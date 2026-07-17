@@ -38,6 +38,11 @@ class DroneSession:
     hardware_uid: Optional[str] = None
     drone: Optional[dict]       = None
 
+    # Where the CLIENT roughly is (IP geolocation) — lets the admin map place
+    # a drone with no GPS fix near its operator instead of nowhere.
+    client_ip: Optional[str]        = None
+    approx_location: Optional[dict] = None  # {lat, lng, city, country}
+
     # /admin observer sockets get a session too (same connect path) but are
     # excluded from the client list and never own a drone.
     is_admin: bool            = False

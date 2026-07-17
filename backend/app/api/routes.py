@@ -43,7 +43,7 @@ async def get_sessions(request: Request):
         # without opening a full telemetry mirror per session.
         live = None
         tel = sm.get_telemetry(s.session_id)
-        if tel and tel.is_connected():
+        if tel and tel.is_connected:
             snap = tel.snapshot
             live = {
                 "lat": snap.position.latitude_deg,
@@ -64,6 +64,7 @@ async def get_sessions(request: Request):
             "hardware_uid": s.hardware_uid,
             "drone": s.drone,
             "live": live,
+            "approx_location": s.approx_location,
         })
     return {"active_sessions": len(sessions), "sessions": sessions}
 

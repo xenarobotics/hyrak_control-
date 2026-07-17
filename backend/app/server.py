@@ -96,6 +96,21 @@ def create_app() -> socketio.ASGIApp:
         session = session_manager.create(socket_id=sid)
         logger.info(f"Connected {sid[:8]} → session {session.session_id[:8]}")
 
+        # Approximate client location for the admin map. Through the tunnel
+        # the socket peer is localhost — the real IP is in CF-Connecting-IP.
+        ip = (
+            environ.get("HTTP_CF_CONNECTING_IP")
+            or (environ.get("HTTP_X_FORWARDED_FOR") or "").split(",")[0].strip()
+            or environ.get("REMOTE_ADDR")
+        )
+        session.client_ip = ip
+
+        async def _resolve_location():
+            from app.utils.geoip import locate
+            session.approx_location = await locate(ip)
+
+        asyncio.create_task(_resolve_location())
+
         async def _send_ready():
             await asyncio.sleep(0.05)
             await sio.emit(
