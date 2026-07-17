@@ -134,6 +134,48 @@ async def create_zone(
     return {"zone": feature}
 
 
+@router.patch("/zones/{zone_id}")
+async def patch_zone(
+    zone_id: str,
+    body: dict,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """Edit zone properties: name, zone_class, floor_m, ceiling_m, active.
+    (Geometry changes = delete + redraw.)"""
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from sqlalchemy import select
+    from app.db import db_available, get_session
+    from app.db.models import Zone
+    from app.zones import engine as zone_engine
+    if not db_available():
+        raise HTTPException(status_code=503, detail="Database offline")
+    async with get_session() as db:
+        zone = (
+            await db.execute(select(Zone).where(Zone.id == zone_id))
+        ).scalar_one_or_none()
+        if zone is None:
+            raise HTTPException(status_code=404, detail="Zone not found")
+        if "name" in body and str(body["name"]).strip():
+            zone.name = str(body["name"]).strip()[:120]
+        if "zone_class" in body:
+            if body["zone_class"] not in ("green", "orange", "red"):
+                raise HTTPException(status_code=400, detail="bad zone_class")
+            zone.zone_class = body["zone_class"]
+        if "floor_m" in body:
+            zone.floor_m = float(body["floor_m"] or 0.0)
+        if "ceiling_m" in body:
+            zone.ceiling_m = (
+                float(body["ceiling_m"]) if body["ceiling_m"] not in (None, "") else None
+            )
+        if "active" in body:
+            zone.active = bool(body["active"])
+        await db.commit()
+        feature = zone.to_feature()
+    await zone_engine.reload()
+    return {"zone": feature}
+
+
 @router.delete("/zones/{zone_id}")
 async def delete_zone(
     zone_id: str,

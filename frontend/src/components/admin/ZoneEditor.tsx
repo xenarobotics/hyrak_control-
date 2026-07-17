@@ -57,6 +57,37 @@ export default function ZoneEditor({
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [focusZone, setFocusZone] = useState<ZoneFeature | null>(null)
+    const [editingId, setEditingId] = useState<string | null>(null)
+    const [editName, setEditName] = useState('')
+    const [editClass, setEditClass] = useState<ZoneClass>('red')
+    const [editCeiling, setEditCeiling] = useState('')
+    const [editActive, setEditActive] = useState(true)
+
+    const startEdit = (z: ZoneFeature) => {
+        setEditingId(z.properties.id)
+        setEditName(z.properties.name)
+        setEditClass(z.properties.zone_class)
+        setEditCeiling(z.properties.ceiling_m != null ? String(z.properties.ceiling_m) : '')
+        setEditActive(z.properties.active)
+    }
+
+    const saveEdit = async () => {
+        if (!editingId) return
+        try {
+            await fetch(`${getServerUrl()}/api/zones/${editingId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', 'X-Auth-Token': TOKEN },
+                body: JSON.stringify({
+                    name: editName,
+                    zone_class: editClass,
+                    ceiling_m: editCeiling !== '' ? Number(editCeiling) : null,
+                    active: editActive,
+                }),
+            })
+            setEditingId(null)
+            onChanged()
+        } catch { /* poll shows the truth */ }
+    }
 
     const addPoint = useCallback((lat: number, lng: number) => {
         setPoints(p => [...p, [lat, lng]])
@@ -198,26 +229,89 @@ export default function ZoneEditor({
                                     className="border border-zinc-800 rounded p-2.5 text-xs cursor-pointer hover:border-zinc-600"
                                     onClick={() => setFocusZone(z)}
                                 >
-                                    <div className="flex items-center gap-2">
-                                        <span
-                                            className="w-2.5 h-2.5 rounded-sm shrink-0"
-                                            style={{ background: ZONE_COLORS[z.properties.zone_class] }}
-                                        />
-                                        <span className="font-semibold text-zinc-100 truncate">
-                                            {z.properties.name}
-                                        </span>
-                                        <button
-                                            onClick={e => { e.stopPropagation(); void remove(z.properties.id) }}
-                                            className="ml-auto text-[10px] text-zinc-600 hover:text-red-400"
-                                        >
-                                            DELETE
-                                        </button>
-                                    </div>
-                                    <div className="mt-1 text-[9px] text-zinc-600">
-                                        {z.properties.zone_class.toUpperCase()}
-                                        {z.properties.ceiling_m != null &&
-                                            ` · up to ${z.properties.ceiling_m} m`}
-                                    </div>
+                                    {editingId === z.properties.id ? (
+                                        <div className="space-y-2" onClick={e => e.stopPropagation()}>
+                                            <input
+                                                value={editName}
+                                                onChange={e => setEditName(e.target.value)}
+                                                className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 outline-none"
+                                            />
+                                            <div className="flex gap-1.5">
+                                                {(['green', 'orange', 'red'] as ZoneClass[]).map(c => (
+                                                    <button
+                                                        key={c}
+                                                        onClick={() => setEditClass(c)}
+                                                        className="flex-1 py-1 rounded border text-[9px] uppercase"
+                                                        style={{
+                                                            borderColor: editClass === c ? ZONE_COLORS[c] : 'rgba(255,255,255,.15)',
+                                                            color: editClass === c ? ZONE_COLORS[c] : '#71717a',
+                                                        }}
+                                                    >
+                                                        {c}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    value={editCeiling}
+                                                    onChange={e => setEditCeiling(e.target.value.replace(/[^0-9.]/g, ''))}
+                                                    placeholder="ceiling m"
+                                                    className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-[10px] text-zinc-200 outline-none placeholder:text-zinc-600"
+                                                />
+                                                <label className="flex items-center gap-1 text-[9px] text-zinc-400">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={editActive}
+                                                        onChange={e => setEditActive(e.target.checked)}
+                                                    />
+                                                    ACTIVE
+                                                </label>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => void saveEdit()}
+                                                    className="flex-1 py-1 rounded border border-emerald-700 text-[10px] text-emerald-400 hover:border-emerald-500">
+                                                    SAVE
+                                                </button>
+                                                <button onClick={() => setEditingId(null)}
+                                                    className="px-3 py-1 rounded border border-zinc-700 text-[10px] text-zinc-400 hover:border-zinc-500">
+                                                    CANCEL
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="flex items-center gap-2">
+                                                <span
+                                                    className="w-2.5 h-2.5 rounded-sm shrink-0"
+                                                    style={{ background: ZONE_COLORS[z.properties.zone_class] }}
+                                                />
+                                                <span className={
+                                                    'font-semibold truncate ' +
+                                                    (z.properties.active ? 'text-zinc-100' : 'text-zinc-600 line-through')
+                                                }>
+                                                    {z.properties.name}
+                                                </span>
+                                                <button
+                                                    onClick={e => { e.stopPropagation(); startEdit(z) }}
+                                                    className="ml-auto text-[10px] text-zinc-600 hover:text-cyan-400"
+                                                >
+                                                    EDIT
+                                                </button>
+                                                <button
+                                                    onClick={e => { e.stopPropagation(); void remove(z.properties.id) }}
+                                                    className="text-[10px] text-zinc-600 hover:text-red-400"
+                                                >
+                                                    DELETE
+                                                </button>
+                                            </div>
+                                            <div className="mt-1 text-[9px] text-zinc-600">
+                                                {z.properties.zone_class.toUpperCase()}
+                                                {z.properties.ceiling_m != null &&
+                                                    ` · up to ${z.properties.ceiling_m} m`}
+                                                {!z.properties.active && ' · INACTIVE'}
+                                            </div>
+                                        </>
+                                    )}
                                 </div>
                             ))}
                         </div>

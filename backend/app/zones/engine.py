@@ -157,10 +157,22 @@ def red_polygon_rings() -> list[list[tuple[float, float]]]:
     return rings
 
 
-def check_path(points: list[tuple[float, float]], corridor_m: float = 20.0) -> dict:
+def check_path(
+    points: list[tuple[float, float]],
+    corridor_m: float = 20.0,
+    red_margin_m: float = 2.0,
+) -> dict:
     """
-    Zones crossed by a path of (lat, lng) waypoints, buffered into a
-    corridor. Used for pre-arm mission validation.
+    Zones crossed by a path of (lat, lng) waypoints. Used for pre-arm
+    mission validation. Two tolerances on purpose:
+
+      corridor_m   — wide safety corridor; touching it flags ORANGE zones
+                     (a warning costs nothing).
+      red_margin_m — tight margin for RED rejection, so a legal path
+                     hugging a red zone's boundary (zones drawn
+                     edge-to-edge) isn't falsely blocked. In-flight, the
+                     monitor + FC fence still guard the actual boundary.
+
     Returns {"zone_class": worst, "zones": [...]}.
     """
     with _lock:
@@ -173,13 +185,15 @@ def check_path(points: list[tuple[float, float]], corridor_m: float = 20.0) -> d
     # ~degrees per metre at the path's latitude (fine for corridor-sized buffers)
     lat0 = points[0][0]
     import math
-    deg = corridor_m / (111_320 * max(0.2, math.cos(math.radians(lat0))))
-    corridor = path.buffer(deg)
+    m2deg = 1.0 / (111_320 * max(0.2, math.cos(math.radians(lat0))))
+    corridor = path.buffer(corridor_m * m2deg)
+    red_strip = path.buffer(red_margin_m * m2deg)
 
     hits = []
     for idx in tree.query(corridor):
         z = zones[idx]
-        if z["geom"].intersects(corridor):
+        probe = red_strip if z["zone_class"] == "red" else corridor
+        if z["geom"].intersects(probe):
             hits.append(z)
 
     worst = max((h["zone_class"] for h in hits), key=lambda c: _SEVERITY[c], default="green")
