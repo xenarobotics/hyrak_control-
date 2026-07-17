@@ -9,6 +9,7 @@
 // backend so it doesn't count as a client.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import Image from 'next/image'
 import { connectSocket, getSocket } from '@/lib/socket'
 import { getServerUrl } from '@/lib/server-url'
 
@@ -111,7 +112,8 @@ export default function AdminPage() {
     return (
         <div className="min-h-screen bg-zinc-950 text-zinc-200 font-mono p-6">
             <div className="max-w-5xl mx-auto space-y-6">
-                <div className="flex items-baseline gap-3">
+                <div className="flex items-center gap-3">
+                    <Image src="/brand/icon.png" alt="HYRAK" width={22} height={22} />
                     <h1 className="text-lg text-zinc-100">ADMIN — LIVE SESSIONS</h1>
                     <span className="text-sm text-zinc-500">
                         {sessions.length} client{sessions.length === 1 ? '' : 's'} connected

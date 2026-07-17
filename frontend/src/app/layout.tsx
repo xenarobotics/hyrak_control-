@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Verocore Platform',
+  title: 'HYRAK',
   description: 'Cloud-native drone intelligence',
 }
 

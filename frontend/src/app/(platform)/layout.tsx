@@ -11,7 +11,8 @@ import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { useDroneStore } from '@/store/drone'
 import { getSocket } from '@/lib/socket'
 import { cn } from '@/lib/utils'
-import { Radio, Map, Bot, SlidersHorizontal, Settings, Zap, AlertTriangle } from 'lucide-react'
+import Image from 'next/image'
+import { Radio, Map, Bot, SlidersHorizontal, Settings, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useSwarmStore } from '@/store/swarm'
 import { FleetAside } from '@/components/swarm/FleetAside'
@@ -65,8 +66,11 @@ function PlatformNav() {
                 className="w-16 flex flex-col items-center py-4 gap-1 shrink-0 border-r"
                 style={{ background: 'hsl(var(--app-sidebar))', borderColor: 'hsl(var(--app-border))' }}
             >
-                <div className="mb-6 p-2">
-                    <Zap size={22} className="text-cyan-500" />
+                <div className="mb-6 p-2" title="HYRAK">
+                    <Image src="/brand/icon-dark.png" alt="HYRAK" width={26} height={26}
+                        className="dark:hidden" />
+                    <Image src="/brand/icon.png" alt="HYRAK" width={26} height={26}
+                        className="hidden dark:block" />
                 </div>
 
                 {NAV.map(({ href, label, icon: Icon }) => {
