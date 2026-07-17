@@ -1,6 +1,5 @@
 import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
-import Script from 'next/script'
 import { ThemeProvider } from '@/lib/theme'
 import './globals.css'
 
@@ -27,12 +26,12 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Apply the saved theme before first paint (no flash). next/script
-            with beforeInteractive is the one sanctioned way to do this —
-            raw <script> tags in React components trigger a React 19 warning. */}
-        <Script
-          id="theme-init"
-          strategy="beforeInteractive"
+        {/* Apply the saved theme before first paint (no flash). A plain
+            inline script in the SSR head runs synchronously before paint;
+            next/script's beforeInteractive doesn't support inline code.
+            suppressHydrationWarning keeps React from diffing it. */}
+        <script
+          suppressHydrationWarning
           dangerouslySetInnerHTML={{
             __html:
               "try{var t=localStorage.getItem('theme');t=t==='light'?'light':'dark';var d=document.documentElement;d.classList.add(t);d.style.colorScheme=t}catch(e){}",
