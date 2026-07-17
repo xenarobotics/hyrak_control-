@@ -227,8 +227,12 @@ export default function AdminPage() {
         sessions.filter(s => s.hardware_uid).map(s => s.hardware_uid as string)
     )
 
-    const mapDrones: MapDrone[] = sessions.flatMap((s): MapDrone[] => {
-        const name = s.drone?.name ?? (s.telemetry_connected ? 'identifying…' : 'client')
+    // The landing map only shows real drones — sessions without telemetry
+    // (browser open, nothing linked) stay off the list and the map.
+    const telemSessions = sessions.filter(s => s.telemetry_connected)
+
+    const mapDrones: MapDrone[] = telemSessions.flatMap((s): MapDrone[] => {
+        const name = s.drone?.name ?? 'identifying…'
         if (s.live && (s.live.lat !== 0 || s.live.lng !== 0)) {
             return [{
                 session_id: s.session_id,
@@ -289,8 +293,8 @@ export default function AdminPage() {
                     </button>
                 ))}
                 <div className="mt-auto text-center text-[9px] text-zinc-600">
-                    <div className={sessions.length > 0 ? 'text-emerald-400' : ''}>
-                        ● {sessions.length}
+                    <div className={telemSessions.length > 0 ? 'text-emerald-400' : ''}>
+                        ● {telemSessions.length}
                     </div>
                     LIVE
                 </div>
@@ -303,18 +307,27 @@ export default function AdminPage() {
                         <div className="flex-1 relative min-w-0">
                             <AdminMap drones={mapDrones} onSelect={toggleSelect} />
 
-                            {/* Session column — full height, translucent */}
-                            <div className="absolute left-0 top-0 bottom-0 z-[1000] w-72 bg-black/60 backdrop-blur border-r border-zinc-800/80 flex flex-col">
+                            {/* Active drones column — mission-page panel style */}
+                            <div
+                                className="absolute left-3 top-3 bottom-3 z-[1000] w-72 rounded-xl border flex flex-col overflow-hidden"
+                                style={{
+                                    background: 'rgba(17, 19, 24, .94)',
+                                    backdropFilter: 'blur(12px)',
+                                    WebkitBackdropFilter: 'blur(12px)',
+                                    borderColor: 'rgba(255, 255, 255, .08)',
+                                }}
+                            >
                                 <div className="px-3 py-2.5 text-[10px] tracking-widest text-zinc-500 border-b border-zinc-800/80">
-                                    LIVE CLIENTS — {sessions.length}
+                                    ACTIVE DRONES — {telemSessions.length}
                                 </div>
                                 <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                                    {sessions.length === 0 && (
+                                    {telemSessions.length === 0 && (
                                         <div className="text-[10px] text-zinc-500 p-2">
-                                            No clients connected. This page doesn&apos;t count as one.
+                                            No drones connected. Clients without a telemetry link
+                                            don&apos;t appear here.
                                         </div>
                                     )}
-                                    {sessions.map(s => (
+                                    {telemSessions.map(s => (
                                         <button
                                             key={s.session_id}
                                             onClick={() => toggleSelect(s.session_id)}
@@ -327,17 +340,11 @@ export default function AdminPage() {
                                         >
                                             <div className="flex items-center gap-2 text-xs">
                                                 <span className="font-semibold text-zinc-100 truncate">
-                                                    {s.drone?.name ??
-                                                        (s.telemetry_connected ? 'IDENTIFYING…' : 'CLIENT')}
+                                                    {s.drone?.name ?? 'IDENTIFYING…'}
                                                 </span>
                                                 {s.drone?.is_simulated && <Tag label="SIM" tone="amber" />}
                                                 {s.live?.armed && <Tag label="ARMED" tone="red" />}
                                             </div>
-                                            {!s.drone && !s.telemetry_connected && (
-                                                <div className="mt-0.5 text-[9px] text-zinc-600">
-                                                    browser connected — no drone linked yet
-                                                </div>
-                                            )}
                                             <div className="mt-1 flex items-center gap-3 text-[10px] text-zinc-500">
                                                 <Badge on={s.is_streaming} label="VIDEO" />
                                                 <Badge on={s.telemetry_connected} label="TELEM" />
