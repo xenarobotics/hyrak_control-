@@ -1,0 +1,32 @@
+# ── Dependencies / build output ──────────────────────────────
+backend/.venv/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+__pycache__/
+*.py[cod]
+
+# ── Secrets — never commit ───────────────────────────────────
+.env
+.env.local
+*.env.local
+
+# ── Logs ─────────────────────────────────────────────────────
+.logs/
+*.log
+
+# ── Vendored upstream sources (huge; not our code) ───────────
+PX4-Autopilot-main/
+qgroundcontrol-master/
+ADOSMissionControl-main/
+
+# ── Stray junk from an old copy (safe to delete) ─────────────
+frontend/home/
+
+# ── Model weights (large binaries; re-download instead) ──────
+*.pt
+
+# ── Editor / OS ──────────────────────────────────────────────
+.vscode/
+.claude/settings.local.json
+.DS_Store

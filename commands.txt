@@ -1,0 +1,13 @@
+One-click (recommended):
+  ./start.sh
+
+Manual:
+cd backend
+source .venv/bin/activate
+python -m app.main
+
+cd frontend
+npm run dev
+
+cd hyrak_control
+cloudflared tunnel run --protocol http2 xenaview

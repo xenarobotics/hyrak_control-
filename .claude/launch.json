@@ -1,0 +1,20 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Frontend (Next.js)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "/home/japesh/hyrak_control/frontend",
+      "port": 3000,
+      "autoPort": true
+    },
+    {
+      "name": "Backend (FastAPI + Uvicorn)",
+      "runtimeExecutable": "/home/japesh/hyrak_control/backend/.venv/bin/python",
+      "runtimeArgs": ["-m", "app.main"],
+      "cwd": "/home/japesh/hyrak_control/backend",
+      "port": 8001
+    }
+  ]
+}
