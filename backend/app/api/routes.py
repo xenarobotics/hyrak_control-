@@ -35,8 +35,27 @@ async def get_sessions(request: Request):
     """Live client sessions for the /admin observer page (admin sockets
     themselves are excluded)."""
     sm = request.app.state.session_manager
-    sessions = [
-        {
+    sessions = []
+    for s in sm.all_sessions():
+        if s.is_admin:
+            continue
+        # Compact live-state summary so the admin map can plot every drone
+        # without opening a full telemetry mirror per session.
+        live = None
+        tel = sm.get_telemetry(s.session_id)
+        if tel and tel.is_connected():
+            snap = tel.snapshot
+            live = {
+                "lat": snap.position.latitude_deg,
+                "lng": snap.position.longitude_deg,
+                "alt": snap.position.relative_altitude_m,
+                "heading": snap.heading_deg,
+                "armed": snap.flight_mode.is_armed,
+                "in_air": snap.flight_mode.is_in_air,
+                "mode": snap.flight_mode.mode,
+                "battery": snap.battery.remaining_percent,
+            }
+        sessions.append({
             "session_id": s.session_id,
             "mode": s.mode.value,
             "is_streaming": s.is_streaming,
@@ -44,10 +63,8 @@ async def get_sessions(request: Request):
             "drone_address": s.drone_address,
             "hardware_uid": s.hardware_uid,
             "drone": s.drone,
-        }
-        for s in sm.all_sessions()
-        if not s.is_admin
-    ]
+            "live": live,
+        })
     return {"active_sessions": len(sessions), "sessions": sessions}
 
 
