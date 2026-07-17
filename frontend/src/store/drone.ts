@@ -13,6 +13,10 @@ export interface MissionUploadResult {
     count?: number
     terrain_follow?: boolean
     msg: string
+    // Zone validation results from the backend
+    needs_ack?: boolean          // crosses orange — pilot must confirm
+    blocked?: 'red'              // crosses red — hard rejection
+    zones?: { id: string; name: string; zone_class: string }[]
 }
 
 export interface ActionResult {

@@ -271,14 +271,36 @@ export default function MissionPage() {
     return () => document.removeEventListener('mousedown', close)
   }, [showSettings, showCamDropdown])
 
+  // Holds the exact waypoint list of the last upload attempt so an
+  // orange-zone acknowledgment can re-send it unchanged.
+  const lastUploadRef = useRef<ReturnType<typeof expandWaypointsWithTurnRadius> | null>(null)
+
   // Auto-dismiss upload toast after 4s; clear loading state when result arrives
   useEffect(() => {
     if (!missionUploadResult) return
     setIsUploading(false)
+
+    // Orange-zone crossing: backend wants explicit pilot confirmation
+    if (missionUploadResult.needs_ack) {
+      const msg = missionUploadResult.msg
+      setMissionUploadResult(null)
+      if (lastUploadRef.current &&
+          window.confirm(`${msg}.\n\nYou will get warnings while inside it. Upload anyway?`)) {
+        setIsUploading(true)
+        getSocket().emit('upload_mission', {
+          terrain_follow: terrainFollow,
+          waypoints: lastUploadRef.current,
+          ack_orange: true,
+        })
+      }
+      return
+    }
+
     if (missionUploadResult.ok) setMissionUploaded(true)
-    const t = setTimeout(() => setMissionUploadResult(null), 4000)
+    const t = setTimeout(() => setMissionUploadResult(null),
+      missionUploadResult.blocked === 'red' ? 7000 : 4000)
     return () => clearTimeout(t)
-  }, [missionUploadResult, setMissionUploadResult])
+  }, [missionUploadResult, setMissionUploadResult, terrainFollow])
 
   // wasMissionRef: tracks whether drone has entered MISSION mode this session.
   // Reset when waypoints change so a re-uploaded mission shows "Start" not "Resume".
@@ -508,6 +530,7 @@ export default function MissionPage() {
         return
       }
       setIsUploading(true)
+      lastUploadRef.current = uploadWaypoints
       getSocket().emit('upload_mission', {
         terrain_follow: terrainFollow,
         waypoints: uploadWaypoints,

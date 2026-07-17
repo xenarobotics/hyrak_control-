@@ -101,6 +101,62 @@ def check_point(lat: float, lng: float, alt_m: float | None = None) -> dict:
     }
 
 
+def nearest_exit(lat: float, lng: float, extra_m: float = 20.0) -> tuple[float, float] | None:
+    """
+    For a point inside red zone(s): the nearest location outside them, pushed
+    `extra_m` beyond the boundary. None if the point isn't in any red zone.
+    Used by the enforcement monitor to command a drone back out.
+    """
+    import math
+    with _lock:
+        zones = _zones
+    p = Point(lng, lat)
+    reds = [z for z in zones if z["zone_class"] == "red" and z["geom"].covers(p)]
+    if not reds:
+        return None
+
+    best = None
+    for z in reds:
+        b = z["geom"].boundary
+        bp = b.interpolate(b.project(p))
+        d = p.distance(bp)
+        if best is None or d < best[0]:
+            best = (d, bp)
+    bp = best[1]
+
+    deg_extra = extra_m / 111_320
+    dx, dy = bp.x - p.x, bp.y - p.y
+    n = math.hypot(dx, dy) or 1e-9
+    ux, uy = dx / n, dy / n
+    # Extend until clear of every red zone (a boundary point can sit inside a
+    # second overlapping red zone) — give up after widening 5×.
+    for k in range(1, 6):
+        ex, ey = bp.x + ux * deg_extra * k, bp.y + uy * deg_extra * k
+        if not any(z["geom"].covers(Point(ex, ey)) for z in zones if z["zone_class"] == "red"):
+            return (ey, ex)  # (lat, lng)
+    return (bp.y + uy * deg_extra, bp.x + ux * deg_extra)
+
+
+def red_polygon_rings() -> list[list[tuple[float, float]]]:
+    """Exterior rings of all red zones as (lat, lng) lists — for uploading
+    PX4 exclusion geofences (the FC-level backstop)."""
+    with _lock:
+        zones = _zones
+    rings = []
+    for z in zones:
+        if z["zone_class"] != "red":
+            continue
+        geom = z["geom"]
+        polys = [geom] if geom.geom_type == "Polygon" else list(getattr(geom, "geoms", []))
+        for poly in polys:
+            coords = list(poly.exterior.coords)
+            if coords and coords[0] == coords[-1]:
+                coords = coords[:-1]
+            if len(coords) >= 3:
+                rings.append([(lat, lng) for lng, lat in coords])
+    return rings
+
+
 def check_path(points: list[tuple[float, float]], corridor_m: float = 20.0) -> dict:
     """
     Zones crossed by a path of (lat, lng) waypoints, buffered into a

@@ -18,6 +18,43 @@ import { useDroneStore } from '@/store/drone'
 import { useSwarmStore } from '@/store/swarm'
 import { MAP_LAYERS, WP_META } from '@/types/mission'
 import type { Waypoint } from '@/types/mission'
+import { getServerUrl } from '@/lib/server-url'
+import { ZONE_COLORS, zoneRings, type ZoneFeature } from '@/components/admin/zones'
+
+// ── Flight zones (green/orange/red) — pilots plan around these ─────────────
+
+function FlightZonesOverlay() {
+  const [zones, setZones] = useState<ZoneFeature[]>([])
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      try {
+        const res = await fetch(`${getServerUrl()}/api/zones`)
+        const data = await res.json()
+        if (alive) setZones(data.features ?? [])
+      } catch { /* zones stay hidden if backend unreachable */ }
+    }
+    void load()
+    const id = setInterval(load, 60000)
+    return () => { alive = false; clearInterval(id) }
+  }, [])
+  return (
+    <>
+      {zones.filter(z => z.properties.active).map(z => (
+        <Polygon
+          key={z.properties.id}
+          positions={zoneRings(z)}
+          pathOptions={{
+            color: ZONE_COLORS[z.properties.zone_class],
+            weight: 1.5,
+            fillOpacity: 0.12,
+            interactive: false,
+          }}
+        />
+      ))}
+    </>
+  )
+}
 
 // ── Custom icons ────────────────────────────────────────────────────────────
 
@@ -346,6 +383,7 @@ export default function MissionMap() {
 
       <ClickHandler />
       <DronePositionTracker />
+      <FlightZonesOverlay />
 
       {/* Planned flight path (no active mission) — cyan when terrain-follow is on
           (path adapts to terrain), blue when off (fixed altitude relative to home) */}

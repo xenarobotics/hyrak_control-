@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ThemeToggle } from '@/components/controls/ThemeToggle'
+import { ZoneBanner } from '@/components/controls/ZoneBanner'
 import { useDrone } from '@/hooks/useDrone'
 import { WebRTCProvider } from '@/contexts/WebRTCContext'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
@@ -175,6 +176,7 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
                     style={{ background: 'hsl(var(--app-bg))', color: 'hsl(var(--app-text))' }}
                 >
                     <PlatformNav />
+                    <ZoneBanner />
                     <main className="flex-1 overflow-hidden p-3 md:p-4">
                         {children}
                     </main>

@@ -117,6 +117,13 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                         snapshot_dict,
                     )
                 )
+                # Zone enforcement monitor
+                from app.zones import monitor as zone_monitor
+                asyncio.create_task(
+                    zone_monitor.on_snapshot(
+                        sio, session_manager, session, manager, snapshot_dict
+                    )
+                )
                 # Mirror to any /admin observers watching this session
                 if observer.has_watchers(session.session_id):
                     asyncio.create_task(
@@ -171,6 +178,9 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 {"hardware_uid": uid, "drone": session.drone},
                 to=sid,
             )
+            # FC-level backstop: push red zones to PX4 as exclusion fences
+            from app.zones import fence
+            asyncio.create_task(fence.upload_red_fence(manager))
 
         asyncio.create_task(_resolve_identity())
 
@@ -224,6 +234,9 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         serial_bridge.close_bridge(session.session_id)
         from app.flights import recorder
         await recorder.end_flight(session.session_id)
+        from app.zones import monitor as zone_monitor
+        zone_monitor.drop(session.session_id)
+        session.zone_lock = False
         session.telemetry_connected = False
         session.hardware_uid = None
         session.drone = None
@@ -235,6 +248,10 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         if not session:
             return
         if session.mode != AnalysisMode.MANUAL_CONTROL:
+            return
+        # Red-zone pushback owns the drone — pilot input is dropped until
+        # the monitor releases the lock.
+        if getattr(session, "zone_lock", False):
             return
         tel = session_manager.get_telemetry(session.session_id)
         if not tel:
@@ -257,6 +274,23 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             await sio.emit("error", {"msg": "No telemetry connected"}, to=sid)
             return
         action = data.get("action", "")
+
+        # No arming/takeoff inside a red zone (without a permit — future phase)
+        if action in ("arm", "takeoff"):
+            from app.zones import engine as zone_engine
+            snap = tel.snapshot
+            check = zone_engine.check_point(
+                snap.position.latitude_deg, snap.position.longitude_deg
+            )
+            if check["zone_class"] == "red":
+                names = ", ".join(z["name"] for z in check["zones"])
+                await sio.emit("action_result", {
+                    "action": action, "ok": False,
+                    "error": f"Blocked — inside NO-FLY (red) zone: {names}",
+                }, to=sid)
+                logger.warning(f"{action} blocked in red zone for {session.session_id[:8]}")
+                return
+
         logger.info(f"Action: {action} | session {session.session_id[:8]}")
         result = await execute_drone_action(tel, action, data)
         await sio.emit("action_result", result, to=sid)
@@ -437,6 +471,27 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             if not waypoints:
                 await sio.emit("mission_upload_result", {
                     "ok": False, "msg": "No waypoints provided"
+                }, to=sid)
+                return
+
+            # ── Zone validation before anything reaches the drone ────────
+            from app.zones import engine as zone_engine
+            path_check = zone_engine.check_path(
+                [(float(w["lat"]), float(w["lng"])) for w in waypoints]
+            )
+            if path_check["zone_class"] == "red":
+                names = ", ".join(z["name"] for z in path_check["zones"])
+                await sio.emit("mission_upload_result", {
+                    "ok": False, "blocked": "red", "zones": path_check["zones"],
+                    "msg": f"Mission crosses NO-FLY (red) zone: {names} — upload blocked",
+                }, to=sid)
+                logger.warning(f"Mission blocked (red zones: {names}) for {session.session_id[:8]}")
+                return
+            if path_check["zone_class"] == "orange" and not data.get("ack_orange"):
+                names = ", ".join(z["name"] for z in path_check["zones"])
+                await sio.emit("mission_upload_result", {
+                    "ok": False, "needs_ack": True, "zones": path_check["zones"],
+                    "msg": f"Mission passes through restricted (orange) zone: {names}",
                 }, to=sid)
                 return
 

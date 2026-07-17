@@ -43,6 +43,10 @@ class DroneSession:
     client_ip: Optional[str]        = None
     approx_location: Optional[dict] = None  # {lat, lng, city, country}
 
+    # True while the red-zone pushback owns the drone — manual-control
+    # inputs are dropped until the zone monitor releases it.
+    zone_lock: bool = False
+
     # /admin observer sockets get a session too (same connect path) but are
     # excluded from the client list and never own a drone.
     is_admin: bool            = False

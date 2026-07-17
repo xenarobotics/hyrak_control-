@@ -93,6 +93,14 @@ type FlightDetail = {
     track: { t: string; lat: number; lng: number; alt: number; speed: number; battery: number; mode: string }[]
 }
 
+type AdminAlert = {
+    level: 'info' | 'warning' | 'danger'
+    session_id: string
+    drone: string
+    message: string
+    ts: number
+}
+
 type Tab = 'overview' | 'drones' | 'zones' | 'permits'
 
 const TABS: { key: Tab; label: string; icon: typeof MapIcon }[] = [
@@ -123,6 +131,7 @@ export default function AdminPage() {
     const [zones, setZones] = useState<ZoneFeature[]>([])
     const [flights, setFlights] = useState<FlightSummary[]>([])
     const [flightDetail, setFlightDetail] = useState<FlightDetail | null>(null)
+    const [alerts, setAlerts] = useState<AdminAlert[]>([])
     const selectedRef = useRef<string | null>(null)
     const frameUrlRef = useRef<string | null>(null)
 
@@ -144,13 +153,18 @@ export default function AdminPage() {
             frameUrlRef.current = url
             setFrameUrl(url)
         }
+        const onAlert = (a: AdminAlert) => {
+            setAlerts(prev => [a, ...prev].slice(0, 50))
+        }
         socket.on('admin_telemetry', onTelem)
         socket.on('admin_frame', onFrame)
+        socket.on('admin_alert', onAlert)
 
         return () => {
             socket.off('connect', hello)
             socket.off('admin_telemetry', onTelem)
             socket.off('admin_frame', onFrame)
+            socket.off('admin_alert', onAlert)
             if (selectedRef.current) {
                 socket.emit('unwatch_session', { session_id: selectedRef.current })
             }
@@ -428,6 +442,48 @@ export default function AdminPage() {
                                 </div>
                             </div>
                         </div>
+
+                        {/* Alerts feed — top right over the map */}
+                        {alerts.length > 0 && (
+                            <div className="absolute right-3 top-3 z-[1100] w-80 space-y-1.5 max-h-[45%] overflow-y-auto">
+                                <div className="flex items-center justify-between px-1">
+                                    <span className="text-[9px] tracking-widest text-zinc-400"
+                                        style={{ textShadow: '0 1px 3px #000' }}>
+                                        ALERTS
+                                    </span>
+                                    <button
+                                        onClick={() => setAlerts([])}
+                                        className="text-[9px] text-zinc-500 hover:text-zinc-200"
+                                        style={{ textShadow: '0 1px 3px #000' }}
+                                    >
+                                        CLEAR
+                                    </button>
+                                </div>
+                                {alerts.map((a, i) => (
+                                    <div
+                                        key={`${a.ts}-${i}`}
+                                        className="rounded-lg border px-2.5 py-2 text-[10px] backdrop-blur"
+                                        style={{
+                                            background: a.level === 'danger' ? 'rgba(127,29,29,.92)'
+                                                : a.level === 'warning' ? 'rgba(120,53,15,.92)'
+                                                : 'rgba(17,19,24,.92)',
+                                            borderColor: a.level === 'danger' ? 'rgba(248,113,113,.5)'
+                                                : a.level === 'warning' ? 'rgba(251,191,36,.4)'
+                                                : 'rgba(255,255,255,.08)',
+                                            color: a.level === 'danger' ? '#fecaca'
+                                                : a.level === 'warning' ? '#fde68a' : '#a1a1aa',
+                                        }}
+                                    >
+                                        <span className="text-zinc-500 mr-2">
+                                            {new Date(a.ts * 1000).toLocaleTimeString([], {
+                                                hour: '2-digit', minute: '2-digit', second: '2-digit',
+                                            })}
+                                        </span>
+                                        {a.message}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
 
                         {/* Detail panel */}
                         {watched && (

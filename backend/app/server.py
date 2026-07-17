@@ -143,6 +143,8 @@ def create_app() -> socketio.ASGIApp:
             close_bridge(session.session_id)
             from app.flights import recorder
             await recorder.end_flight(session.session_id)
+            from app.zones import monitor as zone_monitor
+            zone_monitor.drop(session.session_id)
             observer.drop_session(session.session_id)
             await vision_pool.unregister_session(session.session_id)
             await session_manager.destroy(session.session_id)
