@@ -1209,9 +1209,11 @@ class TelemetryManager:
                 ident = await asyncio.wait_for(
                     self._drone.info.get_identification(), timeout=3.0
                 )
-                uid = (ident.hardware_uid or "").strip("0 ")
-                if uid:
-                    return ident.hardware_uid
+                # PX4 pads the UID with a trailing NUL byte — Postgres (and
+                # any sane consumer) rejects NULs, so keep printable chars only.
+                uid = "".join(c for c in (ident.hardware_uid or "") if c.isprintable()).strip()
+                if uid.strip("0"):
+                    return uid
                 # All-zero UID (some SITL builds) — fall back to legacy uid
                 if ident.legacy_uid:
                     return f"legacy-{ident.legacy_uid:x}"

@@ -58,6 +58,25 @@ async def get_drones():
     return {"drones": await drone_registry.list_drones()}
 
 
+@router.patch("/drones/{drone_id}")
+async def patch_drone(
+    drone_id: str,
+    body: dict,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """Rename a drone. Auth: same X-Auth-Token as other write endpoints."""
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name required")
+    from app.registry import drones as drone_registry
+    updated = await drone_registry.rename_drone(drone_id, name)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Drone not found (or DB offline)")
+    return {"drone": updated}
+
+
 @router.post("/reference-photo")
 async def upload_reference_photo(
     request:    Request,

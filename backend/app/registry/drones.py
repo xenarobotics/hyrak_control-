@@ -18,6 +18,7 @@ async def upsert_seen(hardware_uid: str, is_simulated: bool = False) -> dict | N
     Called on every telemetry connect. Known UID → bump last_seen and return
     the existing record; unknown UID → create one with a default name.
     """
+    hardware_uid = "".join(c for c in hardware_uid if c.isprintable()).strip()
     if not db_available() or not hardware_uid:
         return None
     try:
