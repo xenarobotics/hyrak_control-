@@ -42,11 +42,20 @@ async def get_sessions(request: Request):
             "is_streaming": s.is_streaming,
             "telemetry_connected": s.telemetry_connected,
             "drone_address": s.drone_address,
+            "hardware_uid": s.hardware_uid,
+            "drone": s.drone,
         }
         for s in sm.all_sessions()
         if not s.is_admin
     ]
     return {"active_sessions": len(sessions), "sessions": sessions}
+
+
+@router.get("/drones")
+async def get_drones():
+    """Every drone ever seen by the platform (persistent registry)."""
+    from app.registry import drones as drone_registry
+    return {"drones": await drone_registry.list_drones()}
 
 
 @router.post("/reference-photo")

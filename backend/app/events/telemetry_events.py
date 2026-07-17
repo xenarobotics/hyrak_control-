@@ -91,6 +91,8 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             session_manager.detach_telemetry(other_session_id)
             serial_bridge.close_bridge(other_session_id)
             if other_session:
+                other_session.hardware_uid = None
+                other_session.drone = None
                 await sio.emit(
                     "telemetry_status",
                     {"status": "disconnected", "message": "Disconnected — another client connected to this drone"},
@@ -137,6 +139,29 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             to=sid,
         )
         logger.info(f"✅ Telemetry live for session {session.session_id[:8]}")
+
+        async def _resolve_identity():
+            """Read the FC's hardware UID and map it to a persistent drone
+            record, in the background so connect isn't delayed. A browser
+            radio arrives over a loopback-UDP bridge, so 'udp address' alone
+            doesn't mean simulated — the presence of a serial bridge does."""
+            from app.registry import drones as drone_registry
+
+            uid = await manager.get_hardware_uid()
+            session.hardware_uid = uid
+            if uid:
+                is_sim = (
+                    address.startswith("udp")
+                    and serial_bridge.get_bridge(session.session_id) is None
+                )
+                session.drone = await drone_registry.upsert_seen(uid, is_simulated=is_sim)
+            await sio.emit(
+                "drone_identity",
+                {"hardware_uid": uid, "drone": session.drone},
+                to=sid,
+            )
+
+        asyncio.create_task(_resolve_identity())
 
         # Download existing mission from drone and send to frontend
         existing = await manager.download_mission()
@@ -187,6 +212,8 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             await tel.stop()
         serial_bridge.close_bridge(session.session_id)
         session.telemetry_connected = False
+        session.hardware_uid = None
+        session.drone = None
         await sio.emit("telemetry_status", {"status": "disconnected"}, to=sid)
 
     @sio.on("drone_command")

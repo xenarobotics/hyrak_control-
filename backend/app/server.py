@@ -69,12 +69,16 @@ def create_app() -> socketio.ASGIApp:
     # ------------------------------------------------------------------ #
     @fastapi_app.on_event("startup")
     async def on_startup():
+        from app.db import init_db
+        await init_db()  # non-fatal — flying never depends on the DB
         logger.info("Loading vision modules...")
         await asyncio.to_thread(vision_pool.load)
         logger.info("✅ Vision modules ready")
 
     @fastapi_app.on_event("shutdown")
     async def on_shutdown():
+        from app.db import close_db
+        await close_db()
         await vision_pool.stop_all()
         for pid in list(peer_registry._peers.keys()):
             await peer_registry.remove(pid)

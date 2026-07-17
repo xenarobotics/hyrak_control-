@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     max_concurrent_sessions: int = Field(default=4)
     force_cpu: bool = Field(default=False)
 
+    # Database — local Postgres for now; swapping to a managed provider
+    # (Supabase/RDS are both Postgres) is just changing this URL.
+    database_url: str = Field(
+        default="postgresql+asyncpg://hyrak:hyrak_dev@127.0.0.1:5432/hyrak"
+    )
+
     # Telemetry
     default_baud_rate: int = Field(default=57600)
     mavsdk_server_host: str = Field(default="localhost")

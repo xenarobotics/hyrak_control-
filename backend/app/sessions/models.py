@@ -32,6 +32,12 @@ class DroneSession:
     # These get set after connection
     pc_id: Optional[str]      = None   # WebRTC peer connection id
 
+    # Persistent drone identity, resolved after telemetry connect:
+    # hardware_uid comes from the FC (MAVLink AUTOPILOT_VERSION); drone is
+    # the registry record (None when the DB is offline or UID unreadable).
+    hardware_uid: Optional[str] = None
+    drone: Optional[dict]       = None
+
     # /admin observer sockets get a session too (same connect path) but are
     # excluded from the client list and never own a drone.
     is_admin: bool            = False

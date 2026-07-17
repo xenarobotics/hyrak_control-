@@ -1192,6 +1192,35 @@ class TelemetryManager:
     def is_connected(self) -> bool:
         return self._connected
 
+    async def get_hardware_uid(self) -> Optional[str]:
+        """
+        The flight controller's factory-burned hardware UID (from MAVLink
+        AUTOPILOT_VERSION via the MAVSDK Info plugin). Stable across reboots
+        and reconnects — this is the drone's persistent identity.
+
+        Info arrives shortly after the first heartbeat; retry briefly since
+        we're called right after connect. Slow serial links get more slack.
+        """
+        if not self._drone:
+            return None
+        attempts = 6 if self._address.startswith("serial://") else 3
+        for i in range(attempts):
+            try:
+                ident = await asyncio.wait_for(
+                    self._drone.info.get_identification(), timeout=3.0
+                )
+                uid = (ident.hardware_uid or "").strip("0 ")
+                if uid:
+                    return ident.hardware_uid
+                # All-zero UID (some SITL builds) — fall back to legacy uid
+                if ident.legacy_uid:
+                    return f"legacy-{ident.legacy_uid:x}"
+                return None
+            except Exception:
+                await asyncio.sleep(1.0 + i * 0.5)
+        logger.warning("Could not read hardware UID — drone will be anonymous this session")
+        return None
+
     @property
     def snapshot(self) -> TelemetrySnapshot:
         return self._snapshot

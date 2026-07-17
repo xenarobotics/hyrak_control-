@@ -13,12 +13,23 @@ import Image from 'next/image'
 import { connectSocket, getSocket } from '@/lib/socket'
 import { getServerUrl } from '@/lib/server-url'
 
+type DroneRecord = {
+    id: string
+    hardware_uid: string
+    name: string
+    is_simulated: boolean
+    first_seen: string | null
+    last_seen: string | null
+}
+
 type SessionInfo = {
     session_id: string
     mode: string
     is_streaming: boolean
     telemetry_connected: boolean
     drone_address: string
+    hardware_uid: string | null
+    drone: DroneRecord | null
 }
 
 type Telem = {
@@ -132,7 +143,17 @@ export default function AdminPage() {
                             key={s.session_id}
                             className="flex items-center gap-4 border border-zinc-800 rounded p-3 text-xs"
                         >
-                            <span className="text-zinc-400">{s.session_id.slice(0, 8)}</span>
+                            <span className="text-zinc-200">
+                                {s.drone?.name ?? s.session_id.slice(0, 8)}
+                            </span>
+                            {s.drone?.is_simulated && (
+                                <span className="text-amber-500/80 border border-amber-500/30 rounded px-1">SIM</span>
+                            )}
+                            {s.hardware_uid && (
+                                <span className="text-zinc-600" title={s.hardware_uid}>
+                                    uid …{s.hardware_uid.slice(-8)}
+                                </span>
+                            )}
                             <span className="text-zinc-500">{s.mode}</span>
                             <Badge on={s.is_streaming} label="VIDEO" />
                             <Badge on={s.telemetry_connected} label="TELEM" />
