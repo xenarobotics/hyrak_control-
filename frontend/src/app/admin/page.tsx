@@ -23,8 +23,11 @@ import { Map as MapIcon, Plane, Shield, FileCheck, X, Search } from 'lucide-reac
 import { connectSocket, getSocket } from '@/lib/socket'
 import { getServerUrl } from '@/lib/server-url'
 import type { MapDrone } from '@/components/admin/AdminMap'
+import type { ZoneFeature } from '@/components/admin/zones'
 
 const AdminMap = dynamic(() => import('@/components/admin/AdminMap'), { ssr: false })
+const ZoneEditor = dynamic(() => import('@/components/admin/ZoneEditor'), { ssr: false })
+const FlightTrackMap = dynamic(() => import('@/components/admin/FlightTrackMap'), { ssr: false })
 
 const TOKEN = process.env.NEXT_PUBLIC_SECRET_TOKEN || 'change_this_to_a_random_string'
 
@@ -73,6 +76,23 @@ type Telem = {
     home_distance_m: number
 }
 
+type FlightSummary = {
+    id: string
+    drone_id: string
+    started_at: string | null
+    ended_at: string | null
+    duration_s: number
+    max_alt_m: number
+    distance_m: number
+    samples_count: number
+    in_progress: boolean
+}
+
+type FlightDetail = {
+    flight: FlightSummary
+    track: { t: string; lat: number; lng: number; alt: number; speed: number; battery: number; mode: string }[]
+}
+
 type Tab = 'overview' | 'drones' | 'zones' | 'permits'
 
 const TABS: { key: Tab; label: string; icon: typeof MapIcon }[] = [
@@ -100,6 +120,9 @@ export default function AdminPage() {
     const [telem, setTelem] = useState<Telem | null>(null)
     const [frameUrl, setFrameUrl] = useState<string | null>(null)
     const [copiedUid, setCopiedUid] = useState<string | null>(null)
+    const [zones, setZones] = useState<ZoneFeature[]>([])
+    const [flights, setFlights] = useState<FlightSummary[]>([])
+    const [flightDetail, setFlightDetail] = useState<FlightDetail | null>(null)
     const selectedRef = useRef<string | null>(null)
     const frameUrlRef = useRef<string | null>(null)
 
@@ -155,6 +178,50 @@ export default function AdminPage() {
         void poll()
         const id = setInterval(poll, 2000)
         return () => { alive = false; clearInterval(id) }
+    }, [])
+
+    // Zones: fetch on mount + every 30s + after edits
+    const refreshZones = useCallback(async () => {
+        try {
+            const res = await fetch(`${getServerUrl()}/api/zones`)
+            const data = await res.json()
+            setZones(data.features ?? [])
+        } catch { /* keep last */ }
+    }, [])
+    useEffect(() => {
+        void refreshZones()
+        const id = setInterval(refreshZones, 30000)
+        return () => clearInterval(id)
+    }, [refreshZones])
+
+    // Flights: refetch when the selected drone changes; refresh while viewing
+    const refreshFlights = useCallback(async (droneId: string) => {
+        try {
+            const res = await fetch(`${getServerUrl()}/api/drones/${droneId}/flights`)
+            const data = await res.json()
+            setFlights(data.flights ?? [])
+        } catch { /* keep last */ }
+    }, [])
+    useEffect(() => {
+        setFlights([])
+        setFlightDetail(null)
+        if (!selectedDroneId) return
+        void refreshFlights(selectedDroneId)
+        const id = setInterval(() => void refreshFlights(selectedDroneId), 10000)
+        return () => clearInterval(id)
+    }, [selectedDroneId, refreshFlights])
+
+    const openFlight = useCallback(async (flightId: string) => {
+        let close = false
+        setFlightDetail(d => {
+            if (d?.flight.id === flightId) { close = true; return null }
+            return d
+        })
+        if (close) return
+        try {
+            const res = await fetch(`${getServerUrl()}/api/flights/${flightId}`)
+            if (res.ok) setFlightDetail(await res.json())
+        } catch { /* ignore */ }
     }, [])
 
     // Drop the watch if the watched session disappears
@@ -305,7 +372,7 @@ export default function AdminPage() {
                 {tab === 'overview' && (
                     <>
                         <div className="flex-1 relative min-w-0">
-                            <AdminMap drones={mapDrones} onSelect={toggleSelect} />
+                            <AdminMap drones={mapDrones} zones={zones} onSelect={toggleSelect} />
 
                             {/* Active drones column — mission-page panel style */}
                             <div
@@ -518,6 +585,66 @@ export default function AdminPage() {
                                         </div>
                                     </div>
 
+                                    {/* Flight history */}
+                                    <div className="border border-zinc-800 rounded">
+                                        <div className="px-3 py-2 text-[10px] tracking-widest text-zinc-500 border-b border-zinc-800">
+                                            RECENT FLIGHTS — {flights.length}
+                                        </div>
+                                        {flights.length === 0 ? (
+                                            <div className="p-3 text-[10px] text-zinc-600">
+                                                No recorded flights yet. Every armed→disarmed cycle is
+                                                stored automatically with its full 1 Hz track.
+                                            </div>
+                                        ) : (
+                                            <div className="divide-y divide-zinc-900">
+                                                {flights.map(f => (
+                                                    <div key={f.id}>
+                                                        <button
+                                                            onClick={() => void openFlight(f.id)}
+                                                            className={
+                                                                'w-full text-left px-3 py-2 text-[10px] flex items-center gap-3 hover:bg-zinc-900/50 ' +
+                                                                (flightDetail?.flight.id === f.id ? 'bg-zinc-900/60' : '')
+                                                            }
+                                                        >
+                                                            <span className="text-zinc-300">{fmtDate(f.started_at)}</span>
+                                                            {f.in_progress ? (
+                                                                <Tag label="IN FLIGHT" tone="emerald" />
+                                                            ) : (
+                                                                <span className="text-zinc-500">{fmtDur(f.duration_s)}</span>
+                                                            )}
+                                                            <span className="text-zinc-600">
+                                                                {f.max_alt_m.toFixed(0)}m max · {(f.distance_m / 1000).toFixed(2)}km
+                                                            </span>
+                                                            <span className="ml-auto text-zinc-700">
+                                                                {flightDetail?.flight.id === f.id ? '▾' : '▸'}
+                                                            </span>
+                                                        </button>
+                                                        {flightDetail?.flight.id === f.id && (
+                                                            <div className="px-3 pb-3 space-y-2">
+                                                                <div className="h-56 rounded overflow-hidden border border-zinc-800">
+                                                                    <FlightTrackMap track={flightDetail.track} />
+                                                                </div>
+                                                                <div className="grid grid-cols-4 gap-2 text-[9px] text-zinc-500">
+                                                                    <div>SAMPLES <span className="text-zinc-300">{flightDetail.flight.samples_count}</span></div>
+                                                                    <div>MAX ALT <span className="text-zinc-300">{flightDetail.flight.max_alt_m.toFixed(1)}m</span></div>
+                                                                    <div>DIST <span className="text-zinc-300">{(flightDetail.flight.distance_m / 1000).toFixed(2)}km</span></div>
+                                                                    <div>
+                                                                        MIN BATT{' '}
+                                                                        <span className="text-zinc-300">
+                                                                            {flightDetail.track.length > 0
+                                                                                ? Math.min(...flightDetail.track.map(s => s.battery)).toFixed(0)
+                                                                                : '—'}%
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+
                                     <PermitsBlock />
                                 </div>
                             )}
@@ -525,15 +652,18 @@ export default function AdminPage() {
                     </div>
                 )}
 
-                {(tab === 'zones' || tab === 'permits') && (
+                {tab === 'zones' && (
+                    <div className="flex-1 relative min-w-0">
+                        <ZoneEditor zones={zones} onChanged={() => void refreshZones()} />
+                    </div>
+                )}
+
+                {tab === 'permits' && (
                     <div className="flex-1 flex items-center justify-center">
                         <div className="border border-zinc-800 rounded p-6 text-center text-xs text-zinc-500 max-w-sm">
-                            <div className="text-zinc-300 mb-1">
-                                {tab === 'zones' ? 'FLIGHT ZONES' : 'FLIGHT PERMITS'}
-                            </div>
-                            {tab === 'zones'
-                                ? 'Green / orange / red zone editor arrives with the geofencing phase.'
-                                : 'Time-windowed zone permissions and the approval queue arrive with the geofencing phase.'}
+                            <div className="text-zinc-300 mb-1">FLIGHT PERMITS</div>
+                            Time-windowed zone permissions and the approval queue arrive with
+                            the enforcement phase.
                         </div>
                     </div>
                 )}
@@ -661,6 +791,12 @@ function TelemGrid({ telem }: { telem: Telem }) {
             <Stat k="R/P" v={`${telem.attitude.roll_deg.toFixed(0)}° / ${telem.attitude.pitch_deg.toFixed(0)}°`} />
         </div>
     )
+}
+
+function fmtDur(s: number): string {
+    if (s >= 3600) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
+    if (s >= 60) return `${Math.floor(s / 60)}m ${Math.floor(s % 60)}s`
+    return `${Math.floor(s)}s`
 }
 
 function fmtDate(iso: string | null): string {

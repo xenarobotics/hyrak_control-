@@ -71,6 +71,8 @@ def create_app() -> socketio.ASGIApp:
     async def on_startup():
         from app.db import init_db
         await init_db()  # non-fatal — flying never depends on the DB
+        from app.zones import engine as zone_engine
+        await zone_engine.reload()
         logger.info("Loading vision modules...")
         await asyncio.to_thread(vision_pool.load)
         logger.info("✅ Vision modules ready")
@@ -139,6 +141,8 @@ def create_app() -> socketio.ASGIApp:
         if session:
             from app.telemetry.serial_bridge import close_bridge
             close_bridge(session.session_id)
+            from app.flights import recorder
+            await recorder.end_flight(session.session_id)
             observer.drop_session(session.session_id)
             await vision_pool.unregister_session(session.session_id)
             await session_manager.destroy(session.session_id)

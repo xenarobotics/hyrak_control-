@@ -76,6 +76,146 @@ async def get_drones():
     return {"drones": await drone_registry.list_drones()}
 
 
+# ── Zones ────────────────────────────────────────────────────────────────
+
+@router.get("/zones")
+async def get_zones():
+    """All zones as a GeoJSON FeatureCollection (inactive included)."""
+    from sqlalchemy import select
+    from app.db import db_available, get_session
+    from app.db.models import Zone
+    if not db_available():
+        return {"type": "FeatureCollection", "features": []}
+    async with get_session() as db:
+        rows = (await db.execute(select(Zone).order_by(Zone.created_at))).scalars().all()
+    return {"type": "FeatureCollection", "features": [z.to_feature() for z in rows]}
+
+
+@router.post("/zones")
+async def create_zone(
+    body: dict,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """Create a zone. body: {name, zone_class, geometry, floor_m?, ceiling_m?}"""
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    zone_class = body.get("zone_class")
+    if zone_class not in ("green", "orange", "red"):
+        raise HTTPException(status_code=400, detail="zone_class must be green/orange/red")
+    geometry = body.get("geometry")
+    if not geometry or geometry.get("type") not in ("Polygon", "MultiPolygon"):
+        raise HTTPException(status_code=400, detail="geometry must be a GeoJSON (Multi)Polygon")
+    from shapely.geometry import shape
+    try:
+        geom = shape(geometry)
+        if not geom.is_valid or geom.is_empty:
+            raise ValueError("invalid polygon")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Bad geometry: {e}")
+
+    from app.db import db_available, get_session
+    from app.db.models import Zone
+    from app.zones import engine as zone_engine
+    if not db_available():
+        raise HTTPException(status_code=503, detail="Database offline")
+    zone = Zone(
+        name=(body.get("name") or f"{zone_class} zone").strip()[:120],
+        zone_class=zone_class,
+        geometry=geometry,
+        floor_m=float(body.get("floor_m") or 0.0),
+        ceiling_m=float(body["ceiling_m"]) if body.get("ceiling_m") not in (None, "") else None,
+    )
+    async with get_session() as db:
+        db.add(zone)
+        await db.commit()
+        feature = zone.to_feature()
+    await zone_engine.reload()
+    logger.info(f"Zone created: {zone.name} ({zone_class})")
+    return {"zone": feature}
+
+
+@router.delete("/zones/{zone_id}")
+async def delete_zone(
+    zone_id: str,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from sqlalchemy import delete as sa_delete
+    from app.db import db_available, get_session
+    from app.db.models import Zone
+    from app.zones import engine as zone_engine
+    if not db_available():
+        raise HTTPException(status_code=503, detail="Database offline")
+    async with get_session() as db:
+        await db.execute(sa_delete(Zone).where(Zone.id == zone_id))
+        await db.commit()
+    await zone_engine.reload()
+    return {"ok": True}
+
+
+@router.get("/zones/check")
+async def zones_check(
+    lat: float = Query(...),
+    lng: float = Query(...),
+    alt: float = Query(None),
+):
+    """Zone class at a point — used by clients and for quick testing."""
+    from app.zones import engine as zone_engine
+    return zone_engine.check_point(lat, lng, alt)
+
+
+# ── Flights ──────────────────────────────────────────────────────────────
+
+@router.get("/drones/{drone_id}/flights")
+async def get_drone_flights(drone_id: str, limit: int = Query(30, le=200)):
+    from sqlalchemy import select
+    from app.db import db_available, get_session
+    from app.db.models import Flight
+    if not db_available():
+        return {"flights": []}
+    async with get_session() as db:
+        rows = (
+            await db.execute(
+                select(Flight).where(Flight.drone_id == drone_id)
+                .order_by(Flight.started_at.desc()).limit(limit)
+            )
+        ).scalars().all()
+    return {"flights": [f.to_dict() for f in rows]}
+
+
+@router.get("/flights/{flight_id}")
+async def get_flight(flight_id: str):
+    """Flight summary + full 1 Hz track."""
+    from sqlalchemy import select
+    from app.db import db_available, get_session
+    from app.db.models import Flight, FlightSample
+    if not db_available():
+        raise HTTPException(status_code=503, detail="Database offline")
+    async with get_session() as db:
+        flight = (
+            await db.execute(select(Flight).where(Flight.id == flight_id))
+        ).scalar_one_or_none()
+        if flight is None:
+            raise HTTPException(status_code=404, detail="Flight not found")
+        samples = (
+            await db.execute(
+                select(FlightSample).where(FlightSample.flight_id == flight_id)
+                .order_by(FlightSample.t)
+            )
+        ).scalars().all()
+    return {
+        "flight": flight.to_dict(),
+        "track": [
+            {
+                "t": s.t.isoformat(), "lat": s.lat, "lng": s.lng, "alt": s.alt_m,
+                "speed": s.groundspeed_m_s, "battery": s.battery_pct, "mode": s.mode,
+            }
+            for s in samples
+        ],
+    }
+
+
 @router.patch("/drones/{drone_id}")
 async def patch_drone(
     drone_id: str,

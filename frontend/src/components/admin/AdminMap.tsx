@@ -7,11 +7,12 @@
 // next/dynamic({ ssr: false }) — leaflet touches window at import time.
 
 import { useEffect, useRef, useState } from 'react'
-import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Polygon, Tooltip, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
 import { MAP_LAYERS } from '@/types/mission'
+import { ZONE_COLORS, zoneRings, type ZoneFeature } from '@/components/admin/zones'
 
 export type MapDrone = {
     session_id: string
@@ -82,9 +83,11 @@ function FlyToSelected({ target }: { target: { lat: number; lng: number; approx:
 
 export default function AdminMap({
     drones,
+    zones = [],
     onSelect,
 }: {
     drones: MapDrone[]
+    zones?: ZoneFeature[]
     onSelect: (sessionId: string) => void
 }) {
     const layer = MAP_LAYERS.find(l => l.key === 'satellite') ?? MAP_LAYERS[0]
@@ -110,6 +113,21 @@ export default function AdminMap({
                 <FlyToSelected
                     target={sel ? { lat: sel.lat, lng: sel.lng, approx: sel.approx } : null}
                 />
+                {zones.filter(z => z.properties.active).map(z => (
+                    <Polygon
+                        key={z.properties.id}
+                        positions={zoneRings(z)}
+                        pathOptions={{
+                            color: ZONE_COLORS[z.properties.zone_class],
+                            weight: 1.5,
+                            fillOpacity: 0.15,
+                        }}
+                    >
+                        <Tooltip sticky>
+                            {z.properties.name} — {z.properties.zone_class.toUpperCase()}
+                        </Tooltip>
+                    </Polygon>
+                ))}
                 {drones.map(d => (
                     <Marker
                         key={d.session_id}

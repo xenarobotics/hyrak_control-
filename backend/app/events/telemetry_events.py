@@ -90,6 +90,8 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             await other_tel.stop()
             session_manager.detach_telemetry(other_session_id)
             serial_bridge.close_bridge(other_session_id)
+            from app.flights import recorder
+            await recorder.end_flight(other_session_id)
             if other_session:
                 other_session.hardware_uid = None
                 other_session.drone = None
@@ -105,6 +107,15 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             try:
                 asyncio.create_task(
                     sio.emit("telemetry_update", snapshot_dict, to=sid)
+                )
+                # Flight recorder — no-op unless armed and identified
+                from app.flights import recorder
+                asyncio.create_task(
+                    recorder.on_snapshot(
+                        session.session_id,
+                        session.drone["id"] if session.drone else None,
+                        snapshot_dict,
+                    )
                 )
                 # Mirror to any /admin observers watching this session
                 if observer.has_watchers(session.session_id):
@@ -211,6 +222,8 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         if tel:
             await tel.stop()
         serial_bridge.close_bridge(session.session_id)
+        from app.flights import recorder
+        await recorder.end_flight(session.session_id)
         session.telemetry_connected = False
         session.hardware_uid = None
         session.drone = None
