@@ -479,15 +479,31 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             path_check = zone_engine.check_path(
                 [(float(w["lat"]), float(w["lng"])) for w in waypoints]
             )
+            permit = None
             if path_check["zone_class"] == "red":
                 names = ", ".join(z["name"] for z in path_check["zones"])
-                await sio.emit("mission_upload_result", {
-                    "ok": False, "blocked": "red", "zones": path_check["zones"],
-                    "msg": f"Mission crosses NO-FLY (red) zone: {names} — upload blocked",
-                }, to=sid)
-                logger.warning(f"Mission blocked (red zones: {names}) for {session.session_id[:8]}")
-                return
-            if path_check["zone_class"] == "orange" and not data.get("ack_orange"):
+                if session.drone:
+                    from app.permits import service as permit_service
+                    permit = await permit_service.find_approved(
+                        session.drone["id"], waypoints
+                    )
+                if permit is None:
+                    await sio.emit("mission_upload_result", {
+                        "ok": False, "blocked": "red", "zones": path_check["zones"],
+                        "can_request": bool(session.drone),
+                        "msg": f"Mission crosses NO-FLY (red) zone: {names} — permission required",
+                    }, to=sid)
+                    logger.warning(
+                        f"Mission blocked (red zones: {names}) for {session.session_id[:8]}"
+                    )
+                    return
+                logger.info(
+                    f"Red-zone mission allowed under permit {permit['id'][:8]} "
+                    f"for {session.session_id[:8]}"
+                )
+            # An approved permit covers the whole profile — no extra orange ack
+            if (path_check["zone_class"] == "orange"
+                    and not data.get("ack_orange") and permit is None):
                 names = ", ".join(z["name"] for z in path_check["zones"])
                 await sio.emit("mission_upload_result", {
                     "ok": False, "needs_ack": True, "zones": path_check["zones"],

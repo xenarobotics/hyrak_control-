@@ -27,6 +27,23 @@ export type MapDrone = {
     approx_label?: string    // e.g. "Hyderabad, India"
 }
 
+// Icon cache: leaflet re-mounts a marker whenever it receives a new icon
+// object, so recreating icons every poll makes the whole layer flicker.
+// Heading is bucketed to 10° so small compass noise reuses the same icon.
+const _iconCache = new Map<string, L.DivIcon>()
+
+function cachedDroneIcon(d: MapDrone): L.DivIcon {
+    const hdg = Math.round(d.heading / 10) * 10
+    const key = [d.name, hdg, d.armed, d.selected, d.approx, d.approx_label ?? ''].join('|')
+    let icon = _iconCache.get(key)
+    if (!icon) {
+        icon = droneIcon({ ...d, heading: hdg })
+        if (_iconCache.size > 300) _iconCache.clear()
+        _iconCache.set(key, icon)
+    }
+    return icon
+}
+
 function droneIcon(d: MapDrone): L.DivIcon {
     const color = d.approx ? '#a1a1aa' : d.armed ? '#f59e0b' : '#22d3ee'
     const sz = d.selected ? 34 : 28
@@ -132,7 +149,7 @@ export default function AdminMap({
                     <Marker
                         key={d.session_id}
                         position={[d.lat, d.lng]}
-                        icon={droneIcon(d)}
+                        icon={cachedDroneIcon(d)}
                         eventHandlers={{ click: () => onSelect(d.session_id) }}
                     />
                 ))}

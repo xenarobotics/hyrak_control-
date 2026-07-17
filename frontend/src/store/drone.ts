@@ -16,6 +16,7 @@ export interface MissionUploadResult {
     // Zone validation results from the backend
     needs_ack?: boolean          // crosses orange — pilot must confirm
     blocked?: 'red'              // crosses red — hard rejection
+    can_request?: boolean        // a permit can be requested for this mission
     zones?: { id: string; name: string; zone_class: string }[]
 }
 

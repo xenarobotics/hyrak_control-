@@ -103,6 +103,10 @@ class Flight(Base):
     max_alt_m: Mapped[float] = mapped_column(Float, default=0.0)
     distance_m: Mapped[float] = mapped_column(Float, default=0.0)
     samples_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Set if the flight ever entered an orange/red zone — shown as colored
+    # dots in the admin flight history.
+    crossed_orange: Mapped[bool] = mapped_column(Boolean, default=False)
+    crossed_red: Mapped[bool] = mapped_column(Boolean, default=False)
 
     def to_dict(self) -> dict:
         return {
@@ -115,7 +119,46 @@ class Flight(Base):
             "distance_m": self.distance_m,
             "samples_count": self.samples_count,
             "in_progress": self.ended_at is None,
+            "crossed_orange": self.crossed_orange,
+            "crossed_red": self.crossed_red,
         }
+
+
+class Permit(Base):
+    """
+    A request to fly one specific mission through red zone(s). The exact
+    waypoint list is frozen into the permit — after admin approval, only a
+    mission matching those waypoints (within GPS-noise tolerance) uploads;
+    any edit invalidates it.
+    """
+    __tablename__ = "permits"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    drone_id: Mapped[str] = mapped_column(String(36), ForeignKey("drones.id"), index=True)
+    description: Mapped[str] = mapped_column(String(500))
+    waypoints: Mapped[list] = mapped_column(JSON)
+    mission_hash: Mapped[str] = mapped_column(String(64), index=True)
+    zones: Mapped[list] = mapped_column(JSON)  # red zones the mission crosses
+    status: Mapped[str] = mapped_column(String(12), default="pending")
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def to_dict(self, include_waypoints: bool = False) -> dict:
+        d = {
+            "id": self.id,
+            "drone_id": self.drone_id,
+            "description": self.description,
+            "waypoint_count": len(self.waypoints or []),
+            "zones": self.zones,
+            "status": self.status,
+            "requested_at": self.requested_at.isoformat() if self.requested_at else None,
+            "decided_at": self.decided_at.isoformat() if self.decided_at else None,
+        }
+        if include_waypoints:
+            d["waypoints"] = self.waypoints
+        return d
 
 
 class FlightSample(Base):

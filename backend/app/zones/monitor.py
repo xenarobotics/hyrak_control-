@@ -39,6 +39,12 @@ def drop(session_id: str) -> None:
     _states.pop(session_id, None)
 
 
+def current_class(session_id: str) -> str:
+    """Last-known zone class for a session — for the sessions API."""
+    st = _states.get(session_id)
+    return st["cls"] if st else "green"
+
+
 def _predict(lat: float, lng: float, vel: dict) -> tuple[float, float]:
     vn = vel.get("north_m_s", 0.0) or 0.0
     ve = vel.get("east_m_s", 0.0) or 0.0
@@ -93,7 +99,9 @@ async def on_snapshot(sio, session_manager, session, tel, snap: dict) -> None:
     red_pred = False
     if cls != "red" and armed and in_air and not st["pushing"]:
         plat, plng = _predict(lat, lng, snap.get("velocity", {}))
-        red_pred = engine.check_point(plat, plng, alt)["zone_class"] == "red"
+        # predict_red uses zones eroded by ~5 m — skimming along a red
+        # boundary (edge-to-edge with orange) must not trip the pushback
+        red_pred = engine.predict_red(plat, plng, alt)
 
     now = time.time()
     changed = cls != st["cls"]

@@ -14,6 +14,7 @@ from app.vision.worker_pool import VisionWorkerPool
 from app.events.telemetry_events import register_telemetry_events
 from app.events.swarm_events import register_swarm_events
 from app.events.admin_events import register_admin_events
+from app.events.permit_events import register_permit_events
 from app.webrtc.signaling import register_webrtc_events
 from app.api.routes import router
 
@@ -157,6 +158,7 @@ def create_app() -> socketio.ASGIApp:
     register_telemetry_events(sio, session_manager, vision_pool)
     register_swarm_events(sio, session_manager)
     register_admin_events(sio, session_manager)
+    register_permit_events(sio, session_manager)
     register_webrtc_events(sio, peer_registry, vision_pool, session_manager)
 
     # ------------------------------------------------------------------ #

@@ -272,13 +272,81 @@ export default function MissionPage() {
   }, [showSettings, showCamDropdown])
 
   // Holds the exact waypoint list of the last upload attempt so an
-  // orange-zone acknowledgment can re-send it unchanged.
+  // orange-zone acknowledgment (or a red-zone permit request) can re-send
+  // it unchanged.
   const lastUploadRef = useRef<ReturnType<typeof expandWaypointsWithTurnRadius> | null>(null)
+
+  // ── Red-zone permits ──────────────────────────────────────────────────
+  type MyPermit = {
+    id: string; description: string; status: string
+    waypoints: UploadWp[]; requested_at: string | null
+  }
+  const [approvedPermits, setApprovedPermits] = useState<MyPermit[]>([])
+  const [showPermits, setShowPermits] = useState(false)
+
+  useEffect(() => {
+    const socket = getSocket()
+    const onPermitResult = (r: { ok: boolean; msg: string }) => {
+      setUploadError(r.msg)
+      setTimeout(() => setUploadError(null), 7000)
+      if (r.ok) socket.emit('list_my_permits')
+    }
+    const onMyPermits = (d: { permits: MyPermit[] }) =>
+      setApprovedPermits((d.permits ?? []).filter(p => p.status === 'approved'))
+    socket.on('permit_result', onPermitResult)
+    socket.on('my_permits', onMyPermits)
+    return () => {
+      socket.off('permit_result', onPermitResult)
+      socket.off('my_permits', onMyPermits)
+    }
+  }, [])
+
+  // Refresh permits whenever the drone (re)connects — identity is resolved
+  // shortly after telemetry, so retry once with a delay.
+  useEffect(() => {
+    if (telStatus !== 'connected') { setApprovedPermits([]); return }
+    getSocket().emit('list_my_permits')
+    const t = setTimeout(() => getSocket().emit('list_my_permits'), 4000)
+    return () => clearTimeout(t)
+  }, [telStatus])
+
+  const loadPermitMission = useCallback((p: MyPermit) => {
+    const wps = p.waypoints.map((w, i) => ({
+      id: `permit_${p.id.slice(0, 8)}_${i}`,
+      lat: w.lat, lng: w.lng,
+      altitude: w.altitude ?? 10,
+      speed: w.speed ?? 5,
+      holdTime: w.hold_time ?? 0,
+      type: (w.type ?? 'waypoint') as Waypoint['type'],
+      yaw: w.yaw ?? null,
+    } as Waypoint))
+    importWaypoints(wps)
+    setShowPermits(false)
+  }, [importWaypoints])
 
   // Auto-dismiss upload toast after 4s; clear loading state when result arrives
   useEffect(() => {
     if (!missionUploadResult) return
     setIsUploading(false)
+
+    // Red-zone block with a permit path: offer to apply for permission
+    if (missionUploadResult.blocked === 'red' && missionUploadResult.can_request
+        && lastUploadRef.current) {
+      const msg = missionUploadResult.msg
+      setMissionUploadResult(null)
+      if (window.confirm(`${msg}.\n\nApply for permission to fly this exact mission?`)) {
+        const description = window
+          .prompt('Describe the purpose of this flight for the reviewing authority:')
+          ?.trim()
+        if (description) {
+          getSocket().emit('request_permit', {
+            description,
+            waypoints: lastUploadRef.current,
+          })
+        }
+      }
+      return
+    }
 
     // Orange-zone crossing: backend wants explicit pilot confirmation
     if (missionUploadResult.needs_ack) {
@@ -561,6 +629,53 @@ export default function MissionPage() {
         >
           <WifiOff size={14} />
           {uploadError}
+        </div>
+      )}
+
+      {/* ── Approved red-zone mission profiles ─────────────────────────── */}
+      {approvedPermits.length > 0 && (
+        <div className="absolute bottom-16 right-3 z-[2400] font-mono">
+          {showPermits && (
+            <div
+              className="mb-2 w-72 rounded-xl border overflow-hidden"
+              style={{
+                background: 'rgba(17, 19, 24, .94)',
+                backdropFilter: 'blur(12px)',
+                borderColor: 'rgba(255, 255, 255, .08)',
+              }}
+            >
+              <div className="px-3 py-2 text-[10px] tracking-widest text-zinc-500 border-b border-zinc-800">
+                APPROVED MISSION PROFILES
+              </div>
+              <div className="max-h-56 overflow-y-auto">
+                {approvedPermits.map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => loadPermitMission(p)}
+                    className="w-full text-left px-3 py-2 text-[10px] border-b border-zinc-900 hover:bg-zinc-900/60"
+                  >
+                    <div className="text-zinc-200 truncate">&ldquo;{p.description}&rdquo;</div>
+                    <div className="text-zinc-600 mt-0.5">
+                      {p.waypoints.length} waypoints — click to load (fly as approved; edits
+                      invalidate the permit)
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <button
+            onClick={() => setShowPermits(v => !v)}
+            className="ml-auto flex items-center gap-1.5 px-3 py-2 rounded-xl border text-[10px] font-bold"
+            style={{
+              background: 'rgba(21, 128, 61, .9)',
+              border: '1px solid rgba(34, 197, 94, .45)',
+              color: '#dcfce7',
+              backdropFilter: 'blur(8px)',
+            }}
+          >
+            ✓ PERMITTED MISSIONS ({approvedPermits.length})
+          </button>
         </div>
       )}
 

@@ -18,6 +18,7 @@ from shapely.strtree import STRtree
 logger = logging.getLogger("verocore.zones")
 
 _SEVERITY = {"green": 0, "orange": 1, "red": 2}
+_PREDICT_ERODE_M = 5.0   # red-breach prediction only counts ≥ this deep inside
 
 _lock = threading.Lock()
 _zones: list[dict] = []          # {id, name, zone_class, floor_m, ceiling_m, geom}
@@ -47,10 +48,16 @@ async def reload() -> int:
     for z in rows:
         try:
             geom = shape(z.geometry)
-            zones.append({
+            entry = {
                 "id": z.id, "name": z.name, "zone_class": z.zone_class,
                 "floor_m": z.floor_m, "ceiling_m": z.ceiling_m, "geom": geom,
-            })
+            }
+            if z.zone_class == "red":
+                # Eroded copy for breach *prediction*: skimming along the
+                # boundary must not trigger the pushback — only a track
+                # heading genuinely inside (≥ ~5 m deep) does.
+                entry["geom_eroded"] = geom.buffer(-_PREDICT_ERODE_M / 111_320)
+            zones.append(entry)
             geoms.append(geom)
         except Exception as e:
             logger.warning(f"Zone {z.id} has bad geometry — skipped: {e}")
@@ -99,6 +106,22 @@ def check_point(lat: float, lng: float, alt_m: float | None = None) -> dict:
             for h in sorted(hits, key=lambda h: -_SEVERITY[h["zone_class"]])
         ],
     }
+
+
+def predict_red(lat: float, lng: float, alt_m: float | None = None) -> bool:
+    """True only if the point is meaningfully INSIDE a red zone (eroded by
+    ~5 m) — used for breach prediction so boundary-skimming doesn't trip."""
+    with _lock:
+        zones = _zones
+    p = Point(lng, lat)
+    for z in zones:
+        if z["zone_class"] != "red":
+            continue
+        eroded = z.get("geom_eroded")
+        if eroded is not None and not eroded.is_empty and eroded.covers(p) \
+                and _alt_applies(z, alt_m):
+            return True
+    return False
 
 
 def nearest_exit(lat: float, lng: float, extra_m: float = 20.0) -> tuple[float, float] | None:

@@ -49,6 +49,7 @@ type LiveState = {
     in_air: boolean
     mode: string
     battery: number
+    zone_class: 'green' | 'orange' | 'red'
 } | null
 
 type ApproxLocation = { lat: number; lng: number; city: string; country: string } | null
@@ -86,19 +87,24 @@ type FlightSummary = {
     distance_m: number
     samples_count: number
     in_progress: boolean
+    crossed_orange: boolean
+    crossed_red: boolean
+}
+
+type PermitInfo = {
+    id: string
+    drone_id: string
+    description: string
+    waypoint_count: number
+    zones: { id: string; name: string; zone_class: string }[]
+    status: 'pending' | 'approved' | 'denied' | 'revoked'
+    requested_at: string | null
+    decided_at: string | null
 }
 
 type FlightDetail = {
     flight: FlightSummary
     track: { t: string; lat: number; lng: number; alt: number; speed: number; battery: number; mode: string }[]
-}
-
-type AdminAlert = {
-    level: 'info' | 'warning' | 'danger'
-    session_id: string
-    drone: string
-    message: string
-    ts: number
 }
 
 type Tab = 'overview' | 'drones' | 'zones' | 'permits'
@@ -131,7 +137,7 @@ export default function AdminPage() {
     const [zones, setZones] = useState<ZoneFeature[]>([])
     const [flights, setFlights] = useState<FlightSummary[]>([])
     const [flightDetail, setFlightDetail] = useState<FlightDetail | null>(null)
-    const [alerts, setAlerts] = useState<AdminAlert[]>([])
+    const [permits, setPermits] = useState<PermitInfo[]>([])
     const selectedRef = useRef<string | null>(null)
     const frameUrlRef = useRef<string | null>(null)
 
@@ -153,18 +159,13 @@ export default function AdminPage() {
             frameUrlRef.current = url
             setFrameUrl(url)
         }
-        const onAlert = (a: AdminAlert) => {
-            setAlerts(prev => [a, ...prev].slice(0, 50))
-        }
         socket.on('admin_telemetry', onTelem)
         socket.on('admin_frame', onFrame)
-        socket.on('admin_alert', onAlert)
 
         return () => {
             socket.off('connect', hello)
             socket.off('admin_telemetry', onTelem)
             socket.off('admin_frame', onFrame)
-            socket.off('admin_alert', onAlert)
             if (selectedRef.current) {
                 socket.emit('unwatch_session', { session_id: selectedRef.current })
             }
@@ -184,8 +185,15 @@ export default function AdminPage() {
                 const sData = await sRes.json()
                 const dData = await dRes.json()
                 if (alive) {
-                    setSessions(sData.sessions ?? [])
-                    setDrones(dData.drones ?? [])
+                    // Only replace state when content actually changed — a new
+                    // array identity every 2s makes leaflet re-mount markers
+                    // and polygons, which reads as map jitter.
+                    const nextS = sData.sessions ?? []
+                    const nextD = dData.drones ?? []
+                    setSessions(prev =>
+                        JSON.stringify(prev) === JSON.stringify(nextS) ? prev : nextS)
+                    setDrones(prev =>
+                        JSON.stringify(prev) === JSON.stringify(nextD) ? prev : nextD)
                 }
             } catch { /* backend down — keep last data */ }
         }
@@ -199,7 +207,9 @@ export default function AdminPage() {
         try {
             const res = await fetch(`${getServerUrl()}/api/zones`)
             const data = await res.json()
-            setZones(data.features ?? [])
+            const next = data.features ?? []
+            setZones(prev =>
+                JSON.stringify(prev) === JSON.stringify(next) ? prev : next)
         } catch { /* keep last */ }
     }, [])
     useEffect(() => {
@@ -207,6 +217,34 @@ export default function AdminPage() {
         const id = setInterval(refreshZones, 30000)
         return () => clearInterval(id)
     }, [refreshZones])
+
+    // Permits: poll while the PERMITS tab is open (plus once on mount for the badge)
+    const refreshPermits = useCallback(async () => {
+        try {
+            const res = await fetch(`${getServerUrl()}/api/permits`)
+            const data = await res.json()
+            const next = data.permits ?? []
+            setPermits(prev =>
+                JSON.stringify(prev) === JSON.stringify(next) ? prev : next)
+        } catch { /* keep last */ }
+    }, [])
+    useEffect(() => {
+        void refreshPermits()
+        if (tab !== 'permits') return
+        const id = setInterval(refreshPermits, 5000)
+        return () => clearInterval(id)
+    }, [tab, refreshPermits])
+
+    const decidePermit = useCallback(async (id: string, approve: boolean) => {
+        try {
+            await fetch(`${getServerUrl()}/api/permits/${id}/decision`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Auth-Token': TOKEN },
+                body: JSON.stringify({ approve }),
+            })
+            void refreshPermits()
+        } catch { /* poll shows the truth */ }
+    }, [refreshPermits])
 
     // Flights: refetch when the selected drone changes; refresh while viewing
     const refreshFlights = useCallback(async (droneId: string) => {
@@ -358,21 +396,30 @@ export default function AdminPage() {
                 <div className="mb-5" title="HYRAK OPS">
                     <Image src="/brand/icon.png" alt="HYRAK" width={26} height={26} />
                 </div>
-                {TABS.map(({ key, label, icon: Icon }) => (
-                    <button
-                        key={key}
-                        onClick={() => setTab(key)}
-                        className={
-                            'flex flex-col items-center gap-1 w-12 py-2 rounded text-[9px] transition-colors ' +
-                            (tab === key
-                                ? 'bg-cyan-500/10 text-cyan-400'
-                                : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900')
-                        }
-                    >
-                        <Icon size={17} />
-                        {label}
-                    </button>
-                ))}
+                {TABS.map(({ key, label, icon: Icon }) => {
+                    const pending = key === 'permits'
+                        ? permits.filter(p => p.status === 'pending').length : 0
+                    return (
+                        <button
+                            key={key}
+                            onClick={() => setTab(key)}
+                            className={
+                                'relative flex flex-col items-center gap-1 w-12 py-2 rounded text-[9px] transition-colors ' +
+                                (tab === key
+                                    ? 'bg-cyan-500/10 text-cyan-400'
+                                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900')
+                            }
+                        >
+                            <Icon size={17} />
+                            {label}
+                            {pending > 0 && (
+                                <span className="absolute top-1 right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-amber-500 text-black text-[9px] font-bold flex items-center justify-center">
+                                    {pending}
+                                </span>
+                            )}
+                        </button>
+                    )
+                })}
                 <div className="mt-auto text-center text-[9px] text-zinc-600">
                     <div className={telemSessions.length > 0 ? 'text-emerald-400' : ''}>
                         ● {telemSessions.length}
@@ -426,6 +473,16 @@ export default function AdminPage() {
                                                 {s.drone?.is_simulated && <Tag label="SIM" tone="amber" />}
                                                 {s.live?.armed && <Tag label="ARMED" tone="red" />}
                                             </div>
+                                            {s.live?.zone_class === 'orange' && (
+                                                <div className="mt-0.5 text-[9px] text-amber-400 animate-pulse">
+                                                    ● IN ORANGE ZONE
+                                                </div>
+                                            )}
+                                            {s.live?.zone_class === 'red' && (
+                                                <div className="mt-0.5 text-[9px] text-red-400 animate-pulse">
+                                                    ● IN RED ZONE — ENFORCING
+                                                </div>
+                                            )}
                                             <div className="mt-1 flex items-center gap-3 text-[10px] text-zinc-500">
                                                 <Badge on={s.is_streaming} label="VIDEO" />
                                                 <Badge on={s.telemetry_connected} label="TELEM" />
@@ -442,48 +499,6 @@ export default function AdminPage() {
                                 </div>
                             </div>
                         </div>
-
-                        {/* Alerts feed — top right over the map */}
-                        {alerts.length > 0 && (
-                            <div className="absolute right-3 top-3 z-[1100] w-80 space-y-1.5 max-h-[45%] overflow-y-auto">
-                                <div className="flex items-center justify-between px-1">
-                                    <span className="text-[9px] tracking-widest text-zinc-400"
-                                        style={{ textShadow: '0 1px 3px #000' }}>
-                                        ALERTS
-                                    </span>
-                                    <button
-                                        onClick={() => setAlerts([])}
-                                        className="text-[9px] text-zinc-500 hover:text-zinc-200"
-                                        style={{ textShadow: '0 1px 3px #000' }}
-                                    >
-                                        CLEAR
-                                    </button>
-                                </div>
-                                {alerts.map((a, i) => (
-                                    <div
-                                        key={`${a.ts}-${i}`}
-                                        className="rounded-lg border px-2.5 py-2 text-[10px] backdrop-blur"
-                                        style={{
-                                            background: a.level === 'danger' ? 'rgba(127,29,29,.92)'
-                                                : a.level === 'warning' ? 'rgba(120,53,15,.92)'
-                                                : 'rgba(17,19,24,.92)',
-                                            borderColor: a.level === 'danger' ? 'rgba(248,113,113,.5)'
-                                                : a.level === 'warning' ? 'rgba(251,191,36,.4)'
-                                                : 'rgba(255,255,255,.08)',
-                                            color: a.level === 'danger' ? '#fecaca'
-                                                : a.level === 'warning' ? '#fde68a' : '#a1a1aa',
-                                        }}
-                                    >
-                                        <span className="text-zinc-500 mr-2">
-                                            {new Date(a.ts * 1000).toLocaleTimeString([], {
-                                                hour: '2-digit', minute: '2-digit', second: '2-digit',
-                                            })}
-                                        </span>
-                                        {a.message}
-                                    </div>
-                                ))}
-                            </div>
-                        )}
 
                         {/* Detail panel */}
                         {watched && (
@@ -671,6 +686,12 @@ export default function AdminPage() {
                                                             <span className="text-zinc-600">
                                                                 {f.max_alt_m.toFixed(0)}m max · {(f.distance_m / 1000).toFixed(2)}km
                                                             </span>
+                                                            {f.crossed_orange && (
+                                                                <span className="text-amber-500" title="Passed through orange zone">●</span>
+                                                            )}
+                                                            {f.crossed_red && (
+                                                                <span className="text-red-500" title="Entered red zone">●</span>
+                                                            )}
                                                             <span className="ml-auto text-zinc-700">
                                                                 {flightDetail?.flight.id === f.id ? '▾' : '▸'}
                                                             </span>
@@ -679,6 +700,20 @@ export default function AdminPage() {
                                                             <div className="px-3 pb-3 space-y-2">
                                                                 <div className="h-56 rounded overflow-hidden border border-zinc-800">
                                                                     <FlightTrackMap track={flightDetail.track} />
+                                                                </div>
+                                                                <div className="flex items-center gap-3 text-[9px]">
+                                                                    <a
+                                                                        href={`${getServerUrl()}/api/flights/${f.id}/download`}
+                                                                        className="px-2 py-1 rounded border border-zinc-700 text-zinc-300 hover:border-cyan-600 hover:text-cyan-400"
+                                                                    >
+                                                                        ⬇ DOWNLOAD CSV
+                                                                    </a>
+                                                                    {f.crossed_orange && (
+                                                                        <span className="text-amber-500">● crossed orange zone</span>
+                                                                    )}
+                                                                    {f.crossed_red && (
+                                                                        <span className="text-red-500">● entered red zone</span>
+                                                                    )}
                                                                 </div>
                                                                 <div className="grid grid-cols-4 gap-2 text-[9px] text-zinc-500">
                                                                     <div>SAMPLES <span className="text-zinc-300">{flightDetail.flight.samples_count}</span></div>
@@ -715,11 +750,70 @@ export default function AdminPage() {
                 )}
 
                 {tab === 'permits' && (
-                    <div className="flex-1 flex items-center justify-center">
-                        <div className="border border-zinc-800 rounded p-6 text-center text-xs text-zinc-500 max-w-sm">
-                            <div className="text-zinc-300 mb-1">FLIGHT PERMITS</div>
-                            Time-windowed zone permissions and the approval queue arrive with
-                            the enforcement phase.
+                    <div className="flex-1 overflow-y-auto p-5">
+                        <div className="max-w-3xl mx-auto space-y-6">
+                            <section className="space-y-2">
+                                <h2 className="text-xs tracking-widest text-zinc-500">
+                                    PENDING REQUESTS — {permits.filter(p => p.status === 'pending').length}
+                                </h2>
+                                {permits.filter(p => p.status === 'pending').length === 0 && (
+                                    <div className="text-xs text-zinc-600 border border-zinc-800 rounded p-4">
+                                        No pending requests. When a pilot&apos;s mission is blocked by a
+                                        red zone they can submit it for approval — it appears here.
+                                    </div>
+                                )}
+                                {permits.filter(p => p.status === 'pending').map(p => (
+                                    <div key={p.id} className="border border-amber-700/40 rounded p-3 space-y-2 text-xs">
+                                        <div className="flex items-center gap-3">
+                                            <span className="font-semibold text-zinc-100">
+                                                {drones.find(d => d.id === p.drone_id)?.name ?? p.drone_id.slice(0, 8)}
+                                            </span>
+                                            <span className="text-zinc-600">{p.waypoint_count} waypoints</span>
+                                            <span className="text-zinc-600">{fmtDate(p.requested_at)}</span>
+                                            <span className="ml-auto flex gap-2">
+                                                <button
+                                                    onClick={() => void decidePermit(p.id, true)}
+                                                    className="px-3 py-1 rounded border border-emerald-700 text-emerald-400 hover:border-emerald-500"
+                                                >
+                                                    APPROVE
+                                                </button>
+                                                <button
+                                                    onClick={() => void decidePermit(p.id, false)}
+                                                    className="px-3 py-1 rounded border border-red-800 text-red-400 hover:border-red-600"
+                                                >
+                                                    DENY
+                                                </button>
+                                            </span>
+                                        </div>
+                                        <div className="text-zinc-300 border-l-2 border-zinc-700 pl-2">
+                                            &ldquo;{p.description}&rdquo;
+                                        </div>
+                                        <div className="text-[10px] text-red-400/80">
+                                            red zones: {p.zones.map(z => z.name).join(', ')}
+                                        </div>
+                                    </div>
+                                ))}
+                            </section>
+
+                            <section className="space-y-2">
+                                <h2 className="text-xs tracking-widest text-zinc-500">HISTORY</h2>
+                                {permits.filter(p => p.status !== 'pending').length === 0 && (
+                                    <div className="text-[10px] text-zinc-600 p-2">No decided permits yet.</div>
+                                )}
+                                {permits.filter(p => p.status !== 'pending').map(p => (
+                                    <div key={p.id} className="border border-zinc-800 rounded p-2.5 flex items-center gap-3 text-[10px]">
+                                        <Tag
+                                            label={p.status.toUpperCase()}
+                                            tone={p.status === 'approved' ? 'emerald' : 'red'}
+                                        />
+                                        <span className="text-zinc-200">
+                                            {drones.find(d => d.id === p.drone_id)?.name ?? p.drone_id.slice(0, 8)}
+                                        </span>
+                                        <span className="text-zinc-500 truncate max-w-[280px]">{p.description}</span>
+                                        <span className="ml-auto text-zinc-600">{fmtDate(p.decided_at)}</span>
+                                    </div>
+                                ))}
+                            </section>
                         </div>
                     </div>
                 )}
@@ -748,6 +842,8 @@ function DetailPanel({
                 </span>
                 {session.drone?.is_simulated && <Tag label="SIM" tone="amber" />}
                 {session.live?.armed && <Tag label="ARMED" tone="red" />}
+                {session.live?.zone_class === 'orange' && <Tag label="ORANGE ZONE" tone="amber" />}
+                {session.live?.zone_class === 'red' && <Tag label="RED ZONE" tone="red" />}
                 <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-200" title="Close">
                     <X size={16} />
                 </button>

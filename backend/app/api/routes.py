@@ -44,8 +44,10 @@ async def get_sessions(request: Request):
         live = None
         tel = sm.get_telemetry(s.session_id)
         if tel and tel.is_connected:
+            from app.zones import monitor as zone_monitor
             snap = tel.snapshot
             live = {
+                "zone_class": zone_monitor.current_class(s.session_id),
                 "lat": snap.position.latitude_deg,
                 "lng": snap.position.longitude_deg,
                 "alt": snap.position.relative_altitude_m,
@@ -224,6 +226,65 @@ async def get_drone_flights(drone_id: str, limit: int = Query(30, le=200)):
             )
         ).scalars().all()
     return {"flights": [f.to_dict() for f in rows]}
+
+
+@router.get("/flights/{flight_id}/download")
+async def download_flight(flight_id: str):
+    """Full 1 Hz flight track as CSV."""
+    from fastapi.responses import PlainTextResponse
+    from sqlalchemy import select
+    from app.db import db_available, get_session
+    from app.db.models import Flight, FlightSample
+    if not db_available():
+        raise HTTPException(status_code=503, detail="Database offline")
+    async with get_session() as db:
+        flight = (
+            await db.execute(select(Flight).where(Flight.id == flight_id))
+        ).scalar_one_or_none()
+        if flight is None:
+            raise HTTPException(status_code=404, detail="Flight not found")
+        samples = (
+            await db.execute(
+                select(FlightSample).where(FlightSample.flight_id == flight_id)
+                .order_by(FlightSample.t)
+            )
+        ).scalars().all()
+    lines = ["time_utc,lat,lng,alt_m,heading_deg,groundspeed_m_s,battery_pct,mode"]
+    for s in samples:
+        lines.append(
+            f"{s.t.isoformat()},{s.lat:.7f},{s.lng:.7f},{s.alt_m:.1f},"
+            f"{s.heading_deg:.1f},{s.groundspeed_m_s:.2f},{s.battery_pct:.1f},{s.mode}"
+        )
+    stamp = flight.started_at.strftime("%Y%m%d_%H%M") if flight.started_at else flight_id[:8]
+    return PlainTextResponse(
+        "\n".join(lines),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="flight_{stamp}.csv"'},
+    )
+
+
+# ── Permits ──────────────────────────────────────────────────────────────
+
+@router.get("/permits")
+async def get_permits(status: str = Query(None)):
+    """Permit list for the admin console."""
+    from app.permits import service
+    return {"permits": await service.list_permits(status=status)}
+
+
+@router.post("/permits/{permit_id}/decision")
+async def decide_permit(
+    permit_id: str,
+    body: dict,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.permits import service
+    decided = await service.decide(permit_id, bool(body.get("approve")))
+    if decided is None:
+        raise HTTPException(status_code=404, detail="Permit not found (or DB offline)")
+    return {"permit": decided}
 
 
 @router.get("/flights/{flight_id}")

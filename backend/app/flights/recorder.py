@@ -53,6 +53,8 @@ async def on_snapshot(session_id: str, drone_id: str | None, snap: dict) -> None
                 "dist": 0.0,
                 "last_pos": None,
                 "samples": 0,
+                "crossed_orange": False,
+                "crossed_red": False,
             }
             logger.info(f"Flight started: {fid[:8]} (drone {drone_id[:8]})")
             state = _active[session_id]
@@ -77,6 +79,13 @@ async def on_snapshot(session_id: str, drone_id: str | None, snap: dict) -> None
             if state["last_pos"]:
                 state["dist"] += _haversine_m(*state["last_pos"], lat, lng)
             state["last_pos"] = (lat, lng)
+            if not (state["crossed_orange"] and state["crossed_red"]):
+                from app.zones import engine as zone_engine
+                zc = zone_engine.check_point(lat, lng, alt)["zone_class"]
+                if zc == "orange":
+                    state["crossed_orange"] = True
+                elif zc == "red":
+                    state["crossed_red"] = True
         state["samples"] += 1
 
         async with get_session() as db:
@@ -111,6 +120,8 @@ async def end_flight(session_id: str) -> None:
             flight.max_alt_m = round(state["max_alt"], 1)
             flight.distance_m = round(state["dist"], 1)
             flight.samples_count = state["samples"]
+            flight.crossed_orange = state.get("crossed_orange", False)
+            flight.crossed_red = state.get("crossed_red", False)
             await db.commit()
         logger.info(
             f"Flight ended: {state['flight_id'][:8]} — "
