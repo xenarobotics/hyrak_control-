@@ -13,7 +13,7 @@ import {
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
-import { useMissionStore } from '@/store/mission'
+import { useMissionStore, planKeyForDrone } from '@/store/mission'
 import { useDroneStore } from '@/store/drone'
 import { useSwarmStore } from '@/store/swarm'
 import { MAP_LAYERS, WP_META } from '@/types/mission'
@@ -310,6 +310,8 @@ export default function MissionMap() {
   const swarmEnabled       = useSwarmStore(s => s.enabled)
   const fleetDrones        = useSwarmStore(s => s.drones)
   const activeFleetId      = useSwarmStore(s => s.activeDroneId)
+  const fleetPlans         = useMissionStore(s => s.plans)
+  const activePlanKey      = useMissionStore(s => s.activePlanKey)
 
   // RTL is a separate, non-mission control (see rtlPosition in the mission
   // store) — never part of the orderable/flown path. Defensive filter in case
@@ -490,6 +492,25 @@ export default function MissionMap() {
       {waypoints.map((wp, i) => (
         <WaypointMarker key={wp.id} wp={wp} index={i} />
       ))}
+
+      {/* Fleet mission lanes (swarm mode) — every OTHER connected drone's
+          banked plan drawn as a dashed line in its color, so the operator sees
+          the whole fleet's routes while editing one. The active drone's plan
+          is the working set and renders as the normal editable mission. */}
+      {swarmEnabled && Object.values(fleetDrones)
+        .filter(d => d.connected && planKeyForDrone(d.id) !== activePlanKey)
+        .map(d => {
+          const plan = fleetPlans[planKeyForDrone(d.id)]
+          if (!plan || plan.waypoints.length < 2) return null
+          return (
+            <Polyline
+              key={`lane-${d.id}`}
+              positions={plan.waypoints.map(w => [w.lat, w.lng] as [number, number])}
+              pathOptions={{ color: d.color, weight: 2, opacity: 0.55, dashArray: '6 6' }}
+              interactive={false}
+            />
+          )
+        })}
 
       {/* Fleet drone positions (swarm mode) — each gets a distinct colored icon
           with the drone label inside, so overlapping positions are still readable */}

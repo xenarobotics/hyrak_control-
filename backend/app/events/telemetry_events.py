@@ -46,6 +46,12 @@ async def execute_drone_action(tel, action: str, data: dict) -> dict:
     if action == "set_altitude":
         alt = float(data.get("altitude", 10.0))
         return {"action": action, "ok": await tel.goto_altitude(alt)}
+    if action == "rtl_home":
+        # Per-drone RTL: each vehicle flies to ITS OWN home. Safe as a group
+        # action, unlike goto_custom_rtl which broadcasts one shared point.
+        alt = data.get("altitude")
+        return {"action": action,
+                "ok": await tel.goto_home(float(alt) if alt is not None else None)}
     if action == "goto_custom_rtl":
         ok = await tel.goto_custom_rtl(
             float(data.get("lat", 0.0)),

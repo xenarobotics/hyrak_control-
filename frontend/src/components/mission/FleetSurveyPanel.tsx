@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { useMissionStore, planKeyForDrone, type DronePlan } from '@/store/mission'
+import { useMissionStore, planKeyForDrone, planSignature, type DronePlan } from '@/store/mission'
 import { useSwarmStore } from '@/store/swarm'
 import { getSocket } from '@/lib/socket'
 import { generateSurveyLines, partitionSurveyLines, serpentine, pathLengthM } from '@/lib/survey'
@@ -54,6 +54,18 @@ export default function FleetSurveyPanel() {
           ? { ...s, [data.drone_id]: data.ok ? 'ok' : 'fail' }
           : s,
       )
+      // Record the uploaded plan's signature so the mission page's per-drone
+      // ARM/START gates see this drone as "mission on board".
+      if (data.ok) {
+        const st = useMissionStore.getState()
+        const key = planKeyForDrone(data.drone_id)
+        const plan = key === st.activePlanKey
+          ? { waypoints: st.waypoints }
+          : st.plans[key]
+        if (plan && plan.waypoints.length > 0) {
+          st.markPlanUploaded(key, planSignature(plan.waypoints))
+        }
+      }
     }
     const onGroup = (data: { action: string; ok_count: number; total: number }) => {
       if (data.action === 'arm_and_start_mission') {

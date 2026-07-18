@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
-import { useMissionStore } from '@/store/mission'
+import { useMissionStore, planKeyForDrone, planSignature } from '@/store/mission'
+import { expandWaypointsWithTurnRadius, type UploadWp } from '@/lib/uploadPath'
+import FleetMissionPanel from '@/components/mission/FleetMissionPanel'
 import { useDroneStore } from '@/store/drone'
 import { useSwarmStore } from '@/store/swarm'
 import { useDrone } from '@/hooks/useDrone'
@@ -87,118 +89,6 @@ function fmtTime(s: number): string {
   return mm > 0 ? `${mm}m ${ss}s` : `${ss}s`
 }
 
-// ── Bearing (true heading, deg, 0=N clockwise) between two WGS-84 points ────
-function computeBearing(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const φ1 = (lat1 * Math.PI) / 180
-  const φ2 = (lat2 * Math.PI) / 180
-  const Δλ = ((lng2 - lng1) * Math.PI) / 180
-  const y = Math.sin(Δλ) * Math.cos(φ2)
-  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ)
-  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360
-}
-
-// ── Turn-radius path expansion ───────────────────────────────────────────────
-// Converts a waypoint list with turn radii into a dense list of intermediate
-// waypoints that trace the Bezier curves shown on the map. Without this the
-// drone flies the raw corners; with it the uploaded mission matches the display.
-// When autoHeading is true, each point's yaw is set to the bearing toward the
-// next point along the actual flight path (including Bezier arc tangents).
-
-type UploadWp = { lat: number; lng: number; altitude: number; speed: number; hold_time: number; type: string; yaw: number | null; turn_radius: number }
-
-function expandWaypointsWithTurnRadius(allWaypoints: import('@/types/mission').Waypoint[], autoHeading = false): UploadWp[] {
-  // RTL is a separate, non-mission control now (see rtlPosition in the mission
-  // store) — defensively strip any legacy 'rtl'-type entries before building
-  // the uploaded mission so they never end up as a mission item.
-  const waypoints = allWaypoints.filter(w => w.type !== 'rtl')
-
-  const flat = (wp: import('@/types/mission').Waypoint): UploadWp => ({
-    lat: wp.lat, lng: wp.lng, altitude: wp.altitude,
-    speed: wp.speed, hold_time: wp.holdTime, type: wp.type, yaw: wp.yaw,
-    turn_radius: 0,
-  })
-
-  // No expansion needed if < 3 points or no turn radii set
-  if (waypoints.length < 3 || !waypoints.some(w => (w.turnRadius ?? 0) > 0)) {
-    return waypoints.map(flat)
-  }
-
-  const cLat = waypoints.reduce((s, w) => s + w.lat, 0) / waypoints.length
-  const cLng = waypoints.reduce((s, w) => s + w.lng, 0) / waypoints.length
-  const mPerDegLat = 111_320
-  const mPerDegLng = 111_320 * Math.cos((cLat * Math.PI) / 180)
-
-  const pts = waypoints.map(w => ({
-    x: (w.lng - cLng) * mPerDegLng,
-    y: (w.lat - cLat) * mPerDegLat,
-  }))
-
-  const result: UploadWp[] = [flat(waypoints[0])]
-
-  for (let i = 1; i < waypoints.length - 1; i++) {
-    const prev = pts[i - 1], curr = pts[i], next = pts[i + 1]
-    const r = waypoints[i].turnRadius ?? 0
-
-    if (r <= 0) { result.push(flat(waypoints[i])); continue }
-
-    const toPrev = { x: prev.x - curr.x, y: prev.y - curr.y }
-    const toNext = { x: next.x - curr.x, y: next.y - curr.y }
-    const lenPrev = Math.sqrt(toPrev.x ** 2 + toPrev.y ** 2)
-    const lenNext = Math.sqrt(toNext.x ** 2 + toNext.y ** 2)
-
-    if (lenPrev === 0 || lenNext === 0) { result.push(flat(waypoints[i])); continue }
-
-    const maxR = Math.min(lenPrev * 0.4, lenNext * 0.4, r)
-    const uP = { x: toPrev.x / lenPrev, y: toPrev.y / lenPrev }
-    const uN = { x: toNext.x / lenNext, y: toNext.y / lenNext }
-    const arcS = { x: curr.x + uP.x * maxR, y: curr.y + uP.y * maxR }
-    const arcE = { x: curr.x + uN.x * maxR, y: curr.y + uN.y * maxR }
-
-    const a0 = waypoints[i - 1].altitude
-    const a1 = waypoints[i].altitude
-    const a2 = waypoints[i + 1].altitude
-    const altS = a1 + (a0 - a1) * (maxR / lenPrev)
-    const altE = a1 + (a2 - a1) * (maxR / lenNext)
-
-    // Each intermediate Bezier point gets an acceptance radius ≈ half the arc
-    // step spacing so the drone flows through the arc without stopping at each
-    // point. PX4 for multirotors has no built-in turn-radius arc generator —
-    // `acceptance_radius_m` only controls when to switch to the next waypoint.
-    // With is_fly_through=True + a proper acceptance radius the drone naturally
-    // blends through consecutive points and traces the Bezier shape.
-    const arcStepAcceptance = Math.max(1.5, maxR * 0.12)
-
-    for (let s = 0; s <= 8; s++) {
-      const t = s / 8, it = 1 - t
-      const bx = it * it * arcS.x + 2 * it * t * curr.x + t * t * arcE.x
-      const by = it * it * arcS.y + 2 * it * t * curr.y + t * t * arcE.y
-      result.push({
-        lat: Math.round((cLat + by / mPerDegLat) * 1e7) / 1e7,
-        lng: Math.round((cLng + bx / mPerDegLng) * 1e7) / 1e7,
-        altitude: it * it * altS + 2 * it * t * a1 + t * t * altE,
-        speed: waypoints[i].speed,
-        hold_time: 0,
-        type: 'waypoint',
-        yaw: null,
-        turn_radius: arcStepAcceptance,
-      })
-    }
-  }
-
-  result.push(flat(waypoints[waypoints.length - 1]))
-
-  // Auto-heading: bearing from each expanded point toward the next, so arc
-  // tangents are naturally accounted for by the intermediate Bezier steps.
-  if (autoHeading && result.length >= 2) {
-    for (let i = 0; i < result.length - 1; i++) {
-      result[i].yaw = computeBearing(result[i].lat, result[i].lng, result[i + 1].lat, result[i + 1].lng)
-    }
-    result[result.length - 1].yaw = result[result.length - 2].yaw!
-  }
-
-  return result
-}
-
 // ── Page ────────────────────────────────────────────────────────────────────
 
 export default function MissionPage() {
@@ -247,7 +137,19 @@ export default function MissionPage() {
 
   const isArmed        = telemetry?.flight_mode?.is_armed ?? false
   const flightMode     = telemetry?.flight_mode?.mode ?? 'UNKNOWN'
-  const [missionUploaded, setMissionUploaded] = useState(false)
+  // "Is the current plan on the drone?" is derived, not stored: the plan's
+  // content signature must match the one recorded at its last successful
+  // upload. Switching fleet drones swaps the plan AND the signature key, so
+  // upload state can never be forgotten (the old ARM-disabled bug) and any
+  // edit invalidates it automatically.
+  const activePlanKey      = useMissionStore(s => s.activePlanKey)
+  const uploadedSignatures = useMissionStore(s => s.uploadedSignatures)
+  const markPlanUploaded   = useMissionStore(s => s.markPlanUploaded)
+  const missionUploaded =
+    waypoints.length > 0 && uploadedSignatures[activePlanKey] === planSignature(waypoints)
+  // Which plan an in-flight upload belongs to, so the success event marks the
+  // right signature even if the user switches drones while it's uploading.
+  const pendingUploadRef = useRef<{ key: string; sig: string } | null>(null)
   const [sitlAddress]  = useState('udp://:14540')
 
   const [leftOpen, setLeftOpen]     = useState(true)
@@ -261,6 +163,10 @@ export default function MissionPage() {
   const [showCamDropdown, setShowCamDropdown] = useState(false)
   const rtlDismissedRef = useRef(false)
   const rtlTargetRef    = useRef<{ lat: number; lng: number } | null>(null)
+  // Fleet RTL: ids of the drones sent home — each is tracked against ITS OWN
+  // home position for the arrival check, and the land confirmation targets
+  // exactly these drones even if the tick boxes change meanwhile.
+  const returningIdsRef = useRef<number[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
 
   // Close popovers on outside click
@@ -364,19 +270,19 @@ export default function MissionPage() {
       return
     }
 
-    if (missionUploadResult.ok) setMissionUploaded(true)
+    if (missionUploadResult.ok && pendingUploadRef.current) {
+      markPlanUploaded(pendingUploadRef.current.key, pendingUploadRef.current.sig)
+      pendingUploadRef.current = null
+    }
     const t = setTimeout(() => setMissionUploadResult(null),
       missionUploadResult.blocked === 'red' ? 7000 : 4000)
     return () => clearTimeout(t)
-  }, [missionUploadResult, setMissionUploadResult, terrainFollow])
+  }, [missionUploadResult, setMissionUploadResult, terrainFollow, markPlanUploaded])
 
   // wasMissionRef: tracks whether drone has entered MISSION mode this session.
   // Reset when waypoints change so a re-uploaded mission shows "Start" not "Resume".
   const wasMissionRef = useRef(false)
-
-  // Reset uploaded state and mission-was-executing flag when waypoints change
   useEffect(() => {
-    setMissionUploaded(false)
     wasMissionRef.current = false
   }, [waypoints])
 
@@ -401,29 +307,60 @@ export default function MissionPage() {
     return () => clearTimeout(t)
   }, [uploadError])
 
-  // Auto-close RTL land popup when drone disarms or enters LAND
+  // Auto-close RTL land popup when the drone(s) disarm or enter LAND
   useEffect(() => {
+    if (swarmEnabled && returningIdsRef.current.length > 0) {
+      // Fleet RTL: done once every returning drone has disarmed
+      const allDown = returningIdsRef.current.every(
+        id => !swarmDrones[id]?.telemetry?.flight_mode?.is_armed
+      )
+      if (allDown) {
+        setRtlLandConfirmVisible(false)
+        setRtlReturning(false)
+        rtlDismissedRef.current = false
+        returningIdsRef.current = []
+      }
+      return
+    }
     if (flightMode === 'LAND' || !isArmed) {
       setRtlLandConfirmVisible(false)
       rtlDismissedRef.current = false
     }
     if (!isArmed) { setRtlReturning(false); rtlTargetRef.current = null }
-  }, [flightMode, isArmed])
+  }, [flightMode, isArmed, swarmEnabled, swarmDrones])
 
-  // Show RTL landing popup once the drone arrives within 15 m of the RTL target
+  // Show RTL landing popup once the drone arrives within 8 m of the RTL target.
+  // Fleet RTL: every returning drone is checked against ITS OWN home position;
+  // the popup appears when the whole group has arrived (or already landed).
   useEffect(() => {
-    if (!rtlReturning || !rtlTargetRef.current || !telemetry?.position) return
+    if (!rtlReturning) return
     if (rtlLandConfirmVisible || rtlDismissedRef.current) return
-    const { latitude_deg: lat2, longitude_deg: lng2 } = telemetry.position
-    const { lat: lat1, lng: lng1 } = rtlTargetRef.current
-    const R = 6_371_000
-    const dLat = (lat2 - lat1) * Math.PI / 180
-    const dLng = (lng2 - lng1) * Math.PI / 180
-    const a = Math.sin(dLat / 2) ** 2
-      + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2
-    const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-    if (dist < 8) setRtlLandConfirmVisible(true)
-  }, [rtlReturning, telemetry?.position, rtlLandConfirmVisible])
+    const dist = (lat1: number, lng1: number, lat2: number, lng2: number) => {
+      const R = 6_371_000
+      const dLat = (lat2 - lat1) * Math.PI / 180
+      const dLng = (lng2 - lng1) * Math.PI / 180
+      const a = Math.sin(dLat / 2) ** 2
+        + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    }
+    if (swarmEnabled && returningIdsRef.current.length > 0) {
+      const allArrived = returningIdsRef.current.every(id => {
+        const t = swarmDrones[id]?.telemetry
+        if (!t?.position) return false
+        if (!t.flight_mode?.is_in_air && !t.flight_mode?.is_armed) return true
+        if (!t.home_lat && !t.home_lng) return false  // home not known yet
+        return dist(t.home_lat, t.home_lng, t.position.latitude_deg, t.position.longitude_deg) < 8
+      })
+      if (allArrived) setRtlLandConfirmVisible(true)
+      return
+    }
+    if (!rtlTargetRef.current || !telemetry?.position) return
+    const d = dist(
+      rtlTargetRef.current.lat, rtlTargetRef.current.lng,
+      telemetry.position.latitude_deg, telemetry.position.longitude_deg,
+    )
+    if (d < 8) setRtlLandConfirmVisible(true)
+  }, [rtlReturning, telemetry?.position, rtlLandConfirmVisible, swarmEnabled, swarmDrones])
 
   // Surface failed start/pause/RTL commands instead of failing silently —
   // previously a failed start_mission left the UI looking unchanged, so users
@@ -437,6 +374,7 @@ export default function MissionPage() {
       arm_and_restart_mission: 'Arm & restart failed',
       pause_mission: 'Pause failed',
       goto_custom_rtl: 'RTL failed — check drone connection',
+      rtl_home: 'RTL failed — check drone connection',
     }
     if (!lastActionResult.ok && FAILURE_MSG[lastActionResult.action]) {
       setUploadError(FAILURE_MSG[lastActionResult.action])
@@ -587,6 +525,9 @@ export default function MissionPage() {
         return
       }
       setIsUploading(true)
+      pendingUploadRef.current = {
+        key: planKeyForDrone(activeDroneId), sig: planSignature(waypoints),
+      }
       getSocket().emit('swarm_upload_mission', {
         drone_id: activeDroneId,
         terrain_follow: terrainFollow,
@@ -599,6 +540,9 @@ export default function MissionPage() {
       }
       setIsUploading(true)
       lastUploadRef.current = uploadWaypoints
+      pendingUploadRef.current = {
+        key: useMissionStore.getState().activePlanKey, sig: planSignature(waypoints),
+      }
       getSocket().emit('upload_mission', {
         terrain_follow: terrainFollow,
         waypoints: uploadWaypoints,
@@ -615,6 +559,9 @@ export default function MissionPage() {
 
       {/* Hidden file input */}
       <input ref={fileRef} type="file" accept=".plan,.json" className="hidden" onChange={onFileChange} />
+
+      {/* ── Fleet mission console (swarm mode, general missions) ──────── */}
+      <FleetMissionPanel leftOffset={leftOpen ? 'calc(224px + 24px)' : '12px'} />
 
       {/* ── Upload error toast (not connected etc.) ──────────────────── */}
       {uploadError && (
@@ -790,7 +737,9 @@ export default function MissionPage() {
             {/* Body */}
             <div className="px-4 py-4 space-y-3">
               <p className="text-[11px] font-mono" style={{ color: '#d1d5db' }}>
-                Drone has reached the landing zone. Confirm the area is clear before allowing it to land.
+                {swarmEnabled && returningIdsRef.current.length > 1
+                  ? `${returningIdsRef.current.length} drones have reached their home positions. Confirm the areas are clear before allowing them to land.`
+                  : 'Drone has reached the landing zone. Confirm the area is clear before allowing it to land.'}
               </p>
               <ul className="space-y-1.5 pt-1">
                 {[
@@ -822,12 +771,20 @@ export default function MissionPage() {
                 onClick={() => {
                   setRtlLandConfirmVisible(false)
                   setRtlReturning(false)
-                  sendAction('land')
+                  // Land exactly the drones that were sent home — the tick
+                  // boxes may have changed since the RTL was issued.
+                  if (swarmEnabled && returningIdsRef.current.length > 0) {
+                    getSocket().emit('swarm_group_action', {
+                      drone_ids: returningIdsRef.current, action: 'land',
+                    })
+                  } else {
+                    sendAction('land')
+                  }
                 }}
                 className="flex-1 py-2 rounded-lg text-[11px] font-mono font-bold flex items-center justify-center gap-1.5"
                 style={{ background: 'rgba(192,132,252,.25)', color: '#e9d5ff', border: '1px solid rgba(192,132,252,.4)' }}
               >
-                <Home size={13} /> Ground Clear — Land
+                <Home size={13} /> Ground Clear — Land{swarmEnabled && returningIdsRef.current.length > 1 ? ` (${returningIdsRef.current.length})` : ''}
               </button>
             </div>
           </div>
@@ -1069,12 +1026,27 @@ export default function MissionPage() {
             />
           )}
           {/* RTL — aborts whatever the drone is doing and repositions to the
-              RTL point set in the waypoint panel (defaults to takeoff position) */}
+              RTL point set in the waypoint panel (defaults to takeoff position).
+              Fleet mode: every ticked drone flies to ITS OWN home instead — a
+              shared point would stack the whole fleet on one spot. */}
           {isConnected && (
             <ToolBtn
               icon={<Home size={13} />}
               label="RTL"
               onClick={() => {
+                if (swarmEnabled) {
+                  const { selectedIds, drones } = useSwarmStore.getState()
+                  const targets = selectedIds.filter(id => drones[id]?.connected)
+                  if (targets.length === 0) {
+                    setUploadError('Tick drones in the fleet panel first — RTL targets ticked drones')
+                    return
+                  }
+                  returningIdsRef.current = targets
+                  sendAction('rtl_home', {})
+                  rtlDismissedRef.current = false
+                  setRtlReturning(true)
+                  return
+                }
                 const rtl = getRtlWaypoint()
                 sendAction('goto_custom_rtl', { lat: rtl.lat, lng: rtl.lng, altitude: rtl.altitude })
                 rtlTargetRef.current = { lat: rtl.lat, lng: rtl.lng }
@@ -1388,7 +1360,9 @@ export default function MissionPage() {
                     turnRadius: 0,
                   }))
                   importWaypoints(wps)
-                  setMissionUploaded(true)   // it's already on the drone
+                  // It's already on the drone — record its signature as uploaded
+                  const st = useMissionStore.getState()
+                  markPlanUploaded(st.activePlanKey, planSignature(st.waypoints))
                   setDroneMissionOffer(null)
                 }}
                 className="flex-1 py-2 rounded-lg text-[11px] font-mono font-bold flex items-center justify-center gap-1.5"

@@ -710,6 +710,51 @@ class TelemetryManager:
             logger.error(f"Custom RTL failed: {e}")
             return False
 
+    async def goto_home(self, relative_altitude_m: Optional[float] = None) -> bool:
+        """
+        Fly to THIS drone's own home position (where it armed) and hover there.
+
+        Group RTL uses this instead of goto_custom_rtl so one fleet command
+        doesn't send every drone to a single shared point — each vehicle
+        resolves its own home. Fleet mode doesn't subscribe to HOME_POSITION,
+        so an unset snapshot home is fetched one-shot from the stream (and
+        cached into the snapshot so the UI can track arrival).
+        """
+        home_lat = self._snapshot.home_lat
+        home_lng = self._snapshot.home_lng
+        home_alt = self._snapshot.home_alt
+        if not home_lat and not home_lng:
+            async def _first_home():
+                async for h in self._drone.telemetry.home():
+                    return h
+            try:
+                home = await asyncio.wait_for(_first_home(), timeout=3.0)
+                home_lat = home.latitude_deg
+                home_lng = home.longitude_deg
+                home_alt = round(home.absolute_altitude_m, 2)
+                self._snapshot.home_lat = home_lat
+                self._snapshot.home_lng = home_lng
+                self._snapshot.home_alt = home_alt
+            except Exception as e:
+                logger.error(f"RTL home failed — home position unavailable: {e}")
+                return False
+        pos = self._snapshot.position
+        # No altitude given → keep the current altitude (min 5 m) so the
+        # return leg never descends into obstacles on its own.
+        rel = (float(relative_altitude_m) if relative_altitude_m is not None
+               else max(pos.relative_altitude_m, 5.0))
+        ground_amsl = home_alt or (pos.absolute_altitude_m - pos.relative_altitude_m)
+        try:
+            await self._drone.action.goto_location(
+                float(home_lat), float(home_lng),
+                float(ground_amsl + rel), float('nan'),
+            )
+            logger.info(f"✅ RTL home: repositioning to {home_lat:.6f},{home_lng:.6f} @ {rel:.0f}m AGL")
+            return True
+        except Exception as e:
+            logger.error(f"RTL home failed: {e}")
+            return False
+
     async def restart_mission(self) -> bool:
         """
         Reset to waypoint 0 then start the mission.

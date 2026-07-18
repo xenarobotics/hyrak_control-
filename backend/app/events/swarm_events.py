@@ -331,11 +331,15 @@ def register_swarm_events(sio, session_manager: SessionManager):
     async def on_swarm_group_action(sid, data):
         """
         Run one action on many fleet drones concurrently.
-        Payload: {drone_ids: [..], action, ...params, altitude_stagger?}
+        Payload: {drone_ids: [..], action, ...params, altitude_stagger?, stagger_s?}
 
         For takeoff, altitude_stagger > 0 layers the drones vertically:
         drone k (in ascending id order) gets altitude + k*stagger, so a
         group takeoff never stacks two drones at the same height.
+
+        stagger_s > 0 delays drone k's action by k*stagger_s seconds — used
+        for fleet mission starts so drones lift off one after another instead
+        of climbing into each other's prop wash.
         """
         session = session_manager.get_by_socket(sid)
         if not session:
@@ -343,6 +347,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
         ids     = sorted({int(i) for i in data.get("drone_ids", [])})
         action  = str(data.get("action", ""))
         stagger = float(data.get("altitude_stagger", 0) or 0)
+        stagger_s = min(float(data.get("stagger_s", 0) or 0), 15.0)
         base_alt = data.get("altitude")
 
         async def run_one(idx: int, did: int) -> dict:
@@ -352,6 +357,8 @@ def register_swarm_events(sio, session_manager: SessionManager):
             payload = dict(data)
             if action == "takeoff" and base_alt is not None and stagger > 0:
                 payload["altitude"] = float(base_alt) + idx * stagger
+            if stagger_s > 0 and idx > 0:
+                await asyncio.sleep(idx * stagger_s)
             try:
                 # Per-drone timeout: one hung drone (dead gRPC that stalls
                 # instead of erroring) must not freeze the whole group result.
@@ -394,6 +401,31 @@ def register_swarm_events(sio, session_manager: SessionManager):
                 "drone_id": drone_id, "ok": False, "msg": "Drone not connected",
             }, to=sid)
             return
+        if not waypoints:
+            await sio.emit("swarm_mission_upload_result", {
+                "drone_id": drone_id, "ok": False, "msg": "No waypoints provided",
+            }, to=sid)
+            return
+
+        # Same airspace rules as single-drone uploads: red blocks the upload,
+        # orange is allowed with a warning (fleet drones have no ack dialog).
+        from app.zones import engine as zone_engine
+        path_check = zone_engine.check_path(
+            [(float(w["lat"]), float(w["lng"])) for w in waypoints]
+        )
+        zone_warn = ""
+        if path_check["zone_class"] == "red":
+            names = ", ".join(z["name"] for z in path_check["zones"])
+            await sio.emit("swarm_mission_upload_result", {
+                "drone_id": drone_id, "ok": False,
+                "msg": f"Blocked — crosses NO-FLY (red) zone: {names}",
+            }, to=sid)
+            logger.warning(f"Fleet mission blocked for drone {drone_id} (red zones: {names})")
+            return
+        if path_check["zone_class"] == "orange":
+            names = ", ".join(z["name"] for z in path_check["zones"])
+            zone_warn = f" — WARNING: passes orange zone: {names}"
+
         try:
             ok, err = await tel.upload_mission(waypoints, terrain_follow=terrain_follow)
         except Exception as e:
@@ -402,5 +434,6 @@ def register_swarm_events(sio, session_manager: SessionManager):
         await sio.emit("swarm_mission_upload_result", {
             "drone_id": drone_id, "ok": ok,
             "count": len(waypoints) if ok else 0,
-            "msg": f"Uploaded {len(waypoints)} waypoints" if ok else f"Upload failed: {err}",
+            "msg": f"Uploaded {len(waypoints)} waypoints{zone_warn}" if ok
+                   else f"Upload failed: {err}",
         }, to=sid)

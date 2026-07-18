@@ -40,6 +40,14 @@ export interface DronePlan {
 export const PRIMARY_PLAN_KEY = 'primary'
 export const planKeyForDrone = (id: number) => `drone-${id}`
 
+// Content signature of a plan — ids excluded so an identical re-import still
+// matches. uploadedSignatures remembers, per plan key, the signature that was
+// last successfully uploaded; "is this plan on the drone?" is then a pure
+// comparison, so switching between fleet drones can never forget upload state
+// and any edit invalidates it automatically.
+export const planSignature = (wps: Waypoint[]) =>
+  JSON.stringify(wps.map(w => [w.lat, w.lng, w.altitude, w.speed, w.holdTime, w.type, w.yaw, w.turnRadius]))
+
 interface MissionStore {
   // State
   waypoints: Waypoint[]
@@ -49,6 +57,7 @@ interface MissionStore {
   rtlPosition: { lat: number; lng: number; altitude: number } | null
   plans: Record<string, DronePlan>   // banked plans for non-active drones
   activePlanKey: string              // which drone the working set belongs to
+  uploadedSignatures: Record<string, string>  // planKey → signature last uploaded OK
   mapLayer: MapLayer
   mapView: '2d' | '3d'
   terrainFollow: boolean          // when true: export frame=10, 3D path follows terrain surface
@@ -92,6 +101,7 @@ interface MissionStore {
   importWaypoints: (wps: Waypoint[]) => void
   switchPlan: (key: string) => void
   assignFleetPlans: (assignments: Record<string, DronePlan>) => void
+  markPlanUploaded: (key: string, signature: string) => void
 
   // Survey actions
   setSurveyMode: (on: boolean) => void
@@ -119,6 +129,7 @@ export const useMissionStore = create<MissionStore>()(persist((set, get) => ({
   rtlPosition: null,
   plans: {},
   activePlanKey: PRIMARY_PLAN_KEY,
+  uploadedSignatures: {},
   mapLayer: 'hybrid',
   mapView: '2d',
   terrainFollow: false,
@@ -266,6 +277,9 @@ export const useMissionStore = create<MissionStore>()(persist((set, get) => ({
         ? { plans, waypoints: active.waypoints, rtlPosition: active.rtlPosition, selectedId: null }
         : { plans }
     }),
+
+  markPlanUploaded: (key, signature) =>
+    set(s => ({ uploadedSignatures: { ...s.uploadedSignatures, [key]: signature } })),
 
   // Strip any legacy 'rtl'-type entries out of imported lists — RTL now lives
   // in rtlPosition, never in the orderable waypoints array.
