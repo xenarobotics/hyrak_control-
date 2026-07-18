@@ -159,6 +159,8 @@ export default function MissionPage() {
   const [uploadError, setUploadError]           = useState<string | null>(null)
   const [rtlLandConfirmVisible, setRtlLandConfirmVisible] = useState(false)
   const [rtlReturning, setRtlReturning]     = useState(false)
+  // Fleet RTL progress: how many of the returning drones are at their homes
+  const [fleetRtlArrived, setFleetRtlArrived] = useState<{ n: number; total: number } | null>(null)
   const [showSettings, setShowSettings]     = useState(false)
   const [showCamDropdown, setShowCamDropdown] = useState(false)
   const rtlDismissedRef = useRef(false)
@@ -190,12 +192,19 @@ export default function MissionPage() {
   const [approvedPermits, setApprovedPermits] = useState<MyPermit[]>([])
   const [showPermits, setShowPermits] = useState(false)
 
+  // In swarm mode permits belong to the ACTIVE fleet drone — every permit
+  // request/list call must name it explicitly.
+  const permitScope = useCallback((): { fleet_drone_id?: number } => {
+    const { enabled, activeDroneId } = useSwarmStore.getState()
+    return enabled && activeDroneId !== null ? { fleet_drone_id: activeDroneId } : {}
+  }, [])
+
   useEffect(() => {
     const socket = getSocket()
     const onPermitResult = (r: { ok: boolean; msg: string }) => {
       setUploadError(r.msg)
       setTimeout(() => setUploadError(null), 7000)
-      if (r.ok) socket.emit('list_my_permits')
+      if (r.ok) socket.emit('list_my_permits', permitScope())
     }
     const onMyPermits = (d: { permits: MyPermit[] }) =>
       setApprovedPermits((d.permits ?? []).filter(p => p.status === 'approved'))
@@ -205,16 +214,16 @@ export default function MissionPage() {
       socket.off('permit_result', onPermitResult)
       socket.off('my_permits', onMyPermits)
     }
-  }, [])
+  }, [permitScope])
 
-  // Refresh permits whenever the drone (re)connects — identity is resolved
-  // shortly after telemetry, so retry once with a delay.
+  // Refresh permits whenever the drone (re)connects or the active fleet drone
+  // changes — identity is resolved shortly after connect, so retry with delay.
   useEffect(() => {
     if (telStatus !== 'connected') { setApprovedPermits([]); return }
-    getSocket().emit('list_my_permits')
-    const t = setTimeout(() => getSocket().emit('list_my_permits'), 4000)
+    getSocket().emit('list_my_permits', permitScope())
+    const t = setTimeout(() => getSocket().emit('list_my_permits', permitScope()), 4000)
     return () => clearTimeout(t)
-  }, [telStatus])
+  }, [telStatus, activeDroneId, swarmEnabled, permitScope])
 
   const loadPermitMission = useCallback((p: MyPermit) => {
     const wps = p.waypoints.map((w, i) => ({
@@ -235,9 +244,14 @@ export default function MissionPage() {
     if (!missionUploadResult) return
     setIsUploading(false)
 
+    // Dialog flows below only belong to uploads THIS page initiated
+    // (pendingUploadRef set in handleUpload). Fleet-panel bulk uploads mirror
+    // their results here too (for the active drone) but run their own dialogs.
+    const pageInitiated = pendingUploadRef.current !== null
+
     // Red-zone block with a permit path: offer to apply for permission
     if (missionUploadResult.blocked === 'red' && missionUploadResult.can_request
-        && lastUploadRef.current) {
+        && lastUploadRef.current && pageInitiated) {
       const msg = missionUploadResult.msg
       setMissionUploadResult(null)
       if (window.confirm(`${msg}.\n\nApply for permission to fly this exact mission?`)) {
@@ -248,24 +262,36 @@ export default function MissionPage() {
           getSocket().emit('request_permit', {
             description,
             waypoints: lastUploadRef.current,
+            ...permitScope(),
           })
         }
       }
       return
     }
 
-    // Orange-zone crossing: backend wants explicit pilot confirmation
-    if (missionUploadResult.needs_ack) {
+    // Orange-zone crossing: backend wants explicit pilot confirmation.
+    // Re-send on the channel the upload came from (fleet vs primary).
+    if (missionUploadResult.needs_ack && pageInitiated) {
       const msg = missionUploadResult.msg
       setMissionUploadResult(null)
       if (lastUploadRef.current &&
           window.confirm(`${msg}.\n\nYou will get warnings while inside it. Upload anyway?`)) {
         setIsUploading(true)
-        getSocket().emit('upload_mission', {
-          terrain_follow: terrainFollow,
-          waypoints: lastUploadRef.current,
-          ack_orange: true,
-        })
+        const { enabled, activeDroneId: fleetId } = useSwarmStore.getState()
+        if (enabled && fleetId !== null) {
+          getSocket().emit('swarm_upload_mission', {
+            drone_id: fleetId,
+            terrain_follow: terrainFollow,
+            waypoints: lastUploadRef.current,
+            ack_orange: true,
+          })
+        } else {
+          getSocket().emit('upload_mission', {
+            terrain_follow: terrainFollow,
+            waypoints: lastUploadRef.current,
+            ack_orange: true,
+          })
+        }
       }
       return
     }
@@ -277,7 +303,7 @@ export default function MissionPage() {
     const t = setTimeout(() => setMissionUploadResult(null),
       missionUploadResult.blocked === 'red' ? 7000 : 4000)
     return () => clearTimeout(t)
-  }, [missionUploadResult, setMissionUploadResult, terrainFollow, markPlanUploaded])
+  }, [missionUploadResult, setMissionUploadResult, terrainFollow, markPlanUploaded, permitScope])
 
   // wasMissionRef: tracks whether drone has entered MISSION mode this session.
   // Reset when waypoints change so a re-uploaded mission shows "Start" not "Resume".
@@ -344,14 +370,15 @@ export default function MissionPage() {
       return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
     }
     if (swarmEnabled && returningIdsRef.current.length > 0) {
-      const allArrived = returningIdsRef.current.every(id => {
+      const arrived = returningIdsRef.current.filter(id => {
         const t = swarmDrones[id]?.telemetry
         if (!t?.position) return false
         if (!t.flight_mode?.is_in_air && !t.flight_mode?.is_armed) return true
         if (!t.home_lat && !t.home_lng) return false  // home not known yet
         return dist(t.home_lat, t.home_lng, t.position.latitude_deg, t.position.longitude_deg) < 8
       })
-      if (allArrived) setRtlLandConfirmVisible(true)
+      setFleetRtlArrived({ n: arrived.length, total: returningIdsRef.current.length })
+      if (arrived.length === returningIdsRef.current.length) setRtlLandConfirmVisible(true)
       return
     }
     if (!rtlTargetRef.current || !telemetry?.position) return
@@ -525,6 +552,7 @@ export default function MissionPage() {
         return
       }
       setIsUploading(true)
+      lastUploadRef.current = uploadWaypoints
       pendingUploadRef.current = {
         key: planKeyForDrone(activeDroneId), sig: planSignature(waypoints),
       }
@@ -711,6 +739,22 @@ export default function MissionPage() {
           >
             <PlayCircle size={11} /> Resume
           </button>
+        </div>
+      )}
+
+      {/* Fleet RTL progress chip — visible while the group is returning */}
+      {rtlReturning && swarmEnabled && fleetRtlArrived && !rtlLandConfirmVisible && (
+        <div
+          className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[2400] flex items-center gap-2 px-3 py-1.5 rounded-xl border font-mono text-[10px] font-bold"
+          style={{
+            background: 'rgba(17,19,24,.94)',
+            borderColor: 'rgba(192,132,252,.35)',
+            color: '#e9d5ff',
+            backdropFilter: 'blur(8px)',
+          }}
+        >
+          <Home size={12} color="#c084fc" />
+          RTL — {fleetRtlArrived.n}/{fleetRtlArrived.total} AT HOME
         </div>
       )}
 
@@ -1044,6 +1088,7 @@ export default function MissionPage() {
                   returningIdsRef.current = targets
                   sendAction('rtl_home', {})
                   rtlDismissedRef.current = false
+                  setFleetRtlArrived({ n: 0, total: targets.length })
                   setRtlReturning(true)
                   return
                 }

@@ -1,9 +1,13 @@
 import asyncio
 import logging
+import math
 import subprocess
+import time
 
 from app.sessions.manager import SessionManager
 from app.events.telemetry_events import execute_drone_action
+from app.flights import recorder
+from app.registry import drones as drone_registry
 
 logger = logging.getLogger("verocore.events.swarm")
 
@@ -52,7 +56,57 @@ _scan_lock = asyncio.Lock()
 # ships ONE fleet_telemetry event for all drones at ~3 Hz per socket.
 _FLEET_EMIT_INTERVAL = 0.33
 _fleet_state: dict[int, dict] = {}                 # drone_id → snapshot
+_fleet_seen: dict[int, float] = {}                 # drone_id → last snapshot time
 _fleet_emitters: dict[str, asyncio.Task] = {}      # session_id → emitter task
+
+# Fleet drone DB identities. Fleet connections are always local SITL (udpin
+# scan), and PX4 SITL instances share one firmware UID — so identity is the
+# stable instance id, giving each simulated drone its own registry record and
+# flight history. Real hardware connects through the primary (browser-radio)
+# path, which reads the true hardware UID.
+_fleet_db_ids: dict[int, str] = {}                 # drone_id → drones.id (uuid)
+
+# ── Fleet supervisor ─────────────────────────────────────────────────────────
+# One global 1 Hz watchdog over the shared fleet: low battery (warn, then
+# auto-RTL), stale telemetry, live inter-drone separation, and fleet-mission
+# completion. Alerts go to every fleet session as `fleet_alert` events —
+# surfaced in the fleet panels, never as map popups.
+_SUP_INTERVAL = 1.0
+_BATT_WARN_PCT = 25.0
+_BATT_RTL_PCT = 15.0
+_LINK_STALE_S = 5.0
+# 2.5 m keeps the 3 m SITL spawn grid quiet while catching true convergence
+_SEP_HORIZ_M = 2.5
+_SEP_VERT_M = 3.0
+_sup_task: dict[str, asyncio.Task | None] = {"task": None}
+_sup_drone: dict[int, dict] = {}                   # drone_id → watchdog state
+_sup_pair_alert: dict[tuple, float] = {}           # (id,id) → last separation alert
+_sup_complete = {"announced": False}
+
+
+def _haversine_m(lat1, lng1, lat2, lng2) -> float:
+    r = 6_371_000
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = math.radians(lat2 - lat1), math.radians(lng2 - lng1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+async def _register_fleet_drone(drone_id: int) -> None:
+    """Give a fleet drone its persistent registry identity (idempotent)."""
+    if drone_id in _fleet_db_ids:
+        return
+    rec = await drone_registry.upsert_seen(f"sitl-instance-{drone_id}", is_simulated=True)
+    if rec:
+        _fleet_db_ids[drone_id] = rec["id"]
+
+
+def _end_fleet_flight(drone_id: int) -> None:
+    """Finalise a fleet drone's open flight record, if any (fire-and-forget)."""
+    try:
+        asyncio.get_running_loop().create_task(recorder.end_flight(f"fleet-{drone_id}"))
+    except RuntimeError:
+        pass
 
 
 async def _server_alive_for_port(port: int) -> bool:
@@ -74,10 +128,145 @@ def register_swarm_events(sio, session_manager: SessionManager):
 
     def _fleet_snapshot_cb(drone_id: int):
         """Telemetry callback for a fleet drone — stores the snapshot in the
-        global map for the batched emitters instead of emitting per drone."""
+        global map for the batched emitters instead of emitting per drone.
+        Also feeds the flight recorder (armed→disarmed = one flight, same as
+        primary drones) once the drone has a registry identity."""
         def cb(snapshot_dict: dict):
             _fleet_state[drone_id] = snapshot_dict
+            _fleet_seen[drone_id] = time.time()
+            db_id = _fleet_db_ids.get(drone_id)
+            if db_id:
+                try:
+                    asyncio.get_running_loop().create_task(
+                        recorder.on_snapshot(f"fleet-{drone_id}", db_id, snapshot_dict)
+                    )
+                except RuntimeError:
+                    pass
         return cb
+
+    def _ensure_supervisor():
+        task = _sup_task["task"]
+        if task and not task.done():
+            return
+        _sup_task["task"] = asyncio.create_task(_supervisor_loop())
+
+    async def _supervisor_loop():
+        try:
+            while True:
+                await asyncio.sleep(_SUP_INTERVAL)
+                fleet = session_manager.get_fleet("")
+                if not fleet:
+                    break
+
+                socks = []
+                for sid_ in session_manager.fleet_user_sessions():
+                    s = session_manager.get(sid_)
+                    if s and s.socket_id:
+                        socks.append(s.socket_id)
+
+                async def alert(did: int, kind: str, severity: str, msg: str):
+                    logger.info(f"Fleet alert [{severity}] {kind}: {msg}")
+                    for sk in socks:
+                        await sio.emit("fleet_alert", {
+                            "drone_id": did, "kind": kind,
+                            "severity": severity, "msg": msg,
+                            "at": time.time(),
+                        }, to=sk)
+
+                now = time.time()
+                armed_air: list[tuple[int, float, float, float]] = []
+                any_in_mission = False
+
+                for did, mgr in list(fleet.items()):
+                    snap = _fleet_state.get(did) or {}
+                    st = _sup_drone.setdefault(did, {})
+                    fm = snap.get("flight_mode", {})
+                    armed = bool(fm.get("is_armed"))
+                    pos = snap.get("position", {})
+                    in_air = bool(fm.get("is_in_air")) or pos.get("relative_altitude_m", 0.0) > 1.0
+                    batt = snap.get("battery", {}).get("remaining_percent")
+
+                    # Link staleness — snapshots normally arrive every ~1 s
+                    seen = _fleet_seen.get(did)
+                    if seen and now - seen > _LINK_STALE_S:
+                        if not st.get("link_lost"):
+                            st["link_lost"] = True
+                            await alert(did, "link_lost", "critical",
+                                        f"Drone {did}: telemetry lost (stale >{_LINK_STALE_S:.0f}s)")
+                        continue
+                    if st.get("link_lost"):
+                        st["link_lost"] = False
+                        await alert(did, "link_restored", "info", f"Drone {did}: telemetry restored")
+
+                    # Battery: warn at 25%, auto-RTL (PX4 RETURN — flies home
+                    # and lands) at 15% while airborne
+                    if batt is not None and armed:
+                        if batt < _BATT_RTL_PCT and in_air and not st.get("rtl_done"):
+                            st["rtl_done"] = True
+                            ok = False
+                            try:
+                                ok = await mgr.set_flight_mode("RETURN")
+                            except Exception:
+                                pass
+                            await alert(did, "auto_rtl", "critical",
+                                        f"Drone {did}: battery {batt:.0f}% — auto-RTL "
+                                        f"{'engaged' if ok else 'FAILED — take manual control'}")
+                        elif batt < _BATT_WARN_PCT and now - st.get("batt_warned_at", 0) > 60:
+                            st["batt_warned_at"] = now
+                            await alert(did, "low_battery", "warn",
+                                        f"Drone {did}: battery {batt:.0f}%")
+                    if not armed:
+                        st["rtl_done"] = False
+
+                    # Fleet-mission completion tracking: a drone that flew a
+                    # mission and is now disarmed counts as done; announce once
+                    # when no tracked drone is still flying one.
+                    mci = snap.get("mission_current_index", -1)
+                    if armed and in_air and mci >= 0:
+                        if not st.get("in_mission"):
+                            st["in_mission"] = True
+                            st["mission_done"] = False
+                            _sup_complete["announced"] = False
+                    elif st.get("in_mission") and not armed:
+                        st["in_mission"] = False
+                        st["mission_done"] = True
+                    if st.get("in_mission"):
+                        any_in_mission = True
+
+                    if armed and in_air and (pos.get("latitude_deg") or pos.get("longitude_deg")):
+                        armed_air.append((
+                            did, pos.get("latitude_deg", 0.0),
+                            pos.get("longitude_deg", 0.0),
+                            pos.get("relative_altitude_m", 0.0),
+                        ))
+
+                # Live separation between airborne drones
+                for i in range(len(armed_air)):
+                    for j in range(i + 1, len(armed_air)):
+                        d1, la1, lo1, al1 = armed_air[i]
+                        d2, la2, lo2, al2 = armed_air[j]
+                        if abs(al1 - al2) > _SEP_VERT_M:
+                            continue
+                        horiz = _haversine_m(la1, lo1, la2, lo2)
+                        if horiz < _SEP_HORIZ_M:
+                            key = (d1, d2)
+                            if now - _sup_pair_alert.get(key, 0) > 10:
+                                _sup_pair_alert[key] = now
+                                await alert(d1, "separation", "critical",
+                                            f"Drones {d1} & {d2} within {horiz:.1f} m "
+                                            f"at similar altitude")
+
+                dones = [d for d, s in _sup_drone.items() if s.get("mission_done")]
+                if dones and not any_in_mission and not _sup_complete["announced"]:
+                    _sup_complete["announced"] = True
+                    for s in _sup_drone.values():
+                        s["mission_done"] = False
+                    await alert(0, "fleet_complete", "info",
+                                f"Fleet mission complete — {len(dones)} drone(s) finished")
+        except asyncio.CancelledError:
+            pass
+        finally:
+            _sup_task["task"] = None
 
     def _ensure_fleet_emitter(session_id: str):
         task = _fleet_emitters.get(session_id)
@@ -159,6 +348,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
                 if existing:
                     if await _server_alive_for_port(port):
                         # Healthy — re-announce so a freshly reloaded page sees it
+                        asyncio.create_task(_register_fleet_drone(drone_id))
                         await sio.emit("swarm_drone_status", {
                             "drone_id": drone_id, "connected": True, "name": name, "color": color,
                         }, to=sid)
@@ -169,6 +359,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
                     logger.warning(f"Fleet drone {drone_id} attached but server dead, reconnecting")
                     session_manager.pop_fleet_drone(drone_id)
                     _fleet_state.pop(drone_id, None)
+                    _end_fleet_flight(drone_id)
                     try:
                         await existing.stop(kill_stale=True)
                     except Exception:
@@ -195,6 +386,8 @@ def register_swarm_events(sio, session_manager: SessionManager):
                     await manager.start()
                     session_manager.attach_fleet_drone(session.session_id, drone_id, manager)
                     _ensure_fleet_emitter(session.session_id)
+                    _ensure_supervisor()
+                    asyncio.create_task(_register_fleet_drone(drone_id))
                     await sio.emit("swarm_drone_status", {
                         "drone_id": drone_id, "connected": True, "name": name, "color": color,
                     }, to=sid)
@@ -234,7 +427,11 @@ def register_swarm_events(sio, session_manager: SessionManager):
             return  # enable needs no backend prep — the scan does the work
         stopped = await session_manager.release_fleet_user(session.session_id)
         if stopped:
+            for did in list(_fleet_seen):
+                _end_fleet_flight(did)
             _fleet_state.clear()
+            _fleet_seen.clear()
+            _sup_drone.clear()
             logger.info(f"Swarm disabled — last session left, stopped {stopped} fleet drone(s)")
         else:
             logger.info("Swarm disabled for session — shared fleet kept for other sessions")
@@ -276,6 +473,8 @@ def register_swarm_events(sio, session_manager: SessionManager):
         await manager.start()
         session_manager.attach_fleet_drone(session.session_id, drone_id, manager)
         _ensure_fleet_emitter(session.session_id)
+        _ensure_supervisor()
+        asyncio.create_task(_register_fleet_drone(drone_id))
 
         await sio.emit("swarm_drone_status", {
             "drone_id": drone_id, "connected": True, "name": name, "color": color,
@@ -291,6 +490,9 @@ def register_swarm_events(sio, session_manager: SessionManager):
         drone_id = int(data.get("drone_id", 1))
         session_manager.detach_fleet_drone(session.session_id, drone_id)
         _fleet_state.pop(drone_id, None)
+        _fleet_seen.pop(drone_id, None)
+        _sup_drone.pop(drone_id, None)
+        _end_fleet_flight(drone_id)
         await sio.emit("swarm_drone_status", {"drone_id": drone_id, "connected": False}, to=sid)
         logger.info(f"Fleet drone {drone_id} disconnected — session {session.session_id[:8]}")
 
@@ -339,7 +541,9 @@ def register_swarm_events(sio, session_manager: SessionManager):
 
         stagger_s > 0 delays drone k's action by k*stagger_s seconds — used
         for fleet mission starts so drones lift off one after another instead
-        of climbing into each other's prop wash.
+        of climbing into each other's prop wash. stagger_order (list of drone
+        ids) overrides the id-ascending delay order, so the client can launch
+        e.g. the drone with the farthest first waypoint first.
         """
         session = session_manager.get_by_socket(sid)
         if not session:
@@ -348,6 +552,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
         action  = str(data.get("action", ""))
         stagger = float(data.get("altitude_stagger", 0) or 0)
         stagger_s = min(float(data.get("stagger_s", 0) or 0), 15.0)
+        order   = [int(i) for i in (data.get("stagger_order") or [])]
         base_alt = data.get("altitude")
 
         async def run_one(idx: int, did: int) -> dict:
@@ -357,8 +562,9 @@ def register_swarm_events(sio, session_manager: SessionManager):
             payload = dict(data)
             if action == "takeoff" and base_alt is not None and stagger > 0:
                 payload["altitude"] = float(base_alt) + idx * stagger
-            if stagger_s > 0 and idx > 0:
-                await asyncio.sleep(idx * stagger_s)
+            k = order.index(did) if did in order else idx
+            if stagger_s > 0 and k > 0:
+                await asyncio.sleep(k * stagger_s)
             try:
                 # Per-drone timeout: one hung drone (dead gRPC that stalls
                 # instead of erroring) must not freeze the whole group result.
@@ -407,24 +613,41 @@ def register_swarm_events(sio, session_manager: SessionManager):
             }, to=sid)
             return
 
-        # Same airspace rules as single-drone uploads: red blocks the upload,
-        # orange is allowed with a warning (fleet drones have no ack dialog).
+        # Same airspace rules as single-drone uploads: red blocks unless this
+        # drone holds an approved permit for this exact profile; orange needs
+        # an explicit pilot acknowledgment (ack_orange).
         from app.zones import engine as zone_engine
         path_check = zone_engine.check_path(
             [(float(w["lat"]), float(w["lng"])) for w in waypoints]
         )
         zone_warn = ""
+        permit = None
         if path_check["zone_class"] == "red":
             names = ", ".join(z["name"] for z in path_check["zones"])
-            await sio.emit("swarm_mission_upload_result", {
-                "drone_id": drone_id, "ok": False,
-                "msg": f"Blocked — crosses NO-FLY (red) zone: {names}",
-            }, to=sid)
-            logger.warning(f"Fleet mission blocked for drone {drone_id} (red zones: {names})")
-            return
-        if path_check["zone_class"] == "orange":
+            db_id = _fleet_db_ids.get(drone_id)
+            if db_id:
+                from app.permits import service as permit_service
+                permit = await permit_service.find_approved(db_id, waypoints)
+            if permit is None:
+                await sio.emit("swarm_mission_upload_result", {
+                    "drone_id": drone_id, "ok": False, "blocked": "red",
+                    "can_request": bool(db_id), "zones": path_check["zones"],
+                    "msg": f"Blocked — crosses NO-FLY (red) zone: {names} — permission required",
+                }, to=sid)
+                logger.warning(f"Fleet mission blocked for drone {drone_id} (red zones: {names})")
+                return
+            logger.info(f"Fleet red-zone mission allowed under permit {permit['id'][:8]} "
+                        f"for drone {drone_id}")
+        if path_check["zone_class"] == "orange" and permit is None:
             names = ", ".join(z["name"] for z in path_check["zones"])
-            zone_warn = f" — WARNING: passes orange zone: {names}"
+            if not data.get("ack_orange"):
+                await sio.emit("swarm_mission_upload_result", {
+                    "drone_id": drone_id, "ok": False, "needs_ack": True,
+                    "zones": path_check["zones"],
+                    "msg": f"Mission passes through restricted (orange) zone: {names}",
+                }, to=sid)
+                return
+            zone_warn = f" — passes orange zone: {names}"
 
         try:
             ok, err = await tel.upload_mission(waypoints, terrain_follow=terrain_follow)

@@ -67,11 +67,20 @@ export function useDrone() {
         const onMissionUpload  = (data: { ok: boolean; count?: number; terrain_follow?: boolean; msg: string }) =>
             store.setMissionUploadResult(data)
         // Swarm mission upload result — mirror to primary store so the mission
-        // page's upload indicator and error handling work for fleet drones.
-        const onSwarmMissionUpload = (data: { drone_id: number; ok: boolean; count?: number; msg: string }) => {
+        // page's upload indicator, orange-ack dialog and red/permit flow all
+        // work for fleet drones exactly like the primary drone.
+        const onSwarmMissionUpload = (data: {
+            drone_id: number; ok: boolean; count?: number; msg: string
+            needs_ack?: boolean; blocked?: 'red'; can_request?: boolean
+            zones?: { id: string; name: string; zone_class: string }[]
+        }) => {
             const { activeDroneId } = useSwarmStore.getState()
             if (data.drone_id === activeDroneId) {
-                store.setMissionUploadResult({ ok: data.ok, count: data.count, msg: data.msg })
+                store.setMissionUploadResult({
+                    ok: data.ok, count: data.count, msg: data.msg,
+                    needs_ack: data.needs_ack, blocked: data.blocked,
+                    can_request: data.can_request, zones: data.zones,
+                })
             }
         }
         const onActionResult   = (data: { action: string; ok: boolean; msg?: string }) =>
@@ -124,6 +133,17 @@ export function useDrone() {
         }) => {
             useSwarmStore.getState().setGroupResult({
                 action: data.action, okCount: data.ok_count, total: data.total, at: Date.now(),
+            })
+        }
+
+        // Supervisor alerts — into the swarm store for the fleet panels
+        const onFleetAlert = (data: {
+            drone_id: number; kind: string
+            severity: 'info' | 'warn' | 'critical'; msg: string; at: number
+        }) => {
+            useSwarmStore.getState().pushAlert({
+                droneId: data.drone_id, kind: data.kind,
+                severity: data.severity, msg: data.msg, at: data.at,
             })
         }
 
@@ -204,6 +224,7 @@ export function useDrone() {
         socket.on('drone_telemetry',       onDroneTelemetry)
         socket.on('fleet_telemetry',       onFleetTelemetry)
         socket.on('swarm_drone_status',    onSwarmDroneStatus)
+        socket.on('fleet_alert',           onFleetAlert)
         socket.on('swarm_action_result',   onSwarmActionResult)
         socket.on('swarm_group_result',    onSwarmGroupResult)
         socket.on('swarm_scan_started',    onSwarmScanStarted)
@@ -227,6 +248,7 @@ export function useDrone() {
             socket.off('drone_telemetry',       onDroneTelemetry)
             socket.off('fleet_telemetry',       onFleetTelemetry)
             socket.off('swarm_drone_status',    onSwarmDroneStatus)
+            socket.off('fleet_alert',           onFleetAlert)
             socket.off('swarm_action_result',   onSwarmActionResult)
             socket.off('swarm_group_result',    onSwarmGroupResult)
             socket.off('swarm_scan_started',    onSwarmScanStarted)

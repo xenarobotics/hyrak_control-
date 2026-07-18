@@ -23,6 +23,16 @@ export interface GroupResult {
     at: number
 }
 
+// Supervisor alerts (fleet_alert events): low battery, auto-RTL, link loss,
+// separation, fleet completion. Shown in the fleet panels — never map popups.
+export interface FleetAlert {
+    droneId: number
+    kind: string
+    severity: 'info' | 'warn' | 'critical'
+    msg: string
+    at: number
+}
+
 // Persist swarm-enabled flag so it survives page reload within the same browser session.
 // Drones themselves are NOT persisted — they're repopulated by auto-scan on reconnect.
 const SESSION_KEY = 'hyrak_swarm_enabled'
@@ -43,6 +53,8 @@ interface SwarmStore {
     // Multi-select for group commands. Empty = group commands target ALL connected.
     selectedIds: number[]
     lastGroupResult: GroupResult | null
+    alerts: FleetAlert[]
+    pushAlert: (a: FleetAlert) => void
 
     setEnabled: (v: boolean) => void
     setActiveDrone: (id: number | null) => void
@@ -78,6 +90,9 @@ export const useSwarmStore = create<SwarmStore>((set) => ({
     scanStatus: 'idle',
     selectedIds: [],
     lastGroupResult: null,
+    alerts: [],
+
+    pushAlert: (a) => set((s) => ({ alerts: [a, ...s.alerts].slice(0, 20) })),
 
     setEnabled: (v) => {
         writePersistedEnabled(v)
@@ -93,6 +108,7 @@ export const useSwarmStore = create<SwarmStore>((set) => ({
             scanStatus: v ? s.scanStatus : 'idle',
             selectedIds: v ? s.selectedIds : [],
             lastGroupResult: null,
+            alerts: v ? s.alerts : [],
         }))
     },
 

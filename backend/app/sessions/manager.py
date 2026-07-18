@@ -141,6 +141,9 @@ class SessionManager:
     def mark_fleet_user(self, session_id: str):
         self._fleet_users.add(session_id)
 
+    def fleet_user_sessions(self) -> list[str]:
+        return list(self._fleet_users)
+
     def is_fleet_user(self, session_id: str) -> bool:
         return session_id in self._fleet_users
 

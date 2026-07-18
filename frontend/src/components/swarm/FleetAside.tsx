@@ -20,6 +20,7 @@ export function FleetAside() {
         drones, activeDroneId, scanStatus, selectedIds, lastGroupResult,
         setActiveDrone, addDrone, removeDrone, toggleSelected, setSelected, setGroupResult,
     } = useSwarmStore()
+    const latestAlert = useSwarmStore(s => s.alerts[0])
     const [showAdd, setShowAdd]         = useState(false)
     const [expandedIds, setExpandedIds] = useState<number[]>([])
     const [form, setForm]               = useState({ name: '', port: '14541' })
@@ -304,6 +305,26 @@ export function FleetAside() {
                             }}
                         >
                             {lastGroupResult.action.toUpperCase()}: {lastGroupResult.okCount}/{lastGroupResult.total} OK
+                        </div>
+                    )}
+
+                    {/* Latest supervisor alert (full feed on the mission page) */}
+                    {latestAlert && (
+                        <div
+                            className="flex items-center gap-1.5 text-[9px] font-mono px-1.5 py-1 rounded truncate"
+                            title={latestAlert.msg}
+                            style={{
+                                color: latestAlert.severity === 'critical' ? '#f87171'
+                                    : latestAlert.severity === 'warn' ? '#fbbf24' : '#22d3ee',
+                                background: (latestAlert.severity === 'critical' ? '#f87171'
+                                    : latestAlert.severity === 'warn' ? '#fbbf24' : '#22d3ee') + '12',
+                            }}
+                        >
+                            <span
+                                className={`w-1.5 h-1.5 rounded-full shrink-0 ${latestAlert.severity === 'critical' ? 'animate-pulse' : ''}`}
+                                style={{ background: 'currentColor' }}
+                            />
+                            <span className="truncate">{latestAlert.msg}</span>
                         </div>
                     )}
                 </div>

@@ -10,12 +10,22 @@ logger = logging.getLogger("verocore.events.permits")
 
 
 def register_permit_events(sio, session_manager):
+    def _resolve_drone_rec_id(session, data) -> str | None:
+        """Permit owner: the session's identified drone, or — in swarm mode —
+        the fleet drone the client names via fleet_drone_id."""
+        fleet_id = data.get("fleet_drone_id") if isinstance(data, dict) else None
+        if fleet_id is not None:
+            from app.events.swarm_events import _fleet_db_ids
+            return _fleet_db_ids.get(int(fleet_id))
+        return session.drone["id"] if session.drone else None
+
     @sio.on("request_permit")
     async def on_request_permit(sid, data):
         session = session_manager.get_by_socket(sid)
         if not session:
             return
-        if not session.drone:
+        drone_rec_id = _resolve_drone_rec_id(session, data)
+        if not drone_rec_id:
             await sio.emit("permit_result", {
                 "ok": False,
                 "msg": "Connect a drone first — permits are tied to the drone's identity",
@@ -42,7 +52,7 @@ def register_permit_events(sio, session_manager):
 
         from app.permits import service
         permit = await service.create(
-            session.drone["id"], description, waypoints, red_zones
+            drone_rec_id, description, waypoints, red_zones
         )
         if permit is None:
             await sio.emit("permit_result", {
@@ -60,11 +70,12 @@ def register_permit_events(sio, session_manager):
         session = session_manager.get_by_socket(sid)
         if not session:
             return
-        if not session.drone:
+        drone_rec_id = _resolve_drone_rec_id(session, data or {})
+        if not drone_rec_id:
             await sio.emit("my_permits", {"permits": []}, to=sid)
             return
         from app.permits import service
         permits = await service.list_permits(
-            drone_id=session.drone["id"], include_waypoints=True
+            drone_id=drone_rec_id, include_waypoints=True
         )
         await sio.emit("my_permits", {"permits": permits}, to=sid)
