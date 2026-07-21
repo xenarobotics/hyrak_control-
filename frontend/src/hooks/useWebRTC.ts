@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { getSocket } from '@/lib/socket'
 import { useDroneStore } from '@/store/drone'
+import { tuneVideoSender, videoConstraints, getVideoSettings } from '@/lib/videoSettings'
 
 export interface WebRTCStats {
     inputFps: number
@@ -68,6 +69,9 @@ export function useWebRTC() {
 
         // Add camera tracks to peer connection
         cameraStream.getTracks().forEach(t => pc.addTrack(t, cameraStream))
+        // Uplink quality: allow the bitrate the chosen resolution needs and
+        // prefer dropping resolution over frame rate under congestion.
+        tuneVideoSender(pc)
 
         // When we receive the processed video back from server
         pc.ontrack = (event) => {
@@ -125,6 +129,26 @@ export function useWebRTC() {
         setConnectionStatus('disconnected')
     }, [cleanup, setConnectionStatus])
 
+    // Re-apply the saved video settings to a LIVE stream (called from the
+    // settings page) — reconfigures the camera track and sender in place,
+    // no renegotiation needed.
+    const applyVideoSettings = useCallback(async () => {
+        const track = localStreamRef.current?.getVideoTracks()[0]
+        if (!track || !pcRef.current) return
+        const { fps } = getVideoSettings()
+        try {
+            const deviceId = track.getSettings().deviceId ?? ''
+            const c = videoConstraints(deviceId)
+            await track.applyConstraints({
+                width: c.width, height: c.height,
+                frameRate: { ideal: fps, max: fps },
+            })
+        } catch (e) {
+            console.warn('applyConstraints failed:', e)
+        }
+        await tuneVideoSender(pcRef.current)
+    }, [])
+
     // Stats collection
     useEffect(() => {
         if (!isStreaming || !pcRef.current) return
@@ -166,5 +190,5 @@ export function useWebRTC() {
 
     useEffect(() => { return () => { cleanup() } }, [cleanup])
 
-    return { remoteStream, localStream, isStreaming, stats, startStream, stopStream }
+    return { remoteStream, localStream, isStreaming, stats, startStream, stopStream, applyVideoSettings }
 }

@@ -22,6 +22,7 @@ interface WebRTCContextValue {
     scanCameras: () => void
     startStream: () => Promise<void>
     stopStream: () => void
+    applyVideoSettings: () => Promise<void>
 }
 
 const WebRTCContext = createContext<WebRTCContextValue | null>(null)
@@ -31,6 +32,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
         remoteStream, localStream,
         isStreaming, stats,
         startStream: startWebRTC, stopStream: stopWebRTC,
+        applyVideoSettings,
     } = useWebRTC()
 
     const {
@@ -77,7 +79,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
             remoteStream, localStream,
             isStreaming, isLoading, modelLoading, stats,
             cameras, selectedCameraId, setSelectedCameraId, scanCameras,
-            startStream, stopStream,
+            startStream, stopStream, applyVideoSettings,
         }}>
             {children}
         </WebRTCContext.Provider>

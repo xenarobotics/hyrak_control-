@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { videoConstraints } from '@/lib/videoSettings'
 
 export interface CameraDevice {
     deviceId: string
@@ -53,12 +54,12 @@ export function useCamera() {
             setStream(null)
         }
         try {
-            // 720p is plenty: the vision pipeline downscales to 640px wide for
-            // inference anyway, and 1080p capture noticeably slows down camera
-            // init (the "Start Analysis" delay) plus encode/decode CPU load
-            // throughout the WebRTC round trip.
+            // Resolution and frame rate come from the user's video settings
+            // (settings page — 480/720/1080, 12–30 fps). The vision pipeline
+            // still downscales to 640px wide for inference; capture size only
+            // affects what the operator sees.
             const newStream = await navigator.mediaDevices.getUserMedia({
-                video: { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } },
+                video: videoConstraints(deviceId),
                 audio: false,
             })
             setStream(newStream)

@@ -5,6 +5,8 @@ import { useTheme } from '@/lib/theme'
 import { Sun, Moon, Info, Zap } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useMissionStore } from '@/store/mission'
+import { useWebRTCContext } from '@/contexts/WebRTCContext'
+import { getVideoSettings, RES_OPTIONS, FPS_OPTIONS, type VideoRes, type VideoFps } from '@/lib/videoSettings'
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
 
@@ -306,6 +308,49 @@ function ShortcutsGroup() {
     )
 }
 
+function VideoGroup() {
+    const { isStreaming, applyVideoSettings } = useWebRTCContext()
+    const [res, setRes] = useState<VideoRes>(() => getVideoSettings().res)
+    const [fps, setFps] = useState<VideoFps>(() => getVideoSettings().fps)
+
+    // Live-apply when a stream is running; otherwise takes effect next start.
+    const apply = (nextRes: VideoRes, nextFps: VideoFps) => {
+        lsSet('hyrak-video-res', nextRes)
+        lsSet('hyrak-video-fps', nextFps)
+        if (isStreaming) applyVideoSettings()
+    }
+
+    return (
+        <>
+            <GroupLabel text="VIDEO" />
+            <PrefRow
+                label="Stream resolution"
+                sub={isStreaming ? 'Applied live to the running stream' : 'Applies when the stream starts'}
+                tip="What the camera captures and sends to the server. The AI models always run at 640px internally, so higher resolution only sharpens what you see — at the cost of bandwidth and encode time."
+                right={
+                    <ChipGroup
+                        value={res}
+                        onChange={v => { setRes(v); apply(v, fps) }}
+                        options={RES_OPTIONS.map(r => ({ value: r, label: `${r}p` }))}
+                    />
+                }
+            />
+            <PrefRow
+                label="Frame rate"
+                sub="Camera capture rate in frames per second"
+                tip="Lower frame rates reduce bandwidth and CPU load; higher rates look smoother. Under network congestion the stream keeps this frame rate and drops resolution instead."
+                right={
+                    <ChipGroup
+                        value={String(fps) as `${VideoFps}`}
+                        onChange={v => { const f = Number(v) as VideoFps; setFps(f); apply(res, f) }}
+                        options={FPS_OPTIONS.map(f => ({ value: String(f) as `${VideoFps}`, label: String(f) }))}
+                    />
+                }
+            />
+        </>
+    )
+}
+
 function MissionGroup() {
     const autoFollowOnMission    = useMissionStore(s => s.autoFollowOnMission)
     const setAutoFollowOnMission = useMissionStore(s => s.setAutoFollowOnMission)
@@ -363,6 +408,7 @@ export default function SettingsPage() {
 
                 <DisplayGroup />
                 <UnitsGroup />
+                <VideoGroup />
                 <MapGroup />
                 <MissionGroup />
                 <NotificationsGroup />

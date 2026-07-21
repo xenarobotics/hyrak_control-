@@ -103,8 +103,12 @@ def register_webrtc_events(
                     room=observer.watch_room(session_id),
                 )
 
+            # buffered=False: always hand recv() the NEWEST frame and drop
+            # stale ones. The buffered default queues every frame unboundedly,
+            # so whenever processing ran slower than the camera the backlog
+            # grew and glass-to-glass latency crept 300ms -> 1s+.
             video_track = MultiModeVideoStreamTrack(
-                source_track=relay.subscribe(track),
+                source_track=relay.subscribe(track, buffered=False),
                 session_id=session.session_id,
                 vision_pool=vision_pool,
                 session_manager=session_manager,
