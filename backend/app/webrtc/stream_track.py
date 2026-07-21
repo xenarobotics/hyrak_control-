@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from typing import TYPE_CHECKING, Callable, Optional
 
 import cv2
@@ -39,6 +41,11 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
         self._snapshot_cb    = snapshot_callback
         self._frame_cache:   dict[str, np.ndarray] = {}
         self._meta_cache:    dict[str, dict] = {}
+        # Pixel work (colour conversion, overlay drawing) runs here, off the
+        # event loop — ~6-10ms/frame at 1080p that would otherwise delay
+        # drone commands, telemetry and signaling for every session.
+        # Single worker keeps frame order.
+        self._px_executor    = ThreadPoolExecutor(max_workers=1)
         self._frame_count    = 0
         self._last_fps_time  = time.time()
         self._fps            = 0.0
@@ -74,7 +81,10 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
             self._maybe_snapshot(None, frame)
             return frame
 
-        img_bgr = frame.to_ndarray(format="bgr24")
+        loop = asyncio.get_running_loop()
+        img_bgr = await loop.run_in_executor(
+            self._px_executor, partial(frame.to_ndarray, format="bgr24")
+        )
 
         if analyzer:
             try:
@@ -113,24 +123,29 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
                     except Exception:
                         pass
 
-        # Overlay modes (detector/trackers) draw the latest results onto the
-        # CURRENT camera frame — every frame is displayed, so the video is as
-        # smooth as the fly-tab relay and only the annotations lag by one
-        # inference. Transform modes (depth/enhancer) return None here and
-        # fall back to the cached output frame.
-        out_bgr = None
-        if analyzer is not None:
-            latest_meta = self._meta_cache.get(mode.value)
-            if latest_meta is not None:
-                out_bgr = analyzer.draw_overlay(img_bgr, latest_meta)
-        if out_bgr is None:
-            out_bgr = self._frame_cache.get(mode.value, img_bgr)
+        out_bgr, out_frame = await loop.run_in_executor(
+            self._px_executor, self._compose, analyzer, mode.value, img_bgr
+        )
         self._maybe_snapshot(out_bgr)
 
-        out_frame = VideoFrame.from_ndarray(out_bgr, format="bgr24")
         out_frame.pts       = frame.pts
         out_frame.time_base = frame.time_base
         return out_frame
+
+    # Overlay modes (detector/trackers) draw the latest results onto the
+    # CURRENT camera frame — every frame is displayed, so the video is as
+    # smooth as the fly-tab relay and only the annotations lag by one
+    # inference. Transform modes (depth/enhancer) return None from
+    # draw_overlay and fall back to the cached output frame.
+    def _compose(self, analyzer, mode_value: str, img_bgr: np.ndarray):
+        out_bgr = None
+        if analyzer is not None:
+            latest_meta = self._meta_cache.get(mode_value)
+            if latest_meta is not None:
+                out_bgr = analyzer.draw_overlay(img_bgr, latest_meta)
+        if out_bgr is None:
+            out_bgr = self._frame_cache.get(mode_value, img_bgr)
+        return out_bgr, VideoFrame.from_ndarray(out_bgr, format="bgr24")
 
     # /admin observer mirror: ~4fps downscaled JPEGs of exactly what this
     # session sees (annotated when a vision mode is active). All work —
@@ -164,6 +179,10 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
     def stop(self):
         try:
             super().stop()
+        except Exception:
+            pass
+        try:
+            self._px_executor.shutdown(wait=False, cancel_futures=True)
         except Exception:
             pass
 

@@ -75,6 +75,14 @@ export function useWebRTC() {
 
         // When we receive the processed video back from server
         pc.ontrack = (event) => {
+            // Play received frames out immediately — the browser otherwise
+            // grows a smoothing jitter buffer over time, which shows up as
+            // slowly accumulating glass-to-glass latency.
+            try {
+                const receiver = event.receiver as unknown as Record<string, unknown>
+                if ('jitterBufferTarget' in receiver) receiver.jitterBufferTarget = 0
+                if ('playoutDelayHint' in receiver) receiver.playoutDelayHint = 0
+            } catch { /* best-effort; not supported in every browser */ }
             const stream = event.streams?.[0]
             if (stream) {
                 setRemoteStream(stream)
