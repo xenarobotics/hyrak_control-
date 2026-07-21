@@ -25,6 +25,7 @@ export type MapDrone = {
     selected: boolean
     approx: boolean          // IP-derived location, not GPS
     approx_label?: string    // e.g. "Hyderabad, India"
+    sim?: boolean            // simulated (SITL fleet) drone
 }
 
 // Icon cache: leaflet re-mounts a marker whenever it receives a new icon
@@ -34,7 +35,7 @@ const _iconCache = new Map<string, L.DivIcon>()
 
 function cachedDroneIcon(d: MapDrone): L.DivIcon {
     const hdg = Math.round(d.heading / 10) * 10
-    const key = [d.name, hdg, d.armed, d.selected, d.approx, d.approx_label ?? ''].join('|')
+    const key = [d.name, hdg, d.armed, d.selected, d.approx, d.sim ?? false, d.approx_label ?? ''].join('|')
     let icon = _iconCache.get(key)
     if (!icon) {
         icon = droneIcon({ ...d, heading: hdg })
@@ -45,13 +46,15 @@ function cachedDroneIcon(d: MapDrone): L.DivIcon {
 }
 
 function droneIcon(d: MapDrone): L.DivIcon {
-    const color = d.approx ? '#a1a1aa' : d.armed ? '#f59e0b' : '#22d3ee'
+    const color = d.approx ? '#a1a1aa' : d.armed ? '#f59e0b' : d.sim ? '#a78bfa' : '#22d3ee'
     const sz = d.selected ? 34 : 28
     const border = d.approx ? `2px dashed ${color}` : `2px solid ${color}`
     const label = d.approx ? `~ ${d.name}` : d.name
     const sub = d.approx && d.approx_label
         ? `<div style="color:#a1a1aa;font-size:9px;">${d.approx_label}</div>`
-        : ''
+        : d.sim
+            ? `<div style="color:#a78bfa;font-size:8px;letter-spacing:1px;">SIM</div>`
+            : ''
     return L.divIcon({
         className: '',
         html: `<div style="

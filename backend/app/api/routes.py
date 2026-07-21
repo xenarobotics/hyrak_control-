@@ -68,7 +68,44 @@ async def get_sessions(request: Request):
             "live": live,
             "approx_location": s.approx_location,
         })
-    return {"active_sessions": len(sessions), "sessions": sessions}
+
+    # Swarm fleet drones connect server-side (UDP SITL) rather than through a
+    # client session, so they're reported separately with the same live shape.
+    fleet = []
+    try:
+        from app.events.swarm_events import _fleet_state, _fleet_db_ids
+        from app.zones import engine as zone_engine
+        for did, mgr in sorted(sm.get_fleet("").items()):
+            if not mgr.is_connected:
+                continue
+            snap = _fleet_state.get(did) or {}
+            pos = snap.get("position", {})
+            fm = snap.get("flight_mode", {})
+            lat = pos.get("latitude_deg", 0.0)
+            lng = pos.get("longitude_deg", 0.0)
+            alt = pos.get("relative_altitude_m", 0.0)
+            fleet.append({
+                "drone_id": did,
+                "db_id": _fleet_db_ids.get(did),
+                "hardware_uid": f"sitl-instance-{did}",
+                "is_simulated": True,
+                "live": {
+                    "zone_class": (zone_engine.check_point(lat, lng, alt)["zone_class"]
+                                   if (lat or lng) else "green"),
+                    "lat": lat,
+                    "lng": lng,
+                    "alt": alt,
+                    "heading": snap.get("heading_deg", 0.0),
+                    "armed": bool(fm.get("is_armed")),
+                    "in_air": bool(fm.get("is_in_air")),
+                    "mode": fm.get("mode", "UNKNOWN"),
+                    "battery": snap.get("battery", {}).get("remaining_percent", 0.0),
+                } if snap else None,
+            })
+    except Exception:
+        pass
+
+    return {"active_sessions": len(sessions), "sessions": sessions, "fleet_drones": fleet}
 
 
 @router.get("/drones")

@@ -66,6 +66,16 @@ type SessionInfo = {
     approx_location: ApproxLocation
 }
 
+// Swarm SITL drones — connected server-side (UDP), not through a client
+// session, so they arrive in a separate list with the same live shape.
+type FleetDroneInfo = {
+    drone_id: number
+    db_id: string | null
+    hardware_uid: string
+    is_simulated: boolean
+    live: LiveState
+}
+
 type Telem = {
     attitude: { roll_deg: number; pitch_deg: number; yaw_deg: number }
     position: { latitude_deg: number; longitude_deg: number; relative_altitude_m: number }
@@ -127,6 +137,7 @@ function jitter(id: string, v: number): number {
 export default function AdminPage() {
     const [tab, setTab] = useState<Tab>('overview')
     const [sessions, setSessions] = useState<SessionInfo[]>([])
+    const [fleetDrones, setFleetDrones] = useState<FleetDroneInfo[]>([])
     const [drones, setDrones] = useState<DroneRecord[]>([])
     const [selected, setSelected] = useState<string | null>(null)
     const [selectedDroneId, setSelectedDroneId] = useState<string | null>(null)
@@ -189,9 +200,12 @@ export default function AdminPage() {
                     // array identity every 2s makes leaflet re-mount markers
                     // and polygons, which reads as map jitter.
                     const nextS = sData.sessions ?? []
+                    const nextF = sData.fleet_drones ?? []
                     const nextD = dData.drones ?? []
                     setSessions(prev =>
                         JSON.stringify(prev) === JSON.stringify(nextS) ? prev : nextS)
+                    setFleetDrones(prev =>
+                        JSON.stringify(prev) === JSON.stringify(nextF) ? prev : nextF)
                     setDrones(prev =>
                         JSON.stringify(prev) === JSON.stringify(nextD) ? prev : nextD)
                 }
@@ -276,22 +290,29 @@ export default function AdminPage() {
         } catch { /* ignore */ }
     }, [])
 
-    // Drop the watch if the watched session disappears
+    // Drop the watch if the watched session (or fleet drone) disappears
     useEffect(() => {
-        if (selected && !sessions.some(s => s.session_id === selected)) {
+        if (!selected) return
+        const gone = selected.startsWith('fleet-')
+            ? !fleetDrones.some(f => `fleet-${f.drone_id}` === selected)
+            : !sessions.some(s => s.session_id === selected)
+        if (gone) {
             selectedRef.current = null
             setSelected(null)
             setTelem(null)
         }
-    }, [sessions, selected])
+    }, [sessions, fleetDrones, selected])
 
+    // Fleet ids ('fleet-N') are selectable but never socket-watched — SITL
+    // drones have no client session to mirror video/telemetry from; their
+    // live state comes from the 2s /api/sessions poll instead.
     const watch = useCallback((sessionId: string | null) => {
         const socket = getSocket()
         if (selectedRef.current === sessionId) return
-        if (selectedRef.current) {
+        if (selectedRef.current && !selectedRef.current.startsWith('fleet-')) {
             socket.emit('unwatch_session', { session_id: selectedRef.current })
         }
-        if (sessionId) {
+        if (sessionId && !sessionId.startsWith('fleet-')) {
             socket.emit('watch_session', { session_id: sessionId })
         }
         selectedRef.current = sessionId
@@ -330,6 +351,14 @@ export default function AdminPage() {
     }, [])
 
     const watched = sessions.find(s => s.session_id === selected)
+    const watchedFleet = selected?.startsWith('fleet-')
+        ? fleetDrones.find(f => `fleet-${f.drone_id}` === selected) ?? null
+        : null
+    // Fleet drones carry a registry identity (sitl-instance-N) — show the
+    // registry name (renameable in the DRONES tab) when it exists.
+    const fleetName = useCallback((f: FleetDroneInfo) =>
+        drones.find(d => d.id === f.db_id || d.hardware_uid === f.hardware_uid)?.name
+            ?? `SITL ${f.drone_id}`, [drones])
     const bySession = (droneId: string | null) =>
         droneId ? sessions.find(s => s.drone?.id === droneId) ?? null : null
 
@@ -342,9 +371,10 @@ export default function AdminPage() {
         watch(selectedDroneSession?.session_id ?? null)
     }, [tab, selectedDroneSession?.session_id, watch])
 
-    const onlineUids = new Set(
-        sessions.filter(s => s.hardware_uid).map(s => s.hardware_uid as string)
-    )
+    const onlineUids = new Set([
+        ...sessions.filter(s => s.hardware_uid).map(s => s.hardware_uid as string),
+        ...fleetDrones.map(f => f.hardware_uid),
+    ])
 
     // The landing map only shows real drones — sessions without telemetry
     // (browser open, nothing linked) stay off the list and the map.
@@ -382,6 +412,23 @@ export default function AdminPage() {
         }
         return []
     })
+
+    // Fleet SITL drones on the same map, tagged SIM
+    for (const f of fleetDrones) {
+        if (!f.live || (f.live.lat === 0 && f.live.lng === 0)) continue
+        mapDrones.push({
+            session_id: `fleet-${f.drone_id}`,
+            name: fleetName(f),
+            lat: f.live.lat,
+            lng: f.live.lng,
+            heading: f.live.heading,
+            armed: f.live.armed,
+            in_air: f.live.in_air,
+            selected: `fleet-${f.drone_id}` === selected,
+            approx: false,
+            sim: true,
+        })
+    }
 
     const filteredDrones = drones.filter(d => {
         const q = search.trim().toLowerCase()
@@ -421,8 +468,8 @@ export default function AdminPage() {
                     )
                 })}
                 <div className="mt-auto text-center text-[9px] text-zinc-600">
-                    <div className={telemSessions.length > 0 ? 'text-emerald-400' : ''}>
-                        ● {telemSessions.length}
+                    <div className={(telemSessions.length + fleetDrones.length) > 0 ? 'text-emerald-400' : ''}>
+                        ● {telemSessions.length + fleetDrones.length}
                     </div>
                     LIVE
                 </div>
@@ -446,10 +493,10 @@ export default function AdminPage() {
                                 }}
                             >
                                 <div className="px-3 py-2.5 text-[10px] tracking-widest text-zinc-500 border-b border-zinc-800/80">
-                                    ACTIVE DRONES — {telemSessions.length}
+                                    ACTIVE DRONES — {telemSessions.length + fleetDrones.length}
                                 </div>
                                 <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                                    {telemSessions.length === 0 && (
+                                    {telemSessions.length + fleetDrones.length === 0 && (
                                         <div className="text-[10px] text-zinc-500 p-2">
                                             No drones connected. Clients without a telemetry link
                                             don&apos;t appear here.
@@ -496,6 +543,45 @@ export default function AdminPage() {
                                             </div>
                                         </button>
                                     ))}
+                                    {/* Swarm SITL fleet — server-side connections, tagged SIM */}
+                                    {fleetDrones.map(f => {
+                                        const fid = `fleet-${f.drone_id}`
+                                        return (
+                                            <button
+                                                key={fid}
+                                                onClick={() => toggleSelect(fid)}
+                                                className={
+                                                    'w-full text-left border rounded p-2.5 transition-colors ' +
+                                                    (selected === fid
+                                                        ? 'border-violet-500 bg-violet-500/5'
+                                                        : 'border-zinc-800 hover:border-zinc-600')
+                                                }
+                                            >
+                                                <div className="flex items-center gap-2 text-xs">
+                                                    <span className="font-semibold text-zinc-100 truncate">
+                                                        {fleetName(f)}
+                                                    </span>
+                                                    <Tag label="SIM" tone="violet" />
+                                                    {f.live?.armed && <Tag label="ARMED" tone="red" />}
+                                                </div>
+                                                {f.live?.zone_class === 'orange' && (
+                                                    <div className="mt-0.5 text-[9px] text-amber-400 animate-pulse">
+                                                        ● IN ORANGE ZONE
+                                                    </div>
+                                                )}
+                                                {f.live?.zone_class === 'red' && (
+                                                    <div className="mt-0.5 text-[9px] text-red-400 animate-pulse">
+                                                        ● IN RED ZONE
+                                                    </div>
+                                                )}
+                                                <div className="mt-0.5 text-[9px] text-zinc-600">
+                                                    {f.live
+                                                        ? `${f.live.mode} · ${f.live.alt.toFixed(0)}m · ${f.live.battery.toFixed(0)}%`
+                                                        : 'connecting…'}
+                                                </div>
+                                            </button>
+                                        )
+                                    })}
                                 </div>
                             </div>
                         </div>
@@ -509,6 +595,15 @@ export default function AdminPage() {
                                 copiedUid={copiedUid}
                                 onCopyUid={copyUid}
                                 onRename={renameDrone}
+                                onClose={() => watch(null)}
+                            />
+                        )}
+                        {!watched && watchedFleet && (
+                            <FleetDetailPanel
+                                drone={watchedFleet}
+                                name={fleetName(watchedFleet)}
+                                copiedUid={copiedUid}
+                                onCopyUid={copyUid}
                                 onClose={() => watch(null)}
                             />
                         )}
@@ -907,6 +1002,66 @@ function DetailPanel({
     )
 }
 
+// Detail view for a swarm SITL drone — server-side connection, so no client
+// video/session to mirror; shows live telemetry from the fleet poll instead.
+function FleetDetailPanel({
+    drone, name, copiedUid, onCopyUid, onClose,
+}: {
+    drone: FleetDroneInfo
+    name: string
+    copiedUid: string | null
+    onCopyUid: (u: string) => void
+    onClose: () => void
+}) {
+    const l = drone.live
+    return (
+        <section className="w-96 shrink-0 border-l border-zinc-800 bg-zinc-950 overflow-y-auto">
+            <div className="flex items-center gap-2 px-3 py-2.5 border-b border-zinc-800 sticky top-0 bg-zinc-950 z-10">
+                <span className="text-sm font-semibold text-zinc-100 truncate">{name}</span>
+                <Tag label="SIM" tone="violet" />
+                {l?.armed && <Tag label="ARMED" tone="red" />}
+                {l?.zone_class === 'orange' && <Tag label="ORANGE ZONE" tone="amber" />}
+                {l?.zone_class === 'red' && <Tag label="RED ZONE" tone="red" />}
+                <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-200" title="Close">
+                    <X size={16} />
+                </button>
+            </div>
+
+            <div className="border-b border-zinc-800 pb-2">
+                <div className="px-3 py-1.5 text-[10px] text-zinc-500">FLIGHT DATA</div>
+                {l ? (
+                    <div className="px-3 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] font-mono">
+                        <span className="text-zinc-500">MODE</span><span className="text-zinc-200">{l.mode}</span>
+                        <span className="text-zinc-500">ALT</span><span className="text-zinc-200">{l.alt.toFixed(1)} m</span>
+                        <span className="text-zinc-500">HDG</span><span className="text-zinc-200">{l.heading.toFixed(0)}°</span>
+                        <span className="text-zinc-500">BATT</span><span className="text-zinc-200">{l.battery.toFixed(0)}%</span>
+                        <span className="text-zinc-500">LAT</span><span className="text-zinc-200">{l.lat.toFixed(6)}</span>
+                        <span className="text-zinc-500">LNG</span><span className="text-zinc-200">{l.lng.toFixed(6)}</span>
+                        <span className="text-zinc-500">STATE</span>
+                        <span className="text-zinc-200">
+                            {l.in_air ? 'IN AIR' : l.armed ? 'ARMED' : 'ON GROUND'}
+                        </span>
+                    </div>
+                ) : (
+                    <div className="px-3 text-[10px] text-zinc-600">Waiting for telemetry…</div>
+                )}
+            </div>
+
+            <div className="border-b border-zinc-800 px-3 py-2 space-y-1.5 text-[10px]">
+                <div className="text-zinc-500 tracking-widest">IDENTITY</div>
+                <Uid uid={drone.hardware_uid}
+                    copied={copiedUid === drone.hardware_uid} onCopy={onCopyUid} />
+                <div className="text-zinc-600">
+                    Simulated fleet drone · PX4 SITL instance {drone.drone_id}
+                </div>
+                <div className="text-zinc-600">
+                    Connected server-side (UDP) — no client session, no video feed.
+                </div>
+            </div>
+        </section>
+    )
+}
+
 // Permissions structure — populated once the geofencing phase lands.
 function PermitsBlock() {
     return (
@@ -969,12 +1124,13 @@ function Uid({ uid, copied, onCopy }: { uid: string; copied: boolean; onCopy: (u
     )
 }
 
-function Tag({ label, tone }: { label: string; tone: 'amber' | 'emerald' | 'red' | 'zinc' }) {
+function Tag({ label, tone }: { label: string; tone: 'amber' | 'emerald' | 'red' | 'zinc' | 'violet' }) {
     const cls = {
         amber:   'text-amber-500/80 border-amber-500/30',
         emerald: 'text-emerald-400 border-emerald-500/30',
         red:     'text-red-400 border-red-500/40',
         zinc:    'text-zinc-500 border-zinc-700',
+        violet:  'text-violet-400 border-violet-500/30',
     }[tone]
     return <span className={`border rounded px-1 text-[10px] ${cls}`}>{label}</span>
 }
