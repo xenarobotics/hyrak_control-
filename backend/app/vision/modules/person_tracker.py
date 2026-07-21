@@ -136,13 +136,26 @@ class PersonTracker(BaseAnalyzer):
 
         import insightface
         providers = (
-            ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            # HEURISTIC instead of the ORT default EXHAUSTIVE: exhaustive
+            # cuDNN algo search benchmarks every conv algorithm on the first
+            # inference, freezing the pipeline for seconds mid-stream.
+            [("CUDAExecutionProvider", {"cudnn_conv_algo_search": "HEURISTIC"}),
+             "CPUExecutionProvider"]
             if torch.cuda.is_available()
             else ["CPUExecutionProvider"]
         )
         self.face_app = insightface.app.FaceAnalysis(name="buffalo_sc", providers=providers)
         ctx_id = 0 if torch.cuda.is_available() else -1
         self.face_app.prepare(ctx_id=ctx_id, det_size=(640, 640))
+        # Warm up both face models at load so first-inference CUDA/cuDNN
+        # init doesn't stall the live stream at the first face check.
+        self.face_app.get(np.zeros((360, 640, 3), dtype=np.uint8))
+        try:
+            rec = self.face_app.models.get("recognition")
+            if rec is not None:
+                rec.get_feat(np.zeros((112, 112, 3), dtype=np.uint8))
+        except Exception:
+            pass
 
         self._client_state: Dict[str, Dict[str, Any]] = {}
         logger.info(f"✅ PersonTracker ready on {self.device.upper()} (InsightFace buffalo_sc)")
@@ -273,14 +286,39 @@ class PersonTracker(BaseAnalyzer):
 
     # ── Frame analysis ────────────────────────────────────────────────────────
 
+    # Face detection internally letterboxes to det_size (640x640) anyway;
+    # pre-downscaling 1080p to 960 wide with cv2 (GIL-released) cuts the
+    # Python-side preprocessing cost without hurting detection.
+    _FACE_DET_WIDTH = 960
+
+    def _detect_faces(self, frame_bgr: np.ndarray):
+        H, W = frame_bgr.shape[:2]
+        if W <= self._FACE_DET_WIDTH:
+            return self.face_app.get(frame_bgr)
+        scale = self._FACE_DET_WIDTH / W
+        small = cv2.resize(frame_bgr, (self._FACE_DET_WIDTH, int(H * scale)))
+        faces = self.face_app.get(small)
+        for face in faces:
+            face.bbox = face.bbox / scale
+        return faces
+
     @torch.inference_mode()
     def _analyze_frame_blocking(
         self, frame_bgr: np.ndarray
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
         H, W = frame_bgr.shape[:2]
 
+        # Downscale for inference (same as ObjectDetector) — ultralytics
+        # letterboxes to 640 internally anyway, but pre-resizing with cv2
+        # skips the Python-side cost of doing it at 1080p every frame.
+        frame_proc = frame_bgr
+        if W > 640:
+            frame_proc = cv2.resize(frame_bgr, (640, int(H * 640 / W)))
+        proc_h, proc_w = frame_proc.shape[:2]
+        sx, sy = W / proc_w, H / proc_h
+
         results = self.model.track(
-            frame_bgr, classes=[0],
+            frame_proc, classes=[0],
             device=self.device, half=self.half, verbose=False, conf=0.5,
             persist=True, tracker=_TRACKER_CFG,
         )
@@ -296,7 +334,9 @@ class PersonTracker(BaseAnalyzer):
             )
             min_area = 0.002 * W * H
             for track_id, box, conf in zip(track_ids, xyxy, confs):
-                x1, y1, x2, y2 = map(int, box[:4])
+                # Scale box coordinates back to the original frame resolution
+                x1, y1 = int(box[0] * sx), int(box[1] * sy)
+                x2, y2 = int(box[2] * sx), int(box[3] * sy)
                 if (x2 - x1) * (y2 - y1) < min_area:
                     continue
                 persons.append({
@@ -334,7 +374,7 @@ class PersonTracker(BaseAnalyzer):
 
             # ── Face recognition check (every N frames) ───────────────────
             if ref_emb is not None and (state["frame_counter"] % _FACE_CHECK_EVERY_N == 0):
-                faces = self.face_app.get(frame_bgr)
+                faces = self._detect_faces(frame_bgr)
                 best_sim    = 0.0
                 best_person = None
 
@@ -389,7 +429,7 @@ class PersonTracker(BaseAnalyzer):
                     if dist_n < 0.35:
                         accepted = False
                         if ref_emb is not None:
-                            faces = self.face_app.get(frame_bgr)
+                            faces = self._detect_faces(frame_bgr)
                             x1, y1, x2, y2 = closest["box"]
                             for face in faces:
                                 fcx = (face.bbox[0] + face.bbox[2]) / 2

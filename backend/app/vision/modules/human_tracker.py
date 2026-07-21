@@ -189,8 +189,17 @@ class HumanTracker(BaseAnalyzer):
         H, W = frame_bgr.shape[:2]
         cx_n, cy_n = 0.5, 0.5   # normalised frame centre
 
+        # Downscale for inference (same as ObjectDetector) — ultralytics
+        # letterboxes to 640 internally anyway, but pre-resizing with cv2
+        # skips the Python-side cost of doing it at 1080p every frame.
+        frame_proc = frame_bgr
+        if W > 640:
+            frame_proc = cv2.resize(frame_bgr, (640, int(H * 640 / W)))
+        proc_h, proc_w = frame_proc.shape[:2]
+        sx, sy = W / proc_w, H / proc_h
+
         results = self.model.track(
-            frame_bgr, classes=[0],
+            frame_proc, classes=[0],
             device=self.device, half=self.half, verbose=False, conf=0.5,
             persist=True, tracker=_TRACKER_CFG,
         )
@@ -206,7 +215,9 @@ class HumanTracker(BaseAnalyzer):
             )
             min_area = 0.002 * W * H
             for track_id, box, conf in zip(track_ids, xyxy, confs):
-                x1, y1, x2, y2 = map(int, box[:4])
+                # Scale box coordinates back to the original frame resolution
+                x1, y1 = int(box[0] * sx), int(box[1] * sy)
+                x2, y2 = int(box[2] * sx), int(box[3] * sy)
                 if (x2 - x1) * (y2 - y1) < min_area:
                     continue
                 persons.append({
