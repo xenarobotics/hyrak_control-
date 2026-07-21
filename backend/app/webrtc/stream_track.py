@@ -38,6 +38,7 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
         self._emit_callback  = emit_callback
         self._snapshot_cb    = snapshot_callback
         self._frame_cache:   dict[str, np.ndarray] = {}
+        self._meta_cache:    dict[str, dict] = {}
         self._frame_count    = 0
         self._last_fps_time  = time.time()
         self._fps            = 0.0
@@ -86,6 +87,7 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
             if result:
                 annotated_bgr, meta = result
                 self._frame_cache[mode.value] = annotated_bgr
+                self._meta_cache[mode.value] = meta
 
                 # ── Send drone command directly to MAVLink ──────────────
                 drone_cmd = meta.get("drone_command")
@@ -111,7 +113,18 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
                     except Exception:
                         pass
 
-        out_bgr = self._frame_cache.get(mode.value, img_bgr)
+        # Overlay modes (detector/trackers) draw the latest results onto the
+        # CURRENT camera frame — every frame is displayed, so the video is as
+        # smooth as the fly-tab relay and only the annotations lag by one
+        # inference. Transform modes (depth/enhancer) return None here and
+        # fall back to the cached output frame.
+        out_bgr = None
+        if analyzer is not None:
+            latest_meta = self._meta_cache.get(mode.value)
+            if latest_meta is not None:
+                out_bgr = analyzer.draw_overlay(img_bgr, latest_meta)
+        if out_bgr is None:
+            out_bgr = self._frame_cache.get(mode.value, img_bgr)
         self._maybe_snapshot(out_bgr)
 
         out_frame = VideoFrame.from_ndarray(out_bgr, format="bgr24")

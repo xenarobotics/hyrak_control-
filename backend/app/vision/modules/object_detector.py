@@ -56,28 +56,34 @@ class ObjectDetector(BaseAnalyzer):
         sx = original_w / proc_w
         sy = original_h / proc_h
 
-        annotated = frame_bgr.copy()
         detected: Dict[str, int] = {}
+        detections = []
 
         for box in results[0].boxes:
             name = self.model.names[int(box.cls[0])]
             detected[name] = detected.get(name, 0) + 1
 
             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-            x1 = int(x1 * sx); y1 = int(y1 * sy)
-            x2 = int(x2 * sx); y2 = int(y2 * sy)
-
-            is_person = name == "person"
-            color     = (220, 220, 220) if is_person else (150, 150, 150)
-            thickness = 2 if is_person else 1
-
-            draw_brackets(annotated, x1, y1, x2, y2, color, thickness=thickness)
-            # Class name only — no confidence percentage
-            draw_badge(annotated, name, x1, max(16, y1 - 4))
+            detections.append({
+                "name": name,
+                "box":  [int(x1 * sx), int(y1 * sy), int(x2 * sx), int(y2 * sy)],
+            })
 
         meta: Dict[str, Any] = {
             "objects":      detected,
+            "detections":   detections,
             "person_count": detected.get("person", 0),
             "total_count":  sum(detected.values()),
         }
-        return annotated, meta
+        return frame_bgr, meta
+
+    def draw_overlay(self, frame_bgr: np.ndarray, meta: Dict[str, Any]) -> np.ndarray:
+        for det in meta.get("detections", []):
+            x1, y1, x2, y2 = det["box"]
+            is_person = det["name"] == "person"
+            color     = (220, 220, 220) if is_person else (150, 150, 150)
+            thickness = 2 if is_person else 1
+            draw_brackets(frame_bgr, x1, y1, x2, y2, color, thickness=thickness)
+            # Class name only — no confidence percentage
+            draw_badge(frame_bgr, det["name"], x1, max(16, y1 - 4))
+        return frame_bgr

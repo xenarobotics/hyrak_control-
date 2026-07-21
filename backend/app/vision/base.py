@@ -91,6 +91,19 @@ class BaseAnalyzer(ABC):
         data["latest_result"] = None
         return result
 
+    def draw_overlay(
+        self, frame_bgr: np.ndarray, meta: Dict[str, Any]
+    ) -> Optional[np.ndarray]:
+        """
+        Optional: draw the latest results onto the CURRENT camera frame
+        (in place) and return it. Modules that support this get fly-tab
+        smoothness — every camera frame is displayed, with annotations
+        that lag by at most one inference. Modules whose OUTPUT is a
+        transformed frame (depth colormap, enhancer) return None and the
+        cached-frame path is used instead.
+        """
+        return None
+
     # ------------------------------------------------------------------ #
     # Processing loop                                                      #
     # ------------------------------------------------------------------ #

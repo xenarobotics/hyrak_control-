@@ -278,7 +278,6 @@ class PersonTracker(BaseAnalyzer):
         self, frame_bgr: np.ndarray
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
         H, W = frame_bgr.shape[:2]
-        annotated = frame_bgr.copy()
 
         results = self.model.track(
             frame_bgr, classes=[0],
@@ -502,55 +501,6 @@ class PersonTracker(BaseAnalyzer):
 
             break  # single session per analyzer instance
 
-        # ── Annotations ───────────────────────────────────────────────────────
-        _C_ACTIVE = (200, 220, 50)
-        _C_LOCKED = (30, 190, 255)
-        _C_DIM    = (55, 55, 55)
-        _C_SCAN   = (200, 130, 60)
-
-        if face_confirmed:
-            for p in persons:
-                if p["id"] == target_id:
-                    continue
-                x1, y1, x2, y2 = p["box"]
-                draw_brackets(annotated, x1, y1, x2, y2, _C_DIM, thickness=1)
-
-        target_p = next((p for p in persons if p["id"] == target_id), None)
-        if target_p is not None:
-            x1, y1, x2, y2 = target_p["box"]
-            tx = int(target_p["cx_n"] * W)
-            ty = int(target_p["cy_n"] * H)
-            px_cx = W // 2
-            px_cy = H // 2
-
-            if tracking:
-                draw_brackets(annotated, x1, y1, x2, y2, _C_ACTIVE, thickness=3)
-                for px_, py_ in [(x1, y1), (x2, y1), (x1, y2), (x2, y2)]:
-                    cv2.circle(annotated, (px_, py_), 4, _C_ACTIVE, -1, cv2.LINE_AA)
-                cv2.line(annotated, (px_cx, px_cy), (tx, ty), (*_C_ACTIVE[:2], 80), 1, cv2.LINE_AA)
-                cv2.circle(annotated, (px_cx, px_cy), 4, _C_ACTIVE, -1, cv2.LINE_AA)
-                cv2.circle(annotated, (tx, ty), 10, _C_ACTIVE, 1, cv2.LINE_AA)
-                cv2.line(annotated, (tx - 15, ty), (tx + 15, ty), _C_ACTIVE, 1, cv2.LINE_AA)
-                cv2.line(annotated, (tx, ty - 15), (tx, ty + 15), _C_ACTIVE, 1, cv2.LINE_AA)
-                _draw_pill(annotated, "  FOLLOWING  ", x1, y1, _C_ACTIVE)
-            else:
-                draw_brackets(annotated, x1, y1, x2, y2, _C_LOCKED, thickness=2)
-                cv2.circle(annotated, (tx, ty), 6, _C_LOCKED, 1, cv2.LINE_AA)
-                cv2.line(annotated, (tx - 10, ty), (tx + 10, ty), _C_LOCKED, 1, cv2.LINE_AA)
-                cv2.line(annotated, (tx, ty - 10), (tx, ty + 10), _C_LOCKED, 1, cv2.LINE_AA)
-                _draw_pill(annotated, "  PERSON FOUND  ", x1, y1, _C_LOCKED)
-
-        if searching:
-            fl = state.get("frames_lost", 0)
-            if fl > _PHASE_SWEEP:
-                _draw_corner_status(annotated, "  Hovering...  ", _C_SCAN)
-            elif fl > _PHASE_HOLD:
-                _draw_corner_status(annotated, "  Sweeping...  ", _C_SCAN)
-            else:
-                _draw_corner_status(annotated, "  Searching...  ", _C_SCAN)
-        elif face_confirmed and target_p is None and not searching:
-            _draw_corner_status(annotated, "  Looking for person...  ", _C_SCAN)
-
         meta: Dict[str, Any] = {
             "persons":        [{"id": p["id"], "box": p["box"], "conf": p["conf"]} for p in persons],
             "person_count":   len(persons),
@@ -558,7 +508,68 @@ class PersonTracker(BaseAnalyzer):
             "tracking":       tracking,
             "searching":      searching,
             "face_confirmed": face_confirmed,
+            "frames_lost":    state.get("frames_lost", 0),
             "similarity":     round(similarity, 3),
             "drone_command":  drone_command,
         }
-        return annotated, meta
+        return frame_bgr, meta
+
+    # Drawing happens per CAMERA frame in stream_track (not per inference)
+    # so the video stays as smooth as the fly tab; annotations lag by at
+    # most one inference.
+    def draw_overlay(self, frame_bgr: np.ndarray, meta: Dict[str, Any]) -> np.ndarray:
+        H, W = frame_bgr.shape[:2]
+        _C_ACTIVE = (200, 220, 50)
+        _C_LOCKED = (30, 190, 255)
+        _C_DIM    = (55, 55, 55)
+        _C_SCAN   = (200, 130, 60)
+
+        persons        = meta.get("persons", [])
+        target_id      = meta.get("target_id")
+        tracking       = meta.get("tracking", False)
+        searching      = meta.get("searching", False)
+        face_confirmed = meta.get("face_confirmed", False)
+
+        if face_confirmed:
+            for p in persons:
+                if p["id"] == target_id:
+                    continue
+                x1, y1, x2, y2 = p["box"]
+                draw_brackets(frame_bgr, x1, y1, x2, y2, _C_DIM, thickness=1)
+
+        target_p = next((p for p in persons if p["id"] == target_id), None)
+        if target_p is not None:
+            x1, y1, x2, y2 = target_p["box"]
+            tx, ty = (x1 + x2) // 2, (y1 + y2) // 2
+            px_cx = W // 2
+            px_cy = H // 2
+
+            if tracking:
+                draw_brackets(frame_bgr, x1, y1, x2, y2, _C_ACTIVE, thickness=3)
+                for px_, py_ in [(x1, y1), (x2, y1), (x1, y2), (x2, y2)]:
+                    cv2.circle(frame_bgr, (px_, py_), 4, _C_ACTIVE, -1, cv2.LINE_AA)
+                cv2.line(frame_bgr, (px_cx, px_cy), (tx, ty), (*_C_ACTIVE[:2], 80), 1, cv2.LINE_AA)
+                cv2.circle(frame_bgr, (px_cx, px_cy), 4, _C_ACTIVE, -1, cv2.LINE_AA)
+                cv2.circle(frame_bgr, (tx, ty), 10, _C_ACTIVE, 1, cv2.LINE_AA)
+                cv2.line(frame_bgr, (tx - 15, ty), (tx + 15, ty), _C_ACTIVE, 1, cv2.LINE_AA)
+                cv2.line(frame_bgr, (tx, ty - 15), (tx, ty + 15), _C_ACTIVE, 1, cv2.LINE_AA)
+                _draw_pill(frame_bgr, "  FOLLOWING  ", x1, y1, _C_ACTIVE)
+            else:
+                draw_brackets(frame_bgr, x1, y1, x2, y2, _C_LOCKED, thickness=2)
+                cv2.circle(frame_bgr, (tx, ty), 6, _C_LOCKED, 1, cv2.LINE_AA)
+                cv2.line(frame_bgr, (tx - 10, ty), (tx + 10, ty), _C_LOCKED, 1, cv2.LINE_AA)
+                cv2.line(frame_bgr, (tx, ty - 10), (tx, ty + 10), _C_LOCKED, 1, cv2.LINE_AA)
+                _draw_pill(frame_bgr, "  PERSON FOUND  ", x1, y1, _C_LOCKED)
+
+        if searching:
+            fl = meta.get("frames_lost", 0)
+            if fl > _PHASE_SWEEP:
+                _draw_corner_status(frame_bgr, "  Hovering...  ", _C_SCAN)
+            elif fl > _PHASE_HOLD:
+                _draw_corner_status(frame_bgr, "  Sweeping...  ", _C_SCAN)
+            else:
+                _draw_corner_status(frame_bgr, "  Searching...  ", _C_SCAN)
+        elif face_confirmed and target_p is None:
+            _draw_corner_status(frame_bgr, "  Looking for person...  ", _C_SCAN)
+
+        return frame_bgr

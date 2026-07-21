@@ -188,7 +188,6 @@ class HumanTracker(BaseAnalyzer):
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
         H, W = frame_bgr.shape[:2]
         cx_n, cy_n = 0.5, 0.5   # normalised frame centre
-        annotated = frame_bgr.copy()
 
         results = self.model.track(
             frame_bgr, classes=[0],
@@ -354,50 +353,61 @@ class HumanTracker(BaseAnalyzer):
 
             break  # single session per analyzer instance
 
-        # ── Annotations ──────────────────────────────────────────────────
-        for p in persons:
-            if p["id"] == selected_id:
-                continue
-            x1, y1, x2, y2 = p["box"]
-            draw_brackets(annotated, x1, y1, x2, y2, (90, 90, 90), thickness=1)
-
-        target_vis = next((p for p in persons if p["id"] == selected_id), None)
-        if target_vis is not None:
-            x1, y1, x2, y2 = target_vis["box"]
-            tx, ty = int(target_vis["cx_n"] * W), int(target_vis["cy_n"] * H)
-            px_cx, px_cy = int(cx_n * W), int(cy_n * H)
-
-            if tracking:
-                draw_brackets(annotated, x1, y1, x2, y2, (255, 255, 255), thickness=2)
-                cv2.line(annotated, (px_cx, px_cy), (tx, ty), (200, 200, 200), 1, cv2.LINE_AA)
-                cv2.circle(annotated, (tx, ty), 8, (255, 255, 255), 1, cv2.LINE_AA)
-                cv2.line(annotated, (tx - 12, ty), (tx + 12, ty), (255, 255, 255), 1, cv2.LINE_AA)
-                cv2.line(annotated, (tx, ty - 12), (tx, ty + 12), (255, 255, 255), 1, cv2.LINE_AA)
-                cv2.circle(annotated, (px_cx, px_cy), 3, (180, 180, 180), -1, cv2.LINE_AA)
-                draw_badge(annotated, f"#{selected_id}  TRACKING", x1, max(16, y1 - 4))
-            else:
-                draw_brackets(annotated, x1, y1, x2, y2, (200, 200, 200), thickness=1)
-                draw_badge(
-                    annotated, f"#{selected_id}  SELECTED", x1, max(16, y1 - 4),
-                    fg=(200, 200, 200),
-                )
-
-        if searching:
-            fl = state.get("frames_lost", 0)
-            if fl > _PHASE_SWEEP:
-                label = f"HOVERING  #{selected_id}"
-            elif fl > _PHASE_HOLD:
-                label = f"SWEEPING  #{selected_id}"
-            else:
-                label = f"SEARCHING  #{selected_id}"
-            draw_badge(annotated, label, W - 220, 28, fg=(255, 165, 0), bg=(10, 10, 10))
-
         meta: Dict[str, Any] = {
             "persons":       [{"id": p["id"], "box": p["box"], "conf": p["conf"]} for p in persons],
             "person_count":  len(persons),
             "selected_id":   selected_id,
             "tracking":      tracking,
             "searching":     searching,
+            "frames_lost":   state.get("frames_lost", 0),
             "drone_command": drone_command,
         }
-        return annotated, meta
+        return frame_bgr, meta
+
+    # Drawing happens per CAMERA frame in stream_track (not per inference)
+    # so the video stays as smooth as the fly tab; annotations lag by at
+    # most one inference.
+    def draw_overlay(self, frame_bgr: np.ndarray, meta: Dict[str, Any]) -> np.ndarray:
+        H, W = frame_bgr.shape[:2]
+        persons     = meta.get("persons", [])
+        selected_id = meta.get("selected_id")
+        tracking    = meta.get("tracking", False)
+
+        for p in persons:
+            if p["id"] == selected_id:
+                continue
+            x1, y1, x2, y2 = p["box"]
+            draw_brackets(frame_bgr, x1, y1, x2, y2, (90, 90, 90), thickness=1)
+
+        target_vis = next((p for p in persons if p["id"] == selected_id), None)
+        if target_vis is not None:
+            x1, y1, x2, y2 = target_vis["box"]
+            tx, ty = (x1 + x2) // 2, (y1 + y2) // 2
+            px_cx, px_cy = W // 2, H // 2
+
+            if tracking:
+                draw_brackets(frame_bgr, x1, y1, x2, y2, (255, 255, 255), thickness=2)
+                cv2.line(frame_bgr, (px_cx, px_cy), (tx, ty), (200, 200, 200), 1, cv2.LINE_AA)
+                cv2.circle(frame_bgr, (tx, ty), 8, (255, 255, 255), 1, cv2.LINE_AA)
+                cv2.line(frame_bgr, (tx - 12, ty), (tx + 12, ty), (255, 255, 255), 1, cv2.LINE_AA)
+                cv2.line(frame_bgr, (tx, ty - 12), (tx, ty + 12), (255, 255, 255), 1, cv2.LINE_AA)
+                cv2.circle(frame_bgr, (px_cx, px_cy), 3, (180, 180, 180), -1, cv2.LINE_AA)
+                draw_badge(frame_bgr, f"#{selected_id}  TRACKING", x1, max(16, y1 - 4))
+            else:
+                draw_brackets(frame_bgr, x1, y1, x2, y2, (200, 200, 200), thickness=1)
+                draw_badge(
+                    frame_bgr, f"#{selected_id}  SELECTED", x1, max(16, y1 - 4),
+                    fg=(200, 200, 200),
+                )
+
+        if meta.get("searching"):
+            fl = meta.get("frames_lost", 0)
+            if fl > _PHASE_SWEEP:
+                label = f"HOVERING  #{selected_id}"
+            elif fl > _PHASE_HOLD:
+                label = f"SWEEPING  #{selected_id}"
+            else:
+                label = f"SEARCHING  #{selected_id}"
+            draw_badge(frame_bgr, label, W - 220, 28, fg=(255, 165, 0), bg=(10, 10, 10))
+
+        return frame_bgr
