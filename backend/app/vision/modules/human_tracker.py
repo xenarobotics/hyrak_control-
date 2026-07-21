@@ -97,6 +97,12 @@ class HumanTracker(BaseAnalyzer):
         self.device = settings.device
         self.model = YOLO(settings.default_yolo_model)
         self.model.to(self.device)
+        self.half = self.device == "cuda"
+        # Warm-up so CUDA kernel init doesn't stall the first live frames
+        self.model(
+            np.zeros((360, 640, 3), dtype=np.uint8),
+            device=self.device, half=self.half, verbose=False,
+        )
         self._client_state: Dict[str, Dict[str, Any]] = {}
         logger.info(f"✅ HumanTracker ready on {self.device.upper()}")
 
@@ -186,7 +192,7 @@ class HumanTracker(BaseAnalyzer):
 
         results = self.model.track(
             frame_bgr, classes=[0],
-            device=self.device, verbose=False, conf=0.5,
+            device=self.device, half=self.half, verbose=False, conf=0.5,
             persist=True, tracker=_TRACKER_CFG,
         )
 

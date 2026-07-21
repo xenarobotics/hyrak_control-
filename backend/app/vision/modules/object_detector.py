@@ -24,6 +24,11 @@ class ObjectDetector(BaseAnalyzer):
         logger.info(f"Loading YOLO on {self.device}...")
         self.model = YOLO(settings.default_yolo_model)
         self.model.to(self.device)
+        # Warm-up so CUDA kernel init doesn't stall the first live frames
+        self.model(
+            np.zeros((360, 640, 3), dtype=np.uint8),
+            device=self.device, half=self.device == "cuda", verbose=False,
+        )
         logger.info(f"✅ ObjectDetector ready on {self.device.upper()}")
 
     def _preprocess(self, frame: np.ndarray) -> np.ndarray:

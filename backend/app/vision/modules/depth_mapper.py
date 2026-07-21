@@ -34,6 +34,9 @@ class DepthMapper(BaseAnalyzer):
                 device=self.device,
                 torch_dtype=dtype,
             )
+            # Warm-up: first CUDA inference pays kernel/alloc init (~1s);
+            # do it here so it doesn't stall the first live frames.
+            self.estimator(Image.new("RGB", (self.infer_w, self.infer_h)))
             logger.info(f"✅ DepthMapper using ZoeDepth on {self.device.upper()}")
         except Exception as e:
             logger.error(f"DepthMapper load failed: {e}")
@@ -68,18 +71,13 @@ class DepthMapper(BaseAnalyzer):
         depth_full = cv2.resize(depth_norm, (W, H), interpolation=cv2.INTER_LINEAR)
         colormap   = cv2.applyColorMap(depth_full, cv2.COLORMAP_JET)
 
-        # Free VRAM between frames
-        if self.device == "cuda":
-            torch.cuda.empty_cache()
-
-        # Metric stats — clipped to the same viz range so UI values match the colormap
-        depth_orig = result["predicted_depth"].squeeze().cpu().numpy()
-        depth_orig = np.nan_to_num(depth_orig, nan=0.0, posinf=self.viz_max_depth, neginf=0.0)
-        depth_orig = np.clip(depth_orig, self.viz_min_depth, self.viz_max_depth)
-
+        # Metric stats from the same clipped depth the colormap uses, so UI
+        # values match the visualization. (No per-frame empty_cache here —
+        # it forces a GPU sync/allocator flush every frame, which caused
+        # visible stutter; the worker pool clears VRAM on mode switch.)
         meta: Dict[str, Any] = {
-            "min_depth_m":  round(float(depth_orig.min()), 2),
-            "max_depth_m":  round(float(depth_orig.max()), 2),
-            "mean_depth_m": round(float(depth_orig.mean()), 2),
+            "min_depth_m":  round(float(depth.min()), 2),
+            "max_depth_m":  round(float(depth.max()), 2),
+            "mean_depth_m": round(float(depth.mean()), 2),
         }
         return colormap, meta
