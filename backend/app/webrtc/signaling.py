@@ -47,6 +47,24 @@ async def _add_ice_candidate(pc, cand_sdp, sdp_mid, sdp_mline_index):
         logger.warning(f"ICE candidate error: {e}")
 
 
+def _sort_relay_urls(urls) -> list[str]:
+    """TURN urls ordered most-reachable first for aiortc: turns (TLS/TCP,
+    :443 before :5349) > turn?transport=tcp > turn UDP. STUN order kept."""
+    if isinstance(urls, str):
+        urls = [urls]
+
+    def rank(u: str):
+        if u.startswith("turns:"):
+            return (0, 0 if ":443" in u else 1)
+        if u.startswith("turn:") and "transport=tcp" in u:
+            return (1, 0)
+        if u.startswith("turn:"):
+            return (2, 0)
+        return (3, 0)  # stun — irrelevant to turn selection
+
+    return sorted(urls, key=rank)
+
+
 def register_webrtc_events(
     sio,
     peer_registry: PeerRegistry,
@@ -64,9 +82,13 @@ def register_webrtc_events(
         ice_servers = data.get("iceServers", [])
         # Only pass the fields aiortc knows — browser dicts can carry extras
         # (credentialType etc.) that would TypeError in the dataclass.
+        # aiortc uses only the FIRST turn/turns url it encounters, so sort
+        # TLS/TCP relays first: turn-over-UDP (the provider default first
+        # entry) is dead on UDP-blocking networks like campus WiFi, while
+        # turns:443 traverses essentially any firewall.
         ice_objs = [
             RTCIceServer(
-                urls=s["urls"],
+                urls=_sort_relay_urls(s["urls"]),
                 username=s.get("username"),
                 credential=s.get("credential"),
             )
