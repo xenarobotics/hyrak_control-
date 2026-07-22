@@ -12,7 +12,7 @@
 import { getSocket } from '@/lib/socket'
 
 export type SerialPortLike = {
-    open(opts: { baudRate: number }): Promise<void>
+    open(opts: { baudRate: number; bufferSize?: number }): Promise<void>
     close(): Promise<void>
     getInfo(): { usbVendorId?: number; usbProductId?: number }
     readable: ReadableStream<Uint8Array> | null
@@ -87,9 +87,18 @@ export async function requestRadioPort(): Promise<SerialPortLike | null> {
 
 // Opens the given (already granted) radio and starts relaying. Throws if the
 // port can't be opened (busy in another app/tab, unplugged).
+// Chrome's Web Serial defaults to a 255-byte internal buffer. A 3DR/SiK
+// radio at 57600 baud fills that in ~45ms, so any main-thread stall of that
+// length (a video frame decode, a canvas redraw, a GC pause) throws a
+// buffer-overrun error and drops bytes out of the MAVLink stream. 16KB
+// gives ~2.7s of cushion at 57600 baud — comfortably more than any UI
+// hiccup — at the cost of a little extra read latency, which MAVLink
+// doesn't care about.
+const _SERIAL_BUFFER_SIZE = 16384
+
 export async function startBrowserSerial(radio: SerialPortLike, baudRate = 57600): Promise<void> {
     if (active) return
-    await radio.open({ baudRate })
+    await radio.open({ baudRate, bufferSize: _SERIAL_BUFFER_SIZE })
     port = radio
     writer = radio.writable?.getWriter() ?? null
     active = true
@@ -101,6 +110,14 @@ export async function startBrowserSerial(radio: SerialPortLike, baudRate = 57600
     socket.emit('connect_browser_serial', {})
     void readLoop()
 }
+
+// Per the Web Serial spec, these read() errors mean a few bytes were lost
+// (radio momentarily outran the buffer) — the port itself is still fine.
+// MAVLink resyncs on the next valid packet's start marker, so the right
+// move is to grab a fresh reader and keep going, not tear down the link.
+const _RECOVERABLE_SERIAL_ERRORS = new Set([
+    'BufferOverrunError', 'ParityError', 'FramingError', 'BreakError',
+])
 
 async function readLoop() {
     const socket = getSocket()
@@ -117,6 +134,13 @@ async function readLoop() {
                             value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength),
                         )
                     }
+                }
+            } catch (err) {
+                const name = (err as { name?: string } | undefined)?.name
+                if (name && _RECOVERABLE_SERIAL_ERRORS.has(name)) {
+                    console.warn(`Serial ${name} — a few bytes were dropped, resuming`)
+                } else {
+                    throw err
                 }
             } finally {
                 reader.releaseLock()
