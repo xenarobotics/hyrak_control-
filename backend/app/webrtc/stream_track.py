@@ -31,6 +31,7 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
         session_manager: "SessionManager",
         emit_callback:   Optional[Callable] = None,
         snapshot_callback: Optional[Callable] = None,
+        return_video:    bool = True,
     ):
         super().__init__()
         self.track           = source_track
@@ -39,6 +40,10 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
         self._session_mgr    = session_manager
         self._emit_callback  = emit_callback
         self._snapshot_cb    = snapshot_callback
+        # False = client-overlay stream: the browser shows its own camera
+        # and draws results itself, so we skip all output composition and
+        # no downlink video exists — only cv_results payloads go back.
+        self._return_video   = return_video
         self._frame_cache:   dict[str, np.ndarray] = {}
         self._meta_cache:    dict[str, dict] = {}
         # Pixel work (colour conversion, overlay drawing) runs here, off the
@@ -113,15 +118,32 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
                             )
                         )
 
-                # ── Emit cv_results to frontend (throttled 10Hz) ────────
+                # ── Emit cv_results to frontend ─────────────────────────
+                # Client-overlay streams draw boxes browser-side from these
+                # payloads, so every fresh result goes out with the frame
+                # size for coordinate scaling. Processed streams only feed
+                # the results panel — 10Hz is plenty there.
                 emit_now = time.time()
-                if self._emit_callback and (emit_now - self._last_emit_time) > 0.1:
+                if self._emit_callback and (
+                    not self._return_video
+                    or (emit_now - self._last_emit_time) > 0.1
+                ):
                     self._last_emit_time = emit_now
                     try:
-                        payload = {"mode": mode.value, "session_id": self.session_id, **meta}
+                        h, w = img_bgr.shape[:2]
+                        payload = {
+                            "mode": mode.value, "session_id": self.session_id,
+                            "frame_w": w, "frame_h": h, **meta,
+                        }
                         asyncio.create_task(self._emit_callback(payload))
                     except Exception:
                         pass
+
+        if not self._return_video:
+            # Nobody watches this track's output — the signaling drive task
+            # pulls frames just to keep the pipeline flowing.
+            self._maybe_snapshot(img_bgr)
+            return frame
 
         out_bgr, out_frame = await loop.run_in_executor(
             self._px_executor, self._compose, analyzer, mode.value, img_bgr

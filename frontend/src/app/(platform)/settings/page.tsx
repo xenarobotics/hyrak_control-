@@ -6,7 +6,7 @@ import { Sun, Moon, Info, Zap } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useMissionStore } from '@/store/mission'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
-import { getVideoSettings, RES_OPTIONS, FPS_OPTIONS, type VideoRes, type VideoFps } from '@/lib/videoSettings'
+import { getVideoSettings, getFeedMode, RES_OPTIONS, FPS_OPTIONS, type VideoRes, type VideoFps, type FeedMode } from '@/lib/videoSettings'
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
 
@@ -312,6 +312,7 @@ function VideoGroup() {
     const { isStreaming, applyVideoSettings } = useWebRTCContext()
     const [res, setRes] = useState<VideoRes>(() => getVideoSettings().res)
     const [fps, setFps] = useState<VideoFps>(() => getVideoSettings().fps)
+    const [feed, setFeed] = useState<FeedMode>(() => getFeedMode())
 
     // Live-apply when a stream is running; otherwise takes effect next start.
     const apply = (nextRes: VideoRes, nextFps: VideoFps) => {
@@ -323,6 +324,21 @@ function VideoGroup() {
     return (
         <>
             <GroupLabel text="VIDEO" />
+            <PrefRow
+                label="AI module feed"
+                sub="Applies when the next stream starts"
+                tip="Direct + overlay shows your camera feed directly and draws AI results on top — sharpest video, lowest latency, and roughly half the bandwidth since no video is sent back from the server. The overlays lag the video by one inference (~100 ms). Processed shows the server-rendered feed — video and annotations perfectly in sync, but quality is limited by the return encode and bandwidth is higher. Depth mapping and enhance always use the processed feed."
+                right={
+                    <ChipGroup
+                        value={feed}
+                        onChange={v => { setFeed(v); lsSet('hyrak-feed-mode', v) }}
+                        options={[
+                            { value: 'overlay' as FeedMode, label: 'Direct + overlay' },
+                            { value: 'processed' as FeedMode, label: 'Processed' },
+                        ]}
+                    />
+                }
+            />
             <PrefRow
                 label="Stream resolution"
                 sub={isStreaming ? 'Applied live to the running stream' : 'Applies when the stream starts'}

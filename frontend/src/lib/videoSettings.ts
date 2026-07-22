@@ -22,6 +22,35 @@ const RES_MAX_BITRATE: Record<VideoRes, number> = {
     '1080': 8_000_000,
 }
 
+// How AI-mode video reaches the screen:
+//   'overlay'   — show the LOCAL camera directly and draw AI results on a
+//                 canvas from cv_results. Sharpest video, lowest latency,
+//                 ~half the bandwidth (no return video stream); the boxes
+//                 lag the video by one inference (~100 ms).
+//   'processed' — show the server-rendered feed. Video and annotations are
+//                 perfectly in sync, but quality is capped by the server
+//                 re-encode and everything lags together.
+// Depth and enhance transform the frame itself, so they always use the
+// processed feed regardless of this setting.
+export type FeedMode = 'overlay' | 'processed'
+
+const OVERLAY_CAPABLE = [
+    'manual-control', 'object-detection', 'human-tracking', 'person-tracking',
+]
+
+export function getFeedMode(): FeedMode {
+    if (typeof window === 'undefined') return 'processed'
+    try {
+        const v = JSON.parse(localStorage.getItem('hyrak-feed-mode') ?? '""')
+        if (v === 'overlay' || v === 'processed') return v
+    } catch { /* fall back to default */ }
+    return 'overlay'
+}
+
+export function wantsClientOverlay(mode: string): boolean {
+    return getFeedMode() === 'overlay' && OVERLAY_CAPABLE.includes(mode)
+}
+
 export function getVideoSettings(): { res: VideoRes; fps: VideoFps } {
     if (typeof window === 'undefined') return { res: '720', fps: 30 }
     let res: VideoRes = '720'

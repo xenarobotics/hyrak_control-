@@ -2,6 +2,7 @@
 Tracks all active WebRTC PeerConnections.
 Keyed by pc_id (uuid), linked to session_id.
 """
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
@@ -19,6 +20,9 @@ class PeerEntry:
     pc:         RTCPeerConnection
     tracks:     List[MediaStreamTrack] = field(default_factory=list)
     pending_ice: list = field(default_factory=list)
+    # Client-overlay streams have no outgoing track; this task pulls
+    # frames through the pipeline instead.
+    drive_task: Optional[asyncio.Task] = None
 
 
 class PeerRegistry:
@@ -48,6 +52,8 @@ class PeerRegistry:
         entry = self._peers.pop(pc_id, None)
         if not entry:
             return
+        if entry.drive_task:
+            entry.drive_task.cancel()
         for track in entry.tracks:
             try:
                 track.stop()

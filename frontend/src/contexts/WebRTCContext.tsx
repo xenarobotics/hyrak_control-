@@ -13,6 +13,7 @@ interface WebRTCContextValue {
     remoteStream: MediaStream | null
     localStream: MediaStream | null
     isStreaming: boolean
+    overlayActive: boolean
     isLoading: boolean
     modelLoading: boolean
     stats: WebRTCStats | null
@@ -30,7 +31,7 @@ const WebRTCContext = createContext<WebRTCContextValue | null>(null)
 export function WebRTCProvider({ children }: { children: ReactNode }) {
     const {
         remoteStream, localStream,
-        isStreaming, stats,
+        isStreaming, overlayActive, stats,
         startStream: startWebRTC, stopStream: stopWebRTC,
         applyVideoSettings,
     } = useWebRTC()
@@ -77,7 +78,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
     return (
         <WebRTCContext.Provider value={{
             remoteStream, localStream,
-            isStreaming, isLoading, modelLoading, stats,
+            isStreaming, overlayActive, isLoading, modelLoading, stats,
             cameras, selectedCameraId, setSelectedCameraId, scanCameras,
             startStream, stopStream, applyVideoSettings,
         }}>

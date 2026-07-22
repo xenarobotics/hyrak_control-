@@ -99,6 +99,11 @@ def register_webrtc_events(
         pc = RTCPeerConnection(configuration=config)
         pc_id = f"pc_{uuid.uuid4()}"
 
+        # Client-overlay stream: the browser displays its own camera and
+        # draws cv_results on a canvas — no downlink video at all. The
+        # uplink still feeds inference, drone commands and the observer.
+        client_overlay = bool(data.get("clientOverlay"))
+
         entry = PeerEntry(
             pc_id=pc_id,
             session_id=session.session_id,
@@ -146,10 +151,23 @@ def register_webrtc_events(
                 session_manager=session_manager,
                 emit_callback=emit_cv_results,
                 snapshot_callback=emit_admin_frame,
+                return_video=not client_overlay,
             )
             entry.tracks.append(video_track)
-            pc.addTrack(video_track)
-            logger.info(f"Video track attached for session {session.session_id[:8]}")
+            if client_overlay:
+                # No consumer pulls recv() without an outgoing track, so
+                # drive it ourselves; exits when the source track ends.
+                async def _drive():
+                    try:
+                        while True:
+                            await video_track.recv()
+                    except Exception:
+                        pass
+                entry.drive_task = asyncio.create_task(_drive())
+                logger.info(f"Client-overlay pipeline for session {session.session_id[:8]}")
+            else:
+                pc.addTrack(video_track)
+                logger.info(f"Video track attached for session {session.session_id[:8]}")
 
         try:
             await pc.setRemoteDescription(

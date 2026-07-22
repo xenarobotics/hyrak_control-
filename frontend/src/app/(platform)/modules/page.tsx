@@ -10,6 +10,7 @@ import { HumanTrackingPanel } from '@/components/vision/HumanTrackingPanel'
 import { DepthMappingPanel } from '@/components/vision/DepthMappingPanel'
 import { PersonTrackerPanel } from '@/components/vision/PersonTrackerPanel'
 import { EnhancePanel } from '@/components/vision/EnhancePanel'
+import { CvOverlayCanvas } from '@/components/vision/CvOverlayCanvas'
 import { RecordingControls } from '@/components/video/RecordingControls'
 import { Button } from '@/components/ui/button'
 import {
@@ -57,7 +58,7 @@ function ResultsPanel() {
 export default function ModulesPage() {
     const {
         remoteStream, localStream,
-        isStreaming, isLoading, modelLoading, stats,
+        isStreaming, overlayActive, isLoading, modelLoading, stats,
         cameras, selectedCameraId, setSelectedCameraId,
         startStream, stopStream,
     } = useWebRTCContext()
@@ -97,12 +98,14 @@ export default function ModulesPage() {
     const [maximized, setMaximized] = useState(false)
     const [isFullscreen, setIsFullscreen] = useState(false)
 
-    // Attach streams to video elements
+    // Attach streams to video elements. Client-overlay feed shows the
+    // LOCAL camera (sharp, zero-latency) with AI results drawn on a
+    // canvas; processed feed shows the server-rendered remote stream.
     useEffect(() => {
         if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = remoteStream
+            remoteVideoRef.current.srcObject = overlayActive ? localStream : remoteStream
         }
-    }, [remoteStream])
+    }, [overlayActive, localStream, remoteStream])
 
     useEffect(() => {
         const handler = () => setIsFullscreen(!!document.fullscreenElement)
@@ -227,7 +230,7 @@ export default function ModulesPage() {
                         minHeight: 0,
                     }}
                 >
-                    {/* Processed video — clean, no OSD */}
+                    {/* Main video — clean, no OSD */}
                     <video
                         ref={remoteVideoRef}
                         autoPlay playsInline muted
@@ -236,6 +239,9 @@ export default function ModulesPage() {
                             display: isStreaming ? 'block' : 'none',
                         }}
                     />
+
+                    {/* Client-side AI overlay on the raw local feed */}
+                    {isStreaming && overlayActive && <CvOverlayCanvas />}
 
                     {!isStreaming && !isLoading && (
                         <div style={{
@@ -269,8 +275,8 @@ export default function ModulesPage() {
                         </div>
                     )}
 
-                    {/* PiP — raw local feed */}
-                    {isStreaming && localStream && (
+                    {/* PiP — raw local feed (redundant when the main view IS the raw feed) */}
+                    {isStreaming && localStream && !overlayActive && (
                         <div style={{
                             position: 'absolute', bottom: 44, left: 8,
                             width: 100, borderRadius: 6, overflow: 'hidden',

@@ -4,7 +4,7 @@ import { useEffect, useRef, useCallback, useState } from 'react'
 import { getSocket } from '@/lib/socket'
 import { getServerUrl } from '@/lib/server-url'
 import { useDroneStore } from '@/store/drone'
-import { tuneVideoSender, videoConstraints, getVideoSettings } from '@/lib/videoSettings'
+import { tuneVideoSender, videoConstraints, getVideoSettings, wantsClientOverlay } from '@/lib/videoSettings'
 
 const STUN_ONLY: RTCIceServer[] = [
     { urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] },
@@ -46,6 +46,9 @@ export function useWebRTC() {
     const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
     const [localStream, setLocalStream] = useState<MediaStream | null>(null)
     const [isStreaming, setIsStreaming] = useState(false)
+    // True while the current stream is client-overlay: local camera on
+    // screen, AI results drawn browser-side, no downlink video.
+    const [overlayActive, setOverlayActive] = useState(false)
     const [stats, setStats] = useState<WebRTCStats | null>(null)
 
     const { setConnectionStatus } = useDroneStore()
@@ -76,6 +79,7 @@ export function useWebRTC() {
         setLocalStream(null)
         setStats(null)
         setIsStreaming(false)
+        setOverlayActive(false)
     }, [])
 
     const startStream = useCallback(async (cameraStream: MediaStream) => {
@@ -86,12 +90,24 @@ export function useWebRTC() {
         localStreamRef.current = cameraStream
         setLocalStream(cameraStream)
 
+        // Feed choice is locked in per stream (modes can't change while
+        // streaming): client-overlay sends camera up but receives no video
+        // back — the page shows the local stream + a results canvas.
+        const clientOverlay = wantsClientOverlay(useDroneStore.getState().mode)
+        setOverlayActive(clientOverlay)
+
         const iceServers = await fetchIceServers()
         const pc = new RTCPeerConnection({ iceServers })
         pcRef.current = pc
 
         // Add camera tracks to peer connection
-        cameraStream.getTracks().forEach(t => pc.addTrack(t, cameraStream))
+        if (clientOverlay) {
+            cameraStream.getTracks().forEach(t =>
+                pc.addTransceiver(t, { direction: 'sendonly', streams: [cameraStream] })
+            )
+        } else {
+            cameraStream.getTracks().forEach(t => pc.addTrack(t, cameraStream))
+        }
         // Uplink quality: allow the bitrate the chosen resolution needs and
         // prefer dropping resolution over frame rate under congestion.
         tuneVideoSender(pc)
@@ -115,6 +131,14 @@ export function useWebRTC() {
         }
 
         pc.oniceconnectionstatechange = () => {
+            // No return track in overlay mode, so ontrack never fires —
+            // the connection itself is the "streaming" signal.
+            if (clientOverlay &&
+                (pc.iceConnectionState === 'connected' ||
+                    pc.iceConnectionState === 'completed')) {
+                setIsStreaming(true)
+                setConnectionStatus('connected')
+            }
             if (pc.iceConnectionState === 'failed' ||
                 pc.iceConnectionState === 'disconnected' ||
                 pc.iceConnectionState === 'closed') {
@@ -148,6 +172,7 @@ export function useWebRTC() {
                 // Server-side aiortc uses the same list (first STUN + first
                 // TURN entry) so both peers can reach the relay.
                 iceServers,
+                clientOverlay,
             })
             setConnectionStatus('connecting')
         } catch (e) {
@@ -195,23 +220,32 @@ export function useWebRTC() {
                 const out: WebRTCStats = {
                     inputFps: 0, bitrate: 0, roundTripTime: 0, jitter: 0, packetLoss: 0
                 }
+                let inbound: any = null
+                let outbound: any = null
+                let remoteIn: any = null
                 reports.forEach((r: any) => {
-                    if (r.type === 'inbound-rtp' && r.kind === 'video') {
-                        const bytes = r.bytesReceived ?? 0
-                        const ts = r.timestamp ?? 0
-                        if (lastTs && ts > lastTs) {
-                            out.bitrate = Math.round((bytes - lastBytes) * 8 / ((ts - lastTs) / 1000))
-                        }
-                        lastBytes = bytes
-                        lastTs = ts
-                        out.inputFps = r.framesPerSecond ?? 0
-                        out.packetLoss = r.packetsLost ?? 0
-                        out.jitter = r.jitter ?? 0
-                    }
-                    if (r.type === 'remote-inbound-rtp' && r.roundTripTime) {
-                        out.roundTripTime = r.roundTripTime * 1000
-                    }
+                    if (r.type === 'inbound-rtp' && r.kind === 'video') inbound = r
+                    if (r.type === 'outbound-rtp' && r.kind === 'video') outbound = r
+                    if (r.type === 'remote-inbound-rtp' && r.kind === 'video') remoteIn = r
                 })
+                // Overlay streams have no inbound video — report the uplink
+                // instead (fps/bitrate sent, loss/jitter as the server sees it).
+                const src = inbound ?? outbound
+                if (src) {
+                    const bytes = inbound ? (src.bytesReceived ?? 0) : (src.bytesSent ?? 0)
+                    const ts = src.timestamp ?? 0
+                    if (lastTs && ts > lastTs) {
+                        out.bitrate = Math.round((bytes - lastBytes) * 8 / ((ts - lastTs) / 1000))
+                    }
+                    lastBytes = bytes
+                    lastTs = ts
+                    out.inputFps = src.framesPerSecond ?? 0
+                    out.packetLoss = inbound ? (inbound.packetsLost ?? 0) : (remoteIn?.packetsLost ?? 0)
+                    out.jitter = inbound ? (inbound.jitter ?? 0) : (remoteIn?.jitter ?? 0)
+                }
+                if (remoteIn?.roundTripTime) {
+                    out.roundTripTime = remoteIn.roundTripTime * 1000
+                }
                 setStats(out)
             } catch { }
         }, 1000)
@@ -223,5 +257,5 @@ export function useWebRTC() {
 
     useEffect(() => { return () => { cleanup() } }, [cleanup])
 
-    return { remoteStream, localStream, isStreaming, stats, startStream, stopStream, applyVideoSettings }
+    return { remoteStream, localStream, isStreaming, overlayActive, stats, startStream, stopStream, applyVideoSettings }
 }
