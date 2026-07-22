@@ -62,7 +62,17 @@ def register_webrtc_events(
 
         # Build RTCPeerConnection
         ice_servers = data.get("iceServers", [])
-        ice_objs = [RTCIceServer(**s) for s in ice_servers] if ice_servers else []
+        # Only pass the fields aiortc knows — browser dicts can carry extras
+        # (credentialType etc.) that would TypeError in the dataclass.
+        ice_objs = [
+            RTCIceServer(
+                urls=s["urls"],
+                username=s.get("username"),
+                credential=s.get("credential"),
+            )
+            for s in ice_servers
+            if s.get("urls")
+        ]
         config = RTCConfiguration(iceServers=ice_objs) if ice_objs else None
         pc = RTCPeerConnection(configuration=config)
         pc_id = f"pc_{uuid.uuid4()}"

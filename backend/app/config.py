@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     max_concurrent_sessions: int = Field(default=4)
     force_cpu: bool = Field(default=False)
 
+    # WebRTC — Cloudflare TURN key (dashboard → Calls → TURN). The key ID +
+    # API token are NOT username/password: the backend mints short-lived
+    # credentials from them (app/webrtc/turn.py). Empty = STUN-only.
+    turn_key_id: str = Field(default="")
+    turn_api_token: str = Field(default="")
+
     # Database — local Postgres for now; swapping to a managed provider
     # (Supabase/RDS are both Postgres) is just changing this URL.
     database_url: str = Field(

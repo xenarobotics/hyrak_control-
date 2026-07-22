@@ -30,6 +30,15 @@ async def health():
     }
 
 
+@router.get("/webrtc/ice-servers")
+async def ice_servers():
+    """STUN + TURN list for RTCPeerConnection. TURN credentials are minted
+    short-lived from the Cloudflare key in .env — needed on networks that
+    block UDP (campus WiFi), where STUN-only ICE can never connect."""
+    from app.webrtc.turn import get_ice_servers
+    return {"iceServers": await get_ice_servers()}
+
+
 @router.get("/sessions")
 async def get_sessions(request: Request):
     """Live client sessions for the /admin observer page (admin sockets

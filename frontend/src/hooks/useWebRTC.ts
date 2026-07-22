@@ -2,8 +2,32 @@
 
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { getSocket } from '@/lib/socket'
+import { getServerUrl } from '@/lib/server-url'
 import { useDroneStore } from '@/store/drone'
 import { tuneVideoSender, videoConstraints, getVideoSettings } from '@/lib/videoSettings'
+
+const STUN_ONLY: RTCIceServer[] = [
+    { urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] },
+]
+
+// STUN + TURN from the backend. TURN relay (over TCP/TLS) is what makes
+// video work on UDP-blocking networks like campus WiFi — the backend mints
+// short-lived Cloudflare TURN credentials so none live in frontend code.
+async function fetchIceServers(): Promise<RTCIceServer[]> {
+    try {
+        const res = await fetch(`${getServerUrl()}/api/webrtc/ice-servers`, {
+            signal: AbortSignal.timeout(5000),
+        })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = await res.json()
+        if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+            return data.iceServers
+        }
+    } catch (e) {
+        console.warn('ICE server fetch failed, using STUN only:', e)
+    }
+    return STUN_ONLY
+}
 
 export interface WebRTCStats {
     inputFps: number
@@ -62,9 +86,8 @@ export function useWebRTC() {
         localStreamRef.current = cameraStream
         setLocalStream(cameraStream)
 
-        const pc = new RTCPeerConnection({
-            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-        })
+        const iceServers = await fetchIceServers()
+        const pc = new RTCPeerConnection({ iceServers })
         pcRef.current = pc
 
         // Add camera tracks to peer connection
@@ -122,7 +145,9 @@ export function useWebRTC() {
             socket.emit('offer', {
                 sdp: offer.sdp,
                 type: offer.type,
-                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+                // Server-side aiortc uses the same list (first STUN + first
+                // TURN entry) so both peers can reach the relay.
+                iceServers,
             })
             setConnectionStatus('connecting')
         } catch (e) {
