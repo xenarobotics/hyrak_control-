@@ -167,6 +167,16 @@ class Settings(BaseSettings):
     # controller took it 6.6m -> 0m, then "invalid setpoints / blind land".
     # Nothing below this altitude is worth any framing improvement.
     min_altitude_agl_m: float = Field(default=1.0)
+
+    # ── Crowd density thresholds ──────────────────────────────────────────
+    # Server-side so they SURVIVE analyzer creation. They used to live only in
+    # the browser and be pushed over a socket when the crowd panel mounted —
+    # which lost a race it could not win: the panel mounts before the stream
+    # negotiates, so the analyzer did not exist yet, the push no-op'd, and the
+    # analyzer then came up on these defaults. The operator's custom numbers
+    # were silently discarded every session.
+    crowd_light_max: int = Field(default=8)
+    crowd_moderate_max: int = Field(default=20)
     max_depression_deg: float = Field(default=70.0)    # recognition-quality cap
 
     # WebRTC — Cloudflare TURN key (dashboard → Calls → TURN). The key ID +

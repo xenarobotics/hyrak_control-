@@ -139,6 +139,10 @@ export interface CVResult {
     alpr_available?: boolean
     faces_available?: boolean
     speed_is_estimate?: boolean
+    /** Why speed is unavailable, when it is. A blank field is
+     *  indistinguishable from a broken estimator. */
+    speed_note?: string | null
+    speed_available?: number
     person_count_unique?: number
     /** Slant range to frame centre — the distance a subject in the middle of
      *  frame actually sits at, which at a 45deg mount differs from altitude by

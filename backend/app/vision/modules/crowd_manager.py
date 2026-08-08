@@ -46,6 +46,7 @@ from app.vision.pursuit import (
 )
 from app.vision.tracker_config import make_bytetrack_cfg
 from app.config import get_settings
+from app.vision import calibration as _cal
 
 logger = logging.getLogger("verocore.vision.crowd_manager")
 
@@ -97,8 +98,11 @@ def _make_state() -> Dict[str, Any]:
     return {
         "peak_count": 0,
         "seen_ids": set(),
-        "light_max": _DEFAULT_LIGHT_MAX,
-        "moderate_max": _DEFAULT_MODERATE_MAX,
+        # From the persisted calibration, so an operator's custom values
+        # apply from the FIRST frame rather than whenever a socket push
+        # happens to land after the analyzer exists.
+        "light_max": _cal.effective()["crowd_light_max"],
+        "moderate_max": _cal.effective()["crowd_moderate_max"],
         "section_dense_since": {},
         "section_last_alert": {},
         "last_snapshot_t": 0.0,
@@ -156,13 +160,28 @@ class CrowdManager(BaseAnalyzer):
         self._client_state.pop(client_id, None)
 
     def set_thresholds(self, client_id: str, light_max: int, moderate_max: int):
+        """
+        Apply density thresholds to the running session AND persist them.
+
+        Persisting is what makes them stick: state is rebuilt from scratch
+        every time an analyzer is created, so a value that lives only in
+        session state is lost on the next stream — which is exactly how custom
+        thresholds kept reverting to the defaults a few seconds in.
+        """
+        lo = max(1, int(light_max))
+        hi = max(lo + 1, int(moderate_max))
+
         state = self._client_state.get(client_id)
-        if not state:
-            return
-        state["light_max"] = max(1, int(light_max))
-        state["moderate_max"] = max(state["light_max"] + 1, int(moderate_max))
-        logger.info(f"Session {client_id[:8]}: density thresholds → "
-                    f"{state['light_max']}/{state['moderate_max']}")
+        if state:
+            state["light_max"], state["moderate_max"] = lo, hi
+
+        try:
+            _cal.save({"crowd_light_max": lo, "crowd_moderate_max": hi})
+        except Exception as e:
+            # A failed write must not break the live session — the running
+            # values above are already applied.
+            logger.warning(f"Could not persist density thresholds: {e}")
+        logger.info(f"Session {client_id[:8]}: density thresholds -> {lo}/{hi} (persisted)")
 
     @staticmethod
     def _section_bounds(w, h):

@@ -123,6 +123,22 @@ FIELDS: List[Dict[str, Any]] = [
                 "stopped being useful.",
     },
     {
+        "key": "crowd_light_max", "group": "limits", "type": "int",
+        "label": "Crowd: light up to", "unit": "people", "min": 1, "max": 500, "step": 1,
+        "help": "People in frame at or below this read GREEN. Whole-frame "
+                "headcount depends entirely on lens, altitude and framing, so "
+                "there is no universally correct value — a venue that has "
+                "counted its own safe occupancy has better numbers than any "
+                "default here.",
+    },
+    {
+        "key": "crowd_moderate_max", "group": "limits", "type": "int",
+        "label": "Crowd: moderate up to", "unit": "people", "min": 2, "max": 1000, "step": 1,
+        "help": "Above 'light' and at or below this reads ORANGE; anything "
+                "higher reads RED. Kept above the light threshold, or the "
+                "orange band vanishes and the count jumps green to red.",
+    },
+    {
         "key": "speed_fit_window_frames", "group": "limits", "type": "int",
         "label": "Speed averaging window", "unit": "frames", "min": 5, "max": 60, "step": 1,
         "help": "Frames in the least-squares velocity fit. Longer is smoother but "

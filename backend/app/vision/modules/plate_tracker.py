@@ -322,6 +322,7 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         "type_counts": {},
         "color_counts": {},
         "peak_in_frame": 0,
+        "speed_note": None,
         # Effective calibration, not the raw .env default — an operator who
         # tuned the window in Settings expects it to apply.
         "speed": SpeedEstimator(calibration.effective()["speed_fit_window_frames"]),
@@ -919,6 +920,18 @@ class PlateTracker(BaseAnalyzer):
                 r = speeds.get(v.track_id)
                 if r is not None:
                     v.speed_kmh, v.speed_reliable = round(r.kmh, 1), r.reliable
+            state["speed_note"] = None
+        else:
+            # Speed is GEOMETRY, and the geometry needs a height. Without
+            # telemetry there is no metres-per-pixel, so a number here would be
+            # invented rather than measured. Say which of the two is missing
+            # instead of leaving the field blank — a silent absence is
+            # indistinguishable from a broken estimator, which is exactly how
+            # this read from the outside.
+            state["speed_note"] = (
+                "no telemetry — speed needs altitude to turn pixels into metres"
+                if ctx is not None else "no frame context yet"
+            )
 
         # ── Plate OCR: whole frame + one crop per vehicle ─────────────────
         self._read_plates(frame_bgr, in_frame, state)
@@ -1010,6 +1023,10 @@ class PlateTracker(BaseAnalyzer):
             # Honest about what speed is, everywhere it travels.
             "speed_is_estimate": True,
             "has_telemetry": pose is not None,
+            # Why speed is absent, when it is. Blank fields are
+            # indistinguishable from a broken estimator.
+            "speed_note": state.get("speed_note"),
+            "speed_available": sum(1 for v in in_frame if v.speed_kmh is not None),
             "alpr_available": self.alpr is not None,
         }
         if pending_db:

@@ -145,7 +145,16 @@ export function VehiclePlateTrackingPanel() {
             </div>
 
             {/* ── Degraded-capability notices ─────────────────────────── */}
-            {!hasTelemetry && (
+            {cvResults?.speed_note && (
+                <div style={{
+                    display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 11,
+                    lineHeight: 1.5, color: '#fbbf24',
+                }}>
+                    <AlertCircle size={12} style={{ marginTop: 1, flexShrink: 0 }} />
+                    <span>Speed unavailable — {cvResults.speed_note}.</span>
+                </div>
+            )}
+            {!hasTelemetry && !cvResults?.speed_note && (
                 <div style={{
                     display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 11,
                     lineHeight: 1.5, color: '#fbbf24',
