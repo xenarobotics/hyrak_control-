@@ -37,6 +37,14 @@ releases/*
 # ── Captured data (plate crop images — retained on disk, referenced by ─────
 # ── plate_events rows in Postgres; not source, not committed) ───────────────
 backend/.data/
+# Runtime capture data at the repo root too — plate crops, enrolment shots,
+# face gallery originals. Referenced by DB rows, backed up separately (see
+# docs/DISASTER_RECOVERY.md), never source.
+.data/
+# Loose working folders that are inputs/outputs, not source.
+error images/
+sample human faces/
+air_unit_relay.zip
 
 # ── Vendored upstream sources (huge; not our code) ───────────
 PX4-Autopilot-main/

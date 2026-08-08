@@ -110,6 +110,22 @@ class VisionWorkerPool:
             self._session_analyzer[session_id] = analyzer
             self._session_mode[session_id]     = mode
 
+            # Load the enrolled face gallery once, here, rather than per
+            # frame — see face_gallery.py: Postgres is the store, RAM is the
+            # index. Awaited after register_client so a slow DB delays only
+            # gallery matching, never the tracker coming up. A failure is
+            # logged and left as an empty gallery: matching nobody is a
+            # working tracker, an exception here is no tracker at all.
+            if hasattr(analyzer, "set_gallery"):
+                try:
+                    from app.vision.persistence import load_face_gallery
+                    analyzer.set_gallery(await load_face_gallery())
+                except Exception as e:
+                    logger.warning(
+                        f"Session {session_id[:8]}: face gallery unavailable "
+                        f"({e}) — gallery mode will match nobody"
+                    )
+
             logger.info(f"✅ Session {session_id[:8]}: {mode.value} ready")
 
         except Exception as e:

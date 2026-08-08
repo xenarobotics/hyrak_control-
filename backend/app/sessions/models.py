@@ -14,6 +14,13 @@ class AnalysisMode(str, Enum):
     TARGET_ID       = "target-identification"
     PERSON_TRACK    = "person-tracking"
     ENHANCE         = "enhance"
+    CROWD_MANAGEMENT = "crowd-management"
+    VEHICLE_PLATE    = "vehicle-plate-tracking"
+    # The composed vehicle module: count + type + colour + plate + speed +
+    # follow in one pass. See vision/modules/traffic_manager.py on why this
+    # merges the vehicle analytics but deliberately not crowd or face —
+    # those need incompatible altitudes.
+    TRAFFIC          = "traffic-management"
 
 
 @dataclass
