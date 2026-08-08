@@ -498,13 +498,32 @@ def test_overlay_labels_degrade_gracefully():
     assert out.any(), "overlay drew nothing"
 
 
-def test_overlay_says_so_when_telemetry_is_missing():
-    """Speed silently absent is indistinguishable from speed zero."""
+def test_the_overlay_draws_nothing_positional_free():
+    """Only POSITIONAL marks belong on the picture — a box is there because it
+    points at something in the frame. Counts, the density grid and the
+    telemetry/ALPR warnings moved to the panel, where they are readable
+    without squinting through the video they were covering.
+
+    With no subjects in frame the overlay must therefore leave it untouched."""
     t = bare_tracker()
     frame = np.zeros((720, 1280, 3), dtype=np.uint8)
-    t.draw_overlay(frame, {"vehicles": [], "has_telemetry": False,
-                           "vehicles_in_frame": 0, "vehicle_count_unique": 0})
-    assert frame.any(), "no warning drawn"
+    t.draw_overlay(frame, {"vehicles": [], "people": [], "has_telemetry": False,
+                           "vehicles_in_frame": 0, "vehicle_count_unique": 0,
+                           "person_count": 0, "viability_headline": "plate out of range"})
+    assert not frame.any(), "something non-positional was burned into the video"
+
+
+def test_the_density_grid_is_not_drawn_even_with_people_in_frame():
+    """Inherited from crowd-management, where a grid answers "which zone is
+    busiest" over a venue held station above. Traffic is watched moving, and
+    the tinted cells sat on top of the subjects being followed."""
+    t = bare_tracker()
+    frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+    t.draw_overlay(frame, {
+        "vehicles": [], "people": [], "person_count": 7,
+        "section_counts": {0: 4, 4: 3}, "section_grid": [3, 3],
+    })
+    assert not frame.any(), "the density grid is still being drawn"
 
 
 # --------------------------------------------------------------------------- #
@@ -1257,3 +1276,24 @@ def test_every_crowd_analyzer_implements_the_grid_controls():
     for cls in _crowd_analyzers():
         for name in ("set_zone_names", "set_thresholds"):
             assert callable(getattr(cls, name, None)), f"{cls.__name__} lacks {name}"
+
+
+def test_arming_a_person_follow_reaches_the_analyzer():
+    """FollowControls picks its arm event by subject KIND: a vehicle arms
+    through set_vehicle_tracking, a person through set_tracking. In traffic
+    mode a locked person therefore arms through set_tracking — which routed to
+    three modules and not this one.
+
+    The effect was the reported symptom: Offboard started on the aircraft,
+    the analyzer never learned it was tracking, no commands were emitted, and
+    clicking a person looked like a dead control."""
+    import inspect
+
+    from app.events import telemetry_events
+
+    src = inspect.getsource(telemetry_events.register_telemetry_events)
+    handler = src[src.index('@sio.on("set_tracking")'):]
+    handler = handler[:handler.index("# Start/stop Offboard")]
+    assert "_pursuit_analyzers()" in handler, \
+        "set_tracking uses a hand-written tuple again — traffic will be dropped"
+    assert TrafficManager in telemetry_events._pursuit_analyzers()

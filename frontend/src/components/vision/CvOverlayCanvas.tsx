@@ -561,33 +561,20 @@ function hitTest(
 
 
 function drawTrafficManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: number, H: number) {
-    // ── Crowd grid, always visible while people are present ──────────────
-    // Same 3x3 layout and per-zone colouring as crowd-management, so an
-    // operator reads it identically in both modes.
-    const [rows, cols] = r.section_grid ?? [3, 3]
-    const sections = r.section_counts ?? {}
-    if (r.person_count) {
-        const cellW = W / cols, cellH = H / rows
-        for (let row = 0; row < rows; row++) {
-            for (let c = 0; c < cols; c++) {
-                const cnt = sections[row * cols + c]
-                const x = c * cellW, y = row * cellH
-                // An empty cell is drawn as NOTHING — no outline. The tinted
-                // regions carry the density reading on their own, and the
-                // separator strokes only added a wireframe over the video.
-                // Removed from crowd-management for that reason; this mode
-                // kept drawing them, so the same grid looked different
-                // depending on which mode was watching.
-                if (!cnt) continue
-                const col = LEVEL_COLOR[densityLevel(cnt, r.light_max ?? 8, r.moderate_max ?? 20)]
-                ctx.globalAlpha = 0.10
-                ctx.fillStyle = col
-                ctx.fillRect(x, y, cellW, cellH)
-                ctx.globalAlpha = 1
-                drawBadge(ctx, String(cnt), x + 6, y + 22, col)
-            }
-        }
-    }
+    // NO DENSITY GRID IN THIS MODE, and no counts burned into the picture.
+    //
+    // The grid is crowd-management's tool for answering "which zone is
+    // busiest" over a static venue. Traffic is watched moving, and there the
+    // tinted cells and their per-cell numbers sit on top of the vehicles and
+    // people the operator is actually trying to look at, while the same
+    // headcount is already on the panel — laid out properly, and readable
+    // without staring through it.
+    //
+    // Same reasoning retires the corner readout: vehicle/people/plate counts
+    // and the telemetry and ALPR warnings are all panel material. What earns
+    // space on the video is only what is POSITIONAL — a box has to be on the
+    // picture because it points at something in the picture. A number does
+    // not.
 
     // ── People, named where recognised ───────────────────────────────────
     const byTrack = new Map((r.identities ?? []).map(i => [i.track_id, i]))
@@ -662,26 +649,6 @@ function drawTrafficManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: nu
     }
     ctx.globalAlpha = 1
 
-    drawBadge(
-        ctx,
-        `${r.vehicles_in_frame ?? 0} veh / ${r.person_count ?? 0} ppl`
-        + ` / ${r.plates_read ?? 0} plates`,
-        12, 28, 'rgb(90,220,220)',
-    )
-    let y = 52
-    // Naming what the altitude cannot resolve is the difference between "the
-    // plate reader is broken" and "descend to read plates".
-    if (r.viability_headline) {
-        drawBadge(ctx, r.viability_headline.slice(0, 78), 12, y, C.orange)
-        y += 24
-    }
-    // Speed silently absent is indistinguishable from speed zero, so say why.
-    if (r.has_telemetry === false) {
-        drawBadge(ctx, 'no telemetry - speed unavailable', 12, y, C.orange); y += 24
-    }
-    if (r.alpr_available === false) {
-        drawBadge(ctx, 'plate reader unavailable', 12, y, C.orange)
-    }
 }
 
 export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
@@ -771,8 +738,14 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
             // No caption — the operator already knows what tapping a target
             // does once, and a label on every hover is noise over the picture.
             if (CLICK_TO_SELECT[mode] && hovered.current !== null) {
+                // Must search the SAME lists targetsNow() offers, or a target
+                // can be hoverable and clickable while showing no highlight —
+                // which reads as a dead control. That was happening to people
+                // in traffic-management: hovering set the id, the lookup
+                // searched vehicles only, and nothing lit up.
                 const p = VEHICLE_CLICK_MODES[mode]
-                    ? (view.vehicles ?? []).find(q => q.track_id === hovered.current)
+                    ? ((view.vehicles ?? []).find(q => q.track_id === hovered.current)
+                       ?? (view.people ?? []).find(q => q.id === hovered.current))
                     : mode === 'crowd-management'
                         ? (view.people ?? []).find(q => q.id === hovered.current)
                         : (view.persons ?? []).find(q => q.id === hovered.current)

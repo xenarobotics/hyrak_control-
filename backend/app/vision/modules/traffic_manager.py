@@ -67,7 +67,7 @@ from app.config import ROOT_DIR, get_settings
 from app.vision import calibration
 from app.vision.base import BaseAnalyzer
 from app.vision.controllers import KalmanXY, PDController, VelocitySmoother
-from app.vision.drawing import draw_badge, draw_ring, draw_tint_rect
+from app.vision.drawing import draw_badge, draw_ring
 from app.vision.geometry import camera_from_settings, pose_from_telemetry
 from app.vision.modules.plate_tracker import _INDIA_PLATE_RE, _validate_and_correct
 from app.vision.pursuit import (
@@ -1544,31 +1544,25 @@ class TrafficManager(BaseAnalyzer):
     def draw_overlay(self, frame_bgr: np.ndarray, meta: Dict[str, Any]) -> np.ndarray:
         H, W = frame_bgr.shape[:2]
 
-        # ── Crowd grid, always visible ────────────────────────────────────
-        # Drawn unconditionally rather than only once people occupy two cells:
-        # "which zone is busiest" is the reason a grid exists, and a density map
-        # that appears only after the crowd has spread out is no use.
-        rows, cols = meta.get("section_grid", [_GRID_ROWS, _GRID_COLS])
-        section_counts = meta.get("section_counts", {}) or {}
-        if meta.get("person_count"):
-            cell_w, cell_h = W // cols, H // rows
-            for r in range(rows):
-                for c in range(cols):
-                    idx = r * cols + c
-                    cnt = section_counts.get(idx, section_counts.get(str(idx), 0))
-                    x1, y1 = c * cell_w, r * cell_h
-                    x2 = W if c == cols - 1 else (c + 1) * cell_w
-                    y2 = H if r == rows - 1 else (r + 1) * cell_h
-                    if not cnt:
-                        draw_tint_rect(frame_bgr, x1, y1, x2, y2, (90, 90, 90), alpha=0.0)
-                        continue
-                    # Each zone's OWN density, so a packed corner reads red even
-                    # when the frame overall is quiet.
-                    lvl = _density_level(cnt)
-                    col = {"green": (0, 200, 0), "orange": (0, 165, 255),
-                           "red": (0, 0, 230)}[lvl]
-                    draw_tint_rect(frame_bgr, x1, y1, x2, y2, col, alpha=0.10)
-                    draw_badge(frame_bgr, str(cnt), x1 + 6, y1 + 18, fg=col)
+        # NO DENSITY GRID AND NO CORNER READOUT IN THIS MODE.
+        #
+        # Both were inherited from crowd-management, where a grid answers
+        # "which zone is busiest" over a venue the aircraft is holding station
+        # above. Traffic is watched moving, and there the tinted cells and
+        # their per-cell numbers sit on top of the vehicles and people the
+        # operator is trying to see, while the same counts are already on the
+        # panel — laid out properly and readable without squinting through
+        # them.
+        #
+        # What earns space on the picture is only what is POSITIONAL: a box
+        # belongs there because it points at something in the frame. A count
+        # does not.
+        #
+        # Removed from the client canvas at the same time. Keeping the two
+        # renderers in step matters more than usual here — the server path had
+        # silently drifted anyway, grading cells with the module's default 8/20
+        # while the client used the operator's calibrated thresholds, so the
+        # same crowd could read green in one and orange in the other.
 
         # ── People, named where recognised ────────────────────────────────
         by_track = {i["track_id"]: i for i in meta.get("identities", [])}
@@ -1611,21 +1605,4 @@ class TrafficManager(BaseAnalyzer):
                 px1, py1, px2, py2 = v["plate_box"]
                 draw_ring(frame_bgr, px1, py1, px2, py2, (0, 200, 0), 2, radius=5)
 
-        draw_badge(
-            frame_bgr,
-            f"{meta.get('vehicles_in_frame', 0)} veh / "
-            f"{meta.get('person_count', 0)} ppl / "
-            f"{meta.get('plates_read', 0)} plates",
-            12, 28, fg=(220, 220, 90),
-        )
-        y = 52
-        # Naming what the altitude cannot resolve is the difference between "the
-        # plate reader is broken" and "descend to read plates".
-        headline = meta.get("viability_headline")
-        if headline:
-            draw_badge(frame_bgr, headline[:78], 12, y, fg=(0, 165, 255))
-            y += 24
-        if not meta.get("has_telemetry"):
-            draw_badge(frame_bgr, "no telemetry - speed unavailable",
-                       12, y, fg=(0, 165, 255))
         return frame_bgr

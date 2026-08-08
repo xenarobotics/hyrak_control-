@@ -967,10 +967,13 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
         if vision_pool:
             analyzer = vision_pool.get_for_session(session.session_id)
-            from app.vision.modules.crowd_manager import CrowdManager
-            from app.vision.modules.human_tracker import HumanTracker
-            from app.vision.modules.person_tracker import PersonTracker
-            if isinstance(analyzer, (HumanTracker, PersonTracker, CrowdManager)):
+            # The shared list, not a hand-written tuple. TrafficManager was
+            # missing here, and the effect was the reported one: in traffic
+            # mode a locked PERSON arms through this event (FollowControls
+            # picks the event by subject kind), so Offboard started on the
+            # aircraft while the analyzer never learned it was tracking and
+            # emitted no commands. Clicking a person then "did nothing".
+            if isinstance(analyzer, _pursuit_analyzers()):
                 analyzer.set_tracking(session.session_id, active)
 
         # Start/stop Offboard mode on the drone

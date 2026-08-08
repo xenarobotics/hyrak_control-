@@ -25,15 +25,31 @@ const LABEL: React.CSSProperties = {
     color: 'hsl(var(--app-text-muted))',
 }
 
-function Chip({ children, tone = 'muted' }: { children: React.ReactNode; tone?: 'muted' | 'cyan' }) {
+/** One figure in the stat grid. Value first and large, label under it — the
+ *  number is what gets read at a glance and the label only disambiguates. */
+function Stat({ label, value, tone = 'muted' }: {
+    label: string; value: number | string; tone?: 'muted' | 'cyan'
+}) {
     return (
         <div style={{
-            padding: '4px 10px', borderRadius: 8, fontSize: 11, fontFamily: 'monospace',
+            display: 'flex', flexDirection: 'column', gap: 1,
+            padding: '5px 8px', borderRadius: 7,
             background: 'hsl(var(--app-surface-2))',
             border: '1px solid hsl(var(--app-border))',
-            color: tone === 'cyan' ? '#22d3ee' : 'hsl(var(--app-text-muted))',
         }}>
-            {children}
+            <span style={{
+                fontSize: 15, fontWeight: 700, lineHeight: 1.1,
+                fontFamily: 'var(--font-geist-mono), monospace',
+                color: tone === 'cyan' ? '#22d3ee' : 'hsl(var(--app-text))',
+            }}>
+                {value}
+            </span>
+            <span style={{
+                fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.5,
+                color: 'hsl(var(--app-text-muted))',
+            }}>
+                {label}
+            </span>
         </div>
     )
 }
@@ -146,7 +162,6 @@ export function TrafficManagementPanel() {
     const alprOk = cvResults?.alpr_available !== false
     const facesOk = cvResults?.faces_available !== false
     const identities = cvResults?.identities ?? []
-    const viability = cvResults?.viability ?? []
 
     useEffect(() => {
         const socket = getSocket()
@@ -180,18 +195,24 @@ export function TrafficManagementPanel() {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, height: '100%', minHeight: 0 }}>
 
-            {/* ── Counts ──────────────────────────────────────────────── */}
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                <Chip tone="cyan">
-                    {cvResults?.vehicles_in_frame ?? 0} in frame
-                </Chip>
-                {/* Reported separately from "in frame" because they answer
-                    different questions, and conflating them is how traffic
-                    figures become fiction. */}
-                <Chip>{cvResults?.vehicle_count_unique ?? 0} veh total</Chip>
-                <Chip tone="cyan">{cvResults?.person_count ?? 0} people</Chip>
-                <Chip>{cvResults?.plates_read ?? 0} plates</Chip>
-                <Chip>{identities.length} identified</Chip>
+            {/* ── Counts ──────────────────────────────────────────────────
+                A 3-column grid rather than a wrapping row of chips. Chips
+                reflowed differently at every panel width, so the same figure
+                moved around between glances and nothing could be found by
+                position. A grid puts each number in a fixed place.
+
+                "In frame" and "total" are deliberately separate everywhere
+                they appear: they answer different questions, and conflating
+                them is how traffic figures turn into fiction. */}
+            <div style={{
+                display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6,
+            }}>
+                <Stat label="in frame" value={cvResults?.vehicles_in_frame ?? 0} tone="cyan" />
+                <Stat label="vehicles" value={cvResults?.vehicle_count_unique ?? 0} />
+                <Stat label="plates" value={cvResults?.plates_read ?? 0} />
+                <Stat label="people" value={cvResults?.person_count ?? 0} tone="cyan" />
+                <Stat label="unique" value={cvResults?.person_count_unique ?? 0} />
+                <Stat label="named" value={identities.length} />
             </div>
 
             {/* ── What is being ATTEMPTED, and why ─────────────────────
@@ -201,69 +222,25 @@ export function TrafficManagementPanel() {
                 otherwise indistinguishable from a failed one. */}
             {profile && <ProfileCard profile={profile} />}
 
-            {/* ── What this altitude can resolve ──────────────────────
-                The honest way to offer all five analytics in one mode: run
-                everything, and say which subjects are actually in range. A
-                refused plate read otherwise looks like a broken plate reader. */}
-            {viability.length > 0 && (
+            {/* ── Degraded-capability notices ─────────────────────────────
+                One line, not three stacked paragraphs. These are all the same
+                shape of statement — "X is unavailable, here is what still
+                works" — and three of them took more vertical space than the
+                vehicle list they were pushing off screen. */}
+            {(!hasTelemetry || !alprOk || !facesOk) && (
                 <div style={{
-                    display: 'flex', flexDirection: 'column', gap: 3,
-                    padding: '7px 9px', borderRadius: 8,
-                    background: 'hsl(var(--app-surface-2))',
-                    border: '1px solid hsl(var(--app-border))',
+                    display: 'flex', gap: 6, alignItems: 'flex-start',
+                    fontSize: 10, lineHeight: 1.45, color: '#fbbf24',
                 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={LABEL}>In range now</span>
-                        {cvResults?.slant_range_m != null && (
-                            <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
-                                {cvResults.slant_range_m.toFixed(0)} m to frame centre
-                            </span>
-                        )}
-                    </div>
-                    {viability.map(v => {
-                        const tone = v.status === 'good' ? '#4ade80'
-                            : v.status === 'marginal' ? '#fbbf24'
-                            : v.status === 'unknown' ? 'hsl(var(--app-text-muted))' : '#f87171'
-                        return (
-                            <div key={v.subject} style={{
-                                display: 'flex', alignItems: 'baseline', gap: 6,
-                                fontSize: 10, fontFamily: 'monospace', color: tone,
-                            }}>
-                                <span style={{ width: 52, textTransform: 'capitalize' }}>{v.subject}</span>
-                                <span style={{ width: 70 }}>
-                                    {v.px_on_target > 0 ? `${v.px_on_target.toFixed(0)}px` : '—'}
-                                    <span style={{ opacity: 0.6 }}>/{v.px_needed}</span>
-                                </span>
-                                <span style={{ flex: 1, minWidth: 0 }}>{v.advice}</span>
-                            </div>
-                        )
-                    })}
-                </div>
-            )}
-
-            {/* ── Degraded-capability notices ─────────────────────────── */}
-            {!hasTelemetry && (
-                <div style={{
-                    display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 11,
-                    lineHeight: 1.5, color: '#fbbf24',
-                }}>
-                    <AlertCircle size={12} style={{ marginTop: 1, flexShrink: 0 }} />
+                    <AlertCircle size={11} style={{ marginTop: 2, flexShrink: 0 }} />
                     <span>
-                        No telemetry — speed needs altitude to convert pixels to
-                        metres, so it is omitted rather than guessed.
+                        {[
+                            !hasTelemetry && 'no telemetry (speed needs altitude to convert pixels to metres)',
+                            !alprOk && 'plate reader not loaded',
+                            !facesOk && 'face recognition not loaded',
+                        ].filter(Boolean).join(' · ')}
+                        {' — everything else is unaffected.'}
                     </span>
-                </div>
-            )}
-            {!alprOk && (
-                <div style={{ display: 'flex', gap: 6, fontSize: 11, color: '#fbbf24' }}>
-                    <AlertCircle size={12} style={{ marginTop: 1, flexShrink: 0 }} />
-                    <span>Plate reader unavailable — counting and speed still work.</span>
-                </div>
-            )}
-            {!facesOk && (
-                <div style={{ display: 'flex', gap: 6, fontSize: 11, color: '#fbbf24' }}>
-                    <AlertCircle size={12} style={{ marginTop: 1, flexShrink: 0 }} />
-                    <span>Face recognition unavailable — the other analytics are unaffected.</span>
                 </div>
             )}
 
@@ -291,6 +268,16 @@ export function TrafficManagementPanel() {
                 </div>
             )}
 
+            {/* ── Everything below scrolls as ONE region ──────────────────
+                The panel had six stacked sections all competing for a fixed
+                height, so the vehicle list — the part actually worth looking
+                at — got squeezed to a few rows and the history was cut off
+                entirely. Splitting it puts what you ACT on (counts, profile,
+                follow) permanently in view, and lets the detail scroll instead
+                of being clipped. */}
+            <ScrollArea style={{ flex: 1, minHeight: 0 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingRight: 6 }}>
+
             {/* ── Crowd density ───────────────────────────────────────── */}
             {(cvResults?.person_count ?? 0) > 0 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
@@ -306,8 +293,14 @@ export function TrafficManagementPanel() {
                     }}>
                         {cvResults?.density_level ?? 'green'}
                     </span>
+                    {/* Unique lives in the stat grid now; repeating it here
+                        made two figures for one fact that could disagree
+                        mid-update. Peak is the only one this row adds. */}
                     <span style={{ ...LABEL, marginLeft: 'auto', fontFamily: 'monospace' }}>
-                        peak {cvResults?.peak_count ?? 0} · {cvResults?.person_count_unique ?? 0} unique
+                        peak {cvResults?.peak_count ?? 0}
+                        {cvResults?.trend_per_min != null && (
+                            ` · ${cvResults.trend_per_min > 0 ? '+' : ''}${cvResults.trend_per_min}/min`
+                        )}
                     </span>
                 </div>
             )}
@@ -350,7 +343,7 @@ export function TrafficManagementPanel() {
             )}
 
             {/* ── Live vehicles ───────────────────────────────────────── */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minHeight: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={LABEL}>Vehicles</span>
                     {vehicles.length > 0 && (
@@ -359,7 +352,7 @@ export function TrafficManagementPanel() {
                         </span>
                     )}
                 </div>
-                <ScrollArea style={{ flex: 1 }}>
+                <div>
                     {vehicles.length === 0 ? (
                         <div style={{
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -453,7 +446,7 @@ export function TrafficManagementPanel() {
                             })}
                         </div>
                     )}
-                </ScrollArea>
+                </div>
             </div>
 
             {/* ── Session breakdown ───────────────────────────────────── */}
@@ -519,6 +512,8 @@ export function TrafficManagementPanel() {
                     </div>
                 </div>
             )}
+              </div>
+            </ScrollArea>
         </div>
     )
 }
