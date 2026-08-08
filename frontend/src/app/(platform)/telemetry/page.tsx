@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { PX4_META, getGroupFromKey, humanizeParamKey, type PX4Group, type PX4Meta } from '@/lib/px4-params-meta'
+import { getRfDownlinkPort, setRfDownlinkPort, getRfUplinkPort, setRfUplinkPort } from '@/lib/rfBridge'
 
 function ls<T>(key: string, fallback: T): T {
     if (typeof window === 'undefined') return fallback
@@ -52,9 +53,16 @@ const AIRFRAME_LABELS: Record<string, string> = {
     'fixedwing': 'Fixed Wing', 'other': 'Custom',
 }
 const FLIGHT_MODES_LIST = ['Stabilize', 'Altitude Hold', 'Position', 'Mission', 'RTL', 'Loiter', 'Acro', 'Hold', 'Land']
+// Sentinel address for the wfb-ng air-unit preset — ConnectionWorkspace's
+// connect() special-cases this to fire 'connect_rf_bridge' instead of a
+// plain 'connect_telemetry', since the RF link needs the split-port bridge
+// in app/telemetry/rf_bridge.py rather than a direct MAVSDK udpin:// connect.
+const RF_BRIDGE_ADDR = 'rfbridge://wfb-ng'
+
 const MAV_PRESETS = [
     { label: 'PX4 SITL (UDP)',        addr: 'udpin://0.0.0.0:14540' },
     { label: 'ArduPilot SITL',        addr: 'udpin://0.0.0.0:14550' },
+    { label: 'Custom RF air unit (wfb-ng)', addr: RF_BRIDGE_ADDR },
     { label: 'USB / Telemetry Radio', addr: 'serial:///dev/ttyUSB0:57600' },
     { label: 'TCP (companion)',        addr: 'tcp://192.168.1.1:5760' },
 ]
@@ -638,8 +646,17 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
     const telStatus = useDroneStore(s => s.telemetryStatus)
     const telemetry = useDroneStore(s => s.telemetry)
     const [showPresets, setShowPresets] = useState(false)
+    const [downlinkPort, setDownlinkPort] = useState(() => getRfDownlinkPort())
+    const [uplinkPort, setUplinkPort] = useState(() => getRfUplinkPort())
     const connected = telStatus === 'connected'
-    const connect    = useCallback(() => { lsSet('hyrak-mav-address', address); getSocket().emit('connect_telemetry', { address }) }, [address])
+    const connect    = useCallback(() => {
+        lsSet('hyrak-mav-address', address)
+        if (address === RF_BRIDGE_ADDR) {
+            getSocket().emit('connect_rf_bridge', { downlinkPort, uplinkPort })
+        } else {
+            getSocket().emit('connect_telemetry', { address })
+        }
+    }, [address, downlinkPort, uplinkPort])
     const disconnect = useCallback(() => getSocket().emit('disconnect_telemetry'), [])
     const pos = telemetry?.position, bat = telemetry?.battery, fm = telemetry?.flight_mode, att = telemetry?.attitude
 
@@ -683,6 +700,30 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                                         ))}
                                     </div>
                                 )}
+                            </div>
+                        </Field>
+                    )}
+                    {!connected && address === RF_BRIDGE_ADDR && (
+                        <Field label="RF BRIDGE PORTS" tip="Local UDP ports the ground station's wfb_rx/wfb_tx use — see communication/start-gs.sh. Only change these if your ground-station config uses non-default ports.">
+                            <div style={{ display: 'flex', gap: 6 }}>
+                                <div style={{ flex: 1 }}>
+                                    <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>Downlink (video/mavlink dn)</span>
+                                    <input
+                                        type="number" min={1} max={65535}
+                                        value={downlinkPort}
+                                        onChange={e => { const v = Number(e.target.value); setDownlinkPort(v); if (v > 0 && v < 65536) setRfDownlinkPort(v) }}
+                                        style={{ width: '100%', padding: '8px 10px', borderRadius: 8, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none', boxSizing: 'border-box', marginTop: 3 }}
+                                    />
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                    <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>Uplink (mavlink up)</span>
+                                    <input
+                                        type="number" min={1} max={65535}
+                                        value={uplinkPort}
+                                        onChange={e => { const v = Number(e.target.value); setUplinkPort(v); if (v > 0 && v < 65536) setRfUplinkPort(v) }}
+                                        style={{ width: '100%', padding: '8px 10px', borderRadius: 8, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none', boxSizing: 'border-box', marginTop: 3 }}
+                                    />
+                                </div>
                             </div>
                         </Field>
                     )}

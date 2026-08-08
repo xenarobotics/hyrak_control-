@@ -2,41 +2,46 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useDroneStore } from '@/store/drone'
+import { useStableById } from '@/lib/panelSmoothing'
 import { getSocket } from '@/lib/socket'
 import {
-    Users, Target, Timer, Crosshair, Square, Info,
+    Users, Target, Crosshair, Square, Info,
     ChevronDown, ChevronUp, Mountain, MoveVertical,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
-// Default PD values — kept in sync with backend defaults
-const PD_DEFAULTS = { kp: 0.8, kd: 0.4, max_output: 300, deadband: 0.05 }
+// Default PD values — kept in sync with backend defaults (human_tracker.py
+// _make_state: yaw_pd kp=30/kd=4/max_output=55). These are yaw-axis units
+// (deg/s output), not the 0-2 range this used to show — that mismatch meant
+// touching any slider sent values 15-300x weaker than the real default and
+// silently crushed tracking responsiveness.
+const PD_DEFAULTS = { kp: 30.0, kd: 4.0, max_output: 55, deadband: 0.05 }
 
 const PD_PARAMS = [
     {
         key: 'max_output' as const,
         label: 'Max Speed',
-        min: 50, max: 500, step: 10,
+        min: 15, max: 55, step: 1,
         unit: '',
         format: (v: number) => v.toFixed(0),
-        tooltip: 'Maximum drone speed while tracking. Higher = catches fast-moving subjects, but can overshoot and oscillate. Start low (100–200) and increase gradually.',
+        tooltip: 'Maximum yaw rate (deg/s) while tracking. Backend hard-caps this at 55 to stay under the flight controller\'s auto-yaw rate limit. Higher = catches fast-moving subjects, but can overshoot and oscillate.',
     },
     {
         key: 'kp' as const,
         label: 'Responsiveness',
-        min: 0.1, max: 2.0, step: 0.05,
+        min: 10, max: 50, step: 1,
         unit: '',
-        format: (v: number) => v.toFixed(2),
+        format: (v: number) => v.toFixed(0),
         tooltip: 'How strongly the drone reacts when the subject moves off-centre (proportional gain Kp). Higher = snappier tracking. Too high causes oscillation — the drone will overshoot and correct repeatedly.',
     },
     {
         key: 'kd' as const,
         label: 'Smoothing',
-        min: 0.0, max: 0.8, step: 0.02,
+        min: 0, max: 10, step: 0.2,
         unit: '',
-        format: (v: number) => v.toFixed(2),
-        tooltip: 'Dampens sudden corrections to avoid oscillation (derivative gain Kd). Higher = smoother but slower to catch up. Should be around half the Responsiveness value.',
+        format: (v: number) => v.toFixed(1),
+        tooltip: 'Dampens sudden corrections to avoid oscillation (derivative gain Kd). Higher = smoother but slower to catch up. Should be around 1/7th of the Responsiveness value.',
     },
     {
         key: 'deadband' as const,
@@ -135,8 +140,9 @@ export function HumanTrackingPanel() {
     const [altitudeMode, setAltitudeModeState] = useState<'fixed' | 'auto'>('fixed')
     const [distanceRatio, setDistanceRatioState] = useState(0.25)
 
-    const persons = cvResults?.persons ?? []
-    const inferenceMs = cvResults?.analysis_time_ms ?? 0
+    // Held briefly past their last sighting so the selectable list does not
+    // reflow under the operator's cursor every time the detector blinks.
+    const persons = useStableById(cvResults?.persons)
 
     useEffect(() => {
         const socket = getSocket()
@@ -197,15 +203,6 @@ export function HumanTrackingPanel() {
 
             {/* Stats */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <div style={{
-                    display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px',
-                    background: 'hsl(var(--app-surface-2))',
-                    border: '1px solid hsl(var(--app-border))',
-                    borderRadius: 8, fontSize: 11, fontFamily: 'monospace',
-                    color: 'hsl(var(--app-text-muted))',
-                }}>
-                    <Timer size={12} /> {inferenceMs.toFixed(0)}ms
-                </div>
                 <div style={{
                     display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px',
                     background: 'hsl(var(--app-surface-2))',
@@ -505,7 +502,10 @@ export function HumanTrackingPanel() {
                                         ? (isTracking ? '#5DCAA5' : '#85B7EB')
                                         : 'hsl(var(--app-border))'}`,
                                     transition: 'all 0.15s',
-                                    opacity: isTracking && !isSelected ? 0.4 : 1,
+                                    // Dimmed when held past its last sighting,
+                                    // so a row that is about to age out reads
+                                    // as fading rather than vanishing.
+                                    opacity: isTracking && !isSelected ? 0.4 : p.stale ? 0.5 : 1,
                                 }}
                             >
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

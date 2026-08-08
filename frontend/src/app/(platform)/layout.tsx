@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ThemeToggle } from '@/components/controls/ThemeToggle'
 import { ZoneBanner } from '@/components/controls/ZoneBanner'
+import { UpdatePrompt } from '@/components/updater/UpdatePrompt'
 import { useDrone } from '@/hooks/useDrone'
 import { WebRTCProvider } from '@/contexts/WebRTCContext'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
@@ -17,6 +18,8 @@ import { Radio, Map, Bot, SlidersHorizontal, Settings, AlertTriangle } from 'luc
 import { Button } from '@/components/ui/button'
 import { useSwarmStore } from '@/store/swarm'
 import { FleetAside } from '@/components/swarm/FleetAside'
+import { StatusBar } from '@/components/layout/StatusBar'
+import { getStatusBarEnabled, STATUSBAR_CHANGE_EVENT } from '@/lib/statusBarSettings'
 
 const NAV = [
     { href: '/fly',       label: 'Fly',     icon: Radio },
@@ -164,8 +167,21 @@ function PlatformNav() {
 
 export default function PlatformLayout({ children }: { children: React.ReactNode }) {
     const [mounted, setMounted] = useState(false)
+    const [statusBarOn, setStatusBarOn] = useState(false)
     const swarmEnabled = useSwarmStore(s => s.enabled)
-    useEffect(() => { setMounted(true) }, [])
+    const pathname = usePathname()
+    useEffect(() => {
+        setMounted(true)
+        setStatusBarOn(getStatusBarEnabled())
+        const onChange = (e: Event) => setStatusBarOn((e as CustomEvent<boolean>).detail)
+        window.addEventListener(STATUSBAR_CHANGE_EVENT, onChange)
+        return () => window.removeEventListener(STATUSBAR_CHANGE_EVENT, onChange)
+    }, [])
+
+    // Fly tab already has its own OSD/DroneControls — the global bar would
+    // just duplicate them there, so it's shown everywhere else instead.
+    const onFlyTab = pathname === '/fly' || pathname.startsWith('/fly/')
+    const showStatusBar = mounted && statusBarOn && !onFlyTab
 
     return (
         <TooltipProvider>
@@ -176,12 +192,19 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
                     style={{ background: 'hsl(var(--app-bg))', color: 'hsl(var(--app-text))' }}
                 >
                     <PlatformNav />
-                    <ZoneBanner />
-                    <main className="flex-1 overflow-hidden p-3 md:p-4">
-                        {children}
-                    </main>
+                    {/* Column to the right of the sidebar — status bar stays out of
+                        the sidebar/logo area and persists across tab navigation
+                        since this layout mounts once for the whole route group. */}
+                    <div className="flex flex-col flex-1 overflow-hidden">
+                        {showStatusBar && <StatusBar />}
+                        <ZoneBanner />
+                        <main className="flex-1 overflow-hidden p-3 md:p-4">
+                            {children}
+                        </main>
+                    </div>
                     {mounted && swarmEnabled && <FleetAside />}
                 </div>
+                <UpdatePrompt />
             </WebRTCProvider>
         </TooltipProvider>
     )

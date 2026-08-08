@@ -8,15 +8,59 @@ import { RecordingControls } from './RecordingControls'
 import { Button } from '@/components/ui/button'
 import { Video, VideoOff, Maximize, Minimize, Expand, Shrink, Loader } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getVideoSource, isServerSourced, needsCameraSelection, getLiveEdgeClamp } from '@/lib/videoSource'
+import { useRtspRelayBridge } from '@/hooks/useRtspRelayBridge'
+import { useAirUnitPreview } from '@/lib/airUnitPreview'
+import { useGstPreview } from '@/lib/gstPreview'
+import { useReceiver, fallbackFromHevc } from '@/lib/hyrakReceiver'
+import { clampToLiveEdge } from '@/lib/liveEdge'
+import { WebCodecsVideo } from './WebCodecsVideo'
 
-type AspectRatio = 'fill' | '16:9' | '4:3' | '1:1'
+// 'fit' shows the WHOLE frame at the source's own aspect, letterboxed —
+// distinct from the fixed presets, which force an aspect the camera may not
+// have. For a 16:10 or 4:3 sensor 'fill' crops away frame the AI is still
+// analysing, so a detection can sit where the operator cannot see it.
+type AspectRatio = 'fill' | 'fit' | '16:9' | '4:3' | '1:1'
 
 export function VideoStream() {
     const {
         remoteStream, localStream,
-        isStreaming, isLoading, stats,
+        isStreaming, isLoading, stats, lastError,
         selectedCameraId, startStream, stopStream,
     } = useWebRTCContext()
+
+    // Server-sourced feeds (air-unit UDP, SIYI RTSP) need no browser camera
+    // at all. Starts false (matches the server-rendered HTML, which has no
+    // localStorage to read) and is set for real after mount — reading
+    // getVideoSource() straight into the initial state would make the
+    // server and client's first render disagree whenever a non-default
+    // source is saved, which React flags as a hydration mismatch.
+    const [serverSourced, setServerSourced] = useState(false)
+    const [needsCamera, setNeedsCamera] = useState(false)
+    useEffect(() => {
+        setServerSourced(isServerSourced(getVideoSource()))
+        setNeedsCamera(needsCameraSelection(getVideoSource()))
+    }, [])
+
+    // Relay mode serves the operator a local preview straight off the same
+    // ffmpeg that feeds the server, so the picture on this screen never
+    // makes the round trip to the backend and back. The air-unit DataChannel
+    // source has the same arrangement via its own preview-only relay instance
+    // (lib/airUnitPreview.ts) — at most one of the two is ever non-null,
+    // since they belong to mutually exclusive video sources.
+    const { previewUrl: relayPreviewUrl } = useRtspRelayBridge()
+    const airUnitPreviewUrl = useAirUnitPreview()
+    const gst = useGstPreview()
+    const receiver = useReceiver()
+    // At most one is ever non-null — they belong to mutually exclusive sources.
+    const localPreviewUrl = relayPreviewUrl ?? gst?.previewUrl ?? receiver?.previewUrl ?? airUnitPreviewUrl
+    // WebCodecs renders to a canvas and needs neither the <video> element nor
+    // the live-edge controller — there is no playback buffer to clamp.
+    const wcUrl = gst?.webcodecs ? gst.previewUrl : (receiver?.previewUrl ?? null)
+    // The receiver decides between H.265 passthrough and an H.264 transcode at
+    // run time, and can change its mind mid-session, so this is read from its
+    // status rather than assumed. gst mode always transcodes to H.264.
+    const wcCodec = gst?.webcodecs ? 'h264' : (receiver?.codec ?? 'h264')
 
     const mode = useDroneStore(s => s.mode)
     // manual-control has nothing to process — bypassing the backend WebRTC
@@ -24,7 +68,10 @@ export function VideoStream() {
     // decode) and rendering the local getUserMedia stream directly removes
     // both software transcode hops, which is what was causing the jitter
     // vs. a native camera app. AI modes still need the processed remote feed.
-    const isRaw = mode === 'manual-control'
+    // Doesn't apply to server-sourced feeds — there's no local camera
+    // stream to fall back to (localStream stays null), so that path would
+    // just render blank instead of the real remote video.
+    const isRaw = mode === 'manual-control' && !serverSourced
 
     const mainVideoRef = useRef<HTMLVideoElement | null>(null)
     const localVideoRef = useCallback((el: HTMLVideoElement | null) => {
@@ -37,12 +84,35 @@ export function VideoStream() {
     const [isFullscreen, setIsFullscreen] = useState(false)
     const [aspectRatio, setAspectRatio] = useState<AspectRatio>('fill')
 
-    // Attach whichever stream should currently be visible to the main video element
+    // Attach whichever stream should currently be visible to the main video
+    // element. Relay mode is the exception: its preview is a loopback HTTP
+    // URL rather than a MediaStream, so it goes on `src` and srcObject must
+    // be cleared — setting both leaves srcObject winning and the pane black.
     useEffect(() => {
-        if (mainVideoRef.current) {
-            mainVideoRef.current.srcObject = isRaw ? localStream : remoteStream
+        const el = mainVideoRef.current
+        if (!el) return
+        if (wcUrl) { el.removeAttribute('src'); el.srcObject = null; return }
+        if (localPreviewUrl) {
+            el.srcObject = null
+            if (el.src !== localPreviewUrl) el.src = localPreviewUrl
+            // A live progressive stream in a <video> settles behind its own
+            // newest frame and STAYS there — frames arrive at exactly the rate
+            // they are consumed, so the startup backlog is permanent. Drain it
+            // back to the live edge; see lib/liveEdge.ts for why a seek can't
+            // be used here.
+            //
+            // Forced on for the GStreamer preview, not left to the setting: a
+            // stale `hyrak-live-edge-clamp=0` in localStorage silently disables
+            // the only thing keeping this feed live, and the symptom is a
+            // multi-second delay with a pipeline that measures ZERO buffering —
+            // which sends you hunting upstream where nothing is wrong. This
+            // mode exists specifically to be low latency, so it does not get an
+            // off switch.
+            return (gst?.previewUrl || getLiveEdgeClamp()) ? clampToLiveEdge(el) : undefined
         }
-    }, [isRaw, localStream, remoteStream])
+        el.removeAttribute('src')
+        el.srcObject = isRaw ? localStream : remoteStream
+    }, [isRaw, localStream, remoteStream, localPreviewUrl, gst?.previewUrl, wcUrl])
 
     useEffect(() => {
         const handler = () => setIsFullscreen(!!document.fullscreenElement)
@@ -58,9 +128,10 @@ export function VideoStream() {
         }
     }, [])
 
-    const videoStyle: React.CSSProperties = aspectRatio !== 'fill'
-        ? { aspectRatio: aspectRatio.replace(':', '/'), maxHeight: '100%', maxWidth: '100%' }
-        : {}
+    const videoStyle: React.CSSProperties =
+        aspectRatio === 'fill' ? {}
+        : aspectRatio === 'fit' ? { maxHeight: '100%', maxWidth: '100%' }
+        : { aspectRatio: aspectRatio.replace(':', '/'), maxHeight: '100%', maxWidth: '100%' }
 
     return (
         <div
@@ -72,25 +143,42 @@ export function VideoStream() {
             style={{ background: '#000', borderColor: 'hsl(var(--app-border))' }}
         >
             {/* Main video — raw local feed when no AI mode is active, processed remote feed otherwise */}
-            <video
-                ref={mainVideoRef}
-                autoPlay playsInline muted
-                className={cn(
-                    aspectRatio === 'fill' ? 'w-full h-full object-cover' : 'h-full object-contain mx-auto',
-                    !isStreaming && 'hidden'
-                )}
-                style={videoStyle}
-            />
+            {wcUrl ? (
+                <WebCodecsVideo
+                    src={wcUrl}
+                    codec={wcCodec}
+                    onDecodeError={wcCodec === 'hevc' ? fallbackFromHevc : undefined}
+                    className={aspectRatio === 'fill'
+                        ? 'w-full h-full object-cover'
+                        : 'h-full object-contain mx-auto'}
+                    style={videoStyle}
+                />
+            ) : (
+                <video
+                    ref={mainVideoRef}
+                    autoPlay playsInline muted
+                    className={cn(
+                        aspectRatio === 'fill' ? 'w-full h-full object-cover' : 'h-full object-contain mx-auto',
+                        !isStreaming && !localPreviewUrl && 'hidden'
+                    )}
+                    style={videoStyle}
+                />
+            )}
 
-            {/* Offline state */}
-            {!isStreaming && (
+            {/* Offline state — the relay preview is live before the backend
+                stream negotiates, so "VIDEO OFFLINE" over a working picture
+                would be wrong. */}
+            {!isStreaming && !localPreviewUrl && (
                 <div className="flex-1 flex flex-col items-center justify-center gap-3"
                     style={{ color: 'rgba(255,255,255,0.3)' }}
                 >
                     <VideoOff size={40} strokeWidth={1.5} />
                     <p className="font-mono text-sm tracking-wider">VIDEO OFFLINE</p>
-                    {!selectedCameraId && (
+                    {needsCamera && !selectedCameraId && (
                         <p className="text-xs opacity-50">Select a camera in Devices panel</p>
+                    )}
+                    {lastError && (
+                        <p className="text-xs text-center max-w-xs px-4" style={{ color: '#f87171' }}>{lastError}</p>
                     )}
                 </div>
             )}
@@ -123,7 +211,7 @@ export function VideoStream() {
                 <div className="flex items-center gap-1.5">
                     {isStreaming && (
                         <div className="flex gap-1">
-                            {(['fill', '16:9', '4:3', '1:1'] as const).map(r => (
+                            {(['fill', 'fit', '16:9', '4:3', '1:1'] as const).map(r => (
                                 <button key={r} onClick={() => setAspectRatio(r)}
                                     className="px-2 py-1 rounded text-[10px] font-mono"
                                     style={{
@@ -141,7 +229,16 @@ export function VideoStream() {
                         variant={isStreaming ? 'destructive' : 'default'}
                         className="font-mono text-xs gap-1.5 shadow-lg"
                         onClick={isStreaming ? stopStream : startStream}
-                        disabled={isLoading || (!selectedCameraId && !isStreaming)}
+                        // `needsCamera`, NOT `!serverSourced`. Only a real webcam
+                        // requires the operator to pick a device. 'rtsp_camera'
+                        // produces a MediaStream from a URL and is deliberately
+                        // not server-sourced, so the old test disabled Start
+                        // permanently on any machine with no webcam selected —
+                        // which is the normal state on a dedicated ground-station
+                        // PC. needsCameraSelection() exists for this and was
+                        // already used correctly for the hint above; this call
+                        // site was missed.
+                        disabled={isLoading || (needsCamera && !selectedCameraId && !isStreaming)}
                     >
                         {isLoading
                             ? <><Loader size={12} className="animate-spin" /> Starting...</>

@@ -10,28 +10,36 @@ import { HumanTrackingPanel } from '@/components/vision/HumanTrackingPanel'
 import { DepthMappingPanel } from '@/components/vision/DepthMappingPanel'
 import { PersonTrackerPanel } from '@/components/vision/PersonTrackerPanel'
 import { EnhancePanel } from '@/components/vision/EnhancePanel'
+import { CrowdManagementPanel } from '@/components/vision/CrowdManagementPanel'
+import { TrafficManagementPanel } from '@/components/vision/TrafficManagementPanel'
+import { VehiclePlateTrackingPanel } from '@/components/vision/VehiclePlateTrackingPanel'
 import { CvOverlayCanvas } from '@/components/vision/CvOverlayCanvas'
+import { getVideoFit, setVideoFit, type VideoFit } from '@/lib/videoSettings'
+import { ModulePerformance } from '@/components/vision/ModulePerformance'
 import { RecordingControls } from '@/components/video/RecordingControls'
 import { Button } from '@/components/ui/button'
 import {
     Video, VideoOff, Loader,
-    ChevronDown, ChevronUp, Maximize, Minimize, Expand, Shrink
+    ChevronDown, ChevronUp, Maximize, Minimize, Expand, Shrink, Ratio, Crop
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getVideoSource, isServerSourced, needsCameraSelection, getLiveEdgeClamp, type VideoSource } from '@/lib/videoSource'
+import { useAirUnitPreview } from '@/lib/airUnitPreview'
+import { useGstPreview } from '@/lib/gstPreview'
+import { useReceiver, fallbackFromHevc } from '@/lib/hyrakReceiver'
+import { clampToLiveEdge } from '@/lib/liveEdge'
+import { WebCodecsVideo } from '@/components/video/WebCodecsVideo'
 
-function StatRow({ label, value, unit }: {
-    label: string; value: string | number; unit?: string
-}) {
-    return (
-        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0' }}>
-            <span style={{ fontSize: 11, color: 'hsl(var(--app-text-muted))', fontFamily: 'monospace' }}>
-                {label}
-            </span>
-            <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text))' }}>
-                {value}{unit && <span style={{ color: 'hsl(var(--app-text-muted))', marginLeft: 3 }}>{unit}</span>}
-            </span>
-        </div>
-    )
+const SOURCE_LABELS: Record<string, string> = {
+    air_unit_udp: 'Air unit (UDP) — set in Settings',
+    siyi_rtsp: 'SIYI (RTSP) — set in Settings',
+    rtsp_relay: 'RTSP relay (this machine) — set in Settings',
+    rtsp_camera: 'RTSP as camera — set in Settings',
+    air_unit_datachannel: 'Air unit (DataChannel) — set in Settings',
+    rtsp_datachannel: 'RTSP (DataChannel) — set in Settings',
+    air_unit_srt: 'Air unit (SRT relay) — set in Settings',
+    air_unit_gst: 'Air unit (GStreamer) — set in Settings',
+    hyrak_receiver: 'HYRAK Receiver (ground decoder) — set in Settings',
 }
 
 function ResultsPanel() {
@@ -42,6 +50,9 @@ function ResultsPanel() {
         case 'depth-mapping': return <DepthMappingPanel />
         case 'person-tracking': return <PersonTrackerPanel />
         case 'enhance': return <EnhancePanel />
+        case 'crowd-management': return <CrowdManagementPanel />
+        case 'vehicle-plate-tracking': return <VehiclePlateTrackingPanel />
+        case 'traffic-management': return <TrafficManagementPanel />
         default:
             return (
                 <div style={{
@@ -58,10 +69,22 @@ function ResultsPanel() {
 export default function ModulesPage() {
     const {
         remoteStream, localStream,
-        isStreaming, overlayActive, isLoading, modelLoading, stats,
+        isStreaming, overlayActive, isLoading, startPhase, modelLoading, lastError,
         cameras, selectedCameraId, setSelectedCameraId,
         startStream, stopStream,
     } = useWebRTCContext()
+
+    // Server-sourced modes (air-unit UDP, SIYI RTSP) have no browser camera
+    // at all — the camera dropdown and its "must have one selected" gate on
+    // Start don't apply. Starts as 'camera' (matches server-rendered HTML,
+    // which has no localStorage to read) and is set for real after mount —
+    // reading getVideoSource() straight into the initial state would make
+    // the server and client's first render disagree whenever a non-default
+    // source is saved, which React flags as a hydration mismatch.
+    const [videoSource, setVideoSource] = useState<VideoSource>('camera')
+    useEffect(() => { setVideoSource(getVideoSource()) }, [])
+    const serverSourced = isServerSourced(videoSource)
+    const needsCamera = needsCameraSelection(videoSource)
 
     const remoteVideoRef = useRef<HTMLVideoElement | null>(null)
     const localVideoRef = useCallback((el: HTMLVideoElement | null) => {
@@ -96,16 +119,55 @@ export default function ModulesPage() {
     const [statsOpen, setStatsOpen] = useState(true)
     const [modesOpen, setModesOpen] = useState(true)
     const [maximized, setMaximized] = useState(false)
+    // Fill (cover) crops a 4:3 / 16:10 camera to fit a 16:9 panel — which
+    // hides frame the AI is still analysing. Fit letterboxes instead so the
+    // whole sensor is visible. The overlay canvas is handed the same value:
+    // if the two disagree, boxes and clicks land in the wrong place.
+    const [videoFit, setVideoFitState] = useState<VideoFit>('fill')
+    useEffect(() => { setVideoFitState(getVideoFit()) }, [])
     const [isFullscreen, setIsFullscreen] = useState(false)
 
     // Attach streams to video elements. Client-overlay feed shows the
-    // LOCAL camera (sharp, zero-latency) with AI results drawn on a
+    // LOCAL picture (sharp, zero-latency) with AI results drawn on a
     // canvas; processed feed shows the server-rendered remote stream.
+    // "Local picture" is the webcam MediaStream for camera sources, or the
+    // air unit's in-app preview (lib/airUnitPreview.ts) — a loopback HTTP
+    // URL, so it goes on `src` and srcObject must be cleared, or srcObject
+    // wins and the pane stays black.
+    const airUnitPreviewUrl = useAirUnitPreview()
+    const gst = useGstPreview()
+    const receiver = useReceiver()
+    const localPreviewUrl = gst?.previewUrl ?? receiver?.previewUrl ?? airUnitPreviewUrl
+    // Canvas path — no <video>, no live-edge clamp. The overlay canvas sits on
+    // top of it exactly as before, since CvOverlayCanvas positions absolutely
+    // and scales by CSS.
+    //
+    // Gated on overlayActive, NOT merely on the pipeline running. In PROCESSED
+    // feed mode the pane must show the server's annotated video (remoteStream),
+    // and rendering the local preview instead means the annotated frames — the
+    // entire point of that mode — are never displayed at all. Depth-mapping and
+    // enhance are always processed, since they transform the frame itself.
+    const wcUrl = overlayActive
+        ? (gst?.webcodecs ? gst.previewUrl : (receiver?.previewUrl ?? null))
+        : null
+    // Read from the receiver's status, not assumed: it chooses H.265
+    // passthrough or an H.264 transcode per machine, and can change mid-session.
+    const wcCodec = gst?.webcodecs ? 'h264' : (receiver?.codec ?? 'h264')
     useEffect(() => {
-        if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = overlayActive ? localStream : remoteStream
+        const el = remoteVideoRef.current
+        if (!el) return
+        if (wcUrl) { el.removeAttribute('src'); el.srcObject = null; return }
+        if (overlayActive && localPreviewUrl && !localStream) {
+            el.srcObject = null
+            if (el.src !== localPreviewUrl) el.src = localPreviewUrl
+            // Same live-edge drain as the fly tab — a progressive stream in a
+            // <video> otherwise settles a few hundred ms behind live.
+            // Forced on for the GStreamer preview — see VideoStream.tsx.
+            return (gst?.previewUrl || getLiveEdgeClamp()) ? clampToLiveEdge(el) : undefined
         }
-    }, [overlayActive, localStream, remoteStream])
+        el.removeAttribute('src')
+        el.srcObject = overlayActive ? localStream : remoteStream
+    }, [overlayActive, localStream, remoteStream, localPreviewUrl, gst?.previewUrl, wcUrl])
 
     useEffect(() => {
         const handler = () => setIsFullscreen(!!document.fullscreenElement)
@@ -153,33 +215,51 @@ export default function ModulesPage() {
                             <ModeSelector />
                         </div>
 
-                        {/* Camera selector */}
-                        <div style={{ padding: '0 2px' }}>
-                            <p style={{
-                                fontSize: 10, color: 'hsl(var(--app-text-muted))',
-                                fontFamily: 'monospace', marginBottom: 6,
-                            }}>
-                                CAMERA
-                            </p>
-                            <select
-                                value={selectedCameraId}
-                                onChange={e => setSelectedCameraId(e.target.value)}
-                                disabled={isStreaming}
-                                style={{
-                                    width: '100%', padding: '6px 8px', borderRadius: 8,
-                                    background: 'hsl(var(--app-surface-2))',
-                                    border: '1px solid hsl(var(--app-border))',
-                                    color: 'hsl(var(--app-text))',
-                                    fontSize: 11, fontFamily: 'monospace',
-                                    opacity: isStreaming ? 0.5 : 1,
-                                }}
-                            >
-                                {cameras.length === 0 && <option value="">No cameras found</option>}
-                                {cameras.map(c => (
-                                    <option key={c.deviceId} value={c.deviceId}>{c.label}</option>
-                                ))}
-                            </select>
-                        </div>
+                        {/* Camera selector — not applicable to server-sourced feeds */}
+                        {serverSourced ? (
+                            <div style={{ padding: '0 2px' }}>
+                                <p style={{
+                                    fontSize: 10, color: 'hsl(var(--app-text-muted))',
+                                    fontFamily: 'monospace', marginBottom: 6,
+                                }}>
+                                    VIDEO SOURCE
+                                </p>
+                                <div style={{
+                                    padding: '6px 8px', borderRadius: 8, fontSize: 11, fontFamily: 'monospace',
+                                    background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
+                                    color: 'hsl(var(--app-text-muted))',
+                                }}>
+                                    {SOURCE_LABELS[videoSource]}
+                                </div>
+                            </div>
+                        ) : (
+                            <div style={{ padding: '0 2px' }}>
+                                <p style={{
+                                    fontSize: 10, color: 'hsl(var(--app-text-muted))',
+                                    fontFamily: 'monospace', marginBottom: 6,
+                                }}>
+                                    CAMERA
+                                </p>
+                                <select
+                                    value={selectedCameraId}
+                                    onChange={e => setSelectedCameraId(e.target.value)}
+                                    disabled={isStreaming}
+                                    style={{
+                                        width: '100%', padding: '6px 8px', borderRadius: 8,
+                                        background: 'hsl(var(--app-surface-2))',
+                                        border: '1px solid hsl(var(--app-border))',
+                                        color: 'hsl(var(--app-text))',
+                                        fontSize: 11, fontFamily: 'monospace',
+                                        opacity: isStreaming ? 0.5 : 1,
+                                    }}
+                                >
+                                    {cameras.length === 0 && <option value="">No cameras found</option>}
+                                    {cameras.map(c => (
+                                        <option key={c.deviceId} value={c.deviceId}>{c.label}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
 
                         {/* Start/Stop */}
                         <div style={{ padding: '0 2px' }}>
@@ -188,10 +268,11 @@ export default function ModulesPage() {
                                 variant={isStreaming ? 'destructive' : 'default'}
                                 className="w-full font-mono text-xs gap-2"
                                 onClick={isStreaming ? stopStream : startStream}
-                                disabled={isLoading || (!selectedCameraId && !isStreaming)}
+                                disabled={isLoading || (needsCamera && !selectedCameraId && !isStreaming)}
                             >
                                 {isLoading
-                                    ? <><Loader size={12} className="animate-spin" /> Starting...</>
+                                    ? <><Loader size={12} className="animate-spin" />
+                                        {startPhase === 'model' ? 'Loading model...' : 'Connecting...'}</>
                                     : isStreaming
                                         ? <><VideoOff size={12} /> Stop</>
                                         : <><Video size={12} /> Start Analysis</>
@@ -231,17 +312,28 @@ export default function ModulesPage() {
                     }}
                 >
                     {/* Main video — clean, no OSD */}
-                    <video
-                        ref={remoteVideoRef}
-                        autoPlay playsInline muted
-                        style={{
-                            width: '100%', height: '100%', objectFit: 'cover',
-                            display: isStreaming ? 'block' : 'none',
-                        }}
-                    />
+                    {wcUrl ? (
+                        <WebCodecsVideo
+                            src={wcUrl}
+                            codec={wcCodec}
+                            onDecodeError={wcCodec === 'hevc' ? fallbackFromHevc : undefined}
+                            style={{ width: '100%', height: '100%',
+                                     objectFit: videoFit === 'fit' ? 'contain' : 'cover' }}
+                        />
+                    ) : (
+                        <video
+                            ref={remoteVideoRef}
+                            autoPlay playsInline muted
+                            style={{
+                                width: '100%', height: '100%',
+                                objectFit: videoFit === 'fit' ? 'contain' : 'cover',
+                                display: isStreaming ? 'block' : 'none',
+                            }}
+                        />
+                    )}
 
                     {/* Client-side AI overlay on the raw local feed */}
-                    {isStreaming && overlayActive && <CvOverlayCanvas />}
+                    {isStreaming && overlayActive && <CvOverlayCanvas fit={videoFit} />}
 
                     {!isStreaming && !isLoading && (
                         <div style={{
@@ -252,6 +344,9 @@ export default function ModulesPage() {
                         }}>
                             <VideoOff size={36} strokeWidth={1.5} />
                             <p style={{ fontFamily: 'monospace', fontSize: 12, letterSpacing: 2 }}>NO VIDEO</p>
+                            {lastError && (
+                                <p style={{ fontFamily: 'monospace', fontSize: 11, color: '#f87171', textAlign: 'center', maxWidth: 280, padding: '0 12px' }}>{lastError}</p>
+                            )}
                         </div>
                     )}
 
@@ -306,6 +401,16 @@ export default function ModulesPage() {
                     }}>
                         <RecordingControls videoRef={remoteVideoRef} isStreaming={isStreaming} />
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <Button size="sm" variant="outline" className="h-7 px-2 text-[10px]"
+                                title={videoFit === 'fit'
+                                    ? 'Showing the whole frame (letterboxed). Click to fill the panel.'
+                                    : 'Filling the panel — a 4:3 or 16:10 camera is cropped. Click to show the whole frame.'}
+                                onClick={() => {
+                                    const next: VideoFit = videoFit === 'fit' ? 'fill' : 'fit'
+                                    setVideoFitState(next); setVideoFit(next)
+                                }}>
+                                {videoFit === 'fit' ? <><Ratio size={12} /> Fit</> : <><Crop size={12} /> Fill</>}
+                            </Button>
                             <Button size="sm" variant="outline" className="h-7 w-7 p-0"
                                 onClick={() => setMaximized(m => !m)}>
                                 {maximized ? <Minimize size={13} /> : <Maximize size={13} />}
@@ -339,13 +444,14 @@ export default function ModulesPage() {
                         {statsOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                     </button>
                     {statsOpen && (
-                        <div style={{ padding: '8px 12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 20px' }}>
-                            <StatRow label="FPS" value={stats?.inputFps?.toFixed(0) ?? '—'} />
-                            <StatRow label="Bitrate" value={stats ? (stats.bitrate / 1e6).toFixed(2) : '—'} unit="Mbps" />
-                            <StatRow label="RTT" value={stats?.roundTripTime?.toFixed(1) ?? '—'} unit="ms" />
-                            <StatRow label="Jitter" value={stats ? (stats.jitter * 1000).toFixed(1) : '—'} unit="ms" />
-                            <StatRow label="Pkt loss" value={stats?.packetLoss?.toFixed(1) ?? '—'} unit="%" />
-                            <StatRow label="Inference" value={cvResults?.analysis_time_ms?.toFixed(0) ?? '—'} unit="ms" />
+                        <div style={{ padding: '10px 12px' }}>
+                            {/* Every row here used to come from pc.getStats(), which
+                                reports NOTHING in overlay mode — no video crosses the
+                                PeerConnection, so FPS/bitrate/RTT/jitter/loss all sat
+                                at zero permanently and looked like a broken feed.
+                                ModulePerformance sources each figure from wherever the
+                                video actually is. */}
+                            <ModulePerformance />
                         </div>
                     )}
                 </div>

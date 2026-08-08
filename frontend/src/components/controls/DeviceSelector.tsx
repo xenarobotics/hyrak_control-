@@ -7,6 +7,12 @@ import {
     requestRadioPort, type GrantedRadio,
 } from '@/lib/browserSerial'
 import { useDrone } from '@/hooks/useDrone'
+import { getLocalRelayUrl, setLocalRelayUrl, DEFAULT_LOCAL_RELAY_URL } from '@/lib/localRfRelay'
+import { getSiyiTelemetryTarget, setSiyiTelemetryTarget, startSiyiTelemetry, DEFAULT_SIYI_TELEMETRY_TARGET } from '@/lib/siyiTelemetryRelay'
+import { isDesktopApp } from '@/lib/nativeBridge'
+import { listNativeSerialPorts, type NativeRadio } from '@/lib/nativeSerialRelay'
+import { getTelemetryBaud, setTelemetryBaud } from '@/lib/linkSettings'
+import { getRfDownlinkPort, getRfUplinkPort, getRfFanoutPort, setRfFanoutPort } from '@/lib/rfBridge'
 import {
     Select, SelectContent, SelectItem,
     SelectTrigger, SelectValue,
@@ -14,6 +20,14 @@ import {
 import { Button } from '@/components/ui/button'
 import { RefreshCw, Camera, Satellite, WifiOff, Wifi, Loader, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getVideoSource, isServerSourced, needsCameraSelection } from '@/lib/videoSource'
+
+const SOURCE_LABELS: Record<string, string> = {
+    air_unit_udp: 'Air unit (UDP) — set in Settings',
+    siyi_rtsp: 'SIYI (RTSP) — set in Settings',
+    rtsp_relay: 'RTSP relay (this machine) — set in Settings',
+    rtsp_camera: 'RTSP as camera — set in Settings',
+}
 
 export function DeviceSelector() {
     const [mounted, setMounted] = useState(false)
@@ -23,15 +37,40 @@ export function DeviceSelector() {
         isLoading: camLoading, scanCameras: scanCams
     } = useWebRTCContext()
 
-    // Telemetry source is a CLIENT device, like the camera: radios plugged
-    // into the user's machine, listed by name (QGC-style). The browser can
-    // only enumerate ports the user granted once via the "+" picker; after
-    // that grant they appear here automatically on every visit and update
-    // live on plug/unplug. The server never has a radio — no server ports.
-    const [radios, setRadios] = useState<GrantedRadio[]>([])
-    const [source, setSource] = useState<string>('sitl') // 'sitl' | 'radio-<i>'
+    // Server-sourced feeds (air-unit UDP, SIYI RTSP) don't use a browser
+    // camera — the source is picked once in Settings, not per-tab here.
+    const [videoSource] = useState(() => getVideoSource())
+    const serverSourced = isServerSourced(videoSource)
+    // rtsp_camera isn't server-sourced, but it still has no device to pick.
+    const needsCamera = needsCameraSelection(videoSource)
 
-    const { telemetryStatus, connectTelemetry, connectBrowserSerial } = useDrone()
+    // Telemetry source is a CLIENT device, like the camera: radios plugged
+    // into the user's machine, listed by name (QGC-style). The server never
+    // has a radio — no server ports. How they're enumerated differs by shell:
+    //
+    //   browser  "+" opens Chrome's picker; the one-time grant makes the radio
+    //            appear here on every future visit, live on plug/unplug.
+    //   desktop  every port is listed immediately — no grant, no picker.
+    //            Electron ships navigator.serial but no chooser UI behind it,
+    //            so "+" opened nothing at all; the native SerialBridge's
+    //            list() is used instead (see lib/nativeSerialRelay.ts).
+    //
+    // Either way this is INDEPENDENT of the video source above: a USB radio
+    // for telemetry with a SIYI or HYRAK air-unit feed for video is a normal
+    // combination, not a special case.
+    const desktop = isDesktopApp()
+    const [radios, setRadios] = useState<GrantedRadio[]>([])
+    const [nativeRadios, setNativeRadios] = useState<NativeRadio[]>([])
+    // 'sitl' | 'radio-<i>' (Web Serial) | 'nradio-<i>' (native) | 'local-relay' | 'siyi-udp'
+    const [source, setSource] = useState<string>('sitl')
+    const [relayUrl, setRelayUrl] = useState(() => getLocalRelayUrl())
+    const [siyiTarget, setSiyiTarget] = useState(() => getSiyiTelemetryTarget())
+    // Default comes from Settings -> Comm links; DEFAULT_SERIAL_BAUD remains
+    // the fallback when nothing has been saved.
+    const [baud, setBaud] = useState(() => getTelemetryBaud())
+    const [rfFanout, setRfFanout] = useState(() => getRfFanoutPort())
+
+    const { telemetryStatus, telemetryError, connectBrowserSerial, connectNativeSerial, connectNativeRf, connectLocalRelay, connectRemoteSitl } = useDrone()
 
     const refreshRadios = useCallback(async () => {
         const list = await listGrantedPorts()
@@ -40,7 +79,19 @@ export function DeviceSelector() {
         setSource(s => (s.startsWith('radio-') && !list[Number(s.slice(6))] ? 'sitl' : s))
     }, [])
 
+    const refreshNativeRadios = useCallback(async () => {
+        const list = await listNativeSerialPorts()
+        setNativeRadios(list)
+        setSource(s => (s.startsWith('nradio-') && !list[Number(s.slice(7))] ? 'sitl' : s))
+    }, [])
+
     useEffect(() => {
+        if (desktop) {
+            // No plug/unplug event to subscribe to natively — the refresh
+            // button re-lists, which is all QGC does too.
+            void refreshNativeRadios()
+            return
+        }
         const api = getSerialApi()
         if (!api) return
         void refreshRadios()
@@ -50,7 +101,7 @@ export function DeviceSelector() {
             api.removeEventListener?.('connect', refreshRadios)
             api.removeEventListener?.('disconnect', refreshRadios)
         }
-    }, [refreshRadios])
+    }, [desktop, refreshRadios, refreshNativeRadios])
 
     // One-time grant: browser picker → radio joins the list permanently.
     const addRadio = async () => {
@@ -65,13 +116,38 @@ export function DeviceSelector() {
     const isConnected = telemetryStatus === 'connected'
     const isConnecting = telemetryStatus === 'connecting'
 
+    // SITL bridges the CLIENT'S own SITL through the desktop app's native
+    // UDP bridge — a plain browser tab has no way to reach udp:14540, so
+    // the option is shown but not connectable there (no relay-script
+    // fallback; browser users are pointed at the desktop app instead).
+    const sitlNeedsDesktop = source === 'sitl' && !isDesktopApp()
+
     const handleConnect = () => {
-        if (source.startsWith('radio-')) {
-            const radio = radios[Number(source.slice(6))]
-            if (radio) void connectBrowserSerial(radio.port)
+        if (source.startsWith('nradio-')) {
+            const radio = nativeRadios[Number(source.slice(7))]
+            if (radio) void connectNativeSerial(radio.path, baud)
             return
         }
-        connectTelemetry('udp://:14540')
+        if (source.startsWith('radio-')) {
+            const radio = radios[Number(source.slice(6))]
+            if (radio) void connectBrowserSerial(radio.port, baud)
+            return
+        }
+        if (source === 'air-unit-udp') {
+            void connectNativeRf()
+            return
+        }
+        if (source === 'local-relay') {
+            void connectLocalRelay(relayUrl)
+            return
+        }
+        if (source === 'siyi-udp') {
+            // Its own path rather than connectLocalRelay: that one dials a
+            // WebSocket relay agent, this binds a UDP socket natively.
+            void startSiyiTelemetry(siyiTarget)
+            return
+        }
+        void connectRemoteSitl()
     }
 
     if (!mounted) {
@@ -81,38 +157,46 @@ export function DeviceSelector() {
     return (
         <div className="space-y-3">
 
-            {/* Camera selector */}
+            {/* Camera selector — not applicable to server-sourced feeds */}
             <div>
                 <div className="flex items-center gap-1.5 mb-1.5">
                     <Camera size={12} className="text-zinc-500" />
-                    <span className="text-xs text-zinc-500 font-mono">CAMERA</span>
-                    <button
-                        onClick={scanCams}
-                        className="ml-auto text-zinc-600 hover:text-zinc-400 transition-colors"
-                        title="Refresh cameras"
-                    >
-                        <RefreshCw size={11} className={cn(camLoading && 'animate-spin')} />
-                    </button>
+                    <span className="text-xs text-zinc-500 font-mono">{needsCamera ? 'CAMERA' : 'VIDEO SOURCE'}</span>
+                    {needsCamera && (
+                        <button
+                            onClick={scanCams}
+                            className="ml-auto text-zinc-600 hover:text-zinc-400 transition-colors"
+                            title="Refresh cameras"
+                        >
+                            <RefreshCw size={11} className={cn(camLoading && 'animate-spin')} />
+                        </button>
+                    )}
                 </div>
 
-                <Select
-                        value={camId}
-                        onValueChange={(v) => v && setCamId(v)}
-                        disabled={cameras.length === 0}
-                    >
-                        {/* w-full + truncate keeps long webcam labels from
-                            widening the side panel into horizontal scroll */}
-                        <SelectTrigger className="h-8 w-full max-w-full text-xs font-mono bg-zinc-900 border-zinc-700 overflow-hidden [&>span]:truncate [&>span]:min-w-0 [&>span]:text-left">
-                            <SelectValue placeholder={camLoading ? 'Scanning...' : 'No cameras found'} />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {cameras.map(cam => (
-                                <SelectItem key={cam.deviceId} value={cam.deviceId} className="text-xs font-mono max-w-[280px] [&>span:last-child]:truncate">
-                                    {cam.label}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
+                {!needsCamera ? (
+                    <div className="h-8 flex items-center px-2 rounded text-xs font-mono bg-zinc-900 border border-zinc-700 text-zinc-500 truncate">
+                        {SOURCE_LABELS[videoSource]}
+                    </div>
+                ) : (
+                    <Select
+                            value={camId}
+                            onValueChange={(v) => v && setCamId(v)}
+                            disabled={cameras.length === 0}
+                        >
+                            {/* w-full + truncate keeps long webcam labels from
+                                widening the side panel into horizontal scroll */}
+                            <SelectTrigger className="h-8 w-full max-w-full text-xs font-mono bg-zinc-900 border-zinc-700 overflow-hidden [&>span]:truncate [&>span]:min-w-0 [&>span]:text-left">
+                                <SelectValue placeholder={camLoading ? 'Scanning...' : 'No cameras found'} />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {cameras.map(cam => (
+                                    <SelectItem key={cam.deviceId} value={cam.deviceId} className="text-xs font-mono max-w-[280px] [&>span:last-child]:truncate">
+                                        {cam.label}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                )}
             </div>
 
             {/* Telemetry source — detected client radios (like the camera) or SITL */}
@@ -120,7 +204,17 @@ export function DeviceSelector() {
                 <div className="flex items-center gap-1.5 mb-1.5">
                     <Satellite size={12} className="text-zinc-500" />
                     <span className="text-xs text-zinc-500 font-mono">TELEMETRY</span>
-                    {browserSerialSupported() && (
+                    {/* Desktop needs no grant, so "+" (which opens nothing in
+                        Electron) is replaced by a plain re-scan. */}
+                    {desktop ? (
+                        <button
+                            onClick={() => { void refreshNativeRadios() }}
+                            className="ml-auto text-zinc-600 hover:text-zinc-400 transition-colors"
+                            title="Re-scan serial ports on this device"
+                        >
+                            <RefreshCw size={11} />
+                        </button>
+                    ) : browserSerialSupported() && (
                         <button
                             onClick={addRadio}
                             className="ml-auto text-zinc-600 hover:text-zinc-400 transition-colors"
@@ -140,6 +234,15 @@ export function DeviceSelector() {
                         <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
+                        {nativeRadios.map((radio, i) => (
+                            <SelectItem
+                                key={`nradio-${i}`}
+                                value={`nradio-${i}`}
+                                className="text-xs font-mono max-w-[280px] [&>span:last-child]:truncate"
+                            >
+                                {radio.label}
+                            </SelectItem>
+                        ))}
                         {radios.map((radio, i) => (
                             <SelectItem
                                 key={`radio-${i}`}
@@ -150,10 +253,110 @@ export function DeviceSelector() {
                             </SelectItem>
                         ))}
                         <SelectItem value="sitl" className="text-xs font-mono">
-                            SITL — udp://:14540
+                            SITL
+                        </SelectItem>
+                        {/* Native first: same ground station as local-relay but
+                            with no relay agent to start. Desktop only. */}
+                        {desktop && (
+                            <SelectItem value="air-unit-udp" className="text-xs font-mono">
+                                Air unit (UDP, direct)
+                            </SelectItem>
+                        )}
+                        <SelectItem value="local-relay" className="text-xs font-mono">
+                            Local RF relay (air unit)
+                        </SelectItem>
+                        <SelectItem value="siyi-udp" className="text-xs font-mono">
+                            SIYI ground unit (UDP)
                         </SelectItem>
                     </SelectContent>
                 </Select>
+                {/* Baud only applies to a real serial radio. 57600 is the SiK
+                    default and what PX4's TELEM ports ship at; 115200 is the
+                    other one people actually hit. */}
+                {(source.startsWith('radio-') || source.startsWith('nradio-')) && (
+                    <div className="mt-1.5 flex items-center gap-1.5">
+                        <span className="text-[10px] font-mono text-zinc-500">BAUD</span>
+                        <Select
+                            value={String(baud)}
+                            onValueChange={(v) => { if (v) { setBaud(Number(v)); setTelemetryBaud(Number(v)) } }}
+                            disabled={isConnected}
+                        >
+                            <SelectTrigger className="h-7 flex-1 text-[11px] font-mono bg-zinc-900 border-zinc-700">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {[57600, 115200, 921600, 38400, 9600].map(b => (
+                                    <SelectItem key={b} value={String(b)} className="text-xs font-mono">
+                                        {b}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                )}
+                {desktop && nativeRadios.length === 0 && (
+                    <p className="mt-1.5 text-[10px] font-mono text-zinc-500 leading-relaxed">
+                        No serial ports found. Plug the radio in and hit refresh — on Linux you
+                        may also need to be in the <span className="text-zinc-400">dialout</span> group.
+                    </p>
+                )}
+                {source === 'air-unit-udp' && (
+                    <>
+                        <p className="mt-1.5 text-[10px] font-mono text-zinc-500 leading-relaxed">
+                            Reads udp:{getRfDownlinkPort()} / sends udp:{getRfUplinkPort()} straight from
+                            the ground station — no relay agent needed. Just run start-gs.sh.
+                        </p>
+                        <div className="mt-1.5 flex items-center gap-1.5">
+                            <span className="text-[10px] font-mono text-zinc-500 shrink-0">QGC PORT</span>
+                            <input
+                                type="number"
+                                min={0}
+                                max={65535}
+                                value={rfFanout}
+                                onChange={e => {
+                                    const v = Number(e.target.value)
+                                    setRfFanout(v)
+                                    if (v >= 0 && v < 65536) setRfFanoutPort(v)
+                                }}
+                                disabled={isConnected}
+                                className="h-7 w-full rounded px-2 text-[11px] font-mono bg-zinc-900 border border-zinc-700 text-zinc-300 outline-none disabled:opacity-60"
+                            />
+                        </div>
+                        <p className="mt-1 text-[10px] font-mono text-zinc-500 leading-relaxed">
+                            {rfFanout > 0
+                                ? `Copy of the downlink sent to udp:${rfFanout} — point QGC's UDP link at that port instead of ${getRfDownlinkPort()} (only one program can own a port). Downlink only: QGC can read params and download the mission, but cannot command the aircraft through this.`
+                                : `0 = off. Set a port (e.g. ${getRfDownlinkPort() + 2}) to let QGroundControl watch the same telemetry alongside HYRAK.`}
+                        </p>
+                    </>
+                )}
+                {source === 'local-relay' && (
+                    <input
+                        value={relayUrl}
+                        onChange={e => { setRelayUrl(e.target.value); setLocalRelayUrl(e.target.value) }}
+                        disabled={isConnected}
+                        placeholder={DEFAULT_LOCAL_RELAY_URL}
+                        className="mt-1.5 h-7 w-full rounded px-2 text-[11px] font-mono bg-zinc-900 border border-zinc-700 text-zinc-300 outline-none disabled:opacity-60"
+                    />
+                )}
+                {source === 'siyi-udp' && (
+                    <>
+                        <input
+                            value={siyiTarget}
+                            onChange={e => { setSiyiTarget(e.target.value); setSiyiTelemetryTarget(e.target.value) }}
+                            disabled={isConnected}
+                            placeholder={DEFAULT_SIYI_TELEMETRY_TARGET}
+                            className="mt-1.5 h-7 w-full rounded px-2 text-[11px] font-mono bg-zinc-900 border border-zinc-700 text-zinc-300 outline-none disabled:opacity-60"
+                        />
+                        <p className="mt-1 text-[10px] font-mono text-zinc-500 leading-relaxed">
+                            Target host:port, same as QGC&apos;s UDP link. Local port is ephemeral — the ground unit replies to us.
+                        </p>
+                    </>
+                )}
+                {sitlNeedsDesktop && (
+                    <p className="mt-1.5 text-[10px] font-mono text-zinc-500 leading-relaxed">
+                        SITL requires the HYRAK desktop app — <a href="/" className="underline text-zinc-400 hover:text-zinc-200">download it here</a>, then connect to the PX4 SITL running on your machine.
+                    </p>
+                )}
             </div>
 
             {/* Connect button */}
@@ -161,7 +364,7 @@ export function DeviceSelector() {
                 size="sm"
                 className="w-full font-mono text-xs gap-2"
                 variant={isConnected ? 'outline' : 'default'}
-                disabled={isConnecting}
+                disabled={isConnecting || sitlNeedsDesktop}
                 onClick={handleConnect}
             >
                 {isConnecting
@@ -171,6 +374,14 @@ export function DeviceSelector() {
                         : <><WifiOff size={12} /> CONNECT TELEMETRY</>
                 }
             </Button>
+
+            {/* Why the last attempt failed — a silent spinner-stop tells the
+                operator nothing; the actual reason always does. */}
+            {telemetryError && !isConnected && !isConnecting && (
+                <p className="text-[10px] font-mono text-red-400/90 leading-relaxed break-words">
+                    {telemetryError}
+                </p>
+            )}
 
         </div>
     )

@@ -2,9 +2,10 @@
 
 import { useMemo, useState } from 'react'
 import { useDroneStore } from '@/store/drone'
+import { useStableCounts, useEasedNumber } from '@/lib/panelSmoothing'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
-import { Search, Timer } from 'lucide-react'
+import { Search } from 'lucide-react'
 
 // Icon mapping for common COCO classes
 const CLASS_EMOJI: Record<string, string> = {
@@ -20,7 +21,9 @@ const CLASS_EMOJI: Record<string, string> = {
     'cell phone': '📱', book: '📖', clock: '🕐',
 }
 
-function ObjectCard({ name, count }: { name: string; count: number }) {
+function ObjectCard(
+    { name, count, stale }: { name: string; count: number; stale?: boolean },
+) {
     const emoji = CLASS_EMOJI[name] ?? '📦'
     return (
         <div style={{
@@ -30,6 +33,10 @@ function ObjectCard({ name, count }: { name: string; count: number }) {
             background: 'hsl(var(--app-surface-2))',
             border: '1px solid hsl(var(--app-border))',
             borderRadius: 10, textAlign: 'center',
+            // Held past its last sighting: dimmed rather than removed, so the
+            // grid keeps its shape while a detection flickers.
+            opacity: stale ? 0.45 : 1,
+            transition: 'opacity 180ms ease-out',
         }}>
             <span style={{ fontSize: 22 }}>{emoji}</span>
             <span style={{
@@ -53,15 +60,19 @@ export function ObjectDetectionPanel() {
     const cvResults = useDroneStore(s => s.cvResults)
     const [search, setSearch] = useState('')
 
-    const objects = useMemo(() => {
-        if (!cvResults?.objects) return []
-        return Object.entries(cvResults.objects)
-            .map(([name, count]) => ({ name, count }))
-            .filter(o => o.name.toLowerCase().includes(search.toLowerCase()))
-            .sort((a, b) => b.count - a.count)
-    }, [cvResults, search])
+    // Membership is held briefly so a detection flickering on the confidence
+    // threshold does not make cards pop in and out of the grid; the filter is
+    // applied after, so typing still responds instantly.
+    const stable = useStableCounts(cvResults?.objects)
+    const objects = useMemo(
+        () => stable.filter(o => o.name.toLowerCase().includes(search.toLowerCase())),
+        [stable, search],
+    )
 
-    const inferenceMs = cvResults?.analysis_time_ms ?? 0
+    // Timing is noisy by nature — a median ignores the occasional outlier
+    // instead of dragging the readout around with it.
+    const totalCount = useEasedNumber(cvResults?.total_count ?? 0)
+    const personCount = useEasedNumber(cvResults?.person_count ?? 0)
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%' }}>
@@ -69,25 +80,15 @@ export function ObjectDetectionPanel() {
             {/* Stats row */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{
-                    display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px',
-                    background: 'hsl(var(--app-surface-2))',
-                    border: '1px solid hsl(var(--app-border))',
-                    borderRadius: 8, fontSize: 11, fontFamily: 'monospace',
-                    color: 'hsl(var(--app-text-muted))',
-                }}>
-                    <Timer size={12} />
-                    {inferenceMs.toFixed(0)}ms inference
-                </div>
-                <div style={{
                     padding: '4px 10px',
                     background: 'hsl(var(--app-surface-2))',
                     border: '1px solid hsl(var(--app-border))',
                     borderRadius: 8, fontSize: 11, fontFamily: 'monospace',
                     color: 'hsl(var(--app-text-muted))',
                 }}>
-                    {cvResults?.total_count ?? 0} detected
+                    {totalCount} detected
                 </div>
-                {(cvResults?.person_count ?? 0) > 0 && (
+                {personCount > 0 && (
                     <div style={{
                         padding: '4px 10px',
                         background: '#E6F1FB',
@@ -95,7 +96,7 @@ export function ObjectDetectionPanel() {
                         borderRadius: 8, fontSize: 11, fontFamily: 'monospace',
                         color: '#185FA5',
                     }}>
-                        🧍 {cvResults?.person_count} person
+                        🧍 {personCount} person
                     </div>
                 )}
             </div>
@@ -125,7 +126,7 @@ export function ObjectDetectionPanel() {
                         gap: 8, paddingRight: 4,
                     }}>
                         {objects.map(o => (
-                            <ObjectCard key={o.name} name={o.name} count={o.count} />
+                            <ObjectCard key={o.name} name={o.name} count={o.count} stale={o.stale} />
                         ))}
                     </div>
                 ) : (

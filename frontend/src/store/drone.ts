@@ -29,6 +29,9 @@ interface DroneStore {
     // Connection
     connectionStatus: ConnectionStatus
     telemetryStatus: TelemetryStatus
+    // Why the last connect attempt failed — shown under the Connect button
+    // so a failed connect never ends as a silent spinner-stop.
+    telemetryError: string | null
     session: SessionInfo | null
 
     // Drone state
@@ -48,6 +51,7 @@ interface DroneStore {
     // Actions
     setConnectionStatus: (s: ConnectionStatus) => void
     setTelemetryStatus: (s: TelemetryStatus) => void
+    setTelemetryError: (msg: string | null) => void
     setSession: (s: SessionInfo | null) => void
     setTelemetry: (t: TelemetrySnapshot) => void
     setMode: (m: AnalysisMode) => void
@@ -82,6 +86,7 @@ const defaultTelemetry: TelemetrySnapshot = {
 export const useDroneStore = create<DroneStore>((set) => ({
     connectionStatus: 'disconnected',
     telemetryStatus: 'disconnected',
+    telemetryError: null,
     session: null,
     telemetry: null,
     mode: 'manual-control',
@@ -93,7 +98,12 @@ export const useDroneStore = create<DroneStore>((set) => ({
     isEmergencyConfirm: false,
 
     setConnectionStatus: (s) => set({ connectionStatus: s }),
-    setTelemetryStatus: (s) => set({ telemetryStatus: s }),
+    // Starting a new attempt or connecting successfully clears the stale error.
+    setTelemetryStatus: (s) => set(state => ({
+        telemetryStatus: s,
+        telemetryError: (s === 'connecting' || s === 'connected') ? null : state.telemetryError,
+    })),
+    setTelemetryError: (msg) => set({ telemetryError: msg }),
     setSession: (s) => set({ session: s }),
     setTelemetry: (t) => set({ telemetry: t }),
     setMode: (m) => set({ mode: m }),
@@ -106,6 +116,7 @@ export const useDroneStore = create<DroneStore>((set) => ({
     reset: () => set({
         connectionStatus: 'disconnected',
         telemetryStatus: 'disconnected',
+        telemetryError: null,
         session: null,
         telemetry: null,
         mode: 'manual-control',

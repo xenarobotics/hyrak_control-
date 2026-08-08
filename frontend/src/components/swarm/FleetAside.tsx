@@ -3,13 +3,18 @@
 import { useState, useEffect } from 'react'
 import {
     Plus, ChevronDown, ChevronRight, Wifi, ScanLine, RefreshCw, X,
-    Check, Zap, MoveVertical, AlertTriangle, Unplug, PlayCircle,
+    Check, Zap, MoveVertical, AlertTriangle, Unplug, PlayCircle, Cable,
 } from 'lucide-react'
 import { useSwarmStore } from '@/store/swarm'
 import {
     FLEET_COLORS, portForDrone, FLEET_SCAN_COUNT, GROUP_TAKEOFF_ALT,
 } from '@/lib/fleet'
 import { getSocket } from '@/lib/socket'
+import {
+    startSwarmRelay, stopSwarmRelay, isSwarmRelayActive,
+    getSwarmRelayUrl, setSwarmRelayUrl, DEFAULT_SWARM_RELAY_URL,
+} from '@/lib/localSwarmRelay'
+import { isDesktopApp } from '@/lib/nativeBridge'
 
 function triggerScan() {
     getSocket().emit('scan_swarm_drones', { count: FLEET_SCAN_COUNT })
@@ -27,6 +32,37 @@ export function FleetAside() {
     const [selectedColor, setSelectedColor] = useState(FLEET_COLORS[1])
     const [killConfirm, setKillConfirm] = useState(false)
     const [groupAlt, setGroupAlt]       = useState(GROUP_TAKEOFF_ALT)
+
+    // Local swarm relay — for a client's OWN SITL swarm running on THEIR
+    // own machine (see sitl_relay/swarm_relay.py), not this same machine.
+    // Connecting it BEFORE scanning routes the scan through the browser
+    // relay instead of trying literal server-local ports; leave it alone
+    // and everything behaves exactly as before (same-machine SITL testing).
+    const [showRelay, setShowRelay]         = useState(false)
+    const [relayUrl, setRelayUrl]           = useState(() => getSwarmRelayUrl())
+    const [relayConnected, setRelayConnected] = useState(() => isSwarmRelayActive())
+    const [relayBusy, setRelayBusy]         = useState(false)
+    const [relayError, setRelayError]       = useState<string | null>(null)
+
+    const handleRelayConnect = async () => {
+        setRelayBusy(true)
+        setRelayError(null)
+        try {
+            await startSwarmRelay(relayUrl)
+            setRelayConnected(true)
+            triggerScan()
+        } catch (err) {
+            setRelayError(err instanceof Error ? err.message : 'Could not connect')
+            setRelayConnected(false)
+        } finally {
+            setRelayBusy(false)
+        }
+    }
+
+    const handleRelayDisconnect = async () => {
+        await stopSwarmRelay()
+        setRelayConnected(false)
+    }
 
     // Auto-scan for SITL drones on mount
     useEffect(() => {
@@ -138,6 +174,19 @@ export function FleetAside() {
                 </span>
                 <div className="flex items-center gap-1">
                     <button
+                        onClick={() => setShowRelay(v => !v)}
+                        title="Connect a client's own remote SITL swarm (sitl_relay/swarm_relay.py)"
+                        className="rounded p-0.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors relative"
+                    >
+                        <Cable size={12} style={{ color: relayConnected ? '#10b981' : 'hsl(var(--app-text-muted))' }} />
+                        {relayConnected && (
+                            <span
+                                className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full"
+                                style={{ background: '#10b981' }}
+                            />
+                        )}
+                    </button>
+                    <button
                         onClick={triggerScan}
                         disabled={scanStatus === 'scanning'}
                         title="Re-scan for drones"
@@ -167,6 +216,56 @@ export function FleetAside() {
                     )}
                 </div>
             </div>
+
+            {/* Local swarm relay connect — only needed for a swarm running
+                on someone else's machine; same-machine SITL testing never
+                needs this open. */}
+            {showRelay && (
+                <div
+                    className="p-3 border-b flex flex-col gap-2 shrink-0"
+                    style={{ borderColor: 'hsl(var(--app-border))' }}
+                >
+                    <div className="flex items-center justify-between mb-0.5">
+                        <span className="text-[9px] font-mono tracking-wider" style={{ color: 'hsl(var(--app-text-muted))' }}>
+                            REMOTE SWARM RELAY
+                        </span>
+                        <button onClick={() => setShowRelay(false)}>
+                            <X size={10} style={{ color: 'hsl(var(--app-text-muted))' }} />
+                        </button>
+                    </div>
+                    <p className="text-[9px] font-mono leading-relaxed" style={{ color: 'hsl(var(--app-text-muted))' }}>
+                        {isDesktopApp()
+                            ? 'For a swarm running on your own machine. The desktop app bridges it directly — nothing else to run.'
+                            : <>For a swarm running on your own machine, not this one. Run{' '}
+                                <code>sitl_relay/swarm_relay</code> there first.</>}
+                    </p>
+                    {!isDesktopApp() && (
+                        <input
+                            value={relayUrl}
+                            onChange={e => { setRelayUrl(e.target.value); setSwarmRelayUrl(e.target.value) }}
+                            disabled={relayConnected}
+                            placeholder={DEFAULT_SWARM_RELAY_URL}
+                            className="w-full text-xs px-2 py-1.5 rounded border bg-transparent outline-none focus:border-cyan-500 transition-colors disabled:opacity-60"
+                            style={{ borderColor: 'hsl(var(--app-border))', color: 'hsl(var(--app-text))' }}
+                        />
+                    )}
+                    {relayError && (
+                        <p className="text-[9px] font-mono" style={{ color: '#ef4444' }}>{relayError}</p>
+                    )}
+                    <button
+                        onClick={relayConnected ? handleRelayDisconnect : handleRelayConnect}
+                        disabled={relayBusy}
+                        className="w-full text-xs py-1.5 rounded font-mono transition-colors disabled:opacity-50"
+                        style={{
+                            background: relayConnected ? 'transparent' : '#22d3ee',
+                            border: relayConnected ? '1px solid #ef4444' : 'none',
+                            color: relayConnected ? '#ef4444' : 'black',
+                        }}
+                    >
+                        {relayBusy ? 'Connecting…' : relayConnected ? 'Disconnect relay' : 'Connect relay'}
+                    </button>
+                </div>
+            )}
 
             {/* Fleet summary strip */}
             {droneList.length > 0 && (

@@ -111,7 +111,6 @@ export function EnhancePanel() {
     const upscaled = cvResults?.upscaled ?? false
     const upscaleMethod = cvResults?.upscale_method ?? 'none'
     const reused = cvResults?.reused_frame ?? false
-    const inferenceMs = cvResults?.analysis_time_ms ?? 0
 
     const emit = useCallback((next: EnhanceParams) => {
         getSocket().emit('set_enhance_params', next)
@@ -157,15 +156,16 @@ export function EnhancePanel() {
                 </div>
             </div>
 
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {reused && (
                 <div style={{
                     display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px',
                     background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
-                    borderRadius: 8, fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))',
+                    borderRadius: 8, fontSize: 11, fontFamily: 'monospace',
+                    color: 'hsl(var(--app-text-muted))', width: 'fit-content',
                 }}>
-                    <Gauge size={12} /> {inferenceMs.toFixed(0)}ms{reused ? ' (cached)' : ''}
+                    <Gauge size={12} /> reusing last enhanced frame
                 </div>
-            </div>
+            )}
 
             <Row label="DENOISE" tooltip="Removes speckle/snow-style noise from a glitchy analog (non-digital) FPV link, while keeping edges sharp. Off for a clean digital feed — denoising a feed that has no noise just softens detail for nothing.">
                 <StyledSelect

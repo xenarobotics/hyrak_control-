@@ -7,7 +7,8 @@ import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { cn } from '@/lib/utils'
 import {
     ScanSearch, Users, Layers,
-    ShieldAlert, Brain, Target, ScanFace, Sparkles
+    ShieldAlert, Brain, Target, ScanFace, Sparkles,
+    UsersRound, ScanLine, TrafficCone,
 } from 'lucide-react'
 
 const MODES = [
@@ -47,6 +48,27 @@ const MODES = [
         desc: 'Track specific person'
     },
     {
+        value: 'crowd-management',
+        label: 'Crowd',
+        icon: UsersRound,
+        color: '#38bdf8',
+        desc: 'Count, density, alerts'
+    },
+    {
+        value: 'vehicle-plate-tracking',
+        label: 'Plates',
+        icon: ScanLine,
+        color: '#a3e635',
+        desc: 'Vehicle + plate ANPR'
+    },
+    {
+        value: 'traffic-management',
+        label: 'Traffic',
+        icon: TrafficCone,
+        color: '#38bdf8',
+        desc: 'Count + plate + colour + speed + follow'
+    },
+    {
         value: 'obstacle-avoidance',
         label: 'Avoid',
         icon: ShieldAlert,
@@ -72,7 +94,7 @@ export function ModeSelector() {
             {MODES.map(m => {
                 const active = currentMode === m.value
                 const Icon = m.icon
-                const available = ['manual-control', 'object-detection', 'human-tracking', 'depth-mapping', 'person-tracking', 'enhance'].includes(m.value)
+                const available = ['manual-control', 'object-detection', 'human-tracking', 'depth-mapping', 'person-tracking', 'enhance', 'crowd-management', 'vehicle-plate-tracking', 'traffic-management'].includes(m.value)
 
                 return (
                     <button

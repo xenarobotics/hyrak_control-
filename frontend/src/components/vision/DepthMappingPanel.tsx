@@ -1,31 +1,15 @@
 'use client'
 
 import { useDroneStore } from '@/store/drone'
-import { Timer } from 'lucide-react'
 
 export function DepthMappingPanel() {
     const cvResults = useDroneStore(s => s.cvResults)
-    const inferenceMs = cvResults?.analysis_time_ms ?? 0
     const minD = (cvResults as any)?.min_depth_m ?? 0
     const maxD = (cvResults as any)?.max_depth_m ?? 0
     const meanD = (cvResults as any)?.mean_depth_m ?? 0
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-
-            <div style={{ display: 'flex', gap: 8 }}>
-                <div style={{
-                    display: 'flex', alignItems: 'center', gap: 5,
-                    padding: '4px 10px', borderRadius: 8,
-                    background: 'hsl(var(--app-surface-2))',
-                    border: '1px solid hsl(var(--app-border))',
-                    fontSize: 11, fontFamily: 'monospace',
-                    color: 'hsl(var(--app-text-muted))',
-                }}>
-                    <Timer size={12} />
-                    {inferenceMs.toFixed(0)}ms · ZoeDepth
-                </div>
-            </div>
 
             {cvResults ? (
                 <>

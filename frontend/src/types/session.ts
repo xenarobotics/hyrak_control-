@@ -8,6 +8,12 @@ export type AnalysisMode =
     | 'target-identification'
     | 'person-tracking'
     | 'enhance'
+    | 'crowd-management'
+    | 'vehicle-plate-tracking'
+    // The composed vehicle module: count + type + colour + plate + speed +
+    // follow in one pass. Merges the analytics that share an altitude band;
+    // crowd and face stay separate because they do not.
+    | 'traffic-management'
 
 export type ConnectionStatus =
     | 'disconnected'

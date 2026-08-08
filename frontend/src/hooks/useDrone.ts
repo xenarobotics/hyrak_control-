@@ -3,6 +3,10 @@
 import { useEffect, useCallback } from 'react'
 import { getSocket, connectSocket } from '@/lib/socket'
 import { startBrowserSerial, stopBrowserSerial, isBrowserSerialActive, type SerialPortLike } from '@/lib/browserSerial'
+import { startLocalRelay, isLocalRelayActive } from '@/lib/localRfRelay'
+import { startRemoteSitlRelay, stopRemoteSitlRelay, isRemoteSitlRelayActive, setSitlSilenceHandler } from '@/lib/remoteSitlRelay'
+import { startNativeSerial, stopNativeSerial, isNativeSerialActive, setSerialSilenceHandler, DEFAULT_SERIAL_BAUD } from '@/lib/nativeSerialRelay'
+import { startNativeRfRelay, stopNativeRfRelay, isNativeRfRelayActive, setRfSilenceHandler } from '@/lib/nativeRfRelay'
 import { useDroneStore } from '@/store/drone'
 import { useSwarmStore } from '@/store/swarm'
 import { colorForDrone, FLEET_SCAN_COUNT } from '@/lib/fleet'
@@ -44,9 +48,27 @@ export function useDrone() {
         }
         const onTelStatus      = (data: { status: string; message?: string }) => {
             store.setTelemetryStatus(data.status as any)
+            if (data.status === 'error') {
+                store.setTelemetryError(data.message || 'Connection failed')
+            }
             // Link gone (disconnect, takeover, failed connect) → release the
             // local radio so the user can reconnect cleanly. No-op otherwise.
             if (data.status === 'disconnected' || data.status === 'error') {
+                void stopBrowserSerial()
+            }
+        }
+
+        // The backend's generic `error` event had NO listener at all, so every
+        // path that reports failure that way instead of via telemetry_status
+        // (e.g. connect_browser_serial's "No session found") left the UI stuck
+        // on "connecting" forever with nothing to show — the connect flow can
+        // only ever be un-stuck by a telemetry_status event. Treat it as a
+        // failed connect whenever a connect is what we were waiting on.
+        const onServerError = (data: { msg?: string }) => {
+            console.error('Server error', data?.msg)
+            if (useDroneStore.getState().telemetryStatus === 'connecting') {
+                store.setTelemetryError(data?.msg || 'Connection failed')
+                store.setTelemetryStatus('error')
                 void stopBrowserSerial()
             }
         }
@@ -211,6 +233,7 @@ export function useDrone() {
         socket.on('disconnect',            onDisconnect)
         socket.on('connect_error',         onConnectError)
         socket.on('session_ready',         onSessionReady)
+        socket.on('error',                 onServerError)
         socket.on('telemetry_status',      onTelStatus)
         socket.on('telemetry_update',      onTelUpdate)
         socket.on('cv_results',            onCvResults)
@@ -235,6 +258,7 @@ export function useDrone() {
             socket.off('disconnect',            onDisconnect)
             socket.off('connect_error',         onConnectError)
             socket.off('session_ready',         onSessionReady)
+            socket.off('error',                 onServerError)
             socket.off('telemetry_status',      onTelStatus)
             socket.off('telemetry_update',      onTelUpdate)
             socket.off('cv_results',            onCvResults)
@@ -263,6 +287,35 @@ export function useDrone() {
         getSocket().emit('connect_telemetry', { address })
     }, [])
 
+    /** Tears the link down from this end.
+     *
+     *  The backend has handled `disconnect_telemetry` all along
+     *  (events/telemetry_events.py) — it ends the flight recording, drops zone
+     *  monitoring and clears the session's drone — but nothing in the UI ever
+     *  emitted it, and TelemetryConnect hid its whole control block once
+     *  connected. So a link could be established and then never released
+     *  without reloading the page or restarting the backend.
+     *
+     *  Stops the LOCAL relay first. Every connect path other than a plain
+     *  server-side UDP address is really "this device owns the radio and
+     *  forwards MAVLink" — browser Web Serial, native serial, native RF — and
+     *  those keep pumping regardless of what the server thinks. Telling the
+     *  server to forget the link while a relay is still feeding it would have
+     *  it immediately re-establish from the incoming traffic. */
+    const disconnectTelemetry = useCallback(async () => {
+        try {
+            if (isBrowserSerialActive()) await stopBrowserSerial()
+            if (isNativeSerialActive()) await stopNativeSerial()
+            if (isNativeRfRelayActive()) await stopNativeRfRelay()
+        } catch (err) {
+            // A relay that fails to close cleanly must not block the
+            // disconnect — the server-side teardown is what matters.
+            console.error('Local relay teardown failed', err)
+        }
+        getSocket().emit('disconnect_telemetry')
+        store.setTelemetryStatus('disconnected')
+    }, [])
+
     // Cloud flow: the radio is on the USER'S device — the browser reads it
     // via Web Serial and relays MAVLink to the backend (lib/browserSerial.ts).
     const connectBrowserSerial = useCallback(async (radio: SerialPortLike, baudRate = 57600) => {
@@ -273,6 +326,90 @@ export function useDrone() {
         } catch (err) {
             // Port busy in another app/tab, or radio just unplugged
             console.error('Browser serial connect failed', err)
+            store.setTelemetryError(err instanceof Error ? err.message : 'Could not open the radio port')
+            store.setTelemetryStatus('disconnected')
+        }
+    }, [])
+
+    // Same radio, same bytes, but opened natively instead of through Web
+    // Serial — the desktop app's only working serial path, since Electron
+    // ships navigator.serial with no port picker behind it
+    // (see lib/nativeSerialRelay.ts).
+    const connectNativeSerial = useCallback(async (path: string, baudRate = DEFAULT_SERIAL_BAUD) => {
+        if (isNativeSerialActive()) return
+        store.setTelemetryStatus('connecting')
+        // A port that opens but never speaks is the common failure here (baud
+        // mismatch, unpaired radios) — report that rather than the backend's
+        // generic timeout, same as the SITL bridge does.
+        setSerialSilenceHandler((message) => {
+            store.setTelemetryError(message)
+            store.setTelemetryStatus('error')
+            void stopNativeSerial()
+        })
+        try {
+            await startNativeSerial(path, baudRate)
+        } catch (err) {
+            console.error('Native serial connect failed', err)
+            store.setTelemetryError(err instanceof Error ? err.message : 'Could not open the radio port')
+            store.setTelemetryStatus('disconnected')
+        }
+    }, [])
+
+    // Same wfb-ng ground station as connectLocalRelay, but reading its UDP
+    // ports directly instead of through telemetry_relay.py — desktop only
+    // (see lib/nativeRfRelay.ts). Preferred where available: one fewer process
+    // for the operator to remember to start.
+    const connectNativeRf = useCallback(async () => {
+        if (isNativeRfRelayActive()) return
+        store.setTelemetryStatus('connecting')
+        setRfSilenceHandler((message) => {
+            store.setTelemetryError(message)
+            store.setTelemetryStatus('error')
+            void stopNativeRfRelay()
+        })
+        try {
+            await startNativeRfRelay()
+        } catch (err) {
+            console.error('Native RF relay connect failed', err)
+            store.setTelemetryError(err instanceof Error ? err.message : 'Could not bind the air unit ports')
+            store.setTelemetryStatus('disconnected')
+        }
+    }, [])
+
+    // Same cloud flow, but for a custom RF air unit (wfb-ng) instead of a
+    // USB radio — the browser can't read raw UDP directly, so a local relay
+    // agent re-exposes it as a loopback WebSocket (lib/localRfRelay.ts).
+    const connectLocalRelay = useCallback(async (url?: string) => {
+        if (isLocalRelayActive()) return
+        store.setTelemetryStatus('connecting')
+        try {
+            await startLocalRelay(url)
+        } catch (err) {
+            console.error('Local RF relay connect failed', err)
+            store.setTelemetryError(err instanceof Error ? err.message : 'Could not reach the local relay')
+            store.setTelemetryStatus('disconnected')
+        }
+    }, [])
+
+    // The client's own SITL instance (port 14540, the classic PX4 default),
+    // bridged via the desktop app's native UDP bridge — desktop only, no
+    // browser path (see lib/remoteSitlRelay.ts).
+    const connectRemoteSitl = useCallback(async (port?: number) => {
+        if (isRemoteSitlRelayActive()) return
+        store.setTelemetryStatus('connecting')
+        // The port binding succeeding tells us nothing about whether SITL is
+        // actually sending — report that specific case with its actual causes
+        // instead of waiting out the backend's generic mavsdk timeout.
+        setSitlSilenceHandler((message) => {
+            store.setTelemetryError(message)
+            store.setTelemetryStatus('error')
+            void stopRemoteSitlRelay()
+        })
+        try {
+            await startRemoteSitlRelay(port)
+        } catch (err) {
+            console.error('SITL bridge connect failed', err)
+            store.setTelemetryError(err instanceof Error ? err.message : 'Could not start the SITL bridge')
             store.setTelemetryStatus('disconnected')
         }
     }, [])
@@ -308,7 +445,12 @@ export function useDrone() {
     return {
         ...store,
         connectTelemetry,
+        disconnectTelemetry,
         connectBrowserSerial,
+        connectNativeSerial,
+        connectNativeRf,
+        connectLocalRelay,
+        connectRemoteSitl,
         arm,
         disarm,
         emergencyStop,

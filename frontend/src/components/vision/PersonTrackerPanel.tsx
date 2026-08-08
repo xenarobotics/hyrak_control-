@@ -5,33 +5,38 @@ import { useDroneStore } from '@/store/drone'
 import { getSocket } from '@/lib/socket'
 import { getServerUrl } from '@/lib/server-url'
 import {
-    Users, Crosshair, Square, Timer, Info, ChevronDown, ChevronUp,
+    Users, Crosshair, Square, Info, ChevronDown, ChevronUp,
     Upload, CheckCircle, AlertCircle, Loader2, UserX, ScanFace,
-    Mountain, MoveVertical,
+    Mountain, MoveVertical, UserPlus,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { FaceGalleryPanel } from './FaceGalleryPanel'
 
-const PD_DEFAULTS = { kp: 0.8, kd: 0.4, max_output: 300, deadband: 0.05 }
+// Kept in sync with backend defaults (person_tracker.py _make_state: yaw_pd
+// kp=30/kd=4/max_output=55) — yaw-axis units (deg/s output). A prior 0-2
+// range here meant any slider touch sent values 15-300x weaker than the
+// real default and silently crushed tracking responsiveness.
+const PD_DEFAULTS = { kp: 30.0, kd: 4.0, max_output: 55, deadband: 0.05 }
 
 const PD_PARAMS = [
     {
         key: 'max_output' as const,
-        label: 'Max Speed', min: 50, max: 500, step: 10, unit: '',
+        label: 'Max Speed', min: 15, max: 55, step: 1, unit: '',
         format: (v: number) => v.toFixed(0),
-        tooltip: 'Maximum drone speed while tracking.',
+        tooltip: 'Maximum yaw rate (deg/s) while tracking. Backend hard-caps this at 55 to stay under the flight controller\'s auto-yaw rate limit.',
     },
     {
         key: 'kp' as const,
-        label: 'Responsiveness', min: 0.1, max: 2.0, step: 0.05, unit: '',
-        format: (v: number) => v.toFixed(2),
+        label: 'Responsiveness', min: 10, max: 50, step: 1, unit: '',
+        format: (v: number) => v.toFixed(0),
         tooltip: 'How strongly the drone reacts when the target moves off-centre (Kp). Higher = snappier but may oscillate.',
     },
     {
         key: 'kd' as const,
-        label: 'Smoothing', min: 0.0, max: 0.8, step: 0.02, unit: '',
-        format: (v: number) => v.toFixed(2),
-        tooltip: 'Dampens sudden corrections (Kd). Should be ~half the Responsiveness value.',
+        label: 'Smoothing', min: 0, max: 10, step: 0.2, unit: '',
+        format: (v: number) => v.toFixed(1),
+        tooltip: 'Dampens sudden corrections (Kd). Should be ~1/7th of the Responsiveness value.',
     },
     {
         key: 'deadband' as const,
@@ -135,17 +140,56 @@ export function PersonTrackerPanel() {
 
     const persons = (cvResults as any)?.persons ?? []
     const personCount = (cvResults as any)?.person_count ?? 0
-    const inferenceMs = cvResults?.analysis_time_ms ?? 0
     const targetId = (cvResults as any)?.target_id ?? null
     const similarity = (cvResults as any)?.similarity ?? 0
     const faceConfirmed = (cvResults as any)?.face_confirmed ?? false
     const searching = (cvResults as any)?.searching ?? false
     const cmd = (cvResults as any)?.drone_command
+    // Gallery mode + pursuit state, from the backend's meta.
+    const personName = (cvResults as any)?.person_name ?? null
+    const personId = (cvResults as any)?.person_id ?? null
+    const galleryMargin = (cvResults as any)?.gallery_margin ?? null
+    // EVERY identified person in frame, not only the followed one.
+    const identities = (cvResults as any)?.identities ?? []
+    const lockManual = (cvResults as any)?.lock_manual ?? false
+    const lockState = (cvResults as any)?.lock_state ?? 'idle'
+    const lockMessage = (cvResults as any)?.lock_message ?? ''
+    const elevate = (cvResults as any)?.elevate ?? null
+    const capture = (cvResults as any)?.capture ?? null
+
+    // Tracking used to be gated on an uploaded reference photo alone, which
+    // meant tapping somebody on the video could never actually start a
+    // follow — the button stayed disabled saying "upload photo first". There
+    // are three legitimate ways to have a target now, and any of them should
+    // arm it: an uploaded photo, a face matched from the database, or the
+    // operator simply pointing at someone.
+    const canTrack = uploadState === 'face_found'
+        || targetId !== null
+        || identities.length > 0
+
+    // ── Enrol from the live feed ─────────────────────────────────────────
+    // The gallery then holds this camera, this lens, this angle and this
+    // light — which is what the recogniser is actually asked to match later.
+    // An uploaded photo is a different imaging problem and matches less well.
+    const [enrolName, setEnrolName] = useState('')
+    const [enrolMsg, setEnrolMsg] = useState<string | null>(null)
+    const unknownInFrame = persons.filter(
+        (p: { id: number }) => !identities.some((i: { track_id: number }) => i.track_id === p.id),
+    )
+    const enrolTarget = targetId ?? unknownInFrame[0]?.id ?? persons[0]?.id ?? null
+    const startEnrol = () => {
+        if (!enrolName.trim() || enrolTarget == null) return
+        getSocket().emit('enrol_person_live', { track_id: enrolTarget, name: enrolName.trim() })
+    }
 
     // Sync tracking / clear state from server
     useEffect(() => {
         const socket = getSocket()
         socket.on('tracking_status', (d: { active: boolean }) => setIsTracking(d.active))
+        socket.on('enrolment_started', (d: { ok: boolean; msg?: string }) => {
+            setEnrolMsg(d.msg ?? null)
+            if (d.ok) setEnrolName('')
+        })
         socket.on('reference_cleared', () => {
             setUploadState('idle')
             setFaceThumbnail(null)
@@ -154,6 +198,7 @@ export function PersonTrackerPanel() {
         })
         return () => {
             socket.off('tracking_status')
+            socket.off('enrolment_started')
             socket.off('reference_cleared')
         }
     }, [])
@@ -406,17 +451,52 @@ export function PersonTrackerPanel() {
                 onChange={handleFileSelect}
             />
 
+            {/* ── Lock state ──────────────────────────────────────────────
+                COASTING vs SEARCHING is the distinction that matters: the
+                first means the drone still believes it knows where the target
+                is, the second means it is guessing. A single "tracking" light
+                hides that, and an operator who cannot tell them apart cannot
+                judge whether to take over. */}
+            {lockState !== 'idle' && lockState !== 'locked' && (
+                <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '6px 10px', borderRadius: 8, fontSize: 11,
+                    background: lockState === 'lost' ? 'rgba(248,113,113,0.12)'
+                              : lockState === 'coasting' ? 'rgba(251,191,36,0.10)'
+                              : 'rgba(251,191,36,0.16)',
+                    border: `1px solid ${lockState === 'lost' ? 'rgba(248,113,113,0.4)' : 'rgba(251,191,36,0.4)'}`,
+                    color: lockState === 'lost' ? '#f87171' : '#fbbf24',
+                }}>
+                    <span style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                        {lockState}
+                    </span>
+                    <span style={{ fontFamily: 'monospace', opacity: 0.85 }}>{lockMessage}</span>
+                </div>
+            )}
+
+            {/* ── Auto-elevate ────────────────────────────────────────────
+                Shown whenever it fires OR is blocked. A climb the pilot
+                cannot explain is a climb they will fight, and being blocked by
+                the legal ceiling is different from being blocked because the
+                view has become too steep to recognise anything. */}
+            {elevate && (elevate.elevating || elevate.blocked_by) && (
+                <div style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 8,
+                    padding: '6px 10px', borderRadius: 8, fontSize: 11, lineHeight: 1.5,
+                    background: elevate.elevating ? 'rgba(34,211,238,0.12)' : 'rgba(248,113,113,0.10)',
+                    border: `1px solid ${elevate.elevating ? 'rgba(34,211,238,0.4)' : 'rgba(248,113,113,0.35)'}`,
+                    color: elevate.elevating ? '#22d3ee' : '#f87171',
+                }}>
+                    <MoveVertical size={13} style={{ marginTop: 1, flexShrink: 0 }} />
+                    <span>
+                        <b>{elevate.elevating ? 'Auto-elevating' : 'Cannot climb'}</b>
+                        {' — '}{elevate.reason}
+                    </span>
+                </div>
+            )}
+
             {/* Stats bar */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <div style={{
-                    display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px',
-                    background: 'hsl(var(--app-surface-2))',
-                    border: '1px solid hsl(var(--app-border))',
-                    borderRadius: 8, fontSize: 11, fontFamily: 'monospace',
-                    color: 'hsl(var(--app-text-muted))',
-                }}>
-                    <Timer size={12} /> {inferenceMs.toFixed(0)}ms
-                </div>
                 <div style={{
                     display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px',
                     background: 'hsl(var(--app-surface-2))',
@@ -441,7 +521,109 @@ export function PersonTrackerPanel() {
             </div>
 
             {/* Photo upload section */}
+            {/* ── Enrol from the live feed ────────────────────────────
+                Faster and more accurate than uploading a photo: the gallery
+                ends up holding this camera, lens, angle and lighting, which
+                is what the recogniser is later asked to match. Several shots
+                across ~2s, not one — a single pose matches that pose and
+                little else, and pose variation is the main way recognition
+                fails at drone standoff. */}
+            {capture ? (
+                <div style={{
+                    display: 'flex', flexDirection: 'column', gap: 5,
+                    padding: '9px 10px', borderRadius: 10,
+                    background: 'rgba(56,160,255,0.10)',
+                    border: '1px solid rgba(56,160,255,0.35)',
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12 }}>
+                        <UserPlus size={13} style={{ color: '#38a0ff' }} />
+                        <span style={{ fontWeight: 700, color: '#38a0ff' }}>
+                            Enrolling {capture.name}
+                        </span>
+                        <span style={{ marginLeft: 'auto', fontSize: 11, fontFamily: 'monospace', color: '#38a0ff' }}>
+                            {capture.shots}/{capture.needed}
+                        </span>
+                    </div>
+                    <div style={{ height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.10)' }}>
+                        <div style={{
+                            width: `${(capture.shots / capture.needed) * 100}%`, height: '100%',
+                            borderRadius: 2, background: '#38a0ff', transition: 'width .2s',
+                        }} />
+                    </div>
+                    <div style={{ fontSize: 9.5, color: 'hsl(var(--app-text-muted))', lineHeight: 1.4 }}>
+                        Keep them in frame. Shots are spread over a couple of seconds so
+                        the gallery gets more than one pose.
+                    </div>
+                    <button
+                        onClick={() => getSocket().emit('enrol_person_live', { cancel: true })}
+                        style={{
+                            padding: '4px 0', borderRadius: 6, fontSize: 10, cursor: 'pointer',
+                            border: '1px solid hsl(var(--app-border))', background: 'transparent',
+                            color: 'hsl(var(--app-text-muted))',
+                        }}
+                    >Cancel</button>
+                </div>
+            ) : personCount > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    <div style={{
+                        display: 'flex', alignItems: 'center', gap: 6, fontSize: 10,
+                        textTransform: 'uppercase', letterSpacing: 0.6,
+                        color: 'hsl(var(--app-text-muted))',
+                    }}>
+                        <UserPlus size={11} />
+                        Add to database
+                        {enrolTarget != null && (
+                            <span style={{ marginLeft: 'auto', textTransform: 'none', fontFamily: 'monospace' }}>
+                                #{enrolTarget}{targetId === enrolTarget ? ' (followed)' : ''}
+                            </span>
+                        )}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                        <input
+                            value={enrolName}
+                            onChange={e => setEnrolName(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') startEnrol() }}
+                            placeholder={enrolTarget != null ? `Name for #${enrolTarget}` : 'No one in frame'}
+                            disabled={enrolTarget == null}
+                            style={{
+                                flex: 1, minWidth: 0, padding: '6px 8px', borderRadius: 7,
+                                fontSize: 12, border: '1px solid hsl(var(--app-border))',
+                                background: 'hsl(var(--app-surface-2))', color: 'hsl(var(--app-text))',
+                            }}
+                        />
+                        <button
+                            onClick={startEnrol}
+                            disabled={!enrolName.trim() || enrolTarget == null}
+                            style={{
+                                padding: '6px 12px', borderRadius: 7, fontSize: 11, fontWeight: 600,
+                                cursor: enrolName.trim() && enrolTarget != null ? 'pointer' : 'not-allowed',
+                                border: '1px solid #38a0ff',
+                                background: enrolName.trim() && enrolTarget != null
+                                    ? 'rgba(56,160,255,0.15)' : 'transparent',
+                                color: enrolName.trim() && enrolTarget != null
+                                    ? '#38a0ff' : 'hsl(var(--app-text-muted))',
+                            }}
+                        >Capture</button>
+                    </div>
+                    <div style={{ fontSize: 9.5, color: 'hsl(var(--app-text-muted))' }}>
+                        Tap someone on the video to pick who, then name them here.
+                    </div>
+                    {enrolMsg && (
+                        <div style={{ fontSize: 10, color: '#38a0ff' }}>{enrolMsg}</div>
+                    )}
+                </div>
+            )}
+
             {uploadSection()}
+
+            {/* Second way to acquire a target: match against the enrolled
+                database instead of one uploaded photo. */}
+            <FaceGalleryPanel
+                matchedPersonId={personId}
+                matchedName={personName}
+                similarity={similarity}
+                margin={galleryMargin}
+            />
 
             {/* Track / Stop */}
             <div style={{ display: 'flex', gap: 8 }}>
@@ -449,15 +631,15 @@ export function PersonTrackerPanel() {
                     <Button
                         size="sm"
                         className="flex-1 gap-2 font-mono text-xs"
-                        disabled={uploadState !== 'face_found'}
+                        disabled={!canTrack}
                         onClick={handleStartTracking}
                         style={{
-                            background: uploadState === 'face_found' ? '#0e6b6b' : undefined,
-                            opacity: uploadState !== 'face_found' ? 0.5 : 1,
+                            background: canTrack ? '#0e6b6b' : undefined,
+                            opacity: canTrack ? 1 : 0.5,
                         }}
                     >
                         <Crosshair size={13} />
-                        {uploadState === 'face_found' ? 'Start Tracking' : 'Upload photo first'}
+                        {canTrack ? 'Start Tracking' : 'Select someone or upload a photo'}
                     </Button>
                 ) : (
                     <Button
