@@ -1,6 +1,5 @@
 import logging
 from typing import Any, Dict, Tuple
-import cv2
 import numpy as np
 import torch
 from ultralytics import YOLO
@@ -15,11 +14,12 @@ logger = logging.getLogger("verocore.vision.object_detector")
 # ── Detector ─────────────────────────────────────────────────────────────────
 
 class ObjectDetector(BaseAnalyzer):
+    MODE = "object-detection"
+
     def __init__(self, **kwargs):
         super().__init__(executor_workers=2, **kwargs)
         settings = get_settings()
         self.device = settings.device
-        self.resize_width = settings.inference_resize_width
 
         logger.info(f"Loading YOLO on {self.device}...")
         self.model = YOLO(settings.default_yolo_model)
@@ -31,30 +31,25 @@ class ObjectDetector(BaseAnalyzer):
         )
         logger.info(f"✅ ObjectDetector ready on {self.device.upper()}")
 
-    def _preprocess(self, frame: np.ndarray) -> np.ndarray:
-        if self.resize_width and frame.shape[1] > self.resize_width:
-            scale = self.resize_width / frame.shape[1]
-            new_h = int(frame.shape[0] * scale)
-            return cv2.resize(frame, (self.resize_width, new_h))
-        return frame
-
     @torch.inference_mode()
     def _analyze_frame_blocking(
         self, frame_bgr: np.ndarray
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
-        original_h, original_w = frame_bgr.shape[:2]
-        frame_proc = self._preprocess(frame_bgr)
-        proc_h, proc_w = frame_proc.shape[:2]
+        # Shared with every other module now (BaseAnalyzer.resize_for_inference)
+        # so the per-mode width is honoured in one place instead of four.
+        frame_proc, sx, sy = self.resize_for_inference(frame_bgr)
 
-        opts: Dict[str, Any] = {"device": self.device, "verbose": False, "conf": 0.4}
+        opts: Dict[str, Any] = {
+            "device": self.device, "verbose": False, "conf": 0.4,
+            # Without this ultralytics letterboxes back to 640 regardless.
+            # imgsz_for(), not inference_width: a mode configured to 0 (native)
+            # would otherwise raise on every frame inside the worker thread.
+            "imgsz": self.imgsz_for(frame_proc),
+        }
         if self.device == "cuda":
             opts["half"] = True
 
         results = self.model(frame_proc, **opts)
-
-        # Scale box coordinates back to the original frame resolution
-        sx = original_w / proc_w
-        sy = original_h / proc_h
 
         detected: Dict[str, int] = {}
         detections = []
