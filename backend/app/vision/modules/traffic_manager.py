@@ -54,6 +54,7 @@ THE OPTIMISATION THAT MAKES IT FIT IN ONE FRAME BUDGET
 import logging
 import os
 import time
+from collections import deque
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -70,7 +71,7 @@ from app.vision.drawing import draw_badge, draw_ring, draw_tint_rect
 from app.vision.geometry import camera_from_settings, pose_from_telemetry
 from app.vision.modules.plate_tracker import _INDIA_PLATE_RE, _validate_and_correct
 from app.vision.pursuit import (
-    PursuitLimits, decide_elevation, is_outpaced, lock_state_for,
+    PursuitLimits, decide_elevation, is_outpaced, limit_descent, lock_state_for,
 )
 from app.vision.profiles import ProfileSelector
 from app.vision.speed import SpeedEstimator
@@ -89,10 +90,18 @@ _DETECT_CLASSES = [0, 2, 3, 5, 7]
 # ── Crowd density, borrowed from crowd_manager ───────────────────────────────
 # Same 3x3 grid and the same per-zone colouring, so an operator reads it the
 # same way in both modes. Thresholds are frame-relative headcounts and have no
-# universally correct value — they depend entirely on framing and altitude.
+# universally correct value — they depend entirely on framing and altitude,
+# which is why they live in the persisted calibration rather than here. These
+# two are only the fallback if calibration cannot be read.
 _GRID_ROWS, _GRID_COLS = 3, 3
 _DENSITY_LIGHT_MAX = 8
 _DENSITY_MODERATE_MAX = 20
+
+# Headcount trend, same shape and cadence as crowd_manager so the two modes
+# read identically. A live count cannot tell a steady crowd from one that
+# doubled in a minute; the trend is the number that can.
+_HISTORY_POINTS = 150
+_HISTORY_INTERVAL_S = 2.0
 
 # ── Face recognition budget ──────────────────────────────────────────────────
 # Paced in SECONDS, not frames, for the same reason as person_tracker: counting
@@ -157,6 +166,11 @@ _COLOUR_GOOD_ENOUGH = 0.55
 
 _LOCK_LOST_AFTER_S = 3.0
 _DEFAULT_SIZE_RATIO = 0.22      # target vehicle height as a fraction of frame
+# A person is a stable ~1.7m of vertical extent regardless of which way they
+# face; a vehicle's apparent height swings with its heading. So the two need
+# different hold targets, and only the person one can be given a meaningful
+# metres equivalent. 0.30 matches human_tracker's default (~5m).
+_DEFAULT_PERSON_SIZE_RATIO = 0.30
 _HEIGHT_EMA_ALPHA = 0.12
 _YAW_PRIORITY_THRESHOLD = 0.30
 MAX_PURSUIT_SPEED_M_S = 2.5     # keep in step with dist_pd max_output
@@ -164,10 +178,18 @@ MAX_PURSUIT_SPEED_M_S = 2.5     # keep in step with dist_pd max_output
 _CAPTURE_ROOT = os.path.join(str(ROOT_DIR), ".data", "plate_captures")
 
 
-def _density_level(count: int) -> str:
-    if count <= _DENSITY_LIGHT_MAX:
+def _density_level(count: int, light_max: int = _DENSITY_LIGHT_MAX,
+                   moderate_max: int = _DENSITY_MODERATE_MAX) -> str:
+    """Thresholds are passed in, not read from module constants.
+
+    They were constants here while crowd-management had already moved them to
+    the persisted calibration, so the same crowd was graded differently
+    depending on which mode was watching it — and an operator's custom values
+    silently reverted to 8/20 on entering this mode.
+    """
+    if count <= light_max:
         return "green"
-    if count <= _DENSITY_MODERATE_MAX:
+    if count <= moderate_max:
         return "orange"
     return "red"
 
@@ -261,6 +283,19 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         # ── People / crowd / faces ────────────────────────────────────────
         "person_ids_seen": set(),
         "peak_people": 0,
+        # From the persisted calibration, so an operator's custom values apply
+        # from the FIRST frame rather than whenever a socket push happens to
+        # land after the analyzer exists — a race the push cannot win, since
+        # the panel mounts before the stream negotiates.
+        "light_max": calibration.effective()["crowd_light_max"],
+        "moderate_max": calibration.effective()["crowd_moderate_max"],
+        # Operator labels for the 9 cells. "North Gate is red" is actionable
+        # over a radio; "cell 4 is red" is not.
+        "zone_names": {},
+        # Deque, not a list: a session can run for hours and only the tail is
+        # ever drawn.
+        "count_history": deque(maxlen=_HISTORY_POINTS),
+        "last_history_t": 0.0,
         # track_id -> {person_id, name, votes, best_sim, confirmed, last_seen}
         "face_identities": {},
         "last_face_check_t": 0.0,
@@ -274,6 +309,15 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         "profile_overrides": {},
         # ── Follow ────────────────────────────────────────────────────────
         "locked_track_id": None,
+        # "vehicle" | "person" — which list the locked id was found in. Needed
+        # because the hold distance and the labelling differ by kind.
+        "locked_kind": None,
+        "size_ratio": {
+            "vehicle": _DEFAULT_SIZE_RATIO,
+            "person": _DEFAULT_PERSON_SIZE_RATIO,
+        },
+        "altitude_mode": "auto",
+        "altitude_nudge_v": 0.0,
         "locked_plate": "",
         "follow_request_track_id": None,
         "tracking": False,
@@ -372,19 +416,111 @@ class TrafficManager(BaseAnalyzer):
     # ── Operator control ──────────────────────────────────────────────────
 
     def request_follow(self, client_id: str, track_id: Optional[int]) -> None:
-        """Follow a specific vehicle, or None to release."""
+        """
+        Follow a specific subject — vehicle OR person — or None to release.
+
+        One id space covers both because both come out of the SAME ByteTrack
+        pass (one YOLO call over classes [0,2,3,5,7]), so a track id is unique
+        across the two lists and the caller never has to say which kind it
+        meant. That is the whole reason this mode can offer click-to-follow on
+        anything in frame with a single event.
+        """
         state = self._client_state.get(client_id)
         if state is None:
             return
         if track_id is None:
             state["follow_request_track_id"] = None
             state["locked_track_id"] = None
+            state["locked_kind"] = None
             state["locked_plate"] = ""
             state["tracking"] = False
-            logger.info(f"Session {client_id[:8]}: vehicle lock released")
+            logger.info(f"Session {client_id[:8]}: lock released")
             return
         state["follow_request_track_id"] = int(track_id)
-        logger.info(f"Session {client_id[:8]}: follow requested for vehicle #{track_id}")
+        logger.info(f"Session {client_id[:8]}: follow requested for track #{track_id}")
+
+    def set_tracking_params(self, client_id: str, target_distance_ratio: float) -> None:
+        """
+        Adjust the "hold here" distance: target subject height as a fraction of
+        frame height. Lower holds farther back, higher holds closer.
+
+        Stored PER KIND, because the two are not interchangeable. A person is a
+        stable ~1.7m of vertical extent whichever way they face, so a ratio maps
+        to a rough range. A vehicle's apparent height depends on its heading as
+        much as its distance — broadside shows the long axis, head-on shows only
+        the narrow front — so the same range yields very different fills, and
+        the only workable target is one the operator nudges while watching the
+        actual fill. Sharing one value between them made a target tuned on a car
+        drive the drone into the wrong hold distance the moment a person was
+        picked instead.
+        """
+        state = self._client_state.get(client_id)
+        if state is None:
+            return
+        kind = state.get("locked_kind") or "vehicle"
+        ratio = float(np.clip(target_distance_ratio, 0.05, 0.80))
+        state["size_ratio"][kind] = ratio
+        state["dist_pd"].reset()
+        logger.info(
+            f"Session {client_id[:8]}: {kind} hold distance -> {ratio:.2f} fill"
+        )
+
+    def set_altitude_mode(self, client_id: str, mode: str) -> None:
+        """'fixed' holds the altitude Offboard started at (nudge still applies);
+        'auto' lets the altitude PD keep the subject vertically centred.
+
+        Auto-elevate overrides BOTH — holding a fleeing subject in frame at all
+        outranks either altitude policy.
+        """
+        if client_id not in self._client_state or mode not in ("fixed", "auto"):
+            return
+        state = self._client_state[client_id]
+        state["altitude_mode"] = mode
+        if mode == "fixed":
+            # A stale derivative would lurch the moment auto resumes.
+            state["alt_pd"].reset()
+        else:
+            # Leaving fixed: drop any held nudge so it cannot fight the PD.
+            state["altitude_nudge_v"] = 0.0
+        logger.info(f"Session {client_id[:8]}: altitude mode -> {mode}")
+
+    def set_altitude_nudge(self, client_id: str, velocity: float) -> None:
+        """Manual altitude velocity for Fixed mode: -ve ascend, +ve descend
+        (NED), 0 stop. Held while the operator presses, cleared on release.
+        Ignored in Auto, which owns this axis."""
+        if client_id not in self._client_state:
+            return
+        self._client_state[client_id]["altitude_nudge_v"] = float(
+            np.clip(velocity, -1.5, 1.5)
+        )
+
+    def set_zone_names(self, client_id: str, names: Dict[str, str]) -> None:
+        """Operator labels for the grid cells, keyed by cell index as a string.
+        Same contract as crowd_manager so one panel control drives both."""
+        st = self._client_state.get(client_id)
+        if st is None:
+            return
+        st["zone_names"] = {
+            str(k): str(v)[:24] for k, v in (names or {}).items() if str(v).strip()
+        }
+        logger.info(f"Session {client_id[:8]}: {len(st['zone_names'])} zone name(s) set")
+
+    def set_thresholds(self, client_id: str, light_max: int, moderate_max: int) -> None:
+        """Density band edges, written through to the persisted calibration.
+
+        Persisted rather than held in session state for the reason crowd
+        management already learned the hard way: register_client rebuilds state
+        on every stream, so anything living only in the browser or only in a
+        session reverts to the defaults the moment the stream reconnects.
+        """
+        st = self._client_state.get(client_id)
+        if st is None:
+            return
+        lo = max(1, int(light_max))
+        hi = max(lo + 1, int(moderate_max))
+        st["light_max"], st["moderate_max"] = lo, hi
+        calibration.save({"crowd_light_max": lo, "crowd_moderate_max": hi})
+        logger.info(f"Session {client_id[:8]}: density thresholds -> {lo}/{hi}")
 
     def set_profile_override(self, client_id: str, subject: str, mode: str) -> None:
         """
@@ -421,6 +557,10 @@ class TrafficManager(BaseAnalyzer):
             state["smoother"].reset()
             state["height_ema"] = None
             state["elevate"] = None
+            # A held nudge would otherwise still be commanding vertical motion
+            # the next time Follow arms.
+            state["altitude_nudge_v"] = 0.0
+            state["altitude_floor_reason"] = None
         logger.info(
             f"Session {client_id[:8]}: vehicle tracking "
             f"{'STARTED' if active else 'STOPPED'}"
@@ -834,10 +974,31 @@ class TrafficManager(BaseAnalyzer):
             x1, y1, x2, y2 = pr["box"]
             sec = _section_of((x1 + x2) // 2, (y1 + y2) // 2, W, H)
             section_counts[sec] = section_counts.get(sec, 0) + 1
-        density = _density_level(len(people))
+        light_max = int(state.get("light_max", _DENSITY_LIGHT_MAX))
+        moderate_max = int(state.get("moderate_max", _DENSITY_MODERATE_MAX))
+        density = _density_level(len(people), light_max, moderate_max)
+
+        if now - state.get("last_history_t", 0.0) >= _HISTORY_INTERVAL_S:
+            state["last_history_t"] = now
+            state["count_history"].append({"t": round(now, 1), "n": len(people)})
+        hist = list(state["count_history"])
+        # Rate of change over the last minute, people/min — the headline number
+        # for "is this building". A steady 200 and a 200 that was 120 a minute
+        # ago read identically from a live count and are entirely different
+        # situations.
+        trend_per_min = None
+        if len(hist) >= 2:
+            recent = [h for h in hist if now - h["t"] <= 60.0] or hist[-2:]
+            span = recent[-1]["t"] - recent[0]["t"]
+            if span > 1.0:
+                trend_per_min = round(
+                    (recent[-1]["n"] - recent[0]["n"]) * 60.0 / span, 1
+                )
 
         # ── Follow ────────────────────────────────────────────────────────
-        drone_command = self._follow(state, in_frame, client_id, W, H, ctx, pose)
+        drone_command = self._follow(
+            state, in_frame, people, client_id, W, H, ctx, pose
+        )
 
         # ── Persist + retire ──────────────────────────────────────────────
         pending_db: List[dict] = []
@@ -915,8 +1076,11 @@ class TrafficManager(BaseAnalyzer):
             "density_level": density,
             "section_counts": section_counts,
             "section_grid": [_GRID_ROWS, _GRID_COLS],
-            "light_max": _DENSITY_LIGHT_MAX,
-            "moderate_max": _DENSITY_MODERATE_MAX,
+            "light_max": light_max,
+            "moderate_max": moderate_max,
+            "zone_names": dict(state.get("zone_names", {})),
+            "count_history": hist,
+            "trend_per_min": trend_per_min,
             # ── Faces, borrowed from person_tracker's gallery ─────────────
             "identities": [
                 {
@@ -935,7 +1099,24 @@ class TrafficManager(BaseAnalyzer):
                              if getattr(self, "_gallery", None) else 0),
             # Follow state
             "locked_track_id": locked_id,
+            # Which kind was locked — the panel labels and the hold-distance
+            # control both depend on it, and a person lock must not be
+            # described as a vehicle.
+            "locked_kind": state.get("locked_kind"),
             "locked_plate": state.get("locked_plate") or None,
+            "target_distance_ratio": state["size_ratio"].get(
+                state.get("locked_kind") or "vehicle", _DEFAULT_SIZE_RATIO
+            ),
+            "altitude_mode": state.get("altitude_mode", "auto"),
+            # What the subject is ACTUALLY filling, in the same units as the
+            # target. Shown together with it because "the drone only moves
+            # backward" is indistinguishable from "this target is unreachable
+            # at this range" unless both numbers are visible at once.
+            "subject_fill_pct": (round(state["height_ema"] * 100.0, 1)
+                                 if state.get("height_ema") is not None else None),
+            # Why the floor is holding altitude, when it is. Silence here was
+            # what made the SITL descent impossible to see coming.
+            "altitude_floor_reason": state.get("altitude_floor_reason"),
             "tracking": state.get("tracking", False),
             "lock_state": lock.value,
             "lock_message": lock_msg,
@@ -1009,25 +1190,42 @@ class TrafficManager(BaseAnalyzer):
 
     # ── Follow control ────────────────────────────────────────────────────
 
-    def _follow(self, state, in_frame, client_id, W, H, ctx, pose):
+    def _follow(self, state, in_frame, people, client_id, W, H, ctx, pose):
         """
-        Keep a locked vehicle framed. Same three-axis PD shape as
-        human_tracker (yaw primary, distance via apparent size, altitude
-        secondary) plus the auto-elevate fallback when the vehicle outruns us.
+        Keep a locked subject framed — vehicle or person. Same three-axis PD
+        shape as human_tracker (yaw primary, distance via apparent size,
+        altitude secondary) plus the auto-elevate fallback when the subject
+        outruns us.
+
+        Both kinds resolve out of one id space: people and vehicles come from
+        the same ByteTrack pass, so a track id identifies exactly one subject
+        and this does not need to be told which kind was clicked.
         """
-        # An operator request takes effect as soon as that vehicle is in frame.
+        def _find(tid):
+            """(kind, box, vehicle_or_None) for a track id, or None."""
+            for v in in_frame:
+                if v.track_id == tid:
+                    return "vehicle", v.box, v
+            for p in people:
+                if p["track_id"] == tid:
+                    return "person", p["box"], None
+            return None
+
+        # An operator request takes effect as soon as that subject is in frame.
         wanted = state.get("follow_request_track_id")
         if wanted is not None:
-            if any(v.track_id == wanted for v in in_frame):
+            found = _find(wanted)
+            if found is not None:
+                kind, _, v = found
                 state["locked_track_id"] = wanted
+                state["locked_kind"] = kind
                 state["follow_request_track_id"] = None
                 state["kalman"].reset()
                 state["height_ema"] = None
-                v = next(v for v in in_frame if v.track_id == wanted)
-                state["locked_plate"] = v.plate or ""
+                state["locked_plate"] = (v.plate or "") if v is not None else ""
                 logger.info(
-                    f"Session {client_id[:8]}: locked vehicle #{wanted}"
-                    + (f" ({v.plate})" if v.plate else "")
+                    f"Session {client_id[:8]}: locked {kind} #{wanted}"
+                    + (f" ({v.plate})" if v is not None and v.plate else "")
                 )
 
         locked_id = state.get("locked_track_id")
@@ -1035,24 +1233,26 @@ class TrafficManager(BaseAnalyzer):
             state["elevate"] = None
             return None
 
-        target = next((v for v in in_frame if v.track_id == locked_id), None)
-        if target is None:
+        found = _find(locked_id)
+        if found is None:
             state["frames_lost"] = state.get("frames_lost", 0) + 1
             # The plate is the identity that survives a track id change, so it
             # is kept rather than cleared — a re-read of the same characters is
             # the same vehicle, not a guess.
             return None
 
+        kind, box, target = found
+        state["locked_kind"] = kind
         state["frames_lost"] = 0
         state["last_seen_t"] = time.monotonic()
-        if target.plate and not state.get("locked_plate"):
+        if target is not None and target.plate and not state.get("locked_plate"):
             state["locked_plate"] = target.plate
 
         if not state.get("tracking"):
             state["elevate"] = None
             return None
 
-        x1, y1, x2, y2 = target.box
+        x1, y1, x2, y2 = box
         cx_n, cy_n = (x1 + x2) / (2 * W), (y1 + y2) / (2 * H)
         fx_n, fy_n = state["kalman"].update(cx_n, cy_n)
 
@@ -1063,12 +1263,23 @@ class TrafficManager(BaseAnalyzer):
         )
         state["height_ema"] = h_ema
 
+        target_ratio = state["size_ratio"].get(
+            kind, _DEFAULT_SIZE_RATIO if kind == "vehicle"
+            else _DEFAULT_PERSON_SIZE_RATIO
+        )
         err_yaw = fx_n - 0.5
         err_alt = fy_n - 0.5
-        err_dist = _DEFAULT_SIZE_RATIO - h_ema
+        err_dist = target_ratio - h_ema
 
         yaw_deg_s = state["yaw_pd"].compute(err_yaw)
-        down_m_s = state["alt_pd"].compute(err_alt)
+        # Fixed holds the altitude Offboard started at, so the only vertical
+        # motion is whatever the operator is nudging. Auto lets the PD centre
+        # the subject. Auto-elevate below overrides either.
+        if state.get("altitude_mode") == "fixed":
+            state["alt_pd"].reset()
+            down_m_s = float(state.get("altitude_nudge_v") or 0.0)
+        else:
+            down_m_s = state["alt_pd"].compute(err_alt)
 
         yaw_factor = max(0.0, 1.0 - abs(err_yaw) / _YAW_PRIORITY_THRESHOLD)
         if yaw_factor > 0.0:
@@ -1099,6 +1310,20 @@ class TrafficManager(BaseAnalyzer):
             if elevate.elevating:
                 down_m_s = elevate.climb_m_s
         state["elevate"] = elevate.to_dict() if elevate else None
+
+        # THE ALTITUDE FLOOR. Last thing before the command is emitted, so it
+        # catches every source of descent — the altitude PD, an operator nudge,
+        # anything added later — rather than each of them separately.
+        #
+        # This module was the ONLY follow-capable one without it: the other
+        # five gained the guard after an unguarded descent flew a SITL aircraft
+        # into the ground (+0.5 m/s held for 12s, 6.6m to 0m, ending in
+        # "invalid setpoints / blind land"). The same code path existed here
+        # untouched. See pursuit.limit_descent.
+        down_m_s, floor_reason = limit_descent(
+            down_m_s, pose.agl_m if pose else None, PursuitLimits.from_settings()
+        )
+        state["altitude_floor_reason"] = floor_reason
 
         cmd = state["smoother"].smooth({
             "type": "velocity",

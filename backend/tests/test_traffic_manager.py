@@ -300,10 +300,10 @@ def test_lock_takes_effect_only_once_the_vehicle_is_in_frame():
     t.request_follow("s", 7)
     assert state["locked_track_id"] is None          # requested, not locked
 
-    t._follow(state, [], "s", 1920, 1080, None, None)
+    t._follow(state, [], [], "s", 1920, 1080, None, None)
     assert state["locked_track_id"] is None, "locked onto an absent vehicle"
 
-    t._follow(state, [vehicle(7)], "s", 1920, 1080, None, None)
+    t._follow(state, [vehicle(7)], [], "s", 1920, 1080, None, None)
     assert state["locked_track_id"] == 7
 
 
@@ -315,7 +315,7 @@ def test_locking_captures_the_plate_as_the_durable_identity():
     v = vehicle(7)
     v.plate = "MH12AB1234"
     t.request_follow("s", 7)
-    t._follow(state, [v], "s", 1920, 1080, None, None)
+    t._follow(state, [v], [], "s", 1920, 1080, None, None)
     assert state["locked_plate"] == "MH12AB1234"
 
 
@@ -325,10 +325,10 @@ def test_no_command_until_tracking_is_armed():
     t = bare_tracker()
     state = t._client_state["s"]
     t.request_follow("s", 7)
-    assert t._follow(state, [vehicle(7)], "s", 1920, 1080, None, None) is None
+    assert t._follow(state, [vehicle(7)], [], "s", 1920, 1080, None, None) is None
 
     t.set_tracking("s", True)
-    cmd = t._follow(state, [vehicle(7)], "s", 1920, 1080, None, None)
+    cmd = t._follow(state, [vehicle(7)], [], "s", 1920, 1080, None, None)
     assert cmd is not None
     assert cmd["type"] == "velocity"
 
@@ -342,7 +342,7 @@ def test_command_yaws_toward_a_vehicle_off_to_one_side():
     right = vehicle(7, 1500, 500, 1800, 700)
     cmd = None
     for _ in range(6):
-        cmd = t._follow(state, [right], "s", 1920, 1080, None, None)
+        cmd = t._follow(state, [right], [], "s", 1920, 1080, None, None)
     assert cmd["yaw_deg_s"] > 0, "did not yaw toward a right-hand target"
 
 
@@ -351,12 +351,12 @@ def test_releasing_clears_the_lock_and_stops_commanding():
     state = t._client_state["s"]
     t.request_follow("s", 7)
     t.set_tracking("s", True)
-    t._follow(state, [vehicle(7)], "s", 1920, 1080, None, None)
+    t._follow(state, [vehicle(7)], [], "s", 1920, 1080, None, None)
 
     t.request_follow("s", None)
     assert state["locked_track_id"] is None
     assert state["tracking"] is False
-    assert t._follow(state, [vehicle(7)], "s", 1920, 1080, None, None) is None
+    assert t._follow(state, [vehicle(7)], [], "s", 1920, 1080, None, None) is None
 
 
 def test_losing_the_vehicle_stops_commands_but_keeps_the_identity():
@@ -368,9 +368,9 @@ def test_losing_the_vehicle_stops_commands_but_keeps_the_identity():
     v.plate = "MH12AB1234"
     t.request_follow("s", 7)
     t.set_tracking("s", True)
-    t._follow(state, [v], "s", 1920, 1080, None, None)
+    t._follow(state, [v], [], "s", 1920, 1080, None, None)
 
-    assert t._follow(state, [], "s", 1920, 1080, None, None) is None
+    assert t._follow(state, [], [], "s", 1920, 1080, None, None) is None
     assert state["locked_plate"] == "MH12AB1234"
     assert state["frames_lost"] >= 1
 
@@ -382,7 +382,7 @@ def test_stopping_tracking_resets_the_controllers():
     t.request_follow("s", 7)
     t.set_tracking("s", True)
     for _ in range(4):
-        t._follow(state, [vehicle(7, 1500, 500, 1800, 700)], "s", 1920, 1080, None, None)
+        t._follow(state, [vehicle(7, 1500, 500, 1800, 700)], [], "s", 1920, 1080, None, None)
     t.set_tracking("s", False)
     assert state["height_ema"] is None
     assert state["elevate"] is None
@@ -799,3 +799,147 @@ def test_native_width_survives_the_viability_maths():
     })
     assert {i.subject for i in items} == {"vehicle", "person", "plate", "face"}
     assert all(i.px_on_target > 0 for i in items)
+
+
+# --------------------------------------------------------------------------- #
+# Following a PERSON, not just a vehicle                                        #
+# --------------------------------------------------------------------------- #
+#
+# People and vehicles come out of ONE ByteTrack pass (a single YOLO call over
+# classes [0,2,3,5,7]), so a track id is unique across both lists. That is what
+# lets click-to-follow work on anything in frame through one event, with no
+# "which kind did you mean" in the payload.
+
+def person(tid: int, x1=800, y1=300, x2=900, y2=700) -> dict:
+    return {"track_id": tid, "box": [x1, y1, x2, y2], "conf": 0.9}
+
+
+def test_a_person_can_be_followed():
+    t = bare_tracker()
+    state = t._client_state["s"]
+    t.request_follow("s", 42)
+    t.set_tracking("s", True)
+    cmd = t._follow(state, [], [person(42)], "s", 1920, 1080, None, None)
+    assert state["locked_track_id"] == 42
+    assert state["locked_kind"] == "person"
+    assert cmd is not None and cmd["type"] == "velocity"
+
+
+def test_the_locked_kind_follows_the_subject_not_the_request():
+    """The caller never says which kind it meant, so the module must work it
+    out from which list the id turns up in."""
+    t = bare_tracker()
+    state = t._client_state["s"]
+    t.request_follow("s", 5)
+    t._follow(state, [vehicle(5)], [], "s", 1920, 1080, None, None)
+    assert state["locked_kind"] == "vehicle"
+
+
+def test_person_and_vehicle_hold_distances_are_kept_apart():
+    """A person is a stable 1.7m of vertical extent; a vehicle's apparent
+    height swings with its heading. One shared target meant a value tuned on a
+    car drove the wrong hold distance the moment a person was picked."""
+    t = bare_tracker()
+    state = t._client_state["s"]
+
+    t.request_follow("s", 7)
+    t._follow(state, [vehicle(7)], [], "s", 1920, 1080, None, None)
+    t.set_tracking_params("s", 0.45)
+    assert state["size_ratio"]["vehicle"] == pytest.approx(0.45)
+
+    t.request_follow("s", 8)
+    t._follow(state, [], [person(8)], "s", 1920, 1080, None, None)
+    assert state["size_ratio"]["person"] != pytest.approx(0.45)
+
+
+# --------------------------------------------------------------------------- #
+# The altitude floor                                                            #
+# --------------------------------------------------------------------------- #
+#
+# Every other follow-capable module gained limit_descent after an unguarded
+# descent flew a SITL aircraft into the ground. This one did not have it.
+
+def test_descent_is_refused_without_an_agl_reading():
+    """Descending blind is what the crash did. No AGL must mean no descent,
+    not a default."""
+    from app.vision.pursuit import PursuitLimits, limit_descent
+
+    down, why = limit_descent(0.5, None, PursuitLimits.from_settings())
+    assert down == 0.0
+    assert why and "blind" in why.lower()
+
+
+def test_follow_applies_the_altitude_floor_to_every_descent_source():
+    """Applied last, so it catches the altitude PD, an operator nudge, and
+    anything added later — rather than each of them separately."""
+    import inspect
+
+    from app.vision.modules import traffic_manager as tm
+
+    src = inspect.getsource(tm.TrafficManager._follow)
+    assert "limit_descent(" in src, "the altitude floor is not applied at all"
+    floor_at = src.index("limit_descent(")
+    emit_at = src.index('"type": "velocity"', floor_at)
+    assert floor_at < emit_at, "floor must be applied before the command is emitted"
+
+
+def test_an_operator_nudge_cannot_descend_through_the_floor():
+    t = bare_tracker()
+    state = t._client_state["s"]
+    t.request_follow("s", 7)
+    t.set_tracking("s", True)
+    t.set_altitude_mode("s", "fixed")
+    t.set_altitude_nudge("s", 1.2)          # +ve is DOWN in NED
+    # No pose, so there is no AGL — descent must be refused outright.
+    cmd = t._follow(state, [vehicle(7)], [], "s", 1920, 1080, None, None)
+    assert cmd["down_m_s"] <= 0.0
+
+
+def test_stopping_tracking_drops_a_held_nudge():
+    """Otherwise it is still commanding vertical motion the next time Follow
+    arms."""
+    t = bare_tracker()
+    state = t._client_state["s"]
+    t.set_altitude_nudge("s", 1.0)
+    t.set_tracking("s", False)
+    assert state["altitude_nudge_v"] == 0.0
+
+
+# --------------------------------------------------------------------------- #
+# Crowd parity                                                                  #
+# --------------------------------------------------------------------------- #
+
+def test_density_thresholds_come_from_calibration_not_constants():
+    """crowd-management already persists these. While this module kept its own
+    constants, the same crowd was graded differently depending on which mode
+    was watching, and custom values reverted to 8/20 on entering this one."""
+    from app.vision import calibration
+    from app.vision.modules.traffic_manager import _make_state
+
+    before = calibration.effective()
+    try:
+        calibration.save({"crowd_light_max": 25, "crowd_moderate_max": 60})
+        st = _make_state("threshold-check")
+        assert st["light_max"] == 25
+        assert st["moderate_max"] == 60
+    finally:
+        calibration.save({
+            "crowd_light_max": before["crowd_light_max"],
+            "crowd_moderate_max": before["crowd_moderate_max"],
+        })
+
+
+def test_density_level_uses_the_passed_thresholds():
+    from app.vision.modules.traffic_manager import _density_level
+
+    assert _density_level(10, light_max=25, moderate_max=60) == "green"
+    assert _density_level(10, light_max=8, moderate_max=20) == "orange"
+
+
+def test_moderate_max_cannot_be_set_below_light_max():
+    """An inverted pair would make the orange band empty and every reading
+    jump green to red."""
+    t = bare_tracker()
+    t.set_thresholds("s", light_max=30, moderate_max=10)
+    st = t._client_state["s"]
+    assert st["moderate_max"] > st["light_max"]
