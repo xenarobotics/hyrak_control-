@@ -753,3 +753,43 @@ def test_identify_all_uses_the_supplied_owner_without_searching():
     for _ in range(_ID_MIN_VOTES):
         ids = t._identify_all([(outside_face, BODY_A)], [BODY_A], state)
     assert ids[1]["name"] == "Alice"
+
+
+# --------------------------------------------------------------------------- #
+# A manual pick outranks auto-identification                                    #
+# --------------------------------------------------------------------------- #
+
+def test_follow_track_marks_the_lock_manual_and_clears_the_identity():
+    """Tapping somebody is a deliberate choice about WHO, so it must not leave
+    an identity lock behind that a later face match could resurrect."""
+    from app.vision.modules.person_tracker import PersonTracker, _make_state
+    t = PersonTracker.__new__(PersonTracker)
+    t._client_state = {"s": _make_state()}
+    st = t._client_state["s"]
+    st["locked_person_id"] = "someone-else"
+    t.follow_track("s", 7)
+    assert st["target_track_id"] == 7
+    assert st["lock_manual"] is True
+    assert st["locked_person_id"] is None
+
+
+def test_turning_on_identify_does_not_steal_a_manual_target():
+    """
+    THE BUG: enabling auto-identify handed the aircraft to whoever scored best
+    in the gallery, abandoning the person the operator had tapped. The drone
+    silently switching which human it chases is the worst failure this module
+    can produce.
+
+    Checked structurally — the real path needs YOLO and InsightFace — but the
+    precedence is what matters: identify still runs, it just no longer picks.
+    """
+    import inspect
+    from app.vision.modules.person_tracker import PersonTracker
+    src = inspect.getsource(PersonTracker._analyze_frame_blocking)
+    assert "manual_held" in src, "manual-lock precedence is gone"
+    i_manual = src.index("manual_held")
+    i_choose = src.index("self._choose_target(")
+    assert i_manual < i_choose, (
+        "_choose_target runs before the manual hold is checked — it will "
+        "overwrite the operator's target again"
+    )

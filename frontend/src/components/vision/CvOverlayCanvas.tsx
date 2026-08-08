@@ -435,29 +435,31 @@ function drawVehicleTracking(ctx: CanvasRenderingContext2D, r: CVResult, W: numb
         if (locked) drawLockedRing(ctx, x1, y1, x2, y2, C.active)
         else drawSubjectRing(ctx, x1, y1, x2, y2, C.vehicle, 1.5, 0.7)
 
-        const bits: string[] = []
-        if (v.vehicle_id) bits.push(v.vehicle_id)
-        if (v.color && v.color !== 'unknown' && (v.color_conf ?? 0) >= 0.35) bits.push(v.color)
-        if (v.type && v.type !== 'unknown') bits.push(v.type)
-        let label = bits.join(' ')
+        // ONE thing on screen per vehicle: the plate. vehicle_id, colour,
+        // type and speed were all crammed into a single dense caption —
+        // "719257C VH-000001 blue car ~48km/h" — which is what actually read
+        // as dated, not the chip style. All of it is already in the side
+        // panel, laid out properly, and none of it needs to be read off a
+        // moving picture.
+        //
+        // A trailing "?" marks a reading only one frame produced. It is still
+        // shown AND still logged: at drone standoff a single-frame read is
+        // often the only read a passing vehicle will ever give.
         if (v.plate) {
-            // A trailing "?" marks a reading only one frame has produced —
-            // visible, but visibly weaker. It is still shown AND still logged:
-            // at drone standoff a single-frame read is often the only read a
-            // passing vehicle will ever give.
-            label = `${v.plate}${v.plate_strong ? '' : '?'}  ${label}`
+            const text = `${v.plate}${v.plate_strong ? '' : '?'}`
+            // Solid pill for the followed vehicle, quiet chip for the rest —
+            // hierarchy by weight, not by cramming in more words.
+            if (locked) drawPill(ctx, text, x1, y1, C.active)
+            else drawBadge(ctx, text, x1, Math.max(16, y1 - 4),
+                           v.plate_strong ? C.known : C.unknown)
+        } else if (locked) {
+            drawPill(ctx, v.vehicle_id ?? 'FOLLOWING', x1, y1, C.active)
         }
-        if (v.speed_kmh != null) {
-            // "~" and a trailing "?" are load-bearing: a ground-sample
-            // estimate must not be mistaken for a calibrated reading.
-            label += `  ~${Math.round(v.speed_kmh)}km/h${v.speed_reliable ? '' : '?'}`
-        }
-        drawBadge(ctx, label, x1, Math.max(16, y1 - 4), locked ? C.active : C.vehicle)
 
         if (v.plate_box) {
             const [px1, py1, px2, py2] = v.plate_box
-            // Green once corroborated across frames, amber on a single read.
-            drawBrackets(ctx, px1, py1, px2, py2, v.plate_strong ? C.green : C.orange, 2)
+            drawSubjectRing(ctx, px1, py1, px2, py2,
+                            v.plate_strong ? C.known : C.unknown, 2)
         }
 
         // Recentering guide for the locked, actively-followed vehicle — same

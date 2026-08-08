@@ -1081,7 +1081,38 @@ class PersonTracker(BaseAnalyzer):
                     # separate steps on purpose — see _identify_all.
                     identities = self._identify_all(faces, persons, state)
                     state["identities"] = identities
-                    tid, ident = self._choose_target(identities, persons, state, client_id)
+
+                    # AN OPERATOR'S PICK OUTRANKS AUTO-IDENTIFICATION.
+                    #
+                    # Turning on auto-identify used to hand the aircraft to
+                    # whoever scored best in the gallery, abandoning the person
+                    # the operator had deliberately tapped. That is the worst
+                    # failure this module can produce: the drone silently
+                    # switches which human it is chasing, and the operator has
+                    # no reason to expect it. Naming everyone in frame and
+                    # choosing whom to follow are separate jobs — identify
+                    # still runs, it just no longer steals the target.
+                    manual_tid = state.get("target_track_id")
+                    manual_held = (
+                        state.get("lock_manual")
+                        and manual_tid is not None
+                        and any(pp["id"] == manual_tid for pp in persons)
+                    )
+                    if manual_held:
+                        state["locked_last_seen_t"] = time.monotonic()
+                        tid, ident = manual_tid, identities.get(manual_tid)
+                        if ident is None:
+                            # Held, but not recognised — keep following them
+                            # and skip the gallery-match bookkeeping below.
+                            best_person = next(
+                                (pp for pp in persons if pp["id"] == manual_tid), None
+                            )
+                            threshold, best_sim = 0.0, 1.0
+                            tid = None
+                    else:
+                        tid, ident = self._choose_target(
+                            identities, persons, state, client_id
+                        )
                     if ident is not None:
                         best_person = next(
                             (pp for pp in persons if pp["id"] == tid), None
@@ -1094,7 +1125,12 @@ class PersonTracker(BaseAnalyzer):
                         )
                     # _identify_all and _choose_target have already applied
                     # their own thresholds, so anything returned is admissible.
-                    threshold = 0.0 if gallery_hit else _SIMILARITY_THRESHOLD
+                    # A manual hold has already set its own threshold above and
+                    # must not be re-gated here.
+                    if not manual_held:
+                        threshold = 0.0 if gallery_hit else _SIMILARITY_THRESHOLD
+                    elif gallery_hit:
+                        threshold = 0.0
 
                 if best_sim >= threshold and best_person is not None:
                     if target_id != best_person["id"]:

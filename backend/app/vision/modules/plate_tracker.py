@@ -1293,32 +1293,27 @@ class PlateTracker(BaseAnalyzer):
             color = (200, 220, 50) if locked else (170, 170, 170)
             draw_ring(frame_bgr, x1, y1, x2, y2, color, 3 if locked else 2)
 
-            # Built from what is actually known, so a vehicle with no plate
-            # still reads usefully instead of showing empty fields.
-            bits = [v.get("vehicle_id", "")]
-            if v.get("color") not in (None, "unknown") and v.get("color_conf", 0) >= 0.35:
-                bits.append(v["color"])
-            if v.get("type") and v["type"] != "unknown":
-                bits.append(v["type"])
-            label = " ".join(b for b in bits if b)
+            # ONE thing on screen per vehicle: the plate. vehicle_id, colour,
+            # type and speed all used to be crammed into a single dense
+            # caption, which is what read as dated — not the chip style. Every
+            # one of those is already in the side panel, laid out properly,
+            # and none of it needs reading off a moving picture.
+            #
+            # A trailing "?" marks a reading only one frame produced. Still
+            # shown and still logged: at drone standoff a single-frame read is
+            # often the only read a passing vehicle will ever give.
             plate = v.get("plate")
+            strong = bool(v.get("plate_strong"))
+            pcol = (153, 211, 52) if strong else (36, 191, 251)
             if plate:
-                # A trailing "?" marks a reading only one frame has produced —
-                # visible, but visibly weaker. It is still shown, and still
-                # logged: at drone standoff a single-frame read is often the
-                # only read a passing vehicle will ever give.
-                label = f"{plate}{'' if v.get('plate_strong') else '?'}  {label}"
-            kmh = v.get("speed_kmh")
-            if kmh is not None:
-                # "~" and a trailing "?" are load-bearing: a ground-sample
-                # estimate must not look like a calibrated reading.
-                label += f"  ~{kmh:.0f}km/h" + ("" if v.get("speed_reliable") else "?")
-            draw_badge(frame_bgr, label, x1, max(16, y1 - 4), fg=color)
+                draw_badge(frame_bgr, f"{plate}{'' if strong else '?'}",
+                           x1, max(16, y1 - 4), fg=color if locked else pcol)
+            elif locked:
+                draw_badge(frame_bgr, v.get("vehicle_id") or "FOLLOWING",
+                           x1, max(16, y1 - 4), fg=color)
 
             if v.get("plate_box"):
                 px1, py1, px2, py2 = v["plate_box"]
-                # Green once corroborated, amber on a single-frame read.
-                pcol = (0, 200, 0) if v.get("plate_strong") else (0, 165, 255)
                 draw_ring(frame_bgr, px1, py1, px2, py2, pcol, 2, radius=5)
 
             # Recentering guide for the locked, actively-followed vehicle —
