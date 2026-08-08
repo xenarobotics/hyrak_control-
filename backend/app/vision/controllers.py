@@ -110,3 +110,53 @@ class VelocitySmoother:
 
     def reset(self):
         self._prev = None
+
+
+# --------------------------------------------------------------------------- #
+# Distance error                                                                #
+# --------------------------------------------------------------------------- #
+
+def range_error_ratio(target_size_ratio: float, actual_size_ratio: float) -> float:
+    """
+    Distance error as a FRACTION OF THE TARGET RANGE, from apparent size alone.
+
+    Returns >0 when the subject is further away than wanted (close in), <0 when
+    it is nearer than wanted (back off) — the same sign convention as the raw
+    size difference it replaces.
+
+    WHY NOT JUST (target - actual), WHICH IS WHAT THIS REPLACED
+        Apparent size is proportional to 1/range, so a fixed difference in
+        FILL FRACTION is a wildly different distance depending on how far away
+        the subject already is. Measured on a 1.7m person, 70deg lens, with the
+        0.04 deadband that difference was paired with:
+
+            slant 8.6m  (25% fill)  ->  subject can move  1.4m before any reaction
+            slant  25m  (8.6% fill) ->  subject can move 11.6m before any reaction
+            slant  50m  (4.3% fill) ->  subject can move 46.3m before any reaction
+
+        The dead zone grows as range SQUARED, so the controller is progressively
+        blinder the further out it works — and at close range the same coarseness
+        means a subject walking a metre toward the drone produces no response at
+        all. Both were reported from real flights before this existed.
+
+        The gain had the identical defect, plus an asymmetry nobody chose: with
+        a 0.25 target, "too far" could never produce an error above 0.25 (fill
+        cannot go below zero), capping forward pursuit at kp*0.25 while backward
+        stayed unbounded. The drone backed off hard and chased weakly.
+
+    THE FIX NEEDS NO CALIBRATION
+        range is proportional to 1/size, so
+
+            (range_now - range_target) / range_target  ==  (target - actual) / actual
+
+        The unknown scale factor — subject height, focal length — cancels
+        completely. A deadband on this is a PERCENTAGE of range, which means
+        the same tolerance at every distance, and it works without anyone
+        having measured the lens.
+    """
+    if actual_size_ratio <= 1e-6:
+        # Subject has no measurable size — no range information at all. 0.0
+        # rather than a huge number: withholding a command is correct here,
+        # and dividing by a near-zero size would fabricate a violent one.
+        return 0.0
+    return (target_size_ratio - actual_size_ratio) / actual_size_ratio
