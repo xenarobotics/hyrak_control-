@@ -39,6 +39,10 @@ const C = {
     // Hover / pending-selection accent. Distinct from every
     // module colour so it never reads as a detection state.
     hover:    'rgb(56,160,255)',
+    // Identity states. Green = enrolled, amber = present but unknown. Two
+    // states, two colours, no captions needed for the second.
+    known:    'rgb(52,211,153)',
+    unknown:  'rgb(251,191,36)',
 }
 
 const LEVEL_COLOR: Record<string, string> = { green: C.green, orange: C.orange, red: C.red }
@@ -83,34 +87,60 @@ function drawBrackets(
     ctx.stroke()
 }
 
+// Modern label: a rounded, translucent slate chip with a hairline in the
+// accent colour and the text in that colour too.
+//
+// Replaces a hard black rectangle with white text, which read as a 2008 CCTV
+// burn-in. Three things do the work: rounded corners, a translucent rather
+// than opaque ground (so it sits ON the image instead of punching a hole in
+// it), and colour carried by the text rather than a filled block.
 function drawBadge(
     ctx: CanvasRenderingContext2D, text: string, x: number, y: number,
-    fg = C.white, bg = C.badgeBg,
+    fg = C.white, _bg?: string,
 ) {
-    const pad = 4
+    const padX = 8, padY = 5, r = 7
     const m = ctx.measureText(text)
     const th = m.actualBoundingBoxAscent + m.actualBoundingBoxDescent
-    ctx.fillStyle = bg
-    ctx.fillRect(x, y - th - pad, m.width + pad * 2, th + pad * 2)
+    const w = m.width + padX * 2
+    const h = th + padY * 2
+    const top = y - th - padY
+
+    ctx.save()
+    ctx.fillStyle = 'rgba(12,16,22,0.66)'
+    ctx.beginPath(); ctx.roundRect(x, top, w, h, r); ctx.fill()
+    ctx.strokeStyle = fg
+    ctx.globalAlpha = 0.35
+    ctx.lineWidth = 1
+    ctx.beginPath(); ctx.roundRect(x + 0.5, top + 0.5, w - 1, h - 1, r); ctx.stroke()
+    ctx.restore()
+
     ctx.fillStyle = fg
-    ctx.fillText(text, x + pad, y)
+    ctx.fillText(text, x + padX, y - 1)
 }
 
+// Solid accent pill — for the ONE thing that matters in frame (a recognised
+// name, the followed target). Deliberately louder than drawBadge so the
+// hierarchy is obvious at a glance.
 function drawPill(
     ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color: string,
 ) {
-    const pad = 6
+    const padX = 10, padY = 6
     const m = ctx.measureText(text)
     const th = m.actualBoundingBoxAscent + m.actualBoundingBoxDescent
-    const w = m.width + pad * 2
-    const h = th + pad * 2
-    const py = Math.max(4, y - h - 6)
+    const w = m.width + padX * 2
+    const h = th + padY * 2
+    const py = Math.max(4, y - h - 8)
+
+    ctx.save()
+    ctx.shadowColor = 'rgba(0,0,0,0.45)'
+    ctx.shadowBlur = 8
+    ctx.shadowOffsetY = 1
     ctx.fillStyle = color
-    ctx.beginPath()
-    ctx.roundRect(x, py, w, h, h / 2)
-    ctx.fill()
-    ctx.fillStyle = 'rgb(10,10,10)'
-    ctx.fillText(text, x + pad, py + pad + m.actualBoundingBoxAscent)
+    ctx.beginPath(); ctx.roundRect(x, py, w, h, h / 2); ctx.fill()
+    ctx.restore()
+
+    ctx.fillStyle = 'rgb(8,12,18)'
+    ctx.fillText(text, x + padX, py + padY + m.actualBoundingBoxAscent)
 }
 
 function roundRectPath(
@@ -148,7 +178,7 @@ function drawObjectDetection(ctx: CanvasRenderingContext2D, r: CVResult) {
         const [x1, y1, x2, y2] = det.box
         const isPerson = det.name === 'person'
         ctx.globalAlpha = alphaOf(det)
-        drawBrackets(ctx, x1, y1, x2, y2, isPerson ? C.person : C.object, isPerson ? 2 : 1)
+        drawSubjectRing(ctx, x1, y1, x2, y2, isPerson ? C.person : C.object, isPerson ? 2 : 1.5, 0.75)
         drawBadge(ctx, det.name, x1, Math.max(16, y1 - 4))
     }
     ctx.globalAlpha = 1
@@ -215,26 +245,15 @@ function drawPersonTracking(ctx: CanvasRenderingContext2D, r: CVResult, W: numbe
         const ident = byTrack.get(p.id)
         const [x1, y1, x2, y2] = p.box
         ctx.globalAlpha = alphaOf(p)
+        // GREEN = in the database, and the only thing that gets text: the
+        // name. AMBER = a person, not recognised — no caption at all, because
+        // "unknown" is already said by the colour, and the side panel carries
+        // the detail. Captioning every stranger is what made the frame noisy.
         if (ident) {
-            // A recognised person gets a SOLID rounded ring; an unrecognised
-            // one gets thin dashed brackets. The two states have to be
-            // separable at a glance across a busy frame, and "same brackets,
-            // different colour" is not — colour alone disappears against a
-            // varied background.
-            ctx.save()
-            ctx.shadowColor = C.ident
-            ctx.shadowBlur = 10
-            ctx.strokeStyle = C.ident
-            ctx.lineWidth = 2.5
-            roundRectPath(ctx, x1, y1, x2, y2); ctx.stroke()
-            ctx.restore()
-            drawPill(
-                ctx,
-                `${ident.name.toUpperCase()}  ${ident.similarity.toFixed(2)}`,
-                x1, y1, C.ident,
-            )
-        } else if (faceConfirmed) {
-            drawBrackets(ctx, x1, y1, x2, y2, C.dimmer, 1)
+            drawSubjectRing(ctx, x1, y1, x2, y2, C.known)
+            drawPill(ctx, ident.name.toUpperCase(), x1, y1, C.known)
+        } else {
+            drawSubjectRing(ctx, x1, y1, x2, y2, C.unknown, 1.5, 0.55)
         }
     }
     ctx.globalAlpha = 1
@@ -264,17 +283,14 @@ function drawPersonTracking(ctx: CanvasRenderingContext2D, r: CVResult, W: numbe
                 x1, y1, C.active,
             )
         } else {
-            drawBrackets(ctx, x1, y1, x2, y2, C.locked, 2)
+            // Selected but not yet flying at them. A name if we have one and
+            // nothing otherwise — "PERSON FOUND" told the operator nothing
+            // they could not already see.
+            drawSubjectRing(ctx, x1, y1, x2, y2, C.locked, 2.5)
             drawCrosshair(ctx, tx, ty, C.locked, 6, 10)
-            // A named match replaces the generic label — this is the
-            // "PERSON FOUND" the operator asked to see replaced by a name.
-            drawPill(
-                ctx,
-                r.person_name
-                    ? `${r.person_name.toUpperCase()}  ${(r.similarity ?? 0).toFixed(2)}`
-                    : 'PERSON FOUND',
-                x1, y1, C.locked,
-            )
+            if (r.person_name) {
+                drawPill(ctx, r.person_name.toUpperCase(), x1, y1, C.locked)
+            }
         }
     }
 
@@ -290,7 +306,7 @@ function drawPersonTracking(ctx: CanvasRenderingContext2D, r: CVResult, W: numbe
     }
     if (status) {
         ctx.save()
-        ctx.font = `${Math.max(13, Math.round(H * 0.016))}px monospace`
+        ctx.font = `600 ${Math.max(13, Math.round(H * 0.0155))}px 'Geist Mono', 'SF Mono', 'JetBrains Mono', ui-monospace, 'Cascadia Code', Menlo, monospace`
         const m = ctx.measureText(status)
         drawBadge(ctx, status, W - m.width - 24, 28, C.scan)
         ctx.restore()
@@ -338,7 +354,7 @@ function drawCrowdManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: numb
         if (p.id === sel) continue          // drawn last, above the crowd
         const [x1, y1, x2, y2] = p.box
         ctx.globalAlpha = alphaOf(p)
-        drawBrackets(ctx, x1, y1, x2, y2, C.person, 1)
+        drawSubjectRing(ctx, x1, y1, x2, y2, C.person, 1.5, 0.5)
     }
     ctx.globalAlpha = 1
 
@@ -386,6 +402,23 @@ function drawLockedRing(
     ctx.globalAlpha = 1
 }
 
+/** Soft-glow rounded ring — the modern replacement for corner brackets on
+ *  anything that is a subject rather than clutter. */
+function drawSubjectRing(
+    ctx: CanvasRenderingContext2D,
+    x1: number, y1: number, x2: number, y2: number,
+    color: string, width = 2.5, alpha = 1,
+) {
+    ctx.save()
+    ctx.globalAlpha *= alpha
+    ctx.shadowColor = color
+    ctx.shadowBlur = 12
+    ctx.strokeStyle = color
+    ctx.lineWidth = width
+    roundRectPath(ctx, x1, y1, x2, y2); ctx.stroke()
+    ctx.restore()
+}
+
 function drawVehicleTracking(ctx: CanvasRenderingContext2D, r: CVResult, W: number, H: number) {
     // One vehicle, one identity: this module attaches plate/colour/type/speed
     // to a persistent vehicle_id rather than a raw tracker id — same unified
@@ -400,7 +433,7 @@ function drawVehicleTracking(ctx: CanvasRenderingContext2D, r: CVResult, W: numb
         const locked = v.locked
         ctx.globalAlpha = alphaOf(v)
         if (locked) drawLockedRing(ctx, x1, y1, x2, y2, C.active)
-        else drawBrackets(ctx, x1, y1, x2, y2, C.vehicle, 1)
+        else drawSubjectRing(ctx, x1, y1, x2, y2, C.vehicle, 1.5, 0.7)
 
         const bits: string[] = []
         if (v.vehicle_id) bits.push(v.vehicle_id)
@@ -562,11 +595,10 @@ function drawTrafficManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: nu
         const ident = byTrack.get(p.id)
         ctx.globalAlpha = alphaOf(p)
         if (ident) {
-            drawBrackets(ctx, x1, y1, x2, y2, C.ident, 2)
-            drawPill(ctx, `${ident.name.toUpperCase()}  ${ident.similarity.toFixed(2)}`,
-                     x1, y1, C.ident)
+            drawSubjectRing(ctx, x1, y1, x2, y2, C.known)
+            drawPill(ctx, ident.name.toUpperCase(), x1, y1, C.known)
         } else {
-            drawBrackets(ctx, x1, y1, x2, y2, C.person, 1)
+            drawSubjectRing(ctx, x1, y1, x2, y2, C.unknown, 1.5, 0.55)
         }
     }
     ctx.globalAlpha = 1
@@ -575,7 +607,8 @@ function drawTrafficManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: nu
         const [x1, y1, x2, y2] = v.box
         const locked = v.locked
         ctx.globalAlpha = alphaOf(v)
-        drawBrackets(ctx, x1, y1, x2, y2, locked ? C.active : C.vehicle, locked ? 3 : 1)
+        if (locked) drawLockedRing(ctx, x1, y1, x2, y2, C.active)
+        else drawSubjectRing(ctx, x1, y1, x2, y2, C.vehicle, 1.5, 0.7)
 
         // Built from what is actually KNOWN, so a vehicle with no plate still
         // reads usefully instead of showing empty fields.
@@ -695,7 +728,7 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
                 ? { ...r, [field]: smoothers.current.sample(field) } as CVResult
                 : r
 
-            ctx.font = `${Math.max(13, Math.round(H * 0.016))}px monospace`
+            ctx.font = `600 ${Math.max(13, Math.round(H * 0.0155))}px 'Geist Mono', 'SF Mono', 'JetBrains Mono', ui-monospace, 'Cascadia Code', Menlo, monospace`
             ctx.textBaseline = 'alphabetic'
 
             switch (mode) {

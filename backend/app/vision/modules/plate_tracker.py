@@ -68,7 +68,7 @@ from app.vision.base import BaseAnalyzer
 from app.vision.controllers import (
     KalmanXY, PDController, VelocitySmoother, range_error_ratio,
 )
-from app.vision.drawing import draw_badge, draw_brackets
+from app.vision.drawing import draw_badge, draw_ring
 from app.vision.geometry import (
     camera_from_settings, deforeshorten_size, pose_from_telemetry,
 )
@@ -1291,7 +1291,7 @@ class PlateTracker(BaseAnalyzer):
             x1, y1, x2, y2 = v["box"]
             locked = v.get("locked")
             color = (200, 220, 50) if locked else (170, 170, 170)
-            draw_brackets(frame_bgr, x1, y1, x2, y2, color, 3 if locked else 1)
+            draw_ring(frame_bgr, x1, y1, x2, y2, color, 3 if locked else 2)
 
             # Built from what is actually known, so a vehicle with no plate
             # still reads usefully instead of showing empty fields.
@@ -1319,7 +1319,7 @@ class PlateTracker(BaseAnalyzer):
                 px1, py1, px2, py2 = v["plate_box"]
                 # Green once corroborated, amber on a single-frame read.
                 pcol = (0, 200, 0) if v.get("plate_strong") else (0, 165, 255)
-                draw_brackets(frame_bgr, px1, py1, px2, py2, pcol, 2)
+                draw_ring(frame_bgr, px1, py1, px2, py2, pcol, 2, radius=5)
 
             # Recentering guide for the locked, actively-followed vehicle —
             # same shape as human_tracker's: a line from frame centre to the

@@ -36,7 +36,7 @@ from app.vision.base import BaseAnalyzer
 from app.vision.controllers import (
     KalmanXY, PDController, VelocitySmoother, range_error_ratio,
 )
-from app.vision.drawing import draw_badge, draw_brackets, draw_tint_rect
+from app.vision.drawing import draw_badge, draw_ring, draw_tint_rect
 from app.vision.geometry import (
     blend_weight_for_position, camera_from_settings, deforeshorten_size,
     pose_from_telemetry, size_ratio_from_ground_range,
@@ -608,14 +608,14 @@ class CrowdManager(BaseAnalyzer):
             x1, y1, x2, y2 = p["box"]
             if p["id"] == sel:
                 continue        # drawn below, on top of the rest
-            draw_brackets(frame_bgr, x1, y1, x2, y2, (220, 220, 220), thickness=1)
+            draw_ring(frame_bgr, x1, y1, x2, y2, (200, 200, 200), 1)
 
         # The followed person, drawn last so the crowd never hides them.
         target = next((p for p in meta.get("people", []) if p["id"] == sel), None)
         if target is not None:
             x1, y1, x2, y2 = target["box"]
             col = (255, 255, 255) if tracking else (200, 200, 200)
-            draw_brackets(frame_bgr, x1, y1, x2, y2, col, thickness=2)
+            draw_ring(frame_bgr, x1, y1, x2, y2, col, 3)
             draw_badge(frame_bgr, f"#{sel}  {'TRACKING' if tracking else 'SELECTED'}",
                        x1, max(16, y1 - 4), fg=col)
             if tracking:

@@ -66,7 +66,7 @@ from app.config import ROOT_DIR, get_settings
 from app.vision import calibration
 from app.vision.base import BaseAnalyzer
 from app.vision.controllers import KalmanXY, PDController, VelocitySmoother
-from app.vision.drawing import draw_badge, draw_brackets, draw_tint_rect
+from app.vision.drawing import draw_badge, draw_ring, draw_tint_rect
 from app.vision.geometry import camera_from_settings, pose_from_telemetry
 from app.vision.modules.plate_tracker import _INDIA_PLATE_RE, _validate_and_correct
 from app.vision.pursuit import (
@@ -1075,20 +1075,20 @@ class TrafficManager(BaseAnalyzer):
             x1, y1, x2, y2 = pr["box"]
             ident = by_track.get(pr["id"])
             if ident:
-                draw_brackets(frame_bgr, x1, y1, x2, y2, (220, 120, 170), 2)
+                draw_ring(frame_bgr, x1, y1, x2, y2, (153, 211, 52), 3)
                 draw_badge(
                     frame_bgr,
                     f"{ident['name'].upper()}  {ident['similarity']:.2f}",
                     x1, max(16, y1 - 4), fg=(220, 120, 170),
                 )
             else:
-                draw_brackets(frame_bgr, x1, y1, x2, y2, (220, 220, 220), 1)
+                draw_ring(frame_bgr, x1, y1, x2, y2, (36, 191, 251), 2)
 
         for v in meta.get("vehicles", []):
             x1, y1, x2, y2 = v["box"]
             locked = v.get("locked")
             color = (200, 220, 50) if locked else (170, 170, 170)
-            draw_brackets(frame_bgr, x1, y1, x2, y2, color, 3 if locked else 1)
+            draw_ring(frame_bgr, x1, y1, x2, y2, color, 3 if locked else 2)
 
             # Build the label from what is actually known, so a vehicle with no
             # plate still reads usefully instead of showing an empty field.
@@ -1108,7 +1108,7 @@ class TrafficManager(BaseAnalyzer):
 
             if v.get("plate_box"):
                 px1, py1, px2, py2 = v["plate_box"]
-                draw_brackets(frame_bgr, px1, py1, px2, py2, (0, 200, 0), 2)
+                draw_ring(frame_bgr, px1, py1, px2, py2, (0, 200, 0), 2, radius=5)
 
         draw_badge(
             frame_bgr,

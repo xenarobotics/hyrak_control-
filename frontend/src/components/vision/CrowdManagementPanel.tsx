@@ -167,6 +167,26 @@ export function CrowdManagementPanel() {
         getSocket().emit('set_crowd_thresholds', { light_max: lightMax, moderate_max: moderateMax })
     }, [])
 
+    // ...and keep re-sending until the analyzer agrees.
+    //
+    // The mount emit alone was a race it usually LOST: the panel renders
+    // before the stream negotiates, so the analyzer does not exist yet and the
+    // handler silently no-ops. The operator then sees their custom numbers
+    // ignored with nothing to indicate why. Comparing against what the backend
+    // actually reports is self-healing — it converges as soon as the analyzer
+    // is up, and costs nothing once the two agree.
+    useEffect(() => {
+        if (!cvResults) return
+        const want = getCrowdThresholds()
+        const live = { lightMax: cvResults.light_max, moderateMax: cvResults.moderate_max }
+        if (live.lightMax === undefined) return
+        if (live.lightMax !== want.lightMax || live.moderateMax !== want.moderateMax) {
+            getSocket().emit('set_crowd_thresholds', {
+                light_max: want.lightMax, moderate_max: want.moderateMax,
+            })
+        }
+    }, [cvResults?.light_max, cvResults?.moderate_max, cvResults])
+
     const loadHistory = () => fetchCrowdHistory(10).then(d => { setSessions(d.sessions); setAlerts(d.alerts) })
 
     // Recent list is always visible (not behind a tab) and loads on mount.

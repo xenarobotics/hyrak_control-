@@ -30,13 +30,48 @@ def draw_brackets(img, x1, y1, x2, y2, color, thickness=1, ratio=0.22, radius=5)
     cv2.ellipse(img, (x2 - r, y2 - r), (r, r), 0, 0, 90, color, thickness, cv2.LINE_AA)
 
 
-def draw_badge(img, text, x, y, fg=(255, 255, 255), bg=(10, 10, 10)):
-    """Small dark-background label badge."""
-    font, scale, thick = cv2.FONT_HERSHEY_SIMPLEX, 0.36, 1
-    (tw, th), _ = cv2.getTextSize(text, font, scale, thick)
-    pad = 3
-    cv2.rectangle(img, (x, y - th - pad), (x + tw + pad * 2, y + pad), bg, -1)
-    cv2.putText(img, text, (x + pad, y), font, scale, fg, thick, cv2.LINE_AA)
+def draw_ring(img, x1, y1, x2, y2, color, thickness=2, radius=10):
+    """Rounded-rect subject ring — the modern replacement for corner brackets
+    on anything that is a subject rather than clutter. Mirrors the canvas
+    drawSubjectRing so both render paths agree."""
+    x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+    r = max(2, min(radius, (x2 - x1) // 2, (y2 - y1) // 2))
+    t, ls = int(thickness), cv2.LINE_AA
+    cv2.line(img, (x1 + r, y1), (x2 - r, y1), color, t, ls)
+    cv2.line(img, (x1 + r, y2), (x2 - r, y2), color, t, ls)
+    cv2.line(img, (x1, y1 + r), (x1, y2 - r), color, t, ls)
+    cv2.line(img, (x2, y1 + r), (x2, y2 - r), color, t, ls)
+    for cx, cy, a0, a1 in ((x1 + r, y1 + r, 180, 270), (x2 - r, y1 + r, 270, 360),
+                           (x1 + r, y2 - r, 90, 180), (x2 - r, y2 - r, 0, 90)):
+        cv2.ellipse(img, (cx, cy), (r, r), 0, a0, a1, color, t, ls)
+
+
+def draw_badge(img, text, x, y, fg=(255, 255, 255), bg=(18, 14, 12)):
+    """
+    Rounded, translucent label chip.
+
+    Matches the client canvas (CvOverlayCanvas.drawBadge), because the same
+    scene is drawn by both — the browser in overlay mode, this in processed
+    mode — and two different label styles for one product reads as two
+    products. A hard black rectangle with white text was the old look; the
+    chip sits ON the image rather than punching a hole in it.
+    """
+    font, scale, thick = cv2.FONT_HERSHEY_DUPLEX, 0.42, 1
+    (tw, th), base = cv2.getTextSize(text, font, scale, thick)
+    px, py, r = 8, 5, 7
+    x1, y1 = int(x), int(y - th - py - base // 2)
+    x2, y2 = int(x + tw + px * 2), int(y + py)
+    h, w = img.shape[:2]
+    x1c, y1c = max(0, x1), max(0, y1)
+    x2c, y2c = min(w, x2), min(h, y2)
+    if x2c > x1c and y2c > y1c:
+        roi = img[y1c:y2c, x1c:x2c]
+        block = np.empty_like(roi)
+        block[:] = bg
+        cv2.addWeighted(block, 0.66, roi, 0.34, 0, roi)
+        # Rounded hairline in the accent colour, same as the canvas version.
+        draw_ring(img, x1c, y1c, x2c - 1, y2c - 1, fg, 1, radius=r)
+    cv2.putText(img, text, (x1 + px, y - 1), font, scale, fg, thick, cv2.LINE_AA)
 
 
 def draw_tint_rect(img, x1, y1, x2, y2, color, alpha=0.15, border=True):

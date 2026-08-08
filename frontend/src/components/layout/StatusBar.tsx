@@ -17,12 +17,15 @@ import {
 import { gpsFixLabel, gpsFixColor, batteryTextColor, connectionQuality, connectionQualityColor } from '@/lib/osd'
 import { FLIGHT_MODES } from '@/lib/flightModes'
 
-// Altitude in these modes is driven by the tracking PD loop over an active
-// OFFBOARD session (see human_tracker.py/person_tracker.py set_altitude_mode)
-// — issuing a position-mode "goto altitude" command at the same time would
-// fight it. The per-mode panel's Fixed/Auto + nudge controls own altitude
-// while one of these is selected.
-const ALTITUDE_LOCKED_MODES = new Set(['human-tracking', 'person-tracking'])
+// Altitude is only genuinely unavailable when a tracking loop is ACTIVELY
+// driving it — that is, Follow is armed AND the mode is on Auto altitude.
+// Issuing a position-mode goto then would fight the PD loop.
+//
+// This used to be a list of MODE NAMES, which locked the control the moment
+// person- or human-tracking was selected, regardless of whether anything was
+// being tracked or which altitude mode was set. So merely opening a tracking
+// tab took away manual altitude for the rest of the flight, which is not what
+// the lock was for.
 
 function useOnlineStatus(): boolean {
     const [online, setOnline] = useState(true)
@@ -83,7 +86,7 @@ function BarButton({ onClick, disabled, color, title, children }: {
 }
 
 export function StatusBar() {
-    const { telemetry, telemetryStatus, mode } = useDroneStore()
+    const { telemetry, telemetryStatus, mode, cvResults } = useDroneStore()
     const { sendAction, arm, disarm } = useDrone()
     const { isStreaming, stats } = useWebRTCContext()
     const online = useOnlineStatus()
@@ -104,7 +107,10 @@ export function StatusBar() {
     const fix = telemetry?.gps.fix_type ?? 0
     const bat = telemetry?.battery.remaining_percent ?? 0
     const droneLinked = telemetryStatus === 'connected'
-    const altitudeLocked = ALTITUDE_LOCKED_MODES.has(mode)
+    // Live state, not mode name: locked only while a follow is actually
+    // armed AND that mode owns the altitude axis (Auto).
+    const altitudeLocked = (cvResults?.tracking ?? false)
+        && (cvResults?.altitude_mode ?? 'fixed') === 'auto'
     const canTakeoff = droneLinked && armed && !inAir && !altitudeLocked
     const canSetAlt = droneLinked && inAir && !altitudeLocked
 
