@@ -81,6 +81,8 @@ class Enhancer(BaseAnalyzer):
     instant, unlike the YOLO/InsightFace/depth modules.
     """
 
+    MODE = "enhance"
+
     def __init__(self, **kwargs):
         super().__init__(executor_workers=2, **kwargs)
         self._client_params: Dict[str, dict] = {}

@@ -4,6 +4,7 @@ import socketio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.releases import register_releases_routes
 from app.config import get_settings
 from app.utils.logging import setup_logging  # must run before any verocore logger is used
 setup_logging()
@@ -12,10 +13,12 @@ from app.sessions.manager import SessionManager
 from app.webrtc.peer_registry import PeerRegistry
 from app.vision.worker_pool import VisionWorkerPool
 from app.events.telemetry_events import register_telemetry_events
-from app.events.swarm_events import register_swarm_events
-from app.events.admin_events import register_admin_events
+from app.events.swarm_events import register_swarm_events, cleanup_session_fleet_state
+from app.telemetry.swarm_relay_bridge import close_bridge as close_swarm_relay_bridge
+from app.events.admin_events import register_admin_events, set_sio
 from app.events.permit_events import register_permit_events
 from app.webrtc.signaling import register_webrtc_events
+from app.events.gs_relay_events import register_gs_relay_events
 from app.api.routes import router
 
 logger = logging.getLogger("verocore.server")
@@ -38,6 +41,16 @@ def create_app() -> socketio.ASGIApp:
     )
     fastapi_app.include_router(router)
 
+    # Desktop app installers + electron-updater manifests — plain static
+    # files, no auth (same tier as a public download page). Directory is
+    # created empty if missing so a fresh checkout doesn't fail to boot;
+    # CI populates it with real builds (see desktop/README.md).
+    # NOT StaticFiles: the pinned Starlette (0.38.6) ignores Range entirely,
+    # which deadlocks electron-updater on every client <=0.1.5 — see
+    # app/api/releases.py for the full explanation.
+    settings.releases_dir.mkdir(parents=True, exist_ok=True)
+    register_releases_routes(fastapi_app, settings.releases_dir)
+
     # ------------------------------------------------------------------ #
     # Socket.IO                                                            #
     # ------------------------------------------------------------------ #
@@ -47,6 +60,7 @@ def create_app() -> socketio.ASGIApp:
         ping_timeout=20,
         ping_interval=10,
     )
+    set_sio(sio)
 
     # ------------------------------------------------------------------ #
     # Shared state — created once, passed everywhere                      #
@@ -142,13 +156,27 @@ def create_app() -> socketio.ASGIApp:
         if session:
             from app.telemetry.serial_bridge import close_bridge
             close_bridge(session.session_id)
+            close_swarm_relay_bridge(session.session_id)
             from app.flights import recorder
             await recorder.end_flight(session.session_id)
             from app.zones import monitor as zone_monitor
             zone_monitor.drop(session.session_id)
+            # A relay listener holds a port AND its own ffmpeg, neither tied
+            # to the peer connection — a client that vanishes without the pc
+            # ever changing state would leak both.
+            from app.webrtc import relay_video_source
+            relay_video_source.release(session.session_id)
+            # Same reasoning for the DataChannel ingest: it holds a socket and a
+            # loopback port owned by the DESKTOP's PeerConnection, not the
+            # browser's. Session teardown is the only unambiguous place to free
+            # it — releasing it when the browser's pc changes state would kill a
+            # feed the desktop is still pushing.
+            from app.webrtc import datachannel_video_source
+            datachannel_video_source.release(session.session_id)
             observer.drop_session(session.session_id)
             await vision_pool.unregister_session(session.session_id)
             await session_manager.destroy(session.session_id)
+            cleanup_session_fleet_state(session.session_id)
 
         logger.info(f"Disconnected {sid[:8]}")
 
@@ -160,6 +188,7 @@ def create_app() -> socketio.ASGIApp:
     register_admin_events(sio, session_manager)
     register_permit_events(sio, session_manager)
     register_webrtc_events(sio, peer_registry, vision_pool, session_manager)
+    register_gs_relay_events(sio)
 
     # ------------------------------------------------------------------ #
     # Mount                                                                #

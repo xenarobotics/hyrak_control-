@@ -22,6 +22,7 @@ import logging
 import math
 import time
 
+from app.events.admin_events import emit_admin_alert
 from app.zones import engine
 
 logger = logging.getLogger("verocore.zones.monitor")
@@ -51,15 +52,6 @@ def _predict(lat: float, lng: float, vel: dict) -> tuple[float, float]:
     dlat = vn * _PREDICT_S / 111_320
     dlng = ve * _PREDICT_S / (111_320 * max(0.2, math.cos(math.radians(lat))))
     return lat + dlat, lng + dlng
-
-
-async def _emit_admin_alert(sio, session_manager, payload: dict) -> None:
-    for s in session_manager.all_sessions():
-        if s.is_admin:
-            try:
-                await sio.emit("admin_alert", payload, to=s.socket_id)
-            except Exception:
-                pass
 
 
 async def _pushback(tel, exit_lat: float, exit_lng: float, abs_alt: float) -> None:
@@ -131,19 +123,19 @@ async def on_snapshot(sio, session_manager, session, tel, snap: dict) -> None:
     # ── Admin alerts (transitions only) ─────────────────────────────────
     if changed:
         if cls == "orange":
-            await _emit_admin_alert(sio, session_manager, {
+            await emit_admin_alert(session_manager, {
                 "level": "warning", "session_id": session.session_id,
                 "drone": drone_name, "ts": now,
                 "message": f"{drone_name} entered ORANGE zone{f' {zone_names}' if zone_names else ''}",
             })
         elif cls == "red":
-            await _emit_admin_alert(sio, session_manager, {
+            await emit_admin_alert(session_manager, {
                 "level": "danger", "session_id": session.session_id,
                 "drone": drone_name, "ts": now,
                 "message": f"{drone_name} entered RED zone{f' {zone_names}' if zone_names else ''}",
             })
         elif st["cls"] in ("orange", "red"):
-            await _emit_admin_alert(sio, session_manager, {
+            await emit_admin_alert(session_manager, {
                 "level": "info", "session_id": session.session_id,
                 "drone": drone_name, "ts": now,
                 "message": f"{drone_name} clear of restricted zones",
@@ -163,7 +155,7 @@ async def on_snapshot(sio, session_manager, session, tel, snap: dict) -> None:
             "zone_class": "red", "zones": res["zones"], "locked": True,
             "message": "CONTROLS LOCKED — pushing back out of NO-FLY zone",
         }, to=session.socket_id)
-        await _emit_admin_alert(sio, session_manager, {
+        await emit_admin_alert(session_manager, {
             "level": "danger", "session_id": session.session_id,
             "drone": drone_name, "ts": now,
             "message": f"{drone_name}: RED-zone pushback engaged — pilot controls locked",
@@ -193,7 +185,7 @@ async def on_snapshot(sio, session_manager, session, tel, snap: dict) -> None:
                 "zone_class": cls, "zones": res["zones"], "locked": False,
                 "message": "Clear of NO-FLY zone — controls returned",
             }, to=session.socket_id)
-            await _emit_admin_alert(sio, session_manager, {
+            await emit_admin_alert(session_manager, {
                 "level": "info", "session_id": session.session_id,
                 "drone": drone_name, "ts": now,
                 "message": f"{drone_name}: pushback complete — controls returned to pilot",

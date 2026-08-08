@@ -12,6 +12,29 @@ from app.sessions.manager import SessionManager
 
 logger = logging.getLogger("verocore.events.admin")
 
+# Cached at startup (set_sio, called once from server.py) so callers that
+# don't otherwise have a handle on the socket.io server — e.g. vision
+# analyzer modules, which only see session_id/meta — can still raise an
+# admin alert without threading `sio` through every layer down to them.
+_sio = None
+
+
+def set_sio(sio) -> None:
+    global _sio
+    _sio = sio
+
+
+async def emit_admin_alert(session_manager: SessionManager, payload: dict) -> None:
+    """Broadcast one alert to every connected admin observer socket."""
+    if _sio is None:
+        return
+    for s in session_manager.all_sessions():
+        if s.is_admin:
+            try:
+                await _sio.emit("admin_alert", payload, to=s.socket_id)
+            except Exception:
+                pass
+
 
 def register_admin_events(sio, session_manager: SessionManager):
 

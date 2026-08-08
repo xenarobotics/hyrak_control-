@@ -12,6 +12,8 @@ logger = logging.getLogger("verocore.vision.depth_mapper")
 
 
 class DepthMapper(BaseAnalyzer):
+    MODE = "depth-mapping"
+
     def __init__(self, **kwargs):
         super().__init__(executor_workers=1, **kwargs)
         settings = get_settings()

@@ -19,13 +19,17 @@ class SessionManager:
         self._sessions: dict[str, DroneSession] = {}
         # session_id → TelemetryManager
         self._telemetry: dict[str, TelemetryManager] = {}
-        # Shared fleet: swarm drones are physical resources — ONE manager per
-        # drone no matter how many browser sessions are open. Per-session
-        # fleets made concurrent sessions kill each other's mavsdk_servers
-        # (every scan endpoint-killed the other session's fresh links).
-        # Sessions using swarm mode register here; managers stop only when
-        # the last user leaves.
-        self._global_fleet: dict[int, TelemetryManager] = {}
+        # session_id → {drone_id: TelemetryManager} — one fleet PER SESSION.
+        # Each client's swarm is entirely their own: drone ids only need to
+        # be unique WITHIN a session, so two different sessions can each run
+        # their own "Drone 1..N" on the same default port numbers (each on
+        # their own machine) without colliding, sharing telemetry, or being
+        # able to see or command each other's fleet. (This used to be one
+        # dict shared by every session — the "kill each other's
+        # mavsdk_servers" problem that caused was real, but the fix was
+        # scoping-by-session, not sharing everything; each session's stop()
+        # already only touches ITS OWN managers' mavsdk_servers.)
+        self._fleets: dict[str, dict[int, TelemetryManager]] = {}
         self._fleet_users: set[str] = set()
 
     # ------------------------------------------------------------------ #
@@ -95,48 +99,64 @@ class SessionManager:
         if session:
             session.telemetry_connected = False
 
-    def find_other_telemetry_session(self, exclude_session_id: str) -> Optional[tuple[str, TelemetryManager]]:
+    def find_other_telemetry_session(
+        self, exclude_session_id: str, address: str
+    ) -> Optional[tuple[str, TelemetryManager]]:
         """
-        Only one mavsdk_server can hold the drone link (one serial port / one
-        gRPC port) at a time, so only one session should have live telemetry.
-        Used to gracefully hand off instead of blindly killing every
-        mavsdk_server process on the machine, which would also sever any
-        other session that's legitimately still using it.
+        Only evict a session that's holding the SAME MAVLink endpoint — a
+        literal port/address conflict (e.g. two direct connects to the same
+        hardcoded UDP port, or the same physical serial device). Used to
+        gracefully hand that one off instead of blindly killing every
+        mavsdk_server process on the machine.
+
+        Each cloud client bridges their OWN hardware/SITL through their own
+        browser (see serial_bridge.SerialBridge — one per session, on a
+        unique OS-assigned loopback port), so independent clients never share
+        an address and never evict each other here, even if they're all
+        running SITL on the same default port on their own machines. This
+        used to match ANY other live session regardless of address, which
+        meant a second client connecting anywhere would silently kick off
+        every other session on the server — not what "independent sessions"
+        is supposed to mean.
         """
         for session_id, tel in self._telemetry.items():
-            if session_id != exclude_session_id:
+            if session_id != exclude_session_id and tel.address == address:
                 return session_id, tel
         return None
 
     # ------------------------------------------------------------------ #
-    # Fleet (swarm) — GLOBAL drone registry shared by all sessions        #
-    # (session_id params kept for call-site compatibility; they now only  #
-    # mark the session as a fleet user)                                   #
+    # Fleet (swarm) — one independent drone registry PER SESSION          #
     # ------------------------------------------------------------------ #
 
     def attach_fleet_drone(self, session_id: str, drone_id: int, manager: TelemetryManager) -> bool:
-        self._global_fleet[drone_id] = manager
+        if session_id not in self._sessions:
+            return False
+        self._fleets.setdefault(session_id, {})[drone_id] = manager
         self._fleet_users.add(session_id)
         return True
 
     def get_fleet_drone(self, session_id: str, drone_id: int) -> Optional[TelemetryManager]:
-        return self._global_fleet.get(drone_id)
+        return self._fleets.get(session_id, {}).get(drone_id)
 
-    def pop_fleet_drone(self, drone_id: int) -> Optional[TelemetryManager]:
-        """Remove a drone from the shared fleet WITHOUT stopping it — the
+    def pop_fleet_drone(self, session_id: str, drone_id: int) -> Optional[TelemetryManager]:
+        """Remove a drone from THIS session's fleet WITHOUT stopping it — the
         caller stops it synchronously (fire-and-forget stops race scans)."""
-        return self._global_fleet.pop(drone_id, None)
+        fleet = self._fleets.get(session_id)
+        if not fleet:
+            return None
+        return fleet.pop(drone_id, None)
 
     def detach_fleet_drone(self, session_id: str, drone_id: int):
-        manager = self._global_fleet.pop(drone_id, None)
+        manager = self.pop_fleet_drone(session_id, drone_id)
         if manager:
             import asyncio
             # stop() kills only this manager's own mavsdk_server (gRPC-port
-            # scoped), so other drones and concurrent sessions are safe
+            # scoped), so other drones — including same-numbered drones in
+            # another session's fleet — are never touched.
             asyncio.create_task(manager.stop(kill_stale=True))
 
     def get_fleet(self, session_id: str) -> dict:
-        return dict(self._global_fleet)
+        return dict(self._fleets.get(session_id, {}))
 
     def mark_fleet_user(self, session_id: str):
         self._fleet_users.add(session_id)
@@ -148,13 +168,14 @@ class SessionManager:
         return session_id in self._fleet_users
 
     async def release_fleet_user(self, session_id: str) -> int:
-        """Deregister a swarm session. Stops the shared fleet only when the
-        last user leaves. Returns how many managers were stopped."""
+        """Deregister a swarm session and stop every drone in ITS OWN fleet.
+        Fleets are per-session now, so there's no other session's usage to
+        weigh — leaving just means stopping what THIS session connected.
+        Returns how many managers were stopped."""
         self._fleet_users.discard(session_id)
-        if self._fleet_users or not self._global_fleet:
+        fleet = self._fleets.pop(session_id, None)
+        if not fleet:
             return 0
-        fleet = dict(self._global_fleet)
-        self._global_fleet.clear()
         await asyncio.gather(
             *[m.stop(kill_stale=True) for m in fleet.values()],
             return_exceptions=True,

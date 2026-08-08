@@ -35,6 +35,7 @@ dependencies = [
     "asyncpg>=0.29",
     "alembic>=1.13",
     "shapely>=2.0",
+    "fast-alpr>=0.2.3",
 ]
 
 [dependency-groups]

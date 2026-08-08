@@ -141,14 +141,33 @@ class TelemetryManager:
         logger.info(f"mavsdk_server gRPC port {self._grpc_port} for {address}")
 
         logger.info(f"Connecting to drone at {address} ...")
-        try:
-            await self._drone.connect(system_address=address)
-            logger.info("Waiting for heartbeat...")
+
+        async def _wait_for_heartbeat():
             async for state in self._drone.core.connection_state():
                 if state.is_connected:
-                    self._connected = True
-                    logger.info(f"✅ Drone connected at {address}")
                     return True
+            return False
+
+        try:
+            # This call itself (spawning/attaching to mavsdk_server and
+            # establishing its gRPC channel) had no timeout — only the
+            # heartbeat wait below did. If mavsdk_server fails to spawn or
+            # the gRPC handshake stalls for any reason, this line alone
+            # could hang forever with nothing ever timing out, leaving the
+            # frontend stuck on "connecting" indefinitely with no error to
+            # show — a real infinite hang, not just a slow connect.
+            await asyncio.wait_for(self._drone.connect(system_address=address), timeout=10.0)
+            logger.info("Waiting for heartbeat...")
+            # No timeout here previously meant a link with a listening socket
+            # but no traffic yet (e.g. an RF bridge waiting on real hardware)
+            # hung this call forever instead of failing with a clear error.
+            if await asyncio.wait_for(_wait_for_heartbeat(), timeout=15.0):
+                self._connected = True
+                logger.info(f"✅ Drone connected at {address}")
+                return True
+        except asyncio.TimeoutError:
+            logger.error(f"❌ Connection timed out at {address}")
+            return False
         except Exception as e:
             logger.error(f"❌ Connection failed: {e}")
             return False
@@ -1236,6 +1255,10 @@ class TelemetryManager:
     @property
     def is_connected(self) -> bool:
         return self._connected
+
+    @property
+    def address(self) -> str:
+        return self._address
 
     async def get_hardware_uid(self) -> Optional[str]:
         """
