@@ -883,13 +883,13 @@ class TrafficManager(BaseAnalyzer):
             # What this altitude can actually resolve. Without it a refused
             # plate read is indistinguishable from a broken plate reader — see
             # vision/viability.py.
-            **self._viability(ctx, pose, W, H),
+            **self._viability(ctx, pose, W, H, frame_proc.shape[1]),
         }
         if pending_db:
             meta["_pending_db"] = pending_db
         return frame_bgr, meta
 
-    def _viability(self, ctx, pose, W: int, H: int) -> dict:
+    def _viability(self, ctx, pose, W: int, H: int, det_w: int) -> dict:
         """
         Which subjects the current altitude can resolve.
 
@@ -913,8 +913,15 @@ class TrafficManager(BaseAnalyzer):
             if projected is not None:
                 slant = projected[2]
         widths = {
-            "vehicle": self.inference_width,
-            "person": self.inference_width,
+            # det_w is the width of the array actually handed to YOLO, NOT
+            # self.inference_width. The latter is a BUDGET, not a measurement:
+            # it is 0 when the mode runs native, and it overstates the case
+            # where a frame is already narrower than the target and gets passed
+            # through unresized. Forwarding the 0 divided by zero in
+            # range_for_px — inside the worker thread, so the mode emitted no
+            # metadata at all while video kept streaming.
+            "vehicle": det_w,
+            "person": det_w,
             # Both run on per-subject crops at native resolution.
             "plate": W,
             "face": W,

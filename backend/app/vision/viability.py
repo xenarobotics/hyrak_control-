@@ -78,7 +78,14 @@ def px_per_metre(hfov_deg: float, frame_width_px: int, distance_m: float) -> flo
 def range_for_px(hfov_deg: float, frame_width_px: int,
                  physical_m: float, px_needed: int) -> float:
     """Slant range at which `physical_m` spans `px_needed` pixels."""
-    if px_needed <= 0:
+    # frame_width_px <= 0 is not a legal camera, but it IS what a caller
+    # passes when it forwards an inference width of 0 meaning "native". That
+    # used to divide by zero here — inside the analyzer's worker thread, so
+    # the mode produced no metadata at all while the video kept streaming,
+    # indistinguishable from a model that finds nothing. Callers resolve 0 to
+    # the real frame width now; this refuses rather than crashes if one is
+    # ever missed again.
+    if px_needed <= 0 or frame_width_px <= 0:
         return 0.0
     ifov = 2.0 * math.tan(math.radians(hfov_deg) / 2.0) / frame_width_px
     return physical_m / (px_needed * ifov)

@@ -63,6 +63,18 @@ class Settings(BaseSettings):
         }
     )
 
+    # Per-frame millisecond budget for traffic-management's OPTIONAL analytics
+    # — plate OCR and face recognition — on top of detection and speed.
+    # vision/profiles.py spends it on whichever of the two the current optics
+    # can actually resolve, so this is not a cap that binds at every altitude:
+    # in the survey profile nothing is spent at all.
+    #
+    # 45ms buys 3 OCR calls a frame with faces off, or 2 with faces on. That
+    # deliberately trades frame rate for plate acquisition speed, which is the
+    # right trade for this mode: an unread plate is a lost record, whereas a
+    # few dropped frames cost nothing that matters once a vehicle is tracked.
+    traffic_optional_budget_ms: float = Field(default=45.0)
+
     def inference_width_for(self, mode: str) -> int:
         """Inference width for a mode name, falling back to the global default."""
         if not mode:
