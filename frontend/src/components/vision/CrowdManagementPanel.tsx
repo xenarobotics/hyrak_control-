@@ -236,7 +236,6 @@ export function CrowdManagementPanel() {
                 selectedLabel={selectedId !== null ? `Person #${selectedId}` : null}
                 lockState={cvResults?.lock_state}
                 lockMessage={cvResults?.lock_message}
-                tracking={following}
                 altitudeMode={cvResults?.altitude_mode}
                 targetRatio={cvResults?.target_distance_ratio}
                 elevate={elevate}

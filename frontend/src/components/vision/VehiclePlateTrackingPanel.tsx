@@ -42,7 +42,6 @@ export function VehiclePlateTrackingPanel() {
     const cvResults = useDroneStore(s => s.cvResults)
     const { isStreaming } = useWebRTCContext()
     const [history, setHistory] = useState<PlateHistoryRow[]>([])
-    const [tracking, setTracking] = useState(false)
 
     const vehicles = cvResults?.vehicles ?? []
     const lockedTrackId = cvResults?.locked_track_id ?? null
@@ -59,12 +58,6 @@ export function VehiclePlateTrackingPanel() {
     const vehicleColors = cvResults?.vehicle_colors ?? {}
     const actualFillPct = cvResults?.vehicle_fill_pct ?? null
 
-    useEffect(() => {
-        const socket = getSocket()
-        const onTracking = (d: { active: boolean }) => setTracking(d.active)
-        socket.on('vehicle_tracking_status', onTracking)
-        return () => { socket.off('vehicle_tracking_status', onTracking) }
-    }, [])
 
 
 
@@ -87,7 +80,6 @@ export function VehiclePlateTrackingPanel() {
     const lock = (trackId: number | null) =>
         getSocket().emit('set_follow_vehicle', { track_id: trackId })
     const arm = (active: boolean) => {
-        setTracking(active)
         getSocket().emit('set_vehicle_tracking', { active })
     }
 
@@ -179,7 +171,6 @@ export function VehiclePlateTrackingPanel() {
                     : null}
                 lockState={lockState}
                 lockMessage={lockMessage}
-                tracking={tracking}
                 altitudeMode={cvResults?.altitude_mode}
                 targetRatio={cvResults?.target_distance_ratio}
                 actualFillPct={actualFillPct}

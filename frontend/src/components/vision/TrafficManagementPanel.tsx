@@ -143,7 +143,6 @@ export function TrafficManagementPanel() {
     const cvResults = useDroneStore(s => s.cvResults)
     const { isStreaming } = useWebRTCContext()
     const [history, setHistory] = useState<PlateHistoryRow[]>([])
-    const [tracking, setTracking] = useState(false)
 
     const vehicles = cvResults?.vehicles ?? []
     const lockedId = cvResults?.locked_track_id ?? null
@@ -163,12 +162,6 @@ export function TrafficManagementPanel() {
     const facesOk = cvResults?.faces_available !== false
     const identities = cvResults?.identities ?? []
 
-    useEffect(() => {
-        const socket = getSocket()
-        const onTracking = (d: { active: boolean }) => setTracking(d.active)
-        socket.on('vehicle_tracking_status', onTracking)
-        return () => { socket.off('vehicle_tracking_status', onTracking) }
-    }, [])
 
     const loadHistory = () => fetchPlateHistory(50).then(setHistory)
     useEffect(() => { loadHistory() }, [])
@@ -188,7 +181,6 @@ export function TrafficManagementPanel() {
     const lock = (trackId: number | null) =>
         getSocket().emit('set_follow_vehicle', { track_id: trackId })
     const arm = (active: boolean) => {
-        setTracking(active)
         getSocket().emit('set_vehicle_tracking', { active })
     }
 
@@ -320,7 +312,6 @@ export function TrafficManagementPanel() {
                 ].filter(Boolean).join('  ')}
                 lockState={lockState}
                 lockMessage={lockMessage}
-                tracking={tracking}
                 altitudeMode={cvResults?.altitude_mode}
                 targetRatio={cvResults?.target_distance_ratio}
                 actualFillPct={cvResults?.subject_fill_pct}

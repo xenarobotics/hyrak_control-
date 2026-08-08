@@ -14,6 +14,7 @@
 
 import { useEffect, useState } from 'react'
 import { getSocket } from '@/lib/socket'
+import { useDroneStore } from '@/store/drone'
 import { Crosshair, Square, MoveVertical, Info, Mountain } from 'lucide-react'
 
 export type FollowKind = 'vehicle' | 'person'
@@ -36,20 +37,35 @@ function Hint({ text }: { text: string }) {
 
 export function FollowControls({
     kind, selectedLabel, lockState, lockMessage,
-    tracking, altitudeMode, targetRatio, actualFillPct, elevate, onRelease,
+    altitudeMode, targetRatio, actualFillPct, elevate, onRelease,
 }: {
     kind: FollowKind
     /** What is selected, already formatted (e.g. "VH-000042  719257C"). */
     selectedLabel: string | null
     lockState?: string
     lockMessage?: string
-    tracking: boolean
     altitudeMode?: 'fixed' | 'auto'
     targetRatio?: number
     actualFillPct?: number | null
     elevate?: { elevating: boolean; blocked_by: string | null; reason: string } | null
     onRelease: () => void
 }) {
+    // WHETHER THE DRONE IS FLYING AT THE TARGET comes from the analyzer's own
+    // payload, not from a socket ack the panel happened to subscribe to.
+    //
+    // Each panel used to keep its own flag, fed by whichever status event it
+    // remembered: set_vehicle_tracking replies with `vehicle_tracking_status`
+    // and set_tracking with `tracking_status`, so a panel listening for one
+    // and arming through the other never updated. Traffic hit exactly that —
+    // following a PERSON arms via set_tracking, the panel listened only for
+    // the vehicle event, and the button stayed on "Follow" while the aircraft
+    // was already chasing. Crowd listened for neither.
+    //
+    // The analyzer reports `tracking` in every payload and cannot disagree
+    // with itself, so reading it here fixes all four panels at once and gives
+    // this component no way to drift from them again.
+    const tracking = useDroneStore(s => s.cvResults?.tracking) ?? false
+
     const [dist, setDist] = useState(targetRatio ?? 0.22)
     useEffect(() => { if (targetRatio != null) setDist(targetRatio) }, [targetRatio])
 

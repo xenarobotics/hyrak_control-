@@ -1297,3 +1297,23 @@ def test_arming_a_person_follow_reaches_the_analyzer():
     assert "_pursuit_analyzers()" in handler, \
         "set_tracking uses a hand-written tuple again — traffic will be dropped"
     assert TrafficManager in telemetry_events._pursuit_analyzers()
+
+
+def test_every_pursuit_mode_reports_tracking_in_its_payload():
+    """FollowControls reads `tracking` from the analyzer's payload rather than
+    from a socket ack, because the two arm events reply with DIFFERENT status
+    events (vehicle_tracking_status vs tracking_status) and each panel
+    subscribed to whichever it remembered. Traffic listened for the vehicle one
+    while arming a person through the other, so its button stayed on "Follow"
+    while the aircraft was already chasing; crowd listened for neither.
+
+    That fix only holds if every mode actually reports the field."""
+    import inspect
+    import re
+
+    from app.events.telemetry_events import _pursuit_analyzers
+
+    for cls in _pursuit_analyzers():
+        src = inspect.getsource(inspect.getmodule(cls))
+        assert re.search(r'"tracking":\s*', src), \
+            f"{cls.__name__} never puts `tracking` in its payload"
