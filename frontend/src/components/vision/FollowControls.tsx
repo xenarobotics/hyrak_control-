@@ -15,7 +15,7 @@
 import { useEffect, useState } from 'react'
 import { getSocket } from '@/lib/socket'
 import { useDroneStore } from '@/store/drone'
-import { Crosshair, Square, MoveVertical, Info, Mountain } from 'lucide-react'
+import { AlertTriangle, Crosshair, Square, MoveVertical, Info, Mountain } from 'lucide-react'
 
 export type FollowKind = 'vehicle' | 'person'
 
@@ -66,6 +66,29 @@ export function FollowControls({
     // this component no way to drift from them again.
     const tracking = useDroneStore(s => s.cvResults?.tracking) ?? false
 
+    // WHY ARMING FAILED, shown where the operator pressed the button.
+    //
+    // The backend already explains itself — "Failed to start Offboard mode —
+    // is the drone armed and airborne?" — but the only listener for `error`
+    // surfaced it while telemetry was CONNECTING and otherwise sent it to
+    // console.error. So a Follow press against a disarmed or grounded aircraft
+    // produced a perfectly good diagnosis that nobody could see, and the
+    // button looked dead. That is indistinguishable from the routing bug it
+    // sat behind, which is why this cost two debugging rounds.
+    const [armError, setArmError] = useState<string | null>(null)
+    useEffect(() => {
+        const socket = getSocket()
+        const onError = (d: { msg?: string }) => {
+            if (!d?.msg) return
+            setArmError(d.msg)
+            // Clears on its own: a stale reason next to a control that has
+            // since started working is worse than none.
+            window.setTimeout(() => setArmError(null), 8000)
+        }
+        socket.on('error', onError)
+        return () => { socket.off('error', onError) }
+    }, [])
+
     const [dist, setDist] = useState(targetRatio ?? 0.22)
     useEffect(() => { if (targetRatio != null) setDist(targetRatio) }, [targetRatio])
 
@@ -112,6 +135,15 @@ export function FollowControls({
             {lockMessage && (
                 <div style={{ fontSize: 10, fontFamily: 'monospace', color: '#fbbf24' }}>
                     {lockMessage}
+                </div>
+            )}
+            {armError && (
+                <div style={{
+                    display: 'flex', gap: 5, alignItems: 'flex-start',
+                    fontSize: 10, lineHeight: 1.45, color: '#f87171',
+                }}>
+                    <AlertTriangle size={11} style={{ marginTop: 1, flexShrink: 0 }} />
+                    <span>{armError}</span>
                 </div>
             )}
 
