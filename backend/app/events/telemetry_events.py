@@ -88,7 +88,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         # gracefully instead of letting the new connect's stale-process kill
         # blow away another session's still-active telemetry out from under it
         # (that previously surfaced as random "Socket closed" gRPC errors).
-        other = session_manager.find_other_telemetry_session(session.session_id)
+        other = session_manager.find_other_telemetry_session(session.session_id, address)
         if other:
             other_session_id, other_tel = other
             other_session = session_manager.get(other_session_id)
@@ -196,24 +196,67 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             await sio.emit("drone_mission_loaded", {"waypoints": existing}, to=sid)
             logger.info(f"Sent {len(existing)} existing mission waypoints to {sid[:8]}")
 
+    @sio.on("connect_rf_bridge")
+    async def on_connect_rf_bridge(sid, data=None):
+        """RF link where telemetry already arrives over UDP (e.g. wfb-ng)
+        but on fixed split ports the normal udpin:// 'reply to sender'
+        trick can't reach — see app/telemetry/rf_bridge.py for why."""
+        from app.telemetry import rf_bridge
+        data = data or {}
+        bridge = await rf_bridge.ensure_started(
+            downlink_port=int(data.get("downlinkPort") or 14550),
+            uplink_port=int(data.get("uplinkPort") or 14551),
+        )
+        await on_connect_telemetry(sid, {"address": bridge.address})
+
     @sio.on("connect_browser_serial")
     async def on_connect_browser_serial(sid, data=None):
         """Cloud flow: the user's telemetry radio is plugged into THEIR device.
         The browser reads it via the Web Serial API and relays raw MAVLink
         bytes here; a loopback SerialBridge feeds them to this session's
         mavsdk_server exactly as if the radio were local."""
+        # The client sets its UI to "connecting" the moment it asks, and ONLY a
+        # telemetry_status event can move it off that. Any path out of here
+        # that doesn't emit one leaves the operator staring at "connecting"
+        # forever — so every failure below reports as telemetry_status,
+        # including an unexpected exception (which socket.io would otherwise
+        # swallow silently).
         session = session_manager.get_by_socket(sid)
         if not session:
-            await sio.emit("error", {"msg": "No session found"}, to=sid)
+            await sio.emit(
+                "telemetry_status",
+                {"status": "error", "message": "No session found — reload the page and try again"},
+                to=sid,
+            )
             return
 
-        bridge = await serial_bridge.SerialBridge.create(sio, sid)
+        try:
+            bridge = await serial_bridge.SerialBridge.create(sio, sid)
+        except Exception as e:
+            logger.error(f"Session {session.session_id[:8]} serial bridge setup failed: {e}")
+            await sio.emit(
+                "telemetry_status",
+                {"status": "error", "message": f"Could not set up the telemetry bridge: {e}"},
+                to=sid,
+            )
+            return
+
         serial_bridge.register_bridge(session.session_id, bridge)
         logger.info(f"Session {session.session_id[:8]} browser radio → {bridge.address}")
 
         # Reuse the normal connect flow; the heartbeat mavsdk waits for arrives
         # through serial_uplink events the browser is already pumping.
-        await on_connect_telemetry(sid, {"address": bridge.address})
+        try:
+            await on_connect_telemetry(sid, {"address": bridge.address})
+        except Exception as e:
+            logger.error(f"Session {session.session_id[:8]} telemetry connect raised: {e}")
+            serial_bridge.close_bridge(session.session_id)
+            await sio.emit(
+                "telemetry_status",
+                {"status": "error", "message": f"Telemetry connect failed: {e}"},
+                to=sid,
+            )
+            return
         if getattr(session, "drone_address", None) != bridge.address:
             serial_bridge.close_bridge(session.session_id)  # connect failed
 
@@ -351,15 +394,38 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         session = session_manager.get_by_socket(sid)
         if not session:
             return
+        # None is NOT "ignore" — it is Release, which is how every panel
+        # clears a selection. Returning early here meant Release silently did
+        # nothing, and the target stayed locked with no way to let it go.
         person_id = data.get("person_id")
-        if person_id is None:
-            return
         if vision_pool:
-            from app.sessions.models import AnalysisMode
             analyzer = vision_pool.get_for_session(session.session_id)
+            logger.info(
+                f"select_person: session={session.session_id[:8]} "
+                f"person_id={person_id} analyzer={type(analyzer).__name__}"
+            )
+            from app.vision.modules.crowd_manager import CrowdManager
             from app.vision.modules.human_tracker import HumanTracker
-            if isinstance(analyzer, HumanTracker):
+            from app.vision.modules.person_tracker import PersonTracker
+            # Crowd management follows one person out of the crowd using the
+            # same tracker ids it already counts with, so it takes the same
+            # selection event rather than needing a parallel one.
+            if isinstance(analyzer, (HumanTracker, CrowdManager)):
                 analyzer.set_selected_person(session.session_id, person_id)
+            # person-tracking normally locks an ENROLLED identity, but an
+            # operator pointing at somebody who is not in the database still
+            # means "follow that person". Falling back to the track keeps the
+            # gesture consistent across every mode instead of silently doing
+            # nothing, which is how it behaved before.
+            elif isinstance(analyzer, PersonTracker):
+                analyzer.follow_track(session.session_id, person_id)
+            else:
+                logger.warning(
+                    f"select_person ignored — {type(analyzer).__name__} does "
+                    f"not support person selection"
+                )
+                return
+        await sio.emit("person_selected", {"person_id": person_id}, to=sid)
         await sio.emit("person_selected", {"person_id": person_id}, to=sid)
 
     @sio.on("set_pd_params")
@@ -387,9 +453,11 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         if not session or not vision_pool:
             return
         analyzer = vision_pool.get_for_session(session.session_id)
+        from app.vision.modules.crowd_manager import CrowdManager
         from app.vision.modules.human_tracker import HumanTracker
         from app.vision.modules.person_tracker import PersonTracker
-        if isinstance(analyzer, (HumanTracker, PersonTracker)):
+        from app.vision.modules.plate_tracker import PlateTracker
+        if isinstance(analyzer, (HumanTracker, PersonTracker, PlateTracker, CrowdManager)):
             analyzer.set_altitude_mode(
                 session.session_id,
                 mode=str(data.get("mode", "fixed")),
@@ -403,9 +471,11 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         if not session or not vision_pool:
             return
         analyzer = vision_pool.get_for_session(session.session_id)
+        from app.vision.modules.crowd_manager import CrowdManager
         from app.vision.modules.human_tracker import HumanTracker
         from app.vision.modules.person_tracker import PersonTracker
-        if isinstance(analyzer, (HumanTracker, PersonTracker)):
+        from app.vision.modules.plate_tracker import PlateTracker
+        if isinstance(analyzer, (HumanTracker, PersonTracker, PlateTracker, CrowdManager)):
             analyzer.set_altitude_nudge(
                 session.session_id,
                 velocity=float(data.get("velocity", 0.0)),
@@ -414,17 +484,64 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
     @sio.on("set_tracking_params")
     async def on_set_tracking_params(sid, data):
         """Set distance hold target. Payload: { target_distance_ratio: float }
-        0.15 → far (~10 m), 0.30 → default (~5 m), 0.50 → close (~2 m)."""
+
+        For human/person tracking, 0.15 -> far (~10m), 0.30 -> default (~5m),
+        0.50 -> close (~2m), against a subject whose real height is a stable
+        ~1.7m regardless of heading.
+
+        vehicle-plate-tracking shares the same event and payload shape, but
+        there is no fixed "this ratio means this many metres" table for a
+        vehicle: its apparent height depends on its heading as much as its
+        range, so the right target is something an operator finds by
+        watching vehicle_fill_pct in the panel and nudging this, not a
+        number this handler can assume.
+        """
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
         analyzer = vision_pool.get_for_session(session.session_id)
+        from app.vision.modules.crowd_manager import CrowdManager
         from app.vision.modules.human_tracker import HumanTracker
         from app.vision.modules.person_tracker import PersonTracker
-        if isinstance(analyzer, (HumanTracker, PersonTracker)):
+        from app.vision.modules.plate_tracker import PlateTracker
+        if isinstance(analyzer, (HumanTracker, PersonTracker, PlateTracker, CrowdManager)):
             analyzer.set_tracking_params(
                 session.session_id,
                 target_distance_ratio=float(data.get("target_distance_ratio", 0.30)),
+            )
+
+    @sio.on("set_zone_names")
+    async def on_set_zone_names(sid, data):
+        """Payload: { names: { "0": "North Gate", ... } } keyed by cell index.
+
+        Names, not coordinates: the grid is fixed at 3x3 in frame, so a label
+        is only meaningful while the drone holds a position. That is exactly
+        how this gets used — park over a venue, name the cells once, and every
+        alert afterwards says "North Gate" instead of "cell 1".
+        """
+        session = session_manager.get_by_socket(sid)
+        if not session or not vision_pool:
+            return
+        analyzer = vision_pool.get_for_session(session.session_id)
+        from app.vision.modules.crowd_manager import CrowdManager
+        if isinstance(analyzer, CrowdManager):
+            analyzer.set_zone_names(session.session_id, data.get("names") or {})
+
+    @sio.on("set_crowd_thresholds")
+    async def on_set_crowd_thresholds(sid, data):
+        """Payload: { light_max: int, moderate_max: int }. Whole-frame
+        density is FOV-dependent — operator-calibrated from the Settings
+        page, no universal default is correct."""
+        session = session_manager.get_by_socket(sid)
+        if not session or not vision_pool:
+            return
+        analyzer = vision_pool.get_for_session(session.session_id)
+        from app.vision.modules.crowd_manager import CrowdManager
+        if isinstance(analyzer, CrowdManager):
+            analyzer.set_thresholds(
+                session.session_id,
+                light_max=int(data.get("light_max", 8)),
+                moderate_max=int(data.get("moderate_max", 20)),
             )
 
     @sio.on("set_enhance_params")
@@ -540,6 +657,174 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             except Exception:
                 pass
 
+    @sio.on("set_gallery_mode")
+    async def on_set_gallery_mode(sid, data):
+        """Payload: { enabled: bool }
+
+        Turns database face matching on for this session, so the tracker can
+        name and lock onto anyone enrolled without a target being selected
+        first. An uploaded reference photo still takes precedence, so this
+        cannot disturb a target the operator chose deliberately.
+
+        Reloads the gallery on enable rather than reusing the snapshot taken
+        at session start — otherwise someone enrolled mid-session would be
+        invisible until the mode was switched away and back.
+        """
+        session = session_manager.get_by_socket(sid)
+        if not session or not vision_pool:
+            return
+        analyzer = vision_pool.get_for_session(session.session_id)
+        from app.vision.modules.person_tracker import PersonTracker
+        if not isinstance(analyzer, PersonTracker):
+            return
+
+        enabled = bool(data.get("enabled", False))
+        if enabled:
+            try:
+                from app.vision.persistence import load_face_gallery
+                analyzer.set_gallery(await load_face_gallery())
+            except Exception as e:
+                logger.warning(f"Gallery reload failed: {e}")
+        analyzer.set_gallery_mode(session.session_id, enabled)
+        gallery = getattr(analyzer, "_gallery", None)
+        await sio.emit("gallery_mode_set", {
+            "enabled": enabled,
+            "enrolled": gallery.person_count if gallery else 0,
+            "faces": gallery.size if gallery else 0,
+        }, to=sid)
+
+    @sio.on("set_follow_vehicle")
+    async def on_set_follow_vehicle(sid, data):
+        """Payload: { track_id: int | null }
+
+        Lock onto a vehicle in traffic-management OR vehicle-plate-tracking
+        mode, or null to release. Both modules expose the same
+        request_follow(client_id, track_id) shape, so one handler routes to
+        whichever is actually running this session. Takes effect as soon as
+        that vehicle is in frame — locking a track that is not visible would
+        commit the aircraft to nothing.
+        """
+        session = session_manager.get_by_socket(sid)
+        if not session or not vision_pool:
+            return
+        analyzer = vision_pool.get_for_session(session.session_id)
+        from app.vision.modules.plate_tracker import PlateTracker
+        from app.vision.modules.traffic_manager import TrafficManager
+        if not isinstance(analyzer, (TrafficManager, PlateTracker)):
+            logger.warning(
+                f"set_follow_vehicle ignored — analyzer is "
+                f"{type(analyzer).__name__}, not a vehicle module"
+            )
+            return
+        tid = data.get("track_id")
+        logger.info(
+            f"set_follow_vehicle: session={session.session_id[:8]} track_id={tid} "
+            f"analyzer={type(analyzer).__name__}"
+        )
+        analyzer.request_follow(session.session_id, None if tid is None else int(tid))
+        await sio.emit("follow_vehicle_set", {"track_id": tid}, to=sid)
+
+    @sio.on("set_vehicle_tracking")
+    async def on_set_vehicle_tracking(sid, data):
+        """Payload: { active: bool } — start/stop flying after the locked
+        vehicle, in either traffic-management or vehicle-plate-tracking.
+
+        ARMING OFFBOARD IS HALF THE JOB, AND IT WAS MISSING.
+        Setting the analyzer's flag only makes it COMPUTE velocity setpoints.
+        PX4 discards every one of them unless Offboard mode is running, so the
+        drone sat still while the module happily produced commands — no error
+        anywhere, because nothing had failed. `set_tracking` (human/person
+        tracking) has always done both halves; this handler did only the first,
+        which is why vehicle follow looked implemented and did nothing.
+        """
+        session = session_manager.get_by_socket(sid)
+        if not session or not vision_pool:
+            return
+        analyzer = vision_pool.get_for_session(session.session_id)
+        from app.vision.modules.plate_tracker import PlateTracker
+        from app.vision.modules.traffic_manager import TrafficManager
+        if not isinstance(analyzer, (TrafficManager, PlateTracker)):
+            return
+
+        active = bool(data.get("active"))
+        tel = session_manager.get_telemetry(session.session_id)
+        if tel and tel.is_connected:
+            if active:
+                if not await tel.start_offboard():
+                    # Do NOT arm the analyzer: it would report "following"
+                    # while the aircraft ignores every setpoint.
+                    await sio.emit("error", {
+                        "msg": "Failed to start Offboard mode — is the drone "
+                               "armed and airborne?",
+                    }, to=sid)
+                    await sio.emit("vehicle_tracking_status",
+                                   {"active": False}, to=sid)
+                    return
+            else:
+                await tel.stop_offboard()
+
+        analyzer.set_tracking(session.session_id, active)
+        await sio.emit("vehicle_tracking_status", {"active": active}, to=sid)
+
+    @sio.on("enrol_person_live")
+    async def on_enrol_person_live(sid, data):
+        """Payload: { track_id: int, name: str } — or { cancel: true }.
+
+        Enrols somebody the drone is looking at RIGHT NOW. The gallery then
+        holds this camera, this lens, this angle and this lighting, which is
+        what the recogniser is actually asked to match later — an uploaded
+        photo is a different imaging problem and matches less well.
+        """
+        session = session_manager.get_by_socket(sid)
+        if not session or not vision_pool:
+            return
+        analyzer = vision_pool.get_for_session(session.session_id)
+        from app.vision.modules.person_tracker import PersonTracker
+        if not isinstance(analyzer, PersonTracker):
+            await sio.emit("enrolment_started", {
+                "ok": False,
+                "msg": "Live enrolment only runs in person-tracking mode",
+            }, to=sid)
+            return
+        if data.get("cancel"):
+            analyzer.cancel_capture(session.session_id)
+            await sio.emit("enrolment_started", {"ok": False, "msg": "cancelled"}, to=sid)
+            return
+        name = str(data.get("name") or "").strip()
+        tid = data.get("track_id")
+        if not name or tid is None:
+            await sio.emit("enrolment_started", {
+                "ok": False, "msg": "A name and a selected person are both required",
+            }, to=sid)
+            return
+        started = analyzer.begin_capture(session.session_id, int(tid), name)
+        await sio.emit("enrolment_started", {
+            "ok": started, "name": name, "track_id": int(tid),
+            "msg": (f"Capturing shots of {name} — keep them in frame"
+                    if started else "Could not start capture"),
+        }, to=sid)
+
+    @sio.on("set_follow_person")
+    async def on_set_follow_person(sid, data):
+        """Payload: { person_id: str | null }
+
+        Follow a specific enrolled person, or null to release and let the
+        tracker choose automatically again.
+
+        Applied on the next face check, not immediately: the person has to be
+        identified in frame before there is a body track to follow.
+        """
+        session = session_manager.get_by_socket(sid)
+        if not session or not vision_pool:
+            return
+        analyzer = vision_pool.get_for_session(session.session_id)
+        from app.vision.modules.person_tracker import PersonTracker
+        if not isinstance(analyzer, PersonTracker):
+            return
+        person_id = data.get("person_id") or None
+        analyzer.request_follow(session.session_id, person_id)
+        await sio.emit("follow_person_set", {"person_id": person_id}, to=sid)
+
     @sio.on("clear_reference")
     async def on_clear_reference(sid):
         """Clear the stored face embedding and reset tracking for person-tracking mode."""
@@ -635,9 +920,10 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
         if vision_pool:
             analyzer = vision_pool.get_for_session(session.session_id)
+            from app.vision.modules.crowd_manager import CrowdManager
             from app.vision.modules.human_tracker import HumanTracker
             from app.vision.modules.person_tracker import PersonTracker
-            if isinstance(analyzer, (HumanTracker, PersonTracker)):
+            if isinstance(analyzer, (HumanTracker, PersonTracker, CrowdManager)):
                 analyzer.set_tracking(session.session_id, active)
 
         # Start/stop Offboard mode on the drone

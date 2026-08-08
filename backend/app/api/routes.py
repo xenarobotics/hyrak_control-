@@ -1,10 +1,16 @@
+import contextlib
 import asyncio
 import base64
+import csv
+import io
 import logging
 import math
+import os
+import zipfile
+from datetime import datetime
 from typing import List
 from fastapi import APIRouter, File, Header, HTTPException, Query, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import cv2
 import numpy as np
 from app.config import get_settings
@@ -307,6 +313,367 @@ async def download_flight(flight_id: str):
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="flight_{stamp}.csv"'},
     )
+
+
+# ── Crowd management / vehicle-plate tracking ───────────────────────────────
+#
+# Data is retained by default (see app/vision/persistence.py) — no auto
+# purge. The two /download endpoints below are read-only exports for a
+# single session (manual "Download report" button); the /history endpoints
+# back the "previous sessions" sidebar across ALL sessions; /clear wipes
+# everything on explicit operator request. Nothing is ever deleted as a
+# side effect of viewing or downloading it.
+
+@router.get("/sessions/{session_id}/crowd-report/download")
+async def download_crowd_report(session_id: str):
+    from app.vision.persistence import export_crowd_report
+    report = await export_crowd_report(session_id)
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        snap_csv = io.StringIO()
+        w = csv.DictWriter(snap_csv, fieldnames=[
+            "t", "current_count", "peak_count", "density_level", "section_counts",
+        ])
+        w.writeheader()
+        w.writerows(report["snapshots"])
+        zf.writestr("crowd_snapshots.csv", snap_csv.getvalue())
+
+        alert_csv = io.StringIO()
+        w = csv.DictWriter(alert_csv, fieldnames=["t", "level", "section_idx", "count", "message"])
+        w.writeheader()
+        w.writerows(report["alerts"])
+        zf.writestr("crowd_alerts.csv", alert_csv.getvalue())
+    buf.seek(0)
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M")
+    return StreamingResponse(
+        buf, media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="crowd_report_{stamp}.zip"'},
+    )
+
+
+@router.get("/sessions/{session_id}/plate-report/download")
+async def download_plate_report(session_id: str):
+    from app.vision.persistence import export_plate_report
+    events = await export_plate_report(session_id)
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        rows_csv = io.StringIO()
+        # One row per VEHICLE, with the plate filled in where one was read.
+        # plate_px_w travels with the reading because it is the honest quality
+        # indicator — a 40px plate and a 300px plate are not equally
+        # trustworthy, and the CSV is where that gets judged.
+        fieldnames = [
+            "vehicle_id", "track_id", "plate_text", "ocr_confidence", "plate_px_w",
+            "vehicle_type", "vehicle_color", "vehicle_color_conf",
+            "speed_est_kmh", "lat", "lng", "alt_m",
+            "first_seen", "last_seen", "image_path", "vehicle_image_path",
+        ]
+        w = csv.DictWriter(rows_csv, fieldnames=fieldnames, extrasaction="ignore")
+        w.writeheader()
+        for ev in events:
+            row = dict(ev)
+            # Both images, in separate folders so a reviewer can flip through
+            # the car photos without the plate crops interleaved.
+            for field, folder in (("image_path", "plates"),
+                                  ("vehicle_image_path", "vehicles")):
+                path = ev.get(field)
+                if path and os.path.exists(path):
+                    row[field] = f"{folder}/{os.path.basename(path)}"
+                    zf.write(path, arcname=row[field])
+                else:
+                    row[field] = ""
+            w.writerow(row)
+        zf.writestr("vehicle_log.csv", rows_csv.getvalue())
+    buf.seek(0)
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M")
+    return StreamingResponse(
+        buf, media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="plate_report_{stamp}.zip"'},
+    )
+
+
+@router.get("/vision/crowd-history")
+async def crowd_history(limit: int = Query(10, le=50)):
+    from app.vision.persistence import list_crowd_history
+    return await list_crowd_history(limit=limit)
+
+
+@router.get("/vision/plate-history")
+async def plate_history(limit: int = Query(50, le=200)):
+    from app.vision.persistence import list_plate_history
+    return {"events": await list_plate_history(limit=limit)}
+
+
+@router.get("/vision/plate-history/{event_id}/image")
+async def plate_history_image(event_id: str):
+    from fastapi.responses import FileResponse
+    from app.vision.persistence import get_plate_image_path
+    path = await get_plate_image_path(event_id)
+    if not path or not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Image not found")
+    return FileResponse(path, media_type="image/jpeg")
+
+
+@router.delete("/vision/crowd-history")
+async def clear_crowd_history_route(x_auth_token: str = Header(None, alias="X-Auth-Token")):
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.vision.persistence import clear_crowd_history
+    await clear_crowd_history()
+    return {"cleared": True}
+
+
+@router.delete("/vision/plate-history")
+async def clear_plate_history_route(x_auth_token: str = Header(None, alias="X-Auth-Token")):
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.vision.persistence import clear_plate_history
+    await clear_plate_history()
+    return {"cleared": True}
+
+
+# ── Camera calibration ───────────────────────────────────────────────────
+#
+# The field TABLE is served alongside the values so the UI renders inputs from
+# it. Declaring "hfov is 1-179 degrees" in Python and again in TypeScript is
+# how the two drift apart and the form starts accepting values the backend then
+# rejects — see app/vision/calibration.py.
+
+
+@router.get("/vision/calibration")
+async def get_calibration():
+    """Field definitions plus current effective values."""
+    from app.vision import calibration
+    return calibration.schema()
+
+
+@router.put("/vision/calibration")
+async def put_calibration(
+    updates: dict,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """
+    Save a partial calibration update.
+
+    All-or-nothing: one invalid field rejects the whole request rather than
+    saving half of it, because a half-applied calibration would be flying.
+    Applies to the next frame — no restart, no session reconnect.
+    """
+    settings = get_settings()
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.vision import calibration
+    try:
+        calibration.save(updates)
+    except ValueError as e:
+        # The operator's own message, not a stack trace.
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"saved": True, **calibration.schema()}
+
+
+@router.delete("/vision/calibration")
+async def reset_calibration(x_auth_token: str = Header(None, alias="X-Auth-Token")):
+    """Drop every override and fall back to the deploy-time defaults."""
+    settings = get_settings()
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.vision import calibration
+    calibration.reset()
+    return {"reset": True, **calibration.schema()}
+
+
+# ── Face gallery ─────────────────────────────────────────────────────────
+#
+# The enrolled-identity side of face recognition. The /reference-photo route
+# above is untouched and still works exactly as before: upload a photo, follow
+# that person. This adds the other way in — a persistent database of known
+# people that the tracker can match against with nobody selecting a target.
+#
+# Every mutating route is token-gated. This is durable biometric data, and it
+# is the one dataset in this system with no automatic expiry.
+
+
+@router.get("/vision/face-gallery")
+async def face_gallery_list():
+    """Enrolled people with photo counts."""
+    from app.vision.persistence import list_persons
+    return {"persons": await list_persons()}
+
+
+@router.post("/vision/face-gallery/enrol")
+async def face_gallery_enrol(
+    name:  str = Query(..., min_length=1, max_length=120),
+    notes: str = Query(""),
+    files: list[UploadFile] = File(...),
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """
+    Enrol one person from uploaded photos.
+
+    Adding photos to an existing name extends that person rather than creating
+    a duplicate, so this is safe to call repeatedly.
+
+    Results are per image: a photo with no detectable face is reported rather
+    than silently dropped, because a thin enrolment is the difference between
+    recognition working and not, and the operator needs to know which file to
+    re-shoot.
+    """
+    settings = get_settings()
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+
+    import os
+    import tempfile
+    from app.vision.persistence import enrol_person_images
+
+    tmp_paths = []
+    try:
+        for f in files:
+            suffix = os.path.splitext(f.filename or "")[1].lower() or ".jpg"
+            fd, path = tempfile.mkstemp(suffix=suffix)
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(await f.read())
+            # The original filename is what the operator recognises in the
+            # results, so it is preserved rather than the temp name.
+            tmp_paths.append((path, f.filename or os.path.basename(path)))
+
+        results = await enrol_person_images(name, [p for p, _ in tmp_paths], notes)
+        by_index = {i: orig for i, (_, orig) in enumerate(tmp_paths)}
+        out = []
+        for i, r in enumerate(results):
+            out.append({
+                "filename": by_index.get(i, r.filename),
+                "ok": r.ok,
+                "reason": r.reason,
+                "det_score": round(r.det_score, 3),
+            })
+        return {
+            "person": name,
+            "enrolled": sum(1 for r in results if r.ok),
+            "total": len(results),
+            "results": out,
+        }
+    finally:
+        for path, _ in tmp_paths:
+            with contextlib.suppress(OSError):
+                os.remove(path)
+
+
+@router.post("/vision/face-gallery/enrol-folder")
+async def face_gallery_enrol_folder(
+    path: str = Query(..., description="Folder laid out as <root>/<person name>/<images>"),
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """
+    Enrol a whole `<root>/<person name>/<image>` tree in one call — the layout
+    of the provided sample set, so it needs no reshuffling.
+
+    Server-side path, so it is token-gated like every other mutation here.
+    """
+    settings = get_settings()
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+
+    import os
+    if not os.path.isdir(path):
+        raise HTTPException(status_code=400, detail=f"Not a directory: {path}")
+
+    from app.vision.persistence import enrol_from_folder
+    results = await enrol_from_folder(path)
+    if not results:
+        raise HTTPException(
+            status_code=400,
+            detail="No <name>/<image> subfolders found — expected "
+                   "photos/<person name>/*.jpg",
+        )
+    people: dict[str, dict] = {}
+    for r in results:
+        entry = people.setdefault(r.person_name, {"enrolled": 0, "failed": [], "total": 0})
+        entry["total"] += 1
+        if r.ok:
+            entry["enrolled"] += 1
+        else:
+            entry["failed"].append({"filename": r.filename, "reason": r.reason})
+    return {
+        "enrolled": sum(1 for r in results if r.ok),
+        "total": len(results),
+        "persons": people,
+    }
+
+
+@router.patch("/vision/face-gallery/{person_id}")
+async def face_gallery_set_active(
+    person_id: str,
+    active: bool = Query(...),
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """Take someone out of matching without destroying the enrolment — for
+    investigating a match that keeps misfiring."""
+    settings = get_settings()
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.vision.persistence import set_person_active
+    if not await set_person_active(person_id, active):
+        raise HTTPException(status_code=404, detail="Person not found")
+    return {"person_id": person_id, "active": active}
+
+
+@router.delete("/vision/face-gallery/{person_id}")
+async def face_gallery_delete_person(
+    person_id: str,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """Erase a person, their embeddings, and their stored photos."""
+    settings = get_settings()
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.vision.persistence import delete_person
+    if not await delete_person(person_id):
+        raise HTTPException(status_code=404, detail="Person not found")
+    return {"deleted": person_id}
+
+
+@router.delete("/vision/face-gallery")
+async def face_gallery_clear(x_auth_token: str = Header(None, alias="X-Auth-Token")):
+    """
+    Erase the entire gallery — every identity and every stored photo.
+
+    The explicit deletion path this data category requires, since nothing here
+    is ever purged automatically.
+    """
+    settings = get_settings()
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.vision.persistence import clear_face_gallery
+    await clear_face_gallery()
+    return {"cleared": True}
+
+
+@router.get("/vision/sightings")
+async def face_gallery_sightings(
+    session_id: str | None = Query(None),
+    limit: int = Query(200, le=1000),
+):
+    """Gallery-match audit trail — what the system claimed, when."""
+    from app.vision.persistence import list_sightings
+    return {"sightings": await list_sightings(session_id=session_id, limit=limit)}
+
+
+@router.delete("/vision/sightings")
+async def face_gallery_clear_sightings(
+    session_id: str | None = Query(None),
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    settings = get_settings()
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.vision.persistence import clear_sightings
+    await clear_sightings(session_id=session_id)
+    return {"cleared": True, "session_id": session_id}
 
 
 # ── Permits ──────────────────────────────────────────────────────────────
