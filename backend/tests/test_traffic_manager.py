@@ -616,7 +616,10 @@ def test_a_valid_non_indian_plate_is_not_suppressed():
     assert v.reportable_plate == "719257C"
     assert v.plate_grammar_ok is False
     assert v.plate_strong is True
-    assert v.plate_confirmed is False
+    # It CONFIRMS too. This line previously asserted the opposite, which was
+    # pinning a defect rather than a decision — see
+    # test_a_valid_foreign_plate_confirms_and_stops_burning_budget.
+    assert v.plate_confirmed is True
 
 
 def test_five_different_strings_for_one_vehicle_never_confirm():
@@ -1108,3 +1111,36 @@ def test_every_pursuit_analyzer_implements_the_controls_it_is_routed_for():
     for cls in _pursuit_analyzers():
         for name in ("set_tracking_params", "set_altitude_mode", "set_altitude_nudge"):
             assert callable(getattr(cls, name, None)), f"{cls.__name__} lacks {name}"
+
+
+def test_a_valid_foreign_plate_confirms_and_stops_burning_budget():
+    """Grammar must not gate confirmation, only describe it.
+
+    While it did, "719257C" — a real plate off this rig — never confirmed
+    however many frames agreed. Two consequences, both silent: the vehicle
+    kept consuming OCR calls for the full 12 attempts, starving others; and it
+    never re-attached its identity across an occlusion, so one car turned into
+    several vehicle_ids."""
+    v = _read("719257C", 0.9, _READABLE_BOX, times=_PLATE_MIN_AGREEING_READS)
+    assert v.plate_grammar_ok is False, "premise: this plate fails the regex"
+    assert v.plate_confirmed is True
+    assert v.plate_strong is True
+    assert v.needs_ocr is False, "a settled plate must stop consuming budget"
+
+
+def test_a_foreign_plate_re_identifies_across_an_occlusion():
+    """The second consequence: identity is attached on confirmation, so a
+    plate that never confirms never merges its fragmented tracks."""
+    t = bare_tracker()
+    state = t._client_state["s"]
+
+    first = vehicle(1)
+    first.vehicle_id, first.plate = t._new_vehicle_id(state), "719257C"
+    first.plate_votes = _PLATE_MIN_AGREEING_READS
+    t._register_plate(state, first)
+
+    again = vehicle(2)
+    again.vehicle_id, again.plate = t._new_vehicle_id(state), "719257C"
+    t._register_plate(state, again)
+
+    assert again.vehicle_id == first.vehicle_id

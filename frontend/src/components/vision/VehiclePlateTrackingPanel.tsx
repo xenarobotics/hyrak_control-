@@ -58,7 +58,6 @@ export function VehiclePlateTrackingPanel() {
     const vehicleTypes = cvResults?.vehicle_types ?? {}
     const vehicleColors = cvResults?.vehicle_colors ?? {}
     const actualFillPct = cvResults?.vehicle_fill_pct ?? null
-    const altMode = cvResults?.altitude_mode ?? 'fixed'
 
     useEffect(() => {
         const socket = getSocket()

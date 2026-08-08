@@ -823,10 +823,17 @@ class TrafficManager(BaseAnalyzer):
                 int(box.x2) + cx1, int(box.y2) + cy1,
             ]
 
+            # Confirmation is AGREEMENT ONLY. Requiring grammar here as well
+            # made the relaxation half-done and left a real defect: the valid
+            # plate "719257C" fails _INDIA_PLATE_RE, so however many frames
+            # agreed on it, it never confirmed — which meant it never stopped
+            # consuming OCR budget (starving other vehicles for 12 attempts)
+            # and never re-attached its durable identity across an occlusion,
+            # so one car became several vehicle_ids. Grammar is recorded and
+            # shown; it does not decide what counts as read.
             just_confirmed = (
                 not vehicle.plate_confirmed
                 and vehicle.plate_votes >= _PLATE_MIN_AGREEING_READS
-                and grammar_ok
             )
             if just_confirmed:
                 vehicle.plate_confirmed = True
