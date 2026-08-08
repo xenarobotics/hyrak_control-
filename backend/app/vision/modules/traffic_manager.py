@@ -125,41 +125,67 @@ _FACE_ID_MEMORY_S = 4.0
 # the fallback for the frames before a profile exists.
 _OCR_CALLS_PER_FRAME = 1
 # Don't bother cropping a vehicle this small — after the detector letterboxes
-# the crop to 384 there would be nothing left of the plate to read.
-_OCR_MIN_VEHICLE_PX = 110
+# the crop to 384 there would be nothing left of the plate to read. Relaxed
+# from 110px along with the gates below: at drone standoff a vehicle 70px wide
+# still yields a legible plate often enough to be worth the call, and the
+# per-frame budget is now allocated rather than fixed at one.
+_OCR_MIN_VEHICLE_PX = 70
 # A read at or above this is treated as final and the vehicle stops consuming
 # OCR budget, freeing it for vehicles that still have no plate.
 _OCR_GOOD_ENOUGH = 0.80
-_OCR_MIN_CONF = 0.55
+_OCR_MIN_CONF = 0.35
 # Stop retrying a vehicle that has repeatedly failed — usually its plate simply
 # is not facing us, and it would otherwise starve every other vehicle.
 _OCR_MAX_ATTEMPTS = 12
 
 # ── Guards against fabricated plates ────────────────────────────────────────
 #
-# All three of these exist because of the same observed failure. Left ungated,
-# this module logged plates like WA01WMWH, WA02MM901, WA12MMSH and WAL7MM991 —
-# all for the SAME vehicle, on consecutive frames — plus SUBSCRIBE and
-# SUBSCR18, read off a video overlay. Every one of those crops was 40-50px
-# wide. OCR does not fail loudly at that size; it invents a plausible string,
-# and a plausible string is far worse than no reading at all because it looks
-# like data.
+# THE HISTORY. Left ungated, this module logged WA01WMWH, WA02MM901, WA12MMSH
+# and WAL7MM991 — all for the SAME vehicle, on consecutive frames — plus
+# SUBSCRIBE and SUBSCR18 read off a video overlay. Every one of those crops was
+# 40-50px wide. OCR does not fail loudly at that size; it invents a plausible
+# string, and a plausible string is worse than no reading because it looks like
+# data.
 #
-# MINIMUM WIDTH. Below roughly 70px across a plate there is nothing to read,
-# whatever the model claims. This is the single most effective of the three: no
-# amount of confidence thresholding recovers information that is not in the
-# pixels.
+# WHY THE GATES ARE NOW LOOSER THAN THAT HISTORY SUGGESTS. The original fix put
+# a hard 70px floor on the measured plate width. Checked against 25 real
+# captures off this rig, plates arrive 31-79px wide — so that floor rejected
+# nearly every genuine plate the aircraft will ever see. vehicle-plate-tracking
+# hit exactly this and went from 0 plates read to 19 of 25 by relaxing it.
+#
+# What makes relaxing SAFE here is that the fabrication cause is now blocked
+# UPSTREAM and geometrically: vision/profiles.py refuses to spend an OCR call
+# at all unless the lens and range put ~70px on the plate. The 40-50px crops
+# that produced SUBSCRIBE are never reached. That is a better guard than a
+# confidence threshold, because it reasons about whether the information is
+# present rather than about how sure a model claims to be.
+#
+# So the gates below change role: they no longer decide WHETHER a reading
+# exists, they measure HOW GOOD it is. Every reading is reported and logged
+# with its width, votes and grammar recorded alongside; the UI tones it
+# accordingly. A single-frame read is often the only read a passing vehicle
+# will ever give, and discarding it silently is what lost this project a
+# session's worth of data.
+#
+# AREA, NOT WIDTH. A 40x14 plate carries the same information as a 56x10 one
+# and the first fails a width floor the second passes. Area is the honest
+# measure of how many pixels the reader actually got. Matches
+# plate_tracker._MIN_PLATE_AREA.
+_MIN_PLATE_AREA = 500
+# Kept as a QUALITY MARKER, not a filter — reads below it are still reported,
+# toned as weak. Nothing rejects on this.
 _PLATE_MIN_WIDTH_PX = 70
 # Plate aspect. Indian single-row plates are ~4:1, two-row ~2:1, so anything
-# outside this band is not a plate shape. Note this alone would NOT have
-# stopped "SUBSCRIBE" (3.74) — which is exactly why the size and agreement
-# gates are also needed.
+# outside this band is not a plate shape. This one stays a hard reject: it
+# rejects on SHAPE, which no amount of range fixes, and it costs no real
+# plates. Note it alone would NOT have stopped "SUBSCRIBE" (3.74).
 _PLATE_ASPECT_MIN = 1.6
 _PLATE_ASPECT_MAX = 6.0
 # CROSS-FRAME AGREEMENT. One vehicle yielding five different strings is the
-# signature of guessing. A reading is provisional until the same characters
-# come back twice; only then is it logged or shown as confirmed. Same principle
-# as the face-identification vote in person_tracker.
+# signature of guessing, so agreement is still counted and still drives how a
+# reading is presented — but it no longer suppresses one. Two independent
+# frames agreeing marks a plate STRONG; a single frame is shown and logged with
+# a marker. Same principle as plate_tracker's _PLATE_AGREEMENT_STRONG.
 _PLATE_MIN_AGREEING_READS = 2
 
 # Colour is re-read while confidence is still poor (a vehicle entering frame is
@@ -214,7 +240,7 @@ class _Vehicle:
     __slots__ = (
         "track_id", "vehicle_id", "box", "type", "color", "color_conf",
         "plate", "plate_conf", "plate_box", "crop_path", "vehicle_path",
-        "plate_votes", "plate_confirmed", "plate_grammar_ok",
+        "plate_votes", "plate_confirmed", "plate_grammar_ok", "plate_px_w",
         "speed_kmh", "speed_reliable", "ocr_attempts",
         "first_seen", "last_seen", "logged",
     )
@@ -233,6 +259,10 @@ class _Vehicle:
         self.color_conf = 0.0
         self.plate = ""
         self.plate_conf = 0.0
+        # How many pixels across the plate actually was. The honest quality
+        # indicator now that width no longer rejects: a 40px read and a 300px
+        # read are both reported, and are not equally trustworthy.
+        self.plate_px_w = 0
         self.plate_box: Optional[list] = None
         self.crop_path: Optional[str] = None
         self.vehicle_path: Optional[str] = None
@@ -264,14 +294,35 @@ class _Vehicle:
         )
 
     @property
-    def reportable_plate(self) -> Optional[str]:
-        """The plate, or None if it has not earned being reported.
+    def plate_strong(self) -> bool:
+        """Two or more independent FRAMES agreed on these characters.
 
-        Deliberately strict: a provisional read is shown live with a marker so
-        an operator can see the system working, but it is never logged, never
-        used as a filename, and never presented as a result.
+        Drives how a reading is TONED, never whether it is shown."""
+        return bool(self.plate) and self.plate_votes >= _PLATE_MIN_AGREEING_READS
+
+    @property
+    def reportable_plate(self) -> Optional[str]:
+        """The plate, or None if nothing was read at all.
+
+        Was `plate_confirmed and plate_grammar_ok`, which discarded almost
+        every real reading this rig produces. Two separate reasons:
+
+          * TWO AGREEING FRAMES. A vehicle crossing frame at speed often gives
+            exactly one readable look at its plate. Requiring a second meant
+            the single read — the only one that would ever exist — was thrown
+            away, and the operator saw an empty log.
+          * GRAMMAR. _INDIA_PLATE_RE does not match perfectly valid non-Indian
+            plates; the real captured plate "719257C" fails it. Grammar is a
+            useful signal about a reading, not a licence for it to exist.
+
+        Both are still recorded — as plate_votes, plate_strong, plate_px_w and
+        plate_grammar_ok — so the UI can tone a weak read and a report can be
+        filtered on strength. What changed is that the reading is no longer
+        silently destroyed. Fabrication is prevented upstream now, by
+        profiles.py declining to spend the call at all when the geometry says
+        the pixels are not there.
         """
-        return self.plate if (self.plate_confirmed and self.plate_grammar_ok) else None
+        return self.plate or None
 
 
 def _make_state(session_id: str) -> Dict[str, Any]:
@@ -578,6 +629,51 @@ class TrafficManager(BaseAnalyzer):
             f"{'STARTED' if active else 'STOPPED'}"
         )
 
+    def _plate_event_row(self, v: "_Vehicle") -> Optional[dict]:
+        """
+        Build the DB row for one vehicle, or None if it is already written.
+
+        ONE ROW PER VEHICLE, PLATE OR NOT — the same policy as
+        vehicle-plate-tracking, which this module previously diverged from.
+        Rows used to be restricted to confirmed, grammar-valid plates, which
+        left the log silent about most of the traffic actually seen: most
+        vehicles never turn a readable plate toward an aircraft, and the ones
+        that do often give a single frame to do it in. A vehicle's identity,
+        type, colour, speed and location are worth recording whether or not its
+        plate was legible.
+
+        Quality travels WITH the row (plate_px_w, ocr_confidence) rather than
+        deciding whether the row exists, so a weak reading can be judged or
+        filtered afterwards. A row that was never written cannot be.
+        """
+        if v.logged:
+            return None
+        v.logged = True
+        return {
+            "table": "plate_event",
+            "track_id": v.track_id,
+            "vehicle_id": v.vehicle_id or None,
+            # "" rather than None: the column is NOT NULL, and an empty string
+            # reads correctly as "no plate was ever read for this vehicle".
+            "plate_text": v.reportable_plate or "",
+            "ocr_confidence": v.plate_conf,
+            # The quality indicator that lets a weak row be judged after the
+            # fact. The column already existed for vehicle-plate-tracking;
+            # this module simply never wrote it.
+            "plate_px_w": v.plate_px_w,
+            "vehicle_type": v.type or "unknown",
+            "vehicle_color": v.color or "",
+            "vehicle_color_conf": v.color_conf,
+            "vehicle_box": v.box,
+            "plate_box": v.plate_box,
+            # The plate crop; the vehicle shot sits beside it on disk so a
+            # record can be checked by a human.
+            "image_path": v.crop_path,
+            "vehicle_image_path": v.vehicle_path,
+            # Only a reliable estimate is written to a permanent row.
+            "speed_est_kmh": v.speed_kmh if v.speed_reliable else None,
+        }
+
     # ── Durable vehicle identity ──────────────────────────────────────────
 
     def _new_vehicle_id(self, state: Dict[str, Any]) -> str:
@@ -676,11 +772,15 @@ class TrafficManager(BaseAnalyzer):
             # ── Gate 1: is this even plate-shaped and big enough to read? ──
             pw = int(box.x2) - int(box.x1)
             ph = max(1, int(box.y2) - int(box.y1))
-            if pw < _PLATE_MIN_WIDTH_PX:
-                # The important one. At 40-50px OCR does not fail, it invents.
+            # AREA, not width. Real plates off this rig arrive 31-79px wide; a
+            # 70px width floor rejected almost all of them. A 40x14 crop holds
+            # the same information as a 56x10 one and only the second clears a
+            # width test. See the note above _MIN_PLATE_AREA for why relaxing
+            # is safe now that profiles.py refuses the call geometrically.
+            if pw * ph < _MIN_PLATE_AREA:
                 logger.debug(
                     f"vehicle #{vehicle.track_id}: plate candidate {pw}x{ph}px "
-                    f"below the {_PLATE_MIN_WIDTH_PX}px readable floor — ignored"
+                    f"({pw * ph}px^2) below the {_MIN_PLATE_AREA}px^2 floor — ignored"
                 )
                 continue
             aspect = pw / ph
@@ -715,6 +815,7 @@ class TrafficManager(BaseAnalyzer):
 
             vehicle.plate_conf = max(vehicle.plate_conf, conf)
             vehicle.plate_grammar_ok = grammar_ok
+            vehicle.plate_px_w = max(vehicle.plate_px_w, pw)
             # Back to full-frame coordinates so the overlay draws in the right
             # place — the crop's origin has to be added back.
             vehicle.plate_box = [
@@ -729,15 +830,26 @@ class TrafficManager(BaseAnalyzer):
             )
             if just_confirmed:
                 vehicle.plate_confirmed = True
-                # A confirmed plate is the only evidence strong enough to merge
-                # two track ids into one vehicle, so identity is attached here
-                # rather than on any provisional read.
+                # Re-identification stays gated on AGREEMENT even though
+                # reporting no longer is. Merging two track ids is a claim
+                # about two sightings being one vehicle, and a single wrong
+                # read would silently fuse two different cars' histories —
+                # a far worse outcome than a duplicate row.
                 self._register_plate(state, vehicle)
                 logger.info(
                     f"vehicle #{vehicle.track_id}: plate {text} confirmed "
                     f"({vehicle.plate_votes} agreeing reads, conf={conf:.2f}, "
                     f"{pw}x{ph}px)"
                 )
+
+            # Evidence is saved for the FIRST accepted read, not only on
+            # confirmation. A vehicle crossing frame at speed frequently gives
+            # exactly one readable look, and the previous rule logged that
+            # plate with no image to check it against — which is precisely the
+            # "plates recorded but no captures" complaint. Re-saved on
+            # confirmation because a confirming frame is usually the better
+            # picture, and the second write overwrites the first.
+            if just_confirmed or vehicle.crop_path is None:
                 self._save_evidence(frame_bgr, crop, box, vehicle, state)
 
     # ── Face recognition, borrowed from person_tracker's gallery ──────────
@@ -1049,28 +1161,9 @@ class TrafficManager(BaseAnalyzer):
         for tid, v in list(registry.items()):
             if now - v.last_seen < _LOCK_LOST_AFTER_S:
                 continue
-            # Only a CONFIRMED, grammar-valid plate is written. A provisional
-            # read is shown live but never becomes a permanent record — that is
-            # how SUBSCRIBE ended up in the database.
-            if v.reportable_plate and not v.logged:
-                v.logged = True
-                pending_db.append({
-                    "table": "plate_event",
-                    "track_id": v.track_id,
-                    "vehicle_id": v.vehicle_id or None,
-                    "plate_text": v.reportable_plate,
-                    "ocr_confidence": v.plate_conf,
-                    "vehicle_type": v.type or "unknown",
-                    "vehicle_color": v.color or "",
-                    "vehicle_color_conf": v.color_conf,
-                    "vehicle_box": v.box,
-                    "plate_box": v.plate_box,
-                    # The plate crop; the vehicle shot sits beside it on disk
-                    # so a record can be checked by a human.
-                    "image_path": v.crop_path,
-                    # Only a reliable estimate is written to a permanent row.
-                    "speed_est_kmh": v.speed_kmh if v.speed_reliable else None,
-                })
+            row = self._plate_event_row(v)
+            if row:
+                pending_db.append(row)
             registry.pop(tid, None)
 
         locked_id = state.get("locked_track_id")
@@ -1095,9 +1188,17 @@ class TrafficManager(BaseAnalyzer):
                     # overlay can show a read in progress WITHOUT it looking
                     # like a result.
                     "plate": v.reportable_plate,
-                    "plate_provisional": (v.plate or None) if not v.reportable_plate else None,
+                    # Nothing is "provisional" any more: every read is
+                    # reported, and its strength is carried in the fields
+                    # beside it rather than by withholding the text. Kept as an
+                    # explicit null so the shared VehicleResult type still
+                    # matches what vehicle-plate-tracking sends.
+                    "plate_provisional": None,
                     "plate_conf": round(v.plate_conf, 2),
                     "plate_votes": v.plate_votes,
+                    "plate_px_w": v.plate_px_w,
+                    "plate_grammar_ok": v.plate_grammar_ok,
+                    "plate_strong": v.plate_strong,
                     "plate_box": v.plate_box,
                     "speed_kmh": v.speed_kmh,
                     "speed_reliable": v.speed_reliable,

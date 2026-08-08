@@ -398,17 +398,35 @@ export function TrafficManagementPanel() {
                                                 fontSize: 12, fontWeight: 700,
                                                 fontFamily: 'var(--font-geist-mono)',
                                                 letterSpacing: '0.04em',
-                                                // A provisional read is amber, never green — it
-                                                // must not look like a confirmed result.
-                                                color: v.plate ? '#4ade80'
-                                                    : v.plate_provisional ? '#fbbf24'
-                                                    : 'hsl(var(--app-text-muted))',
+                                                // Toned by STRENGTH, not by whether the read
+                                                // was allowed to exist. Green means two
+                                                // frames agreed; amber is a single-frame
+                                                // read, which at drone standoff is often
+                                                // the only read a passing vehicle gives —
+                                                // shown, logged, and marked rather than
+                                                // discarded.
+                                                color: !v.plate ? 'hsl(var(--app-text-muted))'
+                                                    : v.plate_strong ? '#4ade80'
+                                                    : '#fbbf24',
                                             }}>
                                                 {v.plate
-                                                    ?? (v.plate_provisional
-                                                        ? `${v.plate_provisional}?`
-                                                        : 'no plate')}
+                                                    ? `${v.plate}${v.plate_strong ? '' : '?'}`
+                                                    : 'no plate'}
                                             </span>
+                                            {/* How many pixels the reader actually got.
+                                                The honest quality number now that width no
+                                                longer rejects: a 40px read and a 300px read
+                                                are both reported and are not equally
+                                                trustworthy. */}
+                                            {v.plate && (v.plate_px_w ?? 0) > 0 && (
+                                                <span style={{
+                                                    fontSize: 9, fontFamily: 'monospace',
+                                                    color: 'hsl(var(--app-text-muted))',
+                                                }}>
+                                                    {v.plate_px_w}px across
+                                                    {v.plate_grammar_ok === false && ' · unusual format'}
+                                                </span>
+                                            )}
                                             <span style={{
                                                 fontSize: 10, textTransform: 'capitalize',
                                                 color: 'hsl(var(--app-text-muted))',

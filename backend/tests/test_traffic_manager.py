@@ -143,11 +143,10 @@ def test_a_confirmed_read_stops_consuming_budget():
 def test_high_confidence_alone_does_not_stop_the_budget():
     """A single 1.00-confidence read is exactly what a fabricated plate looks
     like, so it must not end the search."""
-    t = bare_tracker()
     v = vehicle(1)
     v.plate, v.plate_conf, v.plate_votes = "SUBSCRIBE", 1.0, 1
     assert v.needs_ocr is True
-    assert v.reportable_plate is None
+    assert v.plate_strong is False
 
 
 def test_repeated_failures_stop_starving_other_vehicles():
@@ -521,13 +520,26 @@ def test_mode_is_registered_and_has_its_own_inference_width():
 
 
 # --------------------------------------------------------------------------- #
-# Fabricated plates — the observed failures, pinned                             #
+# Fabricated plates — where the protection actually lives now                   #
 # --------------------------------------------------------------------------- #
 #
-# Every case below is a real string this module logged before the gates existed.
-# They are here by name because the failure mode is silent: OCR does not error
-# at 45px, it returns a plausible plate, and a plausible plate is worse than no
-# reading because it looks like data.
+# Every string named below is a real one this module logged: WA01WMWH,
+# WA02MM901, WA12MMSH, WAL7MM991 for the same vehicle on consecutive frames,
+# plus SUBSCRIBE read off a video overlay. The failure is silent — OCR does not
+# error at 45px, it returns something plausible.
+#
+# The first fix was a hard 70px floor on measured plate width. That worked and
+# was wrong: on real footage from this rig plates arrive 31-79px wide, so the
+# floor rejected nearly every genuine plate. The fabricated crops were 40-50px.
+# The two populations OVERLAP, which is why no width or area threshold can
+# separate them — a fact worth stating plainly, because it is the reason the
+# gate had to move rather than be retuned.
+#
+# So protection moved UPSTREAM and became geometric: vision/profiles.py will
+# not spend an OCR call at all unless the lens and slant range put ~70px on a
+# plate. The 40-50px regime is never reached, rather than being reached and
+# then argued with. The tests below pin BOTH halves — that the reader now keeps
+# a weak reading, and that the profile is what stops it being asked for one.
 
 def _read(text, conf, box, veh=None, times=1):
     t = _with_alpr([_FakeResult(text, conf, box)])
@@ -544,23 +556,66 @@ def _read(text, conf, box, veh=None, times=1):
     ("WAL7MM991", 43),
     ("P443", 40),
 ])
-def test_reads_from_unreadably_small_crops_are_discarded(text, box_w):
-    """The single most effective gate. No confidence threshold recovers
-    information that is not in the pixels."""
-    assert box_w < _PLATE_MIN_WIDTH_PX
+def test_small_crops_are_kept_but_marked_weak(text, box_w):
+    """These widths overlap the 31-79px band real plates arrive in, so
+    discarding them threw away genuine reads in order to catch fabricated ones.
+
+    They are kept now with their width recorded, so a weak reading can be
+    judged rather than silently destroyed. What stops the reader being ASKED
+    to look at a 45px plate is the profile gate, tested next."""
     v = _read(text, 0.95, _FakeBox(10, 10, 10 + box_w, 24))
-    assert v.reportable_plate is None
-    assert v.plate == "", "a sub-readable crop was stored at all"
+    assert v.plate == text
+    assert v.plate_px_w == box_w
+    assert v.plate_strong is False, "a single read must not look confirmed"
 
 
-def test_subscribe_read_off_a_video_overlay_is_never_reported():
-    """116x31px and aspect 3.74 — big enough and plate-shaped, so size and
-    aspect both pass. Only the grammar gate stops it, which is why all three
-    gates are needed rather than any one."""
+def test_the_fabricated_crops_are_never_reached_at_their_real_range():
+    """The actual guard. A 45px plate means the vehicle is far enough away that
+    profiles.py refuses to spend the OCR call — so the regime that produced
+    WA01WMWH is not entered, rather than entered and then argued with."""
+    from app.vision import viability
+    from app.vision.profiles import ProfileSelector
+
+    W, HFOV = 1920, 70.0
+    far = viability.range_for_px(HFOV, W, 0.50, 45)
+    items = [i.to_dict() for i in viability.assess(
+        HFOV, W, far,
+        effective_width_px={k: W for k in ("vehicle", "person", "plate", "face")},
+    )]
+    profile = ProfileSelector().select(items)
+    assert not profile.attempting("plate")
+    assert profile.ocr_calls == 0
+
+
+def test_specks_are_still_rejected_outright():
+    """Relaxing is not removing. Below the area floor there is genuinely
+    nothing there, and that gate still fires."""
+    v = _read("TS09EA0001", 0.95, _FakeBox(10, 10, 34, 18))   # 24x8 = 192px^2
+    assert v.plate == ""
+
+
+def test_subscribe_read_off_a_video_overlay_is_reported_but_flagged():
+    """116x31px and aspect 3.74 — plate-shaped and large, so no size gate ever
+    caught this one; only grammar did.
+
+    Grammar is a FLAG now rather than a filter, because it has to be: the real
+    captured plate "719257C" is not Indian-format either, and suppressing on
+    grammar discarded that too. So SUBSCRIBE is reported with
+    plate_grammar_ok False for the UI to tone — the price of not throwing away
+    valid foreign plates."""
     v = _read("SUBSCRIBE", 0.9, _FakeBox(10, 10, 126, 41), times=3)
-    assert v.plate == "SUBSCRIBE"        # it WAS read
+    assert v.plate == "SUBSCRIBE"
     assert v.plate_grammar_ok is False
-    assert v.reportable_plate is None    # ...but never reported
+    assert v.reportable_plate == "SUBSCRIBE"
+
+
+def test_a_valid_non_indian_plate_is_not_suppressed():
+    """The read that motivated dropping grammar-as-a-filter: a real plate off
+    this rig that fails _INDIA_PLATE_RE."""
+    v = _read("719257C", 0.9, _READABLE_BOX, times=2)
+    assert v.reportable_plate == "719257C"
+    assert v.plate_grammar_ok is False
+    assert v.plate_strong is True
     assert v.plate_confirmed is False
 
 
@@ -572,7 +627,7 @@ def test_five_different_strings_for_one_vehicle_never_confirm():
     for text in ("WA01WMWH", "WA02MM901", "WA12MMSH", "WAL7MM991", "WAWMWMH1"):
         t.alpr.predict = lambda c, s=text: [_FakeResult(s, 0.9, _READABLE_BOX)]
         t._read_plate(np.zeros((1080, 1920, 3), np.uint8), v, t._client_state["s"])
-        assert v.reportable_plate is None
+        assert v.plate_strong is False, "guessing must never look confirmed"
         assert v.plate_votes == 1, "a new string inherited the old one's votes"
 
 
@@ -583,10 +638,14 @@ def test_the_same_valid_plate_twice_confirms():
     assert v.plate_grammar_ok is True
 
 
-def test_one_valid_read_is_not_enough():
+def test_one_valid_read_is_reported_but_not_strong():
+    """A vehicle crossing frame at speed often gives exactly one readable look
+    at its plate. Requiring a second discarded the only read that would ever
+    exist, and the operator saw an empty log."""
     v = _read("TS09EA0001", 0.99, _READABLE_BOX, times=1)
-    assert v.reportable_plate is None
+    assert v.reportable_plate == "TS09EA0001"
     assert v.plate_votes == 1
+    assert v.plate_strong is False
 
 
 @pytest.mark.parametrize("w,h", [(100, 8), (40, 34), (300, 20)])
@@ -624,24 +683,38 @@ def test_filenames_come_from_the_track_id_not_the_ocr_text():
     assert name.startswith("v00001_")
 
 
-def test_nothing_is_saved_for_an_unconfirmed_read():
-    v = _read("SUBSCRIBE", 0.9, _FakeBox(10, 10, 126, 41), times=4)
-    assert v.crop_path is None
-    assert v.vehicle_path is None
+def test_evidence_is_saved_for_a_single_frame_read():
+    """A plate logged with no image cannot be checked by a human — the
+    "plates recorded but no captures" complaint. The first accepted read now
+    writes both images, not only a confirmed one."""
+    v = _read("TS09EA0001", 0.9, _READABLE_BOX, times=1)
+    assert v.crop_path and v.crop_path.endswith("_plate.jpg")
+    assert v.vehicle_path and v.vehicle_path.endswith("_vehicle.jpg")
 
 
-def test_only_a_reportable_plate_reaches_the_database():
-    """A provisional read is shown live so an operator can see the system
-    working, but it must never become a permanent record."""
-    provisional = vehicle(1)
-    provisional.plate, provisional.plate_votes = "SUBSCRIBE", 1
-    assert provisional.reportable_plate is None
+def test_every_vehicle_gets_a_row_plate_or_not():
+    """One row per vehicle, matching vehicle-plate-tracking. Restricting rows
+    to confirmed plates left the log silent about most of the traffic actually
+    seen, since most vehicles never turn a readable plate toward an aircraft."""
+    t = bare_tracker()
 
-    confirmed = vehicle(2)
-    confirmed.plate = "MH12AB1234"
-    confirmed.plate_votes, confirmed.plate_confirmed = 2, True
-    confirmed.plate_grammar_ok = True
-    assert confirmed.reportable_plate == "MH12AB1234"
+    plated = vehicle(1)
+    plated.plate, plated.plate_votes, plated.plate_px_w = "MH12AB1234", 2, 88
+    row = t._plate_event_row(plated)
+    assert row["plate_text"] == "MH12AB1234"
+    assert row["plate_px_w"] == 88
+
+    bare = vehicle(2)
+    row = t._plate_event_row(bare)
+    assert row is not None, "a vehicle with no plate still deserves a record"
+    assert row["plate_text"] == "", "NOT NULL column — empty string, not None"
+
+
+def test_a_vehicle_is_only_written_once():
+    t = bare_tracker()
+    v = vehicle(1)
+    assert t._plate_event_row(v) is not None
+    assert t._plate_event_row(v) is None, "duplicate row for one vehicle"
 
 
 # --------------------------------------------------------------------------- #
