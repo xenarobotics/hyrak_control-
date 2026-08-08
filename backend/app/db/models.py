@@ -8,7 +8,9 @@ from datetime import datetime, timezone
 from typing import Optional
 import uuid
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import (
+    JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -177,3 +179,290 @@ class FlightSample(Base):
     groundspeed_m_s: Mapped[float] = mapped_column(Float, default=0.0)
     battery_pct: Mapped[float] = mapped_column(Float, default=0.0)
     mode: Mapped[str] = mapped_column(String(24), default="")
+
+
+class CrowdSnapshot(Base):
+    """
+    A sampled crowd-density reading (~every 2s while crowd-management mode
+    is active) — a live table for the session, purged at session end (see
+    app/vision/persistence.py). session_id is a plain indexed string, not a
+    FK: sessions are ephemeral/in-memory (same pattern as Flight.session_id).
+    """
+    __tablename__ = "crowd_snapshots"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(36), index=True)
+    t: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    current_count: Mapped[int] = mapped_column(Integer, default=0)
+    peak_count: Mapped[int] = mapped_column(Integer, default=0)
+    density_level: Mapped[str] = mapped_column(String(10), default="green")
+    section_counts: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    def to_dict(self) -> dict:
+        return {
+            "t": self.t.isoformat() if self.t else None,
+            "current_count": self.current_count,
+            "peak_count": self.peak_count,
+            "density_level": self.density_level,
+            "section_counts": self.section_counts,
+        }
+
+
+class CrowdAlert(Base):
+    """A sustained-density alert raised for one grid section (see
+    crowd_manager.py's alert_sustain/cooldown logic)."""
+    __tablename__ = "crowd_alerts"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(36), index=True)
+    t: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    level: Mapped[str] = mapped_column(String(10), default="orange")
+    section_idx: Mapped[int] = mapped_column(Integer, default=-1)
+    count: Mapped[int] = mapped_column(Integer, default=0)
+    message: Mapped[str] = mapped_column(String(300), default="")
+
+    def to_dict(self) -> dict:
+        return {
+            "session_id": self.session_id,
+            "t": self.t.isoformat() if self.t else None,
+            "level": self.level,
+            "section_idx": self.section_idx,
+            "count": self.count,
+            "message": self.message,
+        }
+
+
+class PlateEvent(Base):
+    """
+    One row per vehicle (best-confidence plate reading, logged once when its
+    track finalizes — not per frame, and not per fragment if the same plate
+    is re-read within a cooldown window). Retained until an operator
+    explicitly downloads/clears the history — see app/vision/persistence.py.
+    """
+    __tablename__ = "plate_events"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    session_id: Mapped[str] = mapped_column(String(36), index=True)
+    track_id: Mapped[int] = mapped_column(Integer, default=0)
+    # This module's own persistent identity for the vehicle (e.g. "VH-000042"),
+    # distinct from track_id: ByteTrack ids reset on occlusion, this survives —
+    # a re-read plate re-attaches the SAME vehicle_id rather than minting a new
+    # one. Nullable because older rows predate the feature.
+    vehicle_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    plate_text: Mapped[str] = mapped_column(String(20), index=True)
+    ocr_confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    vehicle_type: Mapped[str] = mapped_column(String(20), default="")
+    # Dominant body colour plus how sure the classifier was. The confidence
+    # travels with it because a distant or shaded vehicle genuinely cannot be
+    # coloured reliably, and a bare "red" hides that.
+    vehicle_color: Mapped[str] = mapped_column(String(20), default="")
+    vehicle_color_conf: Mapped[float] = mapped_column(Float, default=0.0)
+    vehicle_box: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    plate_box: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    # How many pixels across the plate actually was. The single most useful
+    # quality indicator for a reading, and the reason it is stored rather than
+    # used as a hard reject filter: on real footage from this rig plates arrive
+    # 31-79px wide, so a width gate strict enough to guarantee a good read
+    # rejects nearly every genuine plate. Recording it instead lets a reading
+    # be judged after the fact without throwing the data away first.
+    plate_px_w: Mapped[int] = mapped_column(Integer, default=0)
+    image_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    # The whole-vehicle shot beside the plate crop. A 40x18px plate crop on its
+    # own is unreviewable — you cannot tell a plate from a badge from an
+    # overlay — so the car photo is what makes a row checkable by a human.
+    vehicle_image_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    lng: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    alt_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Ground-sample-distance estimate from drone altitude/FOV — NOT a
+    # calibrated/certified reading. Always paired with is_estimate=True on
+    # the wire; never present this as enforcement-grade evidence.
+    speed_est_kmh: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "session_id": self.session_id,
+            "track_id": self.track_id,
+            "vehicle_id": self.vehicle_id,
+            "plate_text": self.plate_text,
+            "ocr_confidence": self.ocr_confidence,
+            "vehicle_type": self.vehicle_type,
+            "vehicle_color": self.vehicle_color,
+            "vehicle_color_conf": round(self.vehicle_color_conf, 3),
+            "vehicle_box": self.vehicle_box,
+            "plate_box": self.plate_box,
+            "plate_px_w": self.plate_px_w,
+            "image_path": self.image_path,
+            "vehicle_image_path": self.vehicle_image_path,
+            "lat": self.lat,
+            "lng": self.lng,
+            "alt_m": self.alt_m,
+            "speed_est_kmh": self.speed_est_kmh,
+            "first_seen": self.first_seen.isoformat() if self.first_seen else None,
+            "last_seen": self.last_seen.isoformat() if self.last_seen else None,
+        }
+
+
+# ── Face gallery ─────────────────────────────────────────────────────────────
+#
+# THIS IS A DIFFERENT CATEGORY OF DATA FROM EVERYTHING ABOVE.
+#
+# crowd_snapshots and crowd_alerts are purged at session end; plate_events are
+# kept only until an operator clears them. Both describe a moment. `persons`
+# and `person_faces` instead hold durable biometric identity — a face template
+# that names a specific human being across sessions and flights.
+#
+# That difference is deliberate and load-bearing, so it is written down here
+# rather than left to be inferred: this data has no automatic expiry, so it
+# needs an explicit deletion path (delete_person / clear_face_gallery in
+# app/vision/persistence.py) and a real retention decision before any
+# deployment. A demo gallery of three colleagues is not a reason to let the
+# default become "keep faces forever".
+
+
+class Person(Base):
+    """
+    One enrolled identity. Deliberately thin: a name and a switch.
+
+    Deleting a Person cascades to their faces and unlinks the image files —
+    see persistence.delete_person(). A plain SQL DELETE would orphan the
+    images, the same trap plate_events.image_path carries.
+    """
+    __tablename__ = "persons"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(120), index=True)
+    notes: Mapped[str] = mapped_column(String(500), default="")
+    # Soft disable so a face can be taken out of matching without destroying
+    # the enrolment — useful when a match keeps misfiring and you want to
+    # investigate rather than delete the evidence.
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+    def to_dict(self, face_count: int | None = None) -> dict:
+        d = {
+            "id": self.id,
+            "name": self.name,
+            "notes": self.notes,
+            "active": self.active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+        if face_count is not None:
+            d["face_count"] = face_count
+        return d
+
+
+class PersonFace(Base):
+    """
+    One enrolled photo: the embedding in Postgres, the image on disk.
+
+    WHY THE VECTOR IS RAW BYTES, NOT JSON
+        A 512-dim float32 ArcFace embedding is exactly 2048 bytes packed, but
+        roughly 10 KB as a JSON array of decimal strings — and the round trip
+        through text loses bits. Packed float32 is compact and exact.
+        np.frombuffer on the way out is free.
+
+    WHY THE IMAGE STAYS ON DISK
+        Same reasoning as plate_events.image_path: image bytes in Postgres
+        bloat the table and every backup of it. More importantly the original
+        is the RE-ENROLMENT path — see model_name below.
+
+    WHY model_name AND dim ARE STORED
+        Embeddings from different face models are not comparable. buffalo_sc
+        and buffalo_l are both 512-dim, so a mismatch does not raise or even
+        look wrong — it silently produces meaningless cosine similarities and
+        therefore confident misidentifications. Recording which model produced
+        each vector lets the matcher refuse cross-model comparison and lets an
+        upgrade re-extract from the stored originals instead of guessing.
+    """
+    __tablename__ = "person_faces"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    person_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("persons.id", ondelete="CASCADE"), index=True
+    )
+    image_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    # Packed float32. Read back with np.frombuffer(blob, dtype=np.float32).
+    embedding: Mapped[bytes] = mapped_column(LargeBinary)
+    embedding_dim: Mapped[int] = mapped_column(Integer, default=512)
+    model_name: Mapped[str] = mapped_column(String(60), default="buffalo_sc")
+    # InsightFace's own detection score for the enrolled crop. A blurry or
+    # sharply-angled enrolment photo poisons matching quietly, so the score is
+    # kept to let low-quality enrolments be found and re-shot later.
+    det_score: Mapped[float] = mapped_column(Float, default=0.0)
+    source_filename: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    def to_dict(self) -> dict:
+        """Metadata only — the embedding itself is never serialised to a
+        client. It is biometric material, and it is not needed browser-side."""
+        return {
+            "id": self.id,
+            "person_id": self.person_id,
+            "image_path": self.image_path,
+            "model_name": self.model_name,
+            "embedding_dim": self.embedding_dim,
+            "det_score": round(self.det_score, 3),
+            "source_filename": self.source_filename,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class PersonSighting(Base):
+    """
+    A gallery match during a session — the audit trail for "the drone said
+    this was Madhu at 14:32".
+
+    Session-scoped like crowd_snapshots, NOT durable like persons: the
+    identities are the asset, the sightings are operational log. person_id is
+    SET NULL on delete rather than cascading, so removing someone from the
+    gallery does not silently rewrite the history of what the system did.
+    """
+    __tablename__ = "person_sightings"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    session_id: Mapped[str] = mapped_column(String(36), index=True)
+    person_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("persons.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # Denormalised so the log still reads correctly after a person is deleted.
+    person_name: Mapped[str] = mapped_column(String(120), default="")
+    t: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    similarity: Mapped[float] = mapped_column(Float, default=0.0)
+    track_id: Mapped[int] = mapped_column(Integer, default=0)
+    # Where the drone was, not where the person was — the same honest
+    # distinction plate_events draws.
+    lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    lng: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    alt_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    image_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "session_id": self.session_id,
+            "person_id": self.person_id,
+            "person_name": self.person_name,
+            "t": self.t.isoformat() if self.t else None,
+            "similarity": round(self.similarity, 4),
+            "track_id": self.track_id,
+            "lat": self.lat,
+            "lng": self.lng,
+            "alt_m": self.alt_m,
+            "image_path": self.image_path,
+        }
