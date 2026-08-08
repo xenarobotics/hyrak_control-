@@ -131,20 +131,33 @@ def test_face_identification_is_skipped_but_earned_names_survive():
     assert t._identify_faces(None, [], state, attempt=False) == {}
 
 
-def test_a_confirmed_read_stops_consuming_budget():
-    """Freeing it for vehicles that still have no plate at all.
+def test_a_settled_read_stops_consuming_budget():
+    """SETTLED, not merely confirmed — big AND confident AND agreed.
 
-    Gated on CONFIRMED rather than on confidence: the fabricated reads that
-    prompted these guards scored up to 1.00, so confidence alone is not
-    evidence that a plate has been read."""
+    Confidence alone cannot be the bar (invented reads scored 1.00) and
+    agreement alone cannot either: a vehicle first seen far away confirms a
+    50px plate and would then never be re-read, throwing away the 200px look
+    it gives two seconds later. Only a reading with nothing left to win frees
+    the budget."""
     t = bare_tracker()
     done = vehicle(1)
-    done.plate, done.plate_conf = "TS09EA0001", 0.95
+    done.plate, done.plate_conf, done.plate_px_w = "TS09EA0001", 0.95, 160
     done.plate_votes, done.plate_confirmed, done.plate_grammar_ok = 2, True, True
     pending = vehicle(2, 500, 100, 900, 400)
     picked = t._ocr_candidates(t._client_state["s"], [done, pending], budget=_OCR_CALLS_PER_FRAME)
     assert [v.track_id for v in picked] == [2]
+    assert done.read_settled is True
     assert done.needs_ocr is False
+
+
+def test_a_small_confirmed_read_keeps_its_place_in_the_queue():
+    """The whole point of re-reading: a vehicle first seen at distance must
+    not be finished with just because two frames agreed on a tiny plate."""
+    far = vehicle(1)
+    far.plate, far.plate_conf, far.plate_px_w = "TS09EA0001", 0.95, 55
+    far.plate_votes, far.plate_confirmed = 2, True
+    assert far.read_settled is False
+    assert far.needs_ocr is True
 
 
 def test_high_confidence_alone_does_not_stop_the_budget():
@@ -209,6 +222,17 @@ class _FakeResult:
 # Wide enough to clear _PLATE_MIN_WIDTH_PX and shaped like a plate. The
 # fabricated reads that prompted those gates all came from ~45x13 boxes.
 _READABLE_BOX = _FakeBox(10, 10, 100, 34)
+
+
+class _StubAlpr:
+    """A fixed ALPR result set, swapped in between reads so one test can walk
+    a vehicle through a sequence of looks at its plate."""
+
+    def __init__(self, results):
+        self._results = results
+
+    def predict(self, crop):
+        return self._results
 
 
 def _with_alpr(results, record=None):
@@ -1183,7 +1207,9 @@ def test_a_valid_foreign_plate_confirms_and_stops_burning_budget():
     assert v.plate_grammar_ok is False, "premise: this plate fails the regex"
     assert v.plate_confirmed is True
     assert v.plate_strong is True
-    assert v.needs_ocr is False, "a settled plate must stop consuming budget"
+    # Confirmed but NOT settled: the crop was only 90px, so the vehicle stays
+    # in the queue in case it offers a better look on the way past.
+    assert v.needs_ocr is True
 
 
 def test_a_foreign_plate_re_identifies_across_an_occlusion():
@@ -1377,3 +1403,99 @@ def test_the_plate_bracket_is_stored_relative_to_its_vehicle():
         dx2, dy2 = x1 + f[2] * bw, y1 + f[3] * bh
         assert x1 <= dx1 <= dx2 <= x2
         assert y1 <= dy1 <= dy2 <= y2
+
+
+# --------------------------------------------------------------------------- #
+# Re-reading: keep the best look, not the first                                 #
+# --------------------------------------------------------------------------- #
+
+def test_a_vehicle_driving_closer_upgrades_its_own_reading():
+    """A vehicle is first seen far away and small, so its FIRST reading is the
+    worst one it will ever offer. Stopping there kept a 60px misread in
+    preference to the 210px correct read the same car gave three seconds
+    later.
+
+    Re-reading while the vehicle can still beat itself is the fix; ranking by
+    pixels x confidence is what decides which look wins."""
+    t = bare_tracker()
+    t._save_evidence = lambda *a, **k: None
+    v = vehicle(1, 900, 400, 960, 448)
+
+    approach = [
+        (60, "T509EAO0O1", 0.42),     # far, misread
+        (90, "TS09EA0O01", 0.55),
+        (140, "TS09EA0001", 0.71),
+        (210, "TS09EA0001", 0.88),    # closest, correct
+    ]
+    for pw, text, conf in approach:
+        vw = pw * 6
+        v.box = [900, 400, 900 + vw, 400 + int(vw * 0.8)]
+        t.alpr = _StubAlpr([_FakeResult(text, conf, _FakeBox(10, 10, 10 + pw,
+                                                             10 + int(pw / 3.6)))])
+        t._read_plate(np.zeros((1080, 1920, 3), np.uint8), v, t._client_state["s"])
+
+    assert v.plate == "TS09EA0001"
+    assert v.plate_px_w == 210
+    assert v.plate_conf == pytest.approx(0.88)
+    assert v.read_settled is True
+
+
+def test_a_worse_later_look_never_regresses_the_record():
+    """The car drives past and shrinks again. Its record must not follow it
+    down — and the photo on disk must keep matching the numbers beside it."""
+    t = bare_tracker()
+    t._save_evidence = lambda *a, **k: None
+    v = vehicle(1, 900, 400, 2160, 1408)
+
+    t.alpr = _StubAlpr([_FakeResult("TS09EA0001", 0.88, _FakeBox(10, 10, 220, 68))])
+    t._read_plate(np.zeros((1080, 1920, 3), np.uint8), v, t._client_state["s"])
+    best_px, best_conf = v.plate_px_w, v.plate_conf
+
+    v.box = [900, 400, 1800, 1120]
+    t.alpr = _StubAlpr([_FakeResult("TS09EA0001", 0.66, _FakeBox(10, 10, 160, 52))])
+    t._read_plate(np.zeros((1080, 1920, 3), np.uint8), v, t._client_state["s"])
+
+    assert v.plate_px_w == best_px
+    assert v.plate_conf == pytest.approx(best_conf)
+    assert v.plate_votes >= 2, "a worse look is still independent agreement"
+
+
+def test_a_bigger_read_beats_a_more_confident_small_one():
+    """Confidence was the sole tie-breaker and it is the weaker signal: a model
+    can be certain about characters that are not in the crop, but it cannot
+    invent detail that is."""
+    t = bare_tracker()
+    t._save_evidence = lambda *a, **k: None
+    v = vehicle(1, 900, 400, 2160, 1408)
+
+    t.alpr = _StubAlpr([_FakeResult("AAA1111", 0.95, _FakeBox(10, 10, 70, 28))])
+    t._read_plate(np.zeros((1080, 1920, 3), np.uint8), v, t._client_state["s"])
+    assert v.plate == "AAA1111"
+
+    t.alpr = _StubAlpr([_FakeResult("TS09EA0001", 0.60, _FakeBox(10, 10, 230, 72))])
+    t._read_plate(np.zeros((1080, 1920, 3), np.uint8), v, t._client_state["s"])
+    assert v.plate == "TS09EA0001", "the bigger crop holds the real characters"
+
+
+def test_the_queue_prefers_a_vehicle_that_has_grown():
+    """Largest-first would re-read whichever big vehicle is nearest forever
+    while a vehicle with no reading at all waits behind it."""
+    t = bare_tracker()
+    grown = vehicle(1, 0, 0, 600, 400)
+    grown.plate, grown.plate_px_w, grown.plate_conf = "TS09EA0001", 60, 0.5
+    grown.plate_quality, grown.read_area = 30.0, 60 * 40      # tiny when read
+    unread = vehicle(2, 700, 0, 1000, 240)
+
+    picked = t._ocr_candidates(t._client_state["s"], [grown, unread], budget=2)
+    assert picked[0].track_id == 2, "an unread vehicle outranks a re-read"
+    assert len(picked) == 2
+
+
+def test_a_vehicle_that_has_not_grown_does_not_burn_a_call():
+    """Re-reading the same near vehicle at the same size every frame learns
+    nothing and starves the rest."""
+    t = bare_tracker()
+    same = vehicle(1, 0, 0, 600, 400)
+    same.plate, same.plate_px_w, same.plate_conf = "TS09EA0001", 60, 0.5
+    same.plate_quality, same.read_area = 30.0, same.area      # unchanged size
+    assert t._ocr_candidates(t._client_state["s"], [same], budget=2) == []

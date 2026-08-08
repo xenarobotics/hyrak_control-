@@ -456,9 +456,20 @@ export function TrafficManagementPanel() {
                 </div>
             )}
 
-            {/* ── History ─────────────────────────────────────────────── */}
+              </div>
+            </ScrollArea>
+
+            {/* ── History, PINNED TO THE BOTTOM ───────────────────────────
+                Not part of the scrolling region. It is the one thing here that
+                is a running record rather than a live reading, so it should
+                stay put and be glanceable while the vehicle list above it
+                scrolls — rather than being pushed off the end by however many
+                vehicles happen to be in frame. */}
             {history.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div style={{
+                    display: 'flex', flexDirection: 'column', gap: 4,
+                    paddingTop: 8, borderTop: '1px solid hsl(var(--app-border))',
+                }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={LABEL}>Logged plates</span>
                         <button
@@ -503,8 +514,7 @@ export function TrafficManagementPanel() {
                     </div>
                 </div>
             )}
-              </div>
-            </ScrollArea>
+
         </div>
     )
 }

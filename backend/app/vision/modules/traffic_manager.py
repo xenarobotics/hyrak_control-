@@ -133,13 +133,23 @@ _OCR_CALLS_PER_FRAME = 1
 # 384 with nothing gained, but the detector is free to disagree and the photo
 # makes any result checkable.
 _OCR_MIN_VEHICLE_PX = 40
-# A read at or above this is treated as final and the vehicle stops consuming
-# OCR budget, freeing it for vehicles that still have no plate.
+# A read this confident AND this large is treated as final — the vehicle stops
+# consuming budget because there is essentially nothing left to win.
 _OCR_GOOD_ENOUGH = 0.80
+# ...and the plate has to be genuinely big, not merely confidently guessed.
+# Both conditions together, because confidence alone tops out at 1.00 on
+# fabricated reads.
+_PLATE_GOOD_PX = 110
 _OCR_MIN_CONF = 0.35
 # Stop retrying a vehicle that has repeatedly failed — usually its plate simply
-# is not facing us, and it would otherwise starve every other vehicle.
-_OCR_MAX_ATTEMPTS = 12
+# is not facing us. Generous now that re-reading is the normal case rather than
+# the exception: the priority ordering, not this cap, is what stops one vehicle
+# starving the others.
+_OCR_MAX_ATTEMPTS = 60
+# A vehicle is worth re-reading once it has grown this much since the frame its
+# current best came from. Below that the extra pixels will not change the
+# reading and the call is better spent on a vehicle that has no plate at all.
+_REREAD_GROWTH = 1.30
 
 # ── Guards against fabricated plates ────────────────────────────────────────
 #
@@ -218,6 +228,17 @@ MAX_PURSUIT_SPEED_M_S = 2.5     # keep in step with dist_pd max_output
 _CAPTURE_ROOT = os.path.join(str(ROOT_DIR), ".data", "plate_captures")
 
 
+def _read_quality(px_w: int, conf: float) -> float:
+    """How good a plate reading is, as one number.
+
+    Pixels dominate and confidence modulates, because that is the direction the
+    evidence actually runs: a model can be certain about characters that are
+    not in the crop, but it cannot invent detail that is. Used to decide which
+    of a vehicle's readings to keep as it drives past.
+    """
+    return float(max(0, px_w)) * max(0.0, min(1.0, conf))
+
+
 def _density_level(count: int, light_max: int = _DENSITY_LIGHT_MAX,
                    moderate_max: int = _DENSITY_MODERATE_MAX) -> str:
     """Thresholds are passed in, not read from module constants.
@@ -252,7 +273,7 @@ class _Vehicle:
     __slots__ = (
         "track_id", "vehicle_id", "box", "type", "color", "color_conf",
         "plate", "plate_conf", "plate_box", "plate_box_rel",
-        "crop_path", "vehicle_path",
+        "crop_path", "vehicle_path", "read_area", "plate_quality",
         "plate_votes", "plate_confirmed", "plate_grammar_ok", "plate_px_w",
         "speed_kmh", "speed_reliable", "ocr_attempts",
         "first_seen", "last_seen", "logged",
@@ -276,6 +297,12 @@ class _Vehicle:
         # indicator now that width no longer rejects: a 40px read and a 300px
         # read are both reported, and are not equally trustworthy.
         self.plate_px_w = 0
+        # Vehicle box area at the moment the CURRENT best read was taken, so
+        # "has this vehicle grown enough to be worth re-reading?" is a
+        # measurement rather than a guess.
+        self.read_area = 0
+        # Score of the best reading so far — see _read_quality.
+        self.plate_quality = 0.0
         self.plate_box: Optional[list] = None
         # The same box as FRACTIONS OF THE VEHICLE BOX it was measured in.
         #
@@ -307,14 +334,43 @@ class _Vehicle:
         return max(0, x2 - x1) * max(0, y2 - y1)
 
     @property
-    def needs_ocr(self) -> bool:
-        # A CONFIRMED plate stops consuming budget. Confidence alone is not
-        # enough to stop: the fabricated reads that prompted these guards
-        # scored up to 1.00.
+    def read_settled(self) -> bool:
+        """A reading good enough that nothing further is worth spending.
+
+        BOTH conditions: a big plate AND high confidence, agreed by two frames.
+        Confidence alone tops out at 1.00 on invented strings, and a large crop
+        alone can still be motion-blurred."""
         return (
-            not self.plate_confirmed
-            and self.ocr_attempts < _OCR_MAX_ATTEMPTS
+            self.plate_px_w >= _PLATE_GOOD_PX
+            and self.plate_conf >= _OCR_GOOD_ENOUGH
+            and self.plate_votes >= _PLATE_MIN_AGREEING_READS
         )
+
+    @property
+    def needs_ocr(self) -> bool:
+        """Whether this vehicle is still worth an OCR call.
+
+        WHY THIS IS NO LONGER "STOP AT THE FIRST CONFIRMED READ".
+        A vehicle is usually first seen far away and small. The reading taken
+        there is the WORST one it will ever offer, and stopping at it threw
+        away every better look the vehicle gave while it drove closer — a
+        50px plate confirmed at the far edge of frame, kept in preference to
+        the 200px plate available two seconds later.
+
+        So a vehicle keeps its place in the queue for as long as it can still
+        beat its own best: until the reading is genuinely settled (big AND
+        confident AND agreed), or it has simply had too many tries.
+        """
+        return not self.read_settled and self.ocr_attempts < _OCR_MAX_ATTEMPTS
+
+    @property
+    def reread_gain(self) -> float:
+        """How much bigger this vehicle is now than when its best read was
+        taken. The honest estimate of what another call would buy: >1 means
+        more pixels on the plate than last time, and 1.0 means none."""
+        if not self.plate or self.read_area <= 0:
+            return float("inf")      # never read — nothing to compare, read it
+        return self.area / float(self.read_area)
 
     @property
     def plate_strong(self) -> bool:
@@ -783,10 +839,28 @@ class TrafficManager(BaseAnalyzer):
             v for v in vehicles
             if v.needs_ocr and min(v.box[2] - v.box[0], v.box[3] - v.box[1]) >= 0
             and (v.box[2] - v.box[0]) >= _OCR_MIN_VEHICLE_PX
+            # A vehicle that already has a reading only earns another call once
+            # it has grown enough for the extra pixels to change the answer.
+            # Without this the queue re-reads the same near vehicle every frame
+            # at the same size, learning nothing.
+            and (not v.plate or v.reread_gain >= _REREAD_GROWTH)
         ]
         if not need:
             return []
-        need.sort(key=lambda v: v.area, reverse=True)
+        # ORDERED BY WHAT ANOTHER CALL WOULD ACTUALLY BUY, not by raw size.
+        #
+        # Now that vehicles are re-read while they can still improve, "largest
+        # first" would park the budget on whichever big vehicle is nearest and
+        # re-read a plate that is already as good as it will get, while a
+        # vehicle with no reading at all waits behind it.
+        #
+        #   1. never read      — infinite gain, nothing to compare against
+        #   2. has grown most since its best read — more pixels than last time
+        #   3. size, to break ties
+        #
+        # reread_gain returns +inf for an unread vehicle, so those two rules
+        # are the same expression.
+        need.sort(key=lambda v: (min(v.reread_gain, 1e6), v.area), reverse=True)
 
         locked_id = state.get("locked_track_id")
         front = [v for v in need if v.track_id == locked_id]
@@ -796,6 +870,39 @@ class TrafficManager(BaseAnalyzer):
             rest = rest[cur:] + rest[:cur]
             state["ocr_cursor"] = (cur + 1) % max(1, len(rest))
         return (front + rest)[:budget]
+
+    @staticmethod
+    def _store_best_read(vehicle, text, conf, grammar_ok, pw, quality,
+                         box, cx1: int, cy1: int) -> None:
+        """Record ONE observation as this vehicle's best reading.
+
+        Written as a unit deliberately. The fields used to be updated with an
+        independent max() each, which could report one frame's pixel width
+        beside another frame's confidence and a third frame's box — a record
+        no single observation ever supported, and unfalsifiable against the
+        photograph saved with it.
+        """
+        vehicle.plate_quality = quality
+        vehicle.plate_conf = conf
+        vehicle.plate_grammar_ok = grammar_ok
+        vehicle.plate_px_w = pw
+        # The vehicle's size AT THIS READ, so "has it grown enough to be worth
+        # another look?" is a measurement rather than a guess.
+        vehicle.read_area = vehicle.area
+        # Back to full-frame coordinates — the crop's origin has to be added
+        # back or the overlay bracket lands in the wrong place.
+        vx1, vy1, vx2, vy2 = vehicle.box
+        vw, vh = max(1, vx2 - vx1), max(1, vy2 - vy1)
+        vehicle.plate_box = [
+            int(box.x1) + cx1, int(box.y1) + cy1,
+            int(box.x2) + cx1, int(box.y2) + cy1,
+        ]
+        vehicle.plate_box_rel = [
+            (vehicle.plate_box[0] - vx1) / vw,
+            (vehicle.plate_box[1] - vy1) / vh,
+            (vehicle.plate_box[2] - vx1) / vw,
+            (vehicle.plate_box[3] - vy1) / vh,
+        ]
 
     def _read_plate(self, frame_bgr, vehicle: _Vehicle, state) -> None:
         """
@@ -859,36 +966,41 @@ class TrafficManager(BaseAnalyzer):
                 continue
             grammar_ok = bool(_INDIA_PLATE_RE.match(text))
 
-            # ── Gate 3: has any other frame agreed? ───────────────────────
+            # ── Gate 3: is this the best look this vehicle has given? ─────
+            #
+            # RANKED BY QUALITY, NOT BY CONFIDENCE ALONE. Confidence was the
+            # sole tie-breaker and it is the weaker signal: a 60px crop read at
+            # 0.9 is worse evidence than a 200px crop read at 0.6, because the
+            # second one has the characters actually present in it. Ranking on
+            # pixels x confidence keeps the reading the vehicle's best LOOK
+            # produced rather than the one the model felt best about.
+            quality = _read_quality(pw, conf)
+            improved = quality > vehicle.plate_quality * 1.15
+
             if text == vehicle.plate:
                 vehicle.plate_votes += 1
-            elif conf > vehicle.plate_conf or not vehicle.plate:
-                # A different string. Start it at one vote rather than
-                # inheriting the old one's — that inheritance is what let five
-                # different readings look like a settled answer.
+                # A repeat from a WORSE look still counts as agreement — it is
+                # independent evidence for the same characters. It just must
+                # not overwrite the better look's numbers. Confirmation is
+                # therefore evaluated below for both branches; an earlier
+                # version returned here and votes piled up on a plate that
+                # could never confirm.
+                better = quality > vehicle.plate_quality
+            elif quality > vehicle.plate_quality:
+                # A different string from a better look. Start it at one vote
+                # rather than inheriting the old one's — that inheritance is
+                # what let five different readings look like a settled answer.
                 vehicle.plate = text
                 vehicle.plate_votes = 1
                 vehicle.plate_confirmed = False
+                better = True
             else:
                 continue
 
-            vehicle.plate_conf = max(vehicle.plate_conf, conf)
-            vehicle.plate_grammar_ok = grammar_ok
-            vehicle.plate_px_w = max(vehicle.plate_px_w, pw)
-            # Back to full-frame coordinates so the overlay draws in the right
-            # place — the crop's origin has to be added back.
-            vx1, vy1, vx2, vy2 = vehicle.box
-            vw, vh = max(1, vx2 - vx1), max(1, vy2 - vy1)
-            vehicle.plate_box = [
-                int(box.x1) + cx1, int(box.y1) + cy1,
-                int(box.x2) + cx1, int(box.y2) + cy1,
-            ]
-            vehicle.plate_box_rel = [
-                (vehicle.plate_box[0] - vx1) / vw,
-                (vehicle.plate_box[1] - vy1) / vh,
-                (vehicle.plate_box[2] - vx1) / vw,
-                (vehicle.plate_box[3] - vy1) / vh,
-            ]
+            if better:
+                self._store_best_read(vehicle, text, conf, grammar_ok, pw,
+                                      quality, box, cx1, cy1)
+
 
             # Confirmation is AGREEMENT ONLY. Requiring grammar here as well
             # made the relaxation half-done and left a real defect: the valid
@@ -923,7 +1035,11 @@ class TrafficManager(BaseAnalyzer):
             # "plates recorded but no captures" complaint. Re-saved on
             # confirmation because a confirming frame is usually the better
             # picture, and the second write overwrites the first.
-            if just_confirmed or vehicle.crop_path is None:
+            # The photo must be of the READING IT SITS BESIDE. Since the best
+            # read can now be superseded mid-pass, the evidence is rewritten
+            # whenever a materially better look lands — otherwise the file on
+            # disk shows a 50px plate while the record claims the 200px one.
+            if just_confirmed or vehicle.crop_path is None or improved:
                 self._save_evidence(frame_bgr, crop, box, vehicle, state)
 
     # ── Face recognition, borrowed from person_tracker's gallery ──────────
