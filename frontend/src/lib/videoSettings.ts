@@ -69,9 +69,24 @@ export function getCaptureProfile(): CaptureProfile {
 // processed feed regardless of this setting.
 export type FeedMode = 'overlay' | 'processed'
 
+// MUST list every mode CvOverlayCanvas can draw — its `switch (mode)` is the
+// other half of this list, and the two silently disagreeing is expensive.
+//
+// traffic-management was missing here while having a full draw function, a
+// click handler and an entry in CLICK_TO_SELECT. Nothing errored. The mode
+// simply fell through to the PROCESSED feed, so:
+//
+//   * CvOverlayCanvas was never mounted — no hover highlight and no
+//     click-to-follow were possible at all, in any circumstance;
+//   * the picture on screen was the server's re-encoded round trip, which is
+//     what made it look soft and blocky next to the other modes;
+//   * annotations were burned in server-side at the ANALYSIS rate, so they
+//     stepped at ~20fps under 30fps video instead of being interpolated.
+//
+// Every one of those reads as a different bug. They were one missing string.
 const OVERLAY_CAPABLE = [
     'manual-control', 'object-detection', 'human-tracking', 'person-tracking',
-    'crowd-management', 'vehicle-plate-tracking',
+    'crowd-management', 'vehicle-plate-tracking', 'traffic-management',
 ]
 
 export function getFeedMode(): FeedMode {
@@ -81,6 +96,12 @@ export function getFeedMode(): FeedMode {
         if (v === 'overlay' || v === 'processed') return v
     } catch { /* fall back to default */ }
     return 'overlay'
+}
+
+/** The canonical list, exported so CvOverlayCanvas can assert against it in
+ *  dev rather than failing silently when the two drift apart. */
+export function overlayCapableModes(): string[] {
+    return [...OVERLAY_CAPABLE]
 }
 
 export function wantsClientOverlay(mode: string): boolean {

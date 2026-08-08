@@ -496,6 +496,26 @@ const SMOOTHED_FIELDS: Record<string, string[]> = {
     'traffic-management':     ['vehicles', 'people'],
 }
 
+// A mode listed in CLICK_TO_SELECT or drawn by the switch below must ALSO be
+// in OVERLAY_CAPABLE (lib/videoSettings.ts), or this component is never
+// mounted for it and every interaction here is dead code. In dev that
+// disagreement is now loud instead of silent — traffic-management sat in this
+// map with a full draw function and a click handler while falling through to
+// the processed feed, which cost several rounds of debugging the wrong layer.
+if (process.env.NODE_ENV !== 'production') {
+    void import('@/lib/videoSettings').then(({ overlayCapableModes }) => {
+        for (const m of Object.keys(CLICK_TO_SELECT)) {
+            if (!overlayCapableModes().includes(m)) {
+                console.error(
+                    `[CvOverlayCanvas] "${m}" expects a client overlay but is not in `
+                    + 'OVERLAY_CAPABLE — the canvas will never mount, so hover and '
+                    + 'click-to-follow cannot work in that mode.',
+                )
+            }
+        }
+    })
+}
+
 // Modes where clicking a person on the video means something. Elsewhere the
 // canvas stays pointer-transparent so it cannot swallow clicks meant for the
 // controls underneath it.
