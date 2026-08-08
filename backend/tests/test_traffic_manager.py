@@ -538,11 +538,11 @@ def test_mode_is_registered_and_has_its_own_inference_width():
     assert AnalysisMode.TRAFFIC.value == "traffic-management"
     assert ANALYZER_REGISTRY[AnalysisMode.TRAFFIC] is TrafficManager
     assert TrafficManager.MODE == AnalysisMode.TRAFFIC.value
-    # 0 = NATIVE. Was 1280 while people-counting was treated as the binding
-    # constraint; now the mode also feeds vision/profiles.py, which decides
-    # what to run from pixels on target. Capping the detection pass would cap
-    # that decision with it and a better camera would buy nothing.
-    assert Settings().inference_width_for(TrafficManager.MODE) == 0
+    # 1280. Native was tried and measured 40ms/frame on this GPU against a
+    # 17ms 1280 pass — 19.8 fps analysed under 30 fps video, which showed up as
+    # annotations jumping every other frame. Plate quality is unaffected: OCR
+    # crops come from the full-resolution frame, not the resized copy.
+    assert Settings().inference_width_for(TrafficManager.MODE) == 1280
 
 
 # --------------------------------------------------------------------------- #
@@ -866,19 +866,28 @@ def test_headline_names_the_nearest_thing_to_fix():
     assert "person" in s["headline"]
 
 
-def test_traffic_mode_runs_native_like_plate_tracking():
-    """No downscaling in this mode, by requirement.
-
-    Plate crops are taken from the SAME detection boxes the counting pass
-    produces, so shrinking that pass costs plate pixels twice — once on the box
-    and again on the crop cut from it. Native also lets a camera upgrade widen
-    the profile envelope on its own, which is the point of deciding in pixels.
-    """
+def test_traffic_detection_width_leaves_headroom_for_30fps():
+    """Measured on this GPU: 1280 costs 17ms/frame, native 1920 costs 40ms.
+    At native the mode analysed 19.8 fps under 30 fps video and the overlay
+    visibly stepped. The width has to leave room for the rest of the frame
+    budget — colour, speed, OCR and faces all come out of the same 33ms."""
     from app.config import Settings
     s = Settings()
-    assert s.inference_width_for("traffic-management") == 0
-    assert (s.inference_width_for("traffic-management")
-            == s.inference_width_for("vehicle-plate-tracking"))
+    w = s.inference_width_for("traffic-management")
+    assert 0 < w <= 1280, "native here costs more than the frame budget allows"
+
+
+def test_plate_quality_does_not_depend_on_the_detection_width():
+    """The reason narrowing the pass is safe: OCR crops are cut from the
+    full-resolution frame, never from the resized copy. If that ever changes,
+    the width above starts costing plate pixels and must be revisited."""
+    import inspect
+
+    from app.vision.modules import traffic_manager as tm
+
+    src = inspect.getsource(tm.TrafficManager._analyze_frame_blocking)
+    assert "self._read_plate(frame_bgr," in src, \
+        "OCR is no longer reading the full-resolution frame"
 
 
 def test_native_width_survives_the_viability_maths():

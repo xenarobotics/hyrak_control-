@@ -482,13 +482,18 @@ function drawVehicleTracking(ctx: CanvasRenderingContext2D, r: CVResult, W: numb
 
 // Which list each mode draws, so payloads can be routed to a smoother
 // without the draw functions needing to know smoothing exists.
-const SMOOTHED_FIELD: Record<string, string> = {
-    'object-detection':      'detections',
-    'human-tracking':        'persons',
-    'person-tracking':       'persons',
-    'crowd-management':      'people',
-    'vehicle-plate-tracking': 'vehicles',
-    'traffic-management':     'vehicles',
+// A LIST per mode, not one field. traffic-management draws vehicles AND
+// people, and while only one could be smoothed the other was drawn raw — so
+// person boxes snapped between detections at the analyser's rate while vehicle
+// boxes glided. That is exactly the "smooth in other modules, jumping here"
+// report: crowd-management smooths 'people', traffic did not.
+const SMOOTHED_FIELDS: Record<string, string[]> = {
+    'object-detection':      ['detections'],
+    'human-tracking':        ['persons'],
+    'person-tracking':       ['persons'],
+    'crowd-management':      ['people'],
+    'vehicle-plate-tracking': ['vehicles'],
+    'traffic-management':     ['vehicles', 'people'],
 }
 
 // Modes where clicking a person on the video means something. Elsewhere the
@@ -523,9 +528,13 @@ const VEHICLE_CLICK_MODES: Record<string, true> = {
  */
 function toSourceCoords(
     canvas: HTMLCanvasElement, clientX: number, clientY: number, fit: VideoFit,
+    W: number, H: number,
 ): { x: number; y: number } {
+    // W/H are the SOURCE FRAME size, passed in rather than read off the
+    // canvas: the backing store is supersampled for sharpness, so
+    // canvas.width is a multiple of the source width and using it here would
+    // scale every click by that factor.
     const rect = canvas.getBoundingClientRect()
-    const W = canvas.width, H = canvas.height
     // cover => the LARGER scale wins and the excess is cropped.
     // contain => the SMALLER scale wins and the remainder is letterboxed.
     // Getting this wrong does not fail loudly: clicks simply land further from
@@ -669,13 +678,15 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
     // from blanking the frame.
     const latest = useRef<CVResult | null>(null)
     const smoothers = useRef(new OverlaySmoothers())
+    // Source frame size, shared between the render loop and the pointer
+    // handlers so a click is mapped with the same dimensions it was drawn at.
+    const sourceSize = useRef({ W: 1280, H: 720 })
     const lastPayload = useRef<CVResult | null>(null)
 
     useEffect(() => {
         if (!cvResults) return
         latest.current = cvResults
-        const field = SMOOTHED_FIELD[mode]
-        if (field) {
+        for (const field of SMOOTHED_FIELDS[mode] ?? []) {
             smoothers.current.ingest(
                 field, cvResults[field as keyof CVResult] as never,
             )
@@ -705,19 +716,49 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
             const r = latest.current
             const W = r?.frame_w ?? 1280
             const H = r?.frame_h ?? 720
-            if (canvas.width !== W || canvas.height !== H) {
-                canvas.width = W
-                canvas.height = H
+            sourceSize.current = { W, H }
+
+            // SUPERSAMPLE THE BACKING STORE.
+            //
+            // The canvas used to be exactly the source frame — 1280x720, say —
+            // and then CSS-stretched to fill the player. On a HiDPI screen
+            // that is a 1280-wide bitmap blown up to 2560+ device pixels, so
+            // every ring, pill and character came out soft and blocky. The
+            // VIDEO underneath stayed sharp, which is what makes it read as
+            // "the overlay is pixelated" rather than as a resolution problem.
+            //
+            // Drawing coordinates stay in SOURCE pixels: the transform below
+            // absorbs the factor, so no drawing code changes and box
+            // coordinates from the server still land where they should.
+            const rect = canvas.getBoundingClientRect()
+            const dpr = window.devicePixelRatio || 1
+            // Never below 1 (that would blur boxes to gain nothing) and capped
+            // at 3 — beyond that the memory cost climbs quadratically for a
+            // difference no one can see.
+            const ss = rect.width > 0
+                ? Math.min(3, Math.max(1, (rect.width * dpr) / W))
+                : 1
+            const bw = Math.round(W * ss), bh = Math.round(H * ss)
+            if (canvas.width !== bw || canvas.height !== bh) {
+                canvas.width = bw
+                canvas.height = bh
             }
+            // Re-applied every frame: setting canvas.width resets the
+            // transform, and a frame drawn untransformed would be a visible
+            // jump rather than a silent no-op.
+            ctx.setTransform(ss, 0, 0, ss, 0, 0)
             ctx.clearRect(0, 0, W, H)
             if (!r) return
 
-            const field = SMOOTHED_FIELD[mode]
-            // Replace the raw list with the interpolated, faded one. Every
+            // Replace each raw list with its interpolated, faded one. Every
             // other field passes through untouched, so status badges and
             // counts keep reporting exactly what the server said.
-            const view: CVResult = field
-                ? { ...r, [field]: smoothers.current.sample(field) } as CVResult
+            const fields = SMOOTHED_FIELDS[mode] ?? []
+            const view: CVResult = fields.length
+                ? fields.reduce<CVResult>(
+                    (acc, f) => ({ ...acc, [f]: smoothers.current.sample(f) }),
+                    r,
+                  )
                 : r
 
             ctx.font = `600 ${Math.max(13, Math.round(H * 0.0155))}px 'Geist Mono', 'SF Mono', 'JetBrains Mono', ui-monospace, 'Cascadia Code', Menlo, monospace`
@@ -785,11 +826,38 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
 
     // Which list a click tests against. Vehicle modes key on track_id, not
     // id — so it is normalised here instead of duplicating the hit-test.
+    /** What can be clicked, IN THE POSITIONS THEY ARE DRAWN.
+     *
+     *  This used to hit-test the raw payload while the canvas drew the
+     *  SMOOTHED boxes, so the two disagreed by exactly the interpolation lag.
+     *  The operator aims at the box they can see and the test runs against one
+     *  somewhere else — the click lands in the gap and nothing is emitted, no
+     *  error, no feedback.
+     *
+     *  Small when detections are fast, which is why it went unnoticed. In
+     *  traffic-management, running native at ~20 fps against 30 fps video, the
+     *  gap grew to most of a box and clicking stopped working altogether: not
+     *  one set_follow_vehicle reached the server across a whole session, while
+     *  the same click in plate mode locked first try.
+     *
+     *  Sampling the smoothers here means the hit box is the drawn box, by
+     *  construction, at any detection rate. */
     const targetsNow = (): { id: number; box: [number, number, number, number] }[] => {
         const r = latest.current
         if (!r) return []
+        const smoothed = (field: string) =>
+            smoothers.current.sample(field) as unknown as
+                { id?: number; track_id?: number; box: [number, number, number, number]; _a?: number }[]
+        // A box mid-fade is a memory of a detection, not a target. Clicking one
+        // would lock a track the analyser has already lost.
+        type Clickable = {
+            id?: number; track_id?: number
+            box: [number, number, number, number]; _a?: number
+        }
+        const solid = (items: Clickable[]) => items.filter(i => (i._a ?? 1) > 0.55)
+
         if (VEHICLE_CLICK_MODES[mode]) {
-            const vehicles = (r.vehicles ?? [])
+            const vehicles = solid(smoothed('vehicles'))
                 .filter(v => v.track_id != null)
                 .map(v => ({ id: v.track_id as number, box: v.box }))
             // traffic-management follows PEOPLE as well as vehicles, and both
@@ -798,28 +866,30 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
             // event and no "which kind did you mean" in the payload.
             if (mode === 'traffic-management') {
                 return vehicles.concat(
-                    (r.people ?? []).map(p => ({ id: p.id, box: p.box })),
+                    solid(smoothed('people')).map(p => ({ id: p.id as number, box: p.box })),
                 )
             }
             return vehicles
         }
         if (mode === 'crowd-management') {
-            return (r.people ?? []).map(p => ({ id: p.id, box: p.box }))
+            return solid(smoothed('people')).map(p => ({ id: p.id as number, box: p.box }))
         }
-        return (r.persons ?? []).map(p => ({ id: p.id, box: p.box }))
+        return solid(smoothed('persons')).map(p => ({ id: p.id as number, box: p.box }))
     }
 
     const onMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
         const canvas = canvasRef.current
         if (!canvas || !clickable) return
-        const { x, y } = toSourceCoords(canvas, e.clientX, e.clientY, fit)
+        const { W, H } = sourceSize.current
+        const { x, y } = toSourceCoords(canvas, e.clientX, e.clientY, fit, W, H)
         hovered.current = hitTest(targetsNow(), x, y)
     }
 
     const onClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
         const canvas = canvasRef.current
         if (!canvas || !clickable) return
-        const { x, y } = toSourceCoords(canvas, e.clientX, e.clientY, fit)
+        const { W, H } = sourceSize.current
+        const { x, y } = toSourceCoords(canvas, e.clientX, e.clientY, fit, W, H)
         const id = hitTest(targetsNow(), x, y)
         if (id === null) return
         const hitBox = targetsNow().find(t => t.id === id)?.box

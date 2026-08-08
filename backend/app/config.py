@@ -50,15 +50,26 @@ class Settings(BaseSettings):
             # boxes the OCR crops are taken from, so it costs plate pixels
             # twice over. Compute is deliberately not the constraint here.
             "vehicle-plate-tracking": 0,
-            # 0 = NATIVE. This mode has to serve the widest span of any: a
-            # 1.7m person at 25px sets the ceiling for counting, while plate
-            # OCR crops come out of the SAME detection boxes, so a downscaled
-            # pass costs plate pixels twice over — once on the box and again on
-            # the crop taken from it. It also feeds vision/profiles.py, whose
-            # whole premise is that pixels on target decide what runs; capping
-            # the pass at 1280 would cap that decision too and a 4K camera
-            # would buy nothing. Compute is deliberately not the constraint.
-            "traffic-management": 0,
+            # 1280, walked back from NATIVE after measuring it on this GPU:
+            #
+            #     960   10.1 ms/frame    99 fps ceiling
+            #     1280  17.0 ms/frame    59 fps ceiling
+            #     1920  40.0 ms/frame    25 fps ceiling
+            #
+            # Native was the honest reading of "no downscaling", but this mode
+            # runs a person pass, a vehicle pass, colour, speed and OCR off one
+            # frame, and in the air it measured 19.8 fps analysed at 40-47 ms
+            # against 30 fps video. Overlay boxes then update on two frames out
+            # of three, which is visible as annotations jumping — the reported
+            # symptom, and the reason clicking was landing in the gap between
+            # where a box was drawn and where it actually was.
+            #
+            # Plate quality does NOT pay for this. OCR crops are cut from the
+            # full-resolution frame (see _read_plate), never from the resized
+            # copy, so the only thing a narrower pass costs is a little box
+            # precision. vision/profiles.py is told the width detection really
+            # ran at, so its pixels-on-target maths follows this automatically.
+            "traffic-management": 1280,
             # Subject is close and fills much of the frame. Face detection in
             # person-tracking has its own separate width (_FACE_DET_WIDTH).
             "human-tracking": 640,
