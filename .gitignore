@@ -6,14 +6,37 @@ frontend/out/
 __pycache__/
 *.py[cod]
 
+# ── Desktop app (Electron) build output ──────────────────────
+desktop/node_modules/
+desktop/dist/
+desktop/release/
+
+# ── Standalone relay executable builds (PyInstaller) ─────────
+sitl_relay/dist/
+sitl_relay/build/
+
+# ── Desktop app installers served at /releases — CI-uploaded, not source ─
+releases/*
+!releases/.gitkeep
+
 # ── Secrets — never commit ───────────────────────────────────
 .env
 .env.local
+# Timestamped backups (.env.bak.20260805-234333 and friends). These were NOT
+# covered before and sat one `git add .` away from publishing every token in
+# the file.
+.env.bak*
+.env.*.bak
+*.env.backup
 *.env.local
 
 # ── Logs ─────────────────────────────────────────────────────
 .logs/
 *.log
+
+# ── Captured data (plate crop images — retained on disk, referenced by ─────
+# ── plate_events rows in Postgres; not source, not committed) ───────────────
+backend/.data/
 
 # ── Vendored upstream sources (huge; not our code) ───────────
 PX4-Autopilot-main/
