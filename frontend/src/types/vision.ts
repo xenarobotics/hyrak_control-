@@ -256,5 +256,11 @@ export interface VehicleResult {
      *  the reading is toned, never whether it is shown. */
     plate_strong?: boolean
     plate_box?: [number, number, number, number] | null
+    /** The plate box as FRACTIONS of the vehicle box it was measured in.
+     *  Preferred over plate_box for drawing: absolute coordinates are frozen
+     *  at the moment of the read, and OCR only runs on a couple of vehicles
+     *  per frame, so the bracket was left sitting where the plate had been
+     *  seconds earlier while the vehicle moved on. */
+    plate_box_rel?: [number, number, number, number] | null
     locked?: boolean
 }

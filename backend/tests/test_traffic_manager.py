@@ -595,10 +595,20 @@ def test_small_crops_are_kept_but_marked_weak(text, box_w):
     assert v.plate_strong is False, "a single read must not look confirmed"
 
 
-def test_the_fabricated_crops_are_never_reached_at_their_real_range():
-    """The actual guard. A 45px plate means the vehicle is far enough away that
-    profiles.py refuses to spend the OCR call — so the regime that produced
-    WA01WMWH is not entered, rather than entered and then argued with."""
+def test_plate_reads_are_attempted_at_any_range_and_marked_weak():
+    """THE GEOMETRIC GUARD IS GONE, BY OPERATOR DECISION. Recorded plainly
+    because it is a real loosening, not a refactor.
+
+    profiles.py used to refuse the OCR call when the range put fewer than
+    ~70px on a plate, which is the regime that produced WA01WMWH. It no longer
+    does: a pixel count is a threshold on a continuum, reads a little under it
+    do sometimes come back correct, and refusing guarantees nothing.
+
+    What replaces it is reviewability rather than prevention — every accepted
+    read is saved as a photograph beside its text, and its pixel width, vote
+    count and grammar travel with it, so a wrong reading is visible and
+    correctable instead of being an unfalsifiable row. The trade is deliberate:
+    more weak readings, none of them silently lost, all of them checkable."""
     from app.vision import viability
     from app.vision.profiles import ProfileSelector
 
@@ -609,15 +619,28 @@ def test_the_fabricated_crops_are_never_reached_at_their_real_range():
         effective_width_px={k: W for k in ("vehicle", "person", "plate", "face")},
     )]
     profile = ProfileSelector().select(items)
-    assert not profile.attempting("plate")
-    assert profile.ocr_calls == 0
+    assert profile.attempting("plate")
+    assert profile.ocr_calls >= 1
+    d = profile.subjects["plate"]
+    assert d.px_on_target < d.px_needed
+    assert "weak" in d.reason, "a sub-guide read must still be presented as weak"
 
 
 def test_specks_are_still_rejected_outright():
-    """Relaxing is not removing. Below the area floor there is genuinely
-    nothing there, and that gate still fires."""
-    v = _read("TS09EA0001", 0.95, _FakeBox(10, 10, 34, 18))   # 24x8 = 192px^2
+    """Relaxing is not removing. The area floor came down 500 -> 150, but not
+    to zero: below that the crop is a smear the detector should not have
+    proposed, and passing it on yields strings unrelated to any plate."""
+    v = _read("TS09EA0001", 0.95, _FakeBox(10, 10, 30, 16))   # 20x6 = 120px^2
     assert v.plate == ""
+
+
+def test_a_crop_that_used_to_be_rejected_now_reads():
+    """The point of the change, in the band that actually matters: 40x12 is
+    480px^2 — under the old 500 floor, over the new 150 one."""
+    v = _read("TS09EA0001", 0.5, _FakeBox(10, 10, 50, 22))
+    assert v.plate == "TS09EA0001"
+    assert v.plate_px_w == 40
+    assert v.plate_strong is False, "one read must still not look confirmed"
 
 
 def test_subscribe_read_off_a_video_overlay_is_reported_but_flagged():
@@ -1326,3 +1349,31 @@ def test_every_pursuit_mode_reports_tracking_in_its_payload():
         src = inspect.getsource(inspect.getmodule(cls))
         assert re.search(r'"tracking":\s*', src), \
             f"{cls.__name__} never puts `tracking` in its payload"
+
+
+def test_the_plate_bracket_is_stored_relative_to_its_vehicle():
+    """Absolute plate coordinates are frozen at the moment of the read, and
+    OCR runs on only a couple of vehicles per frame — so a moving vehicle's
+    green bracket was drawn wherever its plate had been seconds earlier, and
+    kept being drawn there while the vehicle's own box moved on and faded.
+
+    Stored as fractions of the vehicle box, the overlay can re-derive it
+    against the CURRENT box so it travels with the vehicle and leaves with it.
+    """
+    t = _with_alpr([_FakeResult("TS09EA0001", 0.9, _FakeBox(120, 190, 220, 215))])
+    v = vehicle(7, 400, 300, 700, 540)
+    t._read_plate(np.zeros((1080, 1920, 3), np.uint8), v, t._client_state["s"])
+
+    assert v.plate_box_rel is not None
+    assert all(0.0 <= f <= 1.0 for f in v.plate_box_rel), \
+        "the plate must sit inside the vehicle box it was read from"
+
+    # Re-derived against a box further down the road, the bracket stays on the
+    # vehicle instead of being left behind.
+    for x1, y1, x2, y2 in ([900, 320, 1200, 560], [1500, 340, 1800, 580]):
+        bw, bh = x2 - x1, y2 - y1
+        f = v.plate_box_rel
+        dx1, dy1 = x1 + f[0] * bw, y1 + f[1] * bh
+        dx2, dy2 = x1 + f[2] * bw, y1 + f[3] * bh
+        assert x1 <= dx1 <= dx2 <= x2
+        assert y1 <= dy1 <= dy2 <= y2

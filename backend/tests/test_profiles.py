@@ -25,7 +25,7 @@ W_4K = 3840
 
 # Both physical constants come from viability._REQUIREMENTS.
 PLATE_M, PLATE_MARGINAL_PX = 0.50, 70
-FACE_M = 0.23
+FACE_M, FACE_MARGINAL_PX = 0.23, 60
 
 
 def _items(width: int, slant: float, hfov: float = HFOV):
@@ -49,15 +49,15 @@ def _profile_at(width: int, slant: float, hfov: float = HFOV):
 # The point of the whole module: pixels, not altitudes                          #
 # --------------------------------------------------------------------------- #
 
-def test_a_4k_sensor_extends_plate_range_with_no_code_change():
+def test_a_4k_sensor_extends_the_gated_range_with_no_code_change():
     """The stated requirement: upgrade the camera and longer ranges work by
-    themselves. 18m is out of range at 1080p and in range at 4K.
+    themselves.
 
-    Deliberately NOT tested at 20m, which is within a pixel of 4K's cold-start
-    boundary of 19.6m at this lens — a test sitting on a latch edge measures
-    the hysteresis, not the scaling it means to check."""
-    assert not _profile_at(W_1080P, 18.0).attempting("plate")
-    assert _profile_at(W_4K, 18.0).attempting("plate")
+    Demonstrated on FACE because plate is deliberately ungated now (an
+    operator decision — see _ALWAYS_ATTEMPT). The scaling property is a
+    property of the geometry, not of which subject uses it."""
+    assert not _profile_at(W_1080P, 6.0).attempting("face")
+    assert _profile_at(W_4K, 6.0).attempting("face")
 
 
 def test_plate_range_scales_linearly_with_sensor_width():
@@ -71,13 +71,14 @@ def test_plate_range_scales_linearly_with_sensor_width():
 def test_a_narrower_lens_extends_range_too():
     """Range depends on the lens as much as the sensor — the reason neither
     can be baked into a constant."""
-    assert not _profile_at(W_4K, 25.0, hfov=70.0).attempting("plate")
-    assert _profile_at(W_4K, 25.0, hfov=50.0).attempting("plate")
+    assert not _profile_at(W_4K, 11.0, hfov=70.0).attempting("face")
+    assert _profile_at(W_4K, 11.0, hfov=50.0).attempting("face")
 
 
-def test_the_documented_boundaries_are_what_the_selector_actually_uses():
-    """Pins the numbers quoted to the operator. If the requirement or the
-    latch changes, this fails rather than the docs quietly going stale."""
+def test_the_documented_plate_ranges_are_still_computed_correctly():
+    """Plate range no longer GATES anything, but it is still reported to the
+    operator and still scales with the optics — so the numbers quoted in the
+    panel must stay right even though nothing branches on them."""
     boundary = {
         (W_1080P, 70.0): 9.8,
         (W_4K, 70.0): 19.6,
@@ -87,22 +88,31 @@ def test_the_documented_boundaries_are_what_the_selector_actually_uses():
         assert viability.range_for_px(
             hfov, width, PLATE_M, PLATE_MARGINAL_PX
         ) == pytest.approx(expected, abs=0.1)
-        # Just inside attempts, just outside does not.
-        assert _profile_at(width, expected * 0.97, hfov).attempting("plate")
-        assert not _profile_at(width, expected * 1.03, hfov).attempting("plate")
+
+
+def test_a_plate_below_the_guide_is_attempted_and_labelled_weak():
+    """The operator decision: a pixel count is a threshold on a continuum, not
+    a cliff. Refusing guarantees no reading; attempting costs one budgeted
+    call and every accepted read is saved as a photo a human can check."""
+    p = _profile_at(W_1080P, 40.0)
+    assert p.attempting("plate")
+    assert p.ocr_calls >= 1
+    d = p.subjects["plate"]
+    assert d.px_on_target < d.px_needed
+    assert "anyway" in d.reason and "weak" in d.reason
 
 
 # --------------------------------------------------------------------------- #
 # Budget                                                                        #
 # --------------------------------------------------------------------------- #
 
-def test_out_of_range_analytics_cost_nothing():
-    """At survey altitude neither optional model runs — that reclaimed budget
-    is the whole reason for gating rather than always attempting."""
+def test_face_recognition_costs_nothing_when_it_cannot_work():
+    """Faces stay gated: no artefact to review afterwards, a wrong NAME is
+    worse than a wrong string, and the model eats most of the optional budget
+    for something out of range from any drone standoff."""
     p = _profile_at(W_1080P, 40.0)
-    assert p.name == "survey"
-    assert p.ocr_calls == 0
     assert p.faces is False
+    assert p.name == "identify"        # plates still attempted
 
 
 def test_skipping_faces_buys_more_plate_reads():
@@ -128,10 +138,13 @@ def test_budget_is_configurable_and_actually_binds():
 # --------------------------------------------------------------------------- #
 
 def _switches_hovering_at_the_boundary(off_fraction: float, seed: int = 7) -> int:
-    """Count OCR on/off transitions while holding station on the latch edge."""
+    """Count face on/off transitions while holding station on the latch edge.
+
+    Measured on FACE since it is the gated subject now; the latch itself is
+    shared, so this still exercises the mechanism plate used to."""
     import app.vision.profiles as profiles_mod
 
-    edge = viability.range_for_px(HFOV, W_1080P, PLATE_M, PLATE_MARGINAL_PX)
+    edge = viability.range_for_px(HFOV, W_1080P, FACE_M, FACE_MARGINAL_PX)
     original = profiles_mod._OFF_FRACTION
     profiles_mod._OFF_FRACTION = off_fraction
     try:
@@ -142,7 +155,7 @@ def _switches_hovering_at_the_boundary(off_fraction: float, seed: int = 7) -> in
             # A hovering drone breathes a metre or so, and baro AGL adds noise.
             on = sel.select(
                 _items(W_1080P, edge + random.uniform(-0.6, 0.6))
-            ).attempting("plate")
+            ).attempting("face")
             if prev is not None and on != prev:
                 switches += 1
             prev = on
@@ -161,23 +174,26 @@ def test_hysteresis_stops_the_profile_flapping_on_a_hover():
 def test_the_latch_still_releases_on_a_real_climb():
     """Hysteresis must be a deadband, not a one-way door."""
     sel = ProfileSelector()
-    for slant in (6.0, 8.0, 10.0):
-        assert sel.select(_items(W_1080P, slant)).attempting("plate")
-    for slant in (14.0, 20.0):
-        assert not sel.select(_items(W_1080P, slant)).attempting("plate")
+    for slant in (3.0, 4.0):
+        assert sel.select(_items(W_1080P, slant)).attempting("face")
+    for slant in (9.0, 14.0):
+        assert not sel.select(_items(W_1080P, slant)).attempting("face")
     # ...and re-arms coming back down.
-    assert sel.select(_items(W_1080P, 6.0)).attempting("plate")
+    assert sel.select(_items(W_1080P, 3.0)).attempting("face")
 
 
 def test_the_deadband_is_asymmetric():
     """Turning off must need a bigger move than turning on, or it is not a
     deadband at all."""
-    climbing = ProfileSelector()
-    for slant in (6.0, 10.5):
-        climbing.select(_items(W_1080P, slant))
-    still_on = climbing.select(_items(W_1080P, 10.5)).attempting("plate")
+    edge = viability.range_for_px(HFOV, W_1080P, FACE_M, FACE_MARGINAL_PX)
+    just_over = edge * 1.10
 
-    from_cold = ProfileSelector().select(_items(W_1080P, 10.5)).attempting("plate")
+    climbing = ProfileSelector()
+    for slant in (edge * 0.6, just_over):
+        climbing.select(_items(W_1080P, slant))
+    still_on = climbing.select(_items(W_1080P, just_over)).attempting("face")
+
+    from_cold = ProfileSelector().select(_items(W_1080P, just_over)).attempting("face")
 
     assert still_on is True and from_cold is False
 
@@ -234,15 +250,9 @@ def test_an_override_cannot_conjure_a_model_that_failed_to_load():
 # Headline                                                                      #
 # --------------------------------------------------------------------------- #
 
-def test_headline_names_the_subject_that_is_nearest_to_achievable():
-    """Ranked by fraction of requirement met, not by pixel gap. At 50m a plate
-    is ~56px short and a face ~54px short, so a raw gap would nominate the
-    face — yet the plate needs less than half the descent."""
+def test_headline_names_what_is_actually_skipped():
+    """Only genuinely skipped subjects belong in the headline. Plate is
+    attempted at every range now, so naming it would be misleading."""
     p = _profile_at(W_1080P, 50.0)
-    assert "plate" in p.headline
-    assert p.headline.index("needs") > 0
-
-    plate_px = p.subjects["plate"].px_on_target
-    face_px = p.subjects["face"].px_on_target
-    # The premise of the test: face really is the smaller raw gap here.
-    assert (70 - plate_px) > (60 - face_px)
+    assert "face" in p.headline
+    assert "plate" not in p.headline

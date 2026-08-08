@@ -56,6 +56,28 @@ logger = logging.getLogger("verocore.vision.profiles")
 # skipping them would leave the mode with nothing to track.
 _GATED = ("plate", "face")
 
+# Subjects that are ALWAYS attempted regardless of what the geometry says.
+#
+# Plates are here by an explicit operator decision, and it is a reasonable one.
+# The pixel requirement is a threshold on a continuum, not a cliff: a plate a
+# little under it sometimes reads perfectly, and refusing the call guarantees
+# nothing while attempting it costs one budgeted call. The reason this is safe
+# where it would not be for faces:
+#
+#   * every accepted read is SAVED AS A PHOTO alongside the text, so a wrong
+#     one is visible and correctable by a human rather than being an
+#     unfalsifiable claim in a database;
+#   * strength travels with the reading — pixel width, vote count, grammar —
+#     so a weak read is presented as weak everywhere it appears;
+#   * an unread plate is a permanently lost record, while a doubtful one can
+#     be checked later against its own photograph.
+#
+# Faces stay gated: there is no equivalent artefact to review, a wrong NAME is
+# far more consequential than a wrong string, and the model costs most of the
+# optional budget for something that is genuinely out of range from any drone
+# standoff.
+_ALWAYS_ATTEMPT = ("plate",)
+
 # Measured on this hardware — see the traffic_manager docstring.
 # fast-alpr letterboxes to 384x384, so a call costs the same whatever it is
 # given: the budget is a COUNT OF CALLS, not an area.
@@ -218,6 +240,23 @@ class ProfileSelector:
                     subject=subject, attempt=False, status=status,
                     px_on_target=px, px_needed=needed, forced=True,
                     reason="switched off by operator",
+                )
+                continue
+
+            if subject in _ALWAYS_ATTEMPT:
+                # Still REPORTS the geometry — an operator seeing "34px on
+                # target, needs 70" understands why reads are poor, and can
+                # switch it off to reclaim the budget. It simply no longer
+                # decides.
+                self._on[subject] = True
+                short = px < needed and px > 0
+                decisions[subject] = SubjectDecision(
+                    subject=subject, attempt=True, status=status,
+                    px_on_target=px, px_needed=needed,
+                    reason=(f"{px:.0f}px on target, below the {needed:.0f} guide — "
+                            f"reading anyway, marked weak"
+                            if short else
+                            f"{px:.0f}px on target, needs {needed:.0f}"),
                 )
                 continue
 

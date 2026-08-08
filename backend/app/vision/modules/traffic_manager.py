@@ -125,11 +125,14 @@ _FACE_ID_MEMORY_S = 4.0
 # the fallback for the frames before a profile exists.
 _OCR_CALLS_PER_FRAME = 1
 # Don't bother cropping a vehicle this small — after the detector letterboxes
-# the crop to 384 there would be nothing left of the plate to read. Relaxed
-# from 110px along with the gates below: at drone standoff a vehicle 70px wide
-# still yields a legible plate often enough to be worth the call, and the
-# per-frame budget is now allocated rather than fixed at one.
-_OCR_MIN_VEHICLE_PX = 70
+# the crop to 384 there would be nothing left of the plate to read.
+#
+# 110 -> 70 -> 40. The last step is the same operator call as _MIN_PLATE_AREA:
+# spending one budgeted call on a marginal vehicle costs a fraction of a frame,
+# while skipping it guarantees no plate at all. A 40px-wide vehicle upscales to
+# 384 with nothing gained, but the detector is free to disagree and the photo
+# makes any result checkable.
+_OCR_MIN_VEHICLE_PX = 40
 # A read at or above this is treated as final and the vehicle stops consuming
 # OCR budget, freeing it for vehicles that still have no plate.
 _OCR_GOOD_ENOUGH = 0.80
@@ -168,10 +171,19 @@ _OCR_MAX_ATTEMPTS = 12
 # session's worth of data.
 #
 # AREA, NOT WIDTH. A 40x14 plate carries the same information as a 56x10 one
-# and the first fails a width floor the second passes. Area is the honest
-# measure of how many pixels the reader actually got. Matches
-# plate_tracker._MIN_PLATE_AREA.
-_MIN_PLATE_AREA = 500
+# and the first fails a width floor the second passes.
+#
+# Lowered from 500 to 150 by operator decision, and the reasoning holds: a
+# pixel count is a threshold on a continuum, not a cliff, and reads a little
+# under it do sometimes come back correct. What makes accepting them safe is
+# that EVERY accepted read is saved as a photograph beside its text, so a wrong
+# one is visible and correctable rather than an unfalsifiable database row —
+# whereas a refused read is a permanently lost record.
+#
+# It is not zero: below roughly 150px^2 the crop is a smear the detector should
+# not have proposed at all, and passing it on produces strings with no
+# relationship to any plate.
+_MIN_PLATE_AREA = 150
 # Kept as a QUALITY MARKER, not a filter — reads below it are still reported,
 # toned as weak. Nothing rejects on this.
 _PLATE_MIN_WIDTH_PX = 70
@@ -239,7 +251,8 @@ class _Vehicle:
     """
     __slots__ = (
         "track_id", "vehicle_id", "box", "type", "color", "color_conf",
-        "plate", "plate_conf", "plate_box", "crop_path", "vehicle_path",
+        "plate", "plate_conf", "plate_box", "plate_box_rel",
+        "crop_path", "vehicle_path",
         "plate_votes", "plate_confirmed", "plate_grammar_ok", "plate_px_w",
         "speed_kmh", "speed_reliable", "ocr_attempts",
         "first_seen", "last_seen", "logged",
@@ -264,6 +277,16 @@ class _Vehicle:
         # read are both reported, and are not equally trustworthy.
         self.plate_px_w = 0
         self.plate_box: Optional[list] = None
+        # The same box as FRACTIONS OF THE VEHICLE BOX it was measured in.
+        #
+        # plate_box is absolute pixels frozen at the moment of the read, and
+        # OCR only runs on a couple of vehicles per frame — so a moving
+        # vehicle's bracket was drawn wherever its plate had been up to
+        # several seconds earlier, and kept being drawn there while the
+        # vehicle's own box was smoothed away across the frame. Storing it
+        # relative lets the overlay place it against the CURRENT box, so it
+        # travels with the vehicle and disappears with it.
+        self.plate_box_rel: Optional[list] = None
         self.crop_path: Optional[str] = None
         self.vehicle_path: Optional[str] = None
         # How many frames independently produced the CURRENT string. One
@@ -854,9 +877,17 @@ class TrafficManager(BaseAnalyzer):
             vehicle.plate_px_w = max(vehicle.plate_px_w, pw)
             # Back to full-frame coordinates so the overlay draws in the right
             # place — the crop's origin has to be added back.
+            vx1, vy1, vx2, vy2 = vehicle.box
+            vw, vh = max(1, vx2 - vx1), max(1, vy2 - vy1)
             vehicle.plate_box = [
                 int(box.x1) + cx1, int(box.y1) + cy1,
                 int(box.x2) + cx1, int(box.y2) + cy1,
+            ]
+            vehicle.plate_box_rel = [
+                (vehicle.plate_box[0] - vx1) / vw,
+                (vehicle.plate_box[1] - vy1) / vh,
+                (vehicle.plate_box[2] - vx1) / vw,
+                (vehicle.plate_box[3] - vy1) / vh,
             ]
 
             # Confirmation is AGREEMENT ONLY. Requiring grammar here as well
@@ -1252,6 +1283,8 @@ class TrafficManager(BaseAnalyzer):
                     "plate_grammar_ok": v.plate_grammar_ok,
                     "plate_strong": v.plate_strong,
                     "plate_box": v.plate_box,
+                    # Preferred by the overlay — see plate_box_rel above.
+                    "plate_box_rel": v.plate_box_rel,
                     "speed_kmh": v.speed_kmh,
                     "speed_reliable": v.speed_reliable,
                     "locked": v.track_id == locked_id,

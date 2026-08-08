@@ -671,9 +671,39 @@ function drawTrafficManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: nu
         }
         drawBadge(ctx, label, x1, Math.max(16, y1 - 4), locked ? C.active : C.vehicle)
 
-        if (v.plate_box) {
-            const [px1, py1, px2, py2] = v.plate_box
-            drawBrackets(ctx, px1, py1, px2, py2, C.green, 2)
+        // The plate bracket is placed RELATIVE to the vehicle box, so it
+        // travels with the vehicle and vanishes with it. Drawn from absolute
+        // coordinates it sat wherever the plate had been when OCR last ran on
+        // that vehicle — which, on a per-frame budget of a couple of calls, is
+        // often seconds and half a frame ago — and then lingered there while
+        // the box itself was smoothed and faded away.
+        if (v.plate_box_rel) {
+            const [fx1, fy1, fx2, fy2] = v.plate_box_rel
+            const bw = x2 - x1, bh = y2 - y1
+            drawBrackets(ctx, x1 + fx1 * bw, y1 + fy1 * bh,
+                              x1 + fx2 * bw, y1 + fy2 * bh, C.green, 2)
+        }
+    }
+
+    // ── Recentering guide for a followed VEHICLE ─────────────────────────
+    // Was drawn for a followed person and not for a vehicle, so the same
+    // control looked half-implemented depending on what you picked. Same
+    // shape as human-tracking's: a line from frame centre to the target, so
+    // which way and how far it sits off-centre is visible at a glance rather
+    // than inferred from the PD command.
+    const followedVehicle = r.locked_kind !== 'person' ? lockedTrack : null
+    if (followedVehicle !== null && r.tracking) {
+        const v = (r.vehicles ?? []).find(q => q.track_id === followedVehicle)
+        if (v) {
+            const [x1, y1, x2, y2] = v.box
+            const tx = (x1 + x2) / 2, ty = (y1 + y2) / 2
+            ctx.globalAlpha = 1
+            ctx.strokeStyle = C.lightGray
+            ctx.lineWidth = 1
+            ctx.beginPath(); ctx.moveTo(W / 2, H / 2); ctx.lineTo(tx, ty); ctx.stroke()
+            drawCrosshair(ctx, tx, ty, C.white, 8, 12)
+            ctx.fillStyle = 'rgb(180,180,180)'
+            ctx.beginPath(); ctx.arc(W / 2, H / 2, 3, 0, Math.PI * 2); ctx.fill()
         }
     }
     ctx.globalAlpha = 1
