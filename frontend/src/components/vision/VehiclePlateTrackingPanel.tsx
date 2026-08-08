@@ -209,13 +209,17 @@ export function VehiclePlateTrackingPanel() {
                         </div>
                     ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingRight: 4 }}>
-                            {vehicles.map(v => {
+                            {vehicles.map((v, i) => {
                                 const locked = v.track_id === lockedTrackId
                                 const showColour = v.color && v.color !== 'unknown'
                                     && (v.color_conf ?? 0) >= 0.35
                                 return (
                                     <div
-                                        key={v.track_id ?? Math.random()}
+                                        // vehicle_id survives the tracker renumbering on
+                                        // occlusion. Math.random() here gave every
+                                        // row a new key each frame, so React tore the
+                                        // list down and rebuilt it ~15x a second.
+                                        key={v.vehicle_id ?? v.track_id ?? `idx-${i}`}
                                         onClick={() => v.track_id != null
                                             && lock(locked ? null : v.track_id)}
                                         title={locked ? 'Click to release' : 'Click to lock onto this vehicle'}

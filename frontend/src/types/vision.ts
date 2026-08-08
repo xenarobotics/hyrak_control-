@@ -153,6 +153,47 @@ export interface CVResult {
     viability?: SubjectViability[]
     viable_subjects?: string[]
     viability_headline?: string
+    /** traffic-management: what was ATTEMPTED this frame and why — the
+     *  counterpart to `viability`, which says only what is resolvable.
+     *  Without it a skipped plate read looks identical to a failed one. */
+    profile?: CaptureProfile
+    /** traffic-management: which kind of subject the lock is on. A person
+     *  lock must not be described as a vehicle. */
+    locked_kind?: 'vehicle' | 'person' | null
+    /** What the locked subject is ACTUALLY filling, same units as
+     *  target_distance_ratio. */
+    subject_fill_pct?: number | null
+    /** Why the altitude floor is holding, when it is. Silence here is what
+     *  made a sustained descent impossible to see coming. */
+    altitude_floor_reason?: string | null
+}
+
+/** Which analytics the current optics can support, and what that costs.
+ *  Decided in pixels on target rather than altitude, so a sensor or lens
+ *  change moves the usable ranges with no constant to update. */
+export interface CaptureProfile {
+    /** 'survey' = count/track/speed only; 'identify' adds plates;
+     *  'forensic' adds face recognition. A label on the decision, never an
+     *  input to it. */
+    name: 'survey' | 'identify' | 'forensic'
+    label: string
+    /** fast-alpr calls allowed this frame. 0 when a plate cannot resolve at
+     *  this range, and the reclaimed budget goes to whatever can. */
+    ocr_calls: number
+    faces: boolean
+    headline: string
+    subjects: ProfileSubject[]
+}
+
+export interface ProfileSubject {
+    subject: 'plate' | 'face'
+    attempt: boolean
+    status: 'good' | 'marginal' | 'out_of_range' | 'unknown' | 'unavailable'
+    px_on_target: number
+    px_needed: number
+    reason: string
+    /** True when an operator forced this against the geometry. */
+    forced: boolean
 }
 
 export interface SubjectViability {

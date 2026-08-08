@@ -83,6 +83,8 @@ logger = logging.getLogger("verocore.vision.traffic_manager")
 
 _TRACKER_CFG = make_bytetrack_cfg("verocore_traffic_")
 _VEHICLE_CLASSES = {"car", "truck", "bus", "motorcycle"}
+# Same prefix as vehicle-plate-tracking, so one id format reads across modes.
+_VEHICLE_ID_PREFIX = "VH"
 # COCO indices: 0 person, 2 car, 3 motorcycle, 5 bus, 7 truck. One call for
 # both subject types — see the module docstring.
 _DETECT_CLASSES = [0, 2, 3, 5, 7]
@@ -210,15 +212,21 @@ class _Vehicle:
     best read is the one worth keeping and logging.
     """
     __slots__ = (
-        "track_id", "box", "type", "color", "color_conf",
+        "track_id", "vehicle_id", "box", "type", "color", "color_conf",
         "plate", "plate_conf", "plate_box", "crop_path", "vehicle_path",
         "plate_votes", "plate_confirmed", "plate_grammar_ok",
         "speed_kmh", "speed_reliable", "ocr_attempts",
         "first_seen", "last_seen", "logged",
     )
 
-    def __init__(self, track_id: int, box, vtype: str):
+    def __init__(self, track_id: int, box, vtype: str, vehicle_id: str = ""):
         self.track_id = track_id
+        # This module's OWN durable identity, distinct from track_id: a
+        # ByteTrack id resets on occlusion, so a vehicle that passes behind
+        # something comes back as a different number and its colour, speed and
+        # plate history are orphaned. Same scheme as vehicle-plate-tracking so
+        # an operator reads one id format across both modes.
+        self.vehicle_id = vehicle_id
         self.box = box
         self.type = vtype
         self.color = ""
@@ -273,6 +281,10 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         "capture_dir": capture_dir,
         "vehicles": {},              # track_id -> _Vehicle
         "ids_seen": set(),           # unique count, by track id
+        "vehicle_id_seq": 0,
+        # plate text -> vehicle_id. What makes re-identification possible: a
+        # re-read of the same characters is the same vehicle, not a guess.
+        "plate_registry": {},
         "type_counts": {},
         "color_counts": {},
         "peak_in_frame": 0,
@@ -566,6 +578,34 @@ class TrafficManager(BaseAnalyzer):
             f"{'STARTED' if active else 'STOPPED'}"
         )
 
+    # ── Durable vehicle identity ──────────────────────────────────────────
+
+    def _new_vehicle_id(self, state: Dict[str, Any]) -> str:
+        state["vehicle_id_seq"] += 1
+        return f"{_VEHICLE_ID_PREFIX}-{state['vehicle_id_seq']:06d}"
+
+    def _register_plate(self, state: Dict[str, Any], vehicle: "_Vehicle") -> None:
+        """
+        Attach the durable identity a plate reading implies.
+
+        If this exact plate was already seen this session under a different
+        vehicle_id, that earlier sighting's track fragmented and came back —
+        re-attach the earlier identity rather than minting a new one. That is
+        what stops one car being counted as three because it passed behind a
+        bus twice.
+        """
+        registry = state["plate_registry"]
+        existing = registry.get(vehicle.plate)
+        if existing and existing != vehicle.vehicle_id:
+            logger.info(
+                f"vehicle #{vehicle.track_id}: plate {vehicle.plate} matches "
+                f"{existing} — re-identified as the same vehicle "
+                f"(was {vehicle.vehicle_id})"
+            )
+            vehicle.vehicle_id = existing
+        else:
+            registry[vehicle.plate] = vehicle.vehicle_id
+
     # ── Plate OCR, on a budget ────────────────────────────────────────────
 
     def _ocr_candidates(self, state, vehicles: List[_Vehicle],
@@ -689,6 +729,10 @@ class TrafficManager(BaseAnalyzer):
             )
             if just_confirmed:
                 vehicle.plate_confirmed = True
+                # A confirmed plate is the only evidence strong enough to merge
+                # two track ids into one vehicle, so identity is attached here
+                # rather than on any provisional read.
+                self._register_plate(state, vehicle)
                 logger.info(
                     f"vehicle #{vehicle.track_id}: plate {text} confirmed "
                     f"({vehicle.plate_votes} agreeing reads, conf={conf:.2f}, "
@@ -899,7 +943,7 @@ class TrafficManager(BaseAnalyzer):
 
                 v = registry.get(tid)
                 if v is None:
-                    v = _Vehicle(tid, full, name)
+                    v = _Vehicle(tid, full, name, self._new_vehicle_id(state))
                     registry[tid] = v
                     state["ids_seen"].add(tid)
                     state["type_counts"][name] = state["type_counts"].get(name, 0) + 1
@@ -1013,6 +1057,7 @@ class TrafficManager(BaseAnalyzer):
                 pending_db.append({
                     "table": "plate_event",
                     "track_id": v.track_id,
+                    "vehicle_id": v.vehicle_id or None,
                     "plate_text": v.reportable_plate,
                     "ocr_confidence": v.plate_conf,
                     "vehicle_type": v.type or "unknown",
@@ -1041,6 +1086,7 @@ class TrafficManager(BaseAnalyzer):
             "vehicles": [
                 {
                     "track_id": v.track_id,
+                    "vehicle_id": v.vehicle_id or None,
                     "box": v.box,
                     "type": v.type,
                     "color": v.color or "unknown",

@@ -572,14 +572,13 @@ function drawTrafficManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: nu
             for (let c = 0; c < cols; c++) {
                 const cnt = sections[row * cols + c]
                 const x = c * cellW, y = row * cellH
-                if (!cnt) {
-                    ctx.globalAlpha = 0.24
-                    ctx.strokeStyle = '#5a5a5a'
-                    ctx.lineWidth = 1
-                    ctx.strokeRect(x, y, cellW, cellH)
-                    ctx.globalAlpha = 1
-                    continue
-                }
+                // An empty cell is drawn as NOTHING — no outline. The tinted
+                // regions carry the density reading on their own, and the
+                // separator strokes only added a wireframe over the video.
+                // Removed from crowd-management for that reason; this mode
+                // kept drawing them, so the same grid looked different
+                // depending on which mode was watching.
+                if (!cnt) continue
                 const col = LEVEL_COLOR[densityLevel(cnt, r.light_max ?? 8, r.moderate_max ?? 20)]
                 ctx.globalAlpha = 0.10
                 ctx.fillStyle = col
@@ -592,11 +591,19 @@ function drawTrafficManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: nu
 
     // ── People, named where recognised ───────────────────────────────────
     const byTrack = new Map((r.identities ?? []).map(i => [i.track_id, i]))
+    // A person can be the followed subject in this mode, not just a vehicle,
+    // so the lock has to read the same on both. Without this the drone flies
+    // at someone with nothing on screen saying which one.
+    const lockedTrack = r.locked_track_id ?? null
+    const followedPerson = r.locked_kind === 'person' ? lockedTrack : null
     for (const p of r.people ?? []) {
         const [x1, y1, x2, y2] = p.box
         const ident = byTrack.get(p.id)
         ctx.globalAlpha = alphaOf(p)
-        if (ident) {
+        if (p.id === followedPerson) {
+            drawLockedRing(ctx, x1, y1, x2, y2, C.active)
+            drawPill(ctx, (ident?.name ?? 'FOLLOWING').toUpperCase(), x1, y1, C.active)
+        } else if (ident) {
             drawSubjectRing(ctx, x1, y1, x2, y2, C.known)
             drawPill(ctx, ident.name.toUpperCase(), x1, y1, C.known)
         } else {
@@ -604,6 +611,22 @@ function drawTrafficManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: nu
         }
     }
     ctx.globalAlpha = 1
+
+    // The recentering guide belongs to whichever subject is followed, so it is
+    // drawn for a locked person here rather than only inside the vehicle loop.
+    if (followedPerson !== null && r.tracking) {
+        const p = (r.people ?? []).find(q => q.id === followedPerson)
+        if (p) {
+            const [x1, y1, x2, y2] = p.box
+            const tx = (x1 + x2) / 2, ty = (y1 + y2) / 2
+            ctx.strokeStyle = C.lightGray
+            ctx.lineWidth = 1
+            ctx.beginPath(); ctx.moveTo(W / 2, H / 2); ctx.lineTo(tx, ty); ctx.stroke()
+            drawCrosshair(ctx, tx, ty, C.white, 8, 12)
+            ctx.fillStyle = 'rgb(180,180,180)'
+            ctx.beginPath(); ctx.arc(W / 2, H / 2, 3, 0, Math.PI * 2); ctx.fill()
+        }
+    }
 
     for (const v of r.vehicles ?? []) {
         const [x1, y1, x2, y2] = v.box
@@ -793,9 +816,19 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
         const r = latest.current
         if (!r) return []
         if (VEHICLE_CLICK_MODES[mode]) {
-            return (r.vehicles ?? [])
+            const vehicles = (r.vehicles ?? [])
                 .filter(v => v.track_id != null)
                 .map(v => ({ id: v.track_id as number, box: v.box }))
+            // traffic-management follows PEOPLE as well as vehicles, and both
+            // come out of one ByteTrack pass — so their ids share a space and
+            // a person is just another target in the same list. No separate
+            // event and no "which kind did you mean" in the payload.
+            if (mode === 'traffic-management') {
+                return vehicles.concat(
+                    (r.people ?? []).map(p => ({ id: p.id, box: p.box })),
+                )
+            }
+            return vehicles
         }
         if (mode === 'crowd-management') {
             return (r.people ?? []).map(p => ({ id: p.id, box: p.box }))

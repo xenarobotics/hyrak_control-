@@ -943,3 +943,95 @@ def test_moderate_max_cannot_be_set_below_light_max():
     t.set_thresholds("s", light_max=30, moderate_max=10)
     st = t._client_state["s"]
     assert st["moderate_max"] > st["light_max"]
+
+
+# --------------------------------------------------------------------------- #
+# Durable vehicle identity                                                      #
+# --------------------------------------------------------------------------- #
+#
+# A ByteTrack id resets on occlusion, so a car that passes behind a bus comes
+# back as a different number with its colour, speed and plate history orphaned.
+# The vehicle_id is what survives that.
+
+def test_every_vehicle_gets_an_id_on_first_sighting():
+    t = bare_tracker()
+    state = t._client_state["s"]
+    ids = {t._new_vehicle_id(state) for _ in range(3)}
+    assert ids == {"VH-000001", "VH-000002", "VH-000003"}
+
+
+def test_the_same_plate_re_attaches_the_earlier_identity():
+    """One car behind a bus twice must not be counted as three vehicles."""
+    t = bare_tracker()
+    state = t._client_state["s"]
+
+    first = vehicle(1)
+    first.vehicle_id, first.plate = t._new_vehicle_id(state), "TS09EA0001"
+    t._register_plate(state, first)
+
+    # Same car, new track id after the occlusion.
+    again = vehicle(2)
+    again.vehicle_id, again.plate = t._new_vehicle_id(state), "TS09EA0001"
+    t._register_plate(state, again)
+
+    assert again.vehicle_id == first.vehicle_id
+
+
+def test_a_different_plate_keeps_its_own_identity():
+    t = bare_tracker()
+    state = t._client_state["s"]
+    a, b = vehicle(1), vehicle(2)
+    a.vehicle_id, a.plate = t._new_vehicle_id(state), "TS09EA0001"
+    b.vehicle_id, b.plate = t._new_vehicle_id(state), "TS09EA9999"
+    t._register_plate(state, a)
+    t._register_plate(state, b)
+    assert a.vehicle_id != b.vehicle_id
+
+
+def test_the_id_format_matches_plate_tracking():
+    """One id format across both modes, or an operator reading a report has to
+    know which module produced it."""
+    from app.vision.modules.plate_tracker import _VEHICLE_ID_PREFIX as plate_prefix
+    from app.vision.modules.traffic_manager import _VEHICLE_ID_PREFIX as traffic_prefix
+
+    assert traffic_prefix == plate_prefix
+
+
+def test_vehicle_id_is_a_real_column_on_the_row_it_is_written_to():
+    """The DB payload gained the field; if the model lacks it, persist_events
+    raises inside the writer and the row is silently lost."""
+    from app.db.models import PlateEvent
+
+    assert "vehicle_id" in PlateEvent.__table__.columns
+
+
+# --------------------------------------------------------------------------- #
+# The follow-control handlers must actually reach this module                   #
+# --------------------------------------------------------------------------- #
+
+def test_traffic_answers_every_shared_follow_control():
+    """The panel shows hold distance and altitude controls for this mode. If
+    the setters are absent the emits are accepted and silently do nothing,
+    which looks exactly like a broken controller."""
+    for name in ("set_tracking_params", "set_altitude_mode",
+                 "set_altitude_nudge", "set_zone_names", "set_thresholds",
+                 "set_profile_override", "request_follow", "set_tracking"):
+        assert callable(getattr(TrafficManager, name, None)), f"missing {name}"
+
+
+def test_traffic_is_routed_by_the_shared_pursuit_list():
+    """It was missing from all three hand-copied isinstance tuples, so those
+    controls did nothing for this mode while appearing to work."""
+    from app.events.telemetry_events import _pursuit_analyzers
+
+    assert TrafficManager in _pursuit_analyzers()
+
+
+def test_every_pursuit_analyzer_implements_the_controls_it_is_routed_for():
+    """Membership of that list is a promise. Pin it for all of them, so adding
+    a mode to the list without the setters fails here rather than in flight."""
+    from app.events.telemetry_events import _pursuit_analyzers
+
+    for cls in _pursuit_analyzers():
+        for name in ("set_tracking_params", "set_altitude_mode", "set_altitude_nudge"):
+            assert callable(getattr(cls, name, None)), f"{cls.__name__} lacks {name}"

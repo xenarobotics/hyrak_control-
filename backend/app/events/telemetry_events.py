@@ -9,6 +9,29 @@ from app.sessions.models import AnalysisMode
 logger = logging.getLogger("verocore.events.telemetry")
 
 
+def _pursuit_analyzers():
+    """
+    Every analyzer that can chase a subject, and therefore answers the shared
+    follow controls — hold distance, fixed/auto altitude, altitude nudge.
+
+    One list instead of the seven hand-copied import blocks and isinstance
+    tuples this file used to carry. Those had already drifted: traffic
+    management implements all three setters and was missing from every one of
+    them, so its distance and altitude controls silently did nothing while the
+    panel showed them as working. A single list is one place to update when a
+    mode is added, rather than seven places to forget.
+
+    Imported lazily inside the function because these modules pull in torch and
+    ultralytics, which must not load at import time.
+    """
+    from app.vision.modules.crowd_manager import CrowdManager
+    from app.vision.modules.human_tracker import HumanTracker
+    from app.vision.modules.person_tracker import PersonTracker
+    from app.vision.modules.plate_tracker import PlateTracker
+    from app.vision.modules.traffic_manager import TrafficManager
+    return (HumanTracker, PersonTracker, PlateTracker, CrowdManager, TrafficManager)
+
+
 async def execute_drone_action(tel, action: str, data: dict) -> dict:
     """Execute a named action on a TelemetryManager. Returns the result dict."""
     if action == "arm":
@@ -453,11 +476,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         if not session or not vision_pool:
             return
         analyzer = vision_pool.get_for_session(session.session_id)
-        from app.vision.modules.crowd_manager import CrowdManager
-        from app.vision.modules.human_tracker import HumanTracker
-        from app.vision.modules.person_tracker import PersonTracker
-        from app.vision.modules.plate_tracker import PlateTracker
-        if isinstance(analyzer, (HumanTracker, PersonTracker, PlateTracker, CrowdManager)):
+        if isinstance(analyzer, _pursuit_analyzers()):
             analyzer.set_altitude_mode(
                 session.session_id,
                 mode=str(data.get("mode", "fixed")),
@@ -471,11 +490,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         if not session or not vision_pool:
             return
         analyzer = vision_pool.get_for_session(session.session_id)
-        from app.vision.modules.crowd_manager import CrowdManager
-        from app.vision.modules.human_tracker import HumanTracker
-        from app.vision.modules.person_tracker import PersonTracker
-        from app.vision.modules.plate_tracker import PlateTracker
-        if isinstance(analyzer, (HumanTracker, PersonTracker, PlateTracker, CrowdManager)):
+        if isinstance(analyzer, _pursuit_analyzers()):
             analyzer.set_altitude_nudge(
                 session.session_id,
                 velocity=float(data.get("velocity", 0.0)),
@@ -500,11 +515,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         if not session or not vision_pool:
             return
         analyzer = vision_pool.get_for_session(session.session_id)
-        from app.vision.modules.crowd_manager import CrowdManager
-        from app.vision.modules.human_tracker import HumanTracker
-        from app.vision.modules.person_tracker import PersonTracker
-        from app.vision.modules.plate_tracker import PlateTracker
-        if isinstance(analyzer, (HumanTracker, PersonTracker, PlateTracker, CrowdManager)):
+        if isinstance(analyzer, _pursuit_analyzers()):
             analyzer.set_tracking_params(
                 session.session_id,
                 target_distance_ratio=float(data.get("target_distance_ratio", 0.30)),

@@ -12,7 +12,9 @@ import { useDroneStore } from '@/store/drone'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { getSocket } from '@/lib/socket'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Crosshair, Square, MoveVertical, AlertCircle, Download, Trash2 } from 'lucide-react'
+import { AlertCircle, Download, Layers, Trash2 } from 'lucide-react'
+import { FollowControls } from '@/components/vision/FollowControls'
+import type { CVResult } from '@/types/vision'
 import {
     fetchPlateHistory, downloadSessionReport, clearHistory, toFileStamp,
     type PlateHistoryRow,
@@ -36,6 +38,91 @@ function Chip({ children, tone = 'muted' }: { children: React.ReactNode; tone?: 
     )
 }
 
+const PROFILE_TONE: Record<string, string> = {
+    survey: '#38bdf8',
+    identify: '#4ade80',
+    forensic: '#a78bfa',
+}
+
+/** What the current optics support, and the override that argues with it.
+ *
+ *  Shown as an override rather than a mode switch on purpose: an operator who
+ *  forces plate OCR on at 40m should still be able to read that the plate is
+ *  34px short of legible, so the automatic verdict stays visible next to the
+ *  button that overrules it. */
+function ProfileCard({ profile }: { profile: NonNullable<CVResult['profile']> }) {
+    const tone = PROFILE_TONE[profile.name] ?? '#38bdf8'
+    const set = (subject: string, mode: string) =>
+        getSocket().emit('set_profile_override', { subject, mode })
+
+    return (
+        <div style={{
+            display: 'flex', flexDirection: 'column', gap: 6,
+            padding: '8px 10px', borderRadius: 8,
+            background: 'hsl(var(--app-surface-2))',
+            border: `1px solid ${tone}44`,
+        }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Layers size={12} style={{ color: tone }} />
+                <span style={{ fontSize: 12, fontWeight: 700, color: tone }}>
+                    {profile.label}
+                </span>
+                <span style={{ ...LABEL, marginLeft: 'auto', textTransform: 'none' }}>
+                    {profile.ocr_calls > 0 ? `${profile.ocr_calls} OCR/frame` : 'no OCR'}
+                </span>
+            </div>
+
+            {profile.headline && (
+                <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
+                    {profile.headline}
+                </div>
+            )}
+
+            {profile.subjects.map(s => (
+                <div key={s.subject} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{
+                        width: 46, fontSize: 10, fontFamily: 'monospace',
+                        textTransform: 'capitalize',
+                        color: s.attempt ? '#4ade80' : 'hsl(var(--app-text-muted))',
+                    }}>
+                        {s.subject}
+                    </span>
+                    <span style={{
+                        flex: 1, minWidth: 0, fontSize: 10, fontFamily: 'monospace',
+                        color: 'hsl(var(--app-text-muted))',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }} title={s.reason}>
+                        {s.reason}
+                    </span>
+                    {s.status !== 'unavailable' && (
+                        <div style={{ display: 'flex', gap: 2 }}>
+                            {(['auto', 'on', 'off'] as const).map(m => {
+                                const active = m === 'auto' ? !s.forced
+                                    : s.forced && (m === 'on') === s.attempt
+                                return (
+                                    <button
+                                        key={m}
+                                        onClick={() => set(s.subject, m)}
+                                        style={{
+                                            padding: '1px 6px', borderRadius: 5, fontSize: 9,
+                                            fontFamily: 'monospace', cursor: 'pointer',
+                                            border: `1px solid ${active ? tone : 'hsl(var(--app-border))'}`,
+                                            background: active ? `${tone}22` : 'transparent',
+                                            color: active ? tone : 'hsl(var(--app-text-muted))',
+                                        }}
+                                    >
+                                        {m}
+                                    </button>
+                                )
+                            })}
+                        </div>
+                    )}
+                </div>
+            ))}
+        </div>
+    )
+}
+
 export function TrafficManagementPanel() {
     const cvResults = useDroneStore(s => s.cvResults)
     const { isStreaming } = useWebRTCContext()
@@ -44,7 +131,14 @@ export function TrafficManagementPanel() {
 
     const vehicles = cvResults?.vehicles ?? []
     const lockedId = cvResults?.locked_track_id ?? null
+    // Which kind was locked comes FROM the backend: people and vehicles share
+    // one track-id space, so the panel cannot know what was clicked until the
+    // module has resolved the id against both lists.
+    const lockedKind = cvResults?.locked_kind ?? 'vehicle'
+    const lockedVehicleId = vehicles.find(v => v.track_id === lockedId)?.vehicle_id ?? null
     const lockedPlate = cvResults?.locked_plate ?? null
+    const profile = cvResults?.profile ?? null
+    const floorReason = cvResults?.altitude_floor_reason ?? null
     const lockState = cvResults?.lock_state ?? 'idle'
     const lockMessage = cvResults?.lock_message ?? ''
     const elevate = cvResults?.elevate ?? null
@@ -99,6 +193,13 @@ export function TrafficManagementPanel() {
                 <Chip>{cvResults?.plates_read ?? 0} plates</Chip>
                 <Chip>{identities.length} identified</Chip>
             </div>
+
+            {/* ── What is being ATTEMPTED, and why ─────────────────────
+                Sits above the range readout because it is the actionable one:
+                viability says what COULD resolve, this says what the frame
+                budget is actually being spent on. A skipped plate read is
+                otherwise indistinguishable from a failed one. */}
+            {profile && <ProfileCard profile={profile} />}
 
             {/* ── What this altitude can resolve ──────────────────────
                 The honest way to offer all five analytics in one mode: run
@@ -211,67 +312,40 @@ export function TrafficManagementPanel() {
                 </div>
             )}
 
-            {/* ── Lock + follow ───────────────────────────────────────── */}
-            {lockedId !== null && (
+            {/* ── Lock + follow ───────────────────────────────────────────
+                The SHARED control, so vehicles, people, crowds and person-ID
+                all behave the same way — the inconsistency between four
+                hand-rolled versions was itself the reliability problem.
+                `kind` comes from the backend rather than being assumed here:
+                one id space covers both, so what got clicked is only known
+                after the module resolves it. */}
+            <FollowControls
+                kind={lockedKind}
+                selectedLabel={lockedId === null ? null : [
+                    lockedVehicleId ?? `#${lockedId}`,
+                    lockedPlate,
+                ].filter(Boolean).join('  ')}
+                lockState={lockState}
+                lockMessage={lockMessage}
+                tracking={tracking}
+                altitudeMode={cvResults?.altitude_mode}
+                targetRatio={cvResults?.target_distance_ratio}
+                actualFillPct={cvResults?.subject_fill_pct}
+                elevate={elevate}
+                onRelease={() => { arm(false); lock(null) }}
+            />
+
+            {/* The altitude floor is the reason a commanded descent stops. Left
+                unsaid, a drone that will not come down reads as a broken
+                controller — and its opposite, a descent nobody could see, is
+                what put an aircraft into the ground. */}
+            {floorReason && (
                 <div style={{
-                    display: 'flex', flexDirection: 'column', gap: 6,
-                    padding: '8px 10px', borderRadius: 8,
-                    background: 'rgba(34,211,238,0.10)',
-                    border: '1px solid rgba(34,211,238,0.35)',
+                    display: 'flex', gap: 6, alignItems: 'flex-start',
+                    fontSize: 10, lineHeight: 1.5, color: '#fbbf24',
                 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-                        <Crosshair size={13} style={{ color: '#22d3ee' }} />
-                        <span style={{ fontWeight: 700, color: '#22d3ee' }}>
-                            #{lockedId}{lockedPlate ? `  ${lockedPlate}` : ''}
-                        </span>
-                        <span style={{ ...LABEL, marginLeft: 'auto' }}>{lockState}</span>
-                    </div>
-                    {lockMessage && (
-                        <div style={{ fontSize: 10, fontFamily: 'monospace', color: '#fbbf24' }}>
-                            {lockMessage}
-                        </div>
-                    )}
-                    {/* Locking frames a vehicle; flying at it is a second,
-                        explicit decision. */}
-                    <div style={{ display: 'flex', gap: 6 }}>
-                        <button
-                            onClick={() => arm(!tracking)}
-                            style={{
-                                flex: 1, padding: '6px 0', borderRadius: 7, fontSize: 11,
-                                fontWeight: 600, cursor: 'pointer',
-                                border: `1px solid ${tracking ? '#f87171' : '#22d3ee'}`,
-                                background: tracking ? 'rgba(248,113,113,0.15)' : 'rgba(34,211,238,0.15)',
-                                color: tracking ? '#f87171' : '#22d3ee',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-                            }}
-                        >
-                            {tracking ? <><Square size={11} /> Stop following</>
-                                      : <><Crosshair size={11} /> Follow</>}
-                        </button>
-                        <button
-                            onClick={() => { arm(false); lock(null) }}
-                            style={{
-                                padding: '6px 10px', borderRadius: 7, fontSize: 11,
-                                cursor: 'pointer', border: '1px solid hsl(var(--app-border))',
-                                background: 'transparent', color: 'hsl(var(--app-text-muted))',
-                            }}
-                        >
-                            Release
-                        </button>
-                    </div>
-                    {elevate && (elevate.elevating || elevate.blocked_by) && (
-                        <div style={{
-                            display: 'flex', gap: 6, alignItems: 'flex-start',
-                            fontSize: 10, lineHeight: 1.5,
-                            color: elevate.elevating ? '#22d3ee' : '#f87171',
-                        }}>
-                            <MoveVertical size={11} style={{ marginTop: 1, flexShrink: 0 }} />
-                            <span>
-                                <b>{elevate.elevating ? 'Auto-elevating' : 'Cannot climb'}</b>
-                                {' — '}{elevate.reason}
-                            </span>
-                        </div>
-                    )}
+                    <AlertCircle size={11} style={{ marginTop: 1, flexShrink: 0 }} />
+                    <span>{floorReason}</span>
                 </div>
             )}
 
@@ -296,13 +370,19 @@ export function TrafficManagementPanel() {
                         </div>
                     ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingRight: 4 }}>
-                            {vehicles.map(v => {
+                            {vehicles.map((v, i) => {
                                 const locked = v.track_id === lockedId
                                 const showColour = v.color && v.color !== 'unknown'
                                     && (v.color_conf ?? 0) >= 0.35
                                 return (
                                     <div
-                                        key={v.track_id ?? Math.random()}
+                                        // vehicle_id first: it is stable across
+                                        // the track id resetting on occlusion.
+                                        // Math.random() used to stand in here,
+                                        // which gave every row a new key on
+                                        // every frame — React tore down and
+                                        // rebuilt the whole list ~15x a second.
+                                        key={v.vehicle_id ?? v.track_id ?? `idx-${i}`}
                                         onClick={() => v.track_id != null
                                             && lock(locked ? null : v.track_id)}
                                         title={locked ? 'Click to release' : 'Click to lock onto this vehicle'}
@@ -333,8 +413,13 @@ export function TrafficManagementPanel() {
                                                 fontSize: 10, textTransform: 'capitalize',
                                                 color: 'hsl(var(--app-text-muted))',
                                             }}>
+                                                {/* vehicle_id, not the track id, is the
+                                                    identity worth showing: it survives the
+                                                    tracker renumbering on occlusion and is
+                                                    what the exported report is keyed by. */}
                                                 {[showColour ? v.color : null, v.type]
-                                                    .filter(Boolean).join(' ')} · #{v.track_id}
+                                                    .filter(Boolean).join(' ')}
+                                                {' · '}{v.vehicle_id ?? `#${v.track_id}`}
                                             </span>
                                         </div>
                                         {v.speed_kmh != null && (
