@@ -1,0 +1,97 @@
+name: Desktop release
+
+# electron-builder can't reliably cross-compile a Windows .exe or macOS
+# .dmg from Linux — each platform's installer has to be built ON that
+# platform. This matrix does exactly that: one job per OS, each building
+# its own installer, then uploading it (via rsync over SSH) straight into
+# the backend's own releases/ folder — served at /releases by
+# backend/app/server.py, no GitHub Releases involved. desktop/package.json
+# uses electron-builder's "generic" publish provider specifically because
+# it does no uploading itself; this workflow owns that step instead.
+#
+# Triggers on pushing a version tag, e.g.:
+#   git tag desktop-v0.1.0 && git push origin desktop-v0.1.0
+#
+# Needs these repo secrets pointing at the actual server before this can
+# deploy anything (unset today — configure once, in GitHub repo Settings →
+# Secrets and variables → Actions):
+#   DEPLOY_HOST     — server hostname/IP
+#   DEPLOY_USER     — SSH user
+#   DEPLOY_SSH_KEY  — private key with access to that user
+#   DEPLOY_PATH     — absolute path to the backend's releases_dir on the
+#                     server (see backend/app/config.py's releases_dir,
+#                     default "<repo root>/releases")
+
+on:
+  push:
+    tags:
+      - 'desktop-v*'
+  workflow_dispatch: {} # manual "Run workflow" button, for test builds
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Python deps for icon generation
+        run: pip install pillow
+
+      - run: npm ci
+
+      - run: npm run icons
+
+      - name: Build + write electron-updater manifests
+        run: npm run release
+        env:
+          # electron-builder still wants SOME publish target reachable to
+          # validate config even with the generic provider (which does no
+          # actual upload) — GH_TOKEN isn't used for anything here, this
+          # var name is just what electron-builder's CI detection checks.
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+
+      - name: Deploy to server
+        if: ${{ vars.DEPLOY_CONFIGURED == 'true' }}
+        uses: burnett01/rsync-deployments@7.0.1
+        with:
+          switches: -avz --include='*.exe' --include='*.dmg' --include='*.AppImage' --include='*.blockmap' --include='latest*.yml' --exclude='*'
+          path: desktop/release/
+          remote_path: ${{ secrets.DEPLOY_PATH }}
+          remote_host: ${{ secrets.DEPLOY_HOST }}
+          remote_user: ${{ secrets.DEPLOY_USER }}
+          remote_key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Deploy step skipped
+        if: ${{ vars.DEPLOY_CONFIGURED != 'true' }}
+        run: |
+          echo "Deploy secrets not configured yet (DEPLOY_HOST/DEPLOY_USER/DEPLOY_SSH_KEY/DEPLOY_PATH)."
+          echo "Set them as repo secrets, then set the repo variable DEPLOY_CONFIGURED=true, to enable the upload step above."
+          echo "Built artifacts are still available as this job's workflow artifact for manual upload in the meantime."
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ vars.DEPLOY_CONFIGURED != 'true' }}
+        with:
+          name: hyrak-desktop-${{ matrix.os }}
+          path: |
+            desktop/release/*.exe
+            desktop/release/*.dmg
+            desktop/release/*.AppImage
+            desktop/release/*.blockmap
+            desktop/release/latest*.yml
+          if-no-files-found: ignore

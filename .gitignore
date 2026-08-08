@@ -11,6 +11,13 @@ desktop/node_modules/
 desktop/dist/
 desktop/release/
 
+# ── Vendored SDK + build artefacts, not source ───────────────
+# communication/ is a read-only reference tree; luckfox_pico_airunit alone is
+# 27GB of vendored SDK and prebuilt images. The scripts beside it ARE worth
+# keeping, so the SDK is excluded rather than the whole directory.
+communication/luckfox_pico_airunit/
+communication/*.tar.gz
+
 # ── Standalone relay executable builds (PyInstaller) ─────────
 sitl_relay/dist/
 sitl_relay/build/
