@@ -41,7 +41,7 @@ def test_only_one_ocr_call_per_frame():
     t = bare_tracker()
     state = t._client_state["s"]
     many = [vehicle(i, x1=i * 320, x2=i * 320 + 300) for i in range(1, 7)]
-    assert len(t._ocr_candidates(state, many)) == _OCR_CALLS_PER_FRAME
+    assert len(t._ocr_candidates(state, many, budget=_OCR_CALLS_PER_FRAME)) == _OCR_CALLS_PER_FRAME
 
 
 def test_largest_vehicle_wins_the_budget():
@@ -49,7 +49,7 @@ def test_largest_vehicle_wins_the_budget():
     t = bare_tracker()
     small = vehicle(1, 0, 0, 160, 120)
     big = vehicle(2, 500, 100, 1100, 600)
-    picked = t._ocr_candidates(t._client_state["s"], [small, big])
+    picked = t._ocr_candidates(t._client_state["s"], [small, big], budget=_OCR_CALLS_PER_FRAME)
     assert picked[0].track_id == 2
 
 
@@ -61,7 +61,7 @@ def test_locked_vehicle_gets_priority_over_a_larger_one():
     state["locked_track_id"] = 1
     small_locked = vehicle(1, 0, 0, 200, 160)
     big_other = vehicle(2, 500, 100, 1200, 700)
-    picked = t._ocr_candidates(state, [small_locked, big_other])
+    picked = t._ocr_candidates(state, [small_locked, big_other], budget=_OCR_CALLS_PER_FRAME)
     assert picked[0].track_id == 1
 
 
@@ -70,7 +70,58 @@ def test_vehicles_too_small_never_consume_budget():
     the plate to read, so spending a call is pure waste."""
     t = bare_tracker()
     tiny = vehicle(1, 0, 0, _OCR_MIN_VEHICLE_PX - 20, 80)
-    assert t._ocr_candidates(t._client_state["s"], [tiny]) == []
+    assert t._ocr_candidates(t._client_state["s"], [tiny], budget=_OCR_CALLS_PER_FRAME) == []
+
+
+def test_a_zero_budget_spends_nothing():
+    """The survey profile's whole point: when the optics cannot resolve a plate
+    at this range, the 14.7ms call is reclaimed rather than spent inventing a
+    reading. Vehicles that would otherwise qualify must still get nothing."""
+    t = bare_tracker()
+    ready = [vehicle(i, x1=i * 320, x2=i * 320 + 300) for i in range(1, 4)]
+    assert t._ocr_candidates(t._client_state["s"], ready, budget=0) == []
+    # ...and the same vehicles are picked up the moment budget returns.
+    assert t._ocr_candidates(t._client_state["s"], ready, budget=2) != []
+
+
+def test_a_larger_budget_reads_more_vehicles_in_one_frame():
+    """Skipping out-of-range faces frees budget, and that budget has to
+    actually buy extra reads or the reallocation is decorative."""
+    t = bare_tracker()
+    state = t._client_state["s"]
+    many = [vehicle(i, x1=i * 320, x2=i * 320 + 300) for i in range(1, 7)]
+    assert len(t._ocr_candidates(state, many, budget=1)) == 1
+    assert len(t._ocr_candidates(state, many, budget=3)) == 3
+
+
+def test_face_identification_is_skipped_but_earned_names_survive():
+    """Out of range, the model must not run — yet a name established when the
+    face WAS resolvable should persist while its track lives, rather than a
+    climb erasing a good identification."""
+    t = bare_tracker()
+    t.face_app = object()          # present, so availability is not the reason
+
+    class _Gallery:
+        def is_empty(self):
+            return False
+
+        def match(self, *a, **k):
+            raise AssertionError("gallery must not be consulted when skipping")
+
+    t._gallery = _Gallery()
+    state = t._client_state["s"]
+    state["face_identities"][7] = {
+        "person_id": "p1", "name": "Asha", "votes": 3, "best_sim": 0.8,
+        "last_sim": 0.8, "margin": 0.2, "last_seen": time.monotonic(),
+        "confirmed": True,
+    }
+    people = [{"track_id": 7, "box": [0, 0, 200, 400], "conf": 0.9}]
+
+    out = t._identify_faces(None, people, state, attempt=False)
+    assert out[7]["name"] == "Asha"
+
+    # A track that has left frame is not reported even so.
+    assert t._identify_faces(None, [], state, attempt=False) == {}
 
 
 def test_a_confirmed_read_stops_consuming_budget():
@@ -84,7 +135,7 @@ def test_a_confirmed_read_stops_consuming_budget():
     done.plate, done.plate_conf = "TS09EA0001", 0.95
     done.plate_votes, done.plate_confirmed, done.plate_grammar_ok = 2, True, True
     pending = vehicle(2, 500, 100, 900, 400)
-    picked = t._ocr_candidates(t._client_state["s"], [done, pending])
+    picked = t._ocr_candidates(t._client_state["s"], [done, pending], budget=_OCR_CALLS_PER_FRAME)
     assert [v.track_id for v in picked] == [2]
     assert done.needs_ocr is False
 
@@ -106,7 +157,7 @@ def test_repeated_failures_stop_starving_other_vehicles():
     stubborn = vehicle(1, 0, 0, 900, 600)
     stubborn.ocr_attempts = _OCR_MAX_ATTEMPTS
     other = vehicle(2, 900, 100, 1200, 400)
-    picked = t._ocr_candidates(t._client_state["s"], [stubborn, other])
+    picked = t._ocr_candidates(t._client_state["s"], [stubborn, other], budget=_OCR_CALLS_PER_FRAME)
     assert [v.track_id for v in picked] == [2]
 
 
@@ -119,7 +170,7 @@ def test_budget_rotates_between_equally_deserving_vehicles():
     a, b, c = (vehicle(i, x1=i * 400, x2=i * 400 + 300) for i in (1, 2, 3))
     picked = set()
     for _ in range(9):
-        for v in t._ocr_candidates(state, [a, b, c]):
+        for v in t._ocr_candidates(state, [a, b, c], budget=_OCR_CALLS_PER_FRAME):
             picked.add(v.track_id)
     assert len(picked) > 1, "budget fixated on one vehicle"
 
@@ -462,9 +513,11 @@ def test_mode_is_registered_and_has_its_own_inference_width():
     assert AnalysisMode.TRAFFIC.value == "traffic-management"
     assert ANALYZER_REGISTRY[AnalysisMode.TRAFFIC] is TrafficManager
     assert TrafficManager.MODE == AnalysisMode.TRAFFIC.value
-    # 1280, not 960: this mode counts PEOPLE too, and a 1.7m person at 25px
-    # is the binding constraint — same reasoning as crowd-management.
-    assert Settings().inference_width_for(TrafficManager.MODE) == 1280
+    # 0 = NATIVE. Was 1280 while people-counting was treated as the binding
+    # constraint; now the mode also feeds vision/profiles.py, which decides
+    # what to run from pixels on target. Capping the detection pass would cap
+    # that decision with it and a better camera would buy nothing.
+    assert Settings().inference_width_for(TrafficManager.MODE) == 0
 
 
 # --------------------------------------------------------------------------- #
@@ -711,10 +764,38 @@ def test_headline_names_the_nearest_thing_to_fix():
     assert "person" in s["headline"]
 
 
-def test_traffic_mode_uses_the_crowd_inference_width():
-    """Counting PEOPLE is now the binding constraint — a 1.7m person at 25px —
-    so this mode needs the same width as crowd-management."""
+def test_traffic_mode_runs_native_like_plate_tracking():
+    """No downscaling in this mode, by requirement.
+
+    Plate crops are taken from the SAME detection boxes the counting pass
+    produces, so shrinking that pass costs plate pixels twice — once on the box
+    and again on the crop cut from it. Native also lets a camera upgrade widen
+    the profile envelope on its own, which is the point of deciding in pixels.
+    """
     from app.config import Settings
     s = Settings()
-    assert s.inference_width_for("traffic-management") == 1280
-    assert s.inference_width_for("traffic-management") == s.inference_width_for("crowd-management")
+    assert s.inference_width_for("traffic-management") == 0
+    assert (s.inference_width_for("traffic-management")
+            == s.inference_width_for("vehicle-plate-tracking"))
+
+
+def test_native_width_survives_the_viability_maths():
+    """Native is 0, and 0 is exactly what used to divide by zero in
+    range_for_px — inside the worker thread, so the mode fell silent while
+    video kept streaming. Pin the whole path, not just the guard."""
+    import numpy as np
+
+    from app.vision import viability
+
+    assert viability.range_for_px(70.0, 0, 0.5, 100) == 0.0
+
+    t = bare_tracker()
+    t.inference_width_value = 0
+    frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    # The width actually fed to YOLO is what viability must be told about.
+    det_w = frame.shape[1]
+    items = viability.assess(70.0, 1920, 25.0, effective_width_px={
+        "vehicle": det_w, "person": det_w, "plate": 1920, "face": 1920,
+    })
+    assert {i.subject for i in items} == {"vehicle", "person", "plate", "face"}
+    assert all(i.px_on_target > 0 for i in items)

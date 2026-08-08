@@ -510,6 +510,29 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 target_distance_ratio=float(data.get("target_distance_ratio", 0.30)),
             )
 
+    @sio.on("set_profile_override")
+    async def on_set_profile_override(sid, data):
+        """Force a traffic-management analytic on/off. Payload:
+        { subject: "plate" | "face", mode: "auto" | "on" | "off" }
+
+        An override rather than a mode switch, so the automatic decision stays
+        visible beside it: an operator forcing plate OCR on at 40m should still
+        be able to read that the plate is 34px short of readable. The analyzer
+        validates subject and mode — this handler deliberately does not
+        second-guess it, so there is one place the rules live.
+        """
+        session = session_manager.get_by_socket(sid)
+        if not session or not vision_pool:
+            return
+        analyzer = vision_pool.get_for_session(session.session_id)
+        from app.vision.modules.traffic_manager import TrafficManager
+        if isinstance(analyzer, TrafficManager):
+            analyzer.set_profile_override(
+                session.session_id,
+                str(data.get("subject", "")),
+                str(data.get("mode", "auto")),
+            )
+
     @sio.on("set_zone_names")
     async def on_set_zone_names(sid, data):
         """Payload: { names: { "0": "North Gate", ... } } keyed by cell index.

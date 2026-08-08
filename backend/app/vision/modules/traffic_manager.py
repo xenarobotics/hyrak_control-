@@ -72,6 +72,7 @@ from app.vision.modules.plate_tracker import _INDIA_PLATE_RE, _validate_and_corr
 from app.vision.pursuit import (
     PursuitLimits, decide_elevation, is_outpaced, lock_state_for,
 )
+from app.vision.profiles import ProfileSelector
 from app.vision.speed import SpeedEstimator
 from app.vision.tracker_config import make_bytetrack_cfg
 from app.vision.vehicle_color import classify_vehicle_color
@@ -105,8 +106,12 @@ _FACE_CONFIRM_NOW = 0.62
 _FACE_ID_MEMORY_S = 4.0
 
 # ── OCR budget ───────────────────────────────────────────────────────────────
-# One fast-alpr call per frame. See the module docstring: the call costs 14.7ms
-# regardless of input size, so the budget is a count of calls, not pixels.
+# The call costs 14.7ms regardless of input size (see the module docstring), so
+# the budget is a COUNT OF CALLS, not pixels.
+#
+# The live number comes from vision/profiles.py, which spends more calls when
+# faces are out of range and none at all when plates are. This constant is only
+# the fallback for the frames before a profile exists.
 _OCR_CALLS_PER_FRAME = 1
 # Don't bother cropping a vehicle this small — after the detector letterboxes
 # the crop to 384 there would be nothing left of the plate to read.
@@ -259,6 +264,14 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         # track_id -> {person_id, name, votes, best_sim, confirmed, last_seen}
         "face_identities": {},
         "last_face_check_t": 0.0,
+        # ── Capability profile ────────────────────────────────────────────
+        # Per-session, so two clients at different altitudes cannot drag each
+        # other's profile around. Holds the hysteresis latch.
+        "profile": ProfileSelector(),
+        # subject -> "auto" | "on" | "off". An operator can force an analytic
+        # against the geometry: "on" to try a marginal read anyway, "off" to
+        # stop paying for one they do not want.
+        "profile_overrides": {},
         # ── Follow ────────────────────────────────────────────────────────
         "locked_track_id": None,
         "locked_plate": "",
@@ -373,6 +386,30 @@ class TrafficManager(BaseAnalyzer):
         state["follow_request_track_id"] = int(track_id)
         logger.info(f"Session {client_id[:8]}: follow requested for vehicle #{track_id}")
 
+    def set_profile_override(self, client_id: str, subject: str, mode: str) -> None:
+        """
+        Force an analytic on or off against the geometry, or hand it back to
+        "auto". Kept as an override rather than a mode switch so the automatic
+        decision stays visible next to it — an operator who forces plate OCR on
+        at 40m should still be able to read that it is 34px short.
+        """
+        state = self._client_state.get(client_id)
+        if state is None:
+            return
+        subject = str(subject).lower()
+        mode = str(mode).lower()
+        if subject not in ("plate", "face") or mode not in ("auto", "on", "off"):
+            logger.warning(
+                f"Session {client_id[:8]}: ignoring profile override "
+                f"{subject!r}={mode!r} — not a recognised subject/mode"
+            )
+            return
+        if mode == "auto":
+            state["profile_overrides"].pop(subject, None)
+        else:
+            state["profile_overrides"][subject] = mode
+        logger.info(f"Session {client_id[:8]}: profile override {subject} -> {mode}")
+
     def set_tracking(self, client_id: str, active: bool) -> None:
         state = self._client_state.get(client_id)
         if state is None:
@@ -391,7 +428,8 @@ class TrafficManager(BaseAnalyzer):
 
     # ── Plate OCR, on a budget ────────────────────────────────────────────
 
-    def _ocr_candidates(self, state, vehicles: List[_Vehicle]) -> List[_Vehicle]:
+    def _ocr_candidates(self, state, vehicles: List[_Vehicle],
+                        budget: int) -> List[_Vehicle]:
         """
         Which vehicles get this frame's OCR calls.
 
@@ -399,7 +437,13 @@ class TrafficManager(BaseAnalyzer):
         survives a track id change), then largest-first among those still
         needing a read. Rotated by a cursor so a permanently unreadable vehicle
         at the front cannot starve the rest.
+
+        `budget` is the number of calls the active profile allows this frame —
+        0 when the optics cannot resolve a plate at this range, in which case
+        the whole cost is reclaimed rather than spent inventing readings.
         """
+        if budget <= 0:
+            return []
         need = [
             v for v in vehicles
             if v.needs_ocr and min(v.box[2] - v.box[0], v.box[3] - v.box[1]) >= 0
@@ -416,7 +460,7 @@ class TrafficManager(BaseAnalyzer):
             cur = state["ocr_cursor"] % len(rest)
             rest = rest[cur:] + rest[:cur]
             state["ocr_cursor"] = (cur + 1) % max(1, len(rest))
-        return (front + rest)[:_OCR_CALLS_PER_FRAME]
+        return (front + rest)[:budget]
 
     def _read_plate(self, frame_bgr, vehicle: _Vehicle, state) -> None:
         """
@@ -525,7 +569,8 @@ class TrafficManager(BaseAnalyzer):
                 f"{gallery.person_count} person(s)"
             )
 
-    def _identify_faces(self, frame_bgr, people: List[dict], state) -> Dict[int, dict]:
+    def _identify_faces(self, frame_bgr, people: List[dict], state,
+                        attempt: bool = True) -> Dict[int, dict]:
         """
         Name enrolled people among the detected persons.
 
@@ -544,8 +589,13 @@ class TrafficManager(BaseAnalyzer):
             return {}
 
         now = time.monotonic()
-        if (now - state.get("last_face_check_t", 0.0)) < _FACE_CHECK_INTERVAL_S:
-            # Not due — return what is already known so labels persist.
+        # `attempt` is the active profile's verdict: at any range where a face
+        # is a handful of pixels the model cannot succeed, so running it is
+        # pure cost. Names already earned are still reported for as long as
+        # their track lives — they were established when the face WAS
+        # resolvable, and dropping them on a climb would erase a good
+        # identification rather than decline to make a new one.
+        if not attempt or (now - state.get("last_face_check_t", 0.0)) < _FACE_CHECK_INTERVAL_S:
             live = {p["track_id"] for p in people}
             return {t: e for t, e in state["face_identities"].items()
                     if e["confirmed"] and t in live}
@@ -755,12 +805,28 @@ class TrafficManager(BaseAnalyzer):
                 if r is not None:
                     v.speed_kmh, v.speed_reliable = round(r.kmh, 1), r.reliable
 
-        # ── Plate OCR, one call per frame ─────────────────────────────────
-        for v in self._ocr_candidates(state, in_frame):
+        # ── What the optics can deliver right now ─────────────────────────
+        # Computed BEFORE any optional analytic runs, because it decides which
+        # of them run at all. See vision/profiles.py: the decision is in pixels
+        # on target, so a sensor or lens change moves the usable ranges by
+        # itself and there is no altitude constant to keep in step.
+        via = self._viability(ctx, pose, W, H, frame_proc.shape[1])
+        profile = state["profile"].select(
+            via["viability"],
+            overrides=state["profile_overrides"],
+            alpr_available=self.alpr is not None,
+            faces_available=self.face_app is not None,
+            budget_ms=get_settings().traffic_optional_budget_ms,
+        )
+
+        # ── Plate OCR, on the profile's budget ────────────────────────────
+        for v in self._ocr_candidates(state, in_frame, profile.ocr_calls):
             self._read_plate(frame_bgr, v, state)
 
         # ── Faces + crowd density ─────────────────────────────────────────
-        identities = self._identify_faces(frame_bgr, people, state)
+        identities = self._identify_faces(
+            frame_bgr, people, state, attempt=profile.faces
+        )
         state["peak_people"] = max(state["peak_people"], len(people))
 
         section_counts: Dict[int, int] = {}
@@ -883,7 +949,11 @@ class TrafficManager(BaseAnalyzer):
             # What this altitude can actually resolve. Without it a refused
             # plate read is indistinguishable from a broken plate reader — see
             # vision/viability.py.
-            **self._viability(ctx, pose, W, H, frame_proc.shape[1]),
+            **via,
+            # What was ATTEMPTED and why — the counterpart to viability, which
+            # says only what is resolvable. Without this a skipped plate read is
+            # indistinguishable from a failed one.
+            "profile": profile.to_dict(),
         }
         if pending_db:
             meta["_pending_db"] = pending_db

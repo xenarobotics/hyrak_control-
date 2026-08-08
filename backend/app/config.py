@@ -50,11 +50,15 @@ class Settings(BaseSettings):
             # boxes the OCR crops are taken from, so it costs plate pixels
             # twice over. Compute is deliberately not the constraint here.
             "vehicle-plate-tracking": 0,
-            # 1280 because this mode now counts PEOPLE too, and a 1.7m
-            # person at 25px is the binding constraint — same reasoning as
-            # crowd-management. Plate OCR is unaffected either way: it runs on
-            # per-vehicle crops and fast-alpr letterboxes to 384 regardless.
-            "traffic-management": 1280,
+            # 0 = NATIVE. This mode has to serve the widest span of any: a
+            # 1.7m person at 25px sets the ceiling for counting, while plate
+            # OCR crops come out of the SAME detection boxes, so a downscaled
+            # pass costs plate pixels twice over — once on the box and again on
+            # the crop taken from it. It also feeds vision/profiles.py, whose
+            # whole premise is that pixels on target decide what runs; capping
+            # the pass at 1280 would cap that decision too and a 4K camera
+            # would buy nothing. Compute is deliberately not the constraint.
+            "traffic-management": 0,
             # Subject is close and fills much of the frame. Face detection in
             # person-tracking has its own separate width (_FACE_DET_WIDTH).
             "human-tracking": 640,
