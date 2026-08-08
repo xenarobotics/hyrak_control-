@@ -3,10 +3,17 @@
 // platform's installer and copies it there (see
 // desktop/build/deploy-local.js and desktop/package.json's "generic"
 // publish provider), and electron-updater's manifest files
-// (latest.yml / latest-mac.yml / latest-linux.yml) land alongside them —
-// this reads those same manifests to figure out the current version, then
-// builds the direct file URL from the known artifactName pattern (see
-// desktop/package.json's build.win/mac/linux.artifactName).
+// (latest.yml / latest-mac.yml / latest-linux.yml) land alongside them.
+//
+// The filename is taken FROM the manifest, never reconstructed from a
+// pattern. This file used to rebuild it as `HYRAK-${version}.AppImage` to
+// match desktop/package.json's artifactName — and then artifactName gained
+// an `-${arch}` segment, the real file became HYRAK-0.1.57-x86_64.AppImage,
+// and every Linux download 404'd into "No build published yet" with nothing
+// in the backend log to show for it. Any future artifactName change would
+// break it again the same silent way. electron-updater already needs the
+// exact name in the manifest, so the manifest is the authoritative source
+// and reading it removes the whole class of bug.
 
 import { getServerUrl } from './server-url'
 
@@ -58,23 +65,67 @@ const MANIFEST: Record<Platform, string> = {
     'linux-arm64': 'latest-linux-arm64.yml',
 }
 
-// Matches desktop/package.json's build.win/mac/linux.artifactName exactly.
-function fileNameFor(platform: Platform, version: string): string {
+const EXT_FOR: Record<Platform, string> = {
+    windows: '.exe',
+    'mac-arm64': '.dmg',
+    'mac-x64': '.dmg',
+    linux: '.AppImage',
+    'linux-arm64': '.AppImage',
+}
+
+// electron-builder writes x86-64 as `x86_64` on Linux and `x64` on macOS,
+// and ARM as `arm64` (occasionally `aarch64`) on both.
+const IS_ARM = /(?:arm64|aarch64)/i
+
+function matchesArch(fileName: string, platform: Platform): boolean {
+    const arm = IS_ARM.test(fileName)
     switch (platform) {
-        case 'windows':   return `HYRAK-Setup-${version}.exe`
-        case 'mac-arm64': return `HYRAK-${version}-arm64.dmg`
-        case 'mac-x64':   return `HYRAK-${version}-x64.dmg`
-        case 'linux':     return `HYRAK-${version}.AppImage`
-        // desktop-arm64/package.json's build.linux.artifactName —
-        // `HYRAK-${version}-${arch}.${ext}`. The x64 build deliberately keeps
-        // its arch-less name so every already-installed client's update URL
-        // stays valid.
-        case 'linux-arm64': return `HYRAK-${version}-arm64.AppImage`
+        case 'mac-arm64':
+        case 'linux-arm64':
+            return arm
+        // An arch-less name (older builds, and Windows, which ships one
+        // installer) counts as x64 — only an explicit ARM marker excludes it.
+        case 'mac-x64':
+        case 'linux':
+        case 'windows':
+            return !arm
     }
+}
+
+/** Pull `version` and the artifact filenames out of an electron-updater
+ *  manifest. Deliberately not a full YAML parse: these manifests are machine-
+ *  written with a fixed shape, and a parser dependency for two fields would
+ *  be the larger risk. */
+function parseManifest(yaml: string): { version: string; files: string[] } | null {
+    const version = yaml.match(/^version:\s*['"]?(\S+?)['"]?\s*$/m)?.[1]
+    if (!version) return null
+
+    const files: string[] = []
+    // `  - url: NAME` under `files:`, plus the top-level `path: NAME` that
+    // electron-updater itself falls back on.
+    for (const m of yaml.matchAll(/^\s*(?:-\s*url|path):\s*['"]?(.+?)['"]?\s*$/gm)) {
+        const name = m[1]
+        // Blockmaps sit beside the installer and are not downloadable builds.
+        if (name && !name.endsWith('.blockmap') && !files.includes(name)) files.push(name)
+    }
+    return files.length ? { version, files } : null
+}
+
+function pickFile(files: string[], platform: Platform): string | null {
+    const ext = EXT_FOR[platform]
+    const candidates = files.filter(f => f.endsWith(ext))
+    if (!candidates.length) return null
+    // Arch is a filter when it discriminates, and ignored when the manifest
+    // only carries one build for this extension — a single-arch manifest
+    // should still resolve rather than fail closed.
+    return candidates.find(f => matchesArch(f, platform)) ?? (candidates.length === 1 ? candidates[0] : null)
 }
 
 export interface ReleaseAsset {
     url: string
+    /** The artifact's on-disk name, undecorated — the `chmod +x` hint needs
+     *  what the file is actually called, not the percent-encoded URL. */
+    fileName: string
     version: string
     sizeBytes: number
 }
@@ -84,20 +135,18 @@ export async function resolveLatestAsset(platform: Platform): Promise<ReleaseAss
         const base = `${getServerUrl()}/releases`
         const manifestRes = await fetch(`${base}/${MANIFEST[platform]}`, { cache: 'no-store' })
         if (!manifestRes.ok) return null
-        const yaml = await manifestRes.text()
-        // Only the one field we need — the manifest format is simple
-        // enough that a full YAML parser would be overkill for this.
-        const versionMatch = yaml.match(/^version:\s*(\S+)/m)
-        if (!versionMatch) return null
-        const version = versionMatch[1]
+        const manifest = parseManifest(await manifestRes.text())
+        if (!manifest) return null
+        const { version } = manifest
 
-        const fileName = fileNameFor(platform, version)
-        const url = `${base}/${fileName}`
+        const fileName = pickFile(manifest.files, platform)
+        if (!fileName) return null
+        const url = `${base}/${encodeURIComponent(fileName)}`
         const headRes = await fetch(url, { method: 'HEAD' })
         if (!headRes.ok) return null
         const sizeBytes = Number(headRes.headers.get('content-length') ?? 0)
 
-        return { url, version, sizeBytes }
+        return { url, fileName, version, sizeBytes }
     } catch {
         return null
     }

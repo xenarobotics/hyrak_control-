@@ -106,12 +106,12 @@ function DesktopDownloadCard() {
                 Universal AppImage behavior, not specific to this build —
                 worth saying up front instead of letting everyone hit
                 "Permission denied" once and wonder if the download's bad. */}
-            {asset && platform === 'linux' && (
+            {asset && (platform === 'linux' || platform === 'linux-arm64') && (
                 <div className="w-full flex flex-col gap-1.5">
                     <p className="text-[10px] font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>
                         First run — AppImages need the executable bit set manually:
                     </p>
-                    <CopyCommand text={`chmod +x ${asset.url.split('/').pop()} && ./${asset.url.split('/').pop()}`} />
+                    <CopyCommand text={`chmod +x ${asset.fileName} && ./${asset.fileName}`} />
                 </div>
             )}
         </div>
