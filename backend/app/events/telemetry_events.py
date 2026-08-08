@@ -32,6 +32,21 @@ def _pursuit_analyzers():
     return (HumanTracker, PersonTracker, PlateTracker, CrowdManager, TrafficManager)
 
 
+def _crowd_analyzers():
+    """
+    Every analyzer that draws the 3x3 density grid, and so answers the zone
+    naming and density threshold controls.
+
+    Traffic management borrows crowd-management's grid wholesale — same
+    layout, same colouring, same persisted thresholds — but was routed to
+    neither control, so naming a zone or setting a custom density band did
+    nothing there while the panel offered both.
+    """
+    from app.vision.modules.crowd_manager import CrowdManager
+    from app.vision.modules.traffic_manager import TrafficManager
+    return (CrowdManager, TrafficManager)
+
+
 async def execute_drone_action(tel, action: str, data: dict) -> dict:
     """Execute a named action on a TelemetryManager. Returns the result dict."""
     if action == "arm":
@@ -557,8 +572,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         if not session or not vision_pool:
             return
         analyzer = vision_pool.get_for_session(session.session_id)
-        from app.vision.modules.crowd_manager import CrowdManager
-        if isinstance(analyzer, CrowdManager):
+        if isinstance(analyzer, _crowd_analyzers()):
             analyzer.set_zone_names(session.session_id, data.get("names") or {})
 
     @sio.on("set_crowd_thresholds")
@@ -570,8 +584,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         if not session or not vision_pool:
             return
         analyzer = vision_pool.get_for_session(session.session_id)
-        from app.vision.modules.crowd_manager import CrowdManager
-        if isinstance(analyzer, CrowdManager):
+        if isinstance(analyzer, _crowd_analyzers()):
             analyzer.set_thresholds(
                 session.session_id,
                 light_max=int(data.get("light_max", 8)),

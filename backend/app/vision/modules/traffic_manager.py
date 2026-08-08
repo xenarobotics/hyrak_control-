@@ -474,7 +474,43 @@ class TrafficManager(BaseAnalyzer):
 
     async def unregister_client(self, client_id: str):
         await super().unregister_client(client_id)
-        self._client_state.pop(client_id, None)
+        state = self._client_state.pop(client_id, None)
+        if state is None:
+            return
+        # A vehicle still in frame when the operator stops never gets the
+        # chance to age out of the registry, so without this flush its row —
+        # plate included — is silently dropped. From the outside that is
+        # exactly "ran a session, saw plates, nothing in the history
+        # afterward". vehicle-plate-tracking already did this; this module did
+        # not, so the two modes lost different amounts of data from the same
+        # flight.
+        rows = [r for v in state["vehicles"].values()
+                if (r := self._plate_event_row(v)) is not None]
+        if not rows:
+            return
+        # Location has to be attached here too. The live path picks it up in
+        # stream_track.recv(), which is not involved once the session is
+        # tearing down — so these rows would otherwise be the only ones
+        # missing lat/lng, which reads as the GPS dropping out at the end of
+        # every flight rather than as a gap in the code.
+        try:
+            from app.sessions.manager import session_manager
+            tel = session_manager.get_telemetry(client_id)
+            pos = tel.snapshot.position if tel and tel.is_connected else None
+            if pos is not None:
+                for ev in rows:
+                    ev.setdefault("lat", pos.latitude_deg)
+                    ev.setdefault("lng", pos.longitude_deg)
+                    ev.setdefault("alt_m", pos.relative_altitude_m)
+        except Exception as e:
+            logger.debug(f"No position for session-end traffic flush: {e}")
+
+        from app.vision.persistence import persist_events
+        await persist_events(client_id, rows)
+        logger.info(
+            f"Session {client_id[:8]}: flushed {len(rows)} vehicle record(s) "
+            f"still in frame at shutdown"
+        )
 
     # ── Operator control ──────────────────────────────────────────────────
 
@@ -1176,8 +1212,17 @@ class TrafficManager(BaseAnalyzer):
         locked_id = state.get("locked_track_id")
         seen_t = state.get("last_seen_t", 0.0)
         lost_s = (time.monotonic() - seen_t) if seen_t else 0.0
+        # Visibility has to consider BOTH lists now that a person can be the
+        # locked subject. Checking only vehicles reported a person standing in
+        # plain sight as lost, so the panel showed COASTING then SEARCHING
+        # while the drone was in fact tracking them perfectly.
+        locked_visible = (
+            locked_id is not None
+            and (any(v.track_id == locked_id for v in in_frame)
+                 or any(p["track_id"] == locked_id for p in people))
+        )
         lock, lock_msg = lock_state_for(
-            visible=any(v.track_id == locked_id for v in in_frame),
+            visible=locked_visible,
             seconds_lost=lost_s,
             tracking=state.get("tracking", False) or locked_id is not None,
         )

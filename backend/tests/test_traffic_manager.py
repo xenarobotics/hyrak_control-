@@ -28,6 +28,13 @@ def bare_tracker() -> TrafficManager:
     t = TrafficManager.__new__(TrafficManager)
     t.alpr = None
     t._client_state = {"s": _make_state("test-traffic")}
+    # BaseAnalyzer.unregister_client (reached via super()) reads these, and
+    # __new__ skips __init__. Only the session-end flush tests need them, but
+    # setting them here keeps bare_tracker() a complete-enough stand-in —
+    # same shape as test_plate_tracker's fixture.
+    t._clients = {}
+    t._inflight = set()
+    t._contexts = {}
     return t
 
 
@@ -1144,3 +1151,109 @@ def test_a_foreign_plate_re_identifies_across_an_occlusion():
     t._register_plate(state, again)
 
     assert again.vehicle_id == first.vehicle_id
+
+
+def test_a_locked_person_in_frame_is_not_reported_as_lost():
+    """Visibility used to be computed against the vehicle list alone, so a
+    person standing in plain sight read as invisible and the lock decayed
+    COASTING -> SEARCHING while the drone was tracking them perfectly."""
+    import inspect
+
+    from app.vision.modules import traffic_manager as tm
+
+    src = inspect.getsource(tm.TrafficManager._analyze_frame_blocking)
+    marker = src[src.index("lock_state_for("):]
+    head = src[:src.index("lock_state_for(")]
+    # The visibility expression must consult people, wherever it is built.
+    assert 'p["track_id"] == locked_id' in head or 'p["track_id"] == locked_id' in marker, \
+        "locked-subject visibility ignores the people list"
+
+
+def test_lock_state_helper_agrees_that_visible_means_locked():
+    """Guards the semantics the fix relies on: visible=True must not decay."""
+    from app.vision.pursuit import lock_state_for
+
+    state, _ = lock_state_for(visible=True, seconds_lost=0.0, tracking=True)
+    assert state.value == "locked"
+
+
+# --------------------------------------------------------------------------- #
+# Session-end flush                                                             #
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.asyncio
+async def test_vehicles_still_in_frame_are_written_when_the_session_stops():
+    """A vehicle on screen when the operator hits stop never ages out of the
+    registry, so without a flush its row is silently dropped — which from the
+    outside is "ran a session, saw plates, nothing in the history afterward".
+    vehicle-plate-tracking already flushed; this module did not, so the two
+    lost different amounts of data from the same flight."""
+    written: list = []
+
+    t = bare_tracker()
+    state = t._client_state["s"]
+    v = vehicle(1)
+    v.plate, v.plate_votes, v.plate_px_w = "TS09EA0001", 2, 84
+    state["vehicles"][1] = v
+
+    import app.vision.persistence as persistence
+
+    async def _capture(session_id, events):
+        written.extend(events)
+
+    original = persistence.persist_events
+    persistence.persist_events = _capture
+    try:
+        await t.unregister_client("s")
+    finally:
+        persistence.persist_events = original
+
+    assert len(written) == 1
+    assert written[0]["plate_text"] == "TS09EA0001"
+    assert written[0]["plate_px_w"] == 84
+
+
+@pytest.mark.asyncio
+async def test_the_flush_does_not_double_write_an_already_logged_vehicle():
+    """`logged` is set inside _plate_event_row, the only path that builds one,
+    so the retire loop and the flush cannot both emit the same vehicle."""
+    written: list = []
+
+    t = bare_tracker()
+    state = t._client_state["s"]
+    v = vehicle(1)
+    v.plate = "TS09EA0001"
+    state["vehicles"][1] = v
+    assert t._plate_event_row(v) is not None      # retired during the session
+
+    import app.vision.persistence as persistence
+
+    async def _capture(session_id, events):
+        written.extend(events)
+
+    original = persistence.persist_events
+    persistence.persist_events = _capture
+    try:
+        await t.unregister_client("s")
+    finally:
+        persistence.persist_events = original
+
+    assert written == []
+
+
+def test_traffic_is_routed_by_the_shared_crowd_list():
+    """This module borrows crowd-management's grid wholesale, but was routed
+    to neither the zone-naming nor the threshold handler — so naming a zone or
+    setting a custom density band did nothing here while the panel offered
+    both."""
+    from app.events.telemetry_events import _crowd_analyzers
+
+    assert TrafficManager in _crowd_analyzers()
+
+
+def test_every_crowd_analyzer_implements_the_grid_controls():
+    from app.events.telemetry_events import _crowd_analyzers
+
+    for cls in _crowd_analyzers():
+        for name in ("set_zone_names", "set_thresholds"):
+            assert callable(getattr(cls, name, None)), f"{cls.__name__} lacks {name}"
