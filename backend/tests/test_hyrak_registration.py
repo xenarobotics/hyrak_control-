@@ -30,6 +30,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 _REG = _ROOT / "frontend" / "src" / "lib" / "hyrakRegister.ts"
 _RF = _ROOT / "frontend" / "src" / "lib" / "nativeRfRelay.ts"
 _RECV = _ROOT / "frontend" / "src" / "lib" / "hyrakReceiver.ts"
+_AGENT = _ROOT / "air_unit_relay" / "telemetry_relay.py"
 
 
 def _read(p: Path) -> str:
@@ -147,3 +148,50 @@ def test_registration_never_breaks_the_link_it_is_helping():
     assert "void startHyrakRegistration" in rf, "fire-and-forget, never awaited into the failure path"
     reg = _read(_REG)
     assert "if (!isDesktopApp()) return" in reg, "a browser tab has no socket; that is not an error"
+
+
+# --------------------------------------------------------------------------- #
+# The browser path must not be left depending on inference                      #
+# --------------------------------------------------------------------------- #
+
+def test_the_relay_agent_registers_so_browser_sessions_do_not_need_a_lease():
+    """THE ONE CASE THAT ACTUALLY BIT. Every decoder VIDEO path is desktop-only
+    (hyrakReceiver refuses in a browser, and the server-sourced feed requires
+    the desktop app to push), so no browser video depends on the decoder's
+    lease-following. Telemetry is different: telemetry_relay.py binds 14550 and
+    IS the browser fallback, consuming the decoder's raw UDP push — and a
+    browser tab cannot send a registration, which is the whole reason the agent
+    exists.
+
+    So the agent registers on its own behalf. It is not a browser: it already
+    owns a UDP socket and already knows the decoder's address."""
+    src = _read(_AGENT)
+    assert b'HYRAK REGISTER'.decode() in src
+    assert "args.register_port" in src
+
+
+def test_the_agent_does_not_claim_feeds_it_cannot_receive():
+    """A loopback uplink host means the decoder is this machine, or the host
+    was never configured. Firing registrations at our own loopback would be
+    noise, and worse, a default that looks like it did something."""
+    src = _read(_AGENT)
+    # Matched as the WHOLE guard, not the loopback tuple alone. That tuple
+    # also appears in the startup log warning further down the file, so the
+    # loose version of this assertion passed with the guard deleted — a
+    # vacuous test that would have shipped the bug it was written to prevent.
+    assert 'if args.no_register or args.uplink_host in ("127.0.0.1", "localhost"):' in src
+
+
+def test_the_agents_registration_can_be_turned_off():
+    """Registering redirects BOTH feeds to this machine and there is exactly
+    one direct-UDP client. A rig where something else should own them needs a
+    way to say so."""
+    assert "--no-register" in _read(_AGENT)
+
+
+def test_a_failed_registration_never_takes_the_relay_down():
+    """It is UDP to an unauthenticated port on a box that may be absent. The
+    telemetry it is helping must not depend on it."""
+    src = _read(_AGENT)
+    assert "except OSError" in src
+    assert "feeds unaffected" in src

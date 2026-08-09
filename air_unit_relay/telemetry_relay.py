@@ -56,6 +56,11 @@ async def main():
     ap.add_argument("--downlink-host", default="127.0.0.1",
                     help="Address to receive wfb_rx's downlink on. Use 0.0.0.0 when "
                          "wfb_rx is on another machine on the LAN.")
+    ap.add_argument("--no-register", action="store_true",
+                    help="Do not claim the decoder's feeds for this machine. Only "
+                         "useful if something else on this network should own them.")
+    ap.add_argument("--register-port", type=int, default=9000,
+                    help="The decoder's registration listener.")
     args = ap.parse_args()
 
     current_client = {"ws": None}
@@ -76,6 +81,39 @@ async def main():
             ws = current_client["ws"]
             if ws is not None:
                 asyncio.ensure_future(_safe_send(ws, data))
+
+    async def _register() -> None:
+        """Claim the decoder's MAVLink feed for THIS machine, and keep claiming.
+
+        WHY THE AGENT AND NOT THE BROWSER. The decoder pushes telemetry to one
+        client and must be told which. The desktop app tells it directly, but
+        a browser tab cannot open a UDP socket — which is the entire reason
+        this agent exists — so a browser session had no way to say so and fell
+        back to the decoder inferring the destination from its DHCP lease
+        file. That inference cannot see a statically addressed PC at all, and
+        after another machine has held the address it keeps aiming at the
+        departed one for hours.
+
+        This process is not a browser. It already owns a UDP socket and
+        already knows the decoder's address, so it can simply say so, and the
+        browser path stops depending on inference entirely.
+
+        Bare form, no address: the decoder reads it from the UDP source, so a
+        wrong --uplink-host would misdirect commands but never the feeds.
+        """
+        if args.no_register or args.uplink_host in ("127.0.0.1", "localhost"):
+            return                       # nothing to claim on our own loopback
+        target = (args.uplink_host, args.register_port)
+        while True:
+            try:
+                uplink_sock.sendto(b"HYRAK REGISTER", target)
+            except OSError as e:
+                logger.debug(f"registration send failed (feeds unaffected): {e}")
+            # Not a keepalive — the decoder never expires a client. This is
+            # self-healing: if this PC's address changes, the next tick
+            # re-points the feed with no user action. Measured free on the
+            # decoder: no process restart, no stream churn.
+            await asyncio.sleep(10)
 
     async def _report() -> None:
         """Both directions, side by side, every 10 s.
@@ -123,6 +161,7 @@ async def main():
                     "(a Luckfox dongle, another PC), pass --uplink-host — "
                     "otherwise telemetry will work and commands will not.")
     asyncio.ensure_future(_report())
+    asyncio.ensure_future(_register())
 
     async with websockets.serve(_handle_client, "127.0.0.1", args.port):
         logger.info(f"WebSocket relay ready at ws://127.0.0.1:{args.port} — point the site's Telemetry source here")
