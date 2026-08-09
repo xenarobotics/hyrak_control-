@@ -295,9 +295,21 @@ class Settings(BaseSettings):
     # request there is headroom, and if it stops climbing that is the ceiling.
     # A number that has been measured on THIS radio is worth more than one
     # inferred from another ground station's behaviour.
+    #
+    # ATTITUDE ON THE RADIO IS 6 Hz, NOT 4, as of 2026-08-09 — one step, on
+    # purpose, with the arithmetic done first rather than by analogy to QGC.
+    # A MAVLink v2 ATTITUDE frame is 40 bytes, so 4 -> 6 Hz costs 80 B/s and
+    # takes the whole downlink profile from ~440 to ~520 B/s. Against a
+    # conservative 3DR ceiling (AIR_SPEED 64k, ECC on, half-duplex, framing
+    # overhead) of ~1600 B/s that is 28% -> 32% of budget.
+    #
+    # The same arithmetic explains the earlier failure far better than the
+    # guess that replaced it: 10/8 Hz came to ~920 B/s, 57% of that ceiling —
+    # and 115%, i.e. over it, if AIR_SPEED is 32k rather than 64k. Nothing
+    # here can read AIR_SPEED, which is why this moves one step at a time.
     telemetry_rate_position_radio: float = Field(default=2.0)
     telemetry_rate_position_udp: float = Field(default=4.0)
-    telemetry_rate_attitude_radio: float = Field(default=4.0)
+    telemetry_rate_attitude_radio: float = Field(default=6.0)
     telemetry_rate_attitude_udp: float = Field(default=10.0)
     mavsdk_server_host: str = Field(default="localhost")
     mavsdk_server_port: int = Field(default=50051)

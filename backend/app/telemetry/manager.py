@@ -345,16 +345,70 @@ class TelemetryManager:
                 # is a 2-byte payload — so there is no reason to starve it.
                 ("in_air",       self._drone.telemetry.set_rate_in_air,         1.0 if is_serial else 2.0),
             ]
+            budget = self._downlink_bytes_s(rates)
             logger.info(
                 f"Telemetry profile: {'RADIO' if is_serial else 'UDP/local'} "
-                f"— position {rates[0][2]:g} Hz, attitude {rates[1][2]:g} Hz"
+                f"— position {rates[0][2]:g} Hz, attitude {rates[1][2]:g} Hz "
+                f"— ~{budget:.0f} B/s downlink"
+                + (f" ({budget / self._RADIO_CEILING_BYTES_S * 100:.0f}% of a "
+                   f"conservative 3DR ceiling)" if is_serial else "")
             )
+            if is_serial and budget > self._RADIO_CEILING_BYTES_S * self._RADIO_BUDGET_WARN:
+                logger.warning(
+                    f"Requested streams total ~{budget:.0f} B/s, past "
+                    f"{self._RADIO_BUDGET_WARN * 100:.0f}% of what a 3DR link "
+                    f"can be relied on to carry. A SiK radio is half-duplex, so "
+                    f"the downlink takes its slots from the SAME budget the "
+                    f"commands go out on — this is how a link stays 'connected' "
+                    f"while arm and takeoff stop arriving. Check measured_rates: "
+                    f"if they are below what was asked for, the radio is already "
+                    f"dropping this."
+                )
         for name, setter, hz in rates:
             try:
                 await asyncio.wait_for(setter(hz), timeout=2.0)
             except (asyncio.TimeoutError, Exception):
                 pass  # best-effort; not all PX4 builds support every rate setter
         logger.info("Telemetry rates configured")
+
+    #: MAVLink v2 wire size per stream, in bytes: 10 B header + payload + 2 B
+    #: CRC, payload lengths from common.xml. Upper bounds — v2 truncates
+    #: trailing zero bytes, so a real frame is usually a little smaller.
+    _FRAME_BYTES = {
+        "position": 40,    # GLOBAL_POSITION_INT, payload 28
+        "attitude": 40,    # ATTITUDE, payload 28
+        "battery": 48,     # BATTERY_STATUS, payload 36
+        "gps_info": 42,    # GPS_RAW_INT, payload 30
+        "home": 64,        # HOME_POSITION, payload 52
+        "in_air": 14,      # EXTENDED_SYS_STATE, payload 2
+    }
+    #: What PX4 sends on its own whatever we ask for, and therefore has to be
+    #: counted: HEARTBEAT (21 B, 1 Hz, fixed — PX4 calls it a constant-rate
+    #: stream whose rate is never adjusted) and SYS_STATUS (43 B, 1 Hz).
+    _UNREQUESTED_BYTES_S = 21 + 43
+
+    #: Conservative usable DOWNLINK on a stock 3DR: 64 kbit/s air rate, halved
+    #: by ECC, halved again because SiK is half-duplex TDM, less ~20% framing
+    #: and preamble. Deliberately pessimistic — being wrong in this direction
+    #: costs a warning, being wrong the other way costs a flight.
+    _RADIO_CEILING_BYTES_S = 1600.0
+    #: SiK degrades well before nominal saturation, because the uplink shares
+    #: the same slots and loses them first. Half is where to start worrying.
+    _RADIO_BUDGET_WARN = 0.5
+
+    @classmethod
+    def _downlink_bytes_s(cls, rates) -> float:
+        """Bytes per second the requested streams will ask the link to carry.
+
+        Turns "is 6 Hz safe?" from a matter of opinion into arithmetic. The
+        number that matters is not the rate of any one stream but the sum, and
+        the sum is what nobody was computing — including me, when I raised
+        these to 10/8 Hz on the reasoning that QGroundControl sustains more.
+        """
+        total = float(cls._UNREQUESTED_BYTES_S)
+        for name, _setter, hz in rates:
+            total += cls._FRAME_BYTES.get(name, 40) * hz
+        return total
 
     async def start(self):
         """Starts all telemetry subscription tasks."""
