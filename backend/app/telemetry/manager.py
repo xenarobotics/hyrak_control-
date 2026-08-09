@@ -308,9 +308,9 @@ class TelemetryManager:
                 # updates twice a second is not twice as useful as one that
                 # updates every two seconds, and on a shared radio the
                 # difference is bandwidth taken from the tracking loop.
-                ("battery",      self._drone.telemetry.set_rate_battery,        0.5 if is_serial else 1.0),
-                ("gps_info",     self._drone.telemetry.set_rate_gps_info,       0.5 if is_serial else 1.0),
-                ("home",         self._drone.telemetry.set_rate_home,           0.2 if is_serial else 0.5),
+                ("battery",      self._drone.telemetry.set_rate_battery,        1.0 if is_serial else 2.0),
+                ("gps_info",     self._drone.telemetry.set_rate_gps_info,       1.0 if is_serial else 2.0),
+                ("home",         self._drone.telemetry.set_rate_home,           0.5 if is_serial else 1.0),
                 # in_air is the one low-rate stream that IS load-bearing: the
                 # UI picks TAKEOFF vs SET ALT from it. Cheap — EXTENDED_SYS_STATE
                 # is a 2-byte payload — so there is no reason to starve it.
@@ -986,15 +986,21 @@ class TelemetryManager:
         confirmed the value it will actually use, or the attempt has failed
         loudly enough for the operator to see.
         """
+        # BOUNDED, because this sits between an operator pressing TAKEOFF and
+        # the aircraft moving. Three attempts at two 5 s round trips is 30 s of
+        # an armed drone sitting still with props spinning while the ground
+        # station says nothing — indistinguishable from a command that was
+        # never sent, and far more alarming than a takeoff that reports a
+        # parameter it could not confirm.
         target = float(altitude_m)
         last: Optional[float] = None
-        for attempt in range(3):
+        for attempt in range(2):
             try:
                 await asyncio.wait_for(
-                    self._drone.action.set_takeoff_altitude(target), timeout=5.0
+                    self._drone.action.set_takeoff_altitude(target), timeout=2.5
                 )
                 last = float(await asyncio.wait_for(
-                    self._drone.action.get_takeoff_altitude(), timeout=5.0
+                    self._drone.action.get_takeoff_altitude(), timeout=2.5
                 ))
             except (asyncio.TimeoutError, ActionError, Exception) as e:
                 logger.warning(
@@ -1106,7 +1112,13 @@ class TelemetryManager:
         # without this a malformed or rejected message would leave an armed
         # aircraft sitting on the ground with props spinning and the UI
         # reporting success.
-        for _ in range(20):                       # up to 10 s
+        # 4 s, not 10. This window is pure DELAY on the fallback path: every
+        # second spent here is a second the aircraft has not been told to take
+        # off by any means. A multirotor that accepted the command is off the
+        # ground well inside 4 s at the default 1.5 m/s climb; one that has not
+        # moved by then did not accept it, and waiting longer only postpones
+        # the retry. Ten seconds of nothing reads as a command that never went.
+        for _ in range(8):                        # up to 4 s
             await asyncio.sleep(0.5)
             if (self._snapshot.position.relative_altitude_m > 0.5
                     or self._snapshot.flight_mode.is_in_air):

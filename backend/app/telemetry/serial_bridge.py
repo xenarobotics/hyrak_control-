@@ -36,6 +36,10 @@ class SerialBridge(asyncio.DatagramProtocol):
         self._transport: Optional[asyncio.DatagramTransport] = None
         # mavsdk_server listens here — loopback only, never exposed.
         self.mavsdk_port = _free_udp_port()
+        # Counted so a failed connect can say whether the radio delivered
+        # anything — see traffic().
+        self.bytes_in = 0
+        self.packets_in = 0
 
     @classmethod
     async def create(cls, sio, socket_id: str) -> "SerialBridge":
@@ -54,8 +58,29 @@ class SerialBridge(asyncio.DatagramProtocol):
 
     def uplink(self, data: bytes) -> None:
         """Radio → drone side: browser serial bytes into mavsdk's UDP port."""
+        self.bytes_in += len(data)
+        self.packets_in += 1
         if self._transport and not self._transport.is_closing():
             self._transport.sendto(data, ("127.0.0.1", self.mavsdk_port))
+
+    def traffic(self) -> str:
+        """One line on whether the radio is delivering anything at all.
+
+        A failed connect otherwise looks identical whether the radio is unplugged,
+        the baud rate is wrong, the air side is off, or the aircraft is simply out
+        of range: mavsdk_server says "Waiting to discover system" and then the
+        connect times out with nothing else recorded anywhere. This is the one
+        fact that separates "no bytes reached us" — a radio, cable, permission or
+        baud problem on the operator's machine — from "bytes arrived but carried
+        no heartbeat", which is a link or airframe problem.
+        """
+        if self.packets_in == 0:
+            return ("no bytes at all reached the bridge from the browser — check "
+                    "the radio is plugged in, the serial port permission was "
+                    "granted, and the baud rate matches")
+        return (f"{self.packets_in} chunk(s), {self.bytes_in} bytes arrived from "
+                f"the radio but no MAVLink heartbeat was decoded — check the baud "
+                f"rate and that the air side is powered and in range")
 
     def datagram_received(self, data: bytes, addr) -> None:
         """mavsdk → radio side: relay to the browser to write out the port."""

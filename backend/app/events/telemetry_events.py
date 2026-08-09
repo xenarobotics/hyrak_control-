@@ -195,9 +195,21 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         connected = await manager.connect(address)
 
         if not connected:
+            # SAY WHY, not just that. "Could not connect to udpin://127.0.0.1:59810"
+            # names a loopback port the operator has never heard of and cannot
+            # act on. When the link is a browser radio the bridge knows the one
+            # thing that matters — whether any bytes arrived from it at all.
+            detail = ""
+            own = serial_bridge.get_bridge(session.session_id)
+            if own is not None and own.address == address:
+                detail = f" — {own.traffic()}"
+                logger.warning(
+                    f"Session {session.session_id[:8]} radio connect failed{detail}"
+                )
             await sio.emit(
                 "telemetry_status",
-                {"status": "error", "message": f"Could not connect to {address}"},
+                {"status": "error",
+                 "message": f"Could not connect to the drone{detail or f' at {address}'}"},
                 to=sid,
             )
             return

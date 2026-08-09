@@ -87,10 +87,10 @@ async def test_a_write_that_lands_first_time_is_accepted():
 async def test_a_write_that_does_not_land_is_retried_until_it_does():
     """The whole point. On the first try the vehicle still reports its old
     2.5 m — exactly the value that turns a commanded 2 m into a 2.5 m hover."""
-    a = _StubAction(lands_on_attempt=3)
+    a = _StubAction(lands_on_attempt=2)
     assert await manager(a)._set_takeoff_altitude_verified(2.0) is True
     assert a.value == 2.0
-    assert a.attempts == 3
+    assert a.attempts == 2
 
 
 @pytest.mark.asyncio
@@ -455,10 +455,16 @@ async def test_the_streams_that_fly_the_aircraft_outrank_the_dashboard():
     home position change over minutes and cost the same per message."""
     t, rec = rate_manager("udpin://127.0.0.1:1", "radio")
     await t._set_rates()
-    assert rec.rates["position"] >= 4.0
-    assert rec.rates["attitude_euler"] >= 8.0
-    assert rec.rates["battery"] <= 1.0
-    assert rec.rates["home"] <= 0.5
+    # RELATIVE, not absolute. The absolute figures are a tuning decision that
+    # depends on the radio in front of them — pinning them here turned a
+    # deliberate walk-back to safer rates into a test failure, which is the
+    # test asserting a preference rather than an invariant. What must always
+    # hold is the ORDERING: the two streams the tracking geometry is computed
+    # from outrank the ones that only feed a dashboard.
+    assert rec.rates["position"] > rec.rates["home"]
+    assert rec.rates["attitude_euler"] >= rec.rates["position"]
+    assert rec.rates["attitude_euler"] > rec.rates["battery"]
+    assert rec.rates["home"] <= rec.rates["battery"]
 
 
 @pytest.mark.asyncio
@@ -602,3 +608,51 @@ async def test_a_changed_uplink_host_rebinds_rather_than_reusing():
     a = RFBridge(14550, 14551, "127.0.0.1")
     b = RFBridge(14550, 14551, "192.168.50.12")
     assert (a.downlink_port, a.uplink_addr) != (b.downlink_port, b.uplink_addr)
+
+
+# --------------------------------------------------------------------------- #
+# A failed radio connect has to say WHY                                         #
+# --------------------------------------------------------------------------- #
+#
+# "Connection timed out at udpin://127.0.0.1:59810" names a loopback port the
+# operator has never heard of. Whether the radio was unplugged, the permission
+# was not granted, the baud is wrong, or the aircraft is out of range, the log
+# said the same thing — and mavsdk_server only ever adds "Waiting to discover
+# system". The bridge is the one place that knows whether bytes arrived.
+
+def _bridge():
+    from app.telemetry.serial_bridge import SerialBridge
+    b = SerialBridge.__new__(SerialBridge)
+    b._transport = None
+    b.bytes_in = 0
+    b.packets_in = 0
+    return b
+
+
+def test_silence_from_the_radio_is_named_as_such():
+    b = _bridge()
+    msg = b.traffic()
+    assert "no bytes" in msg
+    assert "baud" in msg
+
+
+def test_bytes_without_a_heartbeat_is_a_different_diagnosis():
+    """Bytes arriving but no heartbeat is a link or airframe problem. Nothing
+    arriving is a radio, cable, permission or baud problem on this machine.
+    Reporting them identically sends the operator to the wrong end of the
+    system."""
+    b = _bridge()
+    b.uplink(b"\xfd" * 40)
+    b.uplink(b"\xfd" * 60)
+    msg = b.traffic()
+    assert "100 bytes" in msg
+    assert "2 chunk" in msg
+    assert "no bytes" not in msg
+
+
+def test_the_counters_survive_a_closed_transport():
+    """uplink() is called from a socket handler and must never raise on a
+    torn-down bridge — losing telemetry is bad, losing the socket is worse."""
+    b = _bridge()
+    b.uplink(b"x" * 10)
+    assert b.bytes_in == 10

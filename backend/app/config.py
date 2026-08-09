@@ -278,9 +278,26 @@ class Settings(BaseSettings):
     # lower it or buy an independent stream. Exposing one was a trap: it read
     # as a third of the bandwidth budget that does not exist. Velocity comes
     # free with position, at the same rate.
-    telemetry_rate_position_radio: float = Field(default=8.0)
+    # THE RADIO FIGURES ARE BACK TO THE CONSERVATIVE ORIGINALS.
+    #
+    # They were raised to 8/10 Hz on the reasoning that QGroundControl sustains
+    # more than that over the same 3DR radio. That inference was wrong in an
+    # important way: QGC is not also running this application's uplink, and a
+    # SiK radio is half-duplex — saturating the downlink starves the commands
+    # going the other way. The code being edited already carried a warning
+    # written from experience, that the higher rates "can saturate it and cause
+    # exactly the kind of intermittent Socket closed disconnects that don't
+    # happen in QGroundControl", and raising them anyway produced a link that
+    # would not hold and commands that did not arrive.
+    #
+    # Raise them deliberately instead, one step at a time, watching
+    # measured_rates on the telemetry page: if the measured figure tracks the
+    # request there is headroom, and if it stops climbing that is the ceiling.
+    # A number that has been measured on THIS radio is worth more than one
+    # inferred from another ground station's behaviour.
+    telemetry_rate_position_radio: float = Field(default=2.0)
     telemetry_rate_position_udp: float = Field(default=10.0)
-    telemetry_rate_attitude_radio: float = Field(default=10.0)
+    telemetry_rate_attitude_radio: float = Field(default=4.0)
     telemetry_rate_attitude_udp: float = Field(default=20.0)
     mavsdk_server_host: str = Field(default="localhost")
     mavsdk_server_port: int = Field(default=50051)
