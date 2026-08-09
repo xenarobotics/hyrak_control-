@@ -545,3 +545,46 @@ async def test_velocity_is_not_requested_separately():
     await t._set_rates()
     assert "velocity_ned" not in rec.rates
     assert rec.rates["position"] > 0
+
+
+# --------------------------------------------------------------------------- #
+# RF bridge: downlink and uplink are not symmetric                              #
+# --------------------------------------------------------------------------- #
+#
+# The downlink is a send TO us and we bind 0.0.0.0, so it arrives from anywhere
+# on the network with no configuration. The uplink is a send FROM us to a fixed
+# listener, so it needs to know where that listener is — and it was hardcoded
+# to loopback, which is only true while the RF decoder shares this machine.
+#
+# Moving the decoder to its own board therefore breaks exactly one direction,
+# silently: telemetry streams in perfectly and every command is dropped into
+# local loopback.
+
+@pytest.mark.asyncio
+async def test_the_uplink_goes_where_the_decoder_actually_is():
+    from app.telemetry.rf_bridge import RFBridge
+    b = RFBridge(14550, 14551, "192.168.50.12")
+    assert b.uplink_addr == ("192.168.50.12", 14551)
+    assert b.downlink_port == 14550
+
+
+@pytest.mark.asyncio
+async def test_loopback_remains_the_default():
+    """An unchanged rig with the dongle in this PC must behave exactly as
+    before — the host is an addition, not a new required setting."""
+    from app.telemetry import rf_bridge
+    import inspect
+    sig = inspect.signature(rf_bridge.ensure_started)
+    assert sig.parameters["uplink_host"].default == "127.0.0.1"
+
+
+@pytest.mark.asyncio
+async def test_a_changed_uplink_host_rebinds_rather_than_reusing():
+    """ensure_started is idempotent on matching config. If it compared only
+    the PORTS, editing the host would silently hand back the old bridge still
+    pointed at loopback — the setting would appear to save and change
+    nothing."""
+    from app.telemetry.rf_bridge import RFBridge
+    a = RFBridge(14550, 14551, "127.0.0.1")
+    b = RFBridge(14550, 14551, "192.168.50.12")
+    assert (a.downlink_port, a.uplink_addr) != (b.downlink_port, b.uplink_addr)

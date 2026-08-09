@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { PX4_META, getGroupFromKey, humanizeParamKey, type PX4Group, type PX4Meta } from '@/lib/px4-params-meta'
-import { getRfDownlinkPort, setRfDownlinkPort, getRfUplinkPort, setRfUplinkPort } from '@/lib/rfBridge'
+import { getRfDownlinkPort, setRfDownlinkPort, getRfUplinkPort, setRfUplinkPort, getRfUplinkHost, setRfUplinkHost } from '@/lib/rfBridge'
 
 function ls<T>(key: string, fallback: T): T {
     if (typeof window === 'undefined') return fallback
@@ -702,15 +702,16 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
     const [showPresets, setShowPresets] = useState(false)
     const [downlinkPort, setDownlinkPort] = useState(() => getRfDownlinkPort())
     const [uplinkPort, setUplinkPort] = useState(() => getRfUplinkPort())
+    const [uplinkHost, setUplinkHost] = useState(() => getRfUplinkHost())
     const connected = telStatus === 'connected'
     const connect    = useCallback(() => {
         lsSet('hyrak-mav-address', address)
         if (address === RF_BRIDGE_ADDR) {
-            getSocket().emit('connect_rf_bridge', { downlinkPort, uplinkPort })
+            getSocket().emit('connect_rf_bridge', { downlinkPort, uplinkPort, uplinkHost })
         } else {
             getSocket().emit('connect_telemetry', { address })
         }
-    }, [address, downlinkPort, uplinkPort])
+    }, [address, downlinkPort, uplinkPort, uplinkHost])
     const disconnect = useCallback(() => getSocket().emit('disconnect_telemetry'), [])
     const pos = telemetry?.position, bat = telemetry?.battery, fm = telemetry?.flight_mode, att = telemetry?.attitude
 
@@ -758,7 +759,7 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                         </Field>
                     )}
                     {!connected && address === RF_BRIDGE_ADDR && (
-                        <Field label="RF BRIDGE PORTS" tip="Local UDP ports the ground station's wfb_rx/wfb_tx use — see communication/start-gs.sh. Only change these if your ground-station config uses non-default ports.">
+                        <Field label="RF BRIDGE PORTS" tip="UDP ports the ground station's wfb_rx/wfb_tx use — see communication/start-gs.sh. The uplink HOST matters once the decoder is not on this machine: downlink arrives from anywhere (we bind 0.0.0.0), but the uplink is sent to a fixed listener, so leaving it on 127.0.0.1 with an off-box decoder gives perfect telemetry and no commands.">
                             <div style={{ display: 'flex', gap: 6 }}>
                                 <div style={{ flex: 1 }}>
                                     <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>Downlink (video/mavlink dn)</span>
@@ -778,6 +779,30 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                                         style={{ width: '100%', padding: '8px 10px', borderRadius: 8, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none', boxSizing: 'border-box', marginTop: 3 }}
                                     />
                                 </div>
+                            </div>
+                            {/* Uplink HOST. Separate row because it is the one
+                                field here that is not symmetric with the
+                                downlink: we bind 0.0.0.0 to receive, so
+                                downlink needs no host at all, while the uplink
+                                is sent to a specific listener. Loopback is only
+                                right while the decoder runs on this machine. */}
+                            <div style={{ marginTop: 6 }}>
+                                <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
+                                    Uplink host (where wfb_tx / the decoder runs)
+                                </span>
+                                <input
+                                    type="text"
+                                    value={uplinkHost}
+                                    placeholder="127.0.0.1"
+                                    onChange={e => { const v = e.target.value; setUplinkHost(v); setRfUplinkHost(v) }}
+                                    style={{ width: '100%', padding: '8px 10px', borderRadius: 8, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none', boxSizing: 'border-box', marginTop: 3 }}
+                                />
+                                <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', display: 'block', marginTop: 4, lineHeight: 1.5 }}>
+                                    127.0.0.1 only if the RF decoder runs on this
+                                    machine. With the decoder on its own board,
+                                    telemetry still reads correctly while every
+                                    command is dropped into local loopback.
+                                </span>
                             </div>
                         </Field>
                     )}

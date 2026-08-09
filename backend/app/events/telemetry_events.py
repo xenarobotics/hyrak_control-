@@ -252,9 +252,25 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         trick can't reach — see app/telemetry/rf_bridge.py for why."""
         from app.telemetry import rf_bridge
         data = data or {}
+        # THE UPLINK HOST IS NOT ALWAYS LOOPBACK, and it was hardcoded to be.
+        #
+        # Downlink and uplink are not symmetric. The downlink is a UDP send TO
+        # us and we bind 0.0.0.0, so it arrives from anywhere on the network
+        # without configuration. The uplink is a send FROM us to a fixed
+        # listener, and that listener is only on 127.0.0.1 while the RF decoder
+        # runs on this same machine.
+        #
+        # Move the decoder onto its own board — which is exactly what the
+        # Luckfox ground dongle is — and the uplink target moves with it, while
+        # the downlink looks completely unaffected. The failure is therefore
+        # silent and one-directional: telemetry streams in perfectly, and every
+        # command, mission upload and parameter write is sent into the local
+        # loopback and dropped. RFBridge has always taken uplink_host; nothing
+        # passed it.
         bridge = await rf_bridge.ensure_started(
             downlink_port=int(data.get("downlinkPort") or 14550),
             uplink_port=int(data.get("uplinkPort") or 14551),
+            uplink_host=str(data.get("uplinkHost") or "127.0.0.1").strip() or "127.0.0.1",
         )
         await on_connect_telemetry(sid, {"address": bridge.address, "link_kind": "radio"})
 
