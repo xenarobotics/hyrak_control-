@@ -88,6 +88,7 @@ def _manager(messages, exc=None):
     t._running = True
     t._status_text = []
     t._status_event = None
+    t._on_fc_message = None
     t.last_action_error = None
     return t
 
@@ -234,3 +235,81 @@ async def test_a_successful_action_carries_no_error():
     result = await execute_drone_action(_Tel(), "arm", {})
     assert result["ok"] is True
     assert "error" not in result
+
+
+# --------------------------------------------------------------------------- #
+# The message log                                                               #
+# --------------------------------------------------------------------------- #
+#
+# The status_text subscription was added so a REFUSED COMMAND could name its
+# cause, and it read exactly one line at exactly one moment. PX4 narrates
+# itself continuously — preflight results, EKF and GPS transitions, failsafe
+# entry and exit, calibration complaints — and all of it was arriving on the
+# link and being thrown away. That stream is most of why a problem is
+# diagnosable in QGroundControl and was not here.
+
+@pytest.mark.asyncio
+async def test_every_message_is_pushed_on_as_it_arrives():
+    seen = []
+    t = _manager([(0.02, "WARNING", "Preflight: GPS fix too poor"),
+                  (0.04, "INFO", "Armed by external command")])
+    t._on_fc_message = seen.append
+    task = asyncio.create_task(t._subscribe_status_text())
+    await asyncio.sleep(0.3)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+    assert [m["text"] for m in seen] == [
+        "Preflight: GPS fix too poor", "Armed by external command"]
+    assert [m["severity"] for m in seen] == ["WARNING", "INFO"]
+
+
+@pytest.mark.asyncio
+async def test_routine_lines_are_forwarded_too_not_only_warnings():
+    """The REFUSAL path filters to warnings and above, because only those
+    explain a failure. The LOG must not: 'Home position set' and 'Calibration
+    done' are exactly what you scroll back for, and a log that shows only what
+    went wrong cannot tell you what went right."""
+    seen = []
+    t = _manager([(0.02, "INFO", "Home position set")])
+    t._on_fc_message = seen.append
+    task = asyncio.create_task(t._subscribe_status_text())
+    await asyncio.sleep(0.2)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    assert len(seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_severity_rank_travels_with_the_message():
+    """The browser must not re-derive the ordering. MAVSDK's StatusTextType
+    ascends and MAVLink's own SEVERITY descends, and a viewer that guessed
+    wrong would paint every emergency grey and every routine line red."""
+    seen = []
+    t = _manager([(0.02, "CRITICAL", "FAILSAFE: no RC")])
+    t._on_fc_message = seen.append
+    task = asyncio.create_task(t._subscribe_status_text())
+    await asyncio.sleep(0.2)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    assert seen[0]["rank"] == TelemetryManager._severity_rank("CRITICAL")
+    assert seen[0]["rank"] > TelemetryManager._severity_rank("INFO")
+    assert seen[0]["ts"] > 0
+
+
+@pytest.mark.asyncio
+async def test_a_broken_listener_cannot_break_the_refusal_reasons():
+    """The log is a viewer. The same subscription is what makes a denied arm
+    explain itself, and that must survive anything the viewer does."""
+    def explode(_msg):
+        raise RuntimeError("viewer is broken")
+
+    t = _manager([(0.02, "CRITICAL", "Arming denied: no GPS lock")])
+    t._on_fc_message = explode
+    task = asyncio.create_task(t._subscribe_status_text())
+    await asyncio.sleep(0.2)
+    assert not task.done(), "subscription died with the listener"
+    reason = await t._fc_reason(0.0, "fallback")
+    assert reason == "Arming denied: no GPS lock"
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)

@@ -20,6 +20,21 @@ export interface MissionUploadResult {
     zones?: { id: string; name: string; zone_class: string }[]
 }
 
+/** One line the autopilot said. PX4 emits these for preflight results, EKF
+ *  and GPS transitions, failsafes, calibration — everything QGroundControl
+ *  shows in its vehicle-messages panel. */
+export interface FcMessage {
+    severity: string
+    text: string
+    /** 0 DEBUG … 7 EMERGENCY, MAVSDK's ordering. Ascending, unlike MAVLink's
+     *  own SEVERITY enum, which descends. */
+    rank: number
+    ts: number
+    /** Assigned here, not by the sender: identical text repeats constantly
+     *  and React needs a stable distinct key. */
+    id: number
+}
+
 export interface ActionResult {
     action: string
     ok: boolean
@@ -58,11 +73,21 @@ interface DroneStore {
      *  operator presses it again. */
     pendingAction: { action: string; at: number } | null
 
+    /** The autopilot's message log, newest last. Bounded — this is a live
+     *  console for the flight in progress, not a flight recorder. */
+    fcMessages: FcMessage[]
+    /** How many have arrived since the panel was last read, so the icon can
+     *  carry a badge without the panel having to be open. */
+    fcUnread: number
+
     // UI
     isEmergencyConfirm: boolean
 
     // Actions
     setPendingAction: (action: string | null) => void
+    addFcMessage: (m: Omit<FcMessage, 'id'>) => void
+    clearFcMessages: () => void
+    markFcRead: () => void
     setConnectionStatus: (s: ConnectionStatus) => void
     setTelemetryStatus: (s: TelemetryStatus) => void
     setTelemetryError: (msg: string | null) => void
@@ -77,6 +102,11 @@ interface DroneStore {
     setDroneMissionOffer: (wps: any[] | null) => void
     reset: () => void
 }
+
+/** Enough to cover a whole flight's worth of interesting lines without
+ *  letting a failsafe loop grow the array without bound. */
+const FC_MESSAGE_LIMIT = 300
+let nextFcId = 1
 
 const defaultTelemetry: TelemetrySnapshot = {
     attitude: { roll_deg: 0, pitch_deg: 0, yaw_deg: 0, rollspeed: 0, pitchspeed: 0, yawspeed: 0 },
@@ -110,6 +140,8 @@ export const useDroneStore = create<DroneStore>((set) => ({
     lastActionResult: null,
     droneMissionOffer: null,
     pendingAction: null,
+    fcMessages: [],
+    fcUnread: 0,
     isEmergencyConfirm: false,
 
     setConnectionStatus: (s) => set({ connectionStatus: s }),
@@ -157,6 +189,16 @@ export const useDroneStore = create<DroneStore>((set) => ({
         return next
     }),
     setDroneMissionOffer: (wps) => set({ droneMissionOffer: wps }),
+    addFcMessage: (m) => set(state => {
+        // Trim from the FRONT. A failsafe loop or a chatty boot can emit
+        // hundreds of lines, and an unbounded array behind a live socket is
+        // how a long flight ends in a dead tab.
+        const next = [...state.fcMessages, { ...m, id: nextFcId++ }]
+        if (next.length > FC_MESSAGE_LIMIT) next.splice(0, next.length - FC_MESSAGE_LIMIT)
+        return { fcMessages: next, fcUnread: state.fcUnread + 1 }
+    }),
+    clearFcMessages: () => set({ fcMessages: [], fcUnread: 0 }),
+    markFcRead: () => set({ fcUnread: 0 }),
     reset: () => set({
         connectionStatus: 'disconnected',
         telemetryStatus: 'disconnected',
@@ -170,6 +212,8 @@ export const useDroneStore = create<DroneStore>((set) => ({
         lastActionResult: null,
         droneMissionOffer: null,
         pendingAction: null,
+        fcMessages: [],
+        fcUnread: 0,
         isEmergencyConfirm: false,
     }),
 }))

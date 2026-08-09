@@ -116,6 +116,8 @@ export function useDrone() {
             store.setLastActionResult(data)
         const onDroneMission   = (data: { waypoints: any[] }) =>
             store.setDroneMissionOffer(data.waypoints)
+        const onFcMessage      = (data: { severity: string; text: string; rank: number; ts: number }) =>
+            store.addFcMessage(data)
 
         // Fleet drone telemetry — updates swarm store and also mirrors to the
         // primary store when this drone is the actively selected one.
@@ -251,6 +253,7 @@ export function useDrone() {
         socket.on('swarm_mission_upload_result', onSwarmMissionUpload)
         socket.on('action_result',         onActionResult)
         socket.on('drone_mission_loaded',  onDroneMission)
+        socket.on('fc_message',            onFcMessage)
         socket.on('drone_telemetry',       onDroneTelemetry)
         socket.on('fleet_telemetry',       onFleetTelemetry)
         socket.on('swarm_drone_status',    onSwarmDroneStatus)
@@ -276,6 +279,7 @@ export function useDrone() {
             socket.off('swarm_mission_upload_result', onSwarmMissionUpload)
             socket.off('action_result',         onActionResult)
             socket.off('drone_mission_loaded',  onDroneMission)
+            socket.off('fc_message',            onFcMessage)
             socket.off('drone_telemetry',       onDroneTelemetry)
             socket.off('fleet_telemetry',       onFleetTelemetry)
             socket.off('swarm_drone_status',    onSwarmDroneStatus)

@@ -15,7 +15,7 @@ import {
     RotateCcw, MapPin, PlaneLanding, Loader
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { FLIGHT_MODES } from '@/lib/flightModes'
+import { FLIGHT_MODES, modeOptionFor, modeLabel } from '@/lib/flightModes'
 
 export function DroneControls() {
     const [mounted, setMounted] = useState(false)
@@ -23,7 +23,8 @@ export function DroneControls() {
     useEffect(() => { setMounted(true) }, [])
 
     const { arm, disarm, sendAction } = useDrone()
-    const { telemetry, telemetryStatus, pendingAction } = useDroneStore()
+    const { telemetry, telemetryStatus, pendingAction, lastActionResult } = useDroneStore()
+    const [modeError, setModeError] = useState<string | null>(null)
     const swarmEnabled = useSwarmStore(s => s.enabled)
     const selectedIds  = useSwarmStore(s => s.selectedIds)
     const drones       = useSwarmStore(s => s.drones)
@@ -35,6 +36,16 @@ export function DroneControls() {
         ? selectedIds.filter(id => drones[id]?.connected)
         : []
     const isGroup = groupTargets.length > 0
+
+    const modePending = pendingAction?.action === 'set_mode'
+
+    useEffect(() => {
+        if (!lastActionResult || lastActionResult.action !== 'set_mode') return
+        if (lastActionResult.ok) { setModeError(null); return }
+        setModeError(lastActionResult.error || lastActionResult.msg || 'The drone did not change mode')
+        const t = setTimeout(() => setModeError(null), 12000)
+        return () => clearTimeout(t)
+    }, [lastActionResult])
 
     const armed = telemetry?.flight_mode?.is_armed ?? false
     // Sent, not yet acknowledged. On a 3DR radio that gap is about a second,
@@ -108,13 +119,22 @@ export function DroneControls() {
                 </div>
             </div>
 
-            {/* Flight mode selector */}
+            {/* Flight mode selector.
+                SHOWS THE LIVE MODE, not a permanent "Change flight mode...".
+                Without that, asking for Position and landing in Hold looked
+                exactly like asking for Position and getting it — the only clue
+                was a separate chip, and only if you knew POSCTL and HOLD are
+                different things. The control that sets the mode is the one
+                place a refusal or a substitution has to be visible. */}
             <Select
-                disabled={!connected}
+                value={modeOptionFor(mode)}
+                disabled={!connected || modePending}
                 onValueChange={(m) => m && sendAction('set_mode', { mode: m })}
             >
                 <SelectTrigger className="h-8 text-xs font-mono">
-                    <SelectValue placeholder="Change flight mode..." />
+                    <SelectValue placeholder={connected ? modeLabel(mode) : 'Change flight mode...'}>
+                        {modePending ? 'Switching…' : modeLabel(mode)}
+                    </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                     {FLIGHT_MODES.map(m => (
@@ -122,11 +142,27 @@ export function DroneControls() {
                             <div>
                                 <div className="font-mono font-medium">{m.label}</div>
                                 <div className="text-[10px] text-muted-foreground">{m.description}</div>
+                                {m.requires && (
+                                    <div className="text-[10px] text-muted-foreground/70">
+                                        needs {m.requires}
+                                    </div>
+                                )}
                             </div>
                         </SelectItem>
                     ))}
                 </SelectContent>
             </Select>
+
+            {/* PX4 refuses a mode whose conditions are not met and says nothing
+                about it over the wire that MAVSDK surfaces, so the backend
+                confirms every switch against telemetry and sends back the
+                reason. Dropping that on the floor here would put us straight
+                back to a menu that silently does nothing. */}
+            {modeError && (
+                <p className="text-[10px] font-mono text-red-400/90 leading-relaxed break-words">
+                    {modeError}
+                </p>
+            )}
 
             {/* Arm / Disarm */}
             <Button

@@ -9,6 +9,7 @@ import { OSDBar } from '@/components/osd/OSDBar'
 import { EmergencyStop } from '@/components/controls/EmergencyStop'
 import { DeviceSelector } from '@/components/controls/DeviceSelector'
 import { DroneControls } from '@/components/controls/DroneControls'
+import { FcMessageLog } from '@/components/layout/FcMessageLog'
 import { TelemetryPanel } from '@/components/telemetry/TelemetryPanel'
 import { VideoStream } from '@/components/video/VideoStream'
 import { Separator } from '@/components/ui/separator'
@@ -235,6 +236,13 @@ export default function FlyPage() {
 
                         <SurfaceCard title="FLIGHT CONTROLS">
                             <DroneControls />
+                            {/* The Fly tab hides the global status bar (it has
+                                its own controls), so the drone's messages need
+                                their own way in here — this is the tab you are
+                                on when something goes wrong. */}
+                            <div className="mt-3">
+                                <FcMessageLog />
+                            </div>
                         </SurfaceCard>
 
                         <div className="rounded-xl border flex flex-col flex-1 min-h-0"

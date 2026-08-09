@@ -195,7 +195,16 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             except RuntimeError:
                 pass
 
-        manager = TelemetryManager(on_update=on_telemetry_update)
+        def on_fc_message(msg: dict):
+            # The autopilot's own words, streamed to the message log — the
+            # same thing QGroundControl's vehicle messages panel shows.
+            try:
+                asyncio.create_task(sio.emit("fc_message", msg, to=sid))
+            except Exception as e:
+                logger.debug(f"Could not forward FC message: {e}")
+
+        manager = TelemetryManager(on_update=on_telemetry_update,
+                                   on_fc_message=on_fc_message)
         # TELL IT WHAT THE LINK REALLY IS, before start() picks stream rates.
         #
         # The address cannot say. In this product the radio is plugged into the

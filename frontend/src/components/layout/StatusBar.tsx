@@ -16,7 +16,8 @@ import {
     Loader,
 } from 'lucide-react'
 import { gpsFixLabel, gpsFixColor, batteryTextColor, connectionQuality, connectionQualityColor } from '@/lib/osd'
-import { FLIGHT_MODES } from '@/lib/flightModes'
+import { FLIGHT_MODES, modeOptionFor, modeLabel } from '@/lib/flightModes'
+import { FcMessageLog } from '@/components/layout/FcMessageLog'
 
 // Altitude is only genuinely unavailable when a tracking loop is ACTIVELY
 // driving it — that is, Follow is armed AND the mode is on Auto altitude.
@@ -105,6 +106,7 @@ export function StatusBar() {
 
     const armed = telemetry?.flight_mode.is_armed ?? false
     const armPending = pendingAction?.action === 'arm' || pendingAction?.action === 'disarm'
+    const modePending = pendingAction?.action === 'set_mode'
     const alt = telemetry?.position.relative_altitude_m ?? 0
     // AIRBORNE IS JUDGED FROM THE ALTITUDE TOO, not from the flag alone.
     //
@@ -267,11 +269,14 @@ export function StatusBar() {
             )}
 
             <Chip title="Current flight mode">
-                <span style={{ color: '#22d3ee' }}>{flightMode}</span>
+                <span style={{ color: '#22d3ee' }}>{modeLabel(flightMode)}</span>
             </Chip>
+            {/* Bound to the LIVE mode, not to "". A select that always shows a
+                placeholder cannot show you that the mode you picked was
+                refused, or quietly turned into a different one. */}
             <select
-                disabled={!droneLinked}
-                value=""
+                disabled={!droneLinked || modePending}
+                value={modeOptionFor(flightMode)}
                 onChange={e => { const m = e.target.value; if (m) sendAction('set_mode', { mode: m }) }}
                 title="Change flight mode"
                 style={{
@@ -281,7 +286,7 @@ export function StatusBar() {
                     cursor: droneLinked ? 'pointer' : 'not-allowed', opacity: droneLinked ? 1 : 0.4,
                 }}
             >
-                <option value="" disabled>Mode…</option>
+                <option value="">{modePending ? 'Switching…' : 'Mode…'}</option>
                 {FLIGHT_MODES.map(m => (
                     <option key={m.value} value={m.value}>{m.label}</option>
                 ))}
@@ -392,6 +397,7 @@ export function StatusBar() {
 
             {/* ── Controls ─────────────────────────────────────────────── */}
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <FcMessageLog />
                 <BarButton onClick={() => sendAction('land')} disabled={!droneLinked} color="#38bdf8" title="Descend and land now">
                     <PlaneLanding size={13} /> LAND
                 </BarButton>

@@ -63,9 +63,19 @@ class TelemetryManager:
     _EMIT_RATE_HZ       = 10  # primary drone
     _FLEET_EMIT_RATE_HZ = 3   # fleet drones — lower to avoid overwhelming mavsdk_server queue
 
-    def __init__(self, on_update: Optional[Callable[[dict], None]] = None, fleet_mode: bool = False):
+    def __init__(self, on_update: Optional[Callable[[dict], None]] = None, fleet_mode: bool = False,
+                 on_fc_message: Optional[Callable[[dict], None]] = None):
         self._drone: Optional[System] = None
         self._on_update = on_update
+        # Every line the autopilot says, pushed on as it arrives.
+        #
+        # These were already being collected — the refusal-reason work needed
+        # the last few — but only ever read at the moment a command failed and
+        # then discarded. That is a fraction of what the aircraft tells you:
+        # preflight results, EKF and GPS state changes, failsafe warnings,
+        # calibration complaints. QGroundControl shows the lot, which is most
+        # of why a problem is diagnosable there and was not here.
+        self._on_fc_message = on_fc_message
         self._fleet_mode = fleet_mode  # when True, use minimal subscriptions and slower rates
         self._snapshot = TelemetrySnapshot()
         self._tasks: list[asyncio.Task] = []
@@ -636,6 +646,18 @@ class TelemetryManager:
                 del self._status_text[:-self._STATUS_TEXT_KEEP]
                 if self._status_event is not None:
                     self._status_event.set()
+                if self._on_fc_message:
+                    try:
+                        self._on_fc_message({
+                            "severity": sev,
+                            "text": text,
+                            "rank": self._severity_rank(sev),
+                            "ts": _time.time(),
+                        })
+                    except Exception as e:
+                        # A viewer must never be able to break the subscription
+                        # that feeds the refusal reasons.
+                        logger.debug(f"FC message listener raised: {e}")
                 if self._severity_rank(sev) >= self._STATUS_MIN_SEVERITY:
                     logger.warning(f"FC: {sev}: {text}")
                 else:
@@ -1695,19 +1717,67 @@ class TelemetryManager:
         except Exception as e:
             logger.warning(f"Velocity command failed: {e}")
             
-    async def set_flight_mode(self, mode: str) -> bool:
-        """
-        Supported modes: HOLD, RETURN, LAND, TAKEOFF, MISSION, OFFBOARD
-        Note: STABILIZE, LOITER etc are ArduPilot names — PX4 uses different names
+    #: PX4 custom-mode numbers, from commander_state.h / px4_custom_mode.h.
+    #: (main, sub) — sub is 0 for everything outside AUTO.
+    _PX4_MAIN = {"MANUAL": 1, "ALTITUDE": 2, "POSITION": 3, "AUTO": 4,
+                 "ACRO": 5, "OFFBOARD": 6, "STABILIZED": 7}
+    _PX4_AUTO_SUB = {"READY": 1, "TAKEOFF": 2, "HOLD": 3, "MISSION": 4,
+                     "RETURN": 5, "LAND": 6, "FOLLOW_TARGET": 8}
+    _MAV_CMD_DO_SET_MODE = 176
+    _MAV_MODE_FLAG_CUSTOM_MODE_ENABLED = 1
 
-        POSITION is aliased to HOLD: PX4's real Position mode (POSCTL) is a manual-
-        stick mode that needs continuously streamed neutral RC input to stay in,
-        whereas HOLD (AUTO_LOITER) gives the same "hover in place" result with no
-        RC input required — which is what the UI option is actually used for.
+    #: What telemetry.flight_mode() reports once each mode is actually running.
+    #: Used to CONFIRM the switch rather than assume it, because DO_SET_MODE is
+    #: fire-and-forget and PX4 silently refuses modes whose conditions are not
+    #: met (POSITION without a position estimate, MISSION with no mission).
+    _MODE_REPORTS_AS = {
+        "HOLD": {"HOLD"}, "POSITION": {"POSCTL"}, "ALTITUDE": {"ALTCTL"},
+        "STABILIZED": {"STABILIZED"}, "MISSION": {"MISSION"},
+        "RETURN": {"RETURN_TO_LAUNCH"}, "LAND": {"LAND"},
+        "OFFBOARD": {"OFFBOARD"}, "MANUAL": {"MANUAL"}, "ACRO": {"ACRO"},
+        "TAKEOFF": {"TAKEOFF"},
+    }
+
+    async def set_flight_mode(self, mode: str) -> bool:
+        """Switch flight mode, for real, and confirm the aircraft agreed.
+
+        THIS USED TO OFFER SEVEN MODES AND IMPLEMENT FOUR. STABILIZED, MISSION
+        and OFFBOARD fell through to an "Unknown flight mode" warning and
+        returned False — the dropdown listed them, selecting them did nothing,
+        and nothing said why.
+
+        POSITION WAS WORSE, because it silently did something else. It was
+        aliased to HOLD on the reasoning that PX4's POSCTL is a manual-stick
+        mode and HOLD gives the same hover with no RC needed. That reasoning is
+        not wrong, but substituting one mode for another behind the operator's
+        back is: the bar then reported HOLD, and the only way to discover the
+        substitution was to notice the mode you did not ask for. If POSITION is
+        the wrong choice for a rig, the operator has to be the one who decides
+        that, and they cannot decide what they are not told.
+
+        So every offered mode is now sent properly. MAVSDK's action plugin
+        covers four of them and is kept for those — it is well proven and
+        returns a real ACK. The rest have no plugin equivalent and go out as
+        MAV_CMD_DO_SET_MODE with PX4's custom mode numbers, which is exactly
+        what QGroundControl sends.
+
+        Either way the result is CONFIRMED against telemetry before being
+        reported, because DO_SET_MODE is fire-and-forget and PX4 refuses modes
+        whose preconditions are not met without saying so.
         """
         mode = mode.upper()
+        if mode not in self._MODE_REPORTS_AS:
+            logger.warning(f"Unknown flight mode: {mode}")
+            self.last_action_error = f"{mode} is not a mode this aircraft offers"
+            return False
+
+        import time as _time
+        sent = _time.monotonic()
+        self.last_action_error = None
         try:
-            if mode == "HOLD" or mode == "POSITION":
+            # Proven plugin paths first — these ACK, so a refusal is reported
+            # by MAVSDK rather than having to be inferred from telemetry.
+            if mode == "HOLD":
                 await self._drone.action.hold()
             elif mode == "RETURN":
                 await self._drone.action.return_to_launch()
@@ -1715,14 +1785,95 @@ class TelemetryManager:
                 await self._drone.action.land()
             elif mode == "TAKEOFF":
                 await self._drone.action.takeoff()
-            else:
-                logger.warning(f"Unknown flight mode: {mode}")
+            elif mode == "MISSION":
+                await self._drone.mission.start_mission()
+            elif mode == "OFFBOARD":
+                # Offboard cannot be entered by asking. PX4 requires setpoints
+                # to ALREADY be streaming or it rejects the switch, and this
+                # manager starts them itself when a tracking mode arms. Saying
+                # so is more use than a refusal with no explanation.
+                self.last_action_error = (
+                    "Offboard is entered automatically when an AI tracking mode "
+                    "starts flying the drone — it cannot be selected by hand, "
+                    "because PX4 rejects it unless setpoints are already streaming"
+                )
+                logger.warning("Offboard requested from the mode menu — refused")
                 return False
-            logger.info(f"Flight mode set to {mode}")
-            return True
+            else:
+                if not await self._send_px4_mode(mode):
+                    return False
         except ActionError as e:
-            logger.error(f"Set mode failed: {e}")
+            self.last_action_error = await self._failure_reason(
+                e, sent, f"the drone refused to switch to {mode}"
+            )
+            logger.error(f"Set mode {mode} failed: {e} | {self.last_action_error}")
             return False
+
+        if await self._mode_confirmed(mode):
+            logger.info(f"✅ Flight mode {mode}")
+            return True
+        actual = self._snapshot.flight_mode.mode
+        self.last_action_error = await self._fc_reason(
+            sent,
+            f"the drone stayed in {actual or 'its previous mode'} instead of "
+            f"switching to {mode} — PX4 refuses a mode whose conditions are not "
+            f"met (no position estimate, no mission loaded, not armed)",
+        )
+        logger.warning(f"Mode {mode} not confirmed — still {actual}")
+        return False
+
+    async def _send_px4_mode(self, mode: str) -> bool:
+        """MAV_CMD_DO_SET_MODE with PX4's custom mode numbers — the same
+        command QGroundControl sends, for the modes MAVSDK has no plugin for."""
+        if mode in self._PX4_AUTO_SUB:
+            main, sub = self._PX4_MAIN["AUTO"], self._PX4_AUTO_SUB[mode]
+        elif mode in self._PX4_MAIN:
+            main, sub = self._PX4_MAIN[mode], 0
+        else:
+            self.last_action_error = f"{mode} has no PX4 mode number"
+            return False
+        try:
+            from mavsdk.mavlink_direct import MavlinkMessage
+            fields = json.dumps({
+                "target_system": 1, "target_component": 1,
+                "command": self._MAV_CMD_DO_SET_MODE, "confirmation": 0,
+                "param1": float(self._MAV_MODE_FLAG_CUSTOM_MODE_ENABLED),
+                "param2": float(main), "param3": float(sub),
+                "param4": 0.0, "param5": 0.0, "param6": 0.0, "param7": 0.0,
+            })
+            await asyncio.wait_for(
+                self._drone.mavlink_direct.send_message(
+                    MavlinkMessage("COMMAND_LONG", 0, 0, 1, 1, fields)
+                ),
+                timeout=5.0,
+            )
+            return True
+        except Exception as e:
+            self.last_action_error = (
+                f"could not send the {mode} command to the drone ({e})"
+            )
+            logger.error(f"DO_SET_MODE {mode} failed: {e}")
+            return False
+
+    #: How long to wait for the aircraft to report the new mode. A mode switch
+    #: is near-instant on the vehicle; this is the radio round trip plus one
+    #: heartbeat, which is where the whole budget goes.
+    _MODE_CONFIRM_S = 4.0
+
+    async def _mode_confirmed(self, mode: str) -> bool:
+        """Wait for telemetry to report the mode we asked for.
+
+        Mode is decoded from HEARTBEAT at 1 Hz, so this cannot be quick — but
+        assuming success is how a silently refused mode came to look like a
+        working one.
+        """
+        expected = self._MODE_REPORTS_AS.get(mode, {mode})
+        deadline = asyncio.get_event_loop().time() + self._MODE_CONFIRM_S
+        while asyncio.get_event_loop().time() < deadline:
+            if self._snapshot.flight_mode.mode in expected:
+                return True
+            await asyncio.sleep(0.2)
+        return self._snapshot.flight_mode.mode in expected
 
     # MAVLink command codes used by mission_raw (terrain follow path)
     _MAV_CMD = {
