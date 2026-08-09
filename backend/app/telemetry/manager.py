@@ -86,6 +86,44 @@ class TelemetryManager:
         # Declared by whoever built the connection, because the MAVSDK address
         # only describes the hop to mavsdk_server. See _set_rates.
         self._link_kind: str = "local"
+        # ACHIEVED stream rates, measured from arrivals. The commanded rate is
+        # a request; what a 3DR radio actually delivers depends on its AIR_SPEED
+        # and ECC settings, which are on the radio and not visible from here.
+        # Asking for 10 Hz and receiving 3 is indistinguishable from a healthy
+        # link unless the arrivals are counted, so they are.
+        self._rate_counts: dict[str, int] = {}
+        # None, not 0.0, for "no window open yet". time.monotonic()'s epoch is
+        # unspecified and does start at zero on some platforms, where a falsy
+        # sentinel would restart the window on every single arrival and no rate
+        # would ever be published.
+        self._rate_window_start: Optional[float] = None
+        self._measured_rates: dict[str, float] = {}
+
+    #: Averaging window for the achieved-rate measurement. Long enough that a
+    #: single late packet does not move the figure, short enough that turning a
+    #: radio setting up shows its effect while you are still standing there.
+    _RATE_WINDOW_S = 5.0
+
+    def _count(self, stream: str) -> None:
+        """Tally one arrival, and roll the window when it closes.
+
+        Called from the subscription loops, which is the only place that knows
+        a message genuinely arrived — mavsdk_server's own rate request is a
+        statement of intent and says nothing about what the radio carried.
+        """
+        import time as _time
+        now = _time.monotonic()
+        if self._rate_window_start is None:
+            self._rate_window_start = now
+        self._rate_counts[stream] = self._rate_counts.get(stream, 0) + 1
+        elapsed = now - self._rate_window_start
+        if elapsed >= self._RATE_WINDOW_S:
+            self._measured_rates = {
+                k: round(v / elapsed, 1) for k, v in self._rate_counts.items()
+            }
+            self._snapshot.measured_rates = dict(self._measured_rates)
+            self._rate_counts.clear()
+            self._rate_window_start = now
 
     def set_link_kind(self, kind: str) -> None:
         """Declare the physical link to the aircraft: "radio" or "local".
@@ -254,12 +292,18 @@ class TelemetryManager:
             # than before on the fields nobody is flying by.
             cfg = get_settings()
             rates = [
+                # POSITION CARRIES VELOCITY. Both MAVSDK setters drive the one
+                # GLOBAL_POSITION_INT message and it keeps the higher of the
+                # two (telemetry_impl.cpp: max(_position_rate_hz,
+                # _velocity_ned_rate_hz)), so setting velocity separately
+                # cannot buy a second stream — it can only push position up,
+                # and setting it LOWER does nothing at all. It is deliberately
+                # not set here: one message, one rate, and the budget below
+                # counts it once.
                 ("position",     self._drone.telemetry.set_rate_position,
                  cfg.telemetry_rate_position_radio if is_serial else cfg.telemetry_rate_position_udp),
                 ("attitude",     self._drone.telemetry.set_rate_attitude_euler,
                  cfg.telemetry_rate_attitude_radio if is_serial else cfg.telemetry_rate_attitude_udp),
-                ("velocity_ned", self._drone.telemetry.set_rate_velocity_ned,
-                 cfg.telemetry_rate_velocity_radio if is_serial else cfg.telemetry_rate_velocity_udp),
                 # Dashboard-only from here down. A battery percentage that
                 # updates twice a second is not twice as useful as one that
                 # updates every two seconds, and on a shared radio the
@@ -375,6 +419,7 @@ class TelemetryManager:
                 # avoids a separate heading() gRPC streaming subscription
                 # (one less stream in mavsdk_server's shared callback queue).
                 self._snapshot.heading_deg = round(att.yaw_deg % 360, 1)
+                self._count("attitude")
                 self._emit()
         except asyncio.CancelledError:
             pass
@@ -392,6 +437,7 @@ class TelemetryManager:
                     absolute_altitude_m=round(pos.absolute_altitude_m, 2),
                     relative_altitude_m=round(pos.relative_altitude_m, 2),
                 )
+                self._count("position")
                 self._emit()
         except asyncio.CancelledError:
             pass

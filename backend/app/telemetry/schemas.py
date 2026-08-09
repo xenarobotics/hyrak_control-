@@ -93,6 +93,12 @@ class TelemetrySnapshot:
     # to remember what they typed and notice the difference, which is exactly
     # what does not happen on a busy flight line. Carrying the target on the
     # snapshot lets the UI put them side by side and say so.
+    # MEASURED stream rates, Hz, keyed by stream name — what the link actually
+    # delivered, not what was requested. On a 3DR radio the ceiling is set by
+    # AIR_SPEED and ECC on the radio itself, which nothing here can read, so
+    # the only honest answer to "how fast can this link go" is to turn the
+    # request up and watch whether these follow.
+    measured_rates: dict = field(default_factory=dict)
     commanded_altitude_m: Optional[float] = None
     # Filled once the climb has settled and the two disagree by more than the
     # tolerance. Plain text, because the cause is on the VEHICLE (parameter,
@@ -118,6 +124,7 @@ class TelemetrySnapshot:
             "home_lat": self.home_lat,
             "home_lng": self.home_lng,
             "home_alt": self.home_alt,
+            "measured_rates": dict(self.measured_rates),
             "commanded_altitude_m": self.commanded_altitude_m,
             "altitude_warning": self.altitude_warning,
         }

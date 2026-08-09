@@ -58,6 +58,12 @@ export interface TelemetrySnapshot {
     home_lat: number
     home_lng: number
     home_alt: number
+    /** MEASURED stream rates in Hz, keyed by stream name — what the link
+     *  actually delivered, not what was requested. A 3DR radio's ceiling is set
+     *  by AIR_SPEED and ECC on the radio itself, which nothing here can read,
+     *  so the only honest answer to "how fast can this link go" is to raise the
+     *  request and watch whether these follow. */
+    measured_rates?: Record<string, number>
     /** The altitude that was ASKED for, kept beside the one the drone reports.
      *  Commanding 2 m and levelling at 5 m is undetectable from the altitude
      *  readout alone — it shows 5 and looks like a correct 5. */

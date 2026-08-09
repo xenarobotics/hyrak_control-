@@ -261,12 +261,17 @@ class Settings(BaseSettings):
     # messages and "Socket closed" reconnects, and these are the knobs to turn
     # down. Only the three that feed the tracking geometry are exposed — the
     # dashboard streams are not worth a setting.
+    # POSITION AND VELOCITY ARE ONE MESSAGE, not two. Both MAVSDK setters
+    # drive GLOBAL_POSITION_INT and it takes the higher of the two
+    # (telemetry_impl.cpp: max(_position_rate_hz, _velocity_ned_rate_hz)), so
+    # a separate velocity dial can only ever raise the position rate, never
+    # lower it or buy an independent stream. Exposing one was a trap: it read
+    # as a third of the bandwidth budget that does not exist. Velocity comes
+    # free with position, at the same rate.
     telemetry_rate_position_radio: float = Field(default=8.0)
     telemetry_rate_position_udp: float = Field(default=10.0)
     telemetry_rate_attitude_radio: float = Field(default=10.0)
     telemetry_rate_attitude_udp: float = Field(default=20.0)
-    telemetry_rate_velocity_radio: float = Field(default=4.0)
-    telemetry_rate_velocity_udp: float = Field(default=8.0)
     mavsdk_server_host: str = Field(default="localhost")
     mavsdk_server_port: int = Field(default=50051)
     sitl_address: str = Field(default="udpin://0.0.0.0:14540")

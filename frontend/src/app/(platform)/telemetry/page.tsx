@@ -640,6 +640,60 @@ function SectionHead({ meta, pct }: { meta: typeof DOMAIN_META[0]; pct: number }
     )
 }
 
+// ── LINK THROUGHPUT ───────────────────────────────────────────────────────────
+//
+// WHAT A LINK CAN CARRY IS NOT KNOWABLE FROM HERE, SO IT IS MEASURED.
+//
+// A 3DR/SiK radio's ceiling is set by AIR_SPEED and ECC — parameters on the
+// RADIO, not on the autopilot, and invisible to this application. The serial
+// baud printed on the box (57600) is the wire between the computer and the
+// radio and says nothing about the air link, which is half-duplex and shared
+// with the uplink.
+//
+// So the request rate is only ever a request. What matters is whether the
+// arrivals follow it: ask for more, and if the measured figure stops rising,
+// that is the ceiling. This panel is that experiment.
+
+function rateTone(measured: number, asked: number): string {
+    if (!asked) return '#9ca3af'
+    const ratio = measured / asked
+    if (ratio >= 0.85) return '#4ade80'      // the link is keeping up
+    if (ratio >= 0.55) return '#fbbf24'      // partially — near the ceiling
+    return '#f87171'                          // asking for far more than arrives
+}
+
+function LinkThroughput() {
+    const measured = useDroneStore(s => s.telemetry?.measured_rates)
+    if (!measured || Object.keys(measured).length === 0) return null
+
+    // The rates this build requests. Kept beside the measurement rather than
+    // shown alone, because a bare "3.2 Hz" cannot tell you whether the link is
+    // saturated or simply was not asked for more.
+    const asked: Record<string, number> = { position: 8, attitude: 10 }
+
+    return (
+        <Panel title="LINK THROUGHPUT" accent="#a78bfa">
+            {Object.entries(measured).map(([k, v]) => {
+                const want = asked[k] ?? 0
+                return (
+                    <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                        <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase' }}>{k}</span>
+                        <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 600, color: rateTone(v as number, want) }}>
+                            {(v as number).toFixed(1)} Hz
+                            {want > 0 && <span style={{ opacity: 0.45 }}> / {want} asked</span>}
+                        </span>
+                    </div>
+                )
+            })}
+            <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)', lineHeight: 1.6, margin: '4px 0 0' }}>
+                Green means the link is delivering what was asked. If it stays
+                amber or red, the radio is at its ceiling — raise AIR_SPEED or
+                turn ECC off on the radio, not here.
+            </p>
+        </Panel>
+    )
+}
+
 // ── CONNECTION ────────────────────────────────────────────────────────────────
 
 function ConnectionWorkspace({ address, setAddress }: { address: string; setAddress: (v: string) => void }) {
@@ -766,6 +820,7 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                                 </div>
                             ))}
                         </Panel>
+                        <LinkThroughput />
                     </div>
                 ) : (
                     <Panel title="PROTOCOL REFERENCE">

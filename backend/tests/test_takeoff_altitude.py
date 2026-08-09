@@ -65,6 +65,9 @@ def manager(action) -> TelemetryManager:
     t._last_emit = 0.0
     t._fleet_mode = False
     t._alt_verify_task = None
+    t._rate_counts = {}
+    t._rate_window_start = None
+    t._measured_rates = {}
     return t
 
 
@@ -473,3 +476,72 @@ async def test_an_unknown_link_kind_is_ignored_rather_than_believed():
     t, _ = rate_manager("udpin://127.0.0.1:1", "local")
     t.set_link_kind("wifi")
     assert t._link_kind == "local"
+
+
+# --------------------------------------------------------------------------- #
+# Achieved rates                                                                #
+# --------------------------------------------------------------------------- #
+#
+# A 3DR radio's ceiling is AIR_SPEED and ECC — set on the RADIO, invisible from
+# here, and unrelated to the 57600 printed on the box (that is the wire to the
+# computer, not the air link). So the request is only a request, and the only
+# honest answer to "how fast can this link go" is to measure what arrives.
+
+@pytest.mark.asyncio
+async def test_arrivals_are_counted_into_a_measured_rate(monkeypatch):
+    t = manager(_StubAction())
+    clock = {"now": 1000.0}
+    monkeypatch.setattr("time.monotonic", lambda: clock["now"])
+
+    for _ in range(30):
+        t._count("attitude")
+    assert t.snapshot.measured_rates == {}, "no verdict before the window closes"
+
+    clock["now"] += TelemetryManager._RATE_WINDOW_S
+    t._count("attitude")
+    assert t.snapshot.measured_rates["attitude"] == pytest.approx(6.2, abs=0.2)
+
+
+@pytest.mark.asyncio
+async def test_a_starved_stream_reads_far_below_what_was_asked(monkeypatch):
+    """The whole point. Requesting 10 Hz and receiving 3 is indistinguishable
+    from a healthy link unless the arrivals are counted."""
+    t = manager(_StubAction())
+    clock = {"now": 500.0}
+    monkeypatch.setattr("time.monotonic", lambda: clock["now"])
+    for _ in range(15):
+        t._count("position")
+    clock["now"] += TelemetryManager._RATE_WINDOW_S
+    t._count("position")
+    assert t.snapshot.measured_rates["position"] < 4.0
+
+
+@pytest.mark.asyncio
+async def test_each_window_is_independent_of_the_last(monkeypatch):
+    """A radio setting turned up must show its effect while you are still
+    standing there, not be averaged away by the previous ten minutes."""
+    t = manager(_StubAction())
+    clock = {"now": 0.0}
+    monkeypatch.setattr("time.monotonic", lambda: clock["now"])
+    for _ in range(5):
+        t._count("position")
+    clock["now"] += TelemetryManager._RATE_WINDOW_S
+    t._count("position")
+    slow = t.snapshot.measured_rates["position"]
+
+    for _ in range(100):
+        t._count("position")
+    clock["now"] += TelemetryManager._RATE_WINDOW_S
+    t._count("position")
+    assert t.snapshot.measured_rates["position"] > slow * 5
+
+
+@pytest.mark.asyncio
+async def test_velocity_is_not_requested_separately():
+    """position and velocity are ONE message. MAVSDK keeps max() of the two
+    rates for GLOBAL_POSITION_INT, so a separate velocity request can only push
+    position up — never buy a second stream, and never lower anything."""
+    t, rec = rate_manager("udpin://127.0.0.1:1", "radio")
+    await t._set_rates()
+    assert "velocity_ned" not in rec.rates
+    assert rec.rates["position"] > 0
