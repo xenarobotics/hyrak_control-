@@ -117,10 +117,33 @@ function publish(r: HyrakRegistration) {
     }
 }
 
+function sendLine(line: string) {
+    nativeBridge()?.send('udp', BRIDGE_ID, new TextEncoder().encode(line))
+}
+
 function sendRegister() {
     // The BARE form. The decoder reads the address off the UDP source, so
     // this works even when our own idea of our address is wrong.
-    nativeBridge()?.send('udp', BRIDGE_ID, new TextEncoder().encode('HYRAK REGISTER'))
+    sendLine('HYRAK REGISTER')
+}
+
+/** Hands the feeds back to whoever should have them next.
+ *
+ *  A REGISTRATION OUTLIVES THE PROCESS THAT MADE IT, which is the point —
+ *  it is a strong claim, and a strong claim is what stops another machine's
+ *  DHCP lease pulling the stream away mid-flight. The cost is symmetrical
+ *  and only shows up after we are gone: nothing expires the claim (the
+ *  decoder's CLIENT_TIMEOUT is 0), so the feeds stay pinned to this PC's
+ *  address forever, and a later lease-following client on another machine
+ *  can never take over, because weak never overrides strong.
+ *
+ *  So the claim has to be released deliberately. This is best-effort by
+ *  nature — a crash or a pulled cable releases nothing, and no amount of
+ *  client code fixes that — but a clean shutdown is the common case and
+ *  costs one datagram.
+ */
+function sendUnregister() {
+    sendLine('HYRAK UNREGISTER')
 }
 
 /** Starts registering with the decoder at `host`, and keeps doing so.
@@ -162,6 +185,7 @@ export async function startHyrakRegistration(host: string, owner = 'default'): P
         publish(parseRegistrationReply(new TextDecoder().decode(event.data)))
     })
 
+    attachUnloadHook()
     sendRegister()
     timer = setInterval(sendRegister, HYRAK_REGISTER_INTERVAL_MS)
 }
@@ -172,7 +196,36 @@ async function teardown(): Promise<void> {
     currentHost = null
     if (timer) { clearInterval(timer); timer = null }
     if (unsubscribe) { unsubscribe(); unsubscribe = null }
+    detachUnloadHook()
+    sendUnregister()
+    // Let the datagram actually leave before the socket closes under it.
+    // dgram.send is asynchronous, so closing in the same tick can discard a
+    // queued packet — and the packet whose whole job is to release the claim
+    // is the worst one to lose.
+    await new Promise(r => setTimeout(r, 50))
     try { await nativeBridge()?.stop('udp', BRIDGE_ID) } catch { /* already gone */ }
+}
+
+// THE CASE THAT ACTUALLY MATTERS is not a tidy stop() call — it is the app
+// being closed, which is exactly when the claim would otherwise be stranded.
+// pagehide fires on close and on navigation away, including the cases
+// beforeunload misses on some platforms; both are registered because neither
+// is reliable alone. Nothing can be awaited here, so this is one fire-and-
+// forget datagram and no cleanup.
+let unloadHook: (() => void) | null = null
+
+function attachUnloadHook() {
+    if (unloadHook || typeof window === 'undefined') return
+    unloadHook = () => { if (active) sendUnregister() }
+    window.addEventListener('pagehide', unloadHook)
+    window.addEventListener('beforeunload', unloadHook)
+}
+
+function detachUnloadHook() {
+    if (!unloadHook || typeof window === 'undefined') return
+    window.removeEventListener('pagehide', unloadHook)
+    window.removeEventListener('beforeunload', unloadHook)
+    unloadHook = null
 }
 
 export async function stopHyrakRegistration(owner = 'default'): Promise<void> {

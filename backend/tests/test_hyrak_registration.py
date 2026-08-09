@@ -106,6 +106,39 @@ def test_retargeting_bypasses_the_owner_count():
     assert "if (active) await teardown()" in src
 
 
+def test_the_claim_is_released_on_a_clean_shutdown():
+    """A REGISTRATION OUTLIVES THE PROCESS, which is the point — it is what
+    stops another machine's DHCP lease pulling the stream away mid-flight.
+    The cost is symmetrical and only appears after we are gone: nothing
+    expires it (the decoder's CLIENT_TIMEOUT is 0), so the feeds stay pinned
+    to this PC's address forever and a later lease-following client on
+    another machine can never take over, because weak never overrides strong.
+
+    Adding a re-registration timer is what made this worth fixing, so the
+    release belongs with it."""
+    src = _read(_REG)
+    assert "'HYRAK UNREGISTER'" in src
+    assert "sendUnregister()" in src
+
+
+def test_the_release_survives_the_app_simply_being_closed():
+    """The stranded-claim case is not a tidy stop() call — it is the window
+    going away, which is precisely when nobody calls anything. Both events
+    are registered because neither is reliable alone across platforms."""
+    src = _read(_REG)
+    assert "'pagehide'" in src and "'beforeunload'" in src
+
+
+def test_the_socket_is_not_closed_out_from_under_the_release():
+    """dgram.send is asynchronous. Closing in the same tick can discard the
+    queued packet, and the packet whose entire job is to release the claim is
+    the worst one to lose."""
+    src = _read(_REG)
+    i, j = src.index("sendUnregister()\n    // Let the datagram"), src.index("stop('udp', BRIDGE_ID)")
+    assert i < j, "release must be sent before the socket is stopped"
+    assert "setTimeout(r, 50)" in src
+
+
 def test_registration_never_breaks_the_link_it_is_helping():
     """It is UDP to an unauthenticated port on a box that may not be there.
     The feeds run regardless, so a failure here must not throw into the relay
