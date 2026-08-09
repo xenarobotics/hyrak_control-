@@ -28,6 +28,7 @@
 import { useEffect, useState } from 'react'
 import { isDesktopApp, nativeBridge, type BridgeEvent } from '@/lib/nativeBridge'
 import { canDecodeHevc } from '@/lib/codecString'
+import { startHyrakRegistration } from '@/lib/hyrakRegister'
 import {
     getReceiverHost, getReceiverTransport, getReceiverLatencyMs, getReceiverAccel,
     getReceiverPassthrough,
@@ -175,6 +176,18 @@ export async function startReceiver(alloc?: RelayAllocation): Promise<ReceiverSt
     await stopReceiver()
     lastError = null
     lastAlloc = alloc
+
+    // Claim the decoder's feeds for this machine before starting the
+    // pipeline. The decoder pushes to ONE direct-UDP client and otherwise
+    // guesses from its DHCP lease file — which cannot see a statically
+    // addressed PC, and keeps aiming at a departed machine for up to 12 hours
+    // after it leaves. A stale destination here is a black video pane with
+    // nothing visibly wrong at either end.
+    //
+    // Only the UDP transport is affected: RTSP is served by MediaMTX to any
+    // number of viewers and is unaffected by who is registered. Registering
+    // regardless keeps one code path and costs one datagram.
+    void startHyrakRegistration(getReceiverHost(), 'video')
 
     const transport = getReceiverTransport()
     // Passthrough is opt-in. Chromium answering "yes I support HEVC" is not

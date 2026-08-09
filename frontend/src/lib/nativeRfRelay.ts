@@ -33,6 +33,7 @@
 // pinRemote — always send to 14551, never to whoever was last heard from.
 
 import { getSocket } from '@/lib/socket'
+import { startHyrakRegistration, stopHyrakRegistration } from '@/lib/hyrakRegister'
 import { isDesktopApp, nativeBridge, type BridgeEvent } from '@/lib/nativeBridge'
 import { getRfDownlinkPort, getRfUplinkPort, getRfUplinkHost, getRfFanoutPort } from '@/lib/rfBridge'
 
@@ -113,6 +114,14 @@ export async function startNativeRfRelay(
         )
     }
 
+    // Tell the decoder to point its feeds at THIS machine. Without it the
+    // decoder infers the destination from its DHCP lease file, which cannot
+    // see a statically addressed PC at all and keeps aiming at a departed
+    // machine for up to 12 hours after it leaves. Best-effort and never
+    // fatal: it is UDP, the feeds run regardless, and a browser session has
+    // no socket to send it with.
+    void startHyrakRegistration(uplinkHost, 'telemetry')
+
     const socket = getSocket()
     sawTraffic = false
     unsubscribe = bridge?.onEvent((event: BridgeEvent) => {
@@ -148,6 +157,10 @@ export async function stopNativeRfRelay(): Promise<void> {
     if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null }
     if (unsubscribe) { unsubscribe(); unsubscribe = null }
     try { getSocket().off('serial_downlink', onDownlink) } catch { /* socket gone */ }
+    // Drop this link's claim. Note this does NOT un-register: the decoder
+    // never expires a client, so the feeds keep flowing — what stops is the
+    // self-healing tick, and only once video has let go too.
+    await stopHyrakRegistration('telemetry')
     if (isDesktopApp()) {
         try { await nativeBridge()?.stop('udp', NATIVE_UDP_ID) } catch { /* not running */ }
     }
