@@ -264,3 +264,212 @@ async def test_a_second_command_supersedes_the_first_verifier():
     assert first.cancelled() or first.done()
     assert t._alt_verify_task is not first
     t._alt_verify_task.cancel()
+
+
+# --------------------------------------------------------------------------- #
+# The altitude in the COMMAND — what QGroundControl does                        #
+# --------------------------------------------------------------------------- #
+#
+# Verified in both codebases rather than inferred:
+#
+#   PX4  navigator_main.cpp      rep->current.alt = cmd.param7;
+#   QGC  PX4FirmwarePlugin.cc    takeoffAltAMSL = takeoffAltRel + altitudeAMSL
+#                                sendMavCommand(..., NAV_TAKEOFF, ..., takeoffAltAMSL)
+#   MAVSDK action_impl.cpp       takeoff_async_px4: NO param7 at all
+#                                set_takeoff_altitude_px4: writes MIS_TAKEOFF_ALT
+#
+# So on PX4 the altitude reaches the aircraft through MAVSDK only as a
+# parameter, and through QGC as a command field. That one difference is the
+# whole of "it works in QGC".
+
+class _RecordingDirect:
+    def __init__(self, fail=False):
+        self.sent = []
+        self.fail = fail
+
+    async def send_message(self, message):
+        if self.fail:
+            raise RuntimeError("mavlink_direct unavailable")
+        self.sent.append(message)
+
+
+def flying_manager(action, direct=None, lat=17.5, lng=78.3, amsl=540.0):
+    t = manager(action)
+    t._drone.mavlink_direct = direct if direct is not None else _RecordingDirect()
+    t._snapshot.position.latitude_deg = lat
+    t._snapshot.position.longitude_deg = lng
+    t._snapshot.position.absolute_altitude_m = amsl
+    return t
+
+
+def _fields(msg) -> dict:
+    import json as _json
+    return _json.loads(msg.fields_json)
+
+
+@pytest.mark.asyncio
+async def test_the_altitude_travels_in_the_command_as_amsl():
+    """param7 is AMSL, exactly as QGC computes it: requested relative height
+    plus the vehicle's own absolute altitude."""
+    a = _StubAction()
+    t = flying_manager(a, amsl=540.0)
+    t._snapshot.position.relative_altitude_m = 2.0    # airborne straight away
+    assert await t._takeoff_with_altitude_in_the_command(2.0) is True
+    f = _fields(t._drone.mavlink_direct.sent[0])
+    assert f["command"] == 22                          # MAV_CMD_NAV_TAKEOFF
+    assert f["param7"] == pytest.approx(542.0)
+    assert a.attempts == 0, "no parameter is written on this path at all"
+
+
+@pytest.mark.asyncio
+async def test_no_field_is_ever_nan():
+    """JSON has no NaN. PX4 substitutes the current position when param5/6 are
+    non-finite, so the drone's own coordinates go in instead — same behaviour,
+    every field a finite float that survives the encoding."""
+    t = flying_manager(_StubAction(), lat=17.5, lng=78.3)
+    t._snapshot.position.relative_altitude_m = 2.0
+    await t._takeoff_with_altitude_in_the_command(5.0)
+    f = _fields(t._drone.mavlink_direct.sent[0])
+    for k, v in f.items():
+        assert v == v, f"{k} is NaN and will not survive JSON"
+    assert f["param5"] == pytest.approx(17.5)
+    assert f["param6"] == pytest.approx(78.3)
+
+
+@pytest.mark.asyncio
+async def test_no_absolute_altitude_means_no_direct_takeoff():
+    """param7 is AMSL. Without an absolute altitude there is no correct value
+    to put in it, and guessing would fly the aircraft to a height nobody
+    chose."""
+    t = flying_manager(_StubAction(), amsl=0.0)
+    assert await t._takeoff_with_altitude_in_the_command(5.0) is False
+    assert t._drone.mavlink_direct.sent == []
+
+
+@pytest.mark.asyncio
+async def test_no_position_means_no_direct_takeoff():
+    t = flying_manager(_StubAction(), lat=0.0, lng=0.0)
+    assert await t._takeoff_with_altitude_in_the_command(5.0) is False
+
+
+@pytest.mark.asyncio
+async def test_an_aircraft_that_never_moves_reports_the_direct_path_failed():
+    """The command is fire-and-forget, so without checking the aircraft
+    actually left the ground a rejected message would leave an armed drone
+    with props spinning and the UI reporting success."""
+    t = flying_manager(_StubAction())
+    t._snapshot.position.relative_altitude_m = 0.0
+    assert await t._takeoff_with_altitude_in_the_command(5.0) is False
+
+
+@pytest.mark.asyncio
+async def test_takeoff_falls_back_to_the_parameter_path_when_direct_fails():
+    """This can only ever ADD a way for the takeoff to succeed — never remove
+    one. A build without mavlink_direct behaves exactly as before."""
+    a = _StubAction()
+    t = flying_manager(a, direct=_RecordingDirect(fail=True))
+    assert await t.takeoff(4.0) is True
+    _cancel(t)
+    assert a.takeoffs == 1, "the MAVSDK takeoff path still ran"
+    assert a.value == 4.0, "and the parameter was still set and verified"
+
+
+@pytest.mark.asyncio
+async def test_a_successful_direct_takeoff_writes_no_parameter():
+    """The point of the whole exercise: MIS_TAKEOFF_ALT is persistent on the
+    vehicle, so not touching it is not merely faster — it stops one takeoff
+    silently reconfiguring the next mission."""
+    a = _StubAction(initial=10.0)
+    t = flying_manager(a)
+    t._snapshot.position.relative_altitude_m = 3.0
+    assert await t.takeoff(3.0) is True
+    _cancel(t)
+    assert a.attempts == 0
+    assert a.takeoffs == 0
+    assert a.value == 10.0, "the vehicle's own setting is left untouched"
+
+
+# --------------------------------------------------------------------------- #
+# Which link the stream rates are chosen for                                    #
+# --------------------------------------------------------------------------- #
+
+class _RateRecorder:
+    def __init__(self):
+        self.rates = {}
+
+    def _setter(self, name):
+        async def set_rate(hz):
+            self.rates[name] = hz
+        return set_rate
+
+
+def rate_manager(address: str, link_kind: str = "local"):
+    t = manager(_StubAction())
+    rec = _RateRecorder()
+
+    class _Tel:
+        pass
+    tel = _Tel()
+    for n in ("position", "attitude_euler", "velocity_ned", "battery",
+              "gps_info", "home", "in_air"):
+        setattr(tel, f"set_rate_{n}", rec._setter(n))
+    t._drone.telemetry = tel
+    t._address = address
+    t._link_kind = "local"
+    t.set_link_kind(link_kind)
+    return t, rec
+
+
+@pytest.mark.asyncio
+async def test_a_relayed_radio_is_recognised_despite_a_loopback_address():
+    """THE BUG. The radio is plugged into the operator's machine and relayed
+    here, so MAVSDK always sees udpin://127.0.0.1 whatever is at the far end —
+    which made startswith("serial://") false on every real-radio flight this
+    platform has ever made, and selected the fast profile over a 57600 baud
+    half-duplex link every single time."""
+    fast, rec_fast = rate_manager("udpin://127.0.0.1:41234", "local")
+    await fast._set_rates()
+    slow, rec_slow = rate_manager("udpin://127.0.0.1:41234", "radio")
+    await slow._set_rates()
+    assert rec_slow.rates["position"] < rec_fast.rates["position"]
+    assert rec_slow.rates["attitude_euler"] < rec_fast.rates["attitude_euler"]
+
+
+@pytest.mark.asyncio
+async def test_a_plain_serial_address_still_counts_as_a_radio():
+    """The address remains a fallback for a genuinely local serial cable —
+    the declaration is an addition, not a replacement."""
+    t, rec = rate_manager("serial:///dev/ttyUSB0:57600", "local")
+    await t._set_rates()
+    fast, rec_fast = rate_manager("udpin://127.0.0.1:41234", "local")
+    await fast._set_rates()
+    assert rec.rates["position"] < rec_fast.rates["position"]
+
+
+@pytest.mark.asyncio
+async def test_the_streams_that_fly_the_aircraft_outrank_the_dashboard():
+    """Position and attitude feed the tracking geometry; battery percentage and
+    home position change over minutes and cost the same per message."""
+    t, rec = rate_manager("udpin://127.0.0.1:1", "radio")
+    await t._set_rates()
+    assert rec.rates["position"] >= 4.0
+    assert rec.rates["attitude_euler"] >= 8.0
+    assert rec.rates["battery"] <= 1.0
+    assert rec.rates["home"] <= 0.5
+
+
+@pytest.mark.asyncio
+async def test_in_air_is_not_starved():
+    """It is 2 bytes of payload and the UI picks TAKEOFF vs SET ALT from it —
+    losing it is what made the altitude box look dead in flight."""
+    for kind in ("radio", "local"):
+        t, rec = rate_manager("udpin://127.0.0.1:1", kind)
+        await t._set_rates()
+        assert rec.rates["in_air"] >= 2.0
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_link_kind_is_ignored_rather_than_believed():
+    t, _ = rate_manager("udpin://127.0.0.1:1", "local")
+    t.set_link_kind("wifi")
+    assert t._link_kind == "local"

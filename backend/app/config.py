@@ -247,6 +247,26 @@ class Settings(BaseSettings):
 
     # Telemetry
     default_baud_rate: int = Field(default=57600)
+
+    # ── MAVLink stream rates, Hz ──────────────────────────────────────────
+    # Two profiles, because the two links are genuinely different: a local UDP
+    # hop to SITL has effectively unlimited headroom, while a 57600-baud SiK
+    # radio is half-duplex and shared with the uplink.
+    #
+    # Configurable rather than hard-coded because the right number depends on
+    # the radio in front of it — air data rate, ECC setting, and how far apart
+    # the two ends are. The defaults are chosen against the observation that
+    # QGroundControl over the same 3DR radio sustains comfortably more than
+    # this; if a particular link cannot hold it the symptom is dropped
+    # messages and "Socket closed" reconnects, and these are the knobs to turn
+    # down. Only the three that feed the tracking geometry are exposed — the
+    # dashboard streams are not worth a setting.
+    telemetry_rate_position_radio: float = Field(default=8.0)
+    telemetry_rate_position_udp: float = Field(default=10.0)
+    telemetry_rate_attitude_radio: float = Field(default=10.0)
+    telemetry_rate_attitude_udp: float = Field(default=20.0)
+    telemetry_rate_velocity_radio: float = Field(default=4.0)
+    telemetry_rate_velocity_udp: float = Field(default=8.0)
     mavsdk_server_host: str = Field(default="localhost")
     mavsdk_server_port: int = Field(default=50051)
     sitl_address: str = Field(default="udpin://0.0.0.0:14540")

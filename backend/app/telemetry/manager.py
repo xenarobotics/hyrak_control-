@@ -10,10 +10,13 @@ Key concepts:
 - One TelemetryManager instance per drone session
 """
 import asyncio
+import json
 import logging
 import math
 import socket
 from typing import Callable, Optional
+
+from app.config import get_settings
 from mavsdk import System
 from mavsdk.action import ActionError
 from mavsdk.offboard import (
@@ -79,6 +82,20 @@ class TelemetryManager:
         # the older one settling last would overwrite the newer verdict with a
         # judgement about an altitude nobody is flying to any more.
         self._alt_verify_task: Optional[asyncio.Task] = None
+        # What the link to the AIRCRAFT actually is — "radio" or "local".
+        # Declared by whoever built the connection, because the MAVSDK address
+        # only describes the hop to mavsdk_server. See _set_rates.
+        self._link_kind: str = "local"
+
+    def set_link_kind(self, kind: str) -> None:
+        """Declare the physical link to the aircraft: "radio" or "local".
+
+        Must be called BEFORE start(), which is where the stream rates are
+        chosen. A radio link gets the conservative profile; a local UDP hop to
+        SITL or a same-machine autopilot gets the fast one.
+        """
+        if kind in ("radio", "local"):
+            self._link_kind = kind
 
     # ------------------------------------------------------------------ #
     # Connection                                                           #
@@ -194,8 +211,21 @@ class TelemetryManager:
         can saturate it and cause exactly the kind of intermittent "Socket closed"
         disconnects that don't happen in QGroundControl, which is far more
         conservative over slow links. Use a lower profile for serial.
+
+        THE ADDRESS DOES NOT TELL YOU WHAT THE LINK IS. It names the hop
+        between this process and mavsdk_server, not the hop between the ground
+        and the aircraft. In this product the radio is plugged into the
+        OPERATOR'S machine and relayed to the backend (serial_bridge.py,
+        rf_bridge.py), so mavsdk always sees `udpin://127.0.0.1:<port>` no
+        matter what is at the far end — which meant a startswith("serial://")
+        test was false on every real-radio flight this platform has ever
+        made, and the "conservative over slow links" profile below was
+        selected exactly never. The bridges now declare the physical link
+        instead (`set_link_kind`), and the address is only the fallback for a
+        genuinely local serial cable.
         """
-        is_serial = self._address.startswith("serial://")
+        is_serial = (self._link_kind == "radio"
+                     or self._address.startswith("serial://"))
 
         if self._fleet_mode:
             # Fleet drones: only the two streams we actually control via rate commands.
@@ -206,15 +236,46 @@ class TelemetryManager:
                 ("battery",  self._drone.telemetry.set_rate_battery,  0.2),
             ]
         else:
+            # WHAT DESERVES BANDWIDTH AND WHAT DOES NOT.
+            #
+            # These are not one dial. Position and attitude feed the tracking
+            # geometry — every metric a follow makes is computed against them,
+            # and a stale attitude is worse than a slow one because it is
+            # confidently wrong. Battery, GPS count and home position are
+            # dashboard numbers that change over minutes and cost the same
+            # bandwidth per message as the ones that matter.
+            #
+            # The old serial figures were far too conservative for a link that
+            # demonstrably carries more: QGroundControl over the same 3DR radio
+            # sustains well above 10 Hz. They also cost more than they saved,
+            # because a 2 Hz position stream is 500 ms of dead reckoning per
+            # sample in a loop chasing a moving vehicle. Raised, with the
+            # dashboard streams cut further to pay for it — the total is lower
+            # than before on the fields nobody is flying by.
+            cfg = get_settings()
             rates = [
-                ("position",     self._drone.telemetry.set_rate_position,       2.0 if is_serial else 4.0),
-                ("attitude",     self._drone.telemetry.set_rate_attitude_euler, 4.0 if is_serial else 10.0),
-                ("velocity_ned", self._drone.telemetry.set_rate_velocity_ned,   2.0 if is_serial else 4.0),
-                ("battery",      self._drone.telemetry.set_rate_battery,        1.0 if is_serial else 2.0),
-                ("gps_info",     self._drone.telemetry.set_rate_gps_info,       1.0 if is_serial else 2.0),
-                ("home",         self._drone.telemetry.set_rate_home,           0.5 if is_serial else 1.0),
-                ("in_air",       self._drone.telemetry.set_rate_in_air,         1.0 if is_serial else 2.0),
+                ("position",     self._drone.telemetry.set_rate_position,
+                 cfg.telemetry_rate_position_radio if is_serial else cfg.telemetry_rate_position_udp),
+                ("attitude",     self._drone.telemetry.set_rate_attitude_euler,
+                 cfg.telemetry_rate_attitude_radio if is_serial else cfg.telemetry_rate_attitude_udp),
+                ("velocity_ned", self._drone.telemetry.set_rate_velocity_ned,
+                 cfg.telemetry_rate_velocity_radio if is_serial else cfg.telemetry_rate_velocity_udp),
+                # Dashboard-only from here down. A battery percentage that
+                # updates twice a second is not twice as useful as one that
+                # updates every two seconds, and on a shared radio the
+                # difference is bandwidth taken from the tracking loop.
+                ("battery",      self._drone.telemetry.set_rate_battery,        0.5 if is_serial else 1.0),
+                ("gps_info",     self._drone.telemetry.set_rate_gps_info,       0.5 if is_serial else 1.0),
+                ("home",         self._drone.telemetry.set_rate_home,           0.2 if is_serial else 0.5),
+                # in_air is the one low-rate stream that IS load-bearing: the
+                # UI picks TAKEOFF vs SET ALT from it. Cheap — EXTENDED_SYS_STATE
+                # is a 2-byte payload — so there is no reason to starve it.
+                ("in_air",       self._drone.telemetry.set_rate_in_air,         2.0),
             ]
+            logger.info(
+                f"Telemetry profile: {'RADIO' if is_serial else 'UDP/local'} "
+                f"— position {rates[0][2]:g} Hz, attitude {rates[1][2]:g} Hz"
+            )
         for name, setter, hz in rates:
             try:
                 await asyncio.wait_for(setter(hz), timeout=2.0)
@@ -915,7 +976,116 @@ class TelemetryManager:
         )
         return False
 
+    #: MAV_CMD_NAV_TAKEOFF.
+    _MAV_CMD_NAV_TAKEOFF = 22
+
+    async def _takeoff_with_altitude_in_the_command(self, relative_altitude_m: float) -> bool:
+        """
+        Send MAV_CMD_NAV_TAKEOFF the way QGroundControl does: with the altitude
+        IN THE COMMAND.
+
+        WHY THIS EXISTS — verified in both codebases, not inferred.
+
+        PX4 takes the takeoff altitude straight off the command
+        (navigator_main.cpp):
+
+            rep->current.alt = cmd.param7;
+
+        QGC therefore puts it there (PX4FirmwarePlugin.cc):
+
+            double takeoffAltAMSL = takeoffAltRel + vehicleAltitudeAMSL;
+            sendMavCommand(..., MAV_CMD_NAV_TAKEOFF, ..., takeoffAltAMSL);
+
+        MAVSDK's PX4 path sends the SAME command with no params at all
+        (action_impl.cpp, takeoff_async_px4) — note that its generic
+        takeoff_async_standard DOES set param7, and the PX4 specialisation
+        deliberately does not:
+
+            command.command = MAV_CMD_NAV_TAKEOFF;
+            command.target_component_id = ...;
+            // no maybe_param7
+
+        so param7 arrives as NaN and PX4 falls back to the MIS_TAKEOFF_ALT
+        PARAMETER, which set_takeoff_altitude() writes in a separate round trip
+        (set_takeoff_altitude_px4 -> set_param_float(TAKEOFF_ALT_PARAM)).
+
+        That single difference is the whole of "it works in QGC". A parameter
+        write is a request/ack exchange over a link the telemetry streams are
+        already filling, and it carries a persistent side effect on the
+        vehicle; a command parameter is neither. Putting the altitude in the
+        command removes the parameter from the path entirely.
+
+        NO NaN IS SENT. PX4 substitutes the current position when param5/param6
+        are non-finite, so the drone's own latitude and longitude are passed
+        instead — identical behaviour, and every field stays a finite float
+        that survives the JSON encoding this goes out through. param1 (pitch)
+        is fixed-wing only and param4 (yaw) is overwritten by the navigator on
+        the line above, so neither is read on a multirotor.
+        """
+        pos = self._snapshot.position
+        if pos.latitude_deg == 0.0 and pos.longitude_deg == 0.0:
+            return False
+        if not pos.absolute_altitude_m:
+            # param7 is AMSL. Without an absolute altitude there is no correct
+            # value to put in it, and guessing one would fly the aircraft to a
+            # height nobody chose.
+            return False
+        target_amsl = float(pos.absolute_altitude_m) + float(relative_altitude_m)
+        try:
+            from mavsdk.mavlink_direct import MavlinkMessage
+            fields = json.dumps({
+                "target_system": 1,
+                "target_component": 1,
+                "command": self._MAV_CMD_NAV_TAKEOFF,
+                "confirmation": 0,
+                "param1": 0.0,          # pitch — fixed-wing only
+                "param2": 0.0,          # unused
+                "param3": 0.0,          # takeoff flags; QGC sends 0
+                "param4": 0.0,          # yaw — navigator overwrites with NaN
+                "param5": float(pos.latitude_deg),
+                "param6": float(pos.longitude_deg),
+                "param7": target_amsl,
+            })
+            await asyncio.wait_for(
+                self._drone.mavlink_direct.send_message(
+                    MavlinkMessage("COMMAND_LONG", 0, 0, 1, 1, fields)
+                ),
+                timeout=5.0,
+            )
+        except Exception as e:
+            logger.warning(f"Direct takeoff command unavailable ({e})")
+            return False
+
+        # DID IT ACTUALLY LEAVE THE GROUND. The command is fire-and-forget, so
+        # without this a malformed or rejected message would leave an armed
+        # aircraft sitting on the ground with props spinning and the UI
+        # reporting success.
+        for _ in range(20):                       # up to 10 s
+            await asyncio.sleep(0.5)
+            if (self._snapshot.position.relative_altitude_m > 0.5
+                    or self._snapshot.flight_mode.is_in_air):
+                logger.info(
+                    f"✅ Takeoff to {relative_altitude_m:g} m commanded directly "
+                    f"(param7 = {target_amsl:.1f} m AMSL) — no parameter involved"
+                )
+                return True
+        logger.warning(
+            "Direct takeoff command did not lift the aircraft — falling back "
+            "to the MAVSDK takeoff path"
+        )
+        return False
+
     async def takeoff(self, altitude_m: Optional[float] = None) -> bool:
+        # PREFERRED PATH: altitude in the command, exactly as QGC sends it.
+        # Falls through to the MAVSDK parameter path below if it is unavailable
+        # or the aircraft did not move, so this can only ever add a way for the
+        # takeoff to succeed.
+        if altitude_m is not None:
+            self._snapshot.commanded_altitude_m = float(altitude_m)
+            self._snapshot.altitude_warning = None
+            if await self._takeoff_with_altitude_in_the_command(float(altitude_m)):
+                self._start_altitude_verify(float(altitude_m))
+                return True
         try:
             if altitude_m is not None:
                 if not await self._set_takeoff_altitude_verified(altitude_m):

@@ -181,6 +181,17 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 pass
 
         manager = TelemetryManager(on_update=on_telemetry_update)
+        # TELL IT WHAT THE LINK REALLY IS, before start() picks stream rates.
+        #
+        # The address cannot say. In this product the radio is plugged into the
+        # operator's machine and relayed here (serial_bridge / rf_bridge), so
+        # MAVSDK always sees a loopback udpin:// whatever is at the far end —
+        # which is why the manager's own startswith("serial://") test had never
+        # once been true on a real-radio flight, and the conservative profile
+        # it guards was never selected. `link_kind` is passed by whichever
+        # handler knows: the browser-radio and RF-relay flows say "radio", a
+        # direct SITL connect says nothing and gets "local".
+        manager.set_link_kind(data.get("link_kind") or "local")
         connected = await manager.connect(address)
 
         if not connected:
@@ -245,7 +256,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             downlink_port=int(data.get("downlinkPort") or 14550),
             uplink_port=int(data.get("uplinkPort") or 14551),
         )
-        await on_connect_telemetry(sid, {"address": bridge.address})
+        await on_connect_telemetry(sid, {"address": bridge.address, "link_kind": "radio"})
 
     @sio.on("connect_browser_serial")
     async def on_connect_browser_serial(sid, data=None):
@@ -285,7 +296,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         # Reuse the normal connect flow; the heartbeat mavsdk waits for arrives
         # through serial_uplink events the browser is already pumping.
         try:
-            await on_connect_telemetry(sid, {"address": bridge.address})
+            await on_connect_telemetry(sid, {"address": bridge.address, "link_kind": "radio"})
         except Exception as e:
             logger.error(f"Session {session.session_id[:8]} telemetry connect raised: {e}")
             serial_bridge.close_bridge(session.session_id)
