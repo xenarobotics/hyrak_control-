@@ -515,9 +515,44 @@ def register_webrtc_events(
                             "must call POST /api/webrtc/video-relay/allocate and start "
                             "relaying before sending the offer."
                         )
-                    source_track = await asyncio.get_event_loop().run_in_executor(
-                        None, ingest.open_track
-                    )
+                    # SAY WHAT IS BEING WAITED FOR, WHILE WAITING.
+                    #
+                    # open_track blocks for up to 25 s waiting for the desktop
+                    # app to push video. For that whole time the operator sees
+                    # a spinner and nothing else, and if it then fails they
+                    # have watched "connecting" for 25 seconds and learned
+                    # nothing — which reads as the mode being broken rather
+                    # than the uplink being silent. It is the same 25 s
+                    # whichever analysis mode is selected, so it also makes an
+                    # uplink problem look like it belongs to whatever mode
+                    # happened to be picked.
+                    #
+                    # ffmpeg already knows. It is the process holding the
+                    # listener, and its stderr says whether the source ever
+                    # connected — "404 Not Found" from the camera reaches this
+                    # tail immediately, 25 s before the timeout fires.
+                    async def _report_wait():
+                        started = asyncio.get_event_loop().time()
+                        while True:
+                            await asyncio.sleep(3.0)
+                            tail = [ln for ln in ingest.stderr_tail().strip().splitlines() if ln]
+                            await sio.emit("stream_progress", {
+                                "phase": "awaiting_video",
+                                "seconds": round(
+                                    asyncio.get_event_loop().time() - started
+                                ),
+                                "source": video_source,
+                                "detail": (tail[-1][:200] if tail else
+                                           "nothing has reached the relay listener yet"),
+                            }, to=sid)
+
+                    reporter = asyncio.create_task(_report_wait())
+                    try:
+                        source_track = await asyncio.get_event_loop().run_in_executor(
+                            None, ingest.open_track
+                        )
+                    finally:
+                        reporter.cancel()
                 elif video_source in ("rtsp_datachannel", "air_unit_datachannel"):
                     # The desktop app is pushing RTP packets down a DataChannel
                     # (see datachannel_video_source.py) and the shim is writing

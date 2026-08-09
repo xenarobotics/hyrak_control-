@@ -69,7 +69,7 @@ function ResultsPanel() {
 export default function ModulesPage() {
     const {
         remoteStream, localStream,
-        isStreaming, overlayActive, isLoading, startPhase, modelLoading, lastError,
+        isStreaming, overlayActive, isLoading, startPhase, startDetail, modelLoading, lastError,
         cameras, selectedCameraId, setSelectedCameraId,
         startStream, stopStream,
     } = useWebRTCContext()
@@ -279,6 +279,22 @@ export default function ModulesPage() {
                                 }
                             </Button>
                         </div>
+
+                        {/* What the connect is blocked on. Without this the
+                            operator watches "Connecting" for 25s and learns
+                            nothing — and blames whichever mode they picked,
+                            because the wait is the same for all of them. */}
+                        {startDetail && !isStreaming && (
+                            <div style={{
+                                padding: '6px 10px', borderRadius: 8,
+                                background: 'rgba(251,191,36,0.10)',
+                                border: '1px solid rgba(251,191,36,0.35)',
+                                fontSize: 10, fontFamily: 'monospace', color: '#fbbf24',
+                                lineHeight: 1.5, wordBreak: 'break-word',
+                            }}>
+                                {startDetail}
+                            </div>
+                        )}
 
                         {/* Model loading */}
                         {modelLoading && (

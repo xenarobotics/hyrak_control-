@@ -20,6 +20,8 @@ interface WebRTCContextValue {
     /** What a start is currently waiting on, for an honest button label.
      *  'connecting' covers signaling + ICE + the first frame arriving. */
     startPhase: 'idle' | 'connecting' | 'model'
+    /** What the connect is currently blocked on, when the server says so. */
+    startDetail: string | null
     modelLoading: boolean
     stats: WebRTCStats | null
     lastError: string | null
@@ -96,6 +98,27 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
         return () => { socket.off('model_status', handle) }
     }, [])
 
+    // WHY THE SPINNER IS STILL SPINNING.
+    //
+    // A server-sourced feed waits up to 25 s for the desktop app to push
+    // video, and for that whole time the only thing on screen was the word
+    // "Connecting". Twenty-five seconds of that, followed by a failure, reads
+    // as the selected ANALYSIS MODE being broken — the mode is simply what the
+    // operator was changing when they hit it. The wait is identical for every
+    // mode, and the backend knows within a second whether anything is arriving.
+    const [progress, setProgress] = useState<string | null>(null)
+    useEffect(() => {
+        const socket = getSocket()
+        const handle = (d: { phase?: string; seconds?: number; detail?: string }) => {
+            setProgress(`waiting for video from the relay — ${d.seconds ?? 0}s · ${d.detail ?? ''}`)
+        }
+        socket.on('stream_progress', handle)
+        return () => { socket.off('stream_progress', handle) }
+    }, [])
+    // Cleared whenever a stream settles either way, so a stale line can never
+    // describe an attempt that is already over.
+    useEffect(() => { if (isStreaming || lastError) setProgress(null) }, [isStreaming, lastError])
+
     const startStream = useCallback(async () => {
         if (isLoading || pending) return
         setPending(true)
@@ -161,6 +184,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
             // operation, not just the signaling leg.
             isLoading: isLoading || pending,
             startPhase: !pending ? 'idle' : modelLoading ? 'model' : 'connecting',
+            startDetail: progress,
             lastError: rtspCameraError ?? lastError,
             cameras, selectedCameraId, setSelectedCameraId, scanCameras,
             startStream, stopStream, applyVideoSettings,
