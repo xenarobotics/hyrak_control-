@@ -29,6 +29,86 @@ def _free_udp_port() -> int:
     return port
 
 
+
+# MAVLink framing, enough to identify what is on the wire without decoding it.
+#
+# WHY SNIFF AT ALL. "Bytes arrived but no heartbeat" has two completely
+# different causes that send you to opposite ends of the system:
+#
+#   * the bytes are NOISE — wrong baud, so nothing frames at all. Fix on the
+#     operator's machine.
+#   * the bytes are VALID MAVLINK but carry no autopilot heartbeat. A SiK
+#     radio emits RADIO_STATUS from the GROUND module itself whether or not
+#     the air side is linked, so a healthy trickle of framed MAVLink proves
+#     the radio and the baud are right and the aircraft is not talking. Fix
+#     at the airframe.
+#
+# Byte counts cannot tell those apart. Frame magic and message ids can, and it
+# needs no CRC tables and no mavlink library — only the header.
+_V1_MAGIC = 0xFE
+_V2_MAGIC = 0xFD
+_MSG_NAMES = {
+    0: "HEARTBEAT", 1: "SYS_STATUS", 24: "GPS_RAW_INT", 30: "ATTITUDE",
+    32: "LOCAL_POSITION_NED", 33: "GLOBAL_POSITION_INT", 74: "VFR_HUD",
+    109: "RADIO_STATUS", 147: "BATTERY_STATUS", 242: "HOME_POSITION",
+    245: "EXTENDED_SYS_STATE", 253: "STATUSTEXT",
+}
+
+
+class _FrameSniffer:
+    """Counts MAVLink frames by message id, and which system ids sent them."""
+
+    def __init__(self):
+        self._buf = bytearray()
+        self.by_msg: dict[int, int] = {}
+        self.sysids: set[int] = set()
+        self.frames = 0
+
+    def feed(self, data: bytes) -> None:
+        # Bounded: a stream that never frames must not grow this forever.
+        # 512 bytes is well over the largest MAVLink frame (280), so a real
+        # frame straddling two chunks is never lost.
+        self._buf.extend(data)
+        if len(self._buf) > 512:
+            del self._buf[:-512]
+        b = self._buf
+        i = 0
+        while i < len(b):
+            magic = b[i]
+            if magic == _V2_MAGIC:
+                if len(b) - i < 12:
+                    break
+                total = b[i + 1] + 12 + (13 if b[i + 2] & 0x01 else 0)
+                if len(b) - i < total:
+                    break
+                sysid = b[i + 5]
+                msgid = b[i + 7] | (b[i + 8] << 8) | (b[i + 9] << 16)
+            elif magic == _V1_MAGIC:
+                if len(b) - i < 8:
+                    break
+                total = b[i + 1] + 8
+                if len(b) - i < total:
+                    break
+                sysid = b[i + 3]
+                msgid = b[i + 5]
+            else:
+                i += 1
+                continue
+            self.frames += 1
+            self.sysids.add(sysid)
+            self.by_msg[msgid] = self.by_msg.get(msgid, 0) + 1
+            i += total
+        del b[:i]
+
+    def summary(self) -> str:
+        if not self.frames:
+            return ""
+        top = sorted(self.by_msg.items(), key=lambda kv: kv[1], reverse=True)[:4]
+        msgs = ", ".join(f"{_MSG_NAMES.get(m, f'msg{m}')} x{n}" for m, n in top)
+        ids = ", ".join(str(s) for s in sorted(self.sysids))
+        return f"{self.frames} MAVLink frame(s) from system id(s) {ids}: {msgs}"
+
+
 class SerialBridge(asyncio.DatagramProtocol):
     def __init__(self, sio, socket_id: str):
         self._sio = sio
@@ -40,6 +120,7 @@ class SerialBridge(asyncio.DatagramProtocol):
         # anything — see traffic().
         self.bytes_in = 0
         self.packets_in = 0
+        self._sniffer = _FrameSniffer()
 
     @classmethod
     async def create(cls, sio, socket_id: str) -> "SerialBridge":
@@ -60,6 +141,7 @@ class SerialBridge(asyncio.DatagramProtocol):
         """Radio → drone side: browser serial bytes into mavsdk's UDP port."""
         self.bytes_in += len(data)
         self.packets_in += 1
+        self._sniffer.feed(data)
         if self._transport and not self._transport.is_closing():
             self._transport.sendto(data, ("127.0.0.1", self.mavsdk_port))
 
@@ -78,9 +160,20 @@ class SerialBridge(asyncio.DatagramProtocol):
             return ("no bytes at all reached the bridge from the browser — check "
                     "the radio is plugged in, the serial port permission was "
                     "granted, and the baud rate matches")
-        return (f"{self.packets_in} chunk(s), {self.bytes_in} bytes arrived from "
-                f"the radio but no MAVLink heartbeat was decoded — check the baud "
-                f"rate and that the air side is powered and in range")
+        seen = self._sniffer.summary()
+        if not seen:
+            return (f"{self.bytes_in} bytes arrived from the radio but NOTHING "
+                    f"framed as MAVLink — that is a baud rate mismatch, not a "
+                    f"drone problem. The radio is talking, just not MAVLink at "
+                    f"this speed")
+        if 0 in self._sniffer.by_msg:
+            return (f"{seen} — heartbeats WERE seen, so the link is up; the "
+                    f"connect timed out anyway, retry it")
+        return (f"{self.bytes_in} bytes arrived and framed correctly — {seen}. "
+                f"No HEARTBEAT among them means the baud and the ground radio "
+                f"are RIGHT and the aircraft is not reaching them: check the "
+                f"air-side radio is powered, paired (same NETID and air speed) "
+                f"and in range")
 
     def datagram_received(self, data: bytes, addr) -> None:
         """mavsdk → radio side: relay to the browser to write out the port."""

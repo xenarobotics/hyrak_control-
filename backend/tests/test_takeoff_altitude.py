@@ -621,11 +621,12 @@ async def test_a_changed_uplink_host_rebinds_rather_than_reusing():
 # system". The bridge is the one place that knows whether bytes arrived.
 
 def _bridge():
-    from app.telemetry.serial_bridge import SerialBridge
+    from app.telemetry.serial_bridge import SerialBridge, _FrameSniffer
     b = SerialBridge.__new__(SerialBridge)
     b._transport = None
     b.bytes_in = 0
     b.packets_in = 0
+    b._sniffer = _FrameSniffer()
     return b
 
 
@@ -636,18 +637,26 @@ def test_silence_from_the_radio_is_named_as_such():
     assert "baud" in msg
 
 
-def test_bytes_without_a_heartbeat_is_a_different_diagnosis():
-    """Bytes arriving but no heartbeat is a link or airframe problem. Nothing
-    arriving is a radio, cable, permission or baud problem on this machine.
-    Reporting them identically sends the operator to the wrong end of the
-    system."""
+def test_framed_mavlink_without_a_heartbeat_blames_the_airframe():
+    """Frames arriving proves the baud and the ground radio are right. What is
+    missing is the aircraft, so the message must say so rather than repeating
+    "check the baud rate"."""
     b = _bridge()
-    b.uplink(b"\xfd" * 40)
-    b.uplink(b"\xfd" * 60)
+    for _ in range(3):
+        b.uplink(_v2(109, sysid=51))
     msg = b.traffic()
-    assert "100 bytes" in msg
-    assert "2 chunk" in msg
+    assert "RADIO_STATUS" in msg
+    assert "air-side" in msg
     assert "no bytes" not in msg
+
+
+def test_unframed_noise_blames_the_baud_rate():
+    """The opposite diagnosis, from the same symptom of "bytes are arriving"."""
+    b = _bridge()
+    b.uplink(bytes([0x41] * 200))
+    msg = b.traffic()
+    assert "baud" in msg
+    assert "air-side" not in msg
 
 
 def test_the_counters_survive_a_closed_transport():
@@ -656,3 +665,73 @@ def test_the_counters_survive_a_closed_transport():
     b = _bridge()
     b.uplink(b"x" * 10)
     assert b.bytes_in == 10
+
+
+# --------------------------------------------------------------------------- #
+# What is actually on the wire                                                  #
+# --------------------------------------------------------------------------- #
+#
+# "3099 bytes arrived but no heartbeat" is still two diagnoses in one sentence,
+# and they point at opposite ends of the system: noise at the wrong baud (fix
+# on the operator's machine) versus valid MAVLink with no autopilot in it (fix
+# at the airframe). A SiK radio emits RADIO_STATUS from the GROUND module
+# whether or not the air side is linked, so framed MAVLink arriving is not
+# evidence that the aircraft is talking.
+
+def _v2(msgid: int, sysid: int = 1, payload_len: int = 9) -> bytes:
+    return (bytes([0xFD, payload_len, 0, 0, 7, sysid, 1,
+                   msgid & 0xFF, (msgid >> 8) & 0xFF, (msgid >> 16) & 0xFF])
+            + bytes(payload_len) + b"\x00\x00")
+
+
+def _sniffed(*chunks: bytes):
+    from app.telemetry.serial_bridge import _FrameSniffer
+    s = _FrameSniffer()
+    for c in chunks:
+        s.feed(c)
+    return s
+
+
+def test_noise_at_the_wrong_baud_frames_as_nothing():
+    """The distinguishing case. Bytes flowing plus zero frames is a baud
+    mismatch, and saying "check the air side is powered" would send the
+    operator to the roof for a problem on their desk."""
+    assert _sniffed(bytes([0x41] * 300)).summary() == ""
+
+
+def test_a_radio_talking_to_itself_is_identified_as_such():
+    """Ground module chattering with no aircraft behind it: frames arrive,
+    they are all RADIO_STATUS, and the system id is the radio's, not an
+    autopilot's."""
+    s = _sniffed(_v2(109, sysid=51) * 3)
+    assert "RADIO_STATUS" in s.summary()
+    assert 0 not in s.by_msg, "no heartbeat"
+    assert s.sysids == {51}
+
+
+def test_a_healthy_link_shows_a_heartbeat():
+    s = _sniffed(_v2(0) + _v2(30) + _v2(33))
+    assert 0 in s.by_msg
+    assert "HEARTBEAT" in s.summary()
+
+
+def test_a_frame_split_across_two_chunks_is_still_counted():
+    """Serial reads land on arbitrary boundaries, so frames straddle chunks
+    constantly. Dropping those would under-count exactly when the stream is
+    slowest — which is when this diagnosis matters most."""
+    f = _v2(0)
+    assert 0 in _sniffed(f[:5], f[5:]).by_msg
+
+
+def test_mavlink_v1_is_recognised_too():
+    """Older autopilots and some radios still emit v1, and reporting "nothing
+    framed" for a perfectly good v1 stream would blame the baud rate."""
+    v1 = bytes([0xFE, 9, 7, 1, 1, 0]) + bytes(9) + b"\x00\x00"
+    assert 0 in _sniffed(v1).by_msg
+
+
+def test_the_scan_buffer_cannot_grow_without_bound():
+    """A stream that never frames must not accumulate — this runs on every
+    chunk from a live radio for the life of the session."""
+    s = _sniffed(*[bytes([0x41] * 400) for _ in range(50)])
+    assert len(s._buf) <= 512
