@@ -268,6 +268,25 @@ class PlateEvent(Base):
     # rejects nearly every genuine plate. Recording it instead lets a reading
     # be judged after the fact without throwing the data away first.
     plate_px_w: Mapped[int] = mapped_column(Integer, default=0)
+    # The other two evidence fields. Both were computed per frame and shown
+    # live, then discarded when the row was written — so a report could be
+    # filtered on width but not on whether independent frames ever agreed,
+    # which is the difference between a settled plate and a single guess.
+    #
+    # votes = how many frames independently produced these exact characters.
+    # grammar_ok = the text matches a known plate pattern. A signal, never a
+    # filter: the genuine plate "719257C" fails the Indian grammar and is
+    # still a perfectly valid reading.
+    plate_votes: Mapped[int] = mapped_column(Integer, default=0)
+    plate_grammar_ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Compass bearing of travel, degrees, 0=North. Null when the vehicle was
+    # too slow for a heading to mean anything, or the ground projection had no
+    # altitude to work from.
+    heading_deg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Sustained travel against the traffic around it. Relative to the observed
+    # local flow, NOT to any map or declared road direction — there is neither
+    # available here. See traffic_manager._update_flow.
+    against_flow: Mapped[bool] = mapped_column(Boolean, default=False)
     image_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     # The whole-vehicle shot beside the plate crop. A 40x18px plate crop on its
     # own is unreviewable — you cannot tell a plate from a badge from an
@@ -298,6 +317,10 @@ class PlateEvent(Base):
             "vehicle_box": self.vehicle_box,
             "plate_box": self.plate_box,
             "plate_px_w": self.plate_px_w,
+            "plate_votes": self.plate_votes,
+            "plate_grammar_ok": self.plate_grammar_ok,
+            "heading_deg": self.heading_deg,
+            "against_flow": self.against_flow,
             "image_path": self.image_path,
             "vehicle_image_path": self.vehicle_image_path,
             "lat": self.lat,

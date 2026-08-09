@@ -353,6 +353,35 @@ async def download_crowd_report(session_id: str):
     )
 
 
+def _plate_grade(ev: dict) -> str:
+    """
+    One sortable word for how much a plate reading is worth.
+
+    The three raw fields answer different questions — how many pixels were
+    there, how many independent frames agreed, does it match a plate pattern —
+    and a reviewer with a few hundred rows needs one column to filter on, not
+    three to cross-reference by eye.
+
+    Thresholds match the live module's own (_PLATE_GOOD_PX, _OCR_GOOD_ENOUGH,
+    _PLATE_MIN_AGREEING_READS), so what the CSV calls "strong" is exactly what
+    the panel showed as settled during the flight.
+    """
+    text = (ev.get("plate_text") or "").strip()
+    if not text:
+        return ""
+    px = int(ev.get("plate_px_w") or 0)
+    conf = float(ev.get("ocr_confidence") or 0.0)
+    votes = int(ev.get("plate_votes") or 0)
+    if px >= 110 and conf >= 0.80 and votes >= 2:
+        return "strong"
+    if px >= 70 and votes >= 2:
+        return "good"
+    # Everything else is reported and kept — it is often the only look a
+    # passing vehicle ever gave — but it is one frame's opinion of a small
+    # crop, and the column says so.
+    return "weak"
+
+
 @router.get("/sessions/{session_id}/plate-report/download")
 async def download_plate_report(session_id: str):
     from app.vision.persistence import export_plate_report
@@ -362,19 +391,28 @@ async def download_plate_report(session_id: str):
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         rows_csv = io.StringIO()
         # One row per VEHICLE, with the plate filled in where one was read.
-        # plate_px_w travels with the reading because it is the honest quality
-        # indicator — a 40px plate and a 300px plate are not equally
-        # trustworthy, and the CSV is where that gets judged.
+        #
+        # THE EVIDENCE TRAVELS WITH THE READING. A 40px single-frame guess and
+        # a 300px plate three frames agreed on are both legitimate rows, and
+        # they are not equally trustworthy — so width, agreement count and
+        # grammar all come along, and `plate_grade` collapses them into the one
+        # column a reviewer can actually sort and filter a session on. Deriving
+        # the grade HERE rather than storing it keeps the raw numbers
+        # authoritative: the thresholds can be argued with afterwards, which
+        # they could not be if only the verdict had been kept.
         fieldnames = [
-            "vehicle_id", "track_id", "plate_text", "ocr_confidence", "plate_px_w",
+            "vehicle_id", "track_id", "plate_text", "plate_grade",
+            "ocr_confidence", "plate_px_w", "plate_votes", "plate_grammar_ok",
             "vehicle_type", "vehicle_color", "vehicle_color_conf",
-            "speed_est_kmh", "lat", "lng", "alt_m",
+            "speed_est_kmh", "heading_deg", "against_flow",
+            "lat", "lng", "alt_m",
             "first_seen", "last_seen", "image_path", "vehicle_image_path",
         ]
         w = csv.DictWriter(rows_csv, fieldnames=fieldnames, extrasaction="ignore")
         w.writeheader()
         for ev in events:
             row = dict(ev)
+            row["plate_grade"] = _plate_grade(ev)
             # Both images, in separate folders so a reviewer can flip through
             # the car photos without the plate crops interleaved.
             for field, folder in (("image_path", "plates"),

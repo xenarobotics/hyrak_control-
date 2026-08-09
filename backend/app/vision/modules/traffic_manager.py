@@ -52,6 +52,7 @@ THE OPTIMISATION THAT MAKES IT FIT IN ONE FRAME BUDGET
     budget with an explicit priority, which is what the merge was for.
 """
 import logging
+import math
 import os
 import time
 from collections import deque
@@ -150,6 +151,10 @@ _OCR_MAX_ATTEMPTS = 60
 # current best came from. Below that the extra pixels will not change the
 # reading and the call is better spent on a vehicle that has no plate at all.
 _REREAD_GROWTH = 1.30
+# How many retired vehicles' best readings to remember for re-identification.
+# One small dict entry each; 500 covers any realistic session over a junction
+# while keeping the memory bounded on a multi-hour flight.
+_READ_ARCHIVE_MAX = 500
 
 # ── Guards against fabricated plates ────────────────────────────────────────
 #
@@ -227,6 +232,69 @@ MAX_PURSUIT_SPEED_M_S = 2.5     # keep in step with dist_pd max_output
 
 _CAPTURE_ROOT = os.path.join(str(ROOT_DIR), ".data", "plate_captures")
 
+# ── Wrong-way detection ──────────────────────────────────────────────────────
+#
+# WHAT THIS CAN AND CANNOT KNOW. There is no map here, no lane geometry and no
+# operator-declared direction, so "wrong way" in the absolute sense is not
+# available. What IS available is the other traffic: a vehicle driving against
+# the vehicles around it is the observable that matters, and it needs no prior
+# knowledge of the road at all.
+#
+# THE FAILURE THIS IS SHAPED TO AVOID is a false alert. A wrong-way flag that
+# fires on a U-turn, a car pulling out of a driveway, or the far carriageway of
+# a divided road is worse than no flag, because an operator stops believing it.
+# Hence four independent conditions, all of which must hold:
+#
+#   1. The vehicle is actually MOVING. Below _FLOW_MIN_KMH a heading is atan2
+#      of box jitter — a uniformly random compass bearing.
+#   2. It is judged against NEARBY traffic only. A radius keeps the two
+#      carriageways of a divided road from being averaged into one meaningless
+#      mean heading, which is the single most likely source of a false alert.
+#   3. The neighbours AGREE with each other. Coherence is measured before the
+#      comparison is made: a junction where everyone is turning has no flow to
+#      be against, and produces no flags rather than flagging everyone.
+#   4. It PERSISTS. A vehicle must hold the opposed heading for about a
+#      second of frames, so a momentary tracker wobble or a car swinging
+#      through a turn cannot trip it.
+_FLOW_MIN_KMH = 8.0
+#: Neighbourhood radius as a fraction of the frame diagonal.
+_FLOW_NEIGHBOUR_FRAC = 0.30
+_FLOW_MIN_NEIGHBOURS = 3
+#: Resultant length of the neighbours' unit heading vectors, 0..1. 1.0 means
+#: they all point exactly the same way; below this there is no flow to oppose.
+_FLOW_COHERENCE = 0.75
+#: How far from the local flow counts as against it. Deliberately near
+#: opposite — 90 degrees is a turn, not a wrong way.
+_FLOW_OPPOSED_DEG = 120.0
+#: Frames of opposition before the flag is raised, and the ceiling on the
+#: counter so a long-flagged vehicle still clears within a second of rejoining
+#: the flow rather than coasting on accumulated credit.
+_FLOW_STRIKES_TO_FLAG = 20
+_FLOW_STRIKE_MAX = 30
+
+
+def _angle_gap(a: float, b: float) -> float:
+    """Smallest absolute angle between two compass bearings, 0..180."""
+    return abs((a - b + 180.0) % 360.0 - 180.0)
+
+
+def _local_flow(headings: List[float]) -> Tuple[Optional[float], float]:
+    """
+    (mean bearing, coherence 0..1) for a set of compass bearings.
+
+    A circular mean, not an arithmetic one: bearings 350 and 10 average to 0,
+    not to 180. Coherence is the resultant length, which is what tells a lane
+    of traffic all going one way from a junction where everyone is turning.
+    """
+    if not headings:
+        return (None, 0.0)
+    rad = np.radians(np.asarray(headings, dtype=np.float64))
+    x, y = float(np.cos(rad).mean()), float(np.sin(rad).mean())
+    r = float(np.hypot(x, y))
+    if r < 1e-6:
+        return (None, 0.0)
+    return (math.degrees(math.atan2(y, x)) % 360.0, r)
+
 
 def _read_quality(px_w: int, conf: float) -> float:
     """How good a plate reading is, as one number.
@@ -276,6 +344,8 @@ class _Vehicle:
         "crop_path", "vehicle_path", "read_area", "plate_quality",
         "plate_votes", "plate_confirmed", "plate_grammar_ok", "plate_px_w",
         "speed_kmh", "speed_reliable", "ocr_attempts",
+        "heading_deg", "closing_m_s", "direction", "screen_dir",
+        "flow_strikes", "against_flow",
         "first_seen", "last_seen", "logged",
     )
 
@@ -323,6 +393,21 @@ class _Vehicle:
         self.plate_grammar_ok = False
         self.speed_kmh: Optional[float] = None
         self.speed_reliable = False
+        # Direction of travel — the velocity VECTOR the speed fit always
+        # computed and never published. None until the vehicle is moving fast
+        # enough for a heading to mean anything.
+        self.heading_deg: Optional[float] = None
+        self.closing_m_s: Optional[float] = None
+        self.direction: Optional[str] = None
+        # Unit vector of travel in FRAME pixels — what an arrow drawn over the
+        # video can point along. A compass bearing cannot be drawn on a moving
+        # picture without a compass rose to read it against.
+        self.screen_dir: Optional[list] = None
+        # Consecutive frames spent opposed to the local flow, and the flag that
+        # raises once there have been enough of them. A counter rather than a
+        # boolean because a single frame of opposition is a tracker wobble.
+        self.flow_strikes = 0
+        self.against_flow = False
         self.ocr_attempts = 0
         self.first_seen = time.time()
         self.last_seen = time.time()
@@ -415,6 +500,13 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         # plate text -> vehicle_id. What makes re-identification possible: a
         # re-read of the same characters is the same vehicle, not a guess.
         "plate_registry": {},
+        # vehicle_id -> the best reading that identity ever produced, kept
+        # after its track has retired. Re-identification already restored the
+        # vehicle_id when a returning vehicle's plate matched; what it did not
+        # restore was the READING, so a car that gave a 210px plate before an
+        # occlusion came back holding whatever 60px guess the far side of the
+        # frame offered. Bounded — see _archive_read.
+        "read_archive": {},
         "type_counts": {},
         "color_counts": {},
         "peak_in_frame": 0,
@@ -776,6 +868,13 @@ class TrafficManager(BaseAnalyzer):
             # fact. The column already existed for vehicle-plate-tracking;
             # this module simply never wrote it.
             "plate_px_w": v.plate_px_w,
+            # The other two halves of "how much should this reading be
+            # trusted". Width was already recorded; agreement and grammar were
+            # computed, shown live, and then dropped on the floor at the point
+            # the record became permanent — so a report could not be filtered
+            # on the very thing that separates a settled plate from a guess.
+            "plate_votes": v.plate_votes,
+            "plate_grammar_ok": v.plate_grammar_ok,
             "vehicle_type": v.type or "unknown",
             "vehicle_color": v.color or "",
             "vehicle_color_conf": v.color_conf,
@@ -787,6 +886,17 @@ class TrafficManager(BaseAnalyzer):
             "vehicle_image_path": v.vehicle_path,
             # Only a reliable estimate is written to a permanent row.
             "speed_est_kmh": v.speed_kmh if v.speed_reliable else None,
+            # Direction of travel, and whether it opposed the traffic around
+            # it. A wrong-way sighting that is not recorded cannot be reviewed,
+            # which is most of what makes it worth detecting.
+            "heading_deg": v.heading_deg,
+            "against_flow": v.against_flow,
+            # This module never wrote these, so every row's timestamps
+            # defaulted to the moment it was inserted — which is when the
+            # vehicle LEFT, identical for the whole batch, and useless for
+            # working out how long anything was in view.
+            "first_seen": datetime.fromtimestamp(v.first_seen, tz=timezone.utc),
+            "last_seen": datetime.fromtimestamp(v.last_seen, tz=timezone.utc),
         }
 
     # ── Durable vehicle identity ──────────────────────────────────────────
@@ -814,8 +924,88 @@ class TrafficManager(BaseAnalyzer):
                 f"(was {vehicle.vehicle_id})"
             )
             vehicle.vehicle_id = existing
+            self._restore_read(state, vehicle)
         else:
             registry[vehicle.plate] = vehicle.vehicle_id
+
+    def _archive_read(self, state: Dict[str, Any], vehicle: "_Vehicle") -> None:
+        """Keep a retiring vehicle's best reading against its durable identity.
+
+        Only the reading, not the vehicle: box, speed and track id all belong
+        to a sighting, whereas the plate belongs to the car.
+        """
+        if not vehicle.plate or not vehicle.vehicle_id:
+            return
+        archive = state["read_archive"]
+        prior = archive.get(vehicle.vehicle_id)
+        if prior is not None and prior["quality"] >= vehicle.plate_quality:
+            return
+        archive[vehicle.vehicle_id] = {
+            "plate": vehicle.plate,
+            "quality": vehicle.plate_quality,
+            "conf": vehicle.plate_conf,
+            "px_w": vehicle.plate_px_w,
+            "votes": vehicle.plate_votes,
+            "grammar_ok": vehicle.plate_grammar_ok,
+            "crop_path": vehicle.crop_path,
+            "vehicle_path": vehicle.vehicle_path,
+            "first_seen": vehicle.first_seen,
+        }
+        # Bounded: a long session over a busy road would otherwise hold one
+        # entry per plate ever seen, and the oldest are the least likely to
+        # come back. dicts preserve insertion order, so the first key is the
+        # oldest.
+        while len(archive) > _READ_ARCHIVE_MAX:
+            archive.pop(next(iter(archive)))
+
+    def _restore_read(self, state: Dict[str, Any], vehicle: "_Vehicle") -> None:
+        """
+        Carry an earlier sighting's reading onto this one, if it was better.
+
+        WHY THIS EXISTS. Re-identification already reattached the vehicle_id,
+        so a returning car was correctly recognised as the same car — and then
+        kept whatever reading THIS sighting happened to produce. Entering frame
+        means entering it small and far away, so that reading is systematically
+        the worst of the two, and the good one taken before the occlusion was
+        discarded at exactly the moment it was proved to belong to the same
+        vehicle.
+
+        The photograph moves with the numbers, because the two must describe
+        one observation; and votes are carried so a plate agreed on twice
+        before does not have to earn agreement again from scratch.
+
+        Only ever an UPGRADE: a worse archived read is left alone, so a car
+        that returns closer than it left keeps its new, better look.
+        """
+        prior = state["read_archive"].get(vehicle.vehicle_id)
+        if prior is None or prior["plate"] != vehicle.plate:
+            return
+        if prior["quality"] <= vehicle.plate_quality:
+            return
+        vehicle.plate_quality = prior["quality"]
+        vehicle.plate_conf = prior["conf"]
+        vehicle.plate_px_w = prior["px_w"]
+        vehicle.plate_grammar_ok = prior["grammar_ok"]
+        vehicle.plate_votes = max(vehicle.plate_votes, prior["votes"])
+        vehicle.crop_path = prior["crop_path"]
+        vehicle.vehicle_path = prior["vehicle_path"]
+        vehicle.first_seen = min(vehicle.first_seen, prior["first_seen"])
+        # The plate box belonged to a different frame of a different sighting;
+        # drawing it against this vehicle's current box would put the bracket
+        # somewhere arbitrary. The reading survives, its geometry does not.
+        vehicle.plate_box = None
+        vehicle.plate_box_rel = None
+        # read_area is what decides whether another call is worth spending, and
+        # it must describe the read now held. Set to this vehicle's CURRENT
+        # size so re-reading resumes only once it has genuinely grown past the
+        # point the archived look was taken from.
+        vehicle.read_area = vehicle.area
+        logger.info(
+            f"vehicle #{vehicle.track_id}: restored {prior['plate']} from "
+            f"{vehicle.vehicle_id}'s earlier sighting "
+            f"({prior['px_w']}px conf={prior['conf']:.2f}) — better than this "
+            f"sighting's own read"
+        )
 
     # ── Plate OCR, on a budget ────────────────────────────────────────────
 
@@ -1290,6 +1480,14 @@ class TrafficManager(BaseAnalyzer):
                 r = speeds.get(v.track_id)
                 if r is not None:
                     v.speed_kmh, v.speed_reliable = round(r.kmh, 1), r.reliable
+                    v.heading_deg = (round(r.heading_deg, 1)
+                                     if r.heading_deg is not None else None)
+                    v.closing_m_s = (round(r.closing_m_s, 2)
+                                     if r.closing_m_s is not None else None)
+                    v.direction = r.direction
+                    v.screen_dir = (list(r.screen_dir)
+                                    if r.screen_dir is not None else None)
+            self._update_flow(in_frame, W, H)
 
         # ── What the optics can deliver right now ─────────────────────────
         # Computed BEFORE any optional analytic runs, because it decides which
@@ -1354,6 +1552,9 @@ class TrafficManager(BaseAnalyzer):
             row = self._plate_event_row(v)
             if row:
                 pending_db.append(row)
+            # Before the object goes: keep its best reading against its durable
+            # identity, so if this vehicle comes back the good look survives.
+            self._archive_read(state, v)
             registry.pop(tid, None)
 
         locked_id = state.get("locked_track_id")
@@ -1403,6 +1604,13 @@ class TrafficManager(BaseAnalyzer):
                     "plate_box_rel": v.plate_box_rel,
                     "speed_kmh": v.speed_kmh,
                     "speed_reliable": v.speed_reliable,
+                    # Direction: the velocity vector's other half. heading is
+                    # a compass bearing, direction is relative to the drone.
+                    "heading_deg": v.heading_deg,
+                    "closing_m_s": v.closing_m_s,
+                    "direction": v.direction,
+                    "screen_dir": v.screen_dir,
+                    "against_flow": v.against_flow,
                     "locked": v.track_id == locked_id,
                 }
                 for v in sorted(in_frame, key=lambda x: x.area, reverse=True)
@@ -1413,6 +1621,9 @@ class TrafficManager(BaseAnalyzer):
             "vehicle_types": dict(state["type_counts"]),
             "vehicle_colors": dict(state["color_counts"]),
             "plates_read": sum(1 for v in registry.values() if v.reportable_plate),
+            # Headline for the panel: an operator watching the video will not
+            # necessarily notice one car among twenty pointing the other way.
+            "against_flow_count": sum(1 for v in in_frame if v.against_flow),
             # ── People / crowd, borrowed from crowd_manager ───────────────
             "people": [{"id": pr["track_id"], "box": pr["box"]} for pr in people],
             "person_count": len(people),
@@ -1487,6 +1698,65 @@ class TrafficManager(BaseAnalyzer):
         if pending_db:
             meta["_pending_db"] = pending_db
         return frame_bgr, meta
+
+    @staticmethod
+    def _update_flow(in_frame: List[_Vehicle], W: int, H: int) -> None:
+        """
+        Flag vehicles driving against the traffic immediately around them.
+
+        See the notes above _FLOW_MIN_KMH for why all four conditions are
+        required. The one worth restating here is that a vehicle is NEVER part
+        of the flow it is judged against — including it would drag the mean
+        toward its own heading, so the more decisively wrong-way a vehicle is,
+        the less wrong-way it would appear.
+
+        Runs in O(n^2) over the vehicles in frame, which is a handful; the
+        alternative is a spatial index for a list that rarely exceeds twenty.
+        """
+        radius = math.hypot(W, H) * _FLOW_NEIGHBOUR_FRAC
+        movers = [
+            v for v in in_frame
+            if v.heading_deg is not None and (v.speed_kmh or 0.0) >= _FLOW_MIN_KMH
+        ]
+        moving_ids = {v.track_id for v in movers}
+        for v in in_frame:
+            if v.track_id not in moving_ids:
+                # No usable heading this frame — decay rather than reset, so a
+                # vehicle briefly occluded or slowed does not lose a flag it
+                # has genuinely earned.
+                v.flow_strikes = max(0, v.flow_strikes - 1)
+                v.against_flow = v.flow_strikes >= _FLOW_STRIKES_TO_FLAG
+                continue
+
+            cx = (v.box[0] + v.box[2]) / 2.0
+            cy = (v.box[1] + v.box[3]) / 2.0
+            near = [
+                o.heading_deg for o in movers
+                if o.track_id != v.track_id
+                and math.hypot((o.box[0] + o.box[2]) / 2.0 - cx,
+                               (o.box[1] + o.box[3]) / 2.0 - cy) <= radius
+            ]
+            flow, coherence = _local_flow(near)
+            opposed = (
+                len(near) >= _FLOW_MIN_NEIGHBOURS
+                and coherence >= _FLOW_COHERENCE
+                and flow is not None
+                and _angle_gap(v.heading_deg, flow) >= _FLOW_OPPOSED_DEG
+            )
+            if opposed:
+                v.flow_strikes = min(_FLOW_STRIKE_MAX, v.flow_strikes + 1)
+            else:
+                # Cleared twice as fast as it is earned: rejoining the flow is
+                # unambiguous evidence, whereas one opposed frame is not.
+                v.flow_strikes = max(0, v.flow_strikes - 2)
+            was = v.against_flow
+            v.against_flow = v.flow_strikes >= _FLOW_STRIKES_TO_FLAG
+            if v.against_flow and not was:
+                logger.warning(
+                    f"vehicle #{v.track_id} ({v.vehicle_id}): heading "
+                    f"{v.heading_deg:.0f}deg against local flow {flow:.0f}deg "
+                    f"over {len(near)} nearby vehicles — AGAINST TRAFFIC"
+                )
 
     def _viability(self, ctx, pose, W: int, H: int, det_w: int) -> dict:
         """
@@ -1731,8 +2001,17 @@ class TrafficManager(BaseAnalyzer):
         for v in meta.get("vehicles", []):
             x1, y1, x2, y2 = v["box"]
             locked = v.get("locked")
-            color = (200, 220, 50) if locked else (170, 170, 170)
-            draw_ring(frame_bgr, x1, y1, x2, y2, color, 3 if locked else 2)
+            # Against-flow outranks the lock colour. A wrong-way vehicle is the
+            # one thing on this picture the operator must not miss, and grey
+            # among twenty other greys is exactly how it would be missed.
+            if v.get("against_flow"):
+                color = (60, 60, 240)
+            elif locked:
+                color = (200, 220, 50)
+            else:
+                color = (170, 170, 170)
+            draw_ring(frame_bgr, x1, y1, x2, y2, color,
+                      3 if (locked or v.get("against_flow")) else 2)
 
             # Build the label from what is actually known, so a vehicle with no
             # plate still reads usefully instead of showing an empty field.
@@ -1748,6 +2027,14 @@ class TrafficManager(BaseAnalyzer):
                 # "~" and a trailing "?" are load-bearing: a ground-sample
                 # estimate must not look like a calibrated reading.
                 label += f"  ~{kmh:.0f}km/h" + ("" if v.get("speed_reliable") else "?")
+            # Relative to the drone, not a compass bearing: a compass bearing
+            # in a corner of a moving picture is a number to be decoded, while
+            # "coming at us" is something an operator can act on. The exact
+            # heading is on the panel for anyone who wants it.
+            arrow = {"approaching": " v", "departing": " ^", "crossing": " >"}
+            label += arrow.get(v.get("direction") or "", "")
+            if v.get("against_flow"):
+                label = "!! WRONG WAY  " + label
             draw_badge(frame_bgr, label, x1, max(16, y1 - 4), fg=color)
 
             if v.get("plate_box"):

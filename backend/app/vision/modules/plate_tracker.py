@@ -824,6 +824,12 @@ class PlateTracker(BaseAnalyzer):
             "vehicle_box": v.box,
             "plate_box": v.plate_box,
             "plate_px_w": v.plate_px_w,
+            # Both were already tracked here and simply never written. The
+            # export's plate_grade column reads all three, so leaving these out
+            # would grade every vehicle-plate-tracking row "weak" regardless of
+            # how good the reading actually was.
+            "plate_votes": v.plate_votes,
+            "plate_grammar_ok": v.plate_grammar_ok,
             "image_path": v.crop_path,
             "vehicle_image_path": v.vehicle_path,
             "speed_est_kmh": v.speed_kmh if v.speed_reliable else None,

@@ -113,6 +113,8 @@ export interface CVResult {
     vehicle_colors?: Record<string, number>
     // traffic-management
     plates_read?: number
+    /** Vehicles currently flagged as driving against the local flow. */
+    against_flow_count?: number
     locked_track_id?: number | null
     /** vehicle-plate-tracking only: the locked vehicle's persistent id. */
     locked_vehicle_id?: string | null
@@ -235,6 +237,23 @@ export interface VehicleResult {
     /** Ground-sample estimate, never a calibrated reading. */
     speed_kmh?: number | null
     speed_reliable?: boolean
+    /** Compass bearing of travel, degrees, 0=North. The other half of the
+     *  velocity vector the speed fit always computed. Null below ~5km/h,
+     *  where a heading is atan2 of box jitter rather than a direction. */
+    heading_deg?: number | null
+    /** Rate the slant range to the drone is shrinking, m/s. Positive closes. */
+    closing_m_s?: number | null
+    /** The same thing said plainly, with a deadband so a vehicle crossing the
+     *  frame does not flicker between the two labels every frame. */
+    direction?: 'approaching' | 'departing' | 'crossing' | null
+    /** Unit vector of travel in FRAME pixels, [dx, dy], y down. Derived from
+     *  the ground projection, not the raw pixel velocity, so parallel motion
+     *  draws as parallel arrows regardless of where in frame it happens. */
+    screen_dir?: [number, number] | null
+    /** Sustained travel against the traffic AROUND IT — there is no map and no
+     *  declared road direction here, so this is relative to the observed local
+     *  flow and nothing else. */
+    against_flow?: boolean
     // traffic-management adds the plate onto the vehicle itself, since that
     // module reads plates from per-vehicle crops rather than the whole frame.
     plate?: string | null

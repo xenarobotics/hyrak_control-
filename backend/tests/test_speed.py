@@ -320,3 +320,122 @@ def test_known_speed_is_recovered_at_1080p(truth_kmh):
             last = r[1]
     assert last is not None
     assert last.kmh == pytest.approx(truth_kmh, rel=0.12)
+
+
+# --------------------------------------------------------------------------- #
+# Direction of travel                                                           #
+# --------------------------------------------------------------------------- #
+#
+# The velocity VECTOR was computed here from the start and only its magnitude
+# was ever published. These pin the two things that make the direction worth
+# publishing: it is a GROUND bearing rather than an image direction, and it is
+# withheld rather than guessed when the vehicle is too slow to have one.
+
+def _drive(est, direction_px, pose, c, frames=26, kmh_px=6.0, seed=3):
+    """Walk a car across a textured ground in a fixed image direction and
+    return its last reading. The drone holds station, so the only motion in
+    frame is the car's own."""
+    ground = ground_texture(seed=seed)
+    dx, dy = direction_px
+    car_x, car_y = 480.0, 270.0
+    last = None
+    for i in range(frames):
+        car_x += dx * kmh_px
+        car_y += dy * kmh_px
+        frame, box = render(ground, 400.0, 400.0, (car_x, car_y), 46)
+        readings = est.update(
+            frame, now=i / FPS,
+            vehicles=[{"track_id": 1, "box": box, "type": "car"}],
+            cam=c, pose=pose, scale_mode="altitude",
+        )
+        if 1 in readings:
+            last = readings[1]
+    return last
+
+
+def test_the_heading_is_a_GROUND_bearing_not_an_image_direction():
+    """
+    Yaw the drone 90 degrees and drive the car the same way across the SCREEN.
+    Its compass bearing must move by 90 degrees, because the same pixels now
+    point somewhere else on the ground.
+
+    This is the property everything downstream depends on. An image-space
+    angle would report two vehicles in the same lane as travelling different
+    ways the moment the drone rotated, and wrong-way detection is built on
+    comparing exactly those bearings.
+    """
+    c = cam()
+    north_up = CameraPose(agl_m=50.0, yaw_deg=0.0, mount=MountOffset(tilt_deg=90.0))
+    turned = CameraPose(agl_m=50.0, yaw_deg=90.0, mount=MountOffset(tilt_deg=90.0))
+
+    a = _drive(SpeedEstimator(window_frames=15), (1.0, 0.0), north_up, c)
+    b = _drive(SpeedEstimator(window_frames=15), (1.0, 0.0), turned, c)
+
+    assert a is not None and b is not None
+    assert a.heading_deg is not None and b.heading_deg is not None
+    gap = (b.heading_deg - a.heading_deg) % 360.0
+    assert gap == pytest.approx(90.0, abs=6.0), (
+        f"a 90deg yaw moved the reported bearing by {gap:.1f}deg — "
+        f"this is an image direction, not a compass bearing"
+    )
+
+
+def test_opposite_travel_reads_as_opposite_bearings():
+    """What wrong-way detection actually asks of this: two vehicles driving
+    into each other must be ~180 degrees apart."""
+    c, pose = cam(), nadir_pose(50.0)
+    a = _drive(SpeedEstimator(window_frames=15), (1.0, 0.0), pose, c)
+    b = _drive(SpeedEstimator(window_frames=15), (-1.0, 0.0), pose, c)
+    assert a.heading_deg is not None and b.heading_deg is not None
+    gap = abs((a.heading_deg - b.heading_deg + 180.0) % 360.0 - 180.0)
+    assert gap == pytest.approx(180.0, abs=8.0)
+
+
+def test_a_crawling_vehicle_gets_no_heading_at_all():
+    """Below the floor a heading is atan2 of box jitter — a uniformly random
+    compass bearing that would be published as fact and would poison the flow
+    consensus wrong-way detection is built on."""
+    c, pose = cam(), nadir_pose(50.0)
+    r = _drive(SpeedEstimator(window_frames=15), (1.0, 0.0), pose, c, kmh_px=0.05)
+    assert r is not None, "a speed is still reported"
+    assert r.kmh < 5.0
+    assert r.heading_deg is None
+    assert r.screen_dir is None
+    assert r.direction is None
+
+
+def test_a_vehicle_driving_toward_the_camera_reads_as_approaching():
+    """Closing rate comes from the SLANT RANGE at the two projected ground
+    points, so it means 'coming at the drone' rather than 'moving down the
+    picture' — which at a 45 degree mount are the same thing and at nadir are
+    not."""
+    c = cam()
+    tilted = CameraPose(agl_m=40.0, mount=MountOffset(tilt_deg=45.0))
+    toward = _drive(SpeedEstimator(window_frames=15), (0.0, 1.0), tilted, c)
+    away = _drive(SpeedEstimator(window_frames=15), (0.0, -1.0), tilted, c)
+
+    assert toward is not None and away is not None
+    assert toward.closing_m_s is not None and away.closing_m_s is not None
+    assert toward.closing_m_s > 0, "moving down a tilted frame closes the range"
+    assert away.closing_m_s < 0
+    assert toward.direction == "approaching"
+    assert away.direction == "departing"
+
+
+def test_a_crossing_vehicle_is_not_labelled_approaching_or_departing():
+    """The deadband: a vehicle crossing the frame has a closing rate that
+    hovers around zero and would otherwise flicker between the two labels
+    every frame."""
+    r = SpeedReading(kmh=50.0, error_pct=4.0, reliable=True, scale_source="altitude",
+                     samples=15, closing_m_s=0.2)
+    assert r.direction == "crossing"
+
+
+def test_the_screen_direction_is_a_unit_vector():
+    """It is drawn as an arrow, so its length must carry no meaning — an
+    arrow whose length tracked speed would be indistinguishable from one
+    whose length tracked distance."""
+    c, pose = cam(), nadir_pose(50.0)
+    r = _drive(SpeedEstimator(window_frames=15), (1.0, 0.0), pose, c)
+    assert r.screen_dir is not None
+    assert math.hypot(*r.screen_dir) == pytest.approx(1.0, abs=1e-6)

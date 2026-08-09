@@ -16,7 +16,8 @@ import pytest
 from app.vision.modules.traffic_manager import (
     _COLOUR_GOOD_ENOUGH, _LOCK_LOST_AFTER_S, _OCR_CALLS_PER_FRAME,
     _OCR_MAX_ATTEMPTS, _OCR_MIN_VEHICLE_PX, _PLATE_MIN_AGREEING_READS,
-    _PLATE_MIN_WIDTH_PX, TrafficManager, _Vehicle, _make_state,
+    _PLATE_MIN_WIDTH_PX, _FLOW_STRIKES_TO_FLAG, _READ_ARCHIVE_MAX,
+    TrafficManager, _Vehicle, _make_state,
 )
 
 
@@ -1499,3 +1500,235 @@ def test_a_vehicle_that_has_not_grown_does_not_burn_a_call():
     same.plate, same.plate_px_w, same.plate_conf = "TS09EA0001", 60, 0.5
     same.plate_quality, same.read_area = 30.0, same.area      # unchanged size
     assert t._ocr_candidates(t._client_state["s"], [same], budget=2) == []
+
+
+# --------------------------------------------------------------------------- #
+# Direction of travel, and driving against the local flow                       #
+# --------------------------------------------------------------------------- #
+#
+# The velocity VECTOR was always computed by the speed fit; only its magnitude
+# was ever published. What is tested here is the layer built on top of it: a
+# vehicle is flagged only when it opposes traffic that genuinely agrees with
+# itself, and only after holding that for long enough to rule out a wobble.
+
+def _moving(tid, heading, kmh=40.0, x=500, y=500, w=200, h=140) -> _Vehicle:
+    v = _Vehicle(tid, [x, y, x + w, y + h], "car")
+    v.heading_deg, v.speed_kmh, v.speed_reliable = heading, kmh, True
+    return v
+
+
+def _run_flow(vehicles, frames=_FLOW_STRIKES_TO_FLAG, W=1920, H=1080):
+    for _ in range(frames):
+        TrafficManager._update_flow(vehicles, W, H)
+    return vehicles
+
+
+def test_a_vehicle_opposing_a_coherent_flow_is_flagged():
+    """Four cars heading north and one heading south among them."""
+    north = [_moving(i, 0.0, x=400 + i * 60) for i in range(4)]
+    wrong = _moving(9, 180.0, x=700)
+    _run_flow(north + [wrong])
+    assert wrong.against_flow is True
+    assert all(not v.against_flow for v in north)
+
+
+def test_one_opposed_frame_is_not_enough():
+    """A single frame of opposition is a tracker wobble, not a wrong way."""
+    north = [_moving(i, 0.0, x=400 + i * 60) for i in range(4)]
+    wrong = _moving(9, 180.0, x=700)
+    _run_flow(north + [wrong], frames=1)
+    assert wrong.against_flow is False, "a flag must be earned over time"
+
+
+def test_no_flow_no_flag_at_a_junction():
+    """Everyone turning is not a flow to be against. Four vehicles pointing
+    four different ways have no coherent direction, so nothing is flagged —
+    which is the difference between a useful alert and a nuisance one."""
+    scattered = [_moving(i, d, x=400 + i * 60)
+                 for i, d in enumerate((0.0, 90.0, 180.0, 270.0))]
+    _run_flow(scattered)
+    assert all(not v.against_flow for v in scattered)
+
+
+def test_too_few_neighbours_never_flags():
+    """Two cars passing each other on a quiet road is not evidence about
+    either of them."""
+    a, b = _moving(1, 0.0, x=400), _moving(2, 180.0, x=520)
+    _run_flow([a, b])
+    assert not a.against_flow and not b.against_flow
+
+
+def test_a_divided_road_flags_nobody():
+    """Both carriageways in frame at once, which is the ordinary case and the
+    most likely source of a false alert. Nothing is flagged.
+
+    Note what actually does the work at these numbers: with the two directions
+    evenly matched there is no coherent flow to be against, so the coherence
+    gate refuses to judge anyone. Locality is the guard for the UNEVEN case,
+    which the next test pins separately."""
+    up = [_moving(i, 0.0, x=100 + i * 50, y=800) for i in range(4)]
+    down = [_moving(10 + i, 180.0, x=100 + i * 50, y=120) for i in range(4)]
+    _run_flow(up + down)
+    assert all(not v.against_flow for v in up + down)
+
+
+def test_the_flow_a_vehicle_is_judged_against_is_a_LOCAL_one():
+    """The same vehicle, the same headings, two positions — and only the one
+    actually among that traffic is judged by it.
+
+    Without a radius, a lone car anywhere in frame would be measured against a
+    lane it is nowhere near, which on a divided road or across a junction is
+    how a perfectly ordinary vehicle gets flagged."""
+    lane = [_moving(i, 0.0, x=100 + i * 50, y=100) for i in range(4)]
+
+    among = _moving(9, 180.0, x=180, y=100)
+    _run_flow(lane + [among])
+    assert among.against_flow is True
+
+    far = _moving(9, 180.0, x=1700, y=900)
+    _run_flow(lane + [far])
+    assert far.against_flow is False, "not near that traffic, not judged by it"
+
+
+def test_a_stationary_vehicle_contributes_no_heading():
+    """Below the speed floor a heading is atan2 of box jitter — a uniformly
+    random bearing that would poison the consensus if it were counted."""
+    north = [_moving(i, 0.0, x=400 + i * 60) for i in range(4)]
+    parked = _moving(9, 137.0, kmh=1.0, x=700)
+    _run_flow(north + [parked])
+    assert parked.against_flow is False
+
+
+def test_rejoining_the_flow_clears_the_flag():
+    north = [_moving(i, 0.0, x=400 + i * 60) for i in range(4)]
+    wrong = _moving(9, 180.0, x=700)
+    _run_flow(north + [wrong])
+    assert wrong.against_flow is True
+    wrong.heading_deg = 0.0
+    _run_flow(north + [wrong], frames=_FLOW_STRIKES_TO_FLAG)
+    assert wrong.against_flow is False
+
+
+def test_direction_reaches_the_wire_and_the_row():
+    """A wrong-way sighting that is not recorded cannot be reviewed, which is
+    most of what makes it worth detecting."""
+    t = bare_tracker()
+    v = vehicle(1)
+    v.heading_deg, v.against_flow = 271.5, True
+    row = t._plate_event_row(v)
+    assert row["heading_deg"] == 271.5
+    assert row["against_flow"] is True
+
+
+# --------------------------------------------------------------------------- #
+# The reading survives an occlusion                                             #
+# --------------------------------------------------------------------------- #
+
+def test_a_returning_vehicle_gets_its_better_read_back():
+    """Re-identification already restored the vehicle_id; what it did not
+    restore was the READING. Entering frame means entering it small and far
+    away, so this sighting's read is systematically the worse of the two —
+    and the good one was discarded at exactly the moment it was proved to
+    belong to the same vehicle."""
+    t = bare_tracker()
+    state = t._client_state["s"]
+
+    first = vehicle(1, 900, 400, 2160, 1408)
+    first.vehicle_id = "VH-000001"
+    first.plate, first.plate_conf, first.plate_px_w = "TS09EA0001", 0.88, 210
+    first.plate_quality = 210 * 0.88
+    first.plate_votes, first.crop_path = 3, "/tmp/first_plate.jpg"
+    state["plate_registry"]["TS09EA0001"] = "VH-000001"
+    t._archive_read(state, first)
+
+    # Comes back after an occlusion, small and far, as a new track id.
+    again = vehicle(2, 100, 100, 220, 190)
+    again.vehicle_id = "VH-000002"
+    again.plate, again.plate_conf, again.plate_px_w = "TS09EA0001", 0.44, 55
+    again.plate_quality = 55 * 0.44
+    t._register_plate(state, again)
+
+    assert again.vehicle_id == "VH-000001", "the identity is re-attached"
+    assert again.plate_px_w == 210, "and so is the reading it was proved by"
+    assert again.plate_conf == pytest.approx(0.88)
+    assert again.crop_path == "/tmp/first_plate.jpg", "photo follows the numbers"
+    assert again.plate_box_rel is None, "old geometry does not follow it"
+
+
+def test_a_better_read_on_return_is_not_replaced_by_the_archive():
+    """Only ever an upgrade: a car that returns CLOSER than it left keeps the
+    new, better look."""
+    t = bare_tracker()
+    state = t._client_state["s"]
+
+    far = vehicle(1, 100, 100, 220, 190)
+    far.vehicle_id, far.plate = "VH-000001", "TS09EA0001"
+    far.plate_conf, far.plate_px_w, far.plate_quality = 0.44, 55, 55 * 0.44
+    state["plate_registry"]["TS09EA0001"] = "VH-000001"
+    t._archive_read(state, far)
+
+    near = vehicle(2, 900, 400, 2160, 1408)
+    near.vehicle_id, near.plate = "VH-000002", "TS09EA0001"
+    near.plate_conf, near.plate_px_w, near.plate_quality = 0.90, 240, 240 * 0.90
+    t._register_plate(state, near)
+
+    assert near.plate_px_w == 240
+    assert near.plate_conf == pytest.approx(0.90)
+
+
+def test_a_restored_settled_read_stops_spending_budget():
+    """The point of carrying the reading back: a vehicle that already gave a
+    settled plate before the occlusion does not have to earn it again."""
+    t = bare_tracker()
+    state = t._client_state["s"]
+
+    first = vehicle(1, 900, 400, 2160, 1408)
+    first.vehicle_id, first.plate = "VH-000001", "TS09EA0001"
+    first.plate_conf, first.plate_px_w, first.plate_quality = 0.92, 210, 210 * 0.92
+    first.plate_votes = 3
+    state["plate_registry"]["TS09EA0001"] = "VH-000001"
+    t._archive_read(state, first)
+
+    again = vehicle(2, 100, 100, 260, 220)
+    again.vehicle_id, again.plate = "VH-000002", "TS09EA0001"
+    again.plate_conf, again.plate_px_w, again.plate_quality = 0.44, 55, 55 * 0.44
+    again.plate_votes = 1
+    assert again.needs_ocr is True
+    t._register_plate(state, again)
+    assert again.read_settled is True
+    assert again.needs_ocr is False, "no budget spent re-proving a settled plate"
+
+
+def test_the_archive_only_keeps_the_best_and_stays_bounded():
+    t = bare_tracker()
+    state = t._client_state["s"]
+
+    good = vehicle(1)
+    good.vehicle_id, good.plate = "VH-000001", "TS09EA0001"
+    good.plate_px_w, good.plate_conf, good.plate_quality = 200, 0.9, 180.0
+    t._archive_read(state, good)
+
+    worse = vehicle(2)
+    worse.vehicle_id, worse.plate = "VH-000001", "TS09EA0001"
+    worse.plate_px_w, worse.plate_conf, worse.plate_quality = 50, 0.5, 25.0
+    t._archive_read(state, worse)
+    assert state["read_archive"]["VH-000001"]["px_w"] == 200
+
+    for i in range(_READ_ARCHIVE_MAX + 25):
+        v = vehicle(1000 + i)
+        v.vehicle_id, v.plate = f"VH-{i:06d}", f"PLATE{i}"
+        v.plate_px_w, v.plate_conf, v.plate_quality = 100, 0.8, 80.0
+        t._archive_read(state, v)
+    assert len(state["read_archive"]) <= _READ_ARCHIVE_MAX
+
+
+def test_a_vehicle_with_no_plate_is_never_archived():
+    """The archive is keyed on identity earned by a reading. Storing an empty
+    one would let the next vehicle to reuse that id inherit nothing at best
+    and a blank at worst."""
+    t = bare_tracker()
+    state = t._client_state["s"]
+    v = vehicle(1)
+    v.vehicle_id = "VH-000001"
+    t._archive_read(state, v)
+    assert state["read_archive"] == {}

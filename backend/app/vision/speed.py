@@ -44,7 +44,7 @@ import logging
 import math
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Deque, Dict, List, Optional, Sequence
+from typing import Deque, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -69,6 +69,17 @@ _RANSAC_REPROJ_PX = 3.0
 # A vehicle cannot accelerate from 0 to this in the time between two frames;
 # anything above it is a tracker identity swap, not a fast car.
 _MAX_PLAUSIBLE_KMH = 250.0
+
+# Below this the direction of travel is noise, not a heading. A stationary
+# vehicle still shows a couple of px/s of box jitter, and atan2 of jitter is a
+# uniformly random compass bearing — which would then be published as fact and
+# would poison the flow consensus that wrong-way detection is built on.
+_MIN_HEADING_KMH = 5.0
+
+# How far ahead the vehicle is projected in order to measure where it is going.
+# Long enough that the two ground points are separated by far more than the
+# projection's own error, short enough that the straight-line assumption holds.
+_HEADING_LOOKAHEAD_S = 1.0
 
 
 # --------------------------------------------------------------------------- #
@@ -191,6 +202,47 @@ class SpeedReading:
     scale_source: str
     samples: int
     note: str = ""
+    # ── Direction of travel ──────────────────────────────────────────────
+    # The velocity VECTOR was always computed here; only its magnitude was
+    # ever published. Both fields below come from the same least-squares fit
+    # at no extra cost, and answer questions the magnitude cannot: which way
+    # is this vehicle going, and is it coming at us.
+    #
+    # None whenever the vehicle is too slow for its direction to mean
+    # anything (see _MIN_HEADING_KMH) or the ground projection failed — a
+    # guessed heading is worse than no heading, because wrong-way detection
+    # is built on top of it.
+    #: Compass bearing of travel in degrees, 0=North, 90=East.
+    heading_deg: Optional[float] = None
+    #: Rate the SLANT RANGE to the camera is shrinking, m/s. Positive means
+    #: closing on the drone, negative means opening away from it.
+    closing_m_s: Optional[float] = None
+    #: Unit vector of travel in CURRENT-FRAME pixels, (dx, dy), y down.
+    #:
+    #: Carried separately from heading_deg because the two are for different
+    #: consumers and neither substitutes for the other. heading_deg is a
+    #: compass bearing — right for a log, a report, and comparing two vehicles.
+    #: This is where the vehicle is going ON THE PICTURE, which is the only
+    #: thing an arrow drawn over the video can honestly point along. Derived
+    #: from the same ground projection, so it carries the perspective the raw
+    #: pixel velocity would get wrong.
+    screen_dir: Optional[Tuple[float, float]] = None
+
+    @property
+    def direction(self) -> Optional[str]:
+        """'approaching' | 'departing' | 'crossing', or None.
+
+        The deadband matters: a vehicle crossing the frame laterally has a
+        closing rate that hovers around zero and would otherwise flicker
+        between the two labels every frame.
+        """
+        if self.closing_m_s is None:
+            return None
+        if self.closing_m_s > 1.0:
+            return "approaching"
+        if self.closing_m_s < -1.0:
+            return "departing"
+        return "crossing"
 
     def to_dict(self) -> dict:
         return {
@@ -203,6 +255,14 @@ class SpeedReading:
             # matching the contract plate_events.speed_est_kmh already states.
             "is_estimate": True,
             "note": self.note,
+            "heading_deg": (round(self.heading_deg, 1)
+                            if self.heading_deg is not None else None),
+            "closing_m_s": (round(self.closing_m_s, 2)
+                            if self.closing_m_s is not None else None),
+            "direction": self.direction,
+            "screen_dir": ([round(self.screen_dir[0], 3),
+                            round(self.screen_dir[1], 3)]
+                           if self.screen_dir is not None else None),
         }
 
 
@@ -395,6 +455,12 @@ class SpeedEstimator:
             reliable = False
             note = note or f"only {span:.2f}s of history"
 
+        heading_deg, closing, screen_dir = (None, None, None)
+        if kmh >= _MIN_HEADING_KMH and reliable:
+            heading_deg, closing, screen_dir = self._bearing(
+                hist.xs[-1], hist.ys[-1], vx_px, vy_px, px, py, cam, pose
+            )
+
         hist.last_kmh = kmh
         return SpeedReading(
             kmh=kmh,
@@ -403,4 +469,74 @@ class SpeedEstimator:
             scale_source=scale.source,
             samples=n,
             note=note,
+            heading_deg=heading_deg,
+            closing_m_s=closing,
+            screen_dir=screen_dir,
         )
+
+    def _bearing(
+        self, sx: float, sy: float, vx_px: float, vy_px: float,
+        px: float, py: float, cam: CameraModel, pose: CameraPose,
+    ) -> tuple:
+        """
+        (compass bearing deg, closing rate m/s, screen unit vector) for one
+        fitted velocity, or a triple of Nones when the geometry does not
+        support an answer.
+
+        WHY NOT JUST TAKE atan2 OF THE PIXEL VELOCITY
+            Because image direction is not ground direction. Perspective
+            compresses the far half of the frame, so the same ground heading
+            produces a different pixel bearing depending on where in frame the
+            vehicle is — badly enough near the top of frame that two vehicles
+            in the same lane would be reported as travelling 30 degrees apart,
+            which is exactly the error that would fabricate wrong-way alerts.
+
+        So the velocity is projected onto the GROUND PLANE: the vehicle's
+        current position and where it will be a second from now are both taken
+        through the same pixel->ground projection already used for scale, and
+        the bearing is measured between those two world points. That also
+        yields the closing rate for free, since the projection returns slant
+        range alongside the position.
+
+        The lookahead point is carried back through the cumulative homography
+        first, because the fit lives in the STABILISED frame of the window's
+        first image while the projection is defined on the current one.
+        """
+        if self._cumulative is None:
+            return (None, None, None)
+        ahead = np.array(
+            [sx + vx_px * _HEADING_LOOKAHEAD_S,
+             sy + vy_px * _HEADING_LOOKAHEAD_S, 1.0], dtype=np.float64
+        )
+        q = self._cumulative @ ahead
+        if abs(q[2]) < 1e-9:
+            return (None, None, None)
+        ux, uy = float(q[0] / q[2]), float(q[1] / q[2])
+
+        # (px, py) is the CURRENT frame's own bottom-centre pixel — the same
+        # point (sx, sy) is the stabilised image of — so it is used directly
+        # rather than mapped back through the homography and returned to where
+        # it started.
+        here = pose.project_to_ground(cam, px, py)
+        there = pose.project_to_ground(cam, ux, uy)
+        # None is routine, not exceptional: the lookahead point can land above
+        # the horizon for a vehicle heading away near the top of frame, and
+        # there is no ground position for a ray that never meets the ground.
+        if here is None or there is None:
+            return (None, None, None)
+
+        dn, de = there[0] - here[0], there[1] - here[1]
+        if math.hypot(dn, de) < 1e-3:
+            return (None, None, None)
+        bearing = math.degrees(math.atan2(de, dn)) % 360.0
+        # Slant range shrinking == closing. Divided by the lookahead so the
+        # answer is a rate rather than a displacement.
+        closing = (here[2] - there[2]) / _HEADING_LOOKAHEAD_S
+
+        # Where that same motion points on the picture. Taken from the
+        # PROJECTED lookahead pixel rather than from (vx_px, vy_px) directly,
+        # so it inherits the same perspective handling the bearing does.
+        sdx, sdy = ux - px, uy - py
+        norm = math.hypot(sdx, sdy)
+        screen = (sdx / norm, sdy / norm) if norm > 1e-6 else None
+        return (bearing, closing, screen)

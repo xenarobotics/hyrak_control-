@@ -12,7 +12,7 @@ import { useDroneStore } from '@/store/drone'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { getSocket } from '@/lib/socket'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { AlertCircle, Download, Layers, Trash2 } from 'lucide-react'
+import { AlertCircle, Download, Layers, Trash2, TriangleAlert } from 'lucide-react'
 import { FollowControls } from '@/components/vision/FollowControls'
 import type { CVResult } from '@/types/vision'
 import {
@@ -52,6 +52,24 @@ function Stat({ label, value, tone = 'muted' }: {
             </span>
         </div>
     )
+}
+
+/** Compass point for a bearing. Eight of them, not sixteen: the heading is a
+ *  ground-projection estimate, and "NNE" claims a precision it does not have. */
+const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+function compass(deg: number): string {
+    return COMPASS[Math.round(((deg % 360) + 360) % 360 / 45) % 8]
+}
+
+/** How a vehicle is moving relative to the drone, in one glanceable phrase.
+ *  The compass bearing answers "which way on the ground"; the direction
+ *  answers "is it coming at us", and neither substitutes for the other. */
+function directionLabel(heading?: number | null, direction?: string | null): string | null {
+    if (heading == null && !direction) return null
+    const parts: string[] = []
+    if (heading != null) parts.push(`${compass(heading)} ${Math.round(heading)}°`)
+    if (direction && direction !== 'crossing') parts.push(direction)
+    return parts.join(' · ')
 }
 
 const PROFILE_TONE: Record<string, string> = {
@@ -144,7 +162,14 @@ export function TrafficManagementPanel() {
     const { isStreaming } = useWebRTCContext()
     const [history, setHistory] = useState<PlateHistoryRow[]>([])
 
-    const vehicles = cvResults?.vehicles ?? []
+    // Wrong-way vehicles float to the top of the list. The backend orders by
+    // apparent size, which is right for "what is nearest" and wrong for "what
+    // needs attention" — a car driving into the traffic could otherwise sit
+    // ninth in a list the operator has to scroll.
+    const vehicles = [...(cvResults?.vehicles ?? [])].sort(
+        (a, b) => Number(b.against_flow ?? false) - Number(a.against_flow ?? false)
+    )
+    const againstFlow = cvResults?.against_flow_count ?? 0
     const lockedId = cvResults?.locked_track_id ?? null
     // Which kind was locked comes FROM the backend: people and vehicles share
     // one track-id space, so the panel cannot know what was clicked until the
@@ -206,6 +231,32 @@ export function TrafficManagementPanel() {
                 <Stat label="unique" value={cvResults?.person_count_unique ?? 0} />
                 <Stat label="named" value={identities.length} />
             </div>
+
+            {/* ── Against the flow ────────────────────────────────────────
+                Pinned above the scrolling region, because it is the only thing
+                in this panel that is an ALERT rather than a reading — and an
+                alert that has to be scrolled to has already failed.
+
+                The wording is deliberately "the traffic around it" and not
+                "wrong way": there is no map here and no declared road
+                direction, so what was actually measured is opposition to the
+                local flow. Claiming more than that would make the first false
+                positive look like a bug rather than a limit. */}
+            {againstFlow > 0 && (
+                <div style={{
+                    display: 'flex', gap: 7, alignItems: 'center',
+                    padding: '6px 9px', borderRadius: 7, fontSize: 11,
+                    background: 'rgba(230,0,0,0.14)',
+                    border: '1px solid rgba(230,0,0,0.45)', color: '#f87171',
+                }}>
+                    <TriangleAlert size={13} style={{ flexShrink: 0 }} />
+                    <span>
+                        <b>{againstFlow}</b>{' '}
+                        {againstFlow === 1 ? 'vehicle is' : 'vehicles are'} driving
+                        against the traffic around {againstFlow === 1 ? 'it' : 'them'}
+                    </span>
+                </div>
+            )}
 
             {/* ── What is being ATTEMPTED, and why ─────────────────────
                 Sits above the range readout because it is the actionable one:
@@ -356,8 +407,10 @@ export function TrafficManagementPanel() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingRight: 4 }}>
                             {vehicles.map((v, i) => {
                                 const locked = v.track_id === lockedId
+                                const wrongWay = v.against_flow === true
                                 const showColour = v.color && v.color !== 'unknown'
                                     && (v.color_conf ?? 0) >= 0.35
+                                const heading = directionLabel(v.heading_deg, v.direction)
                                 return (
                                     <div
                                         // vehicle_id first: it is stable across
@@ -373,8 +426,16 @@ export function TrafficManagementPanel() {
                                         style={{
                                             display: 'flex', alignItems: 'center', gap: 8,
                                             padding: '6px 9px', borderRadius: 7, cursor: 'pointer',
-                                            background: locked ? 'rgba(34,211,238,0.12)' : 'hsl(var(--app-surface-2))',
-                                            border: `1px solid ${locked ? 'rgba(34,211,238,0.45)' : 'transparent'}`,
+                                            // Against-flow outranks the lock
+                                            // highlight — it is the state the
+                                            // operator most needs to find.
+                                            background: wrongWay ? 'rgba(230,0,0,0.13)'
+                                                : locked ? 'rgba(34,211,238,0.12)'
+                                                : 'hsl(var(--app-surface-2))',
+                                            border: `1px solid ${
+                                                wrongWay ? 'rgba(230,0,0,0.45)'
+                                                : locked ? 'rgba(34,211,238,0.45)'
+                                                : 'transparent'}`,
                                         }}
                                     >
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
@@ -423,6 +484,19 @@ export function TrafficManagementPanel() {
                                                     .filter(Boolean).join(' ')}
                                                 {' · '}{v.vehicle_id ?? `#${v.track_id}`}
                                             </span>
+                                            {/* Direction of travel. Absent rather
+                                                than zeroed below ~5km/h, where a
+                                                heading is atan2 of box jitter —
+                                                a blank is honest, "N 0°" is not. */}
+                                            {heading && (
+                                                <span style={{
+                                                    fontSize: 9, fontFamily: 'monospace',
+                                                    color: wrongWay ? '#f87171'
+                                                        : 'hsl(var(--app-text-muted))',
+                                                }}>
+                                                    {wrongWay ? 'AGAINST FLOW · ' : ''}{heading}
+                                                </span>
+                                            )}
                                         </div>
                                         {v.speed_kmh != null && (
                                             <span style={{

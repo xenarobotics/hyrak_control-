@@ -118,6 +118,38 @@ function drawBadge(
     ctx.fillText(text, x + padX, y - 1)
 }
 
+// Direction-of-travel arrow, drawn along the vehicle's projected ground
+// motion rather than its raw pixel velocity.
+//
+// The distinction is not pedantic. Perspective compresses the far half of the
+// frame, so two vehicles in the SAME lane have visibly different pixel
+// velocities depending on where they are on screen; arrows drawn from those
+// would fan out across a straight road and look broken. `screen_dir` comes
+// from projecting the vehicle a second ahead on the ground plane and back into
+// the image, so parallel motion draws as parallel arrows.
+function drawHeadingArrow(
+    ctx: CanvasRenderingContext2D,
+    cx: number, cy: number, dx: number, dy: number,
+    length: number, color: string,
+) {
+    const tipX = cx + dx * length, tipY = cy + dy * length
+    // Perpendicular, for the head. Cheaper and steadier than a rotate().
+    const px = -dy, py = dx
+    const head = Math.max(5, length * 0.28)
+    ctx.save()
+    ctx.strokeStyle = color
+    ctx.fillStyle = color
+    ctx.lineWidth = 2
+    ctx.lineCap = 'round'
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(tipX, tipY); ctx.stroke()
+    ctx.beginPath()
+    ctx.moveTo(tipX, tipY)
+    ctx.lineTo(tipX - dx * head + px * head * 0.5, tipY - dy * head + py * head * 0.5)
+    ctx.lineTo(tipX - dx * head - px * head * 0.5, tipY - dy * head - py * head * 0.5)
+    ctx.closePath(); ctx.fill()
+    ctx.restore()
+}
+
 // Solid accent pill — for the ONE thing that matters in frame (a recognised
 // name, the followed target). Deliberately louder than drawBadge so the
 // hierarchy is obvious at a glance.
@@ -647,8 +679,13 @@ function drawTrafficManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: nu
     for (const v of r.vehicles ?? []) {
         const [x1, y1, x2, y2] = v.box
         const locked = v.locked
+        const wrongWay = v.against_flow === true
         ctx.globalAlpha = alphaOf(v)
-        if (locked) drawLockedRing(ctx, x1, y1, x2, y2, C.active)
+        // Against-flow outranks the lock. A vehicle driving into the traffic
+        // is the one thing on this picture that must not be missed, and grey
+        // among twenty other greys is exactly how it would be.
+        if (wrongWay) drawLockedRing(ctx, x1, y1, x2, y2, C.red)
+        else if (locked) drawLockedRing(ctx, x1, y1, x2, y2, C.active)
         else drawSubjectRing(ctx, x1, y1, x2, y2, C.vehicle, 1.5, 0.7)
 
         // Built from what is actually KNOWN, so a vehicle with no plate still
@@ -669,7 +706,23 @@ function drawTrafficManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: nu
             // must not be mistaken for a calibrated reading.
             label += `  ~${Math.round(v.speed_kmh)}km/h${v.speed_reliable ? '' : '?'}`
         }
-        drawBadge(ctx, label, x1, Math.max(16, y1 - 4), locked ? C.active : C.vehicle)
+        const accent = wrongWay ? C.red : locked ? C.active : C.vehicle
+        drawBadge(ctx, wrongWay ? `WRONG WAY  ${label}` : label,
+                  x1, Math.max(16, y1 - 4), accent)
+
+        // Where it is going, drawn from the vehicle's own centre. The arrow is
+        // the point of the whole direction estimate: a bearing in a text label
+        // has to be decoded against the drone's heading before it means
+        // anything, while an arrow over the car is read instantly.
+        if (v.screen_dir) {
+            const [dx, dy] = v.screen_dir
+            const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2
+            // Scaled to the vehicle so it stays proportionate as the box grows,
+            // and clamped so a distant car's arrow is still visible and a near
+            // one's does not span the frame.
+            const len = Math.min(90, Math.max(22, (x2 - x1) * 0.55))
+            drawHeadingArrow(ctx, cx, cy, dx, dy, len, accent)
+        }
 
         // The plate bracket is placed RELATIVE to the vehicle box, so it
         // travels with the vehicle and vanishes with it. Drawn from absolute
