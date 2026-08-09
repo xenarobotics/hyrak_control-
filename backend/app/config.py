@@ -296,9 +296,9 @@ class Settings(BaseSettings):
     # A number that has been measured on THIS radio is worth more than one
     # inferred from another ground station's behaviour.
     telemetry_rate_position_radio: float = Field(default=2.0)
-    telemetry_rate_position_udp: float = Field(default=10.0)
+    telemetry_rate_position_udp: float = Field(default=4.0)
     telemetry_rate_attitude_radio: float = Field(default=4.0)
-    telemetry_rate_attitude_udp: float = Field(default=20.0)
+    telemetry_rate_attitude_udp: float = Field(default=10.0)
     mavsdk_server_host: str = Field(default="localhost")
     mavsdk_server_port: int = Field(default=50051)
     sitl_address: str = Field(default="udpin://0.0.0.0:14540")

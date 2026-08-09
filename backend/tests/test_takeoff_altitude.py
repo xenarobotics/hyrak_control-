@@ -468,13 +468,18 @@ async def test_the_streams_that_fly_the_aircraft_outrank_the_dashboard():
 
 
 @pytest.mark.asyncio
-async def test_in_air_is_not_starved():
-    """It is 2 bytes of payload and the UI picks TAKEOFF vs SET ALT from it —
-    losing it is what made the altitude box look dead in flight."""
+async def test_in_air_is_requested_but_never_relied_on_alone():
+    """It is only 2 bytes of payload, but on a radio it is still one more
+    message competing with the uplink, so it stays at the original 1 Hz.
+
+    That is safe ONLY because the UI no longer depends on its rate: StatusBar
+    treats the aircraft as airborne on `is_in_air OR altitude > 1 m`, so a
+    slow or missing stream can no longer leave the altitude box offering
+    TAKEOFF to a flying drone. Requesting it faster was papering over that."""
     for kind in ("radio", "local"):
         t, rec = rate_manager("udpin://127.0.0.1:1", kind)
         await t._set_rates()
-        assert rec.rates["in_air"] >= 2.0
+        assert rec.rates["in_air"] >= 1.0
 
 
 @pytest.mark.asyncio

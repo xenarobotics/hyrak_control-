@@ -283,13 +283,18 @@ class TelemetryManager:
             # dashboard numbers that change over minutes and cost the same
             # bandwidth per message as the ones that matter.
             #
-            # The old serial figures were far too conservative for a link that
-            # demonstrably carries more: QGroundControl over the same 3DR radio
-            # sustains well above 10 Hz. They also cost more than they saved,
-            # because a 2 Hz position stream is 500 ms of dead reckoning per
-            # sample in a loop chasing a moving vehicle. Raised, with the
-            # dashboard streams cut further to pay for it — the total is lower
-            # than before on the fields nobody is flying by.
+            # EVERY FIGURE HERE IS THE ORIGINAL ONE. They were briefly raised
+            # on the reasoning that QGroundControl sustains more over the same
+            # 3DR radio; that produced a link which would not hold and commands
+            # that did not arrive, because QGC is not also running this
+            # application's uplink and a SiK radio is half-duplex — saturating
+            # the downlink starves the commands going the other way.
+            #
+            # They are settings rather than constants now, which is the part
+            # worth keeping: raise them deliberately, one step at a time,
+            # against measured_rates on the telemetry page. A number measured
+            # on THIS radio is worth more than one inferred from another
+            # ground station's behaviour.
             cfg = get_settings()
             rates = [
                 # POSITION CARRIES VELOCITY. Both MAVSDK setters drive the one
@@ -314,7 +319,7 @@ class TelemetryManager:
                 # in_air is the one low-rate stream that IS load-bearing: the
                 # UI picks TAKEOFF vs SET ALT from it. Cheap — EXTENDED_SYS_STATE
                 # is a 2-byte payload — so there is no reason to starve it.
-                ("in_air",       self._drone.telemetry.set_rate_in_air,         2.0),
+                ("in_air",       self._drone.telemetry.set_rate_in_air,         1.0 if is_serial else 2.0),
             ]
             logger.info(
                 f"Telemetry profile: {'RADIO' if is_serial else 'UDP/local'} "
