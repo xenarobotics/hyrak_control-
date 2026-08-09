@@ -118,12 +118,19 @@ class RFBridge(asyncio.DatagramProtocol):
 
 
 async def ensure_started(
-    downlink_port: int = 14550, uplink_port: int = 14551, uplink_host: str = "127.0.0.1"
+    downlink_port: int = 14550, uplink_port: int = 14551,
+    uplink_host: Optional[str] = None,
 ) -> RFBridge:
     """Idempotent for matching ports — returns the existing bridge if
     already running with the same config. Rebinds if the ports changed
     (e.g. edited in Settings), since the downlink port is bound once at
     creation and won't just start listening somewhere new on its own."""
+    # Resolved from settings rather than defaulted in the signature, so the
+    # deployed value lives in one place (config.rf_uplink_host) and .env can
+    # override it for a rig whose decoder sits elsewhere.
+    if not uplink_host:
+        from app.config import get_settings
+        uplink_host = get_settings().rf_uplink_host
     global _bridge
     if _bridge is not None:
         if (_bridge.downlink_port, _bridge.uplink_addr) == (downlink_port, (uplink_host, uplink_port)):

@@ -248,6 +248,16 @@ class Settings(BaseSettings):
     # Telemetry
     default_baud_rate: int = Field(default=57600)
 
+    # Where the RF ground decoder's uplink listener (wfb_tx) runs.
+    #
+    # Not loopback: the decoder is its own board on the local network, not a
+    # process on this machine. Downlink needs no equivalent setting — the
+    # bridge binds 0.0.0.0 and receives from anywhere — but the uplink is a
+    # send to a fixed listener, so a wrong value here gives perfect telemetry
+    # and silently drops every command. A setting rather than a constant so a
+    # different rig can override it in .env without touching code.
+    rf_uplink_host: str = Field(default="192.168.50.12")
+
     # ── MAVLink stream rates, Hz ──────────────────────────────────────────
     # Two profiles, because the two links are genuinely different: a local UDP
     # hop to SITL has effectively unlimited headroom, while a 57600-baud SiK

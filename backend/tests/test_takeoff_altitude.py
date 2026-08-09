@@ -569,13 +569,27 @@ async def test_the_uplink_goes_where_the_decoder_actually_is():
 
 
 @pytest.mark.asyncio
-async def test_loopback_remains_the_default():
-    """An unchanged rig with the dongle in this PC must behave exactly as
-    before — the host is an addition, not a new required setting."""
+async def test_the_deployed_default_is_the_real_decoder_not_loopback():
+    """The decoder is its own board on the network. Defaulting to loopback
+    means the very first connect after a fresh install has working telemetry
+    and no working commands — the failure that is hardest to spot."""
+    from app.config import get_settings
+    assert get_settings().rf_uplink_host != "127.0.0.1"
+
+
+@pytest.mark.asyncio
+async def test_the_default_is_resolved_from_settings_not_hardcoded():
+    """One place to change it, and .env can override for a different rig."""
     from app.telemetry import rf_bridge
     import inspect
-    sig = inspect.signature(rf_bridge.ensure_started)
-    assert sig.parameters["uplink_host"].default == "127.0.0.1"
+    assert inspect.signature(rf_bridge.ensure_started).parameters["uplink_host"].default is None
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_host_still_wins_over_the_default():
+    from app.telemetry.rf_bridge import RFBridge
+    b = RFBridge(14550, 14551, "10.0.0.9")
+    assert b.uplink_addr == ("10.0.0.9", 14551)
 
 
 @pytest.mark.asyncio

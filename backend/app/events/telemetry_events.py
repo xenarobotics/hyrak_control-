@@ -270,7 +270,9 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         bridge = await rf_bridge.ensure_started(
             downlink_port=int(data.get("downlinkPort") or 14550),
             uplink_port=int(data.get("uplinkPort") or 14551),
-            uplink_host=str(data.get("uplinkHost") or "127.0.0.1").strip() or "127.0.0.1",
+            # None, not a literal — ensure_started resolves the deployed
+            # default from settings, so the address lives in one place.
+            uplink_host=(str(data.get("uplinkHost") or "").strip() or None),
         )
         await on_connect_telemetry(sid, {"address": bridge.address, "link_kind": "radio"})
 

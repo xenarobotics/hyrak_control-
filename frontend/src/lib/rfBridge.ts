@@ -10,16 +10,21 @@ const UPLINK_HOST_KEY = 'hyrak-rf-uplink-host'
 
 export const DEFAULT_RF_DOWNLINK_PORT = 14550
 export const DEFAULT_RF_UPLINK_PORT = 14551
-// Loopback, because the original rig had the RTL dongle plugged into the same
-// PC as the backend — wfb_tx was a process on this machine.
+// The ground decoder's address on the local network.
 //
-// It stops being loopback the moment the decoder moves off-box. With the
-// ground decoder on its own board (Luckfox over Ethernet), the downlink still
-// arrives here unchanged — it is a UDP send TO us, and we bind 0.0.0.0 — but
-// the uplink is a send FROM us to a listener that is now on another host. Sent
-// to 127.0.0.1 it goes nowhere: telemetry reads perfectly and no command,
-// mission upload or parameter write ever reaches the aircraft.
-export const DEFAULT_RF_UPLINK_HOST = '127.0.0.1'
+// NOT loopback. Loopback was right only while the RTL dongle was plugged into
+// the same PC as the backend and wfb_tx was a process on this machine. The
+// decoder now runs on its own board (Luckfox over Ethernet), so the uplink has
+// to leave this host.
+//
+// Why the wrong value here is worse than a missing one: downlink and uplink
+// are not symmetric. The downlink is a UDP send TO us and the bridge binds
+// 0.0.0.0, so it keeps working from anywhere with no configuration at all. The
+// uplink is a send FROM us to a fixed listener. Point it at 127.0.0.1 with an
+// off-box decoder and telemetry reads perfectly while every command, mission
+// upload and parameter write is dropped into local loopback — a ground station
+// that looks connected and cannot fly the aircraft.
+export const DEFAULT_RF_UPLINK_HOST = '192.168.50.12'
 
 function getPort(key: string, fallback: number): number {
     if (typeof window === 'undefined') return fallback

@@ -758,7 +758,12 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                             </div>
                         </Field>
                     )}
-                    {!connected && address === RF_BRIDGE_ADDR && (
+                    {/* Shown while CONNECTED too, read-only. The uplink host
+                        is the one setting whose wrong value is invisible in
+                        operation — telemetry looks perfect and commands vanish
+                        — so "what is it actually using?" has to be answerable
+                        without disconnecting first. */}
+                    {address === RF_BRIDGE_ADDR && (
                         <Field label="RF BRIDGE PORTS" tip="UDP ports the ground station's wfb_rx/wfb_tx use — see communication/start-gs.sh. The uplink HOST matters once the decoder is not on this machine: downlink arrives from anywhere (we bind 0.0.0.0), but the uplink is sent to a fixed listener, so leaving it on 127.0.0.1 with an off-box decoder gives perfect telemetry and no commands.">
                             <div style={{ display: 'flex', gap: 6 }}>
                                 <div style={{ flex: 1 }}>
@@ -766,6 +771,7 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                                     <input
                                         type="number" min={1} max={65535}
                                         value={downlinkPort}
+                                        disabled={connected}
                                         onChange={e => { const v = Number(e.target.value); setDownlinkPort(v); if (v > 0 && v < 65536) setRfDownlinkPort(v) }}
                                         style={{ width: '100%', padding: '8px 10px', borderRadius: 8, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none', boxSizing: 'border-box', marginTop: 3 }}
                                     />
@@ -775,6 +781,7 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                                     <input
                                         type="number" min={1} max={65535}
                                         value={uplinkPort}
+                                        disabled={connected}
                                         onChange={e => { const v = Number(e.target.value); setUplinkPort(v); if (v > 0 && v < 65536) setRfUplinkPort(v) }}
                                         style={{ width: '100%', padding: '8px 10px', borderRadius: 8, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none', boxSizing: 'border-box', marginTop: 3 }}
                                     />
@@ -794,14 +801,16 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                                     type="text"
                                     value={uplinkHost}
                                     placeholder="127.0.0.1"
+                                    disabled={connected}
                                     onChange={e => { const v = e.target.value; setUplinkHost(v); setRfUplinkHost(v) }}
                                     style={{ width: '100%', padding: '8px 10px', borderRadius: 8, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none', boxSizing: 'border-box', marginTop: 3 }}
                                 />
                                 <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', display: 'block', marginTop: 4, lineHeight: 1.5 }}>
-                                    127.0.0.1 only if the RF decoder runs on this
-                                    machine. With the decoder on its own board,
-                                    telemetry still reads correctly while every
-                                    command is dropped into local loopback.
+                                    Commands go to <b>{uplinkHost}:{uplinkPort}</b>.
+                                    Use 127.0.0.1 only if the RF decoder runs on
+                                    this machine — with the decoder on its own
+                                    board, telemetry still reads correctly while
+                                    every command is dropped into local loopback.
                                 </span>
                             </div>
                         </Field>
