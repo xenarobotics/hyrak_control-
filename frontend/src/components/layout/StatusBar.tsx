@@ -96,6 +96,8 @@ export function StatusBar() {
     // Brief 'sent' confirmation after an altitude command.
     const [altSent, setAltSent] = useState<number | null>(null)
     const [altError, setAltError] = useState<string | null>(null)
+    // The autopilot's own reason for refusing whatever was last pressed.
+    const [refusal, setRefusal] = useState<{ action: string; reason: string } | null>(null)
     const altSentTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     const killTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     useEffect(() => () => { if (killTimer.current) clearTimeout(killTimer.current) }, [])
@@ -166,6 +168,24 @@ export function StatusBar() {
         return () => clearTimeout(t)
     }, [lastActionResult])
 
+    // "COMMANDS ARE NOT REACHING THE DRONE" IS USUALLY THE DRONE SAYING NO.
+    //
+    // A refused arm and a dead radio produced the identical UI — the button
+    // simply did not latch — so the natural conclusion was that the telemetry
+    // link had failed, and the next hour went into the radio. Meanwhile the
+    // refusal itself had travelled back over that radio, which proves it
+    // works. The autopilot names the cause ("Arming denied: ...", "Preflight
+    // Fail: Compass not calibrated"); it is now carried on action_result.error
+    // and shown here, beside the button that was pressed.
+    useEffect(() => {
+        if (!lastActionResult || lastActionResult.ok) return
+        const reason = lastActionResult.error || lastActionResult.msg
+        if (!reason) return
+        setRefusal({ action: lastActionResult.action, reason })
+        const t = setTimeout(() => setRefusal(null), 12000)
+        return () => clearTimeout(t)
+    }, [lastActionResult])
+
     // Confirm-then-kill, same idea as EmergencyStop.tsx, but auto-cancels
     // after 4s so a stray tap can't leave an armed confirm state sitting
     // there for a non-technical operator to bump into later.
@@ -223,6 +243,18 @@ export function StatusBar() {
                 {armed ? <ShieldOff size={13} /> : <Shield size={13} />}
                 {armed ? 'DISARM' : 'ARM'}
             </BarButton>
+
+            {refusal && (
+                <Chip title={`${refusal.action.replace(/_/g, ' ')} refused by the drone — ${refusal.reason}. The refusal came back over the telemetry link, so the link itself is working.`}>
+                    <TriangleAlert size={12} style={{ color: '#f87171' }} />
+                    <span style={{
+                        color: '#f87171', maxWidth: 340, overflow: 'hidden',
+                        textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                        {refusal.reason}
+                    </span>
+                </Chip>
+            )}
 
             <Chip title="Current flight mode">
                 <span style={{ color: '#22d3ee' }}>{flightMode}</span>

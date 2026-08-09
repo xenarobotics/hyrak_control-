@@ -105,7 +105,7 @@ export function useDrone() {
                 })
             }
         }
-        const onActionResult   = (data: { action: string; ok: boolean; msg?: string }) =>
+        const onActionResult   = (data: { action: string; ok: boolean; msg?: string; error?: string }) =>
             store.setLastActionResult(data)
         const onDroneMission   = (data: { waypoints: any[] }) =>
             store.setDroneMissionOffer(data.waypoints)

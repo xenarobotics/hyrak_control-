@@ -98,6 +98,30 @@ class TelemetryManager:
         # would ever be published.
         self._rate_window_start: Optional[float] = None
         self._measured_rates: dict[str, float] = {}
+        # THE AUTOPILOT ALREADY SAYS WHY IT REFUSED, AND WE THREW IT AWAY.
+        #
+        # A denied arm comes back through MAVSDK as COMMAND_DENIED and nothing
+        # else, which reaches the operator as "arm failed" — indistinguishable
+        # from the command never leaving the ground station. PX4 sends the
+        # actual reason in the same breath as the refusal, as a STATUSTEXT
+        # ("Arming denied: ...", "Preflight Fail: ..."). QGC shows exactly that
+        # line and it is why QGC feels diagnosable and this did not. Nothing
+        # here subscribed to status_text at all.
+        self._status_text: list[tuple[float, str, str]] = []   # (monotonic, severity, text)
+        self._status_event: Optional[asyncio.Event] = None
+        #: Set whenever an action is refused — the FC's own words when it gave
+        #: any, else the MAVSDK error. Read by execute_drone_action.
+        self.last_action_error: Optional[str] = None
+
+    #: Keep the tail only. This is for explaining the command you just sent,
+    #: not a flight log — boot spam from the FC must not push memory around.
+    _STATUS_TEXT_KEEP = 20
+    #: How long to wait after a refusal for the FC's explanation to arrive.
+    #: The ACK and the STATUSTEXT are separate messages, and on a 3DR link the
+    #: second can trail the first by a good fraction of a second.
+    _STATUS_WAIT_S = 1.5
+    #: Only WARNING and above explain a refusal; INFO is routine chatter.
+    _STATUS_MIN_SEVERITY = 3  # MAVSDK StatusTextType: 3 == WARNING
 
     #: Averaging window for the achieved-rate measurement. Long enough that a
     #: single late packet does not move the figure, short enough that turning a
@@ -379,6 +403,9 @@ class TelemetryManager:
                 asyncio.create_task(self._subscribe_home(),            name="tel_home"),
                 asyncio.create_task(self._subscribe_mission_progress(),name="tel_mission"),
                 asyncio.create_task(self._poll_mission_finished(),     name="tel_mission_finished"),
+                # Event-driven, no rate, no cost until the FC speaks — and it
+                # carries the only explanation there is for a refused command.
+                asyncio.create_task(self._subscribe_status_text(),      name="tel_statustext"),
                 asyncio.create_task(self._command_loop(),              name="cmd_loop"),
             ]
 
@@ -534,6 +561,76 @@ class TelemetryManager:
             pass
         except Exception as e:
             logger.error(f"In-air subscription error: {e}")
+
+    async def _subscribe_status_text(self):
+        """The autopilot's own words. Event-driven — there is no rate to set,
+        and it costs nothing on the link until the FC has something to say."""
+        try:
+            async for st in self._drone.telemetry.status_text():
+                if not self._running:
+                    break
+                import time as _time
+                sev = str(getattr(st, "type", "")).replace("StatusTextType.", "")
+                text = (getattr(st, "text", "") or "").strip()
+                if not text:
+                    continue
+                self._status_text.append((_time.monotonic(), sev, text))
+                del self._status_text[:-self._STATUS_TEXT_KEEP]
+                if self._status_event is not None:
+                    self._status_event.set()
+                if self._severity_rank(sev) >= self._STATUS_MIN_SEVERITY:
+                    logger.warning(f"FC: {sev}: {text}")
+                else:
+                    logger.info(f"FC: {text}")
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Status text subscription error: {e}")
+
+    @staticmethod
+    def _severity_rank(sev: str) -> int:
+        """MAVSDK's StatusTextType ascends with severity, unlike MAVLink's own
+        SEVERITY enum which descends — worth naming, because reading it the
+        MAVLink way silently inverts the filter and keeps only the chatter."""
+        order = ["DEBUG", "INFO", "NOTICE", "WARNING", "ERROR", "CRITICAL",
+                 "ALERT", "EMERGENCY"]
+        try:
+            return order.index(sev)
+        except ValueError:
+            return 0
+
+    async def _fc_reason(self, since: float, fallback: str) -> str:
+        """The FC's explanation for something that just failed.
+
+        Waits a beat for it, because the refusal ACK and the STATUSTEXT that
+        explains it are two different messages and arrive in that order.
+        """
+        import time as _time
+
+        def _pick() -> Optional[str]:
+            for ts, sev, text in reversed(self._status_text):
+                if ts >= since and self._severity_rank(sev) >= self._STATUS_MIN_SEVERITY:
+                    return text
+            return None
+
+        found = _pick()
+        if found:
+            return found
+        if self._status_event is None:
+            self._status_event = asyncio.Event()
+        deadline = _time.monotonic() + self._STATUS_WAIT_S
+        while _time.monotonic() < deadline:
+            self._status_event.clear()
+            try:
+                await asyncio.wait_for(
+                    self._status_event.wait(), timeout=deadline - _time.monotonic()
+                )
+            except asyncio.TimeoutError:
+                break
+            found = _pick()
+            if found:
+                return found
+        return fallback
 
     async def _subscribe_wind(self):
         """
@@ -1139,6 +1236,9 @@ class TelemetryManager:
         return False
 
     async def takeoff(self, altitude_m: Optional[float] = None) -> bool:
+        import time as _time
+        sent = _time.monotonic()
+        self.last_action_error = None
         # PREFERRED PATH: altitude in the command, exactly as QGC sends it.
         # Falls through to the MAVSDK parameter path below if it is unavailable
         # or the aircraft did not move, so this can only ever add a way for the
@@ -1168,7 +1268,10 @@ class TelemetryManager:
                 self._start_altitude_verify(float(altitude_m))
             return True
         except ActionError as e:
-            logger.error(f"Takeoff failed: {e}")
+            self.last_action_error = await self._fc_reason(
+                sent, self._plain(e, "the drone refused to take off")
+            )
+            logger.error(f"Takeoff failed: {e} | FC said: {self.last_action_error}")
             return False
 
     #: How far the drone may settle from the commanded altitude before the
@@ -1317,21 +1420,55 @@ class TelemetryManager:
     # ------------------------------------------------------------------ #
 
     async def arm(self) -> bool:
+        import time as _time
+        sent = _time.monotonic()
+        self.last_action_error = None
         try:
             await self._drone.action.arm()
             logger.info("✅ Armed")
             return True
         except ActionError as e:
-            logger.error(f"Arm failed: {e}")
+            # COMMAND_DENIED IS AN ANSWER FROM THE AIRCRAFT, NOT A LOST COMMAND.
+            # It means the command arrived, the FC understood it and said no —
+            # so reporting a bare "arm failed" sends the operator to check the
+            # radio, which is the one thing that is definitely working. Take
+            # the FC's own line instead.
+            self.last_action_error = await self._fc_reason(
+                sent, self._plain(e, "the drone refused to arm")
+            )
+            logger.error(f"Arm failed: {e} | FC said: {self.last_action_error}")
             return False
 
+    @staticmethod
+    def _plain(err: Exception, fallback: str) -> str:
+        """MAVSDK's exception text is a C++ call trace with the enum embedded —
+        useless in a status bar. Keep the enum, drop the trace."""
+        raw = str(err)
+        for code, said in (
+            ("COMMAND_DENIED", "the drone refused the command (pre-arm check failed)"),
+            ("UNSUPPORTED", "the drone does not support that command"),
+            ("TIMEOUT", "no reply from the drone — the command may not have arrived"),
+            ("FAILED", "the drone could not carry out the command"),
+            ("BUSY", "the drone is busy — try again"),
+            ("NO_SYSTEM", "no drone connected"),
+        ):
+            if code in raw:
+                return said
+        return fallback
+
     async def disarm(self) -> bool:
+        import time as _time
+        sent = _time.monotonic()
+        self.last_action_error = None
         try:
             await self._drone.action.disarm()
             logger.info("✅ Disarmed")
             return True
         except ActionError as e:
-            logger.error(f"Disarm failed: {e}")
+            self.last_action_error = await self._fc_reason(
+                sent, self._plain(e, "the drone refused to disarm")
+            )
+            logger.error(f"Disarm failed: {e} | FC said: {self.last_action_error}")
             return False
 
     async def emergency_stop(self) -> bool:

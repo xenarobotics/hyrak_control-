@@ -23,6 +23,12 @@ export interface MissionUploadResult {
 export interface ActionResult {
     action: string
     ok: boolean
+    msg?: string
+    /** The AUTOPILOT's reason for a refusal, when it gave one — its own
+     *  STATUSTEXT ("Arming denied: ...", "Preflight Fail: ..."), which is the
+     *  only thing that distinguishes "the drone said no" from "the command
+     *  never got there". Without it both look like a dead radio. */
+    error?: string
 }
 
 interface DroneStore {

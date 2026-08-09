@@ -49,6 +49,21 @@ def _crowd_analyzers():
 
 async def execute_drone_action(tel, action: str, data: dict) -> dict:
     """Execute a named action on a TelemetryManager. Returns the result dict."""
+    result = await _execute_drone_action(tel, action, data)
+    # WHY A REFUSAL NEEDS WORDS. Every branch below returns a bare ok flag, so
+    # a drone that answered "no, pre-arm checks failed" and a command that
+    # never left the ground station produced the identical UI. The operator
+    # then goes and checks the radio — the one part that is demonstrably
+    # working, since the refusal came back over it. TelemetryManager records
+    # the autopilot's own STATUSTEXT for the failure; pass it through.
+    if not result.get("ok") and not result.get("error"):
+        reason = getattr(tel, "last_action_error", None)
+        if reason:
+            result["error"] = reason
+    return result
+
+
+async def _execute_drone_action(tel, action: str, data: dict) -> dict:
     if action == "arm":
         return {"action": action, "ok": await tel.arm()}
     if action == "disarm":
