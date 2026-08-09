@@ -313,3 +313,64 @@ async def test_a_broken_listener_cannot_break_the_refusal_reasons():
     assert reason == "Arming denied: no GPS lock"
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
+
+
+# --------------------------------------------------------------------------- #
+# The viewer has to survive its own hosts                                       #
+# --------------------------------------------------------------------------- #
+#
+# The first version anchored the panel to its own button, which put it inside
+# whatever container the button was in: a status bar with overflow-x: auto, and
+# on the Fly tab a collapsible right-hand column with overflow-y: auto. Both
+# CLIP an absolutely positioned child. The bar scrolled sideways until its
+# controls were unreadable, and on Fly the panel never appeared at all.
+
+def _fc_log_src():
+    from pathlib import Path
+    p = (Path(__file__).resolve().parents[2] / "frontend" / "src"
+         / "components" / "layout" / "FcMessageLog.tsx")
+    if not p.exists():
+        pytest.skip("frontend not present in this checkout")
+    return p.read_text()
+
+
+def test_the_log_escapes_whatever_container_its_button_lives_in():
+    """A portal to document.body is the whole fix. An absolutely positioned
+    panel is clipped by any scrolling ancestor, and both of this button's hosts
+    scroll."""
+    src = _fc_log_src()
+    assert "createPortal" in src
+    assert "document.body" in src
+
+
+def test_the_status_bar_trigger_carries_no_label():
+    """That bar scrolls horizontally once its contents outgrow it. A labelled
+    button plus a badge was enough to push the flight controls off the end,
+    which made the log actively harmful — it hid the things you fly with."""
+    src = _fc_log_src()
+    bar = src.split("variant === 'floating' ?")[1].split(") : (")[1]
+    assert ">MSGS<" not in bar and "MSGS\n" not in bar
+
+
+def test_the_fly_tab_trigger_is_not_inside_the_collapsible_panel():
+    """It was, and it was invisible. The right-hand column collapses to zero
+    width and scrolls vertically; the video pane is the one surface on that tab
+    that is always there."""
+    from pathlib import Path
+    page = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "app"
+            / "(platform)" / "fly" / "page.tsx")
+    if not page.exists():
+        pytest.skip("frontend not present in this checkout")
+    src = page.read_text()
+    assert 'FcMessageLog variant="floating"' in src
+    before_panel = src.split("{/* Right panel */}")[0]
+    assert "FcMessageLog" in before_panel, "must sit with the video, not the panel"
+
+
+def test_both_placements_share_one_window():
+    """Two triggers, one log. A second implementation would drift — and the
+    filter, the clear button and the tail-following are the parts worth having
+    exactly once."""
+    src = _fc_log_src()
+    assert src.count("function MessageWindow") == 1
+    assert src.count("createPortal(") == 1

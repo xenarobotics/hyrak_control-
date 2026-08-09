@@ -158,6 +158,18 @@ export default function FlyPage() {
                         ? <FleetMap />
                         : <VideoStream />}
 
+                    {/* THE DRONE'S MESSAGES, ON THE ONE SURFACE THAT IS ALWAYS
+                        THERE. This first went into the right-hand panel, which
+                        is collapsible AND scrolls — so on the Fly tab it was
+                        either below the fold or hidden entirely, and the report
+                        was simply "I can't see them". The video pane is the one
+                        thing on this tab that cannot be collapsed away, and the
+                        moment you want this is the moment something has gone
+                        wrong on the aircraft you are watching. */}
+                    <div className="absolute top-2 right-2 z-[1100]">
+                        <FcMessageLog variant="floating" />
+                    </div>
+
                     {/* VIDEO / MAP toggle — swarm mode only */}
                     {mounted && swarmEnabled && (
                         <div
@@ -236,13 +248,6 @@ export default function FlyPage() {
 
                         <SurfaceCard title="FLIGHT CONTROLS">
                             <DroneControls />
-                            {/* The Fly tab hides the global status bar (it has
-                                its own controls), so the drone's messages need
-                                their own way in here — this is the tab you are
-                                on when something goes wrong. */}
-                            <div className="mt-3">
-                                <FcMessageLog />
-                            </div>
                         </SurfaceCard>
 
                         <div className="rounded-xl border flex flex-col flex-1 min-h-0"
