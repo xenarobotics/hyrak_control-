@@ -3,8 +3,11 @@
 // This is the desktop replacement for localRfRelay.ts. Both consume the same
 // two ports from a wfb-ng ground station (see wfb-gs's start-gs.sh):
 //
-//   udp 127.0.0.1:14550   wfb_rx  -> MAVLink downlink from the aircraft
-//   udp 127.0.0.1:14551   wfb_tx  -> MAVLink uplink to the aircraft
+//   udp <local>:14550        wfb_rx  -> MAVLink downlink from the aircraft
+//   udp <uplink-host>:14551  wfb_tx  -> MAVLink uplink to the aircraft
+//
+// The uplink host is NOT loopback in general — see getRfUplinkHost(). It is
+// loopback only while the RF decoder runs on this machine.
 //
 // The difference is what sits in between. localRfRelay.ts needs a separate
 // telemetry_relay.py running alongside, purely because a browser tab cannot
@@ -31,7 +34,7 @@
 
 import { getSocket } from '@/lib/socket'
 import { isDesktopApp, nativeBridge, type BridgeEvent } from '@/lib/nativeBridge'
-import { getRfDownlinkPort, getRfUplinkPort, getRfFanoutPort } from '@/lib/rfBridge'
+import { getRfDownlinkPort, getRfUplinkPort, getRfUplinkHost, getRfFanoutPort } from '@/lib/rfBridge'
 
 const NATIVE_UDP_ID = 'air-unit-telemetry'
 
@@ -63,6 +66,7 @@ function onDownlink(data: ArrayBuffer | Uint8Array) {
 export async function startNativeRfRelay(
     downlinkPort = getRfDownlinkPort(),
     uplinkPort = getRfUplinkPort(),
+    uplinkHost = getRfUplinkHost(),
 ): Promise<void> {
     if (!isDesktopApp()) {
         throw new Error(
@@ -76,11 +80,25 @@ export async function startNativeRfRelay(
     // One socket: bound to the downlink port, sending to the uplink port. Two
     // ports, but only ONE local socket is needed — we never receive on 14551,
     // that is wfb_tx's own bind.
+    // THE UPLINK HOST WAS THE ONE THING NOT CONFIGURABLE, AND IT IS THE ONE
+    // THING THAT MOVED. The port has always been a setting; the host was a
+    // literal. That was correct only while wfb_tx ran on this same PC — which
+    // it did, back when the RTL8812EU was plugged straight in. It now runs on
+    // the Luckfox decoder at its own address, and 127.0.0.1:14551 on this PC
+    // is a black hole with nothing bound to it.
+    //
+    // The resulting failure is silent and one-directional, which is why it
+    // cost a whole evening: UDP reports nothing when a datagram goes nowhere,
+    // the downlink is a separate socket and keeps working perfectly, and every
+    // byte counter along the way — including the one I added on the server —
+    // faithfully reports the commands as SENT. They are sent. They are sent
+    // into loopback. getRfUplinkHost() already existed, defaulted correctly,
+    // and had a field on the telemetry page; this relay just never read it.
     const result = await bridge?.start('udp', NATIVE_UDP_ID, {
         ports: [{
             tag: 0,
             port: downlinkPort,
-            remoteHost: '127.0.0.1',
+            remoteHost: uplinkHost,
             remotePort: uplinkPort,
             pinRemote: true,
             // Lets QGroundControl watch the same downlink — see getRfFanoutPort.

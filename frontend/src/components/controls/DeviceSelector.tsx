@@ -12,7 +12,8 @@ import { getSiyiTelemetryTarget, setSiyiTelemetryTarget, startSiyiTelemetry, DEF
 import { isDesktopApp } from '@/lib/nativeBridge'
 import { listNativeSerialPorts, type NativeRadio } from '@/lib/nativeSerialRelay'
 import { getTelemetryBaud, setTelemetryBaud } from '@/lib/linkSettings'
-import { getRfDownlinkPort, getRfUplinkPort, getRfFanoutPort, setRfFanoutPort } from '@/lib/rfBridge'
+import { getRfDownlinkPort, getRfUplinkPort, getRfFanoutPort, setRfFanoutPort,
+         getRfUplinkHost, setRfUplinkHost, DEFAULT_RF_UPLINK_HOST } from '@/lib/rfBridge'
 import {
     Select, SelectContent, SelectItem,
     SelectTrigger, SelectValue,
@@ -70,6 +71,7 @@ export function DeviceSelector() {
     const [baud, setBaud] = useState(() => getTelemetryBaud())
     const [rfFanout, setRfFanout] = useState(() => getRfFanoutPort())
     const [disconnecting, setDisconnecting] = useState(false)
+    const [rfUplinkHost, setRfUplinkHostState] = useState(() => getRfUplinkHost())
 
     const { telemetryStatus, telemetryError, connectBrowserSerial, connectNativeSerial, connectNativeRf, connectLocalRelay, connectRemoteSitl, disconnectTelemetry } = useDrone()
 
@@ -309,9 +311,30 @@ export function DeviceSelector() {
                 {source === 'air-unit-udp' && (
                     <>
                         <p className="mt-1.5 text-[10px] font-mono text-zinc-500 leading-relaxed">
-                            Reads udp:{getRfDownlinkPort()} / sends udp:{getRfUplinkPort()} straight from
-                            the ground station — no relay agent needed. Just run start-gs.sh.
+                            Reads udp:{getRfDownlinkPort()} / sends to {rfUplinkHost}:{getRfUplinkPort()} —
+                            no relay agent needed. Just run start-gs.sh.
                         </p>
+                        {/* THE SETTING THAT COSTS A FLIGHT WHEN IT IS WRONG, and
+                            it used to be a literal in the code. Downlink needs no
+                            address — it is a bind, so it hears whoever sends. The
+                            uplink is a send TO somewhere, and if that somewhere is
+                            this PC while wfb_tx runs on a decoder board, every
+                            command vanishes into loopback with no error anywhere
+                            and telemetry keeps streaming perfectly. */}
+                        <div className="mt-1.5 flex items-center gap-1.5">
+                            <span className="text-[10px] font-mono text-zinc-500 shrink-0">TX HOST</span>
+                            <input
+                                value={rfUplinkHost}
+                                onChange={e => {
+                                    setRfUplinkHostState(e.target.value)
+                                    setRfUplinkHost(e.target.value)
+                                }}
+                                disabled={isConnected}
+                                placeholder={DEFAULT_RF_UPLINK_HOST}
+                                title="Where wfb_tx listens. This machine only if the RF decoder runs here — put the decoder's address here otherwise, or commands go nowhere while telemetry keeps working."
+                                className="h-7 w-full rounded px-2 text-[11px] font-mono bg-zinc-900 border border-zinc-700 text-zinc-300 outline-none disabled:opacity-60"
+                            />
+                        </div>
                         <div className="mt-1.5 flex items-center gap-1.5">
                             <span className="text-[10px] font-mono text-zinc-500 shrink-0">QGC PORT</span>
                             <input
