@@ -58,4 +58,12 @@ export interface TelemetrySnapshot {
     home_lat: number
     home_lng: number
     home_alt: number
+    /** The altitude that was ASKED for, kept beside the one the drone reports.
+     *  Commanding 2 m and levelling at 5 m is undetectable from the altitude
+     *  readout alone — it shows 5 and looks like a correct 5. */
+    commanded_altitude_m?: number | null
+    /** Set once a climb has settled more than the tolerance away from what was
+     *  commanded. The cause is on the vehicle (parameter, barometer, ground
+     *  effect), so this reports rather than corrects. */
+    altitude_warning?: string | null
 }

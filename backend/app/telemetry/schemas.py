@@ -84,6 +84,21 @@ class TelemetrySnapshot:
     home_lat: float = 0.0
     home_lng: float = 0.0
     home_alt: float = 0.0
+    # ── Altitude accountability ──────────────────────────────────────────
+    # What WAS ASKED FOR, kept beside what the drone reports, because those
+    # are two different numbers and only one of them was ever visible.
+    #
+    # Commanding 2 m and levelling at 5 m is not detectable from the altitude
+    # readout alone — it reads 5 and looks like a correct 5. The operator has
+    # to remember what they typed and notice the difference, which is exactly
+    # what does not happen on a busy flight line. Carrying the target on the
+    # snapshot lets the UI put them side by side and say so.
+    commanded_altitude_m: Optional[float] = None
+    # Filled once the climb has settled and the two disagree by more than the
+    # tolerance. Plain text, because the cause is on the VEHICLE (parameter,
+    # barometer, ground effect) and no code here can fix it — only report it
+    # while the operator can still act.
+    altitude_warning: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -103,6 +118,8 @@ class TelemetrySnapshot:
             "home_lat": self.home_lat,
             "home_lng": self.home_lng,
             "home_alt": self.home_alt,
+            "commanded_altitude_m": self.commanded_altitude_m,
+            "altitude_warning": self.altitude_warning,
         }
 
 

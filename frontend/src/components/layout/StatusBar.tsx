@@ -86,7 +86,7 @@ function BarButton({ onClick, disabled, color, title, children }: {
 }
 
 export function StatusBar() {
-    const { telemetry, telemetryStatus, mode, cvResults } = useDroneStore()
+    const { telemetry, telemetryStatus, mode, cvResults, lastActionResult } = useDroneStore()
     const { sendAction, arm, disarm } = useDrone()
     const { isStreaming, stats } = useWebRTCContext()
     const online = useOnlineStatus()
@@ -95,18 +95,34 @@ export function StatusBar() {
     const [killConfirm, setKillConfirm] = useState(false)
     // Brief 'sent' confirmation after an altitude command.
     const [altSent, setAltSent] = useState<number | null>(null)
+    const [altError, setAltError] = useState<string | null>(null)
     const altSentTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     const killTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     useEffect(() => () => { if (killTimer.current) clearTimeout(killTimer.current) }, [])
 
     const armed = telemetry?.flight_mode.is_armed ?? false
-    const inAir = telemetry?.flight_mode.is_in_air ?? false
-    const flightMode = telemetry?.flight_mode.mode ?? 'NO LINK'
     const alt = telemetry?.position.relative_altitude_m ?? 0
+    // AIRBORNE IS JUDGED FROM THE ALTITUDE TOO, not from the flag alone.
+    //
+    // is_in_air comes from its own MAVLink stream at 1 Hz over a serial radio,
+    // and that one subscription failing (or simply not being served by a given
+    // PX4 build) leaves the flag false while the drone is plainly flying. The
+    // bar then kept offering TAKEOFF instead of SET ALT — and a takeoff sent to
+    // an already-airborne vehicle is rejected, so the box looked dead no matter
+    // what was typed into it. The backend's goto_altitude has always used this
+    // same two-source test; the UI deciding which button to show did not, so the
+    // two disagreed about the state of the aircraft.
+    const inAir = (telemetry?.flight_mode.is_in_air ?? false) || alt > 1.0
+    const flightMode = telemetry?.flight_mode.mode ?? 'NO LINK'
     const sats = telemetry?.gps.satellites_visible ?? 0
     const fix = telemetry?.gps.fix_type ?? 0
     const bat = telemetry?.battery.remaining_percent ?? 0
     const droneLinked = telemetryStatus === 'connected'
+    const commandedAlt = telemetry?.commanded_altitude_m ?? null
+    const altWarning = telemetry?.altitude_warning ?? null
+    // Only once airborne and settled — during the climb the gap is expected and
+    // flagging it would make the indicator meaningless by the time it matters.
+    const altMismatch = commandedAlt != null && inAir && altWarning != null
     // Live state, not mode name: locked only while a follow is actually
     // armed AND that mode owns the altitude axis (Auto).
     const altitudeLocked = (cvResults?.tracking ?? false)
@@ -119,6 +135,7 @@ export function StatusBar() {
         if (!Number.isFinite(v)) return
         if (inAir ? !canSetAlt : !canTakeoff) return
         const altitude = Math.min(120, Math.max(1, v))
+        setAltError(null)
         sendAction(inAir ? 'set_altitude' : 'takeoff', { altitude })
         // Confirm the command left, so typing a number and getting no visible
         // response is never ambiguous. Pressing Enter previously did nothing
@@ -128,6 +145,26 @@ export function StatusBar() {
         if (altSentTimer.current) clearTimeout(altSentTimer.current)
         altSentTimer.current = setTimeout(() => setAltSent(null), 2500)
     }
+
+    // A REFUSED COMMAND MUST LOOK DIFFERENT FROM AN ACCEPTED ONE.
+    //
+    // Every altitude action already came back over `action_result` with an ok
+    // flag, and the bar showed the same cheerful "→ 5m" either way. So a
+    // rejection — no position fix, arm timed out, PX4 refusing a reposition —
+    // was indistinguishable from success, and the only symptom left was a
+    // drone that did not move. That is precisely "I type a number and nothing
+    // changes".
+    useEffect(() => {
+        if (!lastActionResult) return
+        if (lastActionResult.action !== 'set_altitude'
+            && lastActionResult.action !== 'takeoff') return
+        if (lastActionResult.ok) return
+        setAltSent(null)
+        setAltError(lastActionResult.action === 'takeoff'
+            ? 'takeoff refused' : 'altitude refused')
+        const t = setTimeout(() => setAltError(null), 6000)
+        return () => clearTimeout(t)
+    }, [lastActionResult])
 
     // Confirm-then-kill, same idea as EmergencyStop.tsx, but auto-cancels
     // after 4s so a stray tap can't leave an armed confirm state sitting
@@ -220,12 +257,38 @@ export function StatusBar() {
 
             <Divider />
 
-            {/* ── Altitude ─────────────────────────────────────────────── */}
-            <Chip title="Current altitude (relative to takeoff)">
-                <Navigation size={12} style={{ color: '#60a5fa' }} />
-                <span style={{ fontWeight: 700 }}>{alt.toFixed(1)}</span>
+            {/* ── Altitude ─────────────────────────────────────────────────
+                WHAT WAS ASKED FOR SITS NEXT TO WHAT THE DRONE REPORTS.
+                Those are two different numbers and only one of them was ever
+                on screen. A drone commanded to 2 m and holding 5 m shows "5.0"
+                — a perfectly ordinary-looking reading that is only wrong if you
+                still remember what you typed, which on a flight line nobody
+                does. Side by side, the disagreement is the display. */}
+            <Chip title={commandedAlt != null
+                ? `Commanded ${commandedAlt.toFixed(1)} m — drone reports ${alt.toFixed(1)} m`
+                : 'Current altitude (relative to takeoff)'}>
+                <Navigation size={12} style={{ color: altMismatch ? '#f87171' : '#60a5fa' }} />
+                <span style={{ fontWeight: 700, color: altMismatch ? '#f87171' : undefined }}>
+                    {alt.toFixed(1)}
+                </span>
                 <span>m</span>
+                {commandedAlt != null && (
+                    <span style={{ opacity: 0.65 }}>
+                        / {commandedAlt.toFixed(0)} set
+                    </span>
+                )}
             </Chip>
+            {altWarning && (
+                <Chip title={altWarning}>
+                    <TriangleAlert size={12} style={{ color: '#f87171' }} />
+                    <span style={{
+                        color: '#f87171', maxWidth: 300, overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                    }}>
+                        {altWarning}
+                    </span>
+                </Chip>
+            )}
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <input
                     type="number" min={1} max={120} step={1}
@@ -255,13 +318,15 @@ export function StatusBar() {
                         style={{
                             display: 'flex', alignItems: 'center', gap: 4,
                             padding: '4px 9px', borderRadius: 6, fontSize: 10.5, fontFamily: 'monospace', fontWeight: 700,
-                            background: 'transparent', border: '1px solid hsl(var(--app-border))',
-                            color: 'hsl(var(--app-text-muted))',
+                            background: 'transparent',
+                            border: `1px solid ${altError ? '#f87171' : 'hsl(var(--app-border))'}`,
+                            color: altError ? '#f87171' : 'hsl(var(--app-text-muted))',
                             cursor: (!canSetAlt || !altInput) ? 'not-allowed' : 'pointer',
                             opacity: (!canSetAlt || !altInput) ? 0.4 : 1,
                         }}
                     >
-                        <MoveVertical size={10} /> {altSent != null ? `→ ${altSent}m` : 'SET ALT'}
+                        <MoveVertical size={10} />
+                        {altError ? altError : altSent != null ? `→ ${altSent}m` : 'SET ALT'}
                     </button>
                 ) : (
                     <button
@@ -271,13 +336,14 @@ export function StatusBar() {
                         style={{
                             display: 'flex', alignItems: 'center', gap: 4,
                             padding: '4px 9px', borderRadius: 6, fontSize: 10.5, fontFamily: 'monospace', fontWeight: 700,
-                            background: 'transparent', border: '1px solid hsl(var(--app-border))',
-                            color: 'hsl(var(--app-text-muted))',
+                            background: 'transparent',
+                            border: `1px solid ${altError ? '#f87171' : 'hsl(var(--app-border))'}`,
+                            color: altError ? '#f87171' : 'hsl(var(--app-text-muted))',
                             cursor: (!canTakeoff || !altInput) ? 'not-allowed' : 'pointer',
                             opacity: (!canTakeoff || !altInput) ? 0.4 : 1,
                         }}
                     >
-                        <PlaneTakeoff size={10} /> TAKEOFF
+                        <PlaneTakeoff size={10} /> {altError ? altError : 'TAKEOFF'}
                     </button>
                 )}
             </div>

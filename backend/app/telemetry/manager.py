@@ -74,6 +74,11 @@ class TelemetryManager:
         self._address: str = ""
         self._grpc_port: Optional[int] = None  # unique per drone — see connect()
         self._last_emit: float = 0.0  # monotonic time of last _emit() push
+        # The in-flight altitude verifier, if any. Held so a NEW altitude
+        # command can cancel it: two verifiers running at once would race, and
+        # the older one settling last would overwrite the newer verdict with a
+        # judgement about an altitude nobody is flying to any more.
+        self._alt_verify_task: Optional[asyncio.Task] = None
 
     # ------------------------------------------------------------------ #
     # Connection                                                           #
@@ -677,6 +682,10 @@ class TelemetryManager:
             logger.warning("Goto altitude refused — no position yet")
             return False
         in_air = self._snapshot.flight_mode.is_in_air or pos.relative_altitude_m > 1.0
+        # A new command supersedes the last verdict. Leaving the old warning up
+        # would have it describe an altitude nobody is flying to any more.
+        self._snapshot.commanded_altitude_m = float(relative_altitude_m)
+        self._snapshot.altitude_warning = None
         try:
             if not in_air:
                 if not self._snapshot.flight_mode.is_armed:
@@ -700,6 +709,7 @@ class TelemetryManager:
                 float(ground_amsl + float(relative_altitude_m)), float('nan'),
             )
             logger.info(f"✅ Goto altitude {relative_altitude_m} m commanded")
+            self._start_altitude_verify(float(relative_altitude_m))
             return True
         except asyncio.TimeoutError:
             logger.error("Goto altitude failed: arm timed out")
@@ -847,16 +857,154 @@ class TelemetryManager:
             logger.error(f"Pause mission failed: {e}")
             return False
 
+    async def _set_takeoff_altitude_verified(self, altitude_m: float) -> bool:
+        """
+        Write MIS_TAKEOFF_ALT and READ IT BACK before trusting it.
+
+        WHY THIS IS NOT PARANOIA. set_takeoff_altitude() is not a command, it
+        is a PARAMETER WRITE, and a parameter write is a request/ack round trip
+        over the same link the telemetry streams are saturating. On SITL that
+        round trip is a local UDP socket and completes in microseconds, so the
+        value is always in place by the time takeoff() is sent. Over a 3DR
+        radio at 57600 baud, sharing the link with position, attitude, velocity,
+        battery, GPS, home and in-air streams, it frequently is not.
+
+        When it is not, PX4 takes off to whatever MIS_TAKEOFF_ALT ALREADY HELD
+        — its default 2.5 m, or the value some earlier takeoff left there. The
+        commanded number is silently ignored and the aircraft levels somewhere
+        else entirely. That is the exact shape of "works in SITL, goes to 3-5 m
+        on the real drone when I ask for 2".
+
+        The read-back closes it: nothing is commanded until the vehicle has
+        confirmed the value it will actually use, or the attempt has failed
+        loudly enough for the operator to see.
+        """
+        target = float(altitude_m)
+        last: Optional[float] = None
+        for attempt in range(3):
+            try:
+                await asyncio.wait_for(
+                    self._drone.action.set_takeoff_altitude(target), timeout=5.0
+                )
+                last = float(await asyncio.wait_for(
+                    self._drone.action.get_takeoff_altitude(), timeout=5.0
+                ))
+            except (asyncio.TimeoutError, ActionError, Exception) as e:
+                logger.warning(
+                    f"Takeoff altitude write attempt {attempt + 1} failed: {e}"
+                )
+                continue
+            # 0.05 m, not equality: the parameter is a float32 and round-trips
+            # through a MAVLink param message, so exact comparison would
+            # occasionally reject a value that is in fact correct.
+            if abs(last - target) <= 0.05:
+                if attempt:
+                    logger.info(
+                        f"Takeoff altitude confirmed at {last:.2f} m on attempt "
+                        f"{attempt + 1} — the first write had not landed"
+                    )
+                return True
+            logger.warning(
+                f"Takeoff altitude read back as {last:.2f} m, asked for "
+                f"{target:.2f} m — retrying"
+            )
+        logger.error(
+            f"❌ MIS_TAKEOFF_ALT would not accept {target:.2f} m "
+            f"(vehicle still reports {last if last is not None else 'unknown'}). "
+            f"The drone will NOT climb to the commanded altitude."
+        )
+        return False
+
     async def takeoff(self, altitude_m: Optional[float] = None) -> bool:
         try:
             if altitude_m is not None:
-                await self._drone.action.set_takeoff_altitude(float(altitude_m))
+                if not await self._set_takeoff_altitude_verified(altitude_m):
+                    # Deliberately still takes off, and deliberately says so.
+                    # Refusing would strand an armed drone on the ground with
+                    # props spinning, which is worse than a takeoff to a known-
+                    # wrong altitude the operator has been told about and can
+                    # correct with SET ALT.
+                    self._snapshot.altitude_warning = (
+                        f"Takeoff altitude parameter did not take — the drone may "
+                        f"climb to its own default rather than {altitude_m:g} m"
+                    )
+                self._snapshot.commanded_altitude_m = float(altitude_m)
             await self._drone.action.takeoff()
             logger.info(f"✅ Takeoff commanded (altitude={altitude_m}m)")
+            if altitude_m is not None:
+                self._start_altitude_verify(float(altitude_m))
             return True
         except ActionError as e:
             logger.error(f"Takeoff failed: {e}")
             return False
+
+    #: How far the drone may settle from the commanded altitude before the
+    #: operator is told. Generous: PX4's own acceptance radius is ~0.8 m and
+    #: baro noise adds to it, so anything tighter would cry wolf on a healthy
+    #: aircraft. 1.5 m still catches every case reported from the field —
+    #: "asked for 2, got 5" and "asked for 5, got 10".
+    _ALT_TOLERANCE_M = 1.5
+
+    def _start_altitude_verify(self, target_m: float) -> None:
+        """Begin verifying one altitude, cancelling any verifier already
+        running — the newest command is the only one worth a verdict."""
+        if self._alt_verify_task is not None and not self._alt_verify_task.done():
+            self._alt_verify_task.cancel()
+        self._alt_verify_task = asyncio.create_task(self._verify_altitude(target_m))
+
+    async def _verify_altitude(self, target_m: float) -> None:
+        """
+        Once the climb has settled, say whether it actually went where it was
+        told. Reports; never corrects.
+
+        A GROUND STATION CANNOT FIX THIS CLASS OF ERROR, so it must not pretend
+        to. If the vehicle levels 3 m above the commanded height the cause is on
+        the aircraft — a parameter that did not take, a barometer pulled down by
+        its own prop wash in ground effect, an EKF height estimate diverging from
+        the rangefinder it does not have. Issuing a correction on top would fight
+        whatever is already wrong and hide the symptom rather than the cause.
+
+        What the operator needs is to KNOW, while there is still flight time to
+        do something about it. The number they typed is on screen next to the
+        number the drone believes, and the gap is named.
+        """
+        try:
+            # Long enough for the climb plus PX4's settle. A 2 m hop takes a
+            # couple of seconds; 30 m takes fifteen. Checked repeatedly rather
+            # than once, so the verdict comes from a STABLE altitude and not
+            # from a snapshot mid-climb.
+            settled_for = 0.0
+            last = None
+            for _ in range(60):                       # up to 30 s
+                await asyncio.sleep(0.5)
+                alt = self._snapshot.position.relative_altitude_m
+                if last is not None and abs(alt - last) < 0.15:
+                    settled_for += 0.5
+                else:
+                    settled_for = 0.0
+                last = alt
+                if settled_for >= 3.0 and alt > 0.5:
+                    break
+            else:
+                return                                # never settled — say nothing
+
+            error = last - target_m
+            if abs(error) <= self._ALT_TOLERANCE_M:
+                self._snapshot.altitude_warning = None
+                logger.info(
+                    f"Altitude verified: commanded {target_m:.1f} m, "
+                    f"holding {last:.1f} m"
+                )
+            else:
+                self._snapshot.altitude_warning = (
+                    f"Commanded {target_m:.1f} m, holding {last:.1f} m "
+                    f"({error:+.1f} m). Check MIS_TAKEOFF_ALT and the barometer "
+                    f"— nothing on the ground station can correct this."
+                )
+                logger.warning(f"⚠️  {self._snapshot.altitude_warning}")
+            self._emit()
+        except Exception as e:
+            logger.debug(f"Altitude verification skipped: {e}")
 
     # ------------------------------------------------------------------ #
     # Emit                                                                 #
@@ -1131,6 +1279,7 @@ class TelemetryManager:
             else:
                 await self._upload_standard_mission(waypoints)
 
+            await self._align_takeoff_altitude_to_mission(waypoints)
             logger.info(f"✅ Mission uploaded: {len(waypoints)} waypoints")
             self._snapshot.mission_finished = False
             return True, ""
@@ -1143,6 +1292,49 @@ class TelemetryManager:
             msg = str(e)
             logger.error(f"❌ Mission upload failed: {e}", exc_info=True)
             return False, msg
+
+    async def _align_takeoff_altitude_to_mission(self, waypoints: list) -> None:
+        """
+        Make PX4's auto-takeoff climb to the mission's own first altitude.
+
+        THE TRAP THIS CLOSES, and it is a trap this application built itself.
+        When a mission is started from the ground, PX4 does not fly straight to
+        waypoint 1 — it inserts a takeoff to MIS_TAKEOFF_ALT first. That
+        parameter is persistent on the vehicle, and set_takeoff_altitude()
+        WRITES IT. So the last manual takeoff silently sets the height every
+        later mission begins at:
+
+            takeoff to 10 m in the morning   -> MIS_TAKEOFF_ALT = 10
+            upload a 5 m survey that afternoon
+            start it from the ground         -> the drone climbs to 10 m first
+
+        which reads, entirely reasonably, as "I asked for a 5 m mission and it
+        went to 10". Nothing in the mission is wrong; the vehicle is obeying a
+        parameter left behind by an unrelated action hours earlier.
+
+        Aligning it at upload makes the mission self-describing: the height it
+        starts at is the height it says.
+        """
+        alt = None
+        for wp in waypoints:
+            # An explicit takeoff item states the intent directly; otherwise
+            # the first waypoint carrying an altitude is what the mission
+            # actually begins at.
+            if wp.get('type') == 'takeoff' and wp.get('altitude'):
+                alt = float(wp['altitude'])
+                break
+            if alt is None and wp.get('altitude'):
+                alt = float(wp['altitude'])
+        if alt is None or alt <= 0:
+            return
+        if await self._set_takeoff_altitude_verified(alt):
+            logger.info(f"Mission auto-takeoff altitude aligned to {alt:g} m")
+        else:
+            logger.warning(
+                f"Could not align the auto-takeoff altitude to {alt:g} m — if "
+                f"this mission is started from the ground the drone will climb "
+                f"to the vehicle's own MIS_TAKEOFF_ALT first"
+            )
 
     async def _upload_standard_mission(self, waypoints: list) -> None:
         """Upload using mission.MissionItem (altitude relative to home, frame=3)."""

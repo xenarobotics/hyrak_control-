@@ -56,6 +56,29 @@ async def _drain(probe: _Probe, expected: int, timeout: float = 3.0):
         await asyncio.sleep(0.01)
 
 
+async def _drain_result(probe: _Probe, client_id: str, timeout: float = 3.0):
+    """Wait for the RESULT to be stored, not merely for the blocking call to
+    have run.
+
+    `probe.seen` is appended from inside _analyze_frame_blocking, on the worker
+    thread, while the result slot is only filled once the awaiting coroutine
+    resumes and stores it. Waiting on `seen` therefore returns before the
+    result exists, and whether the assertion that follows sees it comes down to
+    how promptly the event loop gets scheduled — which is exactly the kind of
+    thing an unrelated slow test file changes.
+
+    The slot is read directly rather than through get_latest_result(), which
+    CONSUMES what it returns — polling with it would hand the result to the
+    wait loop and leave the assertion looking at None every time.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        data = probe._clients.get(client_id)
+        if data and data.get("latest_result") is not None:
+            return
+        await asyncio.sleep(0.01)
+
+
 # --------------------------------------------------------------------------- #
 
 async def test_telemetry_reaches_the_blocking_call():
@@ -157,7 +180,7 @@ async def test_capture_age_is_reported_separately_from_analysis_time():
     probe.hold = 0.06
     probe.register_client("sess-a")
     probe.submit_frame("sess-a", _frame(1), telemetry=_telemetry(30.0))
-    await _drain(probe, 1)
+    await _drain_result(probe, "sess-a")
 
     result = probe.get_latest_result("sess-a")
     assert result is not None
