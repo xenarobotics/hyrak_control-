@@ -531,8 +531,10 @@ class TelemetryManager:
             async for mode in self._drone.telemetry.flight_mode():
                 if not self._running:
                     break
-                self._snapshot.flight_mode.mode = str(mode).replace("FlightMode.", "")
-                self._emit()
+                name = str(mode).replace("FlightMode.", "")
+                changed = self._snapshot.flight_mode.mode != name
+                self._snapshot.flight_mode.mode = name
+                self._emit(force=changed)
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -543,8 +545,9 @@ class TelemetryManager:
             async for armed in self._drone.telemetry.armed():
                 if not self._running:
                     break
+                changed = self._snapshot.flight_mode.is_armed != armed
                 self._snapshot.flight_mode.is_armed = armed
-                self._emit()
+                self._emit(force=changed)
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -555,8 +558,9 @@ class TelemetryManager:
             async for in_air in self._drone.telemetry.in_air():
                 if not self._running:
                     break
+                changed = self._snapshot.flight_mode.is_in_air != in_air
                 self._snapshot.flight_mode.is_in_air = in_air
-                self._emit()
+                self._emit(force=changed)
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -1346,13 +1350,24 @@ class TelemetryManager:
     # Emit                                                                 #
     # ------------------------------------------------------------------ #
 
-    def _emit(self):
-        """Push latest snapshot to frontend, throttled to _EMIT_RATE_HZ (or _FLEET_EMIT_RATE_HZ)."""
+    def _emit(self, force: bool = False):
+        """Push latest snapshot to frontend, throttled to _EMIT_RATE_HZ (or
+        _FLEET_EMIT_RATE_HZ).
+
+        `force` bypasses the throttle for a DISCRETE STATE CHANGE — armed,
+        flight mode, in-air. The throttle exists to stop a 10 Hz attitude
+        stream flooding the socket, and for continuous values dropping a frame
+        costs nothing: the next one carries a barely different number. A state
+        transition is not like that. There is exactly one moment when armed
+        goes false→true, and delaying it by up to a tenth of a second adds
+        avoidable lag to the one update the operator is actually watching for
+        after pressing a button.
+        """
         if not self._on_update:
             return
         now = asyncio.get_event_loop().time()
         rate = self._FLEET_EMIT_RATE_HZ if self._fleet_mode else self._EMIT_RATE_HZ
-        if (now - self._last_emit) < (1.0 / rate):
+        if not force and (now - self._last_emit) < (1.0 / rate):
             return
         self._last_emit = now
         try:

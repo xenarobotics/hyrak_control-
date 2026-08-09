@@ -51,10 +51,18 @@ interface DroneStore {
     lastActionResult: ActionResult | null
     droneMissionOffer: any[] | null   // waypoints downloaded from drone on connect
 
+    /** The command that has been sent and not yet answered, so a button can
+     *  say ARMING… the instant it is pressed. Without this the UI shows
+     *  nothing at all for the whole round trip — on a 3DR radio about a
+     *  second — which reads as a click that did not register, and the
+     *  operator presses it again. */
+    pendingAction: { action: string; at: number } | null
+
     // UI
     isEmergencyConfirm: boolean
 
     // Actions
+    setPendingAction: (action: string | null) => void
     setConnectionStatus: (s: ConnectionStatus) => void
     setTelemetryStatus: (s: TelemetryStatus) => void
     setTelemetryError: (msg: string | null) => void
@@ -101,6 +109,7 @@ export const useDroneStore = create<DroneStore>((set) => ({
     missionUploadResult: null,
     lastActionResult: null,
     droneMissionOffer: null,
+    pendingAction: null,
     isEmergencyConfirm: false,
 
     setConnectionStatus: (s) => set({ connectionStatus: s }),
@@ -117,7 +126,36 @@ export const useDroneStore = create<DroneStore>((set) => ({
     setEmergencyConfirm: (v) => set({ isEmergencyConfirm: v }),
     setCvResults: (r) => set({ cvResults: r }),
     setMissionUploadResult: (r) => set({ missionUploadResult: r }),
-    setLastActionResult: (r) => set({ lastActionResult: r }),
+    setPendingAction: (action) => set({
+        pendingAction: action ? { action, at: Date.now() } : null,
+    }),
+    // THE ACK IS THE FIRST NEWS, AND IT WAS BEING THROWN AWAY.
+    //
+    // Arming used to take two visible seconds: about one for the command to
+    // reach the drone and be acknowledged, then up to another whole second
+    // before the button changed — because the button watched
+    // telemetry.flight_mode.is_armed, which is decoded from HEARTBEAT, and
+    // PX4 sends HEARTBEAT at 1 Hz. So the UI sat on a stale `false` waiting
+    // for a periodic message to repeat something it had already been told.
+    //
+    // A successful action_result for arm IS the vehicle's acknowledgement:
+    // MAVSDK only resolves arm() on MAV_RESULT_ACCEPTED. Folding it into the
+    // snapshot is not optimism — it is using the earlier of two reports of
+    // the same fact. The heartbeat still arrives and still overwrites this;
+    // if the two ever disagreed, the stream wins within the second.
+    setLastActionResult: (r) => set(state => {
+        const next: Partial<DroneStore> = { lastActionResult: r, pendingAction: null }
+        const armState = r?.ok
+            ? (r.action === 'arm' ? true : r.action === 'disarm' ? false : null)
+            : null
+        if (armState !== null && state.telemetry) {
+            next.telemetry = {
+                ...state.telemetry,
+                flight_mode: { ...state.telemetry.flight_mode, is_armed: armState },
+            }
+        }
+        return next
+    }),
     setDroneMissionOffer: (wps) => set({ droneMissionOffer: wps }),
     reset: () => set({
         connectionStatus: 'disconnected',
@@ -131,6 +169,7 @@ export const useDroneStore = create<DroneStore>((set) => ({
         missionUploadResult: null,
         lastActionResult: null,
         droneMissionOffer: null,
+        pendingAction: null,
         isEmergencyConfirm: false,
     }),
 }))

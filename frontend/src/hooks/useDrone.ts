@@ -3,16 +3,23 @@
 import { useEffect, useCallback } from 'react'
 import { getSocket, connectSocket } from '@/lib/socket'
 import { startBrowserSerial, stopBrowserSerial, isBrowserSerialActive, type SerialPortLike } from '@/lib/browserSerial'
-import { startLocalRelay, isLocalRelayActive } from '@/lib/localRfRelay'
+import { startLocalRelay, stopLocalRelay, isLocalRelayActive } from '@/lib/localRfRelay'
 import { startRemoteSitlRelay, stopRemoteSitlRelay, isRemoteSitlRelayActive, setSitlSilenceHandler } from '@/lib/remoteSitlRelay'
 import { startNativeSerial, stopNativeSerial, isNativeSerialActive, setSerialSilenceHandler, DEFAULT_SERIAL_BAUD } from '@/lib/nativeSerialRelay'
 import { startNativeRfRelay, stopNativeRfRelay, isNativeRfRelayActive, setRfSilenceHandler } from '@/lib/nativeRfRelay'
+import { stopSiyiTelemetry, isSiyiTelemetryActive } from '@/lib/siyiTelemetryRelay'
 import { useDroneStore } from '@/store/drone'
 import { useSwarmStore } from '@/store/swarm'
 import { colorForDrone, FLEET_SCAN_COUNT } from '@/lib/fleet'
 import type { TelemetrySnapshot } from '@/types/telemetry'
 import type { SessionInfo } from '@/types/session'
 import type { CVResult } from '@/types/vision'
+
+/** How long a command may sit unanswered before the UI stops claiming it is
+ *  in flight. Generous: a takeoff over a slow radio legitimately takes several
+ *  seconds to acknowledge, and cutting the spinner short would put the button
+ *  back to its idle look while the command is still very much alive. */
+const ACTION_PENDING_TIMEOUT_MS = 8000
 
 export function useDrone() {
     const store = useDroneStore()
@@ -307,6 +314,14 @@ export function useDrone() {
             if (isBrowserSerialActive()) await stopBrowserSerial()
             if (isNativeSerialActive()) await stopNativeSerial()
             if (isNativeRfRelayActive()) await stopNativeRfRelay()
+            // The other three relays are the same shape and were missed:
+            // each one owns a source of MAVLink and keeps pumping it into the
+            // server's serial_uplink after the link is "released". Any of
+            // them still running re-establishes the link from its own traffic,
+            // so Disconnect appears to do nothing at all.
+            if (isLocalRelayActive()) await stopLocalRelay()
+            if (isSiyiTelemetryActive()) await stopSiyiTelemetry()
+            if (isRemoteSitlRelayActive()) await stopRemoteSitlRelay()
         } catch (err) {
             // A relay that fails to close cleanly must not block the
             // disconnect — the server-side teardown is what matters.
@@ -427,7 +442,23 @@ export function useDrone() {
             }
             return
         }
+        // Mark it in flight BEFORE emitting. Everything up to the drone's ACK
+        // is dead air — the button does not change, no spinner appears, and on
+        // a 3DR radio that lasts about a second, which is long enough to read
+        // as a click that missed. The press itself is the one event we can
+        // report instantly, so report it.
+        store.setPendingAction(action)
         getSocket().emit('drone_action', { action, ...payload })
+        // A result that never comes must not leave the button spinning
+        // forever — that trades one misleading state for a worse one. Clear
+        // it only if THIS press is still the pending one, so a later command
+        // is never cancelled by an earlier press's timer.
+        const mine = useDroneStore.getState().pendingAction
+        setTimeout(() => {
+            if (useDroneStore.getState().pendingAction === mine) {
+                useDroneStore.getState().setPendingAction(null)
+            }
+        }, ACTION_PENDING_TIMEOUT_MS)
     }, [])
 
     const arm          = useCallback(() => sendAction('arm'),    [sendAction])

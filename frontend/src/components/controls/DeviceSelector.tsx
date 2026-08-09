@@ -69,8 +69,9 @@ export function DeviceSelector() {
     // the fallback when nothing has been saved.
     const [baud, setBaud] = useState(() => getTelemetryBaud())
     const [rfFanout, setRfFanout] = useState(() => getRfFanoutPort())
+    const [disconnecting, setDisconnecting] = useState(false)
 
-    const { telemetryStatus, telemetryError, connectBrowserSerial, connectNativeSerial, connectNativeRf, connectLocalRelay, connectRemoteSitl } = useDrone()
+    const { telemetryStatus, telemetryError, connectBrowserSerial, connectNativeSerial, connectNativeRf, connectLocalRelay, connectRemoteSitl, disconnectTelemetry } = useDrone()
 
     const refreshRadios = useCallback(async () => {
         const list = await listGrantedPorts()
@@ -121,6 +122,11 @@ export function DeviceSelector() {
     // the option is shown but not connectable there (no relay-script
     // fallback; browser users are pointed at the desktop app instead).
     const sitlNeedsDesktop = source === 'sitl' && !isDesktopApp()
+
+    const handleDisconnect = async () => {
+        setDisconnecting(true)
+        try { await disconnectTelemetry() } finally { setDisconnecting(false) }
+    }
 
     const handleConnect = () => {
         if (source.startsWith('nradio-')) {
@@ -359,21 +365,46 @@ export function DeviceSelector() {
                 )}
             </div>
 
-            {/* Connect button */}
-            <Button
-                size="sm"
-                className="w-full font-mono text-xs gap-2"
-                variant={isConnected ? 'outline' : 'default'}
-                disabled={isConnecting || sitlNeedsDesktop}
-                onClick={handleConnect}
-            >
-                {isConnecting
-                    ? <><Loader size={12} className="animate-spin" /> CONNECTING...</>
-                    : isConnected
-                        ? <><Wifi size={12} /> CONNECTED</>
+            {/* Connect / Disconnect.
+                THE CONNECTED STATE HAD NO WAY OUT. This button showed
+                "CONNECTED" and still called handleConnect, so the only thing
+                a connected operator could do here was connect again — and
+                releasing the radio (to hand it to QGC, to power-cycle it, to
+                switch sources) meant reloading the page. Settings has always
+                had a Disconnect, and its own help text claimed the link
+                "can be released from here or from the Fly tab", which was
+                simply not true. Now it is. */}
+            {isConnected ? (
+                <div className="flex gap-2">
+                    <div className="flex-1 flex items-center justify-center gap-2 rounded-md border border-green-500/40 text-green-500 font-mono text-xs h-8">
+                        <Wifi size={12} /> CONNECTED
+                    </div>
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        className="font-mono text-xs gap-2"
+                        disabled={disconnecting}
+                        onClick={handleDisconnect}
+                        title="Release the drone link and stop whichever local relay owns the radio"
+                    >
+                        {disconnecting
+                            ? <><Loader size={12} className="animate-spin" /> …</>
+                            : <><WifiOff size={12} /> DISCONNECT</>}
+                    </Button>
+                </div>
+            ) : (
+                <Button
+                    size="sm"
+                    className="w-full font-mono text-xs gap-2"
+                    disabled={isConnecting || sitlNeedsDesktop}
+                    onClick={handleConnect}
+                >
+                    {isConnecting
+                        ? <><Loader size={12} className="animate-spin" /> CONNECTING...</>
                         : <><WifiOff size={12} /> CONNECT TELEMETRY</>
-                }
-            </Button>
+                    }
+                </Button>
+            )}
 
             {/* Why the last attempt failed — a silent spinner-stop tells the
                 operator nothing; the actual reason always does. */}

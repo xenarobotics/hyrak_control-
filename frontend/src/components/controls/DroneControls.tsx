@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/select'
 import {
     Shield, ShieldOff, PlaneTakeoff,
-    RotateCcw, MapPin, PlaneLanding
+    RotateCcw, MapPin, PlaneLanding, Loader
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FLIGHT_MODES } from '@/lib/flightModes'
@@ -23,7 +23,7 @@ export function DroneControls() {
     useEffect(() => { setMounted(true) }, [])
 
     const { arm, disarm, sendAction } = useDrone()
-    const { telemetry, telemetryStatus } = useDroneStore()
+    const { telemetry, telemetryStatus, pendingAction } = useDroneStore()
     const swarmEnabled = useSwarmStore(s => s.enabled)
     const selectedIds  = useSwarmStore(s => s.selectedIds)
     const drones       = useSwarmStore(s => s.drones)
@@ -37,6 +37,9 @@ export function DroneControls() {
     const isGroup = groupTargets.length > 0
 
     const armed = telemetry?.flight_mode?.is_armed ?? false
+    // Sent, not yet acknowledged. On a 3DR radio that gap is about a second,
+    // and an unchanged button across it reads as a press that never landed.
+    const armPending = pendingAction?.action === 'arm' || pendingAction?.action === 'disarm'
     const inAir = telemetry?.flight_mode?.is_in_air ?? false
     const mode  = telemetry?.flight_mode?.mode ?? '—'
     const connected = swarmEnabled ? isGroup : telemetryStatus === 'connected'
@@ -135,12 +138,14 @@ export function DroneControls() {
                         : 'border-green-500/40 text-green-500 hover:bg-green-500/10'
                 )}
                 variant="outline"
-                disabled={!connected}
+                disabled={!connected || armPending}
                 onClick={(!isGroup && armed) ? disarm : arm}
             >
-                {(!isGroup && armed)
-                    ? <><ShieldOff size={13} /> DISARM</>
-                    : <><Shield size={13} /> ARM{groupTargets.length > 1 ? ' ALL' : ''}</>
+                {armPending
+                    ? <><Loader size={13} className="animate-spin" /> {armed ? 'DISARMING' : 'ARMING'}…</>
+                    : (!isGroup && armed)
+                        ? <><ShieldOff size={13} /> DISARM</>
+                        : <><Shield size={13} /> ARM{groupTargets.length > 1 ? ' ALL' : ''}</>
                 }
             </Button>
 

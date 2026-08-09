@@ -13,6 +13,7 @@ import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import {
     Wifi, WifiOff, Globe, Shield, ShieldOff, Satellite, Battery,
     Navigation, PlaneLanding, PlaneTakeoff, TriangleAlert, MoveVertical, SignalMedium,
+    Loader,
 } from 'lucide-react'
 import { gpsFixLabel, gpsFixColor, batteryTextColor, connectionQuality, connectionQualityColor } from '@/lib/osd'
 import { FLIGHT_MODES } from '@/lib/flightModes'
@@ -86,7 +87,7 @@ function BarButton({ onClick, disabled, color, title, children }: {
 }
 
 export function StatusBar() {
-    const { telemetry, telemetryStatus, mode, cvResults, lastActionResult } = useDroneStore()
+    const { telemetry, telemetryStatus, mode, cvResults, lastActionResult, pendingAction } = useDroneStore()
     const { sendAction, arm, disarm } = useDrone()
     const { isStreaming, stats } = useWebRTCContext()
     const online = useOnlineStatus()
@@ -103,6 +104,7 @@ export function StatusBar() {
     useEffect(() => () => { if (killTimer.current) clearTimeout(killTimer.current) }, [])
 
     const armed = telemetry?.flight_mode.is_armed ?? false
+    const armPending = pendingAction?.action === 'arm' || pendingAction?.action === 'disarm'
     const alt = telemetry?.position.relative_altitude_m ?? 0
     // AIRBORNE IS JUDGED FROM THE ALTITUDE TOO, not from the flag alone.
     //
@@ -234,14 +236,22 @@ export function StatusBar() {
             <Divider />
 
             {/* ── Vehicle state ────────────────────────────────────────── */}
+            {/* Pressed → ARMING… → ARMED. The middle state is the whole point:
+                the command spends roughly a second on the radio before the
+                drone can answer, and with nothing on screen for that second
+                the press looks lost. */}
             <BarButton
                 onClick={armed ? disarm : arm}
-                disabled={!droneLinked}
+                disabled={!droneLinked || armPending}
                 color={armed ? '#fb923c' : '#4ade80'}
-                title={armed ? 'Disarm motors' : 'Arm motors'}
+                title={armPending
+                    ? 'Waiting for the drone to acknowledge'
+                    : armed ? 'Disarm motors' : 'Arm motors'}
             >
-                {armed ? <ShieldOff size={13} /> : <Shield size={13} />}
-                {armed ? 'DISARM' : 'ARM'}
+                {armPending
+                    ? <Loader size={13} className="animate-spin" />
+                    : armed ? <ShieldOff size={13} /> : <Shield size={13} />}
+                {armPending ? (armed ? 'DISARMING' : 'ARMING') : armed ? 'DISARM' : 'ARM'}
             </BarButton>
 
             {refusal && (
