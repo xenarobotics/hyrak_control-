@@ -324,8 +324,12 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             )
             return
 
+        # Which of the six relays this is. They all arrive on this one event,
+        # and every one of them used to log as "browser radio" — so when a
+        # link half-worked the log could not say what was carrying it.
+        source = str((data or {}).get("source") or "").strip() or "radio"
         try:
-            bridge = await serial_bridge.SerialBridge.create(sio, sid)
+            bridge = await serial_bridge.SerialBridge.create(sio, sid, source)
         except Exception as e:
             logger.error(f"Session {session.session_id[:8]} serial bridge setup failed: {e}")
             await sio.emit(
@@ -336,7 +340,9 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             return
 
         serial_bridge.register_bridge(session.session_id, bridge)
-        logger.info(f"Session {session.session_id[:8]} browser radio → {bridge.address}")
+        logger.info(
+            f"Session {session.session_id[:8]} telemetry relay '{source}' → {bridge.address}"
+        )
 
         # Reuse the normal connect flow; the heartbeat mavsdk waits for arrives
         # through serial_uplink events the browser is already pumping.

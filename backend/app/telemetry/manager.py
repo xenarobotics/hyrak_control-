@@ -1326,9 +1326,7 @@ class TelemetryManager:
                 self._start_altitude_verify(float(altitude_m))
             return True
         except ActionError as e:
-            self.last_action_error = await self._fc_reason(
-                sent, self._plain(e, "the drone refused to take off")
-            )
+            self.last_action_error = await self._failure_reason(e, sent, "the drone refused to take off")
             logger.error(f"Takeoff failed: {e} | FC said: {self.last_action_error}")
             return False
 
@@ -1502,11 +1500,56 @@ class TelemetryManager:
             # so reporting a bare "arm failed" sends the operator to check the
             # radio, which is the one thing that is definitely working. Take
             # the FC's own line instead.
-            self.last_action_error = await self._fc_reason(
-                sent, self._plain(e, "the drone refused to arm")
-            )
+            self.last_action_error = await self._failure_reason(e, sent, "the drone refused to arm")
             logger.error(f"Arm failed: {e} | FC said: {self.last_action_error}")
             return False
+
+    async def _failure_reason(self, err: Exception, sent: float, fallback: str) -> str:
+        """Why a command failed, choosing the right question to ask.
+
+        A TIMEOUT and a DENIAL are opposite diagnoses and must not be handled
+        alike. Denied means the aircraft answered: the link works end to end
+        and the cause is a pre-arm condition, which PX4 states in a STATUSTEXT
+        worth waiting for. Timed out means nothing came back — so a STATUSTEXT
+        arriving now is UNRELATED routine chatter that happens to have landed
+        in the window, and quoting it as the reason would be confidently
+        wrong. Worse, STATUSTEXT travels the downlink, which in this exact
+        failure is the half that still works, so there is always something
+        available to misquote.
+        """
+        if "TIMEOUT" in str(err):
+            return self._plain(err, fallback) + self._link_note(err)
+        return await self._fc_reason(sent, self._plain(err, fallback))
+
+    def _link_note(self, err: Exception) -> str:
+        """Appended to a TIMEOUT, and only to a TIMEOUT.
+
+        A DENIED command and a TIMED-OUT command are opposite diagnoses and
+        were reported the same way. Denied means the aircraft answered — the
+        whole link works and the fault is a pre-arm condition. Timed out means
+        nothing came back, and when telemetry is streaming in at the same
+        moment that can only be the uplink. Six timeouts in a row (rates,
+        mission, UID, arm, fence) is not six faults; it is one dead direction.
+        """
+        if "TIMEOUT" not in str(err):
+            return ""
+        bridge = self._bridge_for_diagnosis()
+        if bridge is None:
+            return ""
+        return f" — {bridge.round_trip_verdict()}"
+
+    def _bridge_for_diagnosis(self):
+        """The relay bridge feeding this manager, if the link runs through
+        one. Looked up by address rather than held, so nothing here keeps a
+        closed bridge alive."""
+        try:
+            from app.telemetry import serial_bridge
+            for bridge in serial_bridge._bridges.values():
+                if bridge.address == self._address:
+                    return bridge
+        except Exception:
+            pass
+        return None
 
     @staticmethod
     def _plain(err: Exception, fallback: str) -> str:
@@ -1534,9 +1577,7 @@ class TelemetryManager:
             logger.info("✅ Disarmed")
             return True
         except ActionError as e:
-            self.last_action_error = await self._fc_reason(
-                sent, self._plain(e, "the drone refused to disarm")
-            )
+            self.last_action_error = await self._failure_reason(e, sent, "the drone refused to disarm")
             logger.error(f"Disarm failed: {e} | FC said: {self.last_action_error}")
             return False
 

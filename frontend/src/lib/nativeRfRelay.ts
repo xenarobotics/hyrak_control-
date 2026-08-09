@@ -120,7 +120,7 @@ export async function startNativeRfRelay(
 
     socket.on('serial_downlink', onDownlink)
     // Same event every other telemetry path sends — from here they are identical.
-    socket.emit('connect_browser_serial', {})
+    socket.emit('connect_browser_serial', { source: 'native-rf' })
     active = true
 }
 

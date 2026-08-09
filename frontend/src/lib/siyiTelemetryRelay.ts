@@ -168,7 +168,7 @@ export async function startSiyiTelemetry(
     // Tells the backend to spin up its MAVLink parser for this session. The same
     // event a Web Serial radio sends, because from here on the paths are
     // identical.
-    socket.emit('connect_browser_serial', {})
+    socket.emit('connect_browser_serial', { source: 'siyi-udp' })
     active = true
 }
 

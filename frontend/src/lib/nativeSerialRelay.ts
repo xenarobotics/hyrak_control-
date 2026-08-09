@@ -163,7 +163,7 @@ export async function startNativeSerial(
 
     socket.on('serial_downlink', onDownlink)
     // Same event a Web Serial radio sends — from here the paths are identical.
-    socket.emit('connect_browser_serial', {})
+    socket.emit('connect_browser_serial', { source: 'native-serial' })
     active = true
 }
 

@@ -107,7 +107,7 @@ export async function startBrowserSerial(radio: SerialPortLike, baudRate = 57600
     socket.on('serial_downlink', onDownlink)
     // The backend waits for the drone's heartbeat to arrive through this
     // relay, so start pumping bytes immediately — don't wait for status.
-    socket.emit('connect_browser_serial', {})
+    socket.emit('connect_browser_serial', { source: 'web-serial' })
     void readLoop()
 }
 

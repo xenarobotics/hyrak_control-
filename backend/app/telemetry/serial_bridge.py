@@ -156,9 +156,16 @@ class _FrameSniffer:
 
 
 class SerialBridge(asyncio.DatagramProtocol):
-    def __init__(self, sio, socket_id: str):
+    def __init__(self, sio, socket_id: str, source: str = "radio"):
         self._sio = sio
         self._socket_id = socket_id
+        #: Which relay is feeding this bridge. Six different frontend relays —
+        #: Web Serial, native serial, native RF, local RF agent, SIYI, remote
+        #: SITL — all connect through this one event, and every one of them
+        #: logged as "browser radio". When a link half-works, the first
+        #: question is which of the six is carrying it, and the log could not
+        #: answer it.
+        self.source = source
         self._transport: Optional[asyncio.DatagramTransport] = None
         # mavsdk_server listens here — loopback only, never exposed.
         self.mavsdk_port = _free_udp_port()
@@ -166,11 +173,20 @@ class SerialBridge(asyncio.DatagramProtocol):
         # anything — see traffic().
         self.bytes_in = 0
         self.packets_in = 0
+        # AND THE OTHER DIRECTION, which was not counted at all.
+        #
+        # Only inbound was measured, so the bridge could say a great deal
+        # about a link that delivers nothing and nothing whatsoever about the
+        # far more confusing failure: telemetry streaming in perfectly while
+        # every command times out. That is one-directional, and diagnosing it
+        # with a one-directional instrument is hopeless.
+        self.bytes_out = 0
+        self.packets_out = 0
         self._sniffer = _FrameSniffer()
 
     @classmethod
-    async def create(cls, sio, socket_id: str) -> "SerialBridge":
-        bridge = cls(sio, socket_id)
+    async def create(cls, sio, socket_id: str, source: str = "radio") -> "SerialBridge":
+        bridge = cls(sio, socket_id, source)
         loop = asyncio.get_running_loop()
         transport, _ = await loop.create_datagram_endpoint(
             lambda: bridge, local_addr=("127.0.0.1", 0)
@@ -224,8 +240,46 @@ class SerialBridge(asyncio.DatagramProtocol):
 
     def datagram_received(self, data: bytes, addr) -> None:
         """mavsdk → radio side: relay to the browser to write out the port."""
+        self.bytes_out += len(data)
+        self.packets_out += 1
         asyncio.create_task(
             self._sio.emit("serial_downlink", bytes(data), to=self._socket_id)
+        )
+
+    def round_trip_verdict(self) -> str:
+        """Where a link that receives but cannot command is broken.
+
+        THE FAILURE THIS NAMES: heartbeat arrives, the drone is discovered, and
+        then every single round trip times out — rate setters, mission
+        download, hardware UID, arm, geofence. Six timeouts in a row is not six
+        problems. It is one: nothing we send is reaching the aircraft, and the
+        aircraft is fine.
+
+        The uplink and downlink fail differently and that is what hides it. The
+        downlink is a bind, so a wrong address means silence — obvious. The
+        uplink is a send, so a wrong address means the bytes leave for an
+        address with nothing on it. UDP reports nothing back. Telemetry keeps
+        streaming the whole time.
+
+        The one fact that splits it: did WE produce outbound bytes? If we did,
+        everything up to this process is working and the break is downstream —
+        the relay, its uplink host, or the air side. If we did not, mavsdk
+        never sent anything and the fault is on this machine.
+        """
+        if self.packets_out == 0:
+            return ("nothing was sent toward the drone at all — mavsdk produced "
+                    "no outbound packets, so the fault is on the server side of "
+                    "the bridge, not on the radio")
+        return (
+            f"{self.bytes_out} bytes in {self.packets_out} packet(s) were sent "
+            f"toward the drone over the '{self.source}' link and {self.bytes_in} "
+            f"bytes came back, but no command was ever acknowledged. The commands "
+            f"ARE leaving this server, so the break is downstream: the relay on "
+            f"your machine, the address it forwards to (a relay agent still "
+            f"pointed at 127.0.0.1 while the RF decoder moved to its own board "
+            f"sends every command into local loopback), or the air side not "
+            f"transmitting. Telemetry keeps working throughout — it travels the "
+            f"other way"
         )
 
     def close(self) -> None:

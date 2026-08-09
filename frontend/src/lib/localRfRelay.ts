@@ -55,7 +55,7 @@ export async function startLocalRelay(url: string = DEFAULT_LOCAL_RELAY_URL): Pr
             socket.onerror = () => { /* handled via onclose */ }
             // Backend waits for the drone's heartbeat through this relay —
             // start it the moment the socket is up, same as browserSerial.
-            io.emit('connect_browser_serial', {})
+            io.emit('connect_browser_serial', { source: 'local-rf-agent' })
             resolve()
         }
         socket.onerror = () => {

@@ -83,7 +83,7 @@ export async function startRemoteSitlRelay(port = 14540): Promise<void> {
     })
 
     socket.on('serial_downlink', onNativeDownlink)
-    socket.emit('connect_browser_serial', {})
+    socket.emit('connect_browser_serial', { source: 'remote-sitl' })
     active = true
 }
 
