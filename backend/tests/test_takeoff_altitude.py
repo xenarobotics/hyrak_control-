@@ -692,18 +692,48 @@ def _sniffed(*chunks: bytes):
     return s
 
 
-def test_noise_at_the_wrong_baud_frames_as_nothing():
-    """The distinguishing case. Bytes flowing plus zero frames is a baud
-    mismatch, and saying "check the air side is powered" would send the
-    operator to the roof for a problem on their desk."""
-    assert _sniffed(bytes([0x41] * 300)).summary() == ""
+def test_noise_at_the_wrong_baud_is_not_mistaken_for_mavlink():
+    """THE BUG THIS PINS SHIPPED. A first version counted any 0xFD/0xFE as a
+    frame start and asked nothing further, so 3153 bytes of noise reported
+    "19 MAVLink frame(s) from system id(s) 24, 33, 45, 60, 64, 89, 140, 152,
+    232, 234, 236: msg250 x5, msg4335019 x1" — and the operator was told
+    confidently that their baud was correct and to go check the aircraft.
+
+    Random bytes hit a start marker every ~128 bytes by chance. What they
+    cannot do is fill the stream: real MAVLink is back-to-back frames, so
+    coverage separates the two where a frame count does not."""
+    import random
+    random.seed(7)
+    s = _sniffed(bytes(random.randrange(256) for _ in range(3153)))
+    assert not s.looks_like_mavlink
+    assert s.coverage < 0.2
+
+
+def test_a_seven_digit_message_id_is_rejected_outright():
+    """msg4335019 came out of the real failure. The v2 id field is 24 bits and
+    noise fills it happily; no dialect defines anything near that."""
+    bogus = bytes([0xFD, 9, 0, 0, 7, 1, 1, 0x6B, 0x24, 0x42]) + bytes(9) + b"\x00\x00"
+    assert _sniffed(bogus).frames == 0
+
+
+def test_real_mavlink_covers_essentially_the_whole_stream():
+    s = _sniffed(b"".join(_v2(m) for m in (0, 30, 33, 0, 1, 24)))
+    assert s.looks_like_mavlink
+    assert s.coverage > 0.95
+
+
+def test_a_couple_of_lucky_frames_are_not_enough():
+    """Coverage alone is not sufficient on a tiny sample — two frames in forty
+    bytes is 100% coverage and still proves nothing."""
+    assert not _sniffed(_v2(30)).looks_like_mavlink
 
 
 def test_a_radio_talking_to_itself_is_identified_as_such():
     """Ground module chattering with no aircraft behind it: frames arrive,
     they are all RADIO_STATUS, and the system id is the radio's, not an
     autopilot's."""
-    s = _sniffed(_v2(109, sysid=51) * 3)
+    s = _sniffed(_v2(109, sysid=51) * 4)
+    assert s.looks_like_mavlink
     assert "RADIO_STATUS" in s.summary()
     assert 0 not in s.by_msg, "no heartbeat"
     assert s.sysids == {51}

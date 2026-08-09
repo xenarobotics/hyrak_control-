@@ -58,16 +58,31 @@ _MSG_NAMES = {
 class _FrameSniffer:
     """Counts MAVLink frames by message id, and which system ids sent them."""
 
+    #: No real MAVLink message id comes near this. common.xml stops around 300
+    #: and the dialects add a few hundred more; the 24-bit v2 field allows 16
+    #: million, and noise happily produces them. Seeing msg4335019 is proof the
+    #: "frame" was a coincidence, not a message.
+    _MAX_PLAUSIBLE_MSGID = 512
+    #: Fraction of the stream that must actually lie inside frames before this
+    #: is called MAVLink. A real link is back-to-back frames — essentially
+    #: every byte is inside one. Random bytes hit a 0xFD or 0xFE every ~128
+    #: bytes by chance and "frame" a short run around it, which lands far
+    #: below this. This single number is what separates the two diagnoses.
+    _MIN_COVERAGE = 0.5
+
     def __init__(self):
         self._buf = bytearray()
         self.by_msg: dict[int, int] = {}
         self.sysids: set[int] = set()
         self.frames = 0
+        self.framed_bytes = 0
+        self.total_bytes = 0
 
     def feed(self, data: bytes) -> None:
         # Bounded: a stream that never frames must not grow this forever.
         # 512 bytes is well over the largest MAVLink frame (280), so a real
         # frame straddling two chunks is never lost.
+        self.total_bytes += len(data)
         self._buf.extend(data)
         if len(self._buf) > 512:
             del self._buf[:-512]
@@ -83,6 +98,9 @@ class _FrameSniffer:
                     break
                 sysid = b[i + 5]
                 msgid = b[i + 7] | (b[i + 8] << 8) | (b[i + 9] << 16)
+                if msgid > self._MAX_PLAUSIBLE_MSGID or sysid == 0:
+                    i += 1
+                    continue
             elif magic == _V1_MAGIC:
                 if len(b) - i < 8:
                     break
@@ -91,14 +109,41 @@ class _FrameSniffer:
                     break
                 sysid = b[i + 3]
                 msgid = b[i + 5]
+                if sysid == 0:
+                    i += 1
+                    continue
             else:
                 i += 1
                 continue
             self.frames += 1
+            self.framed_bytes += total
             self.sysids.add(sysid)
             self.by_msg[msgid] = self.by_msg.get(msgid, 0) + 1
             i += total
         del b[:i]
+
+    @property
+    def coverage(self) -> float:
+        """Fraction of the stream that lies inside plausible frames."""
+        if self.total_bytes <= 0:
+            return 0.0
+        return min(1.0, self.framed_bytes / self.total_bytes)
+
+    @property
+    def looks_like_mavlink(self) -> bool:
+        """Whether this stream is MAVLink at all, as opposed to bytes that
+        happened to contain a start byte.
+
+        THE FAILURE THIS EXISTS TO PREVENT was real and shipped: a noise stream
+        produced "19 MAVLink frame(s) from system id(s) 24, 33, 45, 60, 64, 89,
+        140, 152, 232, 234, 236: msg250 x5, msg4335019 x1" and the operator was
+        told, confidently, that their baud rate was correct and to go and check
+        the aircraft. Eleven system ids across nineteen frames and a
+        seven-digit message id are not a link; they are what random bytes look
+        like when something scans them for a one-byte marker and asks no
+        further questions.
+        """
+        return self.frames >= 3 and self.coverage >= self._MIN_COVERAGE
 
     def summary(self) -> str:
         if not self.frames:
@@ -106,7 +151,8 @@ class _FrameSniffer:
         top = sorted(self.by_msg.items(), key=lambda kv: kv[1], reverse=True)[:4]
         msgs = ", ".join(f"{_MSG_NAMES.get(m, f'msg{m}')} x{n}" for m, n in top)
         ids = ", ".join(str(s) for s in sorted(self.sysids))
-        return f"{self.frames} MAVLink frame(s) from system id(s) {ids}: {msgs}"
+        return (f"{self.frames} frame(s) covering {self.coverage * 100:.0f}% of "
+                f"the stream, from system id(s) {ids}: {msgs}")
 
 
 class SerialBridge(asyncio.DatagramProtocol):
@@ -161,11 +207,12 @@ class SerialBridge(asyncio.DatagramProtocol):
                     "the radio is plugged in, the serial port permission was "
                     "granted, and the baud rate matches")
         seen = self._sniffer.summary()
-        if not seen:
-            return (f"{self.bytes_in} bytes arrived from the radio but NOTHING "
-                    f"framed as MAVLink — that is a baud rate mismatch, not a "
+        if not self._sniffer.looks_like_mavlink:
+            detail = f" (only {seen})" if seen else ""
+            return (f"{self.bytes_in} bytes arrived from the radio but they are "
+                    f"NOT MAVLink{detail} — that is a baud rate mismatch, not a "
                     f"drone problem. The radio is talking, just not MAVLink at "
-                    f"this speed")
+                    f"this speed. Try 115200 instead of 57600 in Settings")
         if 0 in self._sniffer.by_msg:
             return (f"{seen} — heartbeats WERE seen, so the link is up; the "
                     f"connect timed out anyway, retry it")
