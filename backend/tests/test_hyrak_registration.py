@@ -22,6 +22,11 @@ that would silently break the feeds are pinned here rather than nowhere. The
 parse function's behaviour was verified against the decoder's three documented
 reply forms while writing it.
 """
+import asyncio
+import logging
+import re
+import socket
+import types
 from pathlib import Path
 
 import pytest
@@ -195,3 +200,127 @@ def test_a_failed_registration_never_takes_the_relay_down():
     src = _read(_AGENT)
     assert "except OSError" in src
     assert "feeds unaffected" in src
+
+
+# --------------------------------------------------------------------------- #
+# Two registrants, one client — the thrash                                      #
+# --------------------------------------------------------------------------- #
+#
+# There is exactly ONE direct-UDP client on the decoder, and an explicit
+# registration beats everything including another explicit registration. A
+# registration from a DIFFERENT address does not update a variable — it tears
+# down and respawns both wfb_rx processes. So two components registering on
+# independent timers from different machines restart the feeds every few
+# seconds, indefinitely, and the symptom looks exactly like an RF or air-unit
+# fault. Given how much of this investigation was spent on precisely that class
+# of misattribution, these run the REAL loop rather than grepping it.
+
+
+def _register_loop(*, uplink_host, register_port, has_browser, loop, log):
+    """The agent's own _register body, lifted from source and made runnable.
+
+    Executing the real thing is the point: a grep-shaped assertion would
+    happily pass on a loop that no longer works, and this file has already
+    produced one vacuous test that did exactly that.
+    """
+    src = _read(_AGENT)
+    body = re.search(r"    async def _register\(\) -> None:\n(.*?)\n    async def _report",
+                     src, re.S).group(1)
+    fast = types.SimpleNamespace(**{k: getattr(asyncio, k) for k in dir(asyncio)
+                                    if not k.startswith("_")})
+    fast.sleep = lambda _s: asyncio.sleep(0.02)
+    ns = {
+        "args": types.SimpleNamespace(no_register=False, uplink_host=uplink_host,
+                                      register_port=register_port),
+        "socket": socket, "asyncio": fast, "loop": loop, "logger": log,
+        "current_client": {"ws": object() if has_browser else None},
+    }
+    exec("async def _register() -> None:\n" + body, ns)
+    return ns["_register"]
+
+
+class _FakeDecoder(asyncio.DatagramProtocol):
+    """Answers registrations, optionally flipping the destination it reports —
+    which is what a second registrant on another machine looks like from here."""
+
+    def __init__(self, flap: bool):
+        self.flap = flap
+        self.seen = 0
+
+    def connection_made(self, transport):
+        self._t = transport
+
+    def datagram_received(self, data, addr):
+        self.seen += 1
+        ip = ("192.168.50.39" if self.seen % 2 else "192.168.50.77") if self.flap else "192.168.50.39"
+        self._t.sendto(
+            f"HYRAK OK video={ip}:5600 mavlink={ip}:14550 rtsp=rtsp://d:8554/video".encode(),
+            addr,
+        )
+
+
+async def _serve(flap: bool, port: int):
+    dec = _FakeDecoder(flap)
+    await asyncio.get_running_loop().create_datagram_endpoint(
+        lambda: dec, local_addr=("127.0.0.2", port))
+    return dec
+
+
+@pytest.mark.asyncio
+async def test_an_idle_agent_claims_nothing():
+    """The sharp version of the regression. An agent left running on a spare
+    laptop with no browser attached is consuming nothing, and must not fight a
+    working ground station on another machine every ten seconds forever."""
+    dec = await _serve(flap=False, port=9151)
+    loop = asyncio.get_running_loop()
+    fn = _register_loop(uplink_host="127.0.0.2", register_port=9151,
+                        has_browser=False, loop=loop, log=logging.getLogger("t"))
+    task = asyncio.ensure_future(fn())
+    await asyncio.sleep(0.6)
+    task.cancel()
+    assert dec.seen == 0
+
+
+@pytest.mark.asyncio
+async def test_an_agent_that_is_serving_a_browser_does_claim_the_feed():
+    """The other half — the gate must not be so tight that it never registers."""
+    dec = await _serve(flap=False, port=9152)
+    loop = asyncio.get_running_loop()
+    fn = _register_loop(uplink_host="127.0.0.2", register_port=9152,
+                        has_browser=True, loop=loop, log=logging.getLogger("t"))
+    task = asyncio.ensure_future(fn())
+    await asyncio.sleep(0.4)
+    task.cancel()
+    assert dec.seen > 0
+
+
+@pytest.mark.asyncio
+async def test_a_registration_fight_is_detected_and_conceded():
+    """Two registrants cannot both win, so the right move is to stop feeding
+    the fight: back off, let the other one hold the feeds, and say so loudly.
+    A stable stream with a clear log beats both sides restarting it forever."""
+    dec = await _serve(flap=True, port=9153)
+    loop = asyncio.get_running_loop()
+    fn = _register_loop(uplink_host="127.0.0.2", register_port=9153,
+                        has_browser=True, loop=loop, log=logging.getLogger("t"))
+    # The loop RETURNS on conceding. If it never does, this times out — which
+    # is the failure being guarded against: an endless registration war.
+    await asyncio.wait_for(fn(), timeout=10)
+    assert dec.seen < 12, "conceded after a few flaps, not after hundreds"
+
+
+@pytest.mark.asyncio
+async def test_a_steady_decoder_is_never_mistaken_for_a_fight():
+    """The detector keys on the destination CHANGING between our own
+    registrations. A decoder answering consistently must never trip it, or the
+    agent would concede a feed nobody is contesting."""
+    dec = await _serve(flap=False, port=9154)
+    loop = asyncio.get_running_loop()
+    fn = _register_loop(uplink_host="127.0.0.2", register_port=9154,
+                        has_browser=True, loop=loop, log=logging.getLogger("t"))
+    task = asyncio.ensure_future(fn())
+    await asyncio.sleep(0.8)
+    still_running = not task.done()
+    task.cancel()
+    assert still_running, "conceded a feed that was never contested"
+    assert dec.seen > 3

@@ -104,11 +104,90 @@ async def main():
         if args.no_register or args.uplink_host in ("127.0.0.1", "localhost"):
             return                       # nothing to claim on our own loopback
         target = (args.uplink_host, args.register_port)
+        # A datagram endpoint rather than a raw socket with loop.sock_recvfrom.
+        # sock_recvfrom is NOT implemented on every event loop — uvloop raises
+        # NotImplementedError — and this file is a standalone script that
+        # someone may well run under uvloop for the same reason the server
+        # does. create_datagram_endpoint is the portable spelling and it is
+        # the one asyncio actually guarantees.
+        replies: asyncio.Queue = asyncio.Queue()
+
+        class _ReplyProtocol(asyncio.DatagramProtocol):
+            def datagram_received(self, data: bytes, addr) -> None:
+                replies.put_nowait(data)
+
+        reg_transport, _ = await loop.create_datagram_endpoint(
+            _ReplyProtocol, local_addr=("0.0.0.0", 0)
+        )
+        last_dest: str | None = None
+        flaps = 0
         while True:
+            # CLAIM THE FEED ONLY WHILE ACTUALLY SERVING SOMEONE.
+            #
+            # There is exactly ONE direct-UDP client on the decoder and an
+            # explicit registration beats everything, including another
+            # explicit registration — and a registration from a DIFFERENT
+            # address does not update a variable, it tears down and respawns
+            # both wfb_rx processes.
+            #
+            # So an idle agent left running on a spare laptop, with no browser
+            # attached and nothing consuming anything, would fight a working
+            # desktop session on another machine every ten seconds forever.
+            # Both feeds would visibly break and it would look like an RF or
+            # air-unit fault, which is the most expensive way for this to fail.
+            #
+            # An agent with no browser attached is not consuming the feed and
+            # has no business claiming it. Note this is a pause, not an
+            # UNREGISTER: unregistering would suppress this machine's lease as
+            # well, which is a bigger hammer than "I am not using it today".
+            if current_client["ws"] is None:
+                await asyncio.sleep(2)
+                continue
             try:
-                uplink_sock.sendto(b"HYRAK REGISTER", target)
+                reg_transport.sendto(b"HYRAK REGISTER", target)
             except OSError as e:
                 logger.debug(f"registration send failed (feeds unaffected): {e}")
+
+            # WATCH FOR A SECOND REGISTRANT. The reply names where the decoder
+            # is sending. If that destination is different from the one our own
+            # last registration produced, something else registered in between —
+            # and two registrants on a timer thrash the feeds indefinitely.
+            # We cannot see our own address, but we do not need to: a change
+            # between our own consecutive registrations is the signal.
+            dest = None
+            try:
+                data = await asyncio.wait_for(replies.get(), timeout=1.0)
+                text = data.decode(errors="replace")
+                if text.startswith("HYRAK OK"):
+                    for field in text.split():
+                        if field.startswith("mavlink="):
+                            dest = field.split("=", 1)[1]
+                elif text.startswith("HYRAK ERR"):
+                    logger.warning(f"decoder refused the registration: {text.strip()}")
+            except (asyncio.TimeoutError, OSError):
+                pass                     # no reply is not an error; it is UDP
+
+            if dest and last_dest and dest != last_dest:
+                flaps += 1
+                logger.warning(
+                    f"the decoder's MAVLink destination changed to {dest} between our "
+                    f"own registrations (was {last_dest}) — something else is "
+                    f"registering too, and only one client can have the feeds"
+                )
+                if flaps >= 3:
+                    reg_transport.close()
+                    logger.error(
+                        "STOPPING registration: another ground station keeps claiming "
+                        "this decoder, and two registrants on a timer restart the feeds "
+                        "every few seconds indefinitely — which looks exactly like an RF "
+                        "or air-unit fault. Backing off so the other one wins and the "
+                        "feeds stay up. Close the other ground station, or start this "
+                        "agent with --no-register."
+                    )
+                    return
+            if dest:
+                last_dest = dest
+
             # Not a keepalive — the decoder never expires a client. This is
             # self-healing: if this PC's address changes, the next tick
             # re-points the feed with no user action. Measured free on the
