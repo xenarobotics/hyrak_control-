@@ -42,7 +42,9 @@ from app.vision.geometry import (
     pose_from_telemetry, size_ratio_from_ground_range,
 )
 from app.vision.pursuit import (
-    PursuitLimits, decide_elevation, is_outpaced, limit_descent, lock_state_for,
+    PursuitLimits, ROW_NUDGE_STEP, clamp_row_target, decide_elevation,
+    distance_axis, foot_row, is_outpaced, limit_climb, limit_descent,
+    lock_state_for, new_row_pd, row_reference_is_stale, scale_forward,
 )
 from app.vision.tracker_config import make_bytetrack_cfg
 from app.config import get_settings
@@ -119,6 +121,10 @@ def _make_state() -> Dict[str, Any]:
         "altitude_mode": "fixed",
         "altitude_nudge_v": 0.0,
         "target_distance_ratio": _DEFAULT_DISTANCE_RATIO,
+        # Frame row Fixed mode holds the feet on; None = take it from the
+        # subject on the next frame. See human_tracker for why it is seeded
+        # from an observation rather than fixed at frame centre.
+        "target_row": None,
         "height_ema": None,
         "frames_lost": 0,
         "last_seen_t": 0.0,
@@ -128,6 +134,8 @@ def _make_state() -> Dict[str, Any]:
         "yaw_pd": PDController(kp=30.0, kd=4.0, max_output=55.0, deadband=0.05),
         "alt_pd": PDController(kp=1.5, kd=0.3, max_output=1.0, deadband=0.10),
         "dist_pd": PDController(kp=4.0, kd=1.0, max_output=2.5, deadband=0.08),
+        # The Fixed-altitude distance axis — see pursuit.new_row_pd.
+        "row_pd": new_row_pd(),
         "kalman": KalmanXY(),
         "smoother": VelocitySmoother(alpha=0.4),
     }
@@ -404,6 +412,10 @@ class CrowdManager(BaseAnalyzer):
             st["elevate"] = None
             st["last_drone_command"] = None
             st["altitude_nudge_v"] = 0.0
+            st["row_pd"].reset()
+        # Taken fresh at every lock: the framing on screen when the operator
+        # presses start is the framing they asked for.
+        st["target_row"] = None
         logger.info(
             f"Session {client_id[:8]}: crowd follow "
             f"{'STARTED' if active else 'STOPPED'}"
@@ -414,10 +426,15 @@ class CrowdManager(BaseAnalyzer):
         if st is None or mode not in ("fixed", "auto"):
             return
         st["altitude_mode"] = mode
+        # Each mode hands the forward axis to a different sensor; reset the
+        # incoming PD and re-take the row reference at the height we are at now.
         if mode == "fixed":
             st["alt_pd"].reset()
+            st["row_pd"].reset()
+            st["target_row"] = None
         else:
             st["altitude_nudge_v"] = 0.0
+            st["dist_pd"].reset()
 
     def set_altitude_nudge(self, client_id: str, velocity: float) -> None:
         st = self._client_state.get(client_id)
@@ -425,11 +442,24 @@ class CrowdManager(BaseAnalyzer):
             st["altitude_nudge_v"] = float(np.clip(velocity, -1.5, 1.5))
 
     def set_tracking_params(self, client_id: str, target_distance_ratio: float) -> None:
+        """In Fixed altitude the forward axis reads the frame row, so the ratio
+        alone would not reach it — the DIRECTION of change is applied to the
+        target row as well, keeping CLOSER / FURTHER working in both modes."""
         st = self._client_state.get(client_id)
         if st is None:
             return
-        st["target_distance_ratio"] = float(np.clip(target_distance_ratio, 0.08, 0.70))
+        previous = st.get("target_distance_ratio", _DEFAULT_DISTANCE_RATIO)
+        ratio = float(np.clip(target_distance_ratio, 0.08, 0.70))
+        st["target_distance_ratio"] = ratio
         st["height_ema"] = None
+
+        if st.get("altitude_mode") != "auto" and st.get("target_row") is not None:
+            # Closer means the feet sit lower in frame, i.e. a larger row.
+            if ratio > previous:
+                st["target_row"] = clamp_row_target(st["target_row"] + ROW_NUDGE_STEP)
+            elif ratio < previous:
+                st["target_row"] = clamp_row_target(st["target_row"] - ROW_NUDGE_STEP)
+            st["row_pd"].reset()
 
     def _follow(self, state, people, client_id, W, H, ctx, pose):
         """
@@ -469,8 +499,12 @@ class CrowdManager(BaseAnalyzer):
         )
         state["height_ema"] = h_ema
 
+        # Where the subject meets the ground. Drives the Fixed-mode distance
+        # axis, and is the pixel the ground projection inside
+        # _range_observable has to use.
+        foot_n = foot_row(fy_n, h_ema)
         h_eff, _ = self._range_observable(
-            h_ema, pose, ctx, fx_n, fy_n, W, H, _SUBJECT_HEIGHT_M
+            h_ema, pose, ctx, fx_n, fy_n, foot_n, W, H, _SUBJECT_HEIGHT_M
         )
         err_yaw = fx_n - 0.5
         err_dist = range_error_ratio(
@@ -488,9 +522,20 @@ class CrowdManager(BaseAnalyzer):
         else:
             down_m_s = state.get("altitude_nudge_v", 0.0)
 
+        # ── THE DISTANCE AXIS, PER ALTITUDE MODE ──────────────────────────
+        # Fixed reads the frame row (height is held, so the row IS range: high
+        # in frame far, low in frame near); Auto reads apparent size,
+        # unchanged. See pursuit.distance_axis.
+        alt_mode = state.get("altitude_mode", "fixed")
+        forward_raw, range_err = distance_axis(
+            state=state, altitude_mode=alt_mode,
+            foot_row_n=foot_n, size_range_error=err_dist,
+        )
+
         yaw_factor = max(_YAW_PRIORITY_FLOOR,
                          1.0 - abs(err_yaw) / _YAW_PRIORITY_THRESHOLD)
-        forward_m_s = state["dist_pd"].compute(err_dist) * yaw_factor
+        # A retreat is never throttled — see pursuit.scale_forward.
+        forward_m_s = scale_forward(forward_raw, yaw_factor, alt_mode)
 
         elevate = None
         if forward_m_s > 0:
@@ -502,7 +547,7 @@ class CrowdManager(BaseAnalyzer):
             elevate = decide_elevation(
                 target_outpacing=is_outpaced(
                     forward_m_s, MAX_PURSUIT_SPEED_M_S, limits,
-                    target_growing_distance=err_dist > 0.01,
+                    target_growing_distance=range_err > 0.01,
                 ),
                 agl_m=pose.agl_m if pose else None,
                 depression_deg=depression, limits=limits,
@@ -511,9 +556,20 @@ class CrowdManager(BaseAnalyzer):
                 down_m_s = elevate.climb_m_s
         state["elevate"] = elevate.to_dict() if elevate else None
 
-        down_m_s, _floor = limit_descent(
-            down_m_s, pose.agl_m if pose else None, PursuitLimits.from_settings()
-        )
+        # Floor AND ceiling, at the single point every vertical command
+        # converges on. The ceiling matters most for the operator's ▲ nudge,
+        # which reached down_m_s having passed no altitude check at all.
+        _agl = pose.agl_m if pose else None
+        _limits = PursuitLimits.from_settings()
+        down_m_s, _floor = limit_descent(down_m_s, _agl, _limits)
+        down_m_s, _ceiling = limit_climb(down_m_s, _agl, _limits)
+
+        # Row ranging assumes a held altitude; if the aircraft is moving
+        # vertically the reference must be re-taken or the drone reads its own
+        # climb as the subject approaching.
+        if row_reference_is_stale(alt_mode, down_m_s):
+            state["target_row"] = clamp_row_target(foot_n)
+            state["row_pd"].reset()
 
         cmd = state["smoother"].smooth({
             "type": "velocity", "forward_m_s": forward_m_s, "right_m_s": 0.0,
@@ -529,7 +585,7 @@ class CrowdManager(BaseAnalyzer):
         state["last_drone_command"] = out
         return out
 
-    def _range_observable(self, h_ema, pose, ctx, fx_n, fy_n, W, H, subject_h_m):
+    def _range_observable(self, h_ema, pose, ctx, fx_n, fy_n, foot_n, W, H, subject_h_m):
         """
         Distance observable in size-ratio units, blending the two estimates a
         single camera can give.
@@ -551,6 +607,10 @@ class CrowdManager(BaseAnalyzer):
             return h_ema, None
 
         cam = camera_from_settings(ctx.width or W, ctx.height or H)
+        # TWO DIFFERENT PIXELS ON PURPOSE. The de-foreshortening angle belongs
+        # at the subject's mid-height, because that is the vertical extent being
+        # foreshortened. The ground projection below belongs at the feet. Using
+        # one pixel for both is what put a forward bias in the range estimate.
         px, py = fx_n * W, fy_n * H
         phi = pose.depression_deg(cam, px, py)
         if phi is None:
@@ -559,9 +619,17 @@ class CrowdManager(BaseAnalyzer):
         ref = _cal.effective()["camera_mount_tilt_deg"]
         from_size = deforeshorten_size(h_ema, phi, ref)
 
-        # Feet, not centre: the ground plane is what position ranging
-        # intersects, and a box centre floats at half the subject's height.
-        projected = pose.project_to_ground(cam, px, py)
+        # FEET, NOT CENTRE. The comment here said exactly this while the code
+        # passed the box centre, and the centre floats half a subject's height
+        # off the ground — so its ray cleared the subject and struck the ground
+        # BEYOND them. The over-estimate is AGL/(AGL - h/2), independent of
+        # viewing angle: +17% at 6 m AGL, +27% at 4 m, +40% at 3 m. Range too
+        # long reads as "further than wanted", which commands FORWARD, and the
+        # position estimate is weighted in hardest at steep depression — i.e.
+        # exactly when the subject is low in the frame and the drone should have
+        # been backing off. Reported from flight as "person on the lower side of
+        # frame and it moves forward instead of back".
+        projected = pose.project_to_ground(cam, px, foot_n * H)
         if projected is None:
             return from_size, phi
         from_pos = size_ratio_from_ground_range(

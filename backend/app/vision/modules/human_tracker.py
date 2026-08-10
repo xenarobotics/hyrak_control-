@@ -17,8 +17,9 @@ from app.vision.geometry import (
     camera_from_settings, deforeshorten_size, pose_from_telemetry,
 )
 from app.vision.pursuit import (
-    PursuitLimits, decide_elevation, is_outpaced, limit_descent,
-    lock_state_for,
+    PursuitLimits, ROW_NUDGE_STEP, clamp_row_target, decide_elevation,
+    distance_axis, foot_row, is_outpaced, limit_climb, limit_descent,
+    lock_state_for, new_row_pd, row_reference_is_stale, scale_forward,
 )
 from app.config import get_settings
 
@@ -33,12 +34,21 @@ _TRACKER_CFG = make_bytetrack_cfg("verocore_bt_")
 #   YAW   : keep person horizontally centred (err_x → yaw_deg_s)
 #            Primary axis. Fast response. Person exits frame if this lags.
 #
-#   ALTITUDE: keep person vertically centred (err_y → down_m_s)
+#   ALTITUDE: AUTO only — keep person vertically centred (err_y → down_m_s)
 #            Secondary axis. Slow + large deadband so it doesn't fight distance.
+#            In FIXED the altitude is held and this axis does not run.
 #
-#   DISTANCE: maintain visual size via bbox height ratio (→ forward_m_s)
-#            Tertiary axis. Slowest + widest deadband.
-#            Suppressed while yaw error is large (drone is still turning to find person).
+#   DISTANCE: → forward_m_s, from a DIFFERENT SENSOR IN EACH ALTITUDE MODE,
+#            because which sensor is honest depends on whether height is free:
+#
+#              AUTO  — apparent size (bbox height ratio). Altitude is moving,
+#                      so the subject's frame row is not a range signal.
+#              FIXED — the subject's FOOT ROW in frame. With height held, the
+#                      row is range: high in frame is far (drive FORWARD), low
+#                      in frame is near (drive BACK). See pursuit.foot_row.
+#
+#            Scaled down while yaw error is large — but only when driving
+#            FORWARD. A retreat is never throttled; see the yaw_factor use.
 #
 # Key constraint: DO NOT use integral on distance or altitude axes.
 # Integral windup causes the drone to keep moving in one direction long after
@@ -99,6 +109,8 @@ def _make_state() -> Dict[str, Any]:
         # controllers.range_error_ratio for why, and for the measured
         # dead zone this replaced (1.4m at 8.6m, 46m at 50m).
         "dist_pd": PDController(kp=4.0, kd=1.0, max_output=2.5, deadband=0.08),
+        # The Fixed-altitude distance axis — see pursuit.new_row_pd.
+        "row_pd":  new_row_pd(),
         # ── Smoothing ─────────────────────────────────────────────────────
         "kalman":     KalmanXY(),
         "smoother":   VelocitySmoother(alpha=0.4),
@@ -119,6 +131,13 @@ def _make_state() -> Dict[str, Any]:
         "altitude_mode":         "fixed",
         "altitude_nudge_v":      0.0,   # m/s in NED (−=up, +=down), set by hold buttons
         "target_distance_ratio": _DEFAULT_DISTANCE_RATIO,
+        # The frame row Fixed mode holds the subject's feet on. None = take it
+        # from wherever they are on the next frame. Seeding from an OBSERVED
+        # subject rather than hard-coding frame centre is what makes this work
+        # without knowing the mount tilt: frame centre is only reachable on a
+        # steeply tilted camera, and on a shallow one the whole ground plane
+        # sits below it, so "centre the subject" would mean "retreat forever".
+        "target_row":            None,
     }
 
 
@@ -168,11 +187,16 @@ class HumanTracker(BaseAnalyzer):
             state["yaw_pd"].reset()
             state["alt_pd"].reset()
             state["dist_pd"].reset()
+            state["row_pd"].reset()
             state["smoother"].reset()
             state["height_ema"]         = None
             state["last_drone_command"] = None
             state["frames_lost"]        = 0
             state["altitude_nudge_v"]   = 0.0
+        # Taken fresh at every lock, in both directions: the framing the
+        # operator sees at the moment they press start IS the framing they
+        # asked for, and a row left over from the last subject is not.
+        state["target_row"] = None
         logger.info(f"Session {client_id[:8]}: tracking {'STARTED' if active else 'STOPPED'}")
 
     def set_pd_params(self, client_id: str, kp: float, kd: float,
@@ -193,18 +217,46 @@ class HumanTracker(BaseAnalyzer):
             return
         state = self._client_state[client_id]
         state["altitude_mode"] = mode
+        # Each mode hands the forward axis to a different sensor, so the PD the
+        # other one was using is left holding a derivative in units that no
+        # longer apply. Reset the incoming pair, and re-take the row reference
+        # from wherever the subject is now — the altitude that was reached under
+        # the old mode is the height this reference has to describe.
         if mode == "fixed":
             state["alt_pd"].reset()
+            state["row_pd"].reset()
+            state["target_row"] = None
+        else:
+            state["dist_pd"].reset()
         logger.info(f"Session {client_id[:8]}: altitude mode → {mode}")
 
     def set_tracking_params(self, client_id: str, target_distance_ratio: float):
         """Adjust target follow distance.
-        0.15 → far (~8–10 m), 0.25 → default (~5–6 m), 0.40 → close (~2–3 m)."""
+        0.15 → far (~8–10 m), 0.25 → default (~5–6 m), 0.40 → close (~2–3 m).
+
+        In FIXED altitude the forward axis reads the frame row, not apparent
+        size, so a ratio alone would not reach it — CLOSER / FURTHER would
+        silently stop working in the mode that is the default. The ratio is
+        still stored (Auto uses it) and its DIRECTION of change is applied to
+        the target row as well, which keeps one operator concept driving
+        whichever sensor happens to own the axis."""
         if client_id not in self._client_state:
             return
+        state = self._client_state[client_id]
+        previous = state.get("target_distance_ratio", _DEFAULT_DISTANCE_RATIO)
         ratio = float(np.clip(target_distance_ratio, 0.10, 0.60))
-        self._client_state[client_id]["target_distance_ratio"] = ratio
-        self._client_state[client_id]["height_ema"] = None  # reset so new target applies immediately
+        state["target_distance_ratio"] = ratio
+        state["height_ema"] = None  # reset so new target applies immediately
+
+        if state.get("altitude_mode") != "auto" and state.get("target_row") is not None:
+            # A bigger ratio means "fill more of the frame", i.e. closer, and
+            # closer means the feet sit LOWER — a larger row.
+            if ratio > previous:
+                state["target_row"] = clamp_row_target(state["target_row"] + ROW_NUDGE_STEP)
+            elif ratio < previous:
+                state["target_row"] = clamp_row_target(state["target_row"] - ROW_NUDGE_STEP)
+            state["row_pd"].reset()
+            logger.info(f"Session {client_id[:8]}: target row → {state['target_row']:.2f}")
         logger.info(f"Session {client_id[:8]}: distance ratio → {ratio:.2f}")
 
     def set_altitude_nudge(self, client_id: str, velocity: float):
@@ -274,7 +326,8 @@ class HumanTracker(BaseAnalyzer):
             tracking     = state.get("tracking", False)
             yaw_pd       = state["yaw_pd"]
             alt_pd       = state["alt_pd"]
-            dist_pd      = state["dist_pd"]
+            # dist_pd / row_pd are reached through state, in distance_axis —
+            # which of the two runs depends on the altitude mode.
             kalman       = state["kalman"]
             smoother     = state["smoother"]
             dist_target  = state.get("target_distance_ratio", _DEFAULT_DISTANCE_RATIO)
@@ -338,8 +391,12 @@ class HumanTracker(BaseAnalyzer):
                     # "moving away" and drives forward, bringing them closer
                     # still. A feedback loop aimed at the subject. Measured at
                     # 6m AGL: 18.0% fill at 6m out, 14.4% at 3m, 5.8% at 1m.
+                    # Where the subject meets the ground. Drives the Fixed-mode
+                    # distance axis, and is the pixel the ground projection
+                    # inside _range_observable has to use.
+                    foot_n = foot_row(fy_n, h_ema)
                     h_eff, _phi = self._range_observable(
-                        h_ema, pose, ctx, fx_n, fy_n, W, H, _SUBJECT_HEIGHT_M
+                        h_ema, pose, ctx, fx_n, fy_n, foot_n, W, H, _SUBJECT_HEIGHT_M
                     )
                     # ── Error signals (all in normalised [-0.5, 0.5] range) ──
                     err_yaw  = fx_n - cx_n               # horizontal centering
@@ -362,6 +419,24 @@ class HumanTracker(BaseAnalyzer):
                         else state.get("altitude_nudge_v", 0.0)
                     )
 
+                    # ── THE DISTANCE AXIS, PER ALTITUDE MODE ──────────────
+                    #
+                    # FIXED: the frame row. Altitude is held, so the row the
+                    # subject's feet sit on is horizontal range and nothing
+                    # else — high in frame is far, low in frame is near. This
+                    # is what the mode was missing: err_alt was computed and
+                    # thrown away, so vertical framing drove NOTHING, and the
+                    # only thing left steering forward/back was apparent size.
+                    #
+                    # AUTO: apparent size, exactly as before. Altitude is a
+                    # free variable there, so the row is not a range signal and
+                    # the size estimate is the honest one. Untouched.
+                    alt_mode = state.get("altitude_mode", "fixed")
+                    forward_raw, range_err = distance_axis(
+                        state=state, altitude_mode=alt_mode,
+                        foot_row_n=foot_n, size_range_error=err_dist,
+                    )
+
                     # Soft yaw-priority blend: scale forward speed by how centred the person is.
                     # Full speed when centred; zero only when severely off-axis (≥ threshold).
                     # This prevents complete forward-motion lockout during normal yaw corrections.
@@ -371,7 +446,8 @@ class HumanTracker(BaseAnalyzer):
                     # error worse. Both axes correct together.
                     yaw_factor = max(_YAW_PRIORITY_FLOOR,
                                      1.0 - abs(err_yaw) / _YAW_PRIORITY_THRESHOLD)
-                    forward_m_s = dist_pd.compute(err_dist) * yaw_factor
+                    # A retreat is never throttled — see pursuit.scale_forward.
+                    forward_m_s = scale_forward(forward_raw, yaw_factor, alt_mode)
 
                     # ── Auto-elevate: the chase fallback ──────────────────
                     # Only when the target is genuinely pulling away, and only
@@ -392,7 +468,10 @@ class HumanTracker(BaseAnalyzer):
                         elevate = decide_elevation(
                             target_outpacing=is_outpaced(
                                 forward_m_s, MAX_PURSUIT_SPEED_M_S, limits,
-                                target_growing_distance=err_dist > 0.01,
+                                # Whichever error is actually driving the axis —
+                                # in Fixed that is the subject climbing the
+                                # frame, in Auto it is them shrinking.
+                                target_growing_distance=range_err > 0.01,
                             ),
                             agl_m=agl,
                             depression_deg=depression,
@@ -404,13 +483,26 @@ class HumanTracker(BaseAnalyzer):
                     if elevate is None:
                         state["elevate"] = None
 
-                    # THE ALTITUDE FLOOR — see pursuit.limit_descent. Applied
-                    # here, at the single point every descent source converges
-                    # on, rather than at each of them.
+                    # THE ALTITUDE FLOOR AND CEILING — see pursuit.limit_descent
+                    # and limit_climb. Applied here, at the single point every
+                    # vertical command converges on, rather than at each source.
+                    # The ceiling matters most for the operator's ▲ nudge, which
+                    # reached down_m_s having passed no altitude check at all.
+                    _limits = PursuitLimits.from_settings()
                     down_m_s, floor_reason = limit_descent(
-                        down_m_s, agl_for_floor, PursuitLimits.from_settings()
+                        down_m_s, agl_for_floor, _limits
                     )
-                    state["altitude_floor_reason"] = floor_reason
+                    down_m_s, ceiling_reason = limit_climb(
+                        down_m_s, agl_for_floor, _limits
+                    )
+                    state["altitude_floor_reason"] = floor_reason or ceiling_reason
+
+                    # Row ranging assumes a held altitude; if the aircraft is
+                    # moving vertically the reference has to be re-taken or the
+                    # drone reads its own climb as the subject approaching.
+                    if row_reference_is_stale(alt_mode, down_m_s):
+                        state["target_row"] = clamp_row_target(foot_n)
+                        state["row_pd"].reset()
 
                     raw = {
                         "type":        "velocity",
@@ -482,7 +574,7 @@ class HumanTracker(BaseAnalyzer):
     # Drawing happens per CAMERA frame in stream_track (not per inference)
     # so the video stays as smooth as the fly tab; annotations lag by at
     # most one inference.
-    def _range_observable(self, h_ema, pose, ctx, fx_n, fy_n, W, H, subject_h_m):
+    def _range_observable(self, h_ema, pose, ctx, fx_n, fy_n, foot_n, W, H, subject_h_m):
         """
         Distance observable in size-ratio units, blending the two estimates a
         single camera can give.
@@ -504,6 +596,10 @@ class HumanTracker(BaseAnalyzer):
             return h_ema, None
 
         cam = camera_from_settings(ctx.width or W, ctx.height or H)
+        # TWO DIFFERENT PIXELS ON PURPOSE. The de-foreshortening angle belongs
+        # at the subject's mid-height, because that is the vertical extent being
+        # foreshortened. The ground projection below belongs at the feet. Using
+        # one pixel for both is what put a forward bias in the range estimate.
         px, py = fx_n * W, fy_n * H
         phi = pose.depression_deg(cam, px, py)
         if phi is None:
@@ -512,9 +608,17 @@ class HumanTracker(BaseAnalyzer):
         ref = _cal.effective()["camera_mount_tilt_deg"]
         from_size = deforeshorten_size(h_ema, phi, ref)
 
-        # Feet, not centre: the ground plane is what position ranging
-        # intersects, and a box centre floats at half the subject's height.
-        projected = pose.project_to_ground(cam, px, py)
+        # FEET, NOT CENTRE. The comment here said exactly this while the code
+        # passed the box centre, and the centre floats half a subject's height
+        # off the ground — so its ray cleared the subject and struck the ground
+        # BEYOND them. The over-estimate is AGL/(AGL - h/2), independent of
+        # viewing angle: +17% at 6 m AGL, +27% at 4 m, +40% at 3 m. Range too
+        # long reads as "further than wanted", which commands FORWARD, and the
+        # position estimate is weighted in hardest at steep depression — i.e.
+        # exactly when the subject is low in the frame and the drone should have
+        # been backing off. Reported from flight as "person on the lower side of
+        # frame and it moves forward instead of back".
+        projected = pose.project_to_ground(cam, px, foot_n * H)
         if projected is None:
             return from_size, phi
         from_pos = size_ratio_from_ground_range(

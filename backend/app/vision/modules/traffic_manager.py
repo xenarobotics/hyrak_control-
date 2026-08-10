@@ -72,7 +72,9 @@ from app.vision.drawing import draw_badge, draw_ring
 from app.vision.geometry import camera_from_settings, pose_from_telemetry
 from app.vision.modules.plate_tracker import _INDIA_PLATE_RE, _validate_and_correct
 from app.vision.pursuit import (
-    PursuitLimits, decide_elevation, is_outpaced, limit_descent, lock_state_for,
+    PursuitLimits, ROW_NUDGE_STEP, clamp_row_target, decide_elevation,
+    distance_axis, foot_row, is_outpaced, limit_climb, limit_descent,
+    lock_state_for, new_row_pd, row_reference_is_stale, scale_forward,
 )
 from app.vision.profiles import ProfileSelector
 from app.vision.speed import SpeedEstimator
@@ -562,6 +564,11 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         "yaw_pd": PDController(kp=30.0, kd=4.0, max_output=55.0, deadband=0.05),
         "alt_pd": PDController(kp=1.5, kd=0.3, max_output=1.0, deadband=0.10),
         "dist_pd": PDController(kp=3.0, kd=0.8, max_output=2.5, deadband=0.04),
+        # The Fixed-altitude distance axis — see pursuit.new_row_pd.
+        "row_pd": new_row_pd(),
+        # Frame row Fixed mode holds the subject's ground contact on; None =
+        # take it from the subject on the next frame.
+        "target_row": None,
         "kalman": KalmanXY(),
         "smoother": VelocitySmoother(alpha=0.4),
     }
@@ -728,9 +735,23 @@ class TrafficManager(BaseAnalyzer):
         if state is None:
             return
         kind = state.get("locked_kind") or "vehicle"
+        # size_ratio always carries both kinds, so the default is unreachable —
+        # it is only here so a missing key cannot raise mid-flight.
+        previous = state["size_ratio"].get(kind, _DEFAULT_SIZE_RATIO)
         ratio = float(np.clip(target_distance_ratio, 0.05, 0.80))
         state["size_ratio"][kind] = ratio
         state["dist_pd"].reset()
+
+        # In Fixed altitude the forward axis reads the frame row, not apparent
+        # fill, so a ratio alone would not reach it — this control would go dead
+        # in that mode. The DIRECTION of change is applied to the target row too.
+        if state.get("altitude_mode") != "auto" and state.get("target_row") is not None:
+            # Closer means the ground contact sits lower in frame: a larger row.
+            if ratio > previous:
+                state["target_row"] = clamp_row_target(state["target_row"] + ROW_NUDGE_STEP)
+            elif ratio < previous:
+                state["target_row"] = clamp_row_target(state["target_row"] - ROW_NUDGE_STEP)
+            state["row_pd"].reset()
         logger.info(
             f"Session {client_id[:8]}: {kind} hold distance -> {ratio:.2f} fill"
         )
@@ -746,12 +767,18 @@ class TrafficManager(BaseAnalyzer):
             return
         state = self._client_state[client_id]
         state["altitude_mode"] = mode
+        # Each mode hands the forward axis to a different sensor, so the PD the
+        # other was using holds a derivative in units that no longer apply.
         if mode == "fixed":
             # A stale derivative would lurch the moment auto resumes.
             state["alt_pd"].reset()
+            state["row_pd"].reset()
+            # Re-take the row reference at the height we have actually reached.
+            state["target_row"] = None
         else:
             # Leaving fixed: drop any held nudge so it cannot fight the PD.
             state["altitude_nudge_v"] = 0.0
+            state["dist_pd"].reset()
         logger.info(f"Session {client_id[:8]}: altitude mode -> {mode}")
 
     def set_altitude_nudge(self, client_id: str, velocity: float) -> None:
@@ -822,7 +849,7 @@ class TrafficManager(BaseAnalyzer):
             return
         state["tracking"] = bool(active)
         if not active:
-            for k in ("yaw_pd", "alt_pd", "dist_pd"):
+            for k in ("yaw_pd", "alt_pd", "dist_pd", "row_pd"):
                 state[k].reset()
             state["smoother"].reset()
             state["height_ema"] = None
@@ -831,6 +858,9 @@ class TrafficManager(BaseAnalyzer):
             # the next time Follow arms.
             state["altitude_nudge_v"] = 0.0
             state["altitude_floor_reason"] = None
+        # Taken fresh at every lock: the framing on screen when the operator
+        # arms Follow is the framing they asked for.
+        state["target_row"] = None
         logger.info(
             f"Session {client_id[:8]}: vehicle tracking "
             f"{'STARTED' if active else 'STOPPED'}"
@@ -1888,6 +1918,8 @@ class TrafficManager(BaseAnalyzer):
         err_yaw = fx_n - 0.5
         err_alt = fy_n - 0.5
         err_dist = target_ratio - h_ema
+        # Where the subject meets the road — the Fixed-mode distance axis.
+        foot_n = foot_row(fy_n, h_ema)
 
         yaw_deg_s = state["yaw_pd"].compute(err_yaw)
         # Fixed holds the altitude Offboard started at, so the only vertical
@@ -1899,11 +1931,28 @@ class TrafficManager(BaseAnalyzer):
         else:
             down_m_s = state["alt_pd"].compute(err_alt)
 
+        # ── THE DISTANCE AXIS, PER ALTITUDE MODE ──────────────────────────
+        # Fixed reads the frame row (height is held, so the row IS range: high
+        # in frame far, low in frame near); Auto reads apparent fill, unchanged.
+        # See pursuit.distance_axis.
+        alt_mode = state.get("altitude_mode", "auto")
+        forward_raw, range_err = distance_axis(
+            state=state, altitude_mode=alt_mode,
+            foot_row_n=foot_n, size_range_error=err_dist,
+        )
+
         yaw_factor = max(0.0, 1.0 - abs(err_yaw) / _YAW_PRIORITY_THRESHOLD)
         if yaw_factor > 0.0:
-            forward_m_s = state["dist_pd"].compute(err_dist) * yaw_factor
+            # A retreat is never throttled — see pursuit.scale_forward.
+            forward_m_s = scale_forward(forward_raw, yaw_factor, alt_mode)
+        elif forward_raw < 0.0:
+            # This module gates forward to a HARD ZERO off boresight, unlike the
+            # other four. A retreat must survive that gate: a subject too close
+            # AND off-axis is the case where holding station is least safe.
+            forward_m_s = forward_raw
         else:
             state["dist_pd"].reset()
+            state["row_pd"].reset()
             forward_m_s = 0.0
 
         # Auto-elevate: only when the vehicle is genuinely pulling away, and
@@ -1919,7 +1968,7 @@ class TrafficManager(BaseAnalyzer):
             elevate = decide_elevation(
                 target_outpacing=is_outpaced(
                     forward_m_s, MAX_PURSUIT_SPEED_M_S, limits,
-                    target_growing_distance=err_dist > 0.01,
+                    target_growing_distance=range_err > 0.01,
                 ),
                 agl_m=pose.agl_m if pose else None,
                 depression_deg=depression,
@@ -1938,10 +1987,21 @@ class TrafficManager(BaseAnalyzer):
         # into the ground (+0.5 m/s held for 12s, 6.6m to 0m, ending in
         # "invalid setpoints / blind land"). The same code path existed here
         # untouched. See pursuit.limit_descent.
-        down_m_s, floor_reason = limit_descent(
-            down_m_s, pose.agl_m if pose else None, PursuitLimits.from_settings()
-        )
-        state["altitude_floor_reason"] = floor_reason
+        # The ceiling belongs at the same point, and it matters most for the
+        # operator's nudge, which reached down_m_s having passed no altitude
+        # check at all. See pursuit.limit_climb.
+        _agl = pose.agl_m if pose else None
+        _limits = PursuitLimits.from_settings()
+        down_m_s, floor_reason = limit_descent(down_m_s, _agl, _limits)
+        down_m_s, ceiling_reason = limit_climb(down_m_s, _agl, _limits)
+        state["altitude_floor_reason"] = floor_reason or ceiling_reason
+
+        # Row ranging assumes a held altitude; if the aircraft is moving
+        # vertically the reference must be re-taken or the drone reads its own
+        # climb as the subject approaching.
+        if row_reference_is_stale(alt_mode, down_m_s):
+            state["target_row"] = clamp_row_target(foot_n)
+            state["row_pd"].reset()
 
         cmd = state["smoother"].smooth({
             "type": "velocity",

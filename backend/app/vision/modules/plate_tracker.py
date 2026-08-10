@@ -73,8 +73,9 @@ from app.vision.geometry import (
     camera_from_settings, deforeshorten_size, pose_from_telemetry,
 )
 from app.vision.pursuit import (
-    PursuitLimits, decide_elevation, is_outpaced, limit_descent,
-    lock_state_for,
+    PursuitLimits, ROW_NUDGE_STEP, clamp_row_target, decide_elevation,
+    distance_axis, foot_row, is_outpaced, limit_climb, limit_descent,
+    lock_state_for, new_row_pd, row_reference_is_stale, scale_forward,
 )
 from app.vision.speed import SpeedEstimator
 from app.vision.tracker_config import make_bytetrack_cfg
@@ -362,6 +363,11 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         # controllers.range_error_ratio for why, and for the measured
         # dead zone this replaced (1.4m at 8.6m, 46m at 50m).
         "dist_pd": PDController(kp=4.0, kd=1.0, max_output=2.5, deadband=0.08),
+        # The Fixed-altitude distance axis — see pursuit.new_row_pd.
+        "row_pd": new_row_pd(),
+        # Frame row Fixed mode holds the vehicle's ground contact on; None =
+        # take it from the subject on the next frame.
+        "target_row": None,
         "kalman": KalmanXY(),
         "smoother": VelocitySmoother(alpha=0.4),
     }
@@ -492,8 +498,21 @@ class PlateTracker(BaseAnalyzer):
             return
         ratio = float(np.clip(target_distance_ratio, 0.08, 0.70))
         state = self._client_state[client_id]
+        previous = state.get("target_distance_ratio", _DEFAULT_SIZE_RATIO)
         state["target_distance_ratio"] = ratio
         state["height_ema"] = None    # new target applies immediately
+
+        # In Fixed altitude the forward axis reads the frame row, not apparent
+        # size, so the ratio alone would not reach it — this control would go
+        # dead in the default mode. The DIRECTION of change is applied to the
+        # target row too, so one operator concept drives either sensor.
+        if state.get("altitude_mode") != "auto" and state.get("target_row") is not None:
+            # Closer means the ground contact sits lower in frame: a larger row.
+            if ratio > previous:
+                state["target_row"] = clamp_row_target(state["target_row"] + ROW_NUDGE_STEP)
+            elif ratio < previous:
+                state["target_row"] = clamp_row_target(state["target_row"] - ROW_NUDGE_STEP)
+            state["row_pd"].reset()
         logger.info(f"Session {client_id[:8]}: vehicle follow distance -> {ratio:.2f}")
 
     def set_altitude_mode(self, client_id: str, mode: str) -> None:
@@ -507,12 +526,18 @@ class PlateTracker(BaseAnalyzer):
             return
         state = self._client_state[client_id]
         state["altitude_mode"] = mode
+        # Each mode hands the forward axis to a different sensor, so the PD the
+        # other was using holds a derivative in units that no longer apply.
         if mode == "fixed":
             # Stale derivative would otherwise lurch the moment auto resumes.
             state["alt_pd"].reset()
+            state["row_pd"].reset()
+            # Re-take the row reference at the height we have actually reached.
+            state["target_row"] = None
         else:
             # Leaving fixed: drop any held nudge so it cannot fight the PD.
             state["altitude_nudge_v"] = 0.0
+            state["dist_pd"].reset()
         logger.info(f"Session {client_id[:8]}: vehicle altitude mode -> {mode}")
 
     def set_altitude_nudge(self, client_id: str, velocity: float) -> None:
@@ -531,7 +556,7 @@ class PlateTracker(BaseAnalyzer):
             return
         state["tracking"] = bool(active)
         if not active:
-            for k in ("yaw_pd", "alt_pd", "dist_pd"):
+            for k in ("yaw_pd", "alt_pd", "dist_pd", "row_pd"):
                 state[k].reset()
             state["smoother"].reset()
             state["height_ema"] = None
@@ -540,6 +565,9 @@ class PlateTracker(BaseAnalyzer):
             # A held nudge must not survive disarming, or re-arming would
             # immediately command a climb nobody asked for.
             state["altitude_nudge_v"] = 0.0
+        # Taken fresh at every lock: the framing on screen when the operator
+        # arms Follow is the framing they asked for.
+        state["target_row"] = None
         logger.info(
             f"Session {client_id[:8]}: vehicle tracking "
             f"{'STARTED' if active else 'STOPPED'}"
@@ -1120,8 +1148,12 @@ class PlateTracker(BaseAnalyzer):
         # Vehicle height in metres — the ruler the position estimate needs.
         _widths = get_settings().vehicle_widths_m or {}
         _vh = 1.5 if target.type not in ("truck", "bus") else 3.2
+        # Where the vehicle meets the road. Drives the Fixed-mode distance
+        # axis, and is the pixel the ground projection inside
+        # _range_observable has to use.
+        foot_n = foot_row(fy_n, h_ema)
         h_eff, _phi = self._range_observable(
-            h_ema, pose, ctx, fx_n, fy_n, W, H, _vh
+            h_ema, pose, ctx, fx_n, fy_n, foot_n, W, H, _vh
         )
         # Fraction-of-range — see controllers.range_error_ratio.
         err_dist = range_error_ratio(target_ratio, h_eff)
@@ -1177,7 +1209,17 @@ class PlateTracker(BaseAnalyzer):
         yaw_factor = max(
             _YAW_PRIORITY_FLOOR, 1.0 - abs(err_yaw) / _YAW_PRIORITY_THRESHOLD
         )
-        forward_m_s = state["dist_pd"].compute(err_dist) * yaw_factor
+        # ── THE DISTANCE AXIS, PER ALTITUDE MODE ──────────────────────────
+        # Fixed reads the frame row (height is held, so the row IS range: high
+        # in frame far, low in frame near); Auto reads apparent size,
+        # unchanged. See pursuit.distance_axis.
+        alt_mode = state.get("altitude_mode", "fixed")
+        forward_raw, range_err = distance_axis(
+            state=state, altitude_mode=alt_mode,
+            foot_row_n=foot_n, size_range_error=err_dist,
+        )
+        # A retreat is never throttled — see pursuit.scale_forward.
+        forward_m_s = scale_forward(forward_raw, yaw_factor, alt_mode)
 
         # Auto-elevate: only when the vehicle is genuinely pulling away, and
         # only inside both ceilings. Overrides the altitude axis because
@@ -1193,7 +1235,7 @@ class PlateTracker(BaseAnalyzer):
             elevate = decide_elevation(
                 target_outpacing=is_outpaced(
                     forward_m_s, MAX_PURSUIT_SPEED_M_S, limits,
-                    target_growing_distance=err_dist > 0.01,
+                    target_growing_distance=range_err > 0.01,
                 ),
                 agl_m=pose.agl_m if pose else None,
                 depression_deg=depression,
@@ -1208,10 +1250,21 @@ class PlateTracker(BaseAnalyzer):
         # anything added later — rather than each of them separately. Without
         # it a sustained descent flew a SITL aircraft into the ground; see
         # pursuit.limit_descent.
-        down_m_s, floor_reason = limit_descent(
-            down_m_s, pose.agl_m if pose else None, PursuitLimits.from_settings()
-        )
-        state["altitude_floor_reason"] = floor_reason
+        # The ceiling belongs at the same point, and it matters most for the
+        # operator's nudge, which reached down_m_s having passed no altitude
+        # check at all. See pursuit.limit_climb.
+        _agl = pose.agl_m if pose else None
+        _limits = PursuitLimits.from_settings()
+        down_m_s, floor_reason = limit_descent(down_m_s, _agl, _limits)
+        down_m_s, ceiling_reason = limit_climb(down_m_s, _agl, _limits)
+        state["altitude_floor_reason"] = floor_reason or ceiling_reason
+
+        # Row ranging assumes a held altitude; if the aircraft is moving
+        # vertically the reference must be re-taken or the drone reads its own
+        # climb as the subject approaching.
+        if row_reference_is_stale(alt_mode, down_m_s):
+            state["target_row"] = clamp_row_target(foot_n)
+            state["row_pd"].reset()
 
         cmd = state["smoother"].smooth({
             "type": "velocity",
@@ -1232,7 +1285,7 @@ class PlateTracker(BaseAnalyzer):
         state["last_drone_command"] = drone_command
         return drone_command
 
-    def _range_observable(self, h_ema, pose, ctx, fx_n, fy_n, W, H, subject_h_m):
+    def _range_observable(self, h_ema, pose, ctx, fx_n, fy_n, foot_n, W, H, subject_h_m):
         """
         Distance observable in size-ratio units, blending the two estimates a
         single camera can give.
@@ -1254,6 +1307,10 @@ class PlateTracker(BaseAnalyzer):
             return h_ema, None
 
         cam = camera_from_settings(ctx.width or W, ctx.height or H)
+        # TWO DIFFERENT PIXELS ON PURPOSE. The de-foreshortening angle belongs
+        # at the subject's mid-height, because that is the vertical extent being
+        # foreshortened. The ground projection below belongs at the feet. Using
+        # one pixel for both is what put a forward bias in the range estimate.
         px, py = fx_n * W, fy_n * H
         phi = pose.depression_deg(cam, px, py)
         if phi is None:
@@ -1262,9 +1319,17 @@ class PlateTracker(BaseAnalyzer):
         ref = _cal.effective()["camera_mount_tilt_deg"]
         from_size = deforeshorten_size(h_ema, phi, ref)
 
-        # Feet, not centre: the ground plane is what position ranging
-        # intersects, and a box centre floats at half the subject's height.
-        projected = pose.project_to_ground(cam, px, py)
+        # FEET, NOT CENTRE. The comment here said exactly this while the code
+        # passed the box centre, and the centre floats half a subject's height
+        # off the ground — so its ray cleared the subject and struck the ground
+        # BEYOND them. The over-estimate is AGL/(AGL - h/2), independent of
+        # viewing angle: +17% at 6 m AGL, +27% at 4 m, +40% at 3 m. Range too
+        # long reads as "further than wanted", which commands FORWARD, and the
+        # position estimate is weighted in hardest at steep depression — i.e.
+        # exactly when the subject is low in the frame and the drone should have
+        # been backing off. Reported from flight as "person on the lower side of
+        # frame and it moves forward instead of back".
+        projected = pose.project_to_ground(cam, px, foot_n * H)
         if projected is None:
             return from_size, phi
         from_pos = size_ratio_from_ground_range(

@@ -587,7 +587,12 @@ def test_forward_never_drops_to_zero_purely_from_yaw_offset():
     state = t._client_state["s"]
     t.request_follow("s", 7)
     t.set_tracking("s", True)
-    # Far off to one side and far away (small), so both axes want to act.
+    # Far off to one side, and genuinely further than we want to be. Fixed
+    # altitude reads range from the frame row, so the target row is what makes
+    # this "too far" — set below the vehicle, i.e. we want it lower in frame.
+    # (Left unset, the row is seeded from the subject and the distance error is
+    # zero by construction, which would prove nothing about yaw priority.)
+    state["target_row"] = 0.75
     far_and_off_axis = vehicle(7, 1650, 470, 1750, 530)
     cmd = None
     for _ in range(8):
@@ -614,10 +619,17 @@ def test_altitude_is_held_not_continuously_driven_by_vertical_framing():
     t.set_tracking("s", True)
     # Centred horizontally (no elevate pressure) but sitting high vertically —
     # exactly the case that used to drive a standing altitude correction.
+    #
+    # In Fixed altitude, being high in frame is now a DISTANCE error rather than
+    # an altitude one, so a modest target row below the vehicle gives the forward
+    # axis real work to do. That is the sharper version of this test: the axis
+    # that reads vertical framing is active, and altitude STILL must not move.
+    state["target_row"] = 0.45
     high_in_frame = vehicle(7, 900, 300, 1020, 390)
     cmd = None
     for _ in range(8):
         cmd = t._follow(state, [high_in_frame], "s", 1920, 1080, None, None)
+    assert cmd["forward_m_s"] > 0, "setup should be driving the forward axis"
     assert not state["elevate"]["elevating"], "test setup should not be outpacing"
     assert cmd["down_m_s"] == 0.0, \
         "altitude moved even though auto-elevate was not elevating"
@@ -636,11 +648,18 @@ def test_a_fixed_distance_target_can_be_unreachable_and_only_ever_back_away():
     stays negative regardless of what the vehicle does next, because the
     target was never reachable at that range and heading. That reads
     identically to "forward is broken" from outside the module.
+
+    THIS IS NOW AN AUTO-ALTITUDE PROPERTY. Apparent fill only drives the forward
+    axis in Auto; Fixed reads the frame row instead, and a row taken from the
+    subject at lock is reachable by construction, so the whole failure mode
+    cannot arise there. The mechanism is real and still live in Auto, which is
+    where it is pinned.
     """
     t = bare_tracker()
     state = t._client_state["s"]
     t.request_follow("s", 7)
     t.set_tracking("s", True)
+    t.set_altitude_mode("s", "auto")
     # Vehicle already filling FAR more of the frame than the default 0.22
     # target — a normal thing to see right after a close-range lock.
     big_and_close = vehicle(7, 900, 200, 1400, 900)   # ~65% of frame height

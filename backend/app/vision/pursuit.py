@@ -32,7 +32,7 @@ REACQUISITION IS AN ESCALATING LADDER
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger("verocore.vision.pursuit")
 
@@ -249,8 +249,9 @@ def limit_descent(
     from the controller's point of view descending was simply how you get the
     subject where you want it in frame.
 
-    Only DESCENT is limited. Climbing has its own, separate ceiling in
-    decide_elevation, and clamping both here would silently duplicate it.
+    Only DESCENT is limited here. limit_climb is the counterpart, and the two
+    are kept apart because the bound each enforces is a different KIND of bound
+    — terrain versus airspace law — and the operator has to be told which.
 
     Unknown AGL blocks descent entirely — the same stance decide_elevation
     takes on climbing blind, for the same reason: without a height reading
@@ -273,3 +274,229 @@ def limit_descent(
         return eased, (f"{headroom:.1f} m above the {floor:.1f} m floor — "
                        f"descent eased to {eased:.2f} m/s")
     return down_m_s, None
+
+
+#: Easing band below the ceiling, mirroring _DESCENT_TAPER_M.
+_CLIMB_TAPER_M = 1.5
+
+
+def limit_climb(
+    down_m_s: float,
+    agl_m: Optional[float],
+    limits: PursuitLimits,
+) -> Tuple[float, Optional[str]]:
+    """
+    Clamp a commanded CLIMB against max_altitude_agl_m. NED, so a climb is
+    negative. Returns (allowed_down_m_s, reason_if_limited).
+
+    THE GAP THIS CLOSES. decide_elevation enforces the ceiling on the climbs IT
+    decides — auto-elevate, the chase fallback — and every module applied
+    limit_descent to catch descent from any source. Nothing enforced the ceiling
+    on a climb from any OTHER source, and there is one: the operator's ▲ nudge
+    in Fixed altitude mode, which reaches down_m_s having passed through no
+    altitude check whatsoever. Held down, it climbs through 120 m without a word.
+
+    So the guard belongs here, at the same single convergence point the floor
+    uses, rather than inside the one climb source that already had it. The
+    overlap with decide_elevation is harmless: it eases over 10 m of headroom
+    and this eases over 1.5, so for auto-elevate this is a near no-op that only
+    ever tightens.
+
+    UNKNOWN AGL PASSES THROUGH, WHICH IS THE OPPOSITE OF WHAT limit_descent
+    DOES, and the asymmetry is deliberate. decide_elevation ALREADY refuses to
+    climb without an AGL reading, so the only climb that can reach here blind is
+    the operator's held ▲ — a deliberate, human-in-the-loop command from someone
+    watching their own altitude readout. Zeroing it would kill a manual control
+    outright in exchange for a ceiling we cannot measure anyway, whereas the
+    descent guard is protecting against an AUTONOMOUS descent nobody asked for,
+    where the failure is immediate and destroys the aircraft. The reason is
+    still reported, so "the ceiling is not being enforced" reaches the operator
+    rather than being assumed.
+    """
+    if down_m_s >= 0.0:
+        return down_m_s, None          # descending or level — not this function's job
+
+    if agl_m is None:
+        return down_m_s, ("no AGL reading — altitude ceiling is not being enforced")
+
+    ceiling = limits.max_altitude_agl_m
+    if agl_m >= ceiling:
+        return 0.0, (f"at the {ceiling:.0f} m altitude ceiling — climb blocked")
+
+    headroom = ceiling - agl_m
+    if headroom < _CLIMB_TAPER_M:
+        eased = down_m_s * (headroom / _CLIMB_TAPER_M)
+        return eased, (f"{headroom:.1f} m below the {ceiling:.0f} m ceiling — "
+                       f"climb eased to {abs(eased):.2f} m/s")
+    return down_m_s, None
+
+
+# --------------------------------------------------------------------------- #
+# FIXED-ALTITUDE RANGING: the frame row, not apparent size                     #
+# --------------------------------------------------------------------------- #
+#
+# At a HELD altitude, with a camera bolted to the airframe looking downward,
+# the row a subject's FEET occupy in the frame is a direct and monotonic
+# measure of horizontal range. Further away is higher up the frame; closer is
+# lower down. With altitude fixed there is nothing else in the geometry left
+# free to move, so the row IS the range signal — and apparent size, which was
+# driving this axis, is a far worse one for the job.
+#
+# THIS NEEDS NO CAMERA ANGLE, NO FIELD OF VIEW AND NO SUBJECT HEIGHT.
+# Every one of those would only put a SCALE on the response, and the PD gain
+# already does that. The SIGN — the whole question of forward versus back —
+# follows from the single fact that the camera points downward at all. So this
+# path keeps working on a rig nobody has calibrated, which the size path does
+# not: size ranging needs the mount tilt to de-foreshorten and the subject's
+# real height to mean anything.
+#
+# WHY THE FEET AND NOT THE BOX CENTRE. A box centre floats at half the
+# subject's height, so it climbs the frame as the subject draws nearer and the
+# box grows taller — putting range error into the very signal that is supposed
+# to measure range. The bottom edge sits on the ground plane and does not move
+# for any reason except the subject's actual position.
+
+#: Rows above this are too near the horizon for the row to mean a finite
+#: distance: a pixel of noise there is tens of metres of range. A target row is
+#: clamped down to it, so locking a subject in the top of the frame closes in
+#: to here rather than trying to hold an unbounded distance.
+_ROW_TARGET_MIN = 0.18
+#: Kept clear of _ROW_FOOT_OFF_FRAME so a legal target row is always one whose
+#: error can actually be measured.
+_ROW_TARGET_MAX = 0.92
+#: At or past this the ground contact has left the bottom of the frame, so the
+#: subject is bottom-truncated, h_ema understates their height, and foot_row
+#: understates how close they are. With a downward camera that only happens
+#: when they are nearly underneath the aircraft.
+_ROW_FOOT_OFF_FRAME = 0.985
+#: What to report while the feet are off-frame: a definite, bounded "back off"
+#: — clear of any sane deadband, small enough not to lurch.
+_ROW_TRUNCATED_ERROR = -0.08
+#: One press of CLOSER / FURTHER, in frame heights.
+ROW_NUDGE_STEP = 0.05
+#: Below this the altitude counts as held and the row reference stays valid.
+ROW_REFERENCE_HOLD_EPS_M_S = 0.05
+
+
+def foot_row(centre_row_n: float, height_ratio: float) -> float:
+    """
+    Normalised row of the subject's ground contact, built from the two smoothed
+    quantities every follow module already keeps: the Kalman-filtered box centre
+    and the EMA-filtered box height. Reusing those rather than the raw bottom
+    edge keeps this as quiet as the signals feeding it.
+    """
+    return centre_row_n + height_ratio / 2.0
+
+
+def clamp_row_target(row_n: float) -> float:
+    """Hold a target row inside the band where it means a measurable distance."""
+    return min(_ROW_TARGET_MAX, max(_ROW_TARGET_MIN, row_n))
+
+
+def frame_row_range_error(foot_row_n: float, target_row_n: float) -> float:
+    """
+    Range error for the Fixed-altitude forward axis, in frame heights.
+
+    POSITIVE means the subject sits ABOVE the row we want them on — further away
+    than wanted, so move FORWARD. NEGATIVE means they have dropped below it —
+    too close, so move BACK. Deliberately the same sign convention as
+    range_error_ratio, so one distance PD reads either source the same way up
+    and the two are interchangeable at the call site.
+    """
+    if foot_row_n >= _ROW_FOOT_OFF_FRAME:
+        # Ground contact is off the bottom of the frame. The row error is not
+        # measurable, and the ONE thing we know is that the subject is very
+        # close, so this must never be allowed to read as "far" and command
+        # forward — which is exactly what an understated foot_row would do.
+        return _ROW_TRUNCATED_ERROR
+    return target_row_n - foot_row_n
+
+
+def row_reference_is_stale(altitude_mode: str, down_m_s: float) -> bool:
+    """
+    Does the target row need re-taking?
+
+    Row ranging assumes a HELD altitude — that is its entire premise. The
+    moment the aircraft moves vertically, from an operator nudge or from
+    auto-elevate, the map from row to range changes underneath the reference and
+    the subject appears to move without having moved. Climbing makes the
+    depression steeper, drops the subject down the frame, and reads as "too
+    close" — so an uncorrected reference would command a RETREAT during exactly
+    the climb auto-elevate ordered to chase something pulling away.
+
+    Re-taking the row while altitude is moving costs nothing and fixes it: the
+    forward axis goes quiet for the duration (its error is zero by
+    construction), and the reference that resumes afterwards describes the same
+    RANGE at the new height. The operator's chosen follow distance survives a
+    climb without anyone having to store it.
+    """
+    return altitude_mode != "auto" and abs(down_m_s) > ROW_REFERENCE_HOLD_EPS_M_S
+
+
+def new_row_pd():
+    """
+    The Fixed-altitude distance PD, built here so all five follow modules get
+    the same one.
+
+    Error is in FRAME HEIGHTS, which is why this cannot share an instance with
+    the size-based dist_pd: the two carry derivatives in unrelated units and
+    swapping between them mid-flight would kick. kp=8 reaches full speed at
+    ~0.31 of a frame height of error. deadband=0.025 is ~27 px at 1080p, tight
+    because a row is a position and far quieter than a box height.
+
+    The row->range map is left deliberately un-linearised. Near the top of the
+    frame a small row change is a large distance change and near the bottom the
+    reverse, so the response is firm when the subject is far and gentle when
+    they are close — which is what you would tune for by hand anyway.
+    """
+    from app.vision.controllers import PDController
+    return PDController(kp=8.0, kd=1.5, max_output=2.5, deadband=0.025)
+
+
+def distance_axis(
+    *,
+    state: Dict[str, Any],
+    altitude_mode: str,
+    foot_row_n: float,
+    size_range_error: float,
+) -> Tuple[float, float]:
+    """
+    The forward/back command before yaw priority, plus the error that produced
+    it — choosing whichever sensor the current altitude mode makes honest.
+
+    FIXED  -> the frame row. Height is held, so the row the subject's feet sit
+              on is horizontal range and nothing else.
+    AUTO   -> apparent size, unchanged. Height is a free variable there, so the
+              row is not a range signal.
+
+    Shared rather than copied into each module because the five had already
+    drifted apart once — one of them still computes its size error as a raw fill
+    difference where the rest use a fraction of range — and *which sensor owns
+    the forward axis* is not a thing that should be able to differ between them.
+
+    Seeds target_row from the subject on first use. A row nobody has observed
+    cannot be known to be reachable; see clamp_row_target.
+    """
+    if altitude_mode == "auto":
+        return state["dist_pd"].compute(size_range_error), size_range_error
+    if state.get("target_row") is None:
+        state["target_row"] = clamp_row_target(foot_row_n)
+    err = frame_row_range_error(foot_row_n, state["target_row"])
+    return state["row_pd"].compute(err), err
+
+
+def scale_forward(forward_raw: float, yaw_factor: float, altitude_mode: str) -> float:
+    """
+    Apply yaw priority — to a FORWARD command only.
+
+    Yaw priority exists to stop the aircraft charging at a subject it has not
+    centred yet. A subject too CLOSE is the one case where the drone should be
+    leaving at full authority, and scaling the retreat by the same factor made
+    it back away slowest exactly when it was nearest and most off-axis.
+
+    Auto keeps the old symmetric expression, because Auto is flying well and a
+    change to how it retreats is not part of fixing Fixed.
+    """
+    if forward_raw > 0 or altitude_mode == "auto":
+        return forward_raw * yaw_factor
+    return forward_raw
