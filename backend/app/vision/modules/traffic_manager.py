@@ -72,9 +72,10 @@ from app.vision.drawing import draw_badge, draw_ring
 from app.vision.geometry import camera_from_settings, pose_from_telemetry
 from app.vision.modules.plate_tracker import _INDIA_PLATE_RE, _validate_and_correct
 from app.vision.pursuit import (
-    PursuitLimits, ROW_NUDGE_STEP, clamp_row_target, decide_elevation,
-    distance_axis, foot_row, is_outpaced, limit_climb, limit_descent,
-    lock_state_for, new_row_pd, row_reference_is_stale, scale_forward,
+    PursuitLimits, ROW_NUDGE_STEP, blind_command, clamp_row_target,
+    decide_elevation, distance_axis, foot_row, is_outpaced, limit_climb,
+    limit_descent, lock_state_for, new_row_pd, row_reference_is_stale,
+    scale_forward, seconds_lost_for,
 )
 from app.vision.profiles import ProfileSelector
 from app.vision.speed import SpeedEstimator
@@ -559,6 +560,9 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         "tracking": False,
         "last_seen_t": 0.0,
         "frames_lost": 0,
+        # Read by blind_command while the locked subject is out of frame.
+        "last_drone_command": None,
+        "last_yaw_dir": 1.0,
         "height_ema": None,
         "elevate": None,
         "yaw_pd": PDController(kp=30.0, kd=4.0, max_output=55.0, deadband=0.05),
@@ -1887,7 +1891,20 @@ class TrafficManager(BaseAnalyzer):
             # The plate is the identity that survives a track id change, so it
             # is kept rather than cleared — a re-read of the same characters is
             # the same vehicle, not a guess.
-            return None
+            if not state.get("tracking"):
+                return None
+            # Armed, but the subject is not in this frame. Returning None here —
+            # which is what this did — GAPPED the Offboard setpoint stream, and
+            # PX4 then flies on at the last velocity it was given until its
+            # offboard-loss failsafe fires. That is the same "kept moving"
+            # symptom the other four modules produced by replaying the last
+            # command, arrived at from the opposite direction.
+            return blind_command(
+                last_cmd=state.get("last_drone_command"),
+                frames_lost=state["frames_lost"],
+                seconds_lost=seconds_lost_for(state),
+                last_yaw_dir=state.get("last_yaw_dir", 1.0),
+            )
 
         kind, box, target = found
         state["locked_kind"] = kind
@@ -2010,13 +2027,20 @@ class TrafficManager(BaseAnalyzer):
             "down_m_s": down_m_s,
             "yaw_deg_s": yaw_deg_s,
         })
-        return {
+        drone_command = {
             "type": "velocity",
             "forward_m_s": round(cmd["forward_m_s"], 3),
             "right_m_s": 0.0,
             "down_m_s": round(cmd["down_m_s"], 3),
             "yaw_deg_s": round(cmd["yaw_deg_s"], 2),
         }
+        # Both of these are read by blind_command on a frame where the subject
+        # is missing. This module kept neither, which is why its only answer to
+        # a missing subject could be None.
+        state["last_drone_command"] = drone_command
+        if abs(yaw_deg_s) > 1e-6:
+            state["last_yaw_dir"] = 1.0 if yaw_deg_s > 0 else -1.0
+        return drone_command
 
     # ── Overlay ───────────────────────────────────────────────────────────
 

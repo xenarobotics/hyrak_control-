@@ -390,9 +390,17 @@ def test_releasing_clears_the_lock_and_stops_commanding():
     assert t._follow(state, [vehicle(7)], [], "s", 1920, 1080, None, None) is None
 
 
-def test_losing_the_vehicle_stops_commands_but_keeps_the_identity():
+def test_losing_the_vehicle_keeps_the_identity_and_keeps_the_stream_alive():
     """Losing the box does not mean the vehicle was misidentified, and the
-    plate is what a re-acquisition would be matched against."""
+    plate is what a re-acquisition would be matched against.
+
+    This used to assert the command went to None, which was the bug rather than
+    the behaviour: returning None does not stop the aircraft, it stops US, and
+    PX4 flies on at the last velocity it was given until its offboard-loss
+    failsafe fires. Stopping is something that has to be COMMANDED — see
+    test_blind_flight for the ladder that does it, and for the disarmed case
+    where None is still the right answer.
+    """
     t = bare_tracker()
     state = t._client_state["s"]
     v = vehicle(7)
@@ -401,7 +409,9 @@ def test_losing_the_vehicle_stops_commands_but_keeps_the_identity():
     t.set_tracking("s", True)
     t._follow(state, [v], [], "s", 1920, 1080, None, None)
 
-    assert t._follow(state, [], [], "s", 1920, 1080, None, None) is None
+    cmd = t._follow(state, [], [], "s", 1920, 1080, None, None)
+    assert cmd is not None, "the Offboard setpoint stream gapped"
+    assert cmd["type"] == "velocity"
     assert state["locked_plate"] == "MH12AB1234"
     assert state["frames_lost"] >= 1
 

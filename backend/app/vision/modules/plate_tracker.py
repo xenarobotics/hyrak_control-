@@ -73,9 +73,10 @@ from app.vision.geometry import (
     camera_from_settings, deforeshorten_size, pose_from_telemetry,
 )
 from app.vision.pursuit import (
-    PursuitLimits, ROW_NUDGE_STEP, clamp_row_target, decide_elevation,
-    distance_axis, foot_row, is_outpaced, limit_climb, limit_descent,
-    lock_state_for, new_row_pd, row_reference_is_stale, scale_forward,
+    PursuitLimits, ROW_NUDGE_STEP, blind_command, clamp_row_target,
+    decide_elevation, distance_axis, foot_row, is_outpaced, limit_climb,
+    limit_descent, lock_state_for, new_row_pd, row_reference_is_stale,
+    scale_forward, seconds_lost_for,
 )
 from app.vision.speed import SpeedEstimator
 from app.vision.tracker_config import make_bytetrack_cfg
@@ -187,11 +188,9 @@ MAX_PURSUIT_SPEED_M_S = 2.5     # keep in step with dist_pd max_output
 # command, never None, even for the frames where the locked vehicle simply
 # is not visible — those frames are routine here (a missed detection, an
 # occlusion, the vehicle at the frame edge) in a way they are not for a
-# continuous body track. Same ladder as human_tracker: hold the last known
-# command briefly, then a slow yaw sweep to look for the vehicle, then settle
-# to a hover — never silence.
-_PHASE_HOLD = 90
-_PHASE_SWEEP = 180
+# continuous body track. What that command should BE is pursuit.blind_command:
+# hold briefly, fade the translation out, sweep, then hover — never silence,
+# and never a frozen full-speed command either.
 
 _VEHICLE_ID_PREFIX = "VH"
 
@@ -354,7 +353,7 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         # only — auto mode owns the axis.
         "altitude_nudge_v": 0.0,
         # Keeps the Offboard setpoint stream alive across frames where the
-        # locked vehicle is briefly not visible — see the _PHASE_HOLD note.
+        # locked vehicle is briefly not visible — see the Offboard-keepalive note.
         "last_drone_command": None,
         "last_yaw_dir": 1.0,
         "yaw_pd": PDController(kp=30.0, kd=4.0, max_output=55.0, deadband=0.05),
@@ -1113,7 +1112,7 @@ class PlateTracker(BaseAnalyzer):
             # same characters is the same vehicle, not a guess.
             if not state.get("tracking"):
                 return None
-            # NEVER None here while armed — see the _PHASE_HOLD note above.
+            # NEVER None here while armed — see the Offboard-keepalive note above.
             return self._search_command(state)
 
         state["frames_lost"] = 0
@@ -1344,28 +1343,20 @@ class PlateTracker(BaseAnalyzer):
     def _search_command(self, state) -> dict:
         """
         The Offboard-keepalive fallback for a frame where the locked vehicle
-        is not visible. See the _PHASE_HOLD constant for why this must never
-        be None while tracking is armed.
+        is not visible. See the Offboard-keepalive note at the top of this file
+        for why this must never be None while tracking is armed.
 
-        Three rungs, same ladder as human_tracker: hold the last command
-        (most losses are one bad frame — a missed detection, a brief
-        occlusion — and resolve on their own without the drone reacting to
-        noise), then a slow yaw sweep in the last-known direction to look for
-        the vehicle, then settle to a hover rather than wander.
+        Same ladder as every other follow module, and for the same reason it is
+        shared: hold the last command briefly (most losses are one bad frame and
+        resolve on their own without the drone reacting to noise), fade the
+        translation out, sweep for the vehicle, then hover.
         """
-        fl = state.get("frames_lost", 0)
-        if fl <= _PHASE_HOLD and state.get("last_drone_command") is not None:
-            return state["last_drone_command"]
-        if fl <= _PHASE_SWEEP:
-            return {
-                "type": "velocity", "forward_m_s": 0.0, "right_m_s": 0.0,
-                "down_m_s": 0.0,
-                "yaw_deg_s": round(12.0 * state.get("last_yaw_dir", 1.0), 1),
-            }
-        return {
-            "type": "velocity", "forward_m_s": 0.0, "right_m_s": 0.0,
-            "down_m_s": 0.0, "yaw_deg_s": 0.0,
-        }
+        return blind_command(
+            last_cmd=state.get("last_drone_command"),
+            frames_lost=state.get("frames_lost", 0),
+            seconds_lost=seconds_lost_for(state),
+            last_yaw_dir=state.get("last_yaw_dir", 1.0),
+        )
 
     # ── Overlay ───────────────────────────────────────────────────────────
 

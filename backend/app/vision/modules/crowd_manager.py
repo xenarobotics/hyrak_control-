@@ -42,9 +42,10 @@ from app.vision.geometry import (
     pose_from_telemetry, size_ratio_from_ground_range,
 )
 from app.vision.pursuit import (
-    PursuitLimits, ROW_NUDGE_STEP, clamp_row_target, decide_elevation,
-    distance_axis, foot_row, is_outpaced, limit_climb, limit_descent,
-    lock_state_for, new_row_pd, row_reference_is_stale, scale_forward,
+    PursuitLimits, ROW_NUDGE_STEP, blind_command, clamp_row_target,
+    decide_elevation, distance_axis, foot_row, is_outpaced, limit_climb,
+    limit_descent, lock_state_for, new_row_pd, row_reference_is_stale,
+    scale_forward, seconds_lost_for,
 )
 from app.vision.tracker_config import make_bytetrack_cfg
 from app.config import get_settings
@@ -82,8 +83,7 @@ _HEIGHT_EMA_ALPHA = 0.12
 _YAW_PRIORITY_THRESHOLD = 0.30
 _YAW_PRIORITY_FLOOR = 0.35
 MAX_PURSUIT_SPEED_M_S = 2.5
-_PHASE_HOLD = 90
-_PHASE_SWEEP = 180
+# Blind-flight policy is shared and expressed in seconds — see pursuit.py.
 
 _LEVEL_COLOR_BGR = {"green": (0, 200, 0), "orange": (0, 165, 255), "red": (0, 0, 230)}
 
@@ -478,14 +478,12 @@ class CrowdManager(BaseAnalyzer):
         if target is None:
             state["frames_lost"] = state.get("frames_lost", 0) + 1
             fl = state["frames_lost"]
-            if fl <= _PHASE_HOLD and state.get("last_drone_command"):
-                return state["last_drone_command"]
-            if fl <= _PHASE_SWEEP:
-                return {"type": "velocity", "forward_m_s": 0.0, "right_m_s": 0.0,
-                        "down_m_s": 0.0,
-                        "yaw_deg_s": round(12.0 * state.get("last_yaw_dir", 1.0), 1)}
-            return {"type": "velocity", "forward_m_s": 0.0, "right_m_s": 0.0,
-                    "down_m_s": 0.0, "yaw_deg_s": 0.0}
+            return blind_command(
+                last_cmd=state.get("last_drone_command"),
+                frames_lost=fl,
+                seconds_lost=seconds_lost_for(state),
+                last_yaw_dir=state.get("last_yaw_dir", 1.0),
+            )
 
         state["frames_lost"] = 0
         state["last_seen_t"] = time.monotonic()

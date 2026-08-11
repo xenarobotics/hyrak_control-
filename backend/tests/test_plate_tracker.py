@@ -777,23 +777,38 @@ def test_a_missed_frame_holds_the_last_command_rather_than_reacting():
 def test_search_sweeps_then_settles_to_a_hover_never_returning_to_none():
     """Past the hold window the drone sweeps to look for the vehicle; past
     the sweep window it settles to a hover. At no point does the setpoint
-    stream stop."""
-    from app.vision.modules.plate_tracker import _PHASE_HOLD, _PHASE_SWEEP
+    stream stop.
+
+    The ladder is in SECONDS now, not frames — a frame-counted window lasted a
+    different number of seconds on every machine, and longest exactly when
+    vision was slowest. See pursuit's BLIND FLIGHT note. The rungs themselves
+    are covered in test_blind_flight; what this pins is that plate's real
+    _follow walks them and never gaps the stream doing it.
+    """
+    from app.vision.pursuit import BLIND_DECAY_UNTIL_S, BLIND_GIVE_UP_S
 
     t = bare_tracker()
     state = t._client_state["s"]
     t.request_follow("s", 7)
     t.set_tracking("s", True)
     t._follow(state, [vehicle(7, 1500, 500, 1800, 700)], "s", 1920, 1080, None, None)
+    lost_at = time.monotonic()
 
-    cmd = None
-    for _ in range(_PHASE_SWEEP + 20):
+    def _blind_for(seconds):
+        # Backdated rather than slept: 15s of real time per test run is not a
+        # price worth paying to observe a threshold.
+        state["last_seen_t"] = lost_at - seconds
         cmd = t._follow(state, [], "s", 1920, 1080, None, None)
         assert cmd is not None, "the Offboard stream gapped during search"
-    # Well past both phases now: settled to a hover, not still sweeping.
-    assert state["frames_lost"] > _PHASE_SWEEP
-    assert cmd["yaw_deg_s"] == 0.0
-    assert cmd["forward_m_s"] == 0.0
+        return cmd
+
+    sweeping = _blind_for(BLIND_DECAY_UNTIL_S + 1.0)
+    assert sweeping["forward_m_s"] == 0.0
+    assert sweeping["yaw_deg_s"] != 0.0, "not looking for the vehicle at all"
+
+    hovering = _blind_for(BLIND_GIVE_UP_S + 1.0)
+    assert hovering["yaw_deg_s"] == 0.0
+    assert hovering["forward_m_s"] == 0.0
 
 
 def test_stopping_tracking_resets_the_controllers():

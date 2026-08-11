@@ -17,9 +17,11 @@ from app.vision.geometry import (
     camera_from_settings, deforeshorten_size, pose_from_telemetry,
 )
 from app.vision.pursuit import (
-    PursuitLimits, ROW_NUDGE_STEP, clamp_row_target, decide_elevation,
+    BLIND_DECAY_UNTIL_S, BLIND_GIVE_UP_S, PursuitLimits, ROW_NUDGE_STEP,
+    blind_command, blind_elapsed_s, clamp_row_target, decide_elevation,
     distance_axis, foot_row, is_outpaced, limit_climb, limit_descent,
     lock_state_for, new_row_pd, row_reference_is_stale, scale_forward,
+    seconds_lost_for,
 )
 from app.config import get_settings
 
@@ -87,9 +89,11 @@ _HEIGHT_EMA_ALPHA = 0.12
 # two must stay in step.
 MAX_PURSUIT_SPEED_M_S = 2.5
 
-_PHASE_HOLD  = 90    # keep last yaw command
-_PHASE_SWEEP = 180   # slow sweep in last-known direction
-# > _PHASE_SWEEP → hover in place
+# What to command while the target is not visible lives in pursuit.blind_command
+# — in SECONDS, not frames. The frame-counted _PHASE_HOLD/_PHASE_SWEEP pair that
+# used to sit here replayed the last full-speed command for a window whose real
+# duration depended on how fast inference happened to be running; see the
+# BLIND FLIGHT section of pursuit.py.
 
 
 def _make_state() -> Dict[str, Any]:
@@ -528,24 +532,12 @@ class HumanTracker(BaseAnalyzer):
 
                 if tracking:
                     searching = True
-                    if fl <= _PHASE_HOLD:
-                        drone_command = state["last_drone_command"]
-                    elif fl <= _PHASE_SWEEP:
-                        drone_command = {
-                            "type":        "velocity",
-                            "forward_m_s": 0.0,
-                            "right_m_s":   0.0,
-                            "down_m_s":    0.0,
-                            "yaw_deg_s":   round(12.0 * state["last_yaw_dir"], 1),
-                        }
-                    else:
-                        drone_command = {
-                            "type":        "velocity",
-                            "forward_m_s": 0.0,
-                            "right_m_s":   0.0,
-                            "down_m_s":    0.0,
-                            "yaw_deg_s":   0.0,
-                        }
+                    drone_command = blind_command(
+                        last_cmd=state["last_drone_command"],
+                        frames_lost=fl,
+                        seconds_lost=seconds_lost_for(state),
+                        last_yaw_dir=state["last_yaw_dir"],
+                    )
 
             break  # single session per analyzer instance
 
@@ -664,10 +656,14 @@ class HumanTracker(BaseAnalyzer):
                 )
 
         if meta.get("searching"):
-            fl = meta.get("frames_lost", 0)
-            if fl > _PHASE_SWEEP:
+            # Read off the same ladder the aircraft is flying, so the badge
+            # cannot say HOVERING while a command is still being issued.
+            blind_s = blind_elapsed_s(
+                meta.get("frames_lost", 0), meta.get("seconds_lost", 0.0)
+            )
+            if blind_s >= BLIND_GIVE_UP_S:
                 label = f"HOVERING  #{selected_id}"
-            elif fl > _PHASE_HOLD:
+            elif blind_s >= BLIND_DECAY_UNTIL_S:
                 label = f"SWEEPING  #{selected_id}"
             else:
                 label = f"SEARCHING  #{selected_id}"

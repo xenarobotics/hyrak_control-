@@ -14,6 +14,7 @@ import json
 import logging
 import math
 import socket
+import time
 from typing import Callable, Optional
 
 from app.config import get_settings
@@ -84,6 +85,12 @@ class TelemetryManager:
         self._connected = False
         self._offboard_active = False
         self._offboard_hold_alt: Optional[float] = None  # relative altitude (m) to hold during AI/offboard tracking
+        # Monotonic time of the last velocity setpoint from the commanding loop.
+        # 0.0 = none yet, which the watchdog treats as "not commanding" rather
+        # than "stale" — an armed Offboard session that has never been given a
+        # velocity is not one that stopped being given them.
+        self._last_velocity_cmd_t: float = 0.0
+        self._offboard_stale: bool = False
         self._address: str = ""
         self._grpc_port: Optional[int] = None  # unique per drone — see connect()
         self._last_emit: float = 0.0  # monotonic time of last _emit() push
@@ -452,6 +459,7 @@ class TelemetryManager:
                 # WP progress in the UI.
                 asyncio.create_task(self._subscribe_mission_progress(), name="fleet_mission"),
                 asyncio.create_task(self._command_loop(),          name="fleet_cmd"),
+                asyncio.create_task(self._offboard_watchdog(),      name="fleet_ob_watchdog"),
             ]
         else:
             self._tasks = [
@@ -471,6 +479,9 @@ class TelemetryManager:
                 # carries the only explanation there is for a refused command.
                 asyncio.create_task(self._subscribe_status_text(),      name="tel_statustext"),
                 asyncio.create_task(self._command_loop(),              name="cmd_loop"),
+                # The only stop for a runaway that does not depend on the vision
+                # loop still working — see _offboard_watchdog.
+                asyncio.create_task(self._offboard_watchdog(),          name="tel_ob_watchdog"),
             ]
 
         logger.info(f"Telemetry started — {len(self._tasks)} tasks ({'fleet' if self._fleet_mode else 'primary'})")
@@ -1659,11 +1670,59 @@ class TelemetryManager:
             await self._drone.offboard.stop()
             self._offboard_active = False
             self._offboard_hold_alt = None
+            # Cleared so the next Offboard session starts with no command
+            # history rather than inheriting this one's last timestamp.
+            self._last_velocity_cmd_t = 0.0
+            self._offboard_stale = False
             logger.info("Offboard stopped — returning to HOLD")
             return True
         except Exception as e:
             logger.error(f"Offboard stop failed: {e}")
             return False
+
+    # ── Offboard velocity watchdog ────────────────────────────────────────
+    #
+    # Every velocity setpoint reaching PX4 comes from a vision analysis result
+    # (stream_track.recv -> send_velocity_command). So if the vision loop stops
+    # producing results — the video source drops, the model hangs, the analyzer
+    # thread dies, the session's WebRTC track ends — the last velocity that was
+    # sent is simply the last one PX4 ever hears, and the aircraft keeps flying
+    # it. Nothing in the vision layer can fix that, because the thing that has
+    # failed IS the vision layer.
+    #
+    # This is the only stop that does not depend on the tracker still working.
+    # It commands zero, not nothing: continuing to stream a zero setpoint holds
+    # the aircraft in Offboard and under our control, whereas going silent hands
+    # it to PX4's offboard-loss failsafe (COM_OBL_ACT, LAND on many airframes).
+    _OFFBOARD_STALE_AFTER_S = 0.5
+    _OFFBOARD_WATCHDOG_PERIOD_S = 0.2
+
+    async def _offboard_watchdog(self):
+        """Zeroes the velocity setpoint if the commanding loop goes quiet."""
+        while True:
+            try:
+                await asyncio.sleep(self._OFFBOARD_WATCHDOG_PERIOD_S)
+                if not (self._offboard_active and self._connected):
+                    continue
+                last = self._last_velocity_cmd_t
+                if last <= 0.0:
+                    continue
+                idle = time.monotonic() - last
+                if idle < self._OFFBOARD_STALE_AFTER_S:
+                    continue
+                if not self._offboard_stale:
+                    self._offboard_stale = True
+                    logger.warning(
+                        f"No velocity setpoint for {idle:.1f}s while Offboard is "
+                        f"active — holding the aircraft at zero velocity"
+                    )
+                # Re-sent every period, not once: PX4 needs the stream to
+                # continue, and a single zero would itself become a gap.
+                await self._send_velocity_body(0.0, 0.0, 0.0, 0.0)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning(f"Offboard watchdog: {e}")
 
     # Altitude-hold gain for the offboard vertical correction below —
     # tuned conservatively since it's fighting tracking-loop noise, not a setpoint.
@@ -1691,6 +1750,13 @@ class TelemetryManager:
         """
         if not self._connected:
             return
+        # Before the send, not after: a send that raises still means the
+        # commanding loop is alive, and the watchdog is there to catch a loop
+        # that has gone silent, not one whose sends are failing.
+        self._last_velocity_cmd_t = time.monotonic()
+        if self._offboard_stale:
+            self._offboard_stale = False
+            logger.info("Velocity setpoints resumed")
         effective_down_m_s = float(down_m_s)
         if self._offboard_hold_alt is not None:
             if down_m_s != 0.0:
@@ -1705,13 +1771,18 @@ class TelemetryManager:
                 alt_error_m = self._snapshot.position.relative_altitude_m - self._offboard_hold_alt
                 correction = max(-self._ALT_HOLD_MAX_MS, min(self._ALT_HOLD_MAX_MS, self._ALT_HOLD_KP * alt_error_m))
                 effective_down_m_s += correction
+        await self._send_velocity_body(
+            forward_m_s, right_m_s, effective_down_m_s, yaw_deg_s
+        )
+
+    async def _send_velocity_body(self, forward, right, down, yaw):
+        """The raw MAVSDK send, with no altitude-hold correction and no
+        watchdog bookkeeping — so the watchdog can use it without its own zero
+        setpoints looking like a live commanding loop."""
         try:
             await self._drone.offboard.set_velocity_body(
                 VelocityBodyYawspeed(
-                    float(forward_m_s),
-                    float(right_m_s),
-                    float(effective_down_m_s),
-                    float(yaw_deg_s),
+                    float(forward), float(right), float(down), float(yaw)
                 )
             )
         except Exception as e:

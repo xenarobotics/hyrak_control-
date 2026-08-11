@@ -30,6 +30,7 @@ REACQUISITION IS AN ESCALATING LADDER
     truck and resolve on their own.
 """
 import logging
+import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Optional, Tuple
@@ -500,3 +501,152 @@ def scale_forward(forward_raw: float, yaw_factor: float, altitude_mode: str) -> 
     if forward_raw > 0 or altitude_mode == "auto":
         return forward_raw * yaw_factor
     return forward_raw
+
+
+# ── BLIND FLIGHT: what to command while the target is NOT visible ──────────
+#
+# THE DEFECT THIS REPLACES. Every follow module answered a frame with no
+# visible target by re-issuing state["last_drone_command"] verbatim for
+# _PHASE_HOLD = 90 analysis frames. Two things make that worse than it looks:
+#
+#   1. The last command before a target leaves the frame is systematically the
+#      LARGEST one. A subject exits frame because it is off-axis, or fast, or
+#      far — the exact conditions under which the yaw PD is near its 55 deg/s
+#      clamp and the distance PD near its 2.5 m/s clamp. So the command that
+#      got frozen and replayed was close to full authority, every time.
+#
+#   2. The window was counted in FRAMES, and the analysis loop drops frames
+#      (see base.py: "dt IS NOT 1/fps"). 90 frames is ~3 s on a fast GPU and
+#      ~18 s when the model is loaded or the source is slow — over 40 m of
+#      blind travel. The window stretched longest exactly when vision was
+#      least able to end it, which is precisely backwards.
+#
+# WHAT REPLACES IT. Translation is the only dangerous axis when blind: you
+# cannot fly toward something you cannot see. So translation is held briefly
+# (a genuinely missed detection is one or two frames and resolves itself),
+# then faded to zero. Yaw is kept and handed over to the search sweep, because
+# turning after a subject that just left the frame edge is how it comes back
+# and a yaw costs no ground track.
+#
+# The stream itself must never stop — a gap in the Offboard setpoint stream
+# hands the aircraft to PX4's own failsafe, whose default action on many
+# airframes is LAND. So every function here returns a command, never None.
+
+# Full replay of the last command. Rides out a missed detection without
+# reacting to it; at the 2.5 m/s clamp this is ~1 m of travel.
+BLIND_HOLD_S = 0.4
+# Translation reaches zero here. Total worst-case blind ground track is ~2 m,
+# and it is over before COAST_UNTIL_S ends — so the aircraft has already
+# stopped translating while the operator is still reading "briefly hidden".
+BLIND_DECAY_UNTIL_S = 1.2
+# Sweeping stops and the aircraft holds. Deliberately equal to WIDEN_UNTIL_S:
+# the ladder the operator READS in the lock badge is now the ladder that
+# actually flies. Those two used to disagree, so the UI could say
+# "lost 10s ago - holding position" while the module was still replaying a
+# full-speed forward command.
+BLIND_GIVE_UP_S = WIDEN_UNTIL_S
+
+# Search sweep rate, deg/s. Slow on purpose: a fast sweep smears the frame and
+# the detector loses the subject it is turning to find.
+SWEEP_YAW_DEG_S = 12.0
+
+# Only ever used to convert a frame count into a comparable number of seconds.
+# Not a measurement and not a promise about the real rate — see blind_elapsed_s
+# for why being wrong in either direction is safe.
+_NOMINAL_ANALYSIS_FPS = 20.0
+
+
+def seconds_lost_for(state: Dict[str, Any]) -> float:
+    """
+    Wall-clock seconds since the target was last actually SEEN.
+
+    Returns 0.0 when it has never been seen, rather than the epoch-sized
+    interval a bare subtraction would give: a target that was never acquired
+    has not been lost, and blind_elapsed_s would otherwise read a fresh lock
+    as having been missing since process start.
+    """
+    seen = state.get("last_seen_t") or 0.0
+    if not seen:
+        return 0.0
+    return max(0.0, time.monotonic() - seen)
+
+
+def blind_elapsed_s(frames_lost: int, seconds_lost: float) -> float:
+    """
+    How long the aircraft has been flying blind, taking whichever of the two
+    clocks says MORE time has passed.
+
+    Two clocks, because each is blind in a way the other is not. Wall time is
+    the truth about how far the aircraft has actually travelled, but it barely
+    advances when the frame source has stalled and nothing is arriving to
+    advance it. The frame count is what the modules have always counted, but it
+    maps to a different number of seconds on every machine and every model load.
+
+    Taking the MAXIMUM is what makes this safe in both directions: whichever
+    clock is running fast shortens the blind window, and neither clock can be
+    the one that lets a full-speed command persist. Being wrong about
+    _NOMINAL_ANALYSIS_FPS therefore costs a slightly early stop, never a late
+    one.
+    """
+    return max(float(seconds_lost), max(0, int(frames_lost)) / _NOMINAL_ANALYSIS_FPS)
+
+
+def _velocity(forward: float, right: float, down: float, yaw: float) -> Dict[str, Any]:
+    return {
+        "type": "velocity",
+        "forward_m_s": round(forward, 3),
+        "right_m_s": round(right, 3),
+        "down_m_s": round(down, 3),
+        "yaw_deg_s": round(yaw, 3),
+    }
+
+
+def hover_command() -> Dict[str, Any]:
+    """A live setpoint that means "stay put" — not the absence of a setpoint,
+    which means "PX4 decides"."""
+    return _velocity(0.0, 0.0, 0.0, 0.0)
+
+
+def blind_command(
+    *,
+    last_cmd: Optional[Dict[str, Any]],
+    frames_lost: int,
+    seconds_lost: float,
+    last_yaw_dir: float,
+) -> Dict[str, Any]:
+    """
+    The command for a frame in which the locked target is not visible.
+
+    Never returns None, at any point on the ladder, for any input — see the
+    section note above for what a gap in the Offboard stream costs.
+
+    Rungs, on blind_elapsed_s:
+      .. BLIND_HOLD_S         the last command, verbatim
+      .. BLIND_DECAY_UNTIL_S  translation faded to zero, yaw handed to the sweep
+      .. BLIND_GIVE_UP_S      sweep only: no translation at all
+      past that              hover
+    """
+    elapsed = blind_elapsed_s(frames_lost, seconds_lost)
+    sweep = SWEEP_YAW_DEG_S * (1.0 if last_yaw_dir >= 0 else -1.0)
+
+    if elapsed >= BLIND_GIVE_UP_S:
+        return hover_command()
+    if elapsed >= BLIND_DECAY_UNTIL_S or not last_cmd:
+        return _velocity(0.0, 0.0, 0.0, sweep)
+
+    if elapsed <= BLIND_HOLD_S:
+        # Returned verbatim rather than rebuilt, so a single missed detection
+        # is bit-for-bit the previous command and cannot introduce a step from
+        # rounding alone.
+        return dict(last_cmd)
+
+    taper = 1.0 - (elapsed - BLIND_HOLD_S) / (BLIND_DECAY_UNTIL_S - BLIND_HOLD_S)
+    return _velocity(
+        forward=float(last_cmd.get("forward_m_s", 0.0)) * taper,
+        right=float(last_cmd.get("right_m_s", 0.0)) * taper,
+        down=float(last_cmd.get("down_m_s", 0.0)) * taper,
+        # Yaw fades toward the SEARCH rate, not toward zero. It is the one axis
+        # that is still useful blind and the one that cannot carry the aircraft
+        # anywhere it should not be.
+        yaw=float(last_cmd.get("yaw_deg_s", 0.0)) * taper + sweep * (1.0 - taper),
+    )

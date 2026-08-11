@@ -37,9 +37,11 @@ from app.vision.geometry import (
     camera_from_settings, deforeshorten_size, pose_from_telemetry,
 )
 from app.vision.pursuit import (
-    PursuitLimits, ROW_NUDGE_STEP, clamp_row_target, decide_elevation,
+    BLIND_DECAY_UNTIL_S, BLIND_GIVE_UP_S, PursuitLimits, ROW_NUDGE_STEP,
+    blind_command, blind_elapsed_s, clamp_row_target, decide_elevation,
     distance_axis, foot_row, is_outpaced, limit_climb, limit_descent,
     lock_state_for, new_row_pd, row_reference_is_stale, scale_forward,
+    seconds_lost_for,
 )
 from app.config import ROOT_DIR, get_settings
 
@@ -147,8 +149,9 @@ _HEIGHT_EMA_ALPHA       = 0.12
 # two must stay in step.
 MAX_PURSUIT_SPEED_M_S = 2.5
 
-_PHASE_HOLD  = 90
-_PHASE_SWEEP = 180
+# Blind-flight policy is shared, and is expressed in seconds — see the BLIND
+# FLIGHT section of pursuit.py for what the frame-counted pair that used to be
+# here actually did.
 
 
 def _draw_pill(img, text, x1, y1, color_bgr, alpha: float = 0.82):
@@ -1395,24 +1398,12 @@ class PersonTracker(BaseAnalyzer):
 
                 if tracking and target_id is not None:
                     searching = True
-                    if fl <= _PHASE_HOLD:
-                        drone_command = state.get("last_drone_command")
-                    elif fl <= _PHASE_SWEEP:
-                        drone_command = {
-                            "type":        "velocity",
-                            "forward_m_s": 0.0,
-                            "right_m_s":   0.0,
-                            "down_m_s":    0.0,
-                            "yaw_deg_s":   round(12.0 * state.get("last_yaw_dir", 1.0), 1),
-                        }
-                    else:
-                        drone_command = {
-                            "type":        "velocity",
-                            "forward_m_s": 0.0,
-                            "right_m_s":   0.0,
-                            "down_m_s":    0.0,
-                            "yaw_deg_s":   0.0,
-                        }
+                    drone_command = blind_command(
+                        last_cmd=state.get("last_drone_command"),
+                        frames_lost=fl,
+                        seconds_lost=seconds_lost_for(state),
+                        last_yaw_dir=state.get("last_yaw_dir", 1.0),
+                    )
 
             break  # single session per analyzer instance
 
@@ -1639,10 +1630,13 @@ class PersonTracker(BaseAnalyzer):
                 )
 
         if searching:
-            fl = meta.get("frames_lost", 0)
-            if fl > _PHASE_SWEEP:
+            # Same ladder the aircraft is flying — see human_tracker's badge.
+            blind_s = blind_elapsed_s(
+                meta.get("frames_lost", 0), meta.get("seconds_lost", 0.0)
+            )
+            if blind_s >= BLIND_GIVE_UP_S:
                 _draw_corner_status(frame_bgr, "  Hovering...  ", _C_SCAN)
-            elif fl > _PHASE_HOLD:
+            elif blind_s >= BLIND_DECAY_UNTIL_S:
                 _draw_corner_status(frame_bgr, "  Sweeping...  ", _C_SCAN)
             else:
                 _draw_corner_status(frame_bgr, "  Searching...  ", _C_SCAN)
