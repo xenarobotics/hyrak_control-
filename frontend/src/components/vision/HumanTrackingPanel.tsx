@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { fetchFollowTuning } from '@/lib/calibration'
 
 // Default PD values — kept in sync with backend defaults (human_tracker.py
 // _make_state: yaw_pd kp=30/kd=4/max_output=55). These are yaw-axis units
@@ -135,6 +136,11 @@ export function HumanTrackingPanel() {
     const [isTracking, setIsTracking] = useState(false)
     const [pdOpen, setPdOpen] = useState(false)
     const [pd, setPd] = useState(PD_DEFAULTS)
+    // What Settings -> AI Modules -> FOLLOW TUNING holds. The sliders below
+    // emit all four gains at once, so showing hardcoded defaults while the
+    // session had actually started from the operator's saved numbers would
+    // silently revert them the moment any one slider moved.
+    const [savedPd, setSavedPd] = useState(PD_DEFAULTS)
 
     // Flight control state
     const [altitudeMode, setAltitudeModeState] = useState<'fixed' | 'auto'>('fixed')
@@ -143,6 +149,17 @@ export function HumanTrackingPanel() {
     // Held briefly past their last sighting so the selectable list does not
     // reflow under the operator's cursor every time the detector blinks.
     const persons = useStableById(cvResults?.persons)
+
+
+    // Seeded, not pushed: the backend session already built its yaw PD from
+    // these same values, so emitting them here would be a no-op round trip.
+    useEffect(() => {
+        let live = true
+        fetchFollowTuning().then(t => {
+            if (live && t) { setPd(t); setSavedPd(t) }
+        })
+        return () => { live = false }
+    }, [])
 
     useEffect(() => {
         const socket = getSocket()
@@ -455,7 +472,7 @@ export function HumanTrackingPanel() {
                             </p>
                         )}
                         <button
-                            onClick={() => { setPd(PD_DEFAULTS); emitPdParams(PD_DEFAULTS) }}
+                            onClick={() => { setPd(savedPd); emitPdParams(savedPd) }}
                             disabled={isTracking}
                             style={{
                                 fontSize: 10, fontFamily: 'monospace', padding: '4px 8px',
@@ -465,7 +482,7 @@ export function HumanTrackingPanel() {
                                 alignSelf: 'flex-end',
                             }}
                         >
-                            Reset to defaults
+                            Reset to saved
                         </button>
                     </div>
                 )}

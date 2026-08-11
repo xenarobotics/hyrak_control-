@@ -20,7 +20,7 @@ from app.vision.pursuit import (
     BLIND_DECAY_UNTIL_S, BLIND_GIVE_UP_S, PursuitLimits, ROW_NUDGE_STEP,
     blind_command, blind_elapsed_s, clamp_row_target, decide_elevation,
     distance_axis, foot_row, is_outpaced, limit_climb, limit_descent,
-    lock_state_for, new_row_pd, row_reference_is_stale, scale_forward,
+    lock_state_for, new_row_pd, new_yaw_pd, row_reference_is_stale, scale_forward,
     seconds_lost_for,
 )
 from app.config import get_settings
@@ -102,7 +102,10 @@ def _make_state() -> Dict[str, Any]:
         # Yaw: fast, tight deadband — keeps person in frame
         # max_output=55: PX4 stock MPC_YAWRAUTO_MAX is 60deg/s — stay under it
         # with a small margin so offboard setpoints aren't rate-limited upstream.
-        "yaw_pd": PDController(kp=30.0, kd=4.0, max_output=55.0, deadband=0.05),
+        # Yaw: the primary axis. Gains come from the operator's saved follow
+        # tuning (Settings -> AI Modules -> FOLLOW TUNING), so every mode starts
+        # from the same numbers instead of five copies of the same literals.
+        "yaw_pd": new_yaw_pd(),
         # Altitude: gentle, wide deadband — avoids fighting distance axis
         "alt_pd": PDController(kp=1.5,  kd=0.3, max_output=1.0,  deadband=0.10),
         # Distance: slow deadband — bbox size is noisy but 0.04 still filters YOLO jitter.

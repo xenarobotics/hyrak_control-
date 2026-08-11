@@ -206,6 +206,27 @@ class Settings(BaseSettings):
     crowd_moderate_max: int = Field(default=20)
     max_depression_deg: float = Field(default=70.0)    # recognition-quality cap
 
+    # ── Follow tuning: the YAW axis, shared by every tracking mode ────────
+    # Yaw is the primary axis on a fixed-mount airframe — it is the one that
+    # decides whether the subject stays in frame at all — and these four
+    # numbers are what an operator actually reaches for after a flight that
+    # oscillated or lagged.
+    #
+    # They were reachable in exactly two modes. Human Tracking and Person
+    # Tracker each carry the sliders in their own panel; crowd management,
+    # traffic management and vehicle-plate tracking got the same PD stack with
+    # no way to touch it, so those three flew on these numbers permanently and
+    # a tuning session in Human Tracking taught you nothing transferable.
+    # Here they are the DEFAULT every mode starts from; the two panels that
+    # already had live sliders still override it for their own session.
+    follow_yaw_kp: float = Field(default=30.0)
+    follow_yaw_kd: float = Field(default=4.0)
+    # Ceiling, not a target. PX4 stock MPC_YAWRAUTO_MAX is 60 deg/s, so 55
+    # leaves margin rather than having setpoints silently rate-limited
+    # upstream — which looks exactly like a tuning problem from the ground.
+    follow_yaw_max_deg_s: float = Field(default=55.0)
+    follow_yaw_deadband: float = Field(default=0.05)
+
     # WebRTC — Cloudflare TURN key (dashboard → Calls → TURN). The key ID +
     # API token are NOT username/password: the backend mints short-lived
     # credentials from them (app/webrtc/turn.py). Empty = STUN-only.

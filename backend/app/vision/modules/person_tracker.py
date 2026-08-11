@@ -40,7 +40,7 @@ from app.vision.pursuit import (
     BLIND_DECAY_UNTIL_S, BLIND_GIVE_UP_S, PursuitLimits, ROW_NUDGE_STEP,
     blind_command, blind_elapsed_s, clamp_row_target, decide_elevation,
     distance_axis, foot_row, is_outpaced, limit_climb, limit_descent,
-    lock_state_for, new_row_pd, row_reference_is_stale, scale_forward,
+    lock_state_for, new_row_pd, new_yaw_pd, row_reference_is_stale, scale_forward,
     seconds_lost_for,
 )
 from app.config import ROOT_DIR, get_settings
@@ -262,7 +262,10 @@ def _make_state() -> Dict[str, Any]:
         # PD controllers — no integral; see human_tracker.py for design rationale.
         # Caps match human_tracker.py: yaw stays under PX4's 60deg/s
         # MPC_YAWRAUTO_MAX, dist raised from 0.8 (below walking pace) to 2.5m/s.
-        "yaw_pd":  PDController(kp=30.0, kd=4.0, max_output=55.0, deadband=0.05),
+        # Yaw: the primary axis. Gains come from the operator's saved follow
+        # tuning (Settings -> AI Modules -> FOLLOW TUNING), so every mode starts
+        # from the same numbers instead of five copies of the same literals.
+        "yaw_pd":  new_yaw_pd(),
         "alt_pd":  PDController(kp=1.5,  kd=0.3, max_output=1.0,  deadband=0.10),
         # Units are FRACTION OF RANGE, not fill difference — see
         # controllers.range_error_ratio for why, and for the measured

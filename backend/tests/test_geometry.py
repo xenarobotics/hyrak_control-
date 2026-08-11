@@ -295,7 +295,10 @@ def test_schema_serves_ranges_for_the_ui(tmp_path, monkeypatch):
     assert "max_altitude_agl_m" in keys
     for f in schema["fields"]:
         assert f["help"], f"{f['key']} has no help text"
-        assert f["group"] in ("camera", "limits")
+        # A CLOSED list on purpose: the Settings page renders one component per
+        # group, so a field in a group the UI has no section for is a field
+        # nobody can reach. Adding a group here means adding a section there.
+        assert f["group"] in ("camera", "limits", "follow")
         if f["type"] != "enum":
             assert f["min"] < f["max"]
         else:

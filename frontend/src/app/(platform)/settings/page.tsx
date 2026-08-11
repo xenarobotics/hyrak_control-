@@ -1666,6 +1666,47 @@ function CameraCalibrationGroup() {
     )
 }
 
+function FollowTuningGroup() {
+    const { schema, busy, offline, save } = useCalibration()
+    const fields = (schema?.fields ?? []).filter(f => f.group === 'follow')
+
+    if (offline || !schema) {
+        return (
+            <p style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))' }}>
+                {offline ? 'Backend unreachable.' : 'Loading…'}
+            </p>
+        )
+    }
+    return (
+        <>
+            <p style={{ fontSize: 11, color: 'hsl(var(--app-text-muted))', lineHeight: 1.6, margin: '0 0 6px' }}>
+                How hard the drone turns to keep a subject centred, for{' '}
+                <b>every</b> mode that can follow one — human tracking, person
+                tracking, crowd management, traffic management and vehicle-plate
+                tracking. Yaw is the axis that decides whether the subject stays
+                in frame at all.
+            </p>
+            {fields.map(f => (
+                <CalibrationRow key={f.key} field={f} onSave={save} busy={busy} />
+            ))}
+            {/* Said plainly, because the alternative is an operator concluding
+                the Settings values "don't work" after watching a panel slider
+                win. The panel sliders are per-session and were here first. */}
+            <p style={{ fontSize: 11, color: 'hsl(var(--app-text-muted))', lineHeight: 1.6, margin: '8px 0 0' }}>
+                Applied when a tracking mode next <b>starts</b> — unlike the
+                camera calibration above, which takes effect on the next frame.
+                Switch AI mode, or restart the stream, to pick up a change.
+            </p>
+            <p style={{ fontSize: 11, color: 'hsl(var(--app-text-muted))', lineHeight: 1.6, margin: '6px 0 0' }}>
+                These are the values every mode <i>starts</i> from. Human
+                Tracking and Person Tracker also keep their own sliders for
+                changing them between runs — those act on the running session
+                only, and are not saved here.
+            </p>
+        </>
+    )
+}
+
 function VisionLimitsGroup() {
     const { schema, busy, offline, save } = useCalibration()
     const fields = (schema?.fields ?? []).filter(f => f.group === 'limits')
@@ -1828,6 +1869,7 @@ const CATEGORIES: Category[] = [
         id: 'ai', label: 'AI Modules', icon: Bot,
         blurb: 'Per-mode tuning for the vision modules',
         sections: [
+            { label: 'FOLLOW TUNING', Body: FollowTuningGroup },
             { label: 'CROWD MANAGEMENT', Body: CrowdGroup },
             { label: 'TRACKING & SPEED LIMITS', Body: VisionLimitsGroup },
         ],

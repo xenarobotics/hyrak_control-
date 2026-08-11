@@ -499,7 +499,17 @@ async def put_calibration(
 
     All-or-nothing: one invalid field rejects the whole request rather than
     saving half of it, because a half-applied calibration would be flying.
-    Applies to the next frame — no restart, no session reconnect.
+
+    WHEN A CHANGE TAKES EFFECT depends on the group, and the difference matters
+    to whoever is standing under the aircraft:
+
+      camera / limits   the next frame. They are read on the frame path.
+      follow            the next time a tracking mode STARTS. The yaw PD is
+                        built once per session, deliberately — re-reading it
+                        per frame would put a settings lookup on the control
+                        loop, and swapping gains under a live PD changes the
+                        aircraft's behaviour mid-manoeuvre with nobody having
+                        touched a control.
     """
     settings = get_settings()
     if x_auth_token != settings.secret_token:

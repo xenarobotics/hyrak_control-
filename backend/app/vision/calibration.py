@@ -159,6 +159,51 @@ FIELDS: List[Dict[str, Any]] = [
         "help": "In 'auto' mode, how far the two scale sources may differ before "
                 "a speed is marked unreliable instead of being reported.",
     },
+
+    # ── Follow tuning (yaw axis) ──────────────────────────────────────────
+    # A THIRD group, not a third pile in `limits`, because these are neither a
+    # property of the rig nor a mission decision — they are how the aircraft
+    # BEHAVES while chasing, and they are the one thing an operator changes in
+    # response to how the last flight felt.
+    #
+    # Labels and ranges deliberately match the sliders in the Human Tracking
+    # panel, because they are the same four numbers. That panel had the only
+    # copy of them; crowd, traffic and plate tracking ran the identical PD with
+    # nothing wired to it.
+    {
+        "key": "follow_yaw_kp", "group": "follow", "type": "float",
+        "label": "Responsiveness", "unit": "", "min": 10.0, "max": 50.0, "step": 1.0,
+        "help": "How hard the drone turns when the subject drifts off-centre "
+                "(proportional gain). Higher is snappier. Too high and it "
+                "overshoots and hunts back and forth — if the aircraft wags "
+                "left-right around a walking subject, this is the number to "
+                "lower first.",
+    },
+    {
+        "key": "follow_yaw_kd", "group": "follow", "type": "float",
+        "label": "Smoothing", "unit": "", "min": 0.0, "max": 10.0, "step": 0.2,
+        "help": "Damps sudden corrections (derivative gain). Higher is smoother "
+                "but slower to catch up. Roughly a seventh of Responsiveness is "
+                "a sane starting ratio — raise it together with Responsiveness, "
+                "not instead of it.",
+    },
+    {
+        "key": "follow_yaw_max_deg_s", "group": "follow", "type": "float",
+        "label": "Max Speed", "unit": "deg/s", "min": 15.0, "max": 55.0, "step": 1.0,
+        "help": "Fastest the drone will rotate while tracking. This is a TURN "
+                "rate, not a ground speed. 55 is the hard ceiling: PX4's own "
+                "auto-yaw limit is 60, and setpoints above it are silently "
+                "rate-limited by the flight controller, which from the ground "
+                "is indistinguishable from bad tuning.",
+    },
+    {
+        "key": "follow_yaw_deadband", "group": "follow", "type": "float",
+        "label": "Dead Zone", "unit": "frac", "min": 0.01, "max": 0.15, "step": 0.01,
+        "help": "How far off-centre the subject may sit before any correction "
+                "is sent, as a fraction of frame width. Raise it if the drone "
+                "never settles and twitches while hovering; lower it if the "
+                "subject sits persistently off to one side.",
+    },
 ]
 
 _BY_KEY = {f["key"]: f for f in FIELDS}

@@ -12,6 +12,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { FaceGalleryPanel } from './FaceGalleryPanel'
+import { fetchFollowTuning } from '@/lib/calibration'
 
 // Kept in sync with backend defaults (person_tracker.py _make_state: yaw_pd
 // kp=30/kd=4/max_output=55) — yaw-axis units (deg/s output). A prior 0-2
@@ -131,6 +132,11 @@ export function PersonTrackerPanel() {
     const [isTracking, setIsTracking] = useState(false)
     const [pdOpen, setPdOpen] = useState(false)
     const [pd, setPd] = useState(PD_DEFAULTS)
+    // What Settings -> AI Modules -> FOLLOW TUNING holds. The sliders below
+    // emit all four gains at once, so showing hardcoded defaults while the
+    // session had actually started from the operator's saved numbers would
+    // silently revert them the moment any one slider moved.
+    const [savedPd, setSavedPd] = useState(PD_DEFAULTS)
 
     // Flight control state
     const [altitudeMode, setAltitudeModeState] = useState<'fixed' | 'auto'>('fixed')
@@ -183,6 +189,17 @@ export function PersonTrackerPanel() {
     }
 
     // Sync tracking / clear state from server
+
+    // Seeded, not pushed: the backend session already built its yaw PD from
+    // these same values, so emitting them here would be a no-op round trip.
+    useEffect(() => {
+        let live = true
+        fetchFollowTuning().then(t => {
+            if (live && t) { setPd(t); setSavedPd(t) }
+        })
+        return () => { live = false }
+    }, [])
+
     useEffect(() => {
         const socket = getSocket()
         socket.on('tracking_status', (d: { active: boolean }) => setIsTracking(d.active))
@@ -878,7 +895,7 @@ export function PersonTrackerPanel() {
                             </p>
                         )}
                         <button
-                            onClick={() => { setPd(PD_DEFAULTS); emitPdParams(PD_DEFAULTS) }}
+                            onClick={() => { setPd(savedPd); emitPdParams(savedPd) }}
                             disabled={isTracking}
                             style={{
                                 fontSize: 10, fontFamily: 'monospace', padding: '4px 8px',
@@ -888,7 +905,7 @@ export function PersonTrackerPanel() {
                                 alignSelf: 'flex-end',
                             }}
                         >
-                            Reset to defaults
+                            Reset to saved
                         </button>
                     </div>
                 )}

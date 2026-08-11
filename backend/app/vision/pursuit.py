@@ -434,6 +434,40 @@ def row_reference_is_stale(altitude_mode: str, down_m_s: float) -> bool:
     return altitude_mode != "auto" and abs(down_m_s) > ROW_REFERENCE_HOLD_EPS_M_S
 
 
+def new_yaw_pd():
+    """
+    The yaw PD every follow mode steers with, built from the operator's saved
+    follow tuning.
+
+    WHY THIS IS SHARED. The four gains were reachable from exactly two panels.
+    Human Tracking and Person Tracker each carried sliders wired to
+    set_pd_params; crowd management, traffic management and vehicle-plate
+    tracking constructed the identical PDController with the identical literals
+    and had nothing at all wired to it. So three modes flew on deploy-time
+    defaults permanently, and — worse than that — a tuning session in Human
+    Tracking taught the operator nothing that transferred, because the numbers
+    they had just learned could not be entered anywhere else.
+
+    Read at state construction, which is once per session, so the cost of
+    effective() is not on any frame path. The two panels that already had live
+    sliders still override this for their own session; those overrides remain
+    per-session and deliberately do not persist, because a slider dragged mid
+    flight is an experiment, not a decision.
+    """
+    from app.vision.calibration import effective
+    from app.vision.controllers import PDController
+    cal = effective()
+    return PDController(
+        kp=cal["follow_yaw_kp"],
+        kd=cal["follow_yaw_kd"],
+        # min() rather than trust: the calibration range caps at 55, but a
+        # stored value from an older build could exceed it and the flight
+        # controller's own limit is not negotiable.
+        max_output=min(cal["follow_yaw_max_deg_s"], 55.0),
+        deadband=cal["follow_yaw_deadband"],
+    )
+
+
 def new_row_pd():
     """
     The Fixed-altitude distance PD, built here so all five follow modules get

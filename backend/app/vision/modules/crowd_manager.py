@@ -44,7 +44,7 @@ from app.vision.geometry import (
 from app.vision.pursuit import (
     PursuitLimits, ROW_NUDGE_STEP, blind_command, clamp_row_target,
     decide_elevation, distance_axis, foot_row, is_outpaced, limit_climb,
-    limit_descent, lock_state_for, new_row_pd, row_reference_is_stale,
+    limit_descent, lock_state_for, new_row_pd, new_yaw_pd, row_reference_is_stale,
     scale_forward, seconds_lost_for,
 )
 from app.vision.tracker_config import make_bytetrack_cfg
@@ -131,7 +131,10 @@ def _make_state() -> Dict[str, Any]:
         "last_drone_command": None,
         "last_yaw_dir": 1.0,
         "elevate": None,
-        "yaw_pd": PDController(kp=30.0, kd=4.0, max_output=55.0, deadband=0.05),
+        # Yaw: the primary axis. Gains come from the operator's saved follow
+        # tuning (Settings -> AI Modules -> FOLLOW TUNING), so every mode starts
+        # from the same numbers instead of five copies of the same literals.
+        "yaw_pd": new_yaw_pd(),
         "alt_pd": PDController(kp=1.5, kd=0.3, max_output=1.0, deadband=0.10),
         "dist_pd": PDController(kp=4.0, kd=1.0, max_output=2.5, deadband=0.08),
         # The Fixed-altitude distance axis — see pursuit.new_row_pd.
