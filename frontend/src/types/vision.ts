@@ -333,6 +333,19 @@ export interface GroupFraming {
     members_total: number
     missing: number[]
     widening_for_s: number
+    /** How much of the widen allowance is spent, and WHICH bound is in force.
+     *  Distance is the real bound — what goes wrong with an over-long widen is
+     *  displacement, not elapsed time. `by: 'time'` means there was no usable
+     *  GPS fix to measure with, so a looser fallback is running; that is
+     *  reported rather than substituted quietly. */
+    widen_budget: {
+        by: 'distance' | 'time'
+        spent_m: number | null
+        limit_m: number
+        spent_s: number
+        limit_s: number
+        exhausted: boolean
+    }
     /** Roughly the slant range that would be needed to fit the group, metres.
      *  Null without telemetry — "cannot frame all" and "cannot frame all,
      *  needs about 45 m" are different messages and only one is actionable. */

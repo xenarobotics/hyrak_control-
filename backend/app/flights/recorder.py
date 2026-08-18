@@ -8,12 +8,12 @@ Everything degrades to a no-op when the DB is offline; recording must
 never touch the flight path itself.
 """
 import logging
-import math
 import time
 from datetime import datetime, timezone
 
 from app.db import db_available, get_session
 from app.db.models import Flight, FlightSample
+from app.utils.geo import haversine_m
 
 logger = logging.getLogger("verocore.flights")
 
@@ -21,14 +21,6 @@ _SAMPLE_INTERVAL = 1.0
 
 # session_id → live recording state
 _active: dict[str, dict] = {}
-
-
-def _haversine_m(lat1, lng1, lat2, lng2) -> float:
-    r = 6_371_000
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp, dl = math.radians(lat2 - lat1), math.radians(lng2 - lng1)
-    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return 2 * r * math.asin(math.sqrt(a))
 
 
 async def on_snapshot(session_id: str, drone_id: str | None, snap: dict) -> None:
@@ -77,7 +69,7 @@ async def on_snapshot(session_id: str, drone_id: str | None, snap: dict) -> None
         state["max_alt"] = max(state["max_alt"], alt)
         if lat or lng:
             if state["last_pos"]:
-                state["dist"] += _haversine_m(*state["last_pos"], lat, lng)
+                state["dist"] += haversine_m(*state["last_pos"], lat, lng)
             state["last_pos"] = (lat, lng)
             if not (state["crossed_orange"] and state["crossed_red"]):
                 from app.zones import engine as zone_engine

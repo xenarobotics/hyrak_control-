@@ -79,7 +79,7 @@ from app.vision.pursuit import (
 )
 from app.vision.group_follow import (
     GroupAction, GroupState, MAX_FOLLOW_MEMBERS, assess_framing, clamp_members,
-    group_box, required_range_m, widen_velocity,
+    fix_from_telemetry, group_box, required_range_m, widen_velocity,
 )
 from app.vision.profiles import ProfileSelector
 from app.vision.speed import SpeedEstimator
@@ -2112,6 +2112,7 @@ class TrafficManager(BaseAnalyzer):
         if group_mode:
             forward_raw, range_err, err_yaw, err_alt, widen_down = self._group_axes(
                 state, gstate, visible, members, W, H, now, pose, depression,
+                fix_from_telemetry(ctx.telemetry if ctx else None),
             )
             foot_n = None
         else:
@@ -2260,7 +2261,7 @@ class TrafficManager(BaseAnalyzer):
         return drone_command
 
     def _group_axes(self, state, gstate, visible, members, W, H, now,
-                    pose, depression):
+                    pose, depression, fix=None):
         """
         The three error signals for a multi-subject follow, plus the climb half
         of a widen.
@@ -2278,13 +2279,17 @@ class TrafficManager(BaseAnalyzer):
            close in". So the one frame where the naive signal says advance is
            the one frame where advancing is wrong.
 
-        2. PAST GROUP_GIVE_UP_S OF UNSUCCESSFUL WIDENING, TRANSLATION STOPS.
-           Two subjects walking apart need a range that grows without bound;
-           there is no manoeuvre that wins and continuing to fly backwards is
-           just leaving the area. Yaw keeps working — the group stays centred
-           and visible — and the payload carries the range that would have
-           been needed, so the operator drops a member or accepts the loss
-           rather than watching the aircraft do something inexplicable.
+        2. ONCE THE WIDEN BUDGET IS SPENT, TRANSLATION STOPS. Two subjects
+           walking apart need a range that grows without bound; there is no
+           manoeuvre that wins and continuing to fly backwards is just leaving
+           the area. The budget is MEASURED GROUND TRACK where there is a fix
+           to measure it with and elapsed time where there is not — see
+           group_follow.WidenBudget, and note that which of the two is in force
+           is reported, not silently substituted. Yaw keeps working, so the
+           group stays centred and visible, and the payload carries the range
+           that would have been needed — the operator drops a member or accepts
+           the loss rather than watching the aircraft do something
+           inexplicable.
         """
         boxes_px = [hit[1] for _, hit in visible]
         gb = group_box(boxes_px, W, H)
@@ -2314,9 +2319,9 @@ class TrafficManager(BaseAnalyzer):
                     f"holding rather than closing in"
                 )
 
-        gstate.note(action, now)
-        given_up = gstate.has_given_up(now)
-        if given_up:
+        gstate.note(action, now, fix)
+        budget = gstate.budget(now, fix)
+        if budget.exhausted:
             # Rule 2.
             action = GroupAction.UNFRAMEABLE
             error = 0.0
@@ -2325,7 +2330,8 @@ class TrafficManager(BaseAnalyzer):
             framing.reason = (
                 "cannot frame all subjects"
                 + (f" — would need about {need:.0f} m of range" if need else "")
-                + "; holding position, drop a member or release"
+                + f"; {budget.describe()}. Holding position — drop a member "
+                  f"or release"
             )
 
         framing.action = action
@@ -2334,6 +2340,7 @@ class TrafficManager(BaseAnalyzer):
         payload["members_total"] = len(members)
         payload["missing"] = missing
         payload["widening_for_s"] = round(gstate.struggling_for(now), 1)
+        payload["widen_budget"] = budget.to_dict()
         payload["required_range_m"] = (
             round(required_range_m(framing, pose.agl_m if pose else None,
                                    depression) or 0.0, 1) or None

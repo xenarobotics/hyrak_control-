@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import math
 import subprocess
 import time
 
@@ -9,6 +8,7 @@ from app.events.telemetry_events import execute_drone_action
 from app.flights import recorder
 from app.registry import drones as drone_registry
 from app.telemetry import swarm_relay_bridge
+from app.utils.geo import haversine_m
 
 logger = logging.getLogger("verocore.events.swarm")
 
@@ -87,14 +87,6 @@ _sup_task: dict[str, asyncio.Task | None] = {"task": None}
 _sup_drone: dict[tuple[str, int], dict] = {}        # (session_id, drone_id) → watchdog state
 _sup_pair_alert: dict[tuple, float] = {}            # (session_id, id, id) → last separation alert
 _sup_complete: dict[str, bool] = {}                 # session_id → announced
-
-
-def _haversine_m(lat1, lng1, lat2, lng2) -> float:
-    r = 6_371_000
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp, dl = math.radians(lat2 - lat1), math.radians(lng2 - lng1)
-    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return 2 * r * math.asin(math.sqrt(a))
 
 
 async def _register_fleet_drone(session_id: str, drone_id: int) -> None:
@@ -295,7 +287,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
                 d2, la2, lo2, al2 = armed_air[j]
                 if abs(al1 - al2) > _SEP_VERT_M:
                     continue
-                horiz = _haversine_m(la1, lo1, la2, lo2)
+                horiz = haversine_m(la1, lo1, la2, lo2)
                 if horiz < _SEP_HORIZ_M:
                     pair_key = (session_id, d1, d2)
                     if now - _sup_pair_alert.get(pair_key, 0) > 10:

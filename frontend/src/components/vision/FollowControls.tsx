@@ -400,6 +400,18 @@ function GroupFramingReadout({ f }: { f: GroupFraming }) {
                     closing in, so the missing one stays recoverable.
                 </div>
             )}
+            {/* HOW MUCH ROOM THE WIDEN HAS LEFT, and which bound is
+                measuring it. A widen is the one thing here that flies the
+                aircraft somewhere, so "backing off" without a budget beside it
+                gives no sense of how much further it intends to go. */}
+            {(f.action === 'widen' || f.action === 'unframeable') && (
+                <div style={{ fontSize: 9.5, fontFamily: 'monospace', lineHeight: 1.4,
+                              color: f.widen_budget.by === 'time' ? '#fbbf24' : 'hsl(var(--app-text-muted))' }}>
+                    {f.widen_budget.by === 'distance'
+                        ? `widened ${(f.widen_budget.spent_m ?? 0).toFixed(0)} / ${f.widen_budget.limit_m.toFixed(0)} m`
+                        : `widened ${f.widen_budget.spent_s.toFixed(0)} / ${f.widen_budget.limit_s.toFixed(0)}s — no GPS fix, bounded by time not distance`}
+                </div>
+            )}
             <div style={{ fontSize: 9.5, color, lineHeight: 1.4 }}>{f.reason}</div>
             {bad && f.required_range_m != null && (
                 <div style={{ fontSize: 9.5, color: '#f87171', lineHeight: 1.4 }}>

@@ -35,6 +35,7 @@ from app.vision.group_follow import (
     GROUP_DWELL_S,
     GROUP_EDGE_MARGIN,
     GROUP_GIVE_UP_S,
+    GROUP_WIDEN_LIMIT_M,
     GROUP_MAX_FILL_H,
     GROUP_MAX_FILL_W,
     GROUP_MIN_FILL_H,
@@ -46,11 +47,11 @@ from app.vision.group_follow import (
     assess_framing,
     clamp_members,
     edge_breach,
+    fix_from_telemetry,
     group_box,
     required_range_m,
     widen_velocity,
 )
-from app.vision.pursuit import WIDEN_UNTIL_S
 
 W, H = 1920, 1080
 
@@ -327,11 +328,26 @@ def test_without_a_pose_no_range_is_claimed():
 # Giving up, and the clock it gives up on                                       #
 # --------------------------------------------------------------------------- #
 
-def test_the_flown_timeout_matches_the_displayed_ladder():
-    """The lock ladder the operator watches is in seconds and ends at
-    WIDEN_UNTIL_S. A group that kept flying past the moment the panel said the
-    subject was lost would be two clocks disagreeing in front of the pilot."""
-    assert GROUP_GIVE_UP_S == WIDEN_UNTIL_S
+def test_the_time_bound_is_only_a_fallback_and_is_shorter_than_the_lost_ladder():
+    """DELIBERATELY DECOUPLED from the reacquisition ladder's WIDEN_UNTIL_S,
+    which it was briefly tied to.
+
+    The tie was justified as stopping the flown timeout drifting from the
+    displayed one, but the two never measured the same thing: the ladder counts
+    time since the subject was last SEEN, and this counts time spent widening
+    while every subject is in plain sight. There was nothing for them to
+    disagree about, so matching them only made this one longer than it needed
+    to be — and the widen is the one that is actually flying the aircraft
+    somewhere while it runs."""
+    from app.vision.pursuit import WIDEN_UNTIL_S
+    assert GROUP_GIVE_UP_S < WIDEN_UNTIL_S
+
+
+def test_the_distance_limit_is_a_radius_an_operator_can_still_see():
+    """The bound exists so the aircraft does not end up somewhere nobody put
+    it. A limit larger than the distance at which you can tell what the drone
+    is doing is not a bound, it is a formality."""
+    assert 5.0 <= GROUP_WIDEN_LIMIT_M <= 30.0
 
 
 def test_a_group_that_cannot_be_framed_is_given_up_on():
@@ -356,6 +372,114 @@ def test_the_struggle_clock_starts_once_not_on_every_frame():
     for t in range(100, 110):
         gs.note(GroupAction.WIDEN, float(t))
     assert gs.struggling_for(110.0) == pytest.approx(10.0)
+
+
+# --------------------------------------------------------------------------- #
+# The widen budget: measured metres, with time as the fallback                  #
+# --------------------------------------------------------------------------- #
+
+def _fix_tel(lat=12.99, lon=77.59, fix=3, sats=12):
+    return {"gps": {"fix_type": fix, "satellites_visible": sats},
+            "position": {"latitude_deg": lat, "longitude_deg": lon}}
+
+
+def test_a_good_fix_is_read_from_the_raw_snapshot():
+    """The position was already arriving every frame and being discarded one
+    layer up: pose_from_telemetry keeps only altitude and attitude, because
+    that is all the rest of the vision layer needs."""
+    assert fix_from_telemetry(_fix_tel()) == (12.99, 77.59)
+
+
+@pytest.mark.parametrize("tel,why", [
+    (None, "no telemetry at all"),
+    ({}, "empty snapshot"),
+    (_fix_tel(fix=2), "2D fix — no usable horizontal accuracy"),
+    (_fix_tel(sats=4), "too few satellites — the solution wanders"),
+    (_fix_tel(lat=0.0, lon=0.0), "null island: a zeroed dataclass, not a reading"),
+])
+def test_an_unusable_fix_is_refused_rather_than_trusted(tel, why):
+    """A marginal fix is WORSE than none here. Differencing two positions turns
+    any wander in the solution into apparent travel, so it would spend the
+    widen budget while the aircraft hovers — and the drone would give up on a
+    group it was framing perfectly."""
+    assert fix_from_telemetry(tel) is None, why
+
+
+def test_without_a_fix_the_budget_falls_back_to_time():
+    gs = GroupState()
+    gs.note(GroupAction.WIDEN, 100.0, None)
+    b = gs.budget(100.0 + GROUP_GIVE_UP_S + 0.1, None)
+    assert b.by == "time"
+    assert b.exhausted
+
+
+def test_with_a_fix_the_budget_is_measured_in_metres():
+    gs = GroupState()
+    gs.note(GroupAction.WIDEN, 100.0, (12.99, 77.59))
+    b = gs.budget(101.0, (12.99, 77.59))
+    assert b.by == "distance"
+    assert b.spent_m == pytest.approx(0.0, abs=0.1)
+    assert not b.exhausted
+
+
+def test_the_distance_bound_fires_at_the_limit():
+    gs = GroupState()
+    gs.note(GroupAction.WIDEN, 100.0, (12.99, 77.59))
+    far = (12.99 + (GROUP_WIDEN_LIMIT_M + 1.0) / 111_320.0, 77.59)
+    assert gs.budget(101.0, far).exhausted
+
+
+def test_a_stationary_aircraft_never_spends_the_distance_budget():
+    """THE WHOLE POINT OF MEASURING. A widen that is commanded but not achieved
+    — held by the yaw gate, by wind, by a saturated controller — has cost
+    nothing and must not count against a budget that exists to bound where the
+    aircraft ends up. A time bound cannot tell the two apart."""
+    gs = GroupState()
+    gs.note(GroupAction.WIDEN, 100.0, (12.99, 77.59))
+    assert not gs.budget(100.0 + GROUP_GIVE_UP_S * 10, (12.99, 77.59)).exhausted
+
+
+def test_the_budget_says_which_bound_is_in_force():
+    """Substituting the looser bound quietly would read as the tighter one
+    being enforced. Same stance limit_climb takes when it has no AGL."""
+    gs = GroupState()
+    gs.note(GroupAction.WIDEN, 100.0, None)
+    assert "GPS" in gs.budget(101.0, None).describe()
+    gs2 = GroupState()
+    gs2.note(GroupAction.WIDEN, 100.0, (12.99, 77.59))
+    assert "m of the" in gs2.budget(101.0, (12.99, 77.59)).describe()
+
+
+def test_the_origin_is_stamped_when_the_widen_starts_not_on_every_frame():
+    """Re-stamping each frame would measure one frame of travel forever and the
+    budget would never be spent."""
+    gs = GroupState()
+    gs.note(GroupAction.WIDEN, 100.0, (12.99, 77.59))
+    moved = (12.99 + 10.0 / 111_320.0, 77.59)
+    gs.note(GroupAction.WIDEN, 101.0, moved)
+    assert gs.budget(101.0, moved).spent_m == pytest.approx(10.0, abs=0.5)
+
+
+def test_a_fix_arriving_mid_widen_is_not_backdated():
+    """Crediting the widen with metres covered while the fix was unusable would
+    be inventing them — the aircraft may have been sitting still."""
+    gs = GroupState()
+    gs.note(GroupAction.WIDEN, 100.0, None)
+    late = (12.99, 77.59)
+    gs.note(GroupAction.WIDEN, 101.0, late)
+    assert gs.budget(101.0, late).spent_m == pytest.approx(0.0, abs=0.1)
+
+
+def test_a_successful_widen_forgets_where_it_started():
+    """Otherwise the next widen is measured from a stale origin and gives up
+    immediately, somewhere unrelated to where it began."""
+    gs = GroupState()
+    gs.note(GroupAction.WIDEN, 100.0, (12.99, 77.59))
+    gs.note(GroupAction.HOLD, 101.0, (12.99, 77.59))
+    assert gs.widen_origin is None
+    far = (12.99 + 50.0 / 111_320.0, 77.59)
+    gs.note(GroupAction.WIDEN, 102.0, far)
+    assert not gs.budget(102.0, far).exhausted
 
 
 # --------------------------------------------------------------------------- #
@@ -567,8 +691,42 @@ class _Pose:
         return 45.0
 
 
+def _tel(lat=12.9900, lon=77.5900, fix=3, sats=12):
+    """A telemetry snapshot in the shape pose/fix readers expect."""
+    return {
+        "gps": {"fix_type": fix, "satellites_visible": sats},
+        "position": {"latitude_deg": lat, "longitude_deg": lon,
+                     "relative_altitude_m": 30.0},
+        "attitude": {"roll_deg": 0.0, "pitch_deg": 0.0, "yaw_deg": 0.0},
+    }
+
+
 class _Ctx:
+    """No usable fix — the widen falls back to the time bound."""
     width, height = W, H
+    telemetry = None
+
+
+class _FixedCtx:
+    """A good fix that never moves: the aircraft is being commanded to widen
+    and going nowhere, so the DISTANCE budget never gets spent."""
+    width, height = W, H
+    telemetry = _tel()
+
+
+class _DriftCtx:
+    """A good fix that walks north, one metre per frame read."""
+    width, height = W, H
+
+    def __init__(self, step_m=1.0):
+        self._n = 0
+        self._step = step_m
+
+    @property
+    def telemetry(self):
+        # ~1.11e5 m per degree of latitude.
+        self._n += 1
+        return _tel(lat=12.9900 + (self._n * self._step) / 111_320.0)
 
 
 def _settle(t, tt, ids_boxes, clock, seconds=2.0, step=0.1, pose=None, ctx=None):
@@ -711,12 +869,57 @@ def test_an_unframeable_group_stops_translating_but_keeps_looking(clock):
     assert "cannot frame" in state["group_framing"]["reason"]
 
 
+def test_a_widen_that_goes_nowhere_is_not_given_up_on(clock):
+    """THE REASON THE BOUND IS METRES. The aircraft is commanded to widen and
+    is not moving — a good fix, unchanged. Under the old time bound this gave
+    up after 15 s of having cost nothing; now it keeps trying, because nothing
+    the bound exists to prevent has happened."""
+    t, state, tt = _armed()
+    ids = [(7, (20, 60, 400, 1000)), (8, (1500, 60, 1900, 1000))]
+    _two_up(t, tt, [ids[0][1], ids[1][1]], clock, pose=_Pose(), ctx=_FixedCtx())
+    _settle(t, tt, ids, clock, seconds=GROUP_GIVE_UP_S * 3,
+            pose=_Pose(), ctx=_FixedCtx())
+    g = state["group_framing"]
+    assert g["widen_budget"]["by"] == "distance"
+    assert g["action"] == "widen", "gave up on a widen that cost no ground"
+
+
+def test_a_widen_that_actually_travels_is_given_up_on_by_distance(clock):
+    """The same scene with the aircraft genuinely moving. The budget is spent
+    in metres flown, and it fires well before the time fallback would."""
+    t, state, tt = _armed()
+    ids = [(7, (20, 60, 400, 1000)), (8, (1500, 60, 1900, 1000))]
+    ctx = _DriftCtx(step_m=1.0)
+    _two_up(t, tt, [ids[0][1], ids[1][1]], clock, pose=_Pose(), ctx=ctx)
+    cmd = _settle(t, tt, ids, clock, seconds=4.0, step=0.1,
+                  pose=_Pose(), ctx=ctx)
+    g = state["group_framing"]
+    assert g["widen_budget"]["by"] == "distance"
+    assert g["widen_budget"]["spent_m"] >= GROUP_WIDEN_LIMIT_M
+    assert g["action"] == "unframeable"
+    assert cmd["forward_m_s"] == pytest.approx(0.0, abs=0.01)
+    # The point of the change: it stopped on metres, not on the clock.
+    assert g["widening_for_s"] < GROUP_GIVE_UP_S
+
+
+def test_the_reason_names_the_bound_that_actually_stopped_it(clock):
+    """"Cannot frame all" is the same sentence whether 15 m of ground or 8
+    seconds of clock ended it, and the two mean different things about how far
+    the aircraft has gone."""
+    t, state, tt = _armed()
+    ids = [(7, (20, 60, 400, 1000)), (8, (1500, 60, 1900, 1000))]
+    _two_up(t, tt, [ids[0][1], ids[1][1]], clock)
+    _settle(t, tt, ids, clock, seconds=GROUP_GIVE_UP_S + 3.0)
+    assert state["group_framing"]["widen_budget"]["by"] == "time"
+    assert "no usable GPS" in state["group_framing"]["reason"]
+
+
 def test_it_keeps_widening_right_up_to_the_give_up_point(clock):
     """Giving up early would abandon groups that were about to fit."""
     t, state, tt = _armed()
     ids = [(7, (20, 60, 400, 1000)), (8, (1500, 60, 1900, 1000))]
     _two_up(t, tt, [ids[0][1], ids[1][1]], clock)
-    cmd = _settle(t, tt, ids, clock, seconds=GROUP_GIVE_UP_S - 4.0)
+    cmd = _settle(t, tt, ids, clock, seconds=GROUP_GIVE_UP_S - 3.0)
     assert state["group_framing"]["action"] == "widen"
     assert cmd["forward_m_s"] < 0
 

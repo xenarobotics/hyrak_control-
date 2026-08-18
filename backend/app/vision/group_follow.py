@@ -65,7 +65,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from app.vision.pursuit import WIDEN_UNTIL_S
+from app.utils.geo import haversine_m
 
 logger = logging.getLogger("verocore.vision.group_follow")
 
@@ -99,10 +99,50 @@ _EDGE_URGENT_ERROR = -0.06
 #: noisy frame from commanding a manoeuvre. Widening is exempt — see settle().
 GROUP_DWELL_S = 0.5
 
-#: How long the group may stay unframeable before the attempt is abandoned.
-#: Deliberately the same number as the reacquisition ladder's final rung, so
-#: the flown timeout and the displayed one cannot drift apart.
-GROUP_GIVE_UP_S = WIDEN_UNTIL_S
+# ── THE WIDEN BUDGET ────────────────────────────────────────────────────────
+#
+# A widen has to be bounded, because two subjects walking apart need a range
+# that grows without limit and there is no manoeuvre that wins. The question is
+# what to bound it WITH, and the honest answer is metres, not seconds.
+#
+# WHAT ACTUALLY GOES WRONG IS DISPLACEMENT. The cost of an over-long widen is
+# that the aircraft ends up somewhere the operator did not put it — and,
+# because the retreat is backwards, somewhere its camera has not been looking.
+# Seconds are only a proxy for that, and a bad one: the widen speed is
+# proportional to how far past the margin the group is, so the same 15 seconds
+# is 2 m of travel for a group barely over the line and 35 m for one that is
+# diverging hard. A time bound is therefore simultaneously too tight for the
+# case that would have recovered and too loose for the case that will not.
+#
+# MEASURED, NOT INTEGRATED. This differences two GPS fixes. Integrating the
+# COMMANDED velocity instead would be dead reckoning of a setpoint the aircraft
+# may not be achieving — wind, saturation, attitude limits — against the vision
+# loop's dt, which is the exact clock the blind-flight work already established
+# cannot be trusted (frames are not seconds). That would produce a number with
+# a metre sign on it that is really a guess.
+
+#: Ground track allowed while widening, metres. Roughly the radius within which
+#: an operator watching the aircraft still recognises where it is.
+GROUP_WIDEN_LIMIT_M = 15.0
+
+#: The FALLBACK bound, used only when there is no position fix good enough to
+#: measure the distance with.
+#:
+#: NOT tied to the reacquisition ladder's WIDEN_UNTIL_S, which it briefly was.
+#: That tie was justified as keeping the flown timeout from drifting from the
+#: displayed one, but the two were never measuring the same thing: the ladder
+#: counts time since the subject was last SEEN, and this counts time spent
+#: widening while everyone is in plain sight. There was nothing for them to
+#: disagree about, so matching them only made this one longer than it needed
+#: to be.
+GROUP_GIVE_UP_S = 8.0
+
+#: Minimum GPS quality to measure a 15 m displacement with. A 2D fix has no
+#: usable horizontal accuracy for this, and a thin constellation wanders by
+#: metres while the aircraft sits still — which would spend the budget without
+#: the aircraft moving.
+_MIN_FIX_TYPE = 3
+_MIN_SATS = 6
 
 
 class GroupAction(str, Enum):
@@ -371,6 +411,78 @@ def required_range_m(
     return r_now * ratio
 
 
+def fix_from_telemetry(
+    telemetry: Optional[Dict[str, Any]]
+) -> Optional[Tuple[float, float]]:
+    """
+    (lat, lon) when the position solution is good enough to difference, else
+    None.
+
+    This reads the RAW telemetry snapshot rather than the CameraPose the rest
+    of the vision layer works from, because pose_from_telemetry keeps only
+    altitude and attitude — it has no reason to carry a position. So the fix
+    was already arriving at every follow module every frame and being thrown
+    away one layer above this one.
+
+    The quality gate is not decoration. Differencing two positions turns any
+    wander in the solution into apparent travel, so a marginal fix would spend
+    the widen budget while the aircraft hovers, and the aircraft would give up
+    on a group it was successfully framing.
+    """
+    if not telemetry:
+        return None
+    gps = telemetry.get("gps") or {}
+    if int(gps.get("fix_type") or 0) < _MIN_FIX_TYPE:
+        return None
+    if int(gps.get("satellites_visible") or 0) < _MIN_SATS:
+        return None
+    pos = telemetry.get("position") or {}
+    lat = pos.get("latitude_deg")
+    lon = pos.get("longitude_deg")
+    if lat is None or lon is None:
+        return None
+    if lat == 0.0 and lon == 0.0:
+        # Null Island. A zeroed PositionData is the dataclass default, not a
+        # reading, and it is indistinguishable from one off the coast of Ghana.
+        return None
+    return float(lat), float(lon)
+
+
+@dataclass
+class WidenBudget:
+    """
+    How much of the widen allowance has been spent, and — the part the operator
+    needs — WHICH bound is actually in force.
+
+    Reported rather than kept internal for the same reason limit_climb reports
+    that it cannot enforce the ceiling without an AGL reading: "we are bounding
+    this by time because there is no GPS" is a fact about how much the aircraft
+    is being trusted with, and silence about it reads as the tighter bound
+    being in force when it is not.
+    """
+    by: str                       # "distance" | "time"
+    spent_m: Optional[float]
+    spent_s: float
+    exhausted: bool
+
+    def describe(self) -> str:
+        if self.by == "distance":
+            return (f"widened {self.spent_m:.0f} m of the "
+                    f"{GROUP_WIDEN_LIMIT_M:.0f} m allowed")
+        return (f"widened for {self.spent_s:.0f}s of {GROUP_GIVE_UP_S:.0f}s "
+                f"— no usable GPS fix, so this is bounded by time, not distance")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "by": self.by,
+            "spent_m": None if self.spent_m is None else round(self.spent_m, 1),
+            "limit_m": GROUP_WIDEN_LIMIT_M,
+            "spent_s": round(self.spent_s, 1),
+            "limit_s": GROUP_GIVE_UP_S,
+            "exhausted": self.exhausted,
+        }
+
+
 @dataclass
 class GroupState:
     """
@@ -381,25 +493,65 @@ class GroupState:
     latch: GroupLatch = field(default_factory=GroupLatch)
     #: When widening began without succeeding. 0.0 = not currently struggling.
     struggling_since: float = 0.0
+    #: Where the aircraft was when this widen began, if it was knowable.
+    widen_origin: Optional[Tuple[float, float]] = None
 
-    def note(self, action: GroupAction, now: float) -> None:
-        if action == GroupAction.WIDEN:
-            if self.struggling_since == 0.0:
-                self.struggling_since = now
-        else:
+    def note(
+        self,
+        action: GroupAction,
+        now: float,
+        fix: Optional[Tuple[float, float]] = None,
+    ) -> None:
+        if action != GroupAction.WIDEN:
             self.struggling_since = 0.0
+            self.widen_origin = None
+            return
+        if self.struggling_since == 0.0:
+            self.struggling_since = now
+            self.widen_origin = fix
+        elif self.widen_origin is None and fix is not None:
+            # A fix that arrived mid-widen. The origin is stamped HERE rather
+            # than backdated, so the distance measured is one the aircraft
+            # actually flew under observation — crediting it with the metres it
+            # covered while the fix was unusable would be inventing them.
+            self.widen_origin = fix
 
     def struggling_for(self, now: float) -> float:
         if self.struggling_since == 0.0:
             return 0.0
         return max(0.0, now - self.struggling_since)
 
-    def has_given_up(self, now: float) -> bool:
-        return self.struggling_for(now) > GROUP_GIVE_UP_S
+    def budget(
+        self, now: float, fix: Optional[Tuple[float, float]] = None
+    ) -> WidenBudget:
+        """
+        Distance when it can be measured, time when it cannot.
+
+        The fallback is not a lesser version of the same bound — it is a
+        different and looser one, which is exactly why it has to be named in
+        the payload rather than substituted quietly.
+        """
+        spent_s = self.struggling_for(now)
+        if self.widen_origin is not None and fix is not None:
+            spent_m = haversine_m(*self.widen_origin, *fix)
+            return WidenBudget(
+                by="distance", spent_m=spent_m, spent_s=spent_s,
+                exhausted=spent_m >= GROUP_WIDEN_LIMIT_M,
+            )
+        return WidenBudget(
+            by="time", spent_m=None, spent_s=spent_s,
+            exhausted=spent_s > GROUP_GIVE_UP_S,
+        )
+
+    def has_given_up(
+        self, now: float, fix: Optional[Tuple[float, float]] = None
+    ) -> bool:
+        return self.budget(now, fix).exhausted
 
     def reset(self) -> None:
         self.latch.reset()
         self.struggling_since = 0.0
+        self.widen_origin = None
 
 
 def clamp_members(members: Sequence[int]) -> List[int]:
