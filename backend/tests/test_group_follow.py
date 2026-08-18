@@ -27,6 +27,7 @@ into the second is wrong in a specific, flyable way:
     named and reported rather than being flown into indefinitely.
 """
 import importlib
+import inspect
 import math
 
 import pytest
@@ -35,12 +36,13 @@ from app.vision.group_follow import (
     GROUP_DWELL_S,
     GROUP_EDGE_MARGIN,
     GROUP_GIVE_UP_S,
-    GROUP_WIDEN_LIMIT_M,
     GROUP_MAX_FILL_H,
     GROUP_MAX_FILL_W,
     GROUP_MIN_FILL_H,
     GROUP_MIN_FILL_W,
+    GROUP_WIDEN_LIMIT_M,
     MAX_FOLLOW_MEMBERS,
+    MEMBER_RETIRE_S,
     GroupAction,
     GroupLatch,
     GroupState,
@@ -511,6 +513,14 @@ def test_the_cap_is_low_enough_that_the_analytics_survive():
 # Through the real traffic_manager: selection                                   #
 # --------------------------------------------------------------------------- #
 
+def _make_state_for(name):
+    """Other modules' _make_state signatures differ — plate and traffic take a
+    session id, the rest take nothing."""
+    mod = importlib.import_module(f"app.vision.modules.{name}")
+    params = inspect.signature(mod._make_state).parameters
+    return mod._make_state("t") if params else mod._make_state()
+
+
 def _tt():
     return importlib.import_module("test_traffic_manager")
 
@@ -965,3 +975,315 @@ def test_the_widen_climb_still_passes_the_altitude_ceiling(clock):
                   pose=_AtCeiling(), ctx=_Ctx())
     assert cmd["down_m_s"] >= 0.0, "climbed through the ceiling to frame a group"
     assert state["altitude_floor_reason"]
+
+
+# --------------------------------------------------------------------------- #
+# MEMBERSHIP OUTLIVES A TRACK ID                                                #
+# --------------------------------------------------------------------------- #
+#
+# A ByteTrack id is not a person. Walk behind a pole and come back and you are
+# a new id — so a member bound to the old one is gone for the session, while
+# standing in plain sight with their name drawn over them by the face
+# recogniser. The group says "1 of 2" and the overlay says "Japesh", about the
+# same human, at the same time.
+#
+# It is worse than the single-subject version of the same fragility, which
+# degrades boundedly: blind ladder, hover, operator taps again. Here closing in
+# is blocked while ANY member is missing, so the aircraft can never approach
+# again for the rest of the flight and no control undoes it short of releasing
+# the whole lock.
+
+def _enrol(state, tid, person_id="p-japesh", name="Japesh", confirmed=True):
+    state["face_identities"][tid] = {
+        "person_id": person_id, "name": name, "votes": 3,
+        "best_sim": 0.82, "last_sim": 0.82, "margin": 0.2,
+        "last_seen": 0.0, "confirmed": confirmed,
+    }
+
+
+def _group_of_two(t, tt, a, b, people=True):
+    """Lock two subjects and run a frame with both up."""
+    mk = tt.person if people else tt.vehicle
+    t.request_follow("s", a[0])
+    t._follow(t._client_state["s"], [] if people else [mk(*a)],
+              [mk(*a)] if people else [], "s", W, H, None, None)
+    t.request_follow("s", b[0])
+    subs = [mk(*a), mk(*b)]
+    t._follow(t._client_state["s"], [] if people else subs,
+              subs if people else [], "s", W, H, None, None)
+
+
+def test_a_recognised_person_returning_as_a_new_track_is_rebound(clock):
+    """THE REPORTED CASE. Japesh is in the gallery, joins the group as #12,
+    steps behind a pole, and comes back as #47 — still recognised."""
+    t, state, tt = _armed()
+    _enrol(state, 12)
+    _group_of_two(t, tt, (12, 800, 300, 900, 700), (20, 1000, 300, 1100, 700))
+    assert state["follow_members"] == [12, 20]
+
+    _enrol(state, 47)                      # recognised again under a new id
+    clock.advance(0.1)
+    t._follow(state, [], [tt.person(47, 810, 300, 910, 700),
+                          tt.person(20, 1000, 300, 1100, 700)],
+              "s", W, H, None, None)
+
+    assert state["follow_members"] == [47, 20], "lost a member to a new id"
+    assert state["group_framing"]["members_visible"] == 2
+    assert state["group_framing"]["missing"] == []
+
+
+def test_an_unconfirmed_face_does_not_rebind_the_group(clock):
+    """A single-vote guess re-binding the group would put the aircraft on the
+    WRONG subject, which is worse than losing the right one."""
+    t, state, tt = _armed()
+    _enrol(state, 12)
+    _group_of_two(t, tt, (12, 800, 300, 900, 700), (20, 1000, 300, 1100, 700))
+
+    _enrol(state, 47, confirmed=False)
+    clock.advance(0.1)
+    t._follow(state, [], [tt.person(47, 810, 300, 910, 700),
+                          tt.person(20, 1000, 300, 1100, 700)],
+              "s", W, H, None, None)
+    assert 47 not in state["follow_members"]
+
+
+def test_a_person_with_no_gallery_entry_cannot_be_rebound(clock):
+    """Honest limit, pinned so nobody assumes more than is there: without an
+    enrolled face there is no identity to re-bind through, and the member is
+    retired rather than silently swapped for whoever is nearest."""
+    t, state, tt = _armed()
+    _group_of_two(t, tt, (12, 800, 300, 900, 700), (20, 1000, 300, 1100, 700))
+    clock.advance(0.1)
+    t._follow(state, [], [tt.person(47, 810, 300, 910, 700),
+                          tt.person(20, 1000, 300, 1100, 700)],
+              "s", W, H, None, None)
+    assert state["follow_members"] == [12, 20]
+
+
+def test_a_vehicle_rebinds_through_its_persistent_id(clock):
+    """The plate registry already restores vehicle_id when a returning
+    vehicle's plate matches. Follow simply was not reading it — the module's
+    own comment claimed the plate 'survives a track id change' while nothing
+    used it to re-acquire anything."""
+    t, state, tt = _armed()
+    v1, v2 = tt.vehicle(1, 100, 400, 400, 700), tt.vehicle(2, 900, 400, 1200, 700)
+    v1.vehicle_id, v2.vehicle_id = "VH-000001", "VH-000002"
+    t.request_follow("s", 1)
+    t._follow(state, [v1], [], "s", W, H, None, None)
+    t.request_follow("s", 2)
+    t._follow(state, [v1, v2], [], "s", W, H, None, None)
+    assert state["follow_members"] == [1, 2]
+
+    back = tt.vehicle(9, 110, 400, 410, 700)
+    back.vehicle_id = "VH-000001"          # same car, new track
+    clock.advance(0.1)
+    t._follow(state, [back, v2], [], "s", W, H, None, None)
+    assert state["follow_members"] == [9, 2]
+
+
+def test_a_vehicle_rebinds_through_its_plate_before_it_has_an_id(clock):
+    t, state, tt = _armed()
+    v1, v2 = tt.vehicle(1, 100, 400, 400, 700), tt.vehicle(2, 900, 400, 1200, 700)
+    v1.plate, v2.plate = "719257C", "KA01AB1234"
+    t.request_follow("s", 1)
+    t._follow(state, [v1], [], "s", W, H, None, None)
+    t.request_follow("s", 2)
+    t._follow(state, [v1, v2], [], "s", W, H, None, None)
+
+    back = tt.vehicle(9, 110, 400, 410, 700)
+    back.plate = "719257C"
+    clock.advance(0.1)
+    t._follow(state, [back, v2], [], "s", W, H, None, None)
+    assert state["follow_members"] == [9, 2]
+
+
+def test_rebinding_never_steals_a_track_that_is_already_a_member(clock):
+    """Two members collapsing onto one subject would report a full group while
+    following half of it."""
+    t, state, tt = _armed()
+    _enrol(state, 12, person_id="p-a")
+    _enrol(state, 20, person_id="p-a")      # same identity, pathological
+    _group_of_two(t, tt, (12, 800, 300, 900, 700), (20, 1000, 300, 1100, 700))
+    clock.advance(0.1)
+    t._follow(state, [], [tt.person(20, 1000, 300, 1100, 700)],
+              "s", W, H, None, None)
+    assert len(set(state["follow_members"])) == len(state["follow_members"])
+
+
+def test_the_primary_rebinding_carries_the_lock_with_it(clock):
+    """members[0] carries the labelling and the hold distance. Left pointing at
+    a dead id, the readout stays blank while the subject is on screen."""
+    t, state, tt = _armed()
+    _enrol(state, 12)
+    _group_of_two(t, tt, (12, 800, 300, 900, 700), (20, 1000, 300, 1100, 700))
+    assert state["locked_track_id"] == 12
+    _enrol(state, 47)
+    clock.advance(0.1)
+    t._follow(state, [], [tt.person(47, 810, 300, 910, 700),
+                          tt.person(20, 1000, 300, 1100, 700)],
+              "s", W, H, None, None)
+    assert state["locked_track_id"] == 47
+
+
+# ── Retirement ─────────────────────────────────────────────────────────────
+
+def test_a_member_who_is_genuinely_gone_is_retired(clock):
+    """Not tidiness. Closing in is blocked while any member is missing, so one
+    person walking away pins the aircraft at its current distance for the rest
+    of the flight, with no control that undoes it short of releasing."""
+    t, state, tt = _armed()
+    _group_of_two(t, tt, (12, 800, 300, 900, 700), (20, 1000, 300, 1100, 700))
+    for _ in range(int((MEMBER_RETIRE_S + 2) / 0.5)):
+        clock.advance(0.5)
+        t._follow(state, [], [tt.person(20, 1000, 300, 1100, 700)],
+                  "s", W, H, None, None)
+    assert state["follow_members"] == [20]
+    assert 12 in state["retired_members"]
+
+
+def test_the_group_can_close_in_again_once_a_lost_member_is_retired(clock):
+    """The whole point: the aircraft recovers instead of staying crippled."""
+    t, state, tt = _armed()
+    _group_of_two(t, tt, (12, 880, 480, 940, 560), (20, 980, 480, 1040, 560))
+    for _ in range(int((MEMBER_RETIRE_S + 3) / 0.5)):
+        clock.advance(0.5)
+        t._follow(state, [], [tt.person(20, 980, 480, 1040, 560)],
+                  "s", W, H, None, None)
+    assert state["follow_members"] == [20]
+    assert state["group_no_advance"] is False
+
+
+def test_a_member_is_not_retired_early(clock):
+    t, state, tt = _armed()
+    _group_of_two(t, tt, (12, 800, 300, 900, 700), (20, 1000, 300, 1100, 700))
+    for _ in range(int((MEMBER_RETIRE_S - 3) / 0.5)):
+        clock.advance(0.5)
+        t._follow(state, [], [tt.person(20, 1000, 300, 1100, 700)],
+                  "s", W, H, None, None)
+    assert state["follow_members"] == [12, 20]
+
+
+def test_the_last_member_is_never_retired(clock):
+    """Retiring everyone would release the lock on a timer — a much larger
+    action than the operator asked for, and it stops the aircraft."""
+    t, state, tt = _armed()
+    t.request_follow("s", 12)
+    t._follow(state, [], [tt.person(12, 800, 300, 900, 700)], "s", W, H, None, None)
+    for _ in range(int((MEMBER_RETIRE_S + 5) / 0.5)):
+        clock.advance(0.5)
+        t._follow(state, [], [], "s", W, H, None, None)
+    assert state["follow_members"] == [12]
+    assert state["locked_track_id"] == 12
+
+
+def test_retiring_the_primary_promotes_rather_than_releases(clock):
+    t, state, tt = _armed()
+    _group_of_two(t, tt, (12, 800, 300, 900, 700), (20, 1000, 300, 1100, 700))
+    for _ in range(int((MEMBER_RETIRE_S + 2) / 0.5)):
+        clock.advance(0.5)
+        t._follow(state, [], [tt.person(20, 1000, 300, 1100, 700)],
+                  "s", W, H, None, None)
+    assert state["locked_track_id"] == 20
+    assert state["tracking"] is True
+
+
+# ── The deliberate scope limit ──────────────────────────────────────────────
+
+def test_single_subject_follow_is_deliberately_left_alone(clock):
+    """SCOPED ON PURPOSE, and pinned so it does not drift in by accident.
+
+    Single follow has the same track-id fragility but degrades boundedly — the
+    blind ladder, a hover, and the operator taps again. Group loss is permanent
+    and silent. Changing what single follow does is a change to behaviour being
+    flown today and was not asked for."""
+    t, state, tt = _armed(multi=False)
+    v = tt.vehicle(1, 100, 400, 400, 700)
+    v.vehicle_id = "VH-000001"
+    t.request_follow("s", 1)
+    t._follow(state, [v], [], "s", W, H, None, None)
+
+    back = tt.vehicle(9, 110, 400, 410, 700)
+    back.vehicle_id = "VH-000001"
+    clock.advance(0.1)
+    t._follow(state, [back], [], "s", W, H, None, None)
+    assert state["follow_members"] == [1], "single follow silently gained re-binding"
+
+
+# ── The readout must not contradict itself ─────────────────────────────────
+
+def test_the_reason_never_describes_an_action_that_is_not_being_taken(clock):
+    """assess_framing writes its reason before the dwell latch has had a say,
+    so the payload read "closing in" while the action was "hold"."""
+    t, state, tt = _armed()
+    framed = [(7, (500, 250, 800, 850)), (8, (1100, 250, 1400, 850))]
+    _two_up(t, tt, [framed[0][1], framed[1][1]], clock)
+
+    bunched = [(7, (880, 480, 940, 560)), (8, (980, 480, 1040, 560))]
+    for _ in range(3):
+        clock.advance(0.03)
+        _step(t, tt, bunched)
+    g = state["group_framing"]
+    assert g["action"] == "hold"
+    assert "steady for now" in g["reason"]
+    assert not g["reason"].rstrip().endswith("closing in")
+
+
+# --------------------------------------------------------------------------- #
+# OTHER MODES ARE UNTOUCHED                                                     #
+# --------------------------------------------------------------------------- #
+#
+# Group follow lives in traffic-management alone, because that is the only
+# module that finds people and vehicles in ONE detection pass — so a track id
+# identifies exactly one subject across both lists and a mixed group is even
+# expressible. Everywhere else the same feature would need a second id space to
+# disambiguate and would mean something different in each.
+#
+# These are structural rather than behavioural on purpose: the risk is not that
+# another module computes a group wrongly, it is that it acquires the machinery
+# at all and starts carrying state nobody reads.
+
+_OTHER_MODULES = ["human_tracker", "person_tracker", "crowd_manager",
+                  "plate_tracker"]
+
+
+@pytest.mark.parametrize("name", _OTHER_MODULES)
+def test_no_other_module_imports_group_follow(name):
+    src = inspect.getsource(importlib.import_module(f"app.vision.modules.{name}"))
+    assert "group_follow" not in src
+    assert "multi_follow" not in src
+
+
+@pytest.mark.parametrize("name", _OTHER_MODULES)
+def test_no_other_module_carries_group_state(name):
+    """A key that exists but is never read is how a feature leaks sideways: the
+    next person to touch the module sees it and wires something to it."""
+    state = _make_state_for(name)
+    for key in ("follow_members", "multi_follow", "group", "group_framing",
+                "member_identity", "retired_members"):
+        assert key not in state, f"{name} picked up {key}"
+
+
+def test_the_socket_handler_refuses_every_analyzer_but_traffic():
+    """Ungated, `set_multi_follow` would raise AttributeError on four of the
+    five follow modules — which surfaces to the operator as a dead control on a
+    mode that never offered the feature."""
+    src = inspect.getsource(
+        importlib.import_module("app.events.telemetry_events"))
+    handler = src[src.index('@sio.on("set_multi_follow")'):]
+    handler = handler[:handler.index("@sio.on", 10)]
+    assert "isinstance(analyzer, TrafficManager)" in handler
+
+
+def test_the_shared_follow_panel_still_shows_distance_without_a_group():
+    """FollowControls is shared by crowd, traffic and vehicle-plate. The
+    Distance control is hidden in GROUP mode because containment drives the
+    forward axis there and the slider would do nothing — but the guard must be
+    optional-safe, or hiding it in one mode hides it in all three."""
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parents[2] / "frontend/src/components/vision"
+    panel = (root / "FollowControls.tsx").read_text()
+    # Optional chaining on a prop the other panels never pass.
+    assert "!(multi?.enabled && multi.members.length > 1)" in panel
+    for other in ("CrowdManagementPanel.tsx", "VehiclePlateTrackingPanel.tsx"):
+        assert "multi={" not in (root / other).read_text(), \
+            f"{other} started passing a group to the shared control"

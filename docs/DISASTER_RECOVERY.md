@@ -74,8 +74,26 @@ Rebuild:
    Address plan in use: VPS `10.9.0.1`, this machine `10.9.0.2`.
    SSH to the VPS is over the tunnel (`root@10.9.0.1`) — the public port 22
    is firewalled.
-3. Open inbound **UDP 9000–9100** on the VPS and forward it over the tunnel.
+3. Open inbound **UDP 3478–3578** on the VPS and DNAT it over the tunnel to
+   `10.9.0.2`. **Not 9000–9100** — see the warning below.
 4. Set `RELAY_PUBLIC_HOST=<vps public ip>` in root `.env`.
+> **The port range is 3478–3578, and getting it wrong fails silently.**
+> This document said 9000–9100 until 2026-08-18, and `srt-deployment.md` said
+> it in three places while its own checklist said 3478–3578. The code has been
+> `_PUBLIC_PORT_BASE = 3478` since the change logged in CHANGELOG under
+> "Relay ports 9000-9100 -> 3478-3578".
+>
+> A VPS rebuilt to the old range does not fail loudly. The relay allocates a
+> listener on 3478, the client pushes to a port the VPS is not forwarding, and
+> the server reports `No video arrived on srt:3478 within 25s` — identical to
+> the VPS being down. That cost a live debugging session on 2026-08-18.
+>
+> Worse, 9000 is not merely stale: it is the port that was MEASURED to be
+> dropped on the operator's network. `relay_video_source.py` records the test —
+> UDP to 3478 and 8801 reached the relay while 443 and 9000 were dropped
+> before leaving the network. Rebuilding to 9000–9100 reinstates the exact
+> failure the change was made to fix.
+
 5. **Persist the firewall** — `netfilter-persistent save`. Rules were left
    unsaved once and did not survive a reboot; see `KNOWN_ISSUES.md`.
 

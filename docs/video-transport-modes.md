@@ -120,7 +120,7 @@ local preview on loopback HTTP.
 | Quality | Bit-exact; nothing is re-compressed |
 | Latency | Removes a ~30-60 ms transcode, adds the SRT latency window (default 60 ms) — roughly a wash. The real win is the preview skipping the round trip |
 | Server cost | One `-c copy` remux hop (PyAV has no `srt://`), then normal decode for AI |
-| Network | **Does not traverse the cloudflared tunnel** — needs `relay_public_host` + forwarded UDP 9000-9100. Dead where UDP is blocked |
+| Network | **Does not traverse the cloudflared tunnel** — needs `relay_public_host` + forwarded UDP 3478-3578. Dead where UDP is blocked |
 | Platforms | Any the desktop app runs on — no v4l2loopback, unlike `air_unit_udp` |
 
 **Use when:** a networked camera is reachable from the client. This is the

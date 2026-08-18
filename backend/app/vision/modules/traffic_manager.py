@@ -79,7 +79,8 @@ from app.vision.pursuit import (
 )
 from app.vision.group_follow import (
     GroupAction, GroupState, MAX_FOLLOW_MEMBERS, assess_framing, clamp_members,
-    fix_from_telemetry, group_box, required_range_m, widen_velocity,
+    fix_from_telemetry, group_box, required_range_m, should_retire,
+    widen_velocity,
 )
 from app.vision.profiles import ProfileSelector
 from app.vision.speed import SpeedEstimator
@@ -570,6 +571,12 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         "group": GroupState(),
         "group_framing": None,
         "group_no_advance": False,
+        # Membership survives a ByteTrack id change through these: the durable
+        # identity each member was last seen under, and when that was. See
+        # _resolve_members.
+        "member_identity": {},
+        "member_last_seen": {},
+        "retired_members": [],
         "tracking": False,
         "last_seen_t": 0.0,
         "frames_lost": 0,
@@ -2046,7 +2053,6 @@ class TrafficManager(BaseAnalyzer):
             return None
 
         members = state.get("follow_members") or [locked_id]
-        group_mode = bool(state.get("multi_follow")) and len(members) > 1
         gstate: GroupState = state["group"]
 
         # WHO IS ACTUALLY IN FRAME. In group mode this is the whole membership,
@@ -2055,12 +2061,27 @@ class TrafficManager(BaseAnalyzer):
         # stepped behind something. Treating the primary's absence as a total
         # loss — which the single-subject path does, correctly — would abandon
         # a group that is mostly still visible.
-        visible = []
-        for tid in members:
-            hit = _find(tid)
-            if hit is not None:
-                visible.append((tid, hit))
-        primary = _find(locked_id)
+        # RE-BINDING IS SCOPED TO GROUP FOLLOW ON PURPOSE. The single-subject
+        # path has the same track-id fragility, but it degrades BOUNDEDLY —
+        # blind ladder, then a hover at BLIND_GIVE_UP_S, and the operator taps
+        # again. A group member's loss is permanent and silent: the group
+        # reports N-1 for the rest of the session and, because closing in is
+        # blocked while anyone is missing, the aircraft can never approach
+        # again. Changing what single follow does is a change to behaviour that
+        # is being flown today, and it was not what was asked for.
+        if bool(state.get("multi_follow")):
+            members, visible = self._resolve_members(
+                state, members, _find, in_frame, people, client_id,
+            )
+        else:
+            visible = [(tid, _find(tid)) for tid in members if _find(tid) is not None]
+        locked_id = state.get("locked_track_id")
+        primary = _find(locked_id) if locked_id is not None else None
+        if locked_id is None:
+            state["elevate"] = None
+            state["group_framing"] = None
+            return None
+        group_mode = bool(state.get("multi_follow")) and len(members) > 1
 
         if not visible:
             state["frames_lost"] = state.get("frames_lost", 0) + 1
@@ -2260,6 +2281,131 @@ class TrafficManager(BaseAnalyzer):
             state["last_yaw_dir"] = 1.0 if yaw_deg_s > 0 else -1.0
         return drone_command
 
+    @staticmethod
+    def _durable_id(state, kind, tid, vehicle):
+        """
+        The identity that outlives a ByteTrack id, or None when there is none.
+
+        Both branches already exist in this module and were simply not being
+        read by follow. A CONFIRMED face gives a person_id — unconfirmed is
+        refused, because re-binding the group to a single-vote guess would put
+        the aircraft on the wrong subject, which is worse than losing the right
+        one. A vehicle_id is restored by the plate registry when a returning
+        vehicle's plate matches, and the raw plate stands in until the registry
+        has issued one.
+        """
+        if kind == "person":
+            entry = state["face_identities"].get(tid)
+            if entry and entry.get("confirmed") and entry.get("person_id"):
+                return ("person", str(entry["person_id"]))
+            return None
+        if vehicle is not None:
+            if vehicle.vehicle_id:
+                return ("vehicle", str(vehicle.vehicle_id))
+            if vehicle.plate:
+                return ("vehicle", f"plate:{vehicle.plate}")
+        return None
+
+    def _resolve_members(self, state, members, find, in_frame, people, client_id):
+        """
+        Turn the stored track ids into the subjects actually on screen, healing
+        the two ways that mapping rots.
+
+        RE-BIND. A member whose track id died is looked for by durable identity
+        among the live tracks, and the membership is rewritten to the new id.
+        Without this a recognised person who steps behind a pole is lost for the
+        session while the overlay draws their name — the group says "1 of 2" and
+        the face registry says "Japesh", about the same human, at the same time.
+
+        RETIRE. A member who is genuinely gone is dropped after MEMBER_RETIRE_S.
+        This is not tidiness: closing in is blocked while ANY member is missing,
+        so one person walking away would otherwise pin the aircraft at its
+        current distance for the rest of the flight, with no control that
+        undoes it except releasing the whole lock.
+
+        Returns (members, visible) and writes the surviving membership back.
+        """
+        now = time.monotonic()
+        ident = state.setdefault("member_identity", {})
+        seen_t = state.setdefault("member_last_seen", {})
+
+        live_person = {p["track_id"]: p for p in people}
+        live_vehicle = {v.track_id: v for v in in_frame}
+
+        # Durable ids of every live track, so a missing member can be looked up
+        # by identity rather than by the id it used to have.
+        live_by_identity = {}
+        for tid in live_person:
+            d = self._durable_id(state, "person", tid, None)
+            if d is not None:
+                live_by_identity.setdefault(d, tid)
+        for tid, v in live_vehicle.items():
+            d = self._durable_id(state, "vehicle", tid, v)
+            if d is not None:
+                live_by_identity.setdefault(d, tid)
+
+        resolved, visible = [], []
+        for tid in members:
+            hit = find(tid)
+            if hit is not None:
+                kind, _, veh = hit
+                d = self._durable_id(state, kind, tid, veh)
+                if d is not None:
+                    ident[tid] = d
+                seen_t[tid] = now
+                resolved.append(tid)
+                visible.append((tid, hit))
+                continue
+
+            # Missing. Can we find them again under a new id?
+            known = ident.get(tid)
+            new_tid = live_by_identity.get(known) if known else None
+            if new_tid is not None and new_tid not in members and new_tid not in resolved:
+                hit = find(new_tid)
+                if hit is not None:
+                    logger.info(
+                        f"Session {client_id[:8]}: group member #{tid} re-bound "
+                        f"to #{new_tid} via {known[0]} {known[1]}"
+                    )
+                    ident[new_tid] = known
+                    seen_t[new_tid] = now
+                    ident.pop(tid, None)
+                    seen_t.pop(tid, None)
+                    if state.get("locked_track_id") == tid:
+                        # The primary carries the labelling and the hold
+                        # distance; leaving it pointed at a dead id would keep
+                        # the readout blank while the subject is on screen.
+                        state["locked_track_id"] = new_tid
+                    resolved.append(new_tid)
+                    visible.append((new_tid, hit))
+                    continue
+
+            gone_for = now - seen_t.get(tid, now)
+            if should_retire(gone_for, known is not None) and len(members) > 1:
+                logger.info(
+                    f"Session {client_id[:8]}: retiring group member #{tid} — "
+                    f"missing {gone_for:.0f}s"
+                )
+                ident.pop(tid, None)
+                seen_t.pop(tid, None)
+                state["retired_members"] = (
+                    state.get("retired_members", []) + [tid]
+                )[-8:]
+                continue
+            resolved.append(tid)
+
+        if resolved != members:
+            state["follow_members"] = resolved
+            if state.get("locked_track_id") not in resolved and resolved:
+                # The primary was the one retired. Promote rather than release:
+                # the group is still being followed, and releasing would stop
+                # the aircraft on an event the operator did not cause.
+                state["locked_track_id"] = resolved[0]
+                state["locked_plate"] = ""
+            elif not resolved:
+                state["locked_track_id"] = None
+        return resolved, visible
+
     def _group_axes(self, state, gstate, visible, members, W, H, now,
                     pose, depression, fix=None):
         """
@@ -2307,6 +2453,20 @@ class TrafficManager(BaseAnalyzer):
         # HOLD; the assessment is the authority on the ERROR, so a held action
         # with no error behind it commands nothing.
         error = framing.error if action == framing.action else 0.0
+        if action != framing.action:
+            # AND THE REASON MUST DESCRIBE WHAT IS BEING DONE, not what was
+            # assessed. assess_framing writes its reason before the latch has
+            # had a say, so during the dwell the payload read "closing in"
+            # while the action was "hold" — a readout contradicting itself in
+            # front of the operator, which is the failure this module spends
+            # most of its length avoiding elsewhere.
+            _wanted = {"close": "closing in", "widen": "backing off",
+                       "hold": "holding"}.get(framing.action.value, "moving")
+            framing.reason = (
+                f"group fills {framing.fill_w * 100:.0f}%x"
+                f"{framing.fill_h * 100:.0f}% — steady for now; {_wanted} "
+                f"shortly if it holds, rather than reacting to one frame"
+            )
 
         state["group_no_advance"] = not all_present
         if not all_present:

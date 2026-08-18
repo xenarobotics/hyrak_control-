@@ -23,9 +23,9 @@ Required:
 | Item | Value |
 |---|---|
 | Public address | A real inbound-reachable IPv4, static or stable DNS |
-| Inbound UDP | **9000–9100** open to the internet |
+| Inbound UDP | **3478–3578** open to the internet |
 | Config | `RELAY_PUBLIC_HOST=<that address>` |
-| NAT | If behind NAT, forward UDP 9000–9100 to the server |
+| NAT | If behind NAT, forward UDP 3478–3578 to the server |
 | CGNAT | **Will not work** — no inbound path exists. Needs a VPS or equivalent |
 
 ### Why it cannot use the tunnel
@@ -40,7 +40,7 @@ practical answer at this stage.
 
 ### Port budget
 
-`_PUBLIC_PORT_BASE=9000 … _PUBLIC_PORT_LIMIT=9100` → **100 concurrent relay
+`_PUBLIC_PORT_BASE=3478 … _PUBLIC_PORT_LIMIT=3578` → **100 concurrent relay
 sessions**. Each session also takes one loopback port from `5700–5800`
 (internal only, never exposed). Raise both ranges together if more concurrency
 is needed.

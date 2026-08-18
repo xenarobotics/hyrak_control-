@@ -137,6 +137,30 @@ GROUP_WIDEN_LIMIT_M = 15.0
 #: to be.
 GROUP_GIVE_UP_S = 8.0
 
+# ── MEMBERSHIP OUTLIVES A TRACK ID ─────────────────────────────────────────
+#
+# A group member is stored as a ByteTrack id, and a ByteTrack id is not a
+# person. Walk behind a pole and come back and you are a NEW id — so a member
+# bound to the old one is gone forever, while standing in plain sight with
+# their name drawn over them by the face recogniser.
+#
+# That failure is unbounded in a way the single-subject one is not. A lost
+# single subject runs the reacquisition ladder and ends in a hover after 15 s,
+# and the operator taps again. A lost GROUP MEMBER is permanent: the group
+# reports "1 of 2" for the rest of the session, and because closing in is
+# blocked while anyone is missing, the aircraft can never approach again.
+#
+# So membership is resolved through the DURABLE identity where one exists — a
+# confirmed face for a person, the vehicle_id the plate registry restores for a
+# vehicle — and a member who is genuinely gone is RETIRED rather than left to
+# cripple the group.
+
+#: How long a member may be missing before they are dropped from the group.
+#: The reacquisition ladder's final rung: past this the rest of the system has
+#: already declared a subject lost, and a group that kept waiting would be
+#: holding the aircraft to a standard nothing else in the codebase holds.
+MEMBER_RETIRE_S = 15.0
+
 #: Minimum GPS quality to measure a 15 m displacement with. A 2D fix has no
 #: usable horizontal accuracy for this, and a thin constellation wanders by
 #: metres while the aircraft sits still — which would spend the budget without
@@ -552,6 +576,21 @@ class GroupState:
         self.latch.reset()
         self.struggling_since = 0.0
         self.widen_origin = None
+
+
+def should_retire(seconds_missing: float, has_durable_id: bool) -> bool:
+    """
+    Drop a member who has been missing this long?
+
+    A member WITHOUT a durable identity is retired on the same clock as one
+    with it, deliberately. It is tempting to keep the anonymous one longer —
+    there is no other way to find them again — but that has it backwards: an
+    anonymous member is precisely the one that can never be re-bound, so
+    waiting is not patience, it is a group that stays crippled forever. The one
+    with a durable id is the one that can still come back, and it gets the same
+    window because within it, re-binding does not need this function at all.
+    """
+    return seconds_missing > MEMBER_RETIRE_S
 
 
 def clamp_members(members: Sequence[int]) -> List[int]:
