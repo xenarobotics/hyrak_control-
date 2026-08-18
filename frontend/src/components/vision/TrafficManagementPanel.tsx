@@ -187,6 +187,20 @@ export function TrafficManagementPanel() {
     const facesOk = cvResults?.faces_available !== false
     const identities = cvResults?.identities ?? []
 
+    // ── Multi-follow ─────────────────────────────────────────────────────
+    // A member's chip is labelled from whatever identifies it best: a plate
+    // for a vehicle, a recognised name for a person, the track id otherwise.
+    // A group of bare "#7 #12 #19" is a group nobody can decide what to drop
+    // from, which is the one decision the operator has to make when the
+    // aircraft reports it cannot frame them all.
+    const followMembers = cvResults?.follow_members ?? []
+    const memberLabel = (id: number) => {
+        const v = vehicles.find(x => x.track_id === id)
+        if (v) return v.plate || v.vehicle_id || `#${id}`
+        const named = identities.find(i => i.track_id === id)?.name
+        return named || `#${id}`
+    }
+
 
     const loadHistory = () => fetchPlateHistory(50).then(setHistory)
     useEffect(() => { loadHistory() }, [])
@@ -368,6 +382,13 @@ export function TrafficManagementPanel() {
                 actualFillPct={cvResults?.subject_fill_pct}
                 elevate={elevate}
                 onRelease={() => { arm(false); lock(null) }}
+                multi={{
+                    enabled: cvResults?.multi_follow ?? false,
+                    members: followMembers,
+                    max: cvResults?.max_follow_members ?? 4,
+                    framing: cvResults?.group_framing ?? null,
+                    labelFor: memberLabel,
+                }}
             />
 
             {/* The altitude floor is the reason a commanded descent stops. Left

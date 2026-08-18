@@ -54,7 +54,17 @@ export interface CVResult {
     max_depth_m?: number
     mean_depth_m?: number
     // Crowd management
-    people?: { id: number; box: [number, number, number, number] }[]
+    people?: {
+        id: number
+        box: [number, number, number, number]
+        /** traffic-management: this person is the primary follow subject. */
+        locked?: boolean
+        /** traffic-management: this person is a member of the follow GROUP.
+         *  Separate from `locked` so the overlay can show which subject the
+         *  labelling comes from and which are merely being kept in frame —
+         *  collapsing them makes dropping the right member guesswork. */
+        in_group?: boolean
+    }[]
     current_count?: number
     peak_count?: number
     distinct_tracks_seen?: number
@@ -116,6 +126,16 @@ export interface CVResult {
     /** Vehicles currently flagged as driving against the local flow. */
     against_flow_count?: number
     locked_track_id?: number | null
+    /** traffic-management only: group follow is on, so a tap on the video adds
+     *  or removes a subject instead of replacing the lock. */
+    multi_follow?: boolean
+    /** Track ids in the follow group. members[0] IS locked_track_id — the
+     *  primary, which carries the plate identity and the hold distance. */
+    follow_members?: number[]
+    max_follow_members?: number
+    /** Present ONLY while a group is actually being flown, so the readout
+     *  appearing is itself the evidence that group control has the aircraft. */
+    group_framing?: GroupFraming | null
     /** vehicle-plate-tracking only: the locked vehicle's persistent id. */
     locked_vehicle_id?: string | null
     /** The locked vehicle's plate — the identity that survives a track id
@@ -282,4 +302,39 @@ export interface VehicleResult {
      *  seconds earlier while the vehicle moved on. */
     plate_box_rel?: [number, number, number, number] | null
     locked?: boolean
+    /** traffic-management multi-follow: a member of the follow group. */
+    in_group?: boolean
+}
+
+/**
+ * Multi-follow framing, traffic-management only.
+ *
+ * Group follow enforces a CONTAINMENT constraint rather than chasing a
+ * setpoint: everyone inside the frame with margin, and nothing commanded while
+ * that holds. These are the numbers behind that decision, reported rather than
+ * only their outcome — an operator who can see the margin they are flying on
+ * can tell "framed comfortably" from "framed, barely", which the action alone
+ * does not distinguish.
+ */
+export interface GroupFraming {
+    fill_w_pct: number
+    fill_h_pct: number
+    max_fill_w_pct: number
+    max_fill_h_pct: number
+    /** hold: inside the band. widen: backing off and climbing. close: closing
+     *  in. unframeable: given up — translation stopped, yaw still centring. */
+    action: 'hold' | 'widen' | 'close' | 'unframeable'
+    /** Which frame edge a member has come too close to, if any. */
+    edge: 'left' | 'right' | 'top' | 'bottom' | null
+    reason: string
+    /** Normalised [x1,y1,x2,y2] of the union of the members' boxes. */
+    box: [number, number, number, number]
+    members_visible: number
+    members_total: number
+    missing: number[]
+    widening_for_s: number
+    /** Roughly the slant range that would be needed to fit the group, metres.
+     *  Null without telemetry — "cannot frame all" and "cannot frame all,
+     *  needs about 45 m" are different messages and only one is actionable. */
+    required_range_m: number | null
 }

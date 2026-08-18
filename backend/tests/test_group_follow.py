@@ -1,0 +1,764 @@
+"""
+Group follow: keeping two or more subjects in frame at once.
+
+WHAT IS ACTUALLY BEING TESTED, and why it is not just "follow, but twice".
+
+Single-target follow chases a SETPOINT. Group follow enforces a CONTAINMENT
+CONSTRAINT. Every test below exists because the naive extension of the first
+into the second is wrong in a specific, flyable way:
+
+  * A single fill threshold makes the aircraft pump in and out forever, because
+    two independently moving subjects change the group box every frame. The
+    band, the dead zone between its edges, and the dwell latch are all one
+    answer to that.
+
+  * The group box SHRINKS when a member drops out of frame. The naive signal
+    therefore says "too small, close in" at exactly the moment closing in makes
+    that member's loss permanent. Forward is clamped to <= 0 while anyone is
+    missing, and it is a safety rule rather than a tuning choice.
+
+  * Widening by climbing alone steepens the depression until this module's own
+    analytics stop working; widening by retreating alone walks the aircraft
+    backwards. The split holds the look angle, so the manoeuvre costs range and
+    nothing else.
+
+  * Two subjects walking apart need range that grows without bound. There is no
+    manoeuvre that wins, so the attempt is time-bounded and its failure is
+    named and reported rather than being flown into indefinitely.
+"""
+import importlib
+import math
+
+import pytest
+
+from app.vision.group_follow import (
+    GROUP_DWELL_S,
+    GROUP_EDGE_MARGIN,
+    GROUP_GIVE_UP_S,
+    GROUP_MAX_FILL_H,
+    GROUP_MAX_FILL_W,
+    GROUP_MIN_FILL_H,
+    GROUP_MIN_FILL_W,
+    MAX_FOLLOW_MEMBERS,
+    GroupAction,
+    GroupLatch,
+    GroupState,
+    assess_framing,
+    clamp_members,
+    edge_breach,
+    group_box,
+    required_range_m,
+    widen_velocity,
+)
+from app.vision.pursuit import WIDEN_UNTIL_S
+
+W, H = 1920, 1080
+
+
+def _boxes(*rects):
+    return [list(r) for r in rects]
+
+
+def _framing(*rects):
+    bs = _boxes(*rects)
+    gb = group_box(bs, W, H)
+    return assess_framing(gb, bs, W, H)
+
+
+def _centred(fill_w, fill_h):
+    """One box centred in frame at the requested fill — the group box IS this
+    box, so it isolates the fill decision from where the group sits."""
+    w, h = fill_w * W, fill_h * H
+    x1, y1 = (W - w) / 2, (H - h) / 2
+    return [x1, y1, x1 + w, y1 + h]
+
+
+# --------------------------------------------------------------------------- #
+# The group box                                                                 #
+# --------------------------------------------------------------------------- #
+
+def test_the_group_box_is_the_union_not_the_average():
+    """Two subjects at opposite sides must produce a box spanning both. An
+    averaged centre with an averaged size would sit between them and describe
+    a region containing neither."""
+    gb = group_box(_boxes([100, 200, 300, 600], [1500, 100, 1700, 500]), W, H)
+    assert gb.x1 == pytest.approx(100 / W)
+    assert gb.x2 == pytest.approx(1700 / W)
+    assert gb.y1 == pytest.approx(100 / H)
+    assert gb.y2 == pytest.approx(600 / H)
+
+
+def test_an_empty_group_has_no_box_rather_than_a_box_at_the_origin():
+    """A degenerate box at (0,0) would read as a subject in the top-left corner
+    and command a hard yaw toward nothing."""
+    assert group_box([], W, H) is None
+
+
+def test_the_group_box_centre_is_between_the_members():
+    gb = group_box(_boxes([0, 0, 200, 200], [W - 200, H - 200, W, H]), W, H)
+    assert gb.cx == pytest.approx(0.5)
+    assert gb.cy == pytest.approx(0.5)
+
+
+# --------------------------------------------------------------------------- #
+# Edge proximity — the signal that actually predicts a loss                     #
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("rect,edge", [
+    ([2, 400, 300, 700], "left"),
+    ([W - 300, 400, W - 2, 700], "right"),
+    ([700, 2, 900, 300], "top"),
+    ([700, H - 300, 900, H - 2], "bottom"),
+])
+def test_each_frame_edge_is_detected(rect, edge):
+    assert edge_breach(_boxes(rect), W, H) == edge
+
+
+def test_edge_proximity_is_checked_per_member_not_on_the_group_box():
+    """THE CASE THAT MOTIVATES IT. Three subjects: the union sits comfortably
+    inside the margins only if you ignore that one of them is hugging an edge.
+    Checking the union alone would report the group as safely framed."""
+    inner = _boxes([600, 400, 800, 700], [1000, 400, 1200, 700])
+    assert edge_breach(inner, W, H) is None
+    with_edge = inner + [[W - 40, 400, W - 5, 700]]
+    assert edge_breach(with_edge, W, H) == "right"
+
+
+def test_a_group_that_is_small_but_touching_an_edge_still_widens():
+    """Fill says "close in", the edge says "back off". The edge must win: fill
+    only correlates with losing someone, edge proximity predicts it."""
+    f = _framing([20, 450, 220, 650])
+    assert f.fill_w < GROUP_MIN_FILL_W and f.fill_h < GROUP_MIN_FILL_H
+    assert f.action == GroupAction.WIDEN
+    assert f.error < 0
+    assert f.edge == "left"
+
+
+def test_the_edge_margin_leaves_room_to_act_before_truncation():
+    """The point of acting at 4% rather than 0% is that a truncated box stops
+    describing its subject, so the controller loses its input just as it needs
+    it most."""
+    assert 0.01 < GROUP_EDGE_MARGIN < 0.10
+
+
+# --------------------------------------------------------------------------- #
+# The containment band                                                          #
+# --------------------------------------------------------------------------- #
+
+def test_a_group_inside_the_band_commands_nothing():
+    """The dead zone IS the feature. A controller with an exact setpoint here
+    would chase a target that moves every time either subject takes a step."""
+    mid_w = (GROUP_MAX_FILL_W + GROUP_MIN_FILL_W) / 2
+    mid_h = (GROUP_MAX_FILL_H + GROUP_MIN_FILL_H) / 2
+    f = _framing(_centred(mid_w, mid_h))
+    assert f.action == GroupAction.HOLD
+    assert f.error == 0.0
+
+
+def test_too_wide_backs_off():
+    f = _framing(_centred(GROUP_MAX_FILL_W + 0.10, 0.30))
+    assert f.action == GroupAction.WIDEN
+    assert f.error < 0
+
+
+def test_too_tall_backs_off_even_when_the_width_is_fine():
+    """Fitting on one axis is not fitting. With a downward camera the vertical
+    axis is the range axis, so this is the breach that happens in practice."""
+    f = _framing(_centred(0.50, GROUP_MAX_FILL_H + 0.10))
+    assert f.action == GroupAction.WIDEN
+    assert f.error < 0
+
+
+def test_too_small_closes_in():
+    f = _framing(_centred(GROUP_MIN_FILL_W - 0.20, GROUP_MIN_FILL_H - 0.20))
+    assert f.action == GroupAction.CLOSE
+    assert f.error > 0
+
+
+def test_the_band_has_real_width_in_both_axes():
+    """A band narrower than the frame-to-frame noise is a threshold wearing a
+    band's clothes."""
+    assert GROUP_MAX_FILL_W - GROUP_MIN_FILL_W >= 0.2
+    assert GROUP_MAX_FILL_H - GROUP_MIN_FILL_H >= 0.2
+
+
+def test_the_height_margin_is_tighter_than_the_width_margin():
+    """Fixed downward mount: subjects exit the BOTTOM of frame long before a
+    side-by-side pair troubles the width. If these were equal the vertical
+    breach would always arrive unannounced."""
+    assert GROUP_MAX_FILL_H < GROUP_MAX_FILL_W
+
+
+def test_closing_in_stops_at_the_nearer_floor_not_the_further_one():
+    """Closing until the TIGHTER axis reaches its minimum overshoots the other
+    straight back out of the band, which is a self-inflicted oscillation."""
+    # Width is far below its floor, height only just below its own.
+    f = _framing(_centred(0.10, GROUP_MIN_FILL_H - 0.02))
+    assert f.action == GroupAction.CLOSE
+    assert f.error == pytest.approx(0.02, abs=1e-6)
+
+
+# --------------------------------------------------------------------------- #
+# The dwell latch, and the asymmetry in it                                      #
+# --------------------------------------------------------------------------- #
+
+def test_widening_is_adopted_immediately():
+    """Waiting half a second to react to a subject leaving the frame defeats
+    the entire feature."""
+    latch = GroupLatch()
+    assert latch.settle(GroupAction.WIDEN, 100.0) == GroupAction.WIDEN
+
+
+def test_closing_in_has_to_be_wanted_for_a_while_first():
+    """One noisy frame must not command a manoeuvre. Closing in is the risky
+    direction — it is what loses a member — so it waits."""
+    latch = GroupLatch()
+    assert latch.settle(GroupAction.CLOSE, 100.0) == GroupAction.HOLD
+    assert latch.settle(GroupAction.CLOSE, 100.0 + GROUP_DWELL_S / 2) == GroupAction.HOLD
+    assert latch.settle(GroupAction.CLOSE, 100.0 + GROUP_DWELL_S + 0.01) == GroupAction.CLOSE
+
+
+def test_a_single_frame_of_close_does_not_survive_a_change_of_mind():
+    latch = GroupLatch()
+    latch.settle(GroupAction.CLOSE, 100.0)
+    latch.settle(GroupAction.HOLD, 100.1)
+    # The CLOSE dwell must have been abandoned, not merely paused.
+    assert latch.settle(GroupAction.CLOSE, 100.0 + GROUP_DWELL_S + 0.01) == GroupAction.HOLD
+
+
+def test_leaving_a_widen_also_waits():
+    """Symmetry with closing in: the aircraft should not stop backing off on
+    one frame that happened to look framed."""
+    latch = GroupLatch()
+    latch.settle(GroupAction.WIDEN, 100.0)
+    assert latch.settle(GroupAction.HOLD, 100.05) == GroupAction.WIDEN
+    # The dwell runs from when HOLD was first wanted, not from the widen.
+    assert latch.settle(GroupAction.HOLD, 100.05 + GROUP_DWELL_S + 0.01) == GroupAction.HOLD
+
+
+# --------------------------------------------------------------------------- #
+# The widen split                                                               #
+# --------------------------------------------------------------------------- #
+
+def test_widening_at_45_degrees_splits_evenly():
+    fwd, down = widen_velocity(-1.0, 45.0)
+    assert fwd == pytest.approx(-math.sqrt(0.5), abs=1e-6)
+    assert down == pytest.approx(-math.sqrt(0.5), abs=1e-6)
+
+
+def test_looking_straight_down_widens_by_climbing_only():
+    """Moving horizontally under a subject directly below changes the slant
+    range by almost nothing, so a retreat there is wasted motion."""
+    fwd, down = widen_velocity(-2.0, 90.0)
+    assert fwd == pytest.approx(0.0, abs=1e-6)
+    assert down == pytest.approx(-2.0, abs=1e-6)
+
+
+def test_looking_level_widens_by_retreating_only():
+    fwd, down = widen_velocity(-2.0, 0.0)
+    assert fwd == pytest.approx(-2.0, abs=1e-6)
+    assert down == pytest.approx(0.0, abs=1e-6)
+
+
+@pytest.mark.parametrize("theta", [0.0, 15.0, 30.0, 45.0, 60.0, 75.0, 90.0])
+def test_the_split_preserves_the_requested_range_rate(theta):
+    """The whole point is to grow the SLANT RANGE at the commanded rate. A
+    split that lost magnitude would widen slower than the controller asked and
+    read as an under-tuned gain."""
+    fwd, down = widen_velocity(-1.5, theta)
+    assert math.hypot(fwd, down) == pytest.approx(1.5, abs=1e-6)
+
+
+@pytest.mark.parametrize("theta", [0.0, 30.0, 60.0, 90.0])
+def test_widening_never_descends_and_never_advances(theta):
+    """Both halves have exactly one legal sign. A positive `down` here would be
+    a descent commanded by a framing controller, which is how the SITL aircraft
+    was flown into the ground."""
+    fwd, down = widen_velocity(-1.0, theta)
+    assert fwd <= 0.0
+    assert down <= 0.0
+
+
+def test_no_depression_reading_means_no_climb():
+    """Same stance decide_elevation takes: without pose there is no AGL, so
+    neither altitude bound can be enforced and an autonomous climb would be
+    unbounded. Retreat is the survivable half."""
+    fwd, down = widen_velocity(-1.0, None)
+    assert fwd == pytest.approx(-1.0)
+    assert down == 0.0
+
+
+def test_a_zero_widen_commands_nothing():
+    assert widen_velocity(0.0, 45.0) == (0.0, 0.0)
+
+
+def test_the_depression_angle_is_clamped_to_the_physical_range():
+    """A bad pose can report anything. Past 90 degrees the cosine flips sign and
+    the retreat becomes an ADVANCE while the group is overflowing the frame."""
+    fwd, down = widen_velocity(-1.0, 140.0)
+    assert fwd <= 0.0 and down <= 0.0
+
+
+# --------------------------------------------------------------------------- #
+# Reporting the range that would be needed                                      #
+# --------------------------------------------------------------------------- #
+
+def test_a_group_that_already_fits_needs_no_extra_range():
+    f = _framing(_centred(0.50, 0.40))
+    assert required_range_m(f, 30.0, 45.0) is None
+
+
+def test_the_required_range_scales_with_the_overflow():
+    """"Cannot frame all" and "cannot frame all, needs about 45 m" are
+    different messages: only the second tells the operator whether to back off
+    or drop a member."""
+    f = _framing(_centred(GROUP_MAX_FILL_W * 2, 0.30))
+    r_now = 30.0 / math.sin(math.radians(45.0))
+    assert required_range_m(f, 30.0, 45.0) == pytest.approx(r_now * 2.0, rel=1e-3)
+
+
+def test_without_a_pose_no_range_is_claimed():
+    f = _framing(_centred(0.95, 0.30))
+    assert required_range_m(f, None, 45.0) is None
+    assert required_range_m(f, 30.0, None) is None
+
+
+# --------------------------------------------------------------------------- #
+# Giving up, and the clock it gives up on                                       #
+# --------------------------------------------------------------------------- #
+
+def test_the_flown_timeout_matches_the_displayed_ladder():
+    """The lock ladder the operator watches is in seconds and ends at
+    WIDEN_UNTIL_S. A group that kept flying past the moment the panel said the
+    subject was lost would be two clocks disagreeing in front of the pilot."""
+    assert GROUP_GIVE_UP_S == WIDEN_UNTIL_S
+
+
+def test_a_group_that_cannot_be_framed_is_given_up_on():
+    gs = GroupState()
+    gs.note(GroupAction.WIDEN, 100.0)
+    assert not gs.has_given_up(100.0 + GROUP_GIVE_UP_S - 0.1)
+    assert gs.has_given_up(100.0 + GROUP_GIVE_UP_S + 0.1)
+
+
+def test_a_widen_that_succeeds_clears_the_clock():
+    """Otherwise a long flight accumulates unrelated widens into a give-up that
+    fires on a group which is framed perfectly."""
+    gs = GroupState()
+    gs.note(GroupAction.WIDEN, 100.0)
+    gs.note(GroupAction.HOLD, 105.0)
+    assert gs.struggling_for(200.0) == 0.0
+    assert not gs.has_given_up(200.0)
+
+
+def test_the_struggle_clock_starts_once_not_on_every_frame():
+    gs = GroupState()
+    for t in range(100, 110):
+        gs.note(GroupAction.WIDEN, float(t))
+    assert gs.struggling_for(110.0) == pytest.approx(10.0)
+
+
+# --------------------------------------------------------------------------- #
+# Membership                                                                    #
+# --------------------------------------------------------------------------- #
+
+def test_membership_is_capped():
+    assert clamp_members([1, 2, 3, 4, 5, 6]) == [1, 2, 3, 4][:MAX_FOLLOW_MEMBERS]
+
+
+def test_membership_keeps_the_first_clicked_subject_first():
+    """members[0] is the primary — it carries the plate identity and the hold
+    distance — so the order is load-bearing, not cosmetic."""
+    assert clamp_members([7, 3, 9])[0] == 7
+
+
+def test_membership_does_not_duplicate():
+    assert clamp_members([7, 7, 3, 7]) == [7, 3]
+
+
+def test_the_cap_is_low_enough_that_the_analytics_survive():
+    """Past a handful of subjects the range needed makes plates and faces
+    unreadable, and what the operator wants is crowd management — which this
+    same module already does properly."""
+    assert 2 <= MAX_FOLLOW_MEMBERS <= 4
+
+
+# --------------------------------------------------------------------------- #
+# Through the real traffic_manager: selection                                   #
+# --------------------------------------------------------------------------- #
+
+def _tt():
+    return importlib.import_module("test_traffic_manager")
+
+
+def _armed(multi=True):
+    tt = _tt()
+    t = tt.bare_tracker()
+    t.set_multi_follow("s", multi)
+    t.set_tracking("s", True)
+    return t, t._client_state["s"], tt
+
+
+def _step(t, tt, ids_boxes, pose=None, ctx=None):
+    """One _follow frame with the given vehicles present."""
+    vehicles = [tt.vehicle(tid, *box) for tid, box in ids_boxes]
+    return t._follow(t._client_state["s"], vehicles, [], "s", W, H, ctx, pose)
+
+
+def test_single_follow_still_replaces_rather_than_accumulating():
+    """The regression that would make every existing single-target flight into
+    an accidental group."""
+    t, state, tt = _armed(multi=False)
+    t.request_follow("s", 7)
+    _step(t, tt, [(7, (100, 100, 400, 350))])
+    t.request_follow("s", 8)
+    _step(t, tt, [(8, (100, 100, 400, 350))])
+    assert state["follow_members"] == [8]
+    assert state["locked_track_id"] == 8
+
+
+def test_a_tap_in_flight_when_multi_was_switched_off_does_not_leave_a_phantom_group():
+    """The sequence that reaches the second of the two guards. A tap is pending
+    when the operator switches multi-follow off, so by the time the module
+    resolves it the request was made under one rule and lands under another.
+    Appending there leaves a group the toggle says does not exist — which flies
+    a containment controller with the group UI switched off."""
+    t, state, tt = _armed()
+    t.request_follow("s", 7)
+    _step(t, tt, [(7, (100, 400, 300, 700))])
+    t.request_follow("s", 8)                 # queued while multi is ON
+    t.set_multi_follow("s", False)           # ...and off before it resolves
+    _step(t, tt, [(7, (100, 400, 300, 700)), (8, (600, 400, 800, 700))])
+    assert state["follow_members"] == [8]
+    assert state["locked_track_id"] == 8
+
+
+def test_a_second_tap_adds_a_member_when_multi_follow_is_on():
+    t, state, tt = _armed()
+    t.request_follow("s", 7)
+    _step(t, tt, [(7, (100, 400, 300, 700))])
+    t.request_follow("s", 8)
+    _step(t, tt, [(7, (100, 400, 300, 700)), (8, (600, 400, 800, 700))])
+    assert state["follow_members"] == [7, 8]
+
+
+def test_adding_a_member_does_not_move_the_primary():
+    """members[0] carries the plate identity and the hold distance. Handing
+    those to whoever was tapped last would change the group's whole readout
+    every time the operator added someone."""
+    t, state, tt = _armed()
+    t.request_follow("s", 7)
+    _step(t, tt, [(7, (100, 400, 300, 700))])
+    t.request_follow("s", 8)
+    _step(t, tt, [(7, (100, 400, 300, 700)), (8, (600, 400, 800, 700))])
+    assert state["locked_track_id"] == 7
+
+
+def test_tapping_a_member_again_drops_them():
+    """The tap has to mean both add and drop: a separate removal control is one
+    the operator would be hunting for mid-flight, and dropping a member is the
+    answer to a group the aircraft has just said it cannot frame."""
+    t, state, tt = _armed()
+    t.request_follow("s", 7)
+    _step(t, tt, [(7, (100, 400, 300, 700))])
+    t.request_follow("s", 8)
+    _step(t, tt, [(7, (100, 400, 300, 700)), (8, (600, 400, 800, 700))])
+    t.request_follow("s", 8)
+    assert state["follow_members"] == [7]
+
+
+def test_dropping_the_primary_promotes_the_next_member():
+    t, state, tt = _armed()
+    t.request_follow("s", 7)
+    _step(t, tt, [(7, (100, 400, 300, 700))])
+    t.request_follow("s", 8)
+    _step(t, tt, [(7, (100, 400, 300, 700)), (8, (600, 400, 800, 700))])
+    t.request_follow("s", 7)
+    assert state["follow_members"] == [8]
+    assert state["locked_track_id"] == 8
+
+
+def test_tapping_the_last_member_does_not_release_the_lock():
+    """Releasing is a much larger action than a tap appears to offer — it stops
+    the aircraft. The X on the panel is what releases."""
+    t, state, tt = _armed()
+    t.request_follow("s", 7)
+    _step(t, tt, [(7, (100, 400, 300, 700))])
+    t.request_follow("s", 7)
+    assert state["follow_members"] == [7]
+    assert state["locked_track_id"] == 7
+
+
+def test_the_group_refuses_to_grow_past_the_cap():
+    t, state, tt = _armed()
+    present = []
+    for i, tid in enumerate(range(1, MAX_FOLLOW_MEMBERS + 2)):
+        present.append((tid, (100 + i * 120, 400, 200 + i * 120, 700)))
+        t.request_follow("s", tid)
+        _step(t, tt, present)
+    assert len(state["follow_members"]) == MAX_FOLLOW_MEMBERS
+
+
+def test_turning_multi_follow_off_keeps_the_primary_rather_than_stopping():
+    """An operator flipping the toggle off is saying "just this one", not
+    "stop"."""
+    t, state, tt = _armed()
+    t.request_follow("s", 7)
+    _step(t, tt, [(7, (100, 400, 300, 700))])
+    t.request_follow("s", 8)
+    _step(t, tt, [(7, (100, 400, 300, 700)), (8, (600, 400, 800, 700))])
+    t.set_multi_follow("s", False)
+    assert state["follow_members"] == [7]
+    assert state["locked_track_id"] == 7
+    assert state["tracking"] is True
+
+
+def test_releasing_clears_the_whole_group():
+    t, state, tt = _armed()
+    t.request_follow("s", 7)
+    _step(t, tt, [(7, (100, 400, 300, 700))])
+    t.request_follow("s", 8)
+    _step(t, tt, [(7, (100, 400, 300, 700)), (8, (600, 400, 800, 700))])
+    t.request_follow("s", None)
+    assert state["follow_members"] == []
+    assert state["locked_track_id"] is None
+    assert state["tracking"] is False
+
+
+# --------------------------------------------------------------------------- #
+# Through the real traffic_manager: flight                                      #
+# --------------------------------------------------------------------------- #
+#
+# These run on a FAKE CLOCK. The dwell latch and the give-up window are both in
+# seconds, and a test that fires ten frames inside one microsecond exercises
+# neither — it would pass against a build with no latch at all.
+
+
+class _Clock:
+    """Stands in for the `time` module inside traffic_manager. Anything it does
+    not define falls through to the real one, so only monotonic is faked."""
+
+    def __init__(self, t0: float = 1000.0):
+        self.t = t0
+
+    def monotonic(self) -> float:
+        return self.t
+
+    def advance(self, seconds: float) -> None:
+        self.t += seconds
+
+    def __getattr__(self, name):
+        import time as _real
+        return getattr(_real, name)
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    from app.vision.modules import traffic_manager as tm
+    c = _Clock()
+    monkeypatch.setattr(tm, "time", c)
+    return c
+
+
+class _Pose:
+    agl_m = 30.0
+
+    def depression_deg(self, cam, x, y):
+        return 45.0
+
+
+class _Ctx:
+    width, height = W, H
+
+
+def _settle(t, tt, ids_boxes, clock, seconds=2.0, step=0.1, pose=None, ctx=None):
+    """Fly the same scene for a while, so the dwell latch has a chance to adopt
+    what the assessment is asking for."""
+    cmd = None
+    for _ in range(max(1, int(seconds / step))):
+        clock.advance(step)
+        cmd = _step(t, tt, ids_boxes, pose=pose, ctx=ctx)
+    return cmd
+
+
+def _two_up(t, tt, boxes, clock, pose=None, ctx=None, seconds=2.0):
+    """Lock two subjects, then fly the scene until the controller has settled."""
+    ids = [(7, boxes[0]), (8, boxes[1])]
+    t.request_follow("s", 7)
+    _step(t, tt, [ids[0]], pose=pose, ctx=ctx)
+    t.request_follow("s", 8)
+    return _settle(t, tt, ids, clock, seconds=seconds, pose=pose, ctx=ctx)
+
+
+def test_a_single_subject_reports_no_group_framing(clock):
+    """The framing readout appearing IS the evidence that group control has the
+    aircraft. It must not appear when it does not."""
+    t, state, tt = _armed(multi=False)
+    t.request_follow("s", 7)
+    _step(t, tt, [(7, (100, 400, 300, 700))])
+    assert state["group_framing"] is None
+
+
+def test_a_group_reports_what_it_is_filling(clock):
+    t, state, tt = _armed()
+    _two_up(t, tt, [(200, 300, 500, 800), (1300, 300, 1600, 800)], clock)
+    g = state["group_framing"]
+    assert g is not None
+    assert g["members_total"] == 2 and g["members_visible"] == 2
+    assert g["fill_w_pct"] > 0 and g["fill_h_pct"] > 0
+
+
+def test_a_group_that_overflows_the_frame_backs_off(clock):
+    """THE FEATURE. Two subjects spread across nearly the whole frame: the only
+    correct command is away from them."""
+    t, state, tt = _armed()
+    cmd = _two_up(t, tt, [(20, 60, 400, 1000), (1500, 60, 1900, 1000)], clock)
+    assert state["group_framing"]["action"] == "widen"
+    assert cmd["forward_m_s"] < 0
+
+
+def test_a_group_bunched_in_the_middle_closes_in(clock):
+    t, state, tt = _armed()
+    cmd = _two_up(t, tt, [(880, 480, 940, 560), (980, 480, 1040, 560)], clock)
+    assert state["group_framing"]["action"] == "close"
+    assert cmd["forward_m_s"] > 0
+
+
+def test_closing_in_waits_out_the_dwell_before_it_starts(clock):
+    """A bunched group on ONE frame is noise. Without the latch the aircraft
+    lunges at whatever the last detection happened to look like."""
+    t, state, tt = _armed()
+    # Settle inside the band first, so what is being measured is the reaction
+    # to the group bunching up rather than the transition into group mode.
+    framed = [(7, (500, 250, 800, 850)), (8, (1100, 250, 1400, 850))]
+    _two_up(t, tt, [framed[0][1], framed[1][1]], clock)
+    assert state["group_framing"]["action"] == "hold"
+
+    bunched = [(7, (880, 480, 940, 560)), (8, (980, 480, 1040, 560))]
+    for _ in range(3):
+        clock.advance(0.03)
+        cmd = _step(t, tt, bunched)
+    assert state["group_framing"]["action"] == "hold", "lunged on one noisy frame"
+    assert cmd["forward_m_s"] == pytest.approx(0.0, abs=0.01)
+
+
+def test_the_group_box_centre_is_what_yaw_steers_on(clock):
+    """Neither subject is centred, and that is correct. The yaw command has to
+    come from the box that contains both."""
+    t, state, tt = _armed()
+    cmd = _two_up(t, tt, [(1300, 400, 1450, 700), (1600, 400, 1750, 700)], clock)
+    assert cmd["yaw_deg_s"] > 0, "group sits right of centre — yaw right"
+
+
+def test_a_missing_member_never_produces_an_advance(clock):
+    """THE TRAP. Losing a member SHRINKS the group box, which reads as "too
+    small, close in" — so the naive signal says advance at exactly the moment
+    advancing makes that member's loss permanent. And the smoother carries the
+    previous frames' momentum, so zeroing the controller is not enough."""
+    t, state, tt = _armed()
+    _two_up(t, tt, [(880, 480, 940, 560), (980, 480, 1040, 560)], clock)
+    assert state["group_framing"]["action"] == "close"    # was advancing
+    for _ in range(6):
+        clock.advance(0.1)
+        cmd = _step(t, tt, [(7, (880, 480, 940, 560))])
+        assert cmd["forward_m_s"] <= 0.0, "advanced with a member out of frame"
+    assert state["group_framing"]["members_visible"] == 1
+
+
+def test_a_missing_member_still_lets_the_aircraft_back_off(clock):
+    """The retreat is the half that helps find them again, so the clamp must be
+    one-sided rather than a freeze."""
+    t, state, tt = _armed()
+    _two_up(t, tt, [(20, 60, 400, 1000), (1500, 60, 1900, 1000)], clock)
+    cmd = _settle(t, tt, [(7, (20, 60, 900, 1000))], clock, seconds=1.0)
+    assert cmd["forward_m_s"] < 0
+
+
+def test_the_primary_going_missing_does_not_abandon_the_group(clock):
+    """Single-subject follow treats the primary's absence as a total loss,
+    correctly. A group that is mostly still visible is not lost."""
+    t, state, tt = _armed()
+    _two_up(t, tt, [(200, 300, 500, 800), (1300, 300, 1600, 800)], clock)
+    clock.advance(0.1)
+    cmd = _step(t, tt, [(8, (1300, 300, 1600, 800))])
+    assert state["group_framing"] is not None
+    assert state["group_framing"]["members_visible"] == 1
+    assert cmd is not None
+
+
+def test_everyone_missing_still_keeps_the_setpoint_stream_alive(clock):
+    """Returning None gaps Offboard and PX4 flies on at the last velocity —
+    the defect a77c90f fixed, which a new code path could reintroduce."""
+    t, state, tt = _armed()
+    _two_up(t, tt, [(200, 300, 500, 800), (1300, 300, 1600, 800)], clock)
+    clock.advance(0.1)
+    cmd = _step(t, tt, [])
+    assert cmd is not None and cmd["type"] == "velocity"
+
+
+def test_an_unframeable_group_stops_translating_but_keeps_looking(clock):
+    """Two subjects walking apart need range that grows without bound. Flying
+    backwards forever is just leaving the area; yaw keeps them centred so the
+    operator can see what to drop."""
+    t, state, tt = _armed()
+    ids = [(7, (20, 60, 400, 1000)), (8, (1500, 60, 1900, 1000))]
+    _two_up(t, tt, [ids[0][1], ids[1][1]], clock)
+    assert state["group_framing"]["action"] == "widen"
+
+    cmd = _settle(t, tt, ids, clock, seconds=GROUP_GIVE_UP_S + 3.0)
+    assert state["group_framing"]["action"] == "unframeable"
+    assert cmd["forward_m_s"] == pytest.approx(0.0, abs=0.01)
+    assert "cannot frame" in state["group_framing"]["reason"]
+
+
+def test_it_keeps_widening_right_up_to_the_give_up_point(clock):
+    """Giving up early would abandon groups that were about to fit."""
+    t, state, tt = _armed()
+    ids = [(7, (20, 60, 400, 1000)), (8, (1500, 60, 1900, 1000))]
+    _two_up(t, tt, [ids[0][1], ids[1][1]], clock)
+    cmd = _settle(t, tt, ids, clock, seconds=GROUP_GIVE_UP_S - 4.0)
+    assert state["group_framing"]["action"] == "widen"
+    assert cmd["forward_m_s"] < 0
+
+
+def test_an_unframeable_group_says_what_range_it_would_have_needed(clock):
+    """"Cannot do it" and "cannot do it, needs about 45 m" are different
+    messages, and only one of them is actionable."""
+    t, state, tt = _armed()
+    ids = [(7, (20, 60, 400, 1000)), (8, (1500, 60, 1900, 1000))]
+    _two_up(t, tt, [ids[0][1], ids[1][1]], clock, pose=_Pose(), ctx=_Ctx())
+    _settle(t, tt, ids, clock, seconds=GROUP_GIVE_UP_S + 3.0,
+            pose=_Pose(), ctx=_Ctx())
+    assert state["group_framing"]["action"] == "unframeable"
+    assert state["group_framing"]["required_range_m"] > 30.0
+
+
+def test_widening_with_a_known_look_angle_climbs_as_well_as_backs_off(clock):
+    """The split is the answer chosen over pure retreat and pure climb: it
+    grows the range while leaving the depression — and so this module's own
+    analytics — where they were."""
+    t, state, tt = _armed()
+    cmd = _two_up(t, tt, [(20, 60, 400, 1000), (1500, 60, 1900, 1000)], clock,
+                  pose=_Pose(), ctx=_Ctx())
+    assert cmd["forward_m_s"] < 0, "should be backing off"
+    assert cmd["down_m_s"] < 0, "should also be climbing"
+
+
+def test_widening_without_a_pose_does_not_climb_blind(clock):
+    t, state, tt = _armed()
+    cmd = _two_up(t, tt, [(20, 60, 400, 1000), (1500, 60, 1900, 1000)], clock)
+    assert cmd["forward_m_s"] < 0
+    assert cmd["down_m_s"] >= 0.0, "climbed with no altitude reading"
+
+
+def test_the_widen_climb_still_passes_the_altitude_ceiling(clock):
+    """A framing controller is just another source of climb, and the ceiling
+    belongs at the one convergence point rather than inside each source."""
+    class _AtCeiling(_Pose):
+        agl_m = 500.0
+
+    t, state, tt = _armed()
+    cmd = _two_up(t, tt, [(20, 60, 400, 1000), (1500, 60, 1900, 1000)], clock,
+                  pose=_AtCeiling(), ctx=_Ctx())
+    assert cmd["down_m_s"] >= 0.0, "climbed through the ceiling to frame a group"
+    assert state["altitude_floor_reason"]

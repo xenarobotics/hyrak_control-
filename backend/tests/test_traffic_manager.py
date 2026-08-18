@@ -1250,11 +1250,15 @@ def test_a_locked_person_in_frame_is_not_reported_as_lost():
     from app.vision.modules import traffic_manager as tm
 
     src = inspect.getsource(tm.TrafficManager._analyze_frame_blocking)
-    marker = src[src.index("lock_state_for("):]
-    head = src[:src.index("lock_state_for(")]
-    # The visibility expression must consult people, wherever it is built.
-    assert 'p["track_id"] == locked_id' in head or 'p["track_id"] == locked_id' in marker, \
+    # The VISIBILITY EXPRESSION ITSELF must consult people — pinned to the
+    # expression rather than to one spelling of it, because the id being
+    # compared changed when group follow made "visible" mean "any member is
+    # visible". What must not change is that the people list is looked at.
+    expr = src[src.index("locked_visible = "):src.index("lock_state_for(")]
+    assert "for p in people" in expr, \
         "locked-subject visibility ignores the people list"
+    assert "for v in in_frame" in expr, \
+        "locked-subject visibility ignores the vehicle list"
 
 
 def test_lock_state_helper_agrees_that_visible_means_locked():

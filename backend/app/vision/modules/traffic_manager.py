@@ -77,6 +77,10 @@ from app.vision.pursuit import (
     limit_descent, lock_state_for, new_row_pd, new_yaw_pd, row_reference_is_stale,
     scale_forward, seconds_lost_for,
 )
+from app.vision.group_follow import (
+    GroupAction, GroupState, MAX_FOLLOW_MEMBERS, assess_framing, clamp_members,
+    group_box, required_range_m, widen_velocity,
+)
 from app.vision.profiles import ProfileSelector
 from app.vision.speed import SpeedEstimator
 from app.vision.tracker_config import make_bytetrack_cfg
@@ -557,6 +561,15 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         "altitude_nudge_v": 0.0,
         "locked_plate": "",
         "follow_request_track_id": None,
+        # Multi-follow. members[0] IS locked_track_id — the primary — so every
+        # single-subject path below (the plate identity, the hold-distance
+        # control, the lock ladder) keeps working untouched and the group is
+        # purely additive. See vision/group_follow.py.
+        "multi_follow": False,
+        "follow_members": [],
+        "group": GroupState(),
+        "group_framing": None,
+        "group_no_advance": False,
         "tracking": False,
         "last_seen_t": 0.0,
         "frames_lost": 0,
@@ -571,6 +584,13 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         "yaw_pd": new_yaw_pd(),
         "alt_pd": PDController(kp=1.5, kd=0.3, max_output=1.0, deadband=0.10),
         "dist_pd": PDController(kp=3.0, kd=0.8, max_output=2.5, deadband=0.04),
+        # The containment axis. Error is in FRAME FRACTIONS of overshoot past
+        # the group margin — a different unit from both dist_pd (apparent fill)
+        # and row_pd (frame rows), which is why it is a third instance rather
+        # than a shared one: swapping units under a live derivative kicks.
+        # deadband 0.02 is 2% of the frame, below which the group is simply
+        # framed and the aircraft should be still.
+        "group_pd": PDController(kp=6.0, kd=1.2, max_output=2.5, deadband=0.02),
         # The Fixed-altitude distance axis — see pursuit.new_row_pd.
         "row_pd": new_row_pd(),
         # Frame row Fixed mode holds the subject's ground contact on; None =
@@ -717,11 +737,85 @@ class TrafficManager(BaseAnalyzer):
             state["locked_track_id"] = None
             state["locked_kind"] = None
             state["locked_plate"] = ""
+            state["follow_members"] = []
+            state["group_framing"] = None
+            state["group"].reset()
             state["tracking"] = False
             logger.info(f"Session {client_id[:8]}: lock released")
             return
-        state["follow_request_track_id"] = int(track_id)
-        logger.info(f"Session {client_id[:8]}: follow requested for track #{track_id}")
+
+        tid = int(track_id)
+        if not state.get("multi_follow"):
+            state["follow_members"] = []
+            state["follow_request_track_id"] = tid
+            logger.info(f"Session {client_id[:8]}: follow requested for track #{tid}")
+            return
+
+        # MULTI-FOLLOW MAKES THE TAP A TOGGLE. With one subject a tap can only
+        # mean "follow this instead"; with a group it has to mean both "add"
+        # and "drop", and a second control for removal would leave the operator
+        # hunting for it mid-flight. Tapping a member removes them, which is
+        # also the answer to a diverging group the aircraft has said it cannot
+        # frame.
+        members = list(state.get("follow_members") or [])
+        if tid in members and len(members) > 1:
+            members.remove(tid)
+            state["follow_members"] = members
+            state["group"].reset()
+            if state.get("locked_track_id") == tid:
+                # The primary carries the plate identity and the hold distance,
+                # so handing those to the next member is not bookkeeping — it
+                # is what stops the group losing its labelling when the
+                # first-clicked subject is dropped.
+                state["locked_track_id"] = members[0]
+                state["locked_plate"] = ""
+                state["kalman"].reset()
+                state["height_ema"] = None
+            logger.info(
+                f"Session {client_id[:8]}: dropped #{tid} from the group "
+                f"({len(members)} left)"
+            )
+            return
+
+        if tid in members:
+            return                      # the last member; tapping it is a no-op
+        if len(members) >= MAX_FOLLOW_MEMBERS:
+            logger.info(
+                f"Session {client_id[:8]}: refused #{tid} — group is full at "
+                f"{MAX_FOLLOW_MEMBERS}"
+            )
+            return
+        state["follow_request_track_id"] = tid
+        logger.info(f"Session {client_id[:8]}: adding #{tid} to the group")
+
+    def set_multi_follow(self, client_id: str, enabled: bool) -> None:
+        """
+        Turn group follow on or off for this session.
+
+        Turning it OFF collapses the group back to the primary rather than
+        releasing the lock. An operator switching the toggle off mid-flight is
+        saying "just this one", not "stop following" — dropping the lock there
+        would stop the aircraft, which is a much larger action than the control
+        appears to offer.
+        """
+        state = self._client_state.get(client_id)
+        if state is None:
+            return
+        enabled = bool(enabled)
+        state["multi_follow"] = enabled
+        state["group"].reset()
+        state["group_framing"] = None
+        state["group_pd"].reset()
+        if not enabled:
+            locked = state.get("locked_track_id")
+            state["follow_members"] = [locked] if locked is not None else []
+        elif state.get("locked_track_id") is not None and not state["follow_members"]:
+            state["follow_members"] = [state["locked_track_id"]]
+        logger.info(
+            f"Session {client_id[:8]}: multi-follow "
+            f"{'on' if enabled else 'off'} "
+            f"({len(state['follow_members'])} member(s))"
+        )
 
     def set_tracking_params(self, client_id: str, target_distance_ratio: float) -> None:
         """
@@ -1595,16 +1689,25 @@ class TrafficManager(BaseAnalyzer):
             registry.pop(tid, None)
 
         locked_id = state.get("locked_track_id")
+        group_members = list(state.get("follow_members") or [])
         seen_t = state.get("last_seen_t", 0.0)
         lost_s = (time.monotonic() - seen_t) if seen_t else 0.0
         # Visibility has to consider BOTH lists now that a person can be the
         # locked subject. Checking only vehicles reported a person standing in
         # plain sight as lost, so the panel showed COASTING then SEARCHING
         # while the drone was in fact tracking them perfectly.
-        locked_visible = (
-            locked_id is not None
-            and (any(v.track_id == locked_id for v in in_frame)
-                 or any(p["track_id"] == locked_id for p in people))
+        # In group mode ANY visible member counts as visible: the ladder is
+        # about whether the aircraft still knows what it is following, and a
+        # group with two of three in frame plainly does. Keying it to the
+        # primary alone would show SEARCHING while the drone was framing the
+        # rest perfectly — the same false-lost report a person lock used to
+        # produce when only vehicles were checked.
+        _watch = set(group_members) if group_members else (
+            {locked_id} if locked_id is not None else set()
+        )
+        locked_visible = bool(_watch) and (
+            any(v.track_id in _watch for v in in_frame)
+            or any(p["track_id"] in _watch for p in people)
         )
         lock, lock_msg = lock_state_for(
             visible=locked_visible,
@@ -1649,6 +1752,12 @@ class TrafficManager(BaseAnalyzer):
                     "screen_dir": v.screen_dir,
                     "against_flow": v.against_flow,
                     "locked": v.track_id == locked_id,
+                    # Group membership is reported separately from the primary
+                    # lock so the overlay can distinguish "this is the subject
+                    # everything is labelled from" from "this is also being
+                    # kept in frame" — collapsing them would make dropping the
+                    # right member guesswork.
+                    "in_group": v.track_id in group_members,
                 }
                 for v in sorted(in_frame, key=lambda x: x.area, reverse=True)
             ],
@@ -1662,7 +1771,12 @@ class TrafficManager(BaseAnalyzer):
             # necessarily notice one car among twenty pointing the other way.
             "against_flow_count": sum(1 for v in in_frame if v.against_flow),
             # ── People / crowd, borrowed from crowd_manager ───────────────
-            "people": [{"id": pr["track_id"], "box": pr["box"]} for pr in people],
+            "people": [
+                {"id": pr["track_id"], "box": pr["box"],
+                 "locked": pr["track_id"] == locked_id,
+                 "in_group": pr["track_id"] in group_members}
+                for pr in people
+            ],
             "person_count": len(people),
             # Unique across the session vs in frame now — reported separately
             # because they answer different questions, and conflating them is
@@ -1695,6 +1809,13 @@ class TrafficManager(BaseAnalyzer):
                              if getattr(self, "_gallery", None) else 0),
             # Follow state
             "locked_track_id": locked_id,
+            "multi_follow": bool(state.get("multi_follow")),
+            "follow_members": list(group_members),
+            "max_follow_members": MAX_FOLLOW_MEMBERS,
+            # None whenever a group is not actually being flown, so the panel
+            # showing a framing readout is itself the evidence that group
+            # control has the aircraft.
+            "group_framing": state.get("group_framing"),
             # Which kind was locked — the panel labels and the hold-distance
             # control both depend on it, and a person lock must not be
             # described as a vehicle.
@@ -1847,14 +1968,22 @@ class TrafficManager(BaseAnalyzer):
 
     def _follow(self, state, in_frame, people, client_id, W, H, ctx, pose):
         """
-        Keep a locked subject framed — vehicle or person. Same three-axis PD
-        shape as human_tracker (yaw primary, distance via apparent size,
-        altitude secondary) plus the auto-elevate fallback when the subject
-        outruns us.
+        Keep the locked subject — or the locked GROUP — framed.
+
+        Same three-axis PD shape as human_tracker (yaw primary, distance via
+        apparent size, altitude secondary) plus the auto-elevate fallback when
+        the subject outruns us.
 
         Both kinds resolve out of one id space: people and vehicles come from
         the same ByteTrack pass, so a track id identifies exactly one subject
         and this does not need to be told which kind was clicked.
+
+        MULTI-FOLLOW BRANCHES ONLY THE THREE ERROR SIGNALS. Yaw, vertical and
+        forward come from the group box instead of one subject's box; every
+        guard below them — the yaw-priority gate, auto-elevate, the altitude
+        floor and ceiling, the smoother — is shared, because a group follow
+        that flew the aircraft into the ground would be no better than a single
+        one that did. See vision/group_follow.py for the containment policy.
         """
         def _find(tid):
             """(kind, box, vehicle_or_None) for a track id, or None."""
@@ -1872,33 +2001,78 @@ class TrafficManager(BaseAnalyzer):
             found = _find(wanted)
             if found is not None:
                 kind, _, v = found
-                state["locked_track_id"] = wanted
-                state["locked_kind"] = kind
                 state["follow_request_track_id"] = None
-                state["kalman"].reset()
-                state["height_ema"] = None
-                state["locked_plate"] = (v.plate or "") if v is not None else ""
-                logger.info(
-                    f"Session {client_id[:8]}: locked {kind} #{wanted}"
-                    + (f" ({v.plate})" if v is not None and v.plate else "")
+                multi = bool(state.get("multi_follow"))
+                # Single mode keeps exactly one member so a mode toggle can
+                # never inherit a stale group; multi appends.
+                state["follow_members"] = clamp_members(
+                    (state["follow_members"] + [wanted]) if multi else [wanted]
                 )
+                # ADDING A MEMBER MUST NOT REASSIGN THE PRIMARY. members[0]
+                # carries the plate identity, the hold distance and the
+                # labelling; handing all three to whoever was tapped most
+                # recently would make the group's readout change every time
+                # the operator added someone to it.
+                if not multi or state.get("locked_track_id") is None:
+                    state["locked_track_id"] = wanted
+                    state["locked_kind"] = kind
+                    state["kalman"].reset()
+                    state["height_ema"] = None
+                    state["locked_plate"] = (v.plate or "") if v is not None else ""
+                    logger.info(
+                        f"Session {client_id[:8]}: locked {kind} #{wanted}"
+                        + (f" ({v.plate})" if v is not None and v.plate else "")
+                    )
+                else:
+                    # The group box replaces the single-subject box, so the
+                    # filter tracking that box has to start again or it drags
+                    # the old centre into the new one. The smoother goes with
+                    # it: the forward axis switches from apparent-fill error to
+                    # containment error at this instant, and carrying the old
+                    # command across a change of UNITS is how a lunge outlives
+                    # the reason for it.
+                    state["kalman"].reset()
+                    state["smoother"].reset()
+                    state["group_pd"].reset()
+                    logger.info(
+                        f"Session {client_id[:8]}: added {kind} #{wanted} to "
+                        f"the group ({len(state['follow_members'])} members)"
+                    )
 
         locked_id = state.get("locked_track_id")
         if locked_id is None:
             state["elevate"] = None
+            state["group_framing"] = None
             return None
 
-        found = _find(locked_id)
-        if found is None:
+        members = state.get("follow_members") or [locked_id]
+        group_mode = bool(state.get("multi_follow")) and len(members) > 1
+        gstate: GroupState = state["group"]
+
+        # WHO IS ACTUALLY IN FRAME. In group mode this is the whole membership,
+        # not just the primary: the aircraft must keep framing the subjects it
+        # can still see even when the one that happened to be clicked first has
+        # stepped behind something. Treating the primary's absence as a total
+        # loss — which the single-subject path does, correctly — would abandon
+        # a group that is mostly still visible.
+        visible = []
+        for tid in members:
+            hit = _find(tid)
+            if hit is not None:
+                visible.append((tid, hit))
+        primary = _find(locked_id)
+
+        if not visible:
             state["frames_lost"] = state.get("frames_lost", 0) + 1
+            state["group_framing"] = None
             # The plate is the identity that survives a track id change, so it
             # is kept rather than cleared — a re-read of the same characters is
             # the same vehicle, not a guess.
             if not state.get("tracking"):
                 return None
-            # Armed, but the subject is not in this frame. Returning None here —
-            # which is what this did — GAPPED the Offboard setpoint stream, and
-            # PX4 then flies on at the last velocity it was given until its
+            # Armed, but nothing is in this frame. Returning None here — which
+            # is what this did — GAPPED the Offboard setpoint stream, and PX4
+            # then flies on at the last velocity it was given until its
             # offboard-loss failsafe fires. That is the same "kept moving"
             # symptom the other four modules produced by replaying the last
             # command, arrived at from the opposite direction.
@@ -1909,57 +2083,80 @@ class TrafficManager(BaseAnalyzer):
                 last_yaw_dir=state.get("last_yaw_dir", 1.0),
             )
 
-        kind, box, target = found
-        state["locked_kind"] = kind
         state["frames_lost"] = 0
         state["last_seen_t"] = time.monotonic()
-        if target is not None and target.plate and not state.get("locked_plate"):
-            state["locked_plate"] = target.plate
+        if primary is not None:
+            kind, box, target = primary
+            state["locked_kind"] = kind
+            if target is not None and target.plate and not state.get("locked_plate"):
+                state["locked_plate"] = target.plate
+        else:
+            # Group mode with the primary hidden: steer on the rest, and keep
+            # the primary's kind so labels do not flicker.
+            kind, box, target = visible[0][1]
 
         if not state.get("tracking"):
             state["elevate"] = None
+            state["group_framing"] = None
+            gstate.reset()
             return None
 
-        x1, y1, x2, y2 = box
-        cx_n, cy_n = (x1 + x2) / (2 * W), (y1 + y2) / (2 * H)
-        fx_n, fy_n = state["kalman"].update(cx_n, cy_n)
+        now = time.monotonic()
+        alt_mode = state.get("altitude_mode", "auto")
+        depression = None
+        if pose is not None and ctx is not None:
+            cam = camera_from_settings(ctx.width or W, ctx.height or H)
+            depression = pose.depression_deg(cam, W / 2.0, H / 2.0)
 
-        h_raw = (y2 - y1) / H
-        prev = state["height_ema"]
-        h_ema = h_raw if prev is None else (
-            _HEIGHT_EMA_ALPHA * h_raw + (1 - _HEIGHT_EMA_ALPHA) * prev
-        )
-        state["height_ema"] = h_ema
+        state["group_no_advance"] = False
+        if group_mode:
+            forward_raw, range_err, err_yaw, err_alt, widen_down = self._group_axes(
+                state, gstate, visible, members, W, H, now, pose, depression,
+            )
+            foot_n = None
+        else:
+            state["group_framing"] = None
+            gstate.reset()
+            widen_down = None
+            x1, y1, x2, y2 = box
+            cx_n, cy_n = (x1 + x2) / (2 * W), (y1 + y2) / (2 * H)
+            fx_n, fy_n = state["kalman"].update(cx_n, cy_n)
 
-        target_ratio = state["size_ratio"].get(
-            kind, _DEFAULT_SIZE_RATIO if kind == "vehicle"
-            else _DEFAULT_PERSON_SIZE_RATIO
-        )
-        err_yaw = fx_n - 0.5
-        err_alt = fy_n - 0.5
-        err_dist = target_ratio - h_ema
-        # Where the subject meets the road — the Fixed-mode distance axis.
-        foot_n = foot_row(fy_n, h_ema)
+            h_raw = (y2 - y1) / H
+            prev = state["height_ema"]
+            h_ema = h_raw if prev is None else (
+                _HEIGHT_EMA_ALPHA * h_raw + (1 - _HEIGHT_EMA_ALPHA) * prev
+            )
+            state["height_ema"] = h_ema
+
+            target_ratio = state["size_ratio"].get(
+                kind, _DEFAULT_SIZE_RATIO if kind == "vehicle"
+                else _DEFAULT_PERSON_SIZE_RATIO
+            )
+            err_yaw = fx_n - 0.5
+            err_alt = fy_n - 0.5
+            err_dist = target_ratio - h_ema
+            # Where the subject meets the road — the Fixed-mode distance axis.
+            foot_n = foot_row(fy_n, h_ema)
+
+            # ── THE DISTANCE AXIS, PER ALTITUDE MODE ──────────────────────
+            # Fixed reads the frame row (height is held, so the row IS range:
+            # high in frame far, low in frame near); Auto reads apparent fill,
+            # unchanged. See pursuit.distance_axis.
+            forward_raw, range_err = distance_axis(
+                state=state, altitude_mode=alt_mode,
+                foot_row_n=foot_n, size_range_error=err_dist,
+            )
 
         yaw_deg_s = state["yaw_pd"].compute(err_yaw)
         # Fixed holds the altitude Offboard started at, so the only vertical
         # motion is whatever the operator is nudging. Auto lets the PD centre
         # the subject. Auto-elevate below overrides either.
-        if state.get("altitude_mode") == "fixed":
+        if alt_mode == "fixed":
             state["alt_pd"].reset()
             down_m_s = float(state.get("altitude_nudge_v") or 0.0)
         else:
             down_m_s = state["alt_pd"].compute(err_alt)
-
-        # ── THE DISTANCE AXIS, PER ALTITUDE MODE ──────────────────────────
-        # Fixed reads the frame row (height is held, so the row IS range: high
-        # in frame far, low in frame near); Auto reads apparent fill, unchanged.
-        # See pursuit.distance_axis.
-        alt_mode = state.get("altitude_mode", "auto")
-        forward_raw, range_err = distance_axis(
-            state=state, altitude_mode=alt_mode,
-            foot_row_n=foot_n, size_range_error=err_dist,
-        )
 
         yaw_factor = max(0.0, 1.0 - abs(err_yaw) / _YAW_PRIORITY_THRESHOLD)
         if yaw_factor > 0.0:
@@ -1973,17 +2170,24 @@ class TrafficManager(BaseAnalyzer):
         else:
             state["dist_pd"].reset()
             state["row_pd"].reset()
+            state["group_pd"].reset()
             forward_m_s = 0.0
+
+        # THE CLIMB HALF OF A GROUP WIDEN. Applied after the yaw gate because
+        # it is not a forward command and must not be throttled by boresight
+        # error, and before the altitude limits because it is a climb like any
+        # other and gets the same ceiling. It REPLACES the altitude PD rather
+        # than adding to it: centring the group vertically and growing the
+        # range are both vertical demands, and containment outranks centring
+        # for the same reason auto-elevate outranks it.
+        if widen_down is not None:
+            down_m_s = widen_down
 
         # Auto-elevate: only when the vehicle is genuinely pulling away, and
         # only inside both ceilings. Overrides the altitude axis because holding
         # the target in frame at all outranks holding it vertically centred.
         elevate = None
         if forward_m_s > 0:
-            depression = None
-            if pose is not None and ctx is not None:
-                cam = camera_from_settings(ctx.width or W, ctx.height or H)
-                depression = pose.depression_deg(cam, W / 2.0, H / 2.0)
             limits = PursuitLimits.from_settings()
             elevate = decide_elevation(
                 target_outpacing=is_outpaced(
@@ -2019,7 +2223,7 @@ class TrafficManager(BaseAnalyzer):
         # Row ranging assumes a held altitude; if the aircraft is moving
         # vertically the reference must be re-taken or the drone reads its own
         # climb as the subject approaching.
-        if row_reference_is_stale(alt_mode, down_m_s):
+        if foot_n is not None and row_reference_is_stale(alt_mode, down_m_s):
             state["target_row"] = clamp_row_target(foot_n)
             state["row_pd"].reset()
 
@@ -2030,9 +2234,19 @@ class TrafficManager(BaseAnalyzer):
             "down_m_s": down_m_s,
             "yaw_deg_s": yaw_deg_s,
         })
+        # RULE 1 IS ENFORCED ON THE EMITTED VALUE, NOT THE REQUESTED ONE.
+        # Zeroing the controller's output is not enough: the smoother carries
+        # the previous frames' momentum, so a group that was closing in when a
+        # member vanished still advances for several frames afterwards — during
+        # exactly the frames that decide whether that member is recoverable.
+        # Same placement and same reasoning as the altitude floor below it.
+        forward_out = cmd["forward_m_s"]
+        if state.get("group_no_advance") and forward_out > 0.0:
+            forward_out = 0.0
+
         drone_command = {
             "type": "velocity",
-            "forward_m_s": round(cmd["forward_m_s"], 3),
+            "forward_m_s": round(forward_out, 3),
             "right_m_s": 0.0,
             "down_m_s": round(cmd["down_m_s"], 3),
             "yaw_deg_s": round(cmd["yaw_deg_s"], 2),
@@ -2044,6 +2258,100 @@ class TrafficManager(BaseAnalyzer):
         if abs(yaw_deg_s) > 1e-6:
             state["last_yaw_dir"] = 1.0 if yaw_deg_s > 0 else -1.0
         return drone_command
+
+    def _group_axes(self, state, gstate, visible, members, W, H, now,
+                    pose, depression):
+        """
+        The three error signals for a multi-subject follow, plus the climb half
+        of a widen.
+
+        Returns (forward_raw, range_err, err_yaw, err_alt, widen_down), where
+        widen_down is None whenever the vertical axis should be left to the
+        altitude PD.
+
+        TWO RULES HERE ARE SAFETY RULES, NOT TUNING.
+
+        1. WHILE ANY MEMBER IS MISSING, FORWARD IS CLAMPED TO <= 0. Closing in
+           on the subjects still visible is exactly what makes a missing
+           member's loss permanent, and it happens at the worst moment: fewer
+           visible boxes shrink the group box, which reads as "too small,
+           close in". So the one frame where the naive signal says advance is
+           the one frame where advancing is wrong.
+
+        2. PAST GROUP_GIVE_UP_S OF UNSUCCESSFUL WIDENING, TRANSLATION STOPS.
+           Two subjects walking apart need a range that grows without bound;
+           there is no manoeuvre that wins and continuing to fly backwards is
+           just leaving the area. Yaw keeps working — the group stays centred
+           and visible — and the payload carries the range that would have
+           been needed, so the operator drops a member or accepts the loss
+           rather than watching the aircraft do something inexplicable.
+        """
+        boxes_px = [hit[1] for _, hit in visible]
+        gb = group_box(boxes_px, W, H)
+        seen = {tid for tid, _ in visible}
+        missing = [m for m in members if m not in seen]
+        all_present = not missing
+
+        fx_n, fy_n = state["kalman"].update(gb.cx, gb.cy)
+        err_yaw = fx_n - 0.5
+        err_alt = fy_n - 0.5
+
+        framing = assess_framing(gb, boxes_px, W, H)
+        action = gstate.latch.settle(framing.action, now)
+        # The latch can hold CLOSE for a frame after the assessment turned to
+        # HOLD; the assessment is the authority on the ERROR, so a held action
+        # with no error behind it commands nothing.
+        error = framing.error if action == framing.action else 0.0
+
+        state["group_no_advance"] = not all_present
+        if not all_present:
+            # Rule 1. Retreats survive; advances do not.
+            if error > 0.0:
+                error = 0.0
+                action = GroupAction.HOLD
+                framing.reason = (
+                    f"{len(missing)} of {len(members)} not in frame — "
+                    f"holding rather than closing in"
+                )
+
+        gstate.note(action, now)
+        given_up = gstate.has_given_up(now)
+        if given_up:
+            # Rule 2.
+            action = GroupAction.UNFRAMEABLE
+            error = 0.0
+            need = required_range_m(framing, pose.agl_m if pose else None,
+                                    depression)
+            framing.reason = (
+                "cannot frame all subjects"
+                + (f" — would need about {need:.0f} m of range" if need else "")
+                + "; holding position, drop a member or release"
+            )
+
+        framing.action = action
+        payload = framing.to_dict()
+        payload["members_visible"] = len(visible)
+        payload["members_total"] = len(members)
+        payload["missing"] = missing
+        payload["widening_for_s"] = round(gstate.struggling_for(now), 1)
+        payload["required_range_m"] = (
+            round(required_range_m(framing, pose.agl_m if pose else None,
+                                   depression) or 0.0, 1) or None
+        )
+        state["group_framing"] = payload
+
+        forward_raw = state["group_pd"].compute(error)
+        widen_down = None
+        if forward_raw < 0.0:
+            # Split the retreat between backing off and climbing so the look
+            # angle survives it — see group_follow.widen_velocity.
+            forward_raw, widen_down = widen_velocity(forward_raw, depression)
+            if widen_down is not None and abs(widen_down) < 1e-6:
+                widen_down = None
+        # range_err feeds is_outpaced, which asks "is the distance growing".
+        # For a group the equivalent question is "is the group outgrowing the
+        # frame", and a negative containment error is exactly that.
+        return forward_raw, -error, err_yaw, err_alt, widen_down
 
     # ── Overlay ───────────────────────────────────────────────────────────
 

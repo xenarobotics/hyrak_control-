@@ -842,6 +842,36 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         analyzer.request_follow(session.session_id, None if tid is None else int(tid))
         await sio.emit("follow_vehicle_set", {"track_id": tid}, to=sid)
 
+    @sio.on("set_multi_follow")
+    async def on_set_multi_follow(sid, data):
+        """Payload: { enabled: bool }
+
+        Turn GROUP follow on or off — traffic-management only. With it on, a
+        tap on the video adds or removes a subject from the group instead of
+        replacing the lock, and the aircraft backs off and climbs to keep every
+        member in frame rather than centring one.
+
+        Restricted to traffic-management on purpose. It is the only module
+        that finds people and vehicles in ONE detection pass, so a group can
+        mix the two and a track id still identifies exactly one subject. In the
+        other modes the same feature would need a second id space to disambiguate
+        and would mean something different in each.
+        """
+        session = session_manager.get_by_socket(sid)
+        if not session or not vision_pool:
+            return
+        analyzer = vision_pool.get_for_session(session.session_id)
+        from app.vision.modules.traffic_manager import TrafficManager
+        if not isinstance(analyzer, TrafficManager):
+            logger.warning(
+                f"set_multi_follow ignored — analyzer is "
+                f"{type(analyzer).__name__}, not traffic-management"
+            )
+            return
+        enabled = bool(data.get("enabled"))
+        analyzer.set_multi_follow(session.session_id, enabled)
+        await sio.emit("multi_follow_set", {"enabled": enabled}, to=sid)
+
     @sio.on("set_vehicle_tracking")
     async def on_set_vehicle_tracking(sid, data):
         """Payload: { active: bool } — start/stop flying after the locked

@@ -651,6 +651,13 @@ function drawTrafficManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: nu
         if (p.id === followedPerson) {
             drawLockedRing(ctx, x1, y1, x2, y2, C.active)
             drawPill(ctx, (ident?.name ?? 'FOLLOWING').toUpperCase(), x1, y1, C.active)
+        } else if (p.in_group) {
+            // A group member that is not the primary. Same accent so the group
+            // reads as one thing, thinner ring so which subject the labelling
+            // comes from is still obvious — that is the one the operator needs
+            // when deciding who to drop.
+            drawSubjectRing(ctx, x1, y1, x2, y2, C.active, 2, 0.9)
+            drawPill(ctx, (ident?.name ?? 'IN GROUP').toUpperCase(), x1, y1, C.active)
         } else if (ident) {
             drawSubjectRing(ctx, x1, y1, x2, y2, C.known)
             drawPill(ctx, ident.name.toUpperCase(), x1, y1, C.known)
@@ -686,6 +693,7 @@ function drawTrafficManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: nu
         // among twenty other greys is exactly how it would be.
         if (wrongWay) drawLockedRing(ctx, x1, y1, x2, y2, C.red)
         else if (locked) drawLockedRing(ctx, x1, y1, x2, y2, C.active)
+        else if (v.in_group) drawSubjectRing(ctx, x1, y1, x2, y2, C.active, 2, 0.9)
         else drawSubjectRing(ctx, x1, y1, x2, y2, C.vehicle, 1.5, 0.7)
 
         // Built from what is actually KNOWN, so a vehicle with no plate still
@@ -761,6 +769,49 @@ function drawTrafficManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: nu
     }
     ctx.globalAlpha = 1
 
+    // ── The group containment box ────────────────────────────────────────
+    // WHY THIS IS ON THE VIDEO AND NOT IN THE PANEL. Everything else group
+    // follow reports is a number and belongs beside the controls. This one is
+    // POSITIONAL: it is the shape the aircraft is trying to keep inside the
+    // frame, and the only way to see "we are about to lose the one on the
+    // left" is to see that shape against the frame edge it is approaching. A
+    // fill percentage cannot say which side the pressure is on.
+    const g = r.group_framing
+    if (g && (r.follow_members?.length ?? 0) > 1) {
+        const [gx1, gy1, gx2, gy2] = g.box
+        const accent = g.action === 'unframeable' ? C.red
+            : g.action === 'hold' ? C.active
+            : C.orange
+        ctx.save()
+        ctx.strokeStyle = accent
+        ctx.lineWidth = 2
+        // Dashed, so it never reads as a detection. It is a constraint, not a
+        // subject — nothing in the picture is that rectangle.
+        ctx.setLineDash([10, 7])
+        ctx.globalAlpha = 0.9
+        ctx.strokeRect(gx1 * W, gy1 * H, (gx2 - gx1) * W, (gy2 - gy1) * H)
+        ctx.setLineDash([])
+
+        // The margin the constraint is measured against, so the gap between
+        // the two rectangles IS the headroom. Without it the group box alone
+        // says nothing about how close to the limit it is.
+        const mw = (g.max_fill_w_pct / 100) * W
+        const mh = (g.max_fill_h_pct / 100) * H
+        ctx.globalAlpha = 0.28
+        ctx.lineWidth = 1
+        ctx.strokeRect((W - mw) / 2, (H - mh) / 2, mw, mh)
+        ctx.restore()
+
+        const missing = g.members_total - g.members_visible
+        drawBadge(
+            ctx,
+            (g.action === 'unframeable' ? 'CANNOT FRAME ALL' : `GROUP ${g.action.toUpperCase()}`)
+            + `  ${g.members_visible}/${g.members_total}`
+            + (missing > 0 ? `  ${missing} OUT OF FRAME` : ''),
+            gx1 * W, Math.max(16, gy1 * H - 22), accent,
+        )
+        ctx.globalAlpha = 1
+    }
 }
 
 export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {

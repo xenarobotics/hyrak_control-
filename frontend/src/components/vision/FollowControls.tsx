@@ -15,7 +15,8 @@
 import { useEffect, useState } from 'react'
 import { getSocket } from '@/lib/socket'
 import { useDroneStore } from '@/store/drone'
-import { AlertTriangle, Crosshair, Square, MoveVertical, Info, Mountain } from 'lucide-react'
+import { AlertTriangle, Crosshair, Square, MoveVertical, Info, Mountain, Users, X } from 'lucide-react'
+import type { GroupFraming } from '@/types/vision'
 
 export type FollowKind = 'vehicle' | 'person'
 
@@ -37,11 +38,28 @@ function Hint({ text }: { text: string }) {
 
 export function FollowControls({
     kind, selectedLabel, lockState, lockMessage,
-    altitudeMode, targetRatio, actualFillPct, elevate, onRelease,
+    altitudeMode, targetRatio, actualFillPct, elevate, onRelease, multi,
 }: {
     kind: FollowKind
     /** What is selected, already formatted (e.g. "VH-000042  719257C"). */
     selectedLabel: string | null
+    /**
+     * GROUP FOLLOW — traffic-management only, and absent everywhere else.
+     *
+     * Passed in rather than read from the store here because it is the one
+     * capability this shared control does NOT share: traffic-management is the
+     * only module that finds people and vehicles in one detection pass, so it
+     * is the only one where a track id identifies exactly one subject across
+     * both kinds and a mixed group is even expressible.
+     */
+    multi?: {
+        enabled: boolean
+        members: number[]
+        max: number
+        framing: GroupFraming | null
+        /** How to name a member in a chip — the panel knows the plates. */
+        labelFor: (id: number) => string
+    }
     lockState?: string
     lockMessage?: string
     altitudeMode?: 'fixed' | 'auto'
@@ -176,7 +194,84 @@ export function FollowControls({
                 </button>
             </div>
 
+            {/* ── Multi-follow ─────────────────────────────────────────── */}
+            {multi && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Users size={11} style={{ color: 'hsl(var(--app-text-muted))' }} />
+                        <span style={LABEL}>Multi-follow</span>
+                        <Hint text="Keep SEVERAL subjects in frame at once. Nobody is centred — that is impossible for two moving subjects — so instead the drone backs off and climbs enough to contain them all, and holds still while they fit. With this on, tapping a subject on the video adds them to the group; tapping a member again drops them." />
+                        <button
+                            onClick={() => getSocket().emit('set_multi_follow', { enabled: !multi.enabled })}
+                            style={{
+                                marginLeft: 'auto', padding: '3px 10px', borderRadius: 6,
+                                fontSize: 10, cursor: 'pointer',
+                                border: `1px solid ${multi.enabled ? '#38a0ff' : 'hsl(var(--app-border))'}`,
+                                background: multi.enabled ? 'rgba(56,160,255,0.15)' : 'transparent',
+                                color: multi.enabled ? '#38a0ff' : 'hsl(var(--app-text-muted))',
+                            }}
+                        >
+                            {multi.enabled ? 'on' : 'off'}
+                        </button>
+                    </div>
+
+                    {multi.enabled && (
+                        <>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                                {multi.members.map((id, i) => (
+                                    <span
+                                        key={id}
+                                        title={i === 0
+                                            ? 'Primary — the plate, name and hold distance are read from this one'
+                                            : 'Tap to drop from the group'}
+                                        style={{
+                                            display: 'flex', alignItems: 'center', gap: 4,
+                                            padding: '2px 5px 2px 7px', borderRadius: 5,
+                                            fontSize: 10, fontFamily: 'monospace',
+                                            border: `1px solid ${i === 0 ? '#38a0ff' : 'hsl(var(--app-border))'}`,
+                                            background: i === 0 ? 'rgba(56,160,255,0.15)' : 'transparent',
+                                            color: i === 0 ? '#38a0ff' : 'hsl(var(--app-text))',
+                                        }}
+                                    >
+                                        {multi.labelFor(id)}
+                                        {/* Dropping the LAST member would stop the aircraft,
+                                            which is a much bigger action than an X on a chip
+                                            appears to offer. Release is what does that. */}
+                                        {multi.members.length > 1 && (
+                                            <button
+                                                onClick={() => getSocket().emit('set_follow_vehicle', { track_id: id })}
+                                                style={{
+                                                    display: 'flex', border: 'none', background: 'none',
+                                                    cursor: 'pointer', padding: 0,
+                                                    color: 'hsl(var(--app-text-muted))',
+                                                }}
+                                            ><X size={10} /></button>
+                                        )}
+                                    </span>
+                                ))}
+                                <span style={{ ...LABEL, fontSize: 9.5, marginLeft: 'auto' }}>
+                                    {multi.members.length} / {multi.max}
+                                </span>
+                            </div>
+                            <div style={{ ...LABEL, fontSize: 9.5, lineHeight: 1.4 }}>
+                                {multi.members.length < multi.max
+                                    ? 'Tap another subject on the video to add them.'
+                                    : 'Group is full — drop one to add another.'}
+                            </div>
+                            {multi.framing && <GroupFramingReadout f={multi.framing} />}
+                        </>
+                    )}
+                </div>
+            )}
+
             {/* ── Distance ─────────────────────────────────────────────── */}
+            {/* HIDDEN IN GROUP MODE, because it does nothing there. The
+                forward axis is driven by containment — fit everyone with
+                margin — not by any one subject's apparent size, so leaving the
+                slider on screen would offer a control the aircraft ignores.
+                That is worse than no control: it makes the operator think they
+                have tried something when they have not. */}
+            {!(multi?.enabled && multi.members.length > 1) &&
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <MoveVertical size={11} style={{ color: 'hsl(var(--app-text-muted))', transform: 'rotate(90deg)' }} />
@@ -209,7 +304,7 @@ export function FollowControls({
                         will keep moving {actualFillPct! > targetPct ? 'back' : 'in'} until they meet.
                     </div>
                 )}
-            </div>
+            </div>}
 
             {/* ── Altitude ─────────────────────────────────────────────── */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -257,6 +352,59 @@ export function FollowControls({
                 }}>
                     <MoveVertical size={11} style={{ marginTop: 1, flexShrink: 0 }} />
                     <span><b>{elevate.elevating ? 'Auto-elevating' : 'Cannot climb'}</b>{' — '}{elevate.reason}</span>
+                </div>
+            )}
+        </div>
+    )
+}
+
+/**
+ * What group follow is doing and how much margin it has left.
+ *
+ * The FILL NUMBERS are shown next to the limit rather than only the action,
+ * for the same reason the single-target control shows target and actual
+ * together: "framed" and "framed, barely" produce identical behaviour right up
+ * until they do not, and the operator needs to see the second one coming.
+ */
+function GroupFramingReadout({ f }: { f: GroupFraming }) {
+    const bad = f.action === 'unframeable'
+    const busy = f.action === 'widen' || f.action === 'close'
+    const color = bad ? '#f87171' : busy ? '#fbbf24' : 'hsl(var(--app-text-muted))'
+    const tight = (v: number, max: number) => v > max * 0.9
+
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10 }}>
+                <span style={{
+                    fontFamily: 'monospace', fontWeight: 700, color,
+                    textTransform: 'uppercase', letterSpacing: 0.3,
+                }}>
+                    {bad ? 'cannot frame all' : f.action}
+                </span>
+                <span style={{ marginLeft: 'auto', fontFamily: 'monospace', fontSize: 9.5 }}>
+                    <span style={{ color: tight(f.fill_w_pct, f.max_fill_w_pct) ? '#fbbf24' : 'hsl(var(--app-text-muted))' }}>
+                        W {f.fill_w_pct.toFixed(0)}/{f.max_fill_w_pct.toFixed(0)}%
+                    </span>
+                    <span style={{ marginLeft: 6, color: tight(f.fill_h_pct, f.max_fill_h_pct) ? '#fbbf24' : 'hsl(var(--app-text-muted))' }}>
+                        H {f.fill_h_pct.toFixed(0)}/{f.max_fill_h_pct.toFixed(0)}%
+                    </span>
+                </span>
+            </div>
+            {/* A member out of frame is reported even while the rest are
+                framed perfectly. Group follow keeps flying on whoever it can
+                see, so without this line a silent loss looks like normal
+                operation. */}
+            {f.members_visible < f.members_total && (
+                <div style={{ fontSize: 9.5, color: '#fbbf24', lineHeight: 1.4 }}>
+                    {f.members_visible} of {f.members_total} in frame — holding rather than
+                    closing in, so the missing one stays recoverable.
+                </div>
+            )}
+            <div style={{ fontSize: 9.5, color, lineHeight: 1.4 }}>{f.reason}</div>
+            {bad && f.required_range_m != null && (
+                <div style={{ fontSize: 9.5, color: '#f87171', lineHeight: 1.4 }}>
+                    Would need about {f.required_range_m.toFixed(0)} m of range — at which
+                    plates and faces stop being readable. Drop a member or release.
                 </div>
             )}
         </div>
