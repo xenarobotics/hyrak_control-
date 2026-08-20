@@ -102,6 +102,7 @@ def _manager(mode: str = "OFFBOARD", offboard_fail: bool = False):
     t._last_velocity_cmd_t = 0.0
     t._pilot_override_mode = None
     t._offboard_release_until = 0.0
+    t._alt_verify_task = None
     t._MODE_CONFIRM_S = 0.3
     return t
 
@@ -241,7 +242,7 @@ def test_the_window_expires_so_a_later_takeover_is_still_seen():
     started another must still register."""
     import time as _time
     t = _flying()
-    t._expect_offboard_exit()
+    t._claim_next_mode_change()
     t._offboard_release_until = _time.monotonic() - 0.01   # window already gone
     t._check_offboard_departure("POSCTL")
     assert t.pilot_has_control is True
@@ -535,3 +536,88 @@ def test_the_snapshot_carries_who_is_flying():
     d = snap.to_dict()
     assert d["offboard_active"] is False
     assert d["pilot_override"] is None
+
+
+# --------------------------------------------------------------------------- #
+# Holes found on cross-check                                                    #
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.asyncio
+async def test_starting_offboard_claims_the_change_too():
+    """ENTERING RACES THE SAME WAY LEAVING DOES. offboard.start() returns on
+    PX4's ACK, but flight_mode comes off a 1 Hz HEARTBEAT — one already in
+    flight still carries the OLD mode. Arriving after _offboard_active went
+    true, that stale report read as a departure, and the app latched itself out
+    of the Offboard session it had just successfully started."""
+    t = _manager("TAKEOFF")
+    assert await t.start_offboard() is True
+    t._check_offboard_departure("HOLD")   # the stale heartbeat
+    assert t.pilot_has_control is False, "the app locked itself out of its own session"
+    assert t._offboard_active is True
+
+
+#: Every method that commands a flight-mode change. SET ALT and RTL sit on
+#: screen DURING a follow, so a missing claim here is not theoretical: using
+#: either mid-chase would stop the tracker and lock the operator out of
+#: Offboard for a pilot who was never there.
+_MODE_CHANGING = [
+    ("takeoff", ()),
+    ("goto_altitude", (10.0,)),
+    ("goto_custom_rtl", (1.0, 2.0, 10.0)),
+    ("goto_home", ()),
+    ("start_mission", ()),
+    ("restart_mission", ()),
+    ("pause_mission", ()),
+    ("arm_and_start_mission", ()),
+    ("arm_and_restart_mission", ()),
+    ("disarm", ()),
+    ("emergency_stop", ()),
+    ("set_flight_mode", ("HOLD",)),
+    ("start_offboard", ()),
+    ("stop_offboard", ()),
+    ("handover_to_pilot", ()),
+]
+
+
+@pytest.mark.parametrize("name,args", _MODE_CHANGING)
+def test_every_mode_changing_method_claims_the_change(name, args):
+    """Walks the list rather than trusting nine scattered calls to stay in
+    step — this codebase has already grown seven hand-copied copies of one
+    analyzer list that silently drifted apart."""
+    fn = getattr(TelemetryManager, name)
+    assert getattr(fn, "_claims_mode_change", False) is True, (
+        f"{name} moves the aircraft but does not claim the mode change it "
+        f"causes — using it mid-follow would read as a pilot taking over"
+    )
+
+
+@pytest.mark.asyncio
+async def test_setting_altitude_mid_follow_is_not_a_takeover():
+    """THE REGRESSION THE DECORATOR EXISTS FOR. SET ALT during a chase moves
+    the aircraft through PX4's reposition path, which changes mode."""
+    t = _flying()
+    t._snapshot.position.latitude_deg = 17.6
+    t._snapshot.position.longitude_deg = 78.1
+    t._snapshot.flight_mode.is_in_air = True
+
+    class _Loc:
+        async def goto_location(self, *a):
+            return None
+    t._drone.action.goto_location = _Loc().goto_location
+    await t.goto_altitude(25.0)
+    t._check_offboard_departure("HOLD")
+    assert t.pilot_has_control is False
+    # goto_altitude spawns a verifier that outlives this test's loop.
+    if t._alt_verify_task is not None:
+        t._alt_verify_task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_a_setpoint_in_flight_does_not_reach_a_hand_flown_aircraft():
+    """The trackers are stopped by the callback, but a vision result computed
+    just before the takeover can still be on its way down."""
+    t = _flying()
+    t._check_offboard_departure("POSCTL")
+    before = t._drone.offboard.setpoints
+    await t.send_velocity_command(forward_m_s=3.0)
+    assert t._drone.offboard.setpoints == before

@@ -499,6 +499,10 @@ def _wd_manager(offboard_active=True, connected=True):
     t._offboard_hold_alt = None
     t._last_velocity_cmd_t = 0.0
     t._offboard_stale = False
+    # Nobody has taken the aircraft. send_velocity_command refuses outright
+    # while a pilot has it (see test_pilot_handover), so the watchdog tests
+    # have to say which case they are — these are all "the app still holds it".
+    t._pilot_override_mode = None
     return t
 
 

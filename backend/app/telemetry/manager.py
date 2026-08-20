@@ -10,6 +10,7 @@ Key concepts:
 - One TelemetryManager instance per drone session
 """
 import asyncio
+import functools
 import json
 import logging
 import math
@@ -46,6 +47,29 @@ def _find_free_port() -> int:
     port = s.getsockname()[1]
     s.close()
     return port
+
+
+def _claims_mode_change(fn):
+    """Marks a method that COMMANDS A FLIGHT MODE CHANGE, so the change it
+    causes is not mistaken for a pilot taking the aircraft.
+
+    A DECORATOR RATHER THAN NINE SCATTERED CALLS, because nine scattered calls
+    is how this codebase already grew seven hand-copied copies of the pursuit
+    analyzer list that had silently drifted apart. The list of things that move
+    the aircraft only ever grows; a missing decorator is one visible line above
+    a def, and test_pilot_handover walks every one of them.
+
+    Getting this wrong is not cosmetic. SET ALT and RTL sit on screen DURING a
+    follow: without the claim, using either mid-chase would read as a takeover,
+    stop the tracker, and lock the operator out of Offboard for a pilot who was
+    never there.
+    """
+    @functools.wraps(fn)
+    async def _wrapper(self, *args, **kwargs):
+        self._claim_next_mode_change()
+        return await fn(self, *args, **kwargs)
+    _wrapper._claims_mode_change = True
+    return _wrapper
 
 
 class TelemetryManager:
@@ -915,6 +939,7 @@ class TelemetryManager:
         except Exception as e:
             logger.warning(f"Mission rewind failed: {e} — starting anyway")
 
+    @_claims_mode_change
     async def start_mission(self) -> bool:
         """
         Start the uploaded mission. Drone must be armed.
@@ -939,6 +964,7 @@ class TelemetryManager:
             logger.error(f"Start mission failed: {e}")
             return False
 
+    @_claims_mode_change
     async def arm_and_start_mission(self) -> tuple[bool, str]:
         """Arm the drone (if not already armed) then start the uploaded mission."""
         try:
@@ -991,6 +1017,7 @@ class TelemetryManager:
         except Exception as e:
             logger.warning(f"Post-takeoff altitude correction skipped: {e}")
 
+    @_claims_mode_change
     async def goto_altitude(self, relative_altitude_m: float) -> bool:
         """
         Hold the current lat/lon and move to a new relative altitude.
@@ -1044,6 +1071,7 @@ class TelemetryManager:
             logger.error(f"Goto altitude failed: {e}")
             return False
 
+    @_claims_mode_change
     async def goto_custom_rtl(self, lat: float, lng: float, relative_altitude_m: float) -> bool:
         """
         Abort whatever the drone is doing and fly to a custom RTL point.
@@ -1065,6 +1093,7 @@ class TelemetryManager:
             logger.error(f"Custom RTL failed: {e}")
             return False
 
+    @_claims_mode_change
     async def goto_home(self, relative_altitude_m: Optional[float] = None) -> bool:
         """
         Fly to THIS drone's own home position (where it armed) and hover there.
@@ -1110,6 +1139,7 @@ class TelemetryManager:
             logger.error(f"RTL home failed: {e}")
             return False
 
+    @_claims_mode_change
     async def restart_mission(self) -> bool:
         """
         Reset to waypoint 0 then start the mission.
@@ -1137,6 +1167,7 @@ class TelemetryManager:
             logger.error(f"Restart mission failed: {e}")
             return False
 
+    @_claims_mode_change
     async def arm_and_restart_mission(self) -> tuple[bool, str]:
         """Arm the drone (if not already armed), reset to waypoint 0, then start mission."""
         try:
@@ -1173,6 +1204,7 @@ class TelemetryManager:
             logger.error(f"Arm+restart failed: {e}")
             return False, str(e)
 
+    @_claims_mode_change
     async def pause_mission(self) -> bool:
         """Pause mission and enter HOLD mode."""
         try:
@@ -1352,6 +1384,7 @@ class TelemetryManager:
         )
         return False
 
+    @_claims_mode_change
     async def takeoff(self, altitude_m: Optional[float] = None) -> bool:
         import time as _time
         sent = _time.monotonic()
@@ -1627,11 +1660,11 @@ class TelemetryManager:
                 return said
         return fallback
 
+    @_claims_mode_change
     async def disarm(self) -> bool:
         import time as _time
         sent = _time.monotonic()
         self.last_action_error = None
-        self._expect_offboard_exit()
         try:
             await self._drone.action.disarm()
             logger.info("✅ Disarmed")
@@ -1641,12 +1674,12 @@ class TelemetryManager:
             logger.error(f"Disarm failed: {e} | FC said: {self.last_action_error}")
             return False
 
+    @_claims_mode_change
     async def emergency_stop(self) -> bool:
         """
         Kills motors immediately regardless of state.
         Only use in genuine emergency — drone will fall.
         """
-        self._expect_offboard_exit()
         try:
             await self._drone.action.kill()
             logger.warning("🚨 EMERGENCY KILL SENT")
@@ -1698,8 +1731,18 @@ class TelemetryManager:
     #: place: the app is not flying and does not think it is.
     _OFFBOARD_RELEASE_WINDOW_S = 2.0
 
-    def _expect_offboard_exit(self) -> None:
-        """Call immediately BEFORE any action of ours that ends Offboard."""
+    def _claim_next_mode_change(self) -> None:
+        """Call immediately BEFORE any action of ours that changes flight mode.
+
+        BOTH DIRECTIONS NEED IT, which the first cut of this missed. Entering
+        Offboard races the same way leaving it does: offboard.start() returns
+        on PX4's ACK, but flight_mode is derived from a 1 Hz HEARTBEAT, so a
+        heartbeat already in flight still carries the OLD mode. Arriving after
+        _offboard_active went true, that stale report reads as a departure —
+        the app would latch itself out of the Offboard session it had just
+        successfully started, every time the previous mode's last heartbeat
+        landed late.
+        """
         self._offboard_release_until = time.monotonic() + self._OFFBOARD_RELEASE_WINDOW_S
 
     def _check_offboard_departure(self, mode_name: str) -> None:
@@ -1750,6 +1793,7 @@ class TelemetryManager:
     #: possible answer to "give me the aircraft".
     _HANDOVER_MODES = ("POSITION", "ALTITUDE", "STABILIZED")
 
+    @_claims_mode_change
     async def handover_to_pilot(self) -> tuple[bool, str]:
         """Deliberately give the aircraft to the human, from the ground station.
 
@@ -1762,12 +1806,10 @@ class TelemetryManager:
         in the slot they want, which PX4 acts on only when it CHANGES and so
         would otherwise require them to toggle away and back.
         """
-        self._expect_offboard_exit()
         if self._offboard_active:
             await self.stop_offboard()
         tried: list[str] = []
         for mode in self._HANDOVER_MODES:
-            self._expect_offboard_exit()
             if await self.set_flight_mode(mode):
                 self._pilot_override_mode = mode
                 self._snapshot.pilot_override = mode
@@ -1887,6 +1929,7 @@ class TelemetryManager:
             return "ok", f"Flight-mode switch is on RC channel {channel}"
         return "ok", ""
 
+    @_claims_mode_change
     async def start_offboard(self) -> bool:
         """
         Starts Offboard mode.
@@ -1926,11 +1969,9 @@ class TelemetryManager:
             logger.error(f"Offboard start failed: {e}")
             return False
 
+    @_claims_mode_change
     async def stop_offboard(self) -> bool:
         """Stops Offboard mode and returns to HOLD."""
-        # Claimed BEFORE the aircraft is touched: the mode change we are about
-        # to cause must not come back looking like a pilot taking over.
-        self._expect_offboard_exit()
         try:
             # Send zero velocity before stopping
             await self._drone.offboard.set_velocity_body(
@@ -2021,6 +2062,13 @@ class TelemetryManager:
         """
         if not self._connected:
             return
+        if self._pilot_override_mode is not None:
+            # BELT AND BRACES. The trackers are stopped by the override
+            # callback, but a vision result computed just before the takeover
+            # can still be in flight, and the whole point of the latch is that
+            # nothing this app does reaches the aircraft while a human is
+            # flying it out of trouble.
+            return
         # Before the send, not after: a send that raises still means the
         # commanding loop is alive, and the watchdog is there to catch a loop
         # that has gone silent, not one whose sends are failing.
@@ -2080,6 +2128,7 @@ class TelemetryManager:
         "TAKEOFF": {"TAKEOFF"},
     }
 
+    @_claims_mode_change
     async def set_flight_mode(self, mode: str) -> bool:
         """Switch flight mode, for real, and confirm the aircraft agreed.
 
@@ -2108,9 +2157,6 @@ class TelemetryManager:
         whose preconditions are not met without saying so.
         """
         mode = mode.upper()
-        # An operator choosing a mode from the app's own menu is this app
-        # ending Offboard, not a pilot taking the aircraft.
-        self._expect_offboard_exit()
         if mode not in self._MODE_REPORTS_AS:
             logger.warning(f"Unknown flight mode: {mode}")
             self.last_action_error = f"{mode} is not a mode this aircraft offers"
