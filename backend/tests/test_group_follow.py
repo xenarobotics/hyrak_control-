@@ -1097,6 +1097,83 @@ def test_a_vehicle_rebinds_through_its_plate_before_it_has_an_id(clock):
     assert state["follow_members"] == [9, 2]
 
 
+def test_a_rebound_primary_keeps_the_plate_it_was_locked_with(clock):
+    """THE TWELFTH REVERT, which took two attempts to catch.
+
+    _resolve_members repairs `locked_track_id` itself when the PRIMARY is the
+    member being re-bound. The promotion block twenty lines below repairs it
+    too, so reverting the inner guard leaves the track id identical and every
+    obvious assertion passes — the two guards overlap and the test cannot tell
+    them apart on the id alone.
+
+    They do NOT overlap on the plate. The promotion block clears `locked_plate`
+    on purpose: it is promoting a DIFFERENT vehicle, whose plate is not the one
+    that was locked. Applied to a re-bind that is the same vehicle, that wipes
+    a correct plate.
+
+    Which needs one more condition to be visible, and it is the ordinary one:
+    the frame the vehicle returns on has no plate read. ANPR reads
+    intermittently — most frames of a real follow carry no plate at all — so
+    the refill further down _follow does not fire, and the readout goes blank
+    on a vehicle sitting in plain sight. With the guard, nothing was ever
+    cleared.
+    """
+    t, state, tt = _armed()
+    v1 = tt.vehicle(1, 100, 400, 400, 700)
+    v1.vehicle_id, v1.plate = "VH-000001", "719257C"
+    v2 = tt.vehicle(2, 900, 400, 1200, 700)
+    v2.vehicle_id = "VH-000002"
+    t.request_follow("s", 1)
+    t._follow(state, [v1], [], "s", W, H, None, None)
+    t.request_follow("s", 2)
+    t._follow(state, [v1, v2], [], "s", W, H, None, None)
+    assert state["follow_members"] == [1, 2]
+    assert state["locked_plate"] == "719257C"
+
+    back = tt.vehicle(9, 110, 400, 410, 700)
+    back.vehicle_id = "VH-000001"
+    back.plate = ""                      # the usual case: no read on this frame
+    clock.advance(0.1)
+    t._follow(state, [back, v2], [], "s", W, H, None, None)
+
+    assert state["locked_track_id"] == 9
+    assert state["locked_plate"] == "719257C", (
+        "the primary re-bound to the same vehicle and lost its plate — the "
+        "readout goes blank on a subject that is plainly in frame"
+    )
+
+
+def test_the_primary_is_always_the_first_member(clock):
+    """THE INVARIANT THE OVERLAP DEPENDS ON, pinned so it cannot quietly stop
+    being true.
+
+    Because the primary is always members[0], the promotion block's
+    `resolved[0]` happens to be the re-bound primary, which is why reverting
+    the guard above leaves the track id right. If a future change ever lets the
+    primary sit anywhere else in the list — a reorder, a different promotion
+    rule, membership restored from a saved session — that coincidence ends and
+    the promotion block starts handing the aircraft to a DIFFERENT SUBJECT on a
+    re-bind. The guard in _resolve_members is what makes that harmless, and
+    this test is the warning that it has become load-bearing.
+    """
+    t, state, tt = _armed()
+    _group_of_two(t, tt, (12, 800, 300, 900, 700), (20, 1000, 300, 1100, 700))
+    assert state["locked_track_id"] == state["follow_members"][0]
+
+    # Adding a third does not reassign it.
+    t.request_follow("s", 33)
+    t._follow(state, [], [tt.person(12, 800, 300, 900, 700),
+                          tt.person(20, 1000, 300, 1100, 700),
+                          tt.person(33, 400, 300, 500, 700)],
+              "s", W, H, None, None)
+    assert state["locked_track_id"] == state["follow_members"][0]
+
+    # Dropping the primary promotes to the new first member, not to an
+    # arbitrary one.
+    t.request_follow("s", state["locked_track_id"])
+    assert state["locked_track_id"] == state["follow_members"][0]
+
+
 def test_rebinding_never_steals_a_track_that_is_already_a_member(clock):
     """Two members collapsing onto one subject would report a full group while
     following half of it."""
