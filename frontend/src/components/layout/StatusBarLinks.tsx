@@ -16,7 +16,7 @@
 // shared with the Fly tab's DeviceSelector, so the two can never show
 // different answers to "which radio".
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { useTelemetryLink } from '@/hooks/useTelemetryLink'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
@@ -91,13 +91,26 @@ export function StatusBarLinks() {
     // DISABLED while streaming, which is honest but useless here: changing the
     // camera without leaving the AI page is the entire reason this exists. So
     // the restart is done explicitly, and the operator is told it will happen.
+    // Held so a SECOND change cancels the first restart instead of racing it.
+    // Without this, changing source and then camera within the delay fires two
+    // startStream calls at a backend that has torn the session down once — the
+    // second offer arrives against a half-built session and the feed wedges,
+    // which is worse than the state the operator was trying to leave.
+    const restartTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+    useEffect(() => () => { if (restartTimer.current) clearTimeout(restartTimer.current) }, [])
+
     const restart = () => {
         if (!isStreaming) return
+        if (restartTimer.current) clearTimeout(restartTimer.current)
         stopStream()
-        // One tick is not enough — stopStream tears down a PeerConnection and
-        // the backend needs the old session gone before it will accept a new
-        // offer for the same client.
-        setTimeout(() => { void startStream() }, 600)
+        // One tick is not enough. stopStream tears down the PeerConnection
+        // locally and emits stop_stream; the backend has to have finished with
+        // the old session before it will accept a new offer from the same
+        // client, and that round trip is what this waits for.
+        restartTimer.current = setTimeout(() => {
+            restartTimer.current = null
+            void startStream()
+        }, 600)
     }
 
     const changeVideoSource = (v: VideoSource) => {
