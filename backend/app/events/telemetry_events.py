@@ -75,6 +75,14 @@ async def _execute_drone_action(tel, action: str, data: dict) -> dict:
     if action == "set_mode":
         mode = data.get("mode", "HOLD")
         return {"action": action, "mode": mode, "ok": await tel.set_flight_mode(mode)}
+    if action == "start_calibration":
+        ok, why = await tel.start_calibration(str(data.get("sensor", "")))
+        return {"action": action, "ok": ok, "error": None if ok else why}
+    if action == "cancel_calibration":
+        return {"action": action, "ok": await tel.cancel_calibration()}
+    if action == "dismiss_calibration":
+        tel.dismiss_calibration()
+        return {"action": action, "ok": True}
     if action == "handover_to_pilot":
         # THE OPERATOR'S ROUTE TO HANDING THE AIRCRAFT OVER, which until now
         # only existed on the transmitter and only worked if the airframe's
@@ -244,9 +252,25 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             except RuntimeError:
                 pass
 
+        def on_calibration(state: dict):
+            """Calibration state, pushed whole on every change.
+
+            Whole rather than as deltas: a calibration is a few dozen events
+            over half a minute, so there is nothing to save by diffing, and a
+            panel rebuilt from a full state cannot drift out of step with the
+            aircraft the way one accumulating patches can — which on this
+            screen would mean showing a side as done that the autopilot is
+            still waiting for.
+            """
+            try:
+                asyncio.create_task(sio.emit("calibration_state", state, to=sid))
+            except RuntimeError:
+                pass
+
         manager = TelemetryManager(on_update=on_telemetry_update,
                                    on_fc_message=on_fc_message,
                                    on_pilot_override=on_pilot_override)
+        manager.set_calibration_listener(on_calibration)
         # TELL IT WHAT THE LINK REALLY IS, before start() picks stream rates.
         #
         # The address cannot say. In this product the radio is plugged into the

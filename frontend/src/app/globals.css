@@ -124,3 +124,40 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--app-text-muted));
 }
+/* ── Sensor calibration stage ─────────────────────────────────────────────
+   Keyframes for the 3D drone model in Config -> Sensors. Here rather than in
+   the component because CSS animations cannot be expressed as inline styles,
+   and the alternative — an injected <style> tag per mount — re-inserts the
+   same rules on every render of a panel that is already animating.
+
+   Every one of these is PURELY DECORATIVE. The calibration state comes from
+   the autopilot; nothing below is allowed to imply progress the aircraft has
+   not reported, which is why there is no keyframe that fills a bar or marks a
+   side. prefers-reduced-motion turns all of it off, and the panel stays
+   readable because the state is carried by colour and text, never by motion
+   alone. */
+
+@keyframes hyrak-cal-spin {
+  from { transform: rotateZ(0deg); }
+  to   { transform: rotateZ(360deg); }
+}
+
+@keyframes hyrak-cal-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
+@keyframes hyrak-cal-arrow {
+  0%   { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: -36; }
+}
+
+@keyframes hyrak-cal-settle {
+  0%   { transform: translateY(-3px); }
+  50%  { transform: translateY(3px); }
+  100% { transform: translateY(-3px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hyrak-cal-anim { animation: none !important; }
+}

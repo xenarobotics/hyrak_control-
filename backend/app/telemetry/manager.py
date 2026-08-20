@@ -10,6 +10,7 @@ Key concepts:
 - One TelemetryManager instance per drone session
 """
 import asyncio
+import contextlib
 import functools
 import json
 import logging
@@ -26,6 +27,7 @@ from mavsdk.offboard import (
     AttitudeRate,
     VelocityBodyYawspeed,
 )
+from app.telemetry.calibration import CalibrationSession, SENSORS
 from app.telemetry.schemas import (
     TelemetrySnapshot,
     AttitudeData,
@@ -118,6 +120,13 @@ class TelemetryManager:
         self._offboard_hold_alt: Optional[float] = None  # relative altitude (m) to hold during AI/offboard tracking
         # Latched when the pilot takes the aircraft; see _note_pilot_override.
         self._pilot_override_mode: Optional[str] = None
+        # The calibration in progress, if any. One at a time, deliberately:
+        # PX4 runs a single calibration routine and a second START while one is
+        # live is refused by the vehicle in a way that reads, on screen, as the
+        # first one having crashed.
+        self._calibration: Optional[CalibrationSession] = None
+        self._calibration_task: Optional[asyncio.Task] = None
+        self._on_calibration: Optional[Callable[[dict], None]] = None
         # Monotonic deadline before which a departure from Offboard is OURS.
         #
         # The alternative — a boolean cleared once the mode has settled — races
@@ -705,6 +714,21 @@ class TelemetryManager:
                     continue
                 self._status_text.append((_time.monotonic(), sev, text))
                 del self._status_text[:-self._STATUS_TEXT_KEEP]
+                # THE CALIBRATION PICTURE COMES FROM HERE, not from the
+                # plugin's cooked progress — see telemetry/calibration.py for
+                # why.
+                #
+                # Guarded for the same reason the message listener below is:
+                # THIS LOOP CARRIES THE AUTOPILOT'S REFUSAL REASONS, and an
+                # exception anywhere in it ends the subscription for the rest
+                # of the flight. Every "arming denied because…" after that
+                # point would degrade to "the drone refused the command",
+                # sending the operator to check a radio that is working.
+                # Nothing about drawing a calibration is worth that.
+                try:
+                    self._feed_calibration(text)
+                except Exception as e:
+                    logger.debug(f"Calibration feed raised: {e}")
                 if self._status_event is not None:
                     self._status_event.set()
                 if self._on_fc_message:
@@ -2508,6 +2532,162 @@ class TelemetryManager:
     @property
     def snapshot(self) -> TelemetrySnapshot:
         return self._snapshot
+
+    # ------------------------------------------------------------------ #
+    # Sensor calibration                                                   #
+    # ------------------------------------------------------------------ #
+    #
+    # The plugin drives it and delivers the verdict; PX4's own STATUSTEXT
+    # drives the picture. telemetry/calibration.py explains the split — the
+    # short version is that a percentage does not tell an operator which way to
+    # turn the aircraft, and the side-by-side state that does is only in the
+    # raw lines.
+
+    def set_calibration_listener(self, cb: Optional[Callable[[dict], None]]) -> None:
+        self._on_calibration = cb
+
+    @property
+    def calibrating(self) -> Optional[str]:
+        """The sensor being calibrated, or None."""
+        return self._calibration.state.sensor if self._calibration else None
+
+    def _feed_calibration(self, text: str) -> None:
+        if self._calibration is None:
+            return
+        try:
+            if self._calibration.feed(text):
+                self._emit_calibration()
+        except Exception as e:
+            logger.debug(f"Calibration line ignored: {e}")
+
+    def _emit_calibration(self) -> None:
+        if self._calibration is None or self._on_calibration is None:
+            return
+        try:
+            self._on_calibration(self._calibration.state.to_dict())
+        except Exception as e:
+            logger.debug(f"Calibration listener raised: {e}")
+
+    def calibration_refusal(self, sensor: str) -> Optional[str]:
+        """Why this calibration must not start, or None if it may.
+
+        CHECKED HERE RATHER THAN LEFT TO PX4, even though PX4 refuses an armed
+        calibration itself. Its refusal arrives as CalibrationResult.FAILED_ARMED
+        several seconds later, by which time the operator has a spinning
+        control and a vehicle they believe is calibrating. Saying no
+        immediately, in a sentence, is the whole difference.
+        """
+        if sensor not in SENSORS:
+            return f"{sensor} is not a sensor this aircraft can calibrate from here"
+        if not self._connected:
+            return "No drone connected"
+        if self._calibration is not None:
+            return (
+                f"A {SENSORS[self._calibration.state.sensor]['label']} calibration "
+                f"is already running — cancel it first"
+            )
+        if self._snapshot.flight_mode.is_armed:
+            return "Disarm before calibrating — the autopilot refuses to calibrate an armed vehicle"
+        if self._snapshot.flight_mode.is_in_air:
+            return "The aircraft is airborne"
+        if self._offboard_active:
+            return "Stop the tracking mode that is flying this aircraft first"
+        return None
+
+    async def start_calibration(self, sensor: str) -> tuple[bool, str]:
+        """Begin one calibration. Returns (started, reason-if-not)."""
+        refusal = self.calibration_refusal(sensor)
+        if refusal:
+            logger.warning(f"Calibration refused ({sensor}): {refusal}")
+            return False, refusal
+
+        self._calibration = CalibrationSession(sensor)
+        self._emit_calibration()
+        self._calibration_task = asyncio.create_task(
+            self._run_calibration(sensor), name=f"cal_{sensor}"
+        )
+        logger.info(f"🧭 Calibration started: {SENSORS[sensor]['label']}")
+        return True, ""
+
+    async def _run_calibration(self, sensor: str) -> None:
+        session = self._calibration
+        method = getattr(self._drone.calibration, SENSORS[sensor]["method"])
+        try:
+            async for progress in method():
+                if session is not self._calibration:
+                    return                      # superseded or cancelled
+                changed = False
+                # The plugin's own percentage is a FALLBACK. On firmwares that
+                # send progress STATUSTEXTs the two agree; on ones that do not,
+                # this is the only number there is, and a bar frozen at zero
+                # for forty seconds is indistinguishable from a hang.
+                if getattr(progress, "has_progress", False):
+                    p = int(round(float(progress.progress) * 100))
+                    if p > session.state.progress:
+                        session.state.progress = max(0, min(100, p))
+                        changed = True
+                if getattr(progress, "has_status_text", False):
+                    if session.feed(progress.status_text or ""):
+                        changed = True
+                if changed:
+                    self._emit_calibration()
+            session.finish(True)
+            logger.info(f"✅ Calibration complete: {SENSORS[sensor]['label']}")
+        except asyncio.CancelledError:
+            session.state.phase = "cancelled"
+            session.state.instruction = "Calibration cancelled"
+            raise
+        except Exception as e:
+            reason = self._plain(e, "the calibration did not complete")
+            session.finish(False, reason)
+            logger.error(f"Calibration failed ({sensor}): {e}")
+        finally:
+            if session is self._calibration:
+                self._emit_calibration()
+                # The session is kept, not cleared: the operator has to be able
+                # to READ the verdict. It is replaced when the next calibration
+                # starts, and cleared explicitly by dismiss_calibration.
+                self._calibration_task = None
+
+    async def cancel_calibration(self) -> bool:
+        """Stop the running calibration, both ends.
+
+        BOTH ENDS IS THE POINT. Cancelling only our task leaves PX4 still in
+        its calibration routine, refusing arming and every subsequent
+        calibration, with nothing on screen to say why — the aircraft looks
+        bricked. The vehicle is told first, for that reason.
+        """
+        if self._calibration is None:
+            return False
+        try:
+            await asyncio.wait_for(self._drone.calibration.cancel(), timeout=5.0)
+        except Exception as e:
+            logger.warning(f"Calibration cancel not acknowledged: {e}")
+        task = self._calibration_task
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+        self._calibration_task = None
+        if self._calibration is not None:
+            self._calibration.state.phase = "cancelled"
+            self._calibration.state.instruction = "Calibration cancelled"
+            self._emit_calibration()
+        logger.info("Calibration cancelled")
+        return True
+
+    def dismiss_calibration(self) -> None:
+        """Clear a FINISHED calibration so the panel returns to its resting
+        state. Refuses to discard one that is still running, which would leave
+        PX4 mid-routine with nothing on screen tracking it."""
+        if self._calibration is None:
+            return
+        if self._calibration.state.phase in ("starting", "running"):
+            return
+        self._calibration = None
+        if self._on_calibration is not None:
+            with contextlib.suppress(Exception):
+                self._on_calibration({"phase": "idle", "sensor": "", "sides": {}})
 
     # ------------------------------------------------------------------ #
     # Parameter read / write                                               #

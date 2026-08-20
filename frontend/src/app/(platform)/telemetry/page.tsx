@@ -2,6 +2,9 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useDroneStore } from '@/store/drone'
+import { useCalibration } from '@/hooks/useCalibration'
+import { CalibrationStage } from '@/components/config/CalibrationStage'
+import { CAL_SENSORS } from '@/types/calibration'
 import { useMissionStore } from '@/store/mission'
 import { getSocket } from '@/lib/socket'
 import {
@@ -914,6 +917,92 @@ function VehicleWorkspace({ v, onUpdate }: { v: VehicleProfile; onUpdate: (p: Pa
 
 // ── SENSORS ───────────────────────────────────────────────────────────────────
 
+// ── CALIBRATION ───────────────────────────────────────────────────────────────
+//
+// This used to be five disabled buttons under "Status: not calibrated" and a
+// note saying a wizard needed parameter write access. The note was wrong about
+// the mechanism — calibration is a COMMAND (MAV_CMD_PREFLIGHT_CALIBRATION),
+// not a parameter write, and MAVSDK has had a plugin for it all along — and
+// the hardcoded status was worse than no status: an aircraft that had been
+// calibrated ten minutes earlier still read "not calibrated".
+//
+// It says nothing about calibration state at rest now, for the same reason.
+// PX4 exposes no "is the accelerometer calibrated" flag a ground station can
+// read; what it exposes is a PREFLIGHT FAILURE when one is missing, which is
+// already in the message log and on the arming refusal. Inventing a green tick
+// here would be inventing a fact.
+
+function CalibrationPanel({ connected }: { connected: boolean }) {
+    const { state, refusal, busy, start, cancel, dismiss } = useCalibration()
+
+    if (state.phase !== 'idle') {
+        return <CalibrationStage state={state} onCancel={cancel} onDismiss={dismiss} />
+    }
+
+    return (
+        <Card title="CALIBRATION">
+            {CAL_SENSORS.map((sensor, i) => (
+                <div key={sensor.key} style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 12,
+                    paddingBottom: i < CAL_SENSORS.length - 1 ? 12 : 0,
+                    borderBottom: i < CAL_SENSORS.length - 1 ? '1px solid hsl(var(--app-border))' : 'none',
+                    marginBottom: i < CAL_SENSORS.length - 1 ? 12 : 0,
+                }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ fontSize: 12, fontWeight: 600, color: 'hsl(var(--app-text))', margin: 0 }}>
+                            {sensor.label}
+                            <span style={{ fontSize: 10, fontFamily: 'monospace', fontWeight: 400, color: 'hsl(var(--app-text-muted))', marginLeft: 8 }}>
+                                {sensor.mins}
+                            </span>
+                        </p>
+                        {/* WHAT IT IS FOR AND WHAT RUINS IT, at the moment of
+                            choosing. A compass calibrated indoors passes and is
+                            then wrong, which is not something an operator can
+                            discover from the result. */}
+                        <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '3px 0 0', lineHeight: 1.6 }}>
+                            {sensor.blurb}
+                        </p>
+                    </div>
+                    <button
+                        onClick={() => start(sensor.key)}
+                        disabled={!connected || busy}
+                        title={connected ? `Start ${sensor.label} calibration` : 'Connect to the drone first'}
+                        style={{
+                            padding: '5px 13px', borderRadius: 7, flexShrink: 0,
+                            background: 'transparent',
+                            border: `1px solid ${connected && !busy ? 'rgba(34,211,238,0.45)' : 'hsl(var(--app-border))'}`,
+                            color: connected && !busy ? '#22d3ee' : 'hsl(var(--app-text-muted))',
+                            fontSize: 11, fontFamily: 'monospace', fontWeight: 600,
+                            cursor: connected && !busy ? 'pointer' : 'not-allowed',
+                            opacity: connected && !busy ? 1 : 0.45,
+                        }}
+                    >
+                        Start
+                    </button>
+                </div>
+            ))}
+            {/* The refusal belongs where the button was pressed. The autopilot
+                answers "no, the vehicle is armed" in a sentence, and dropping
+                it would leave a button that looks broken. */}
+            {refusal && (
+                <p style={{ fontSize: 11, fontFamily: 'monospace', color: '#f87171', margin: '12px 0 0', lineHeight: 1.6 }}>
+                    {refusal}
+                </p>
+            )}
+            {/* Named rather than silently absent. "Where is the barometer
+                calibration" is a question that costs a support round, and the
+                answer — there is no such command — is short. */}
+            <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '12px 0 0', lineHeight: 1.6 }}>
+                No barometer or GPS calibration is offered because PX4 has none:
+                the barometer is zeroed at every boot and the GNSS receiver
+                calibrates itself. Both are shown live on the left — that health
+                readout IS the check. Airspeed applies to fixed-wing only and is
+                not exposed by the flight-control library this uses.
+            </p>
+        </Card>
+    )
+}
+
 function SensorsWorkspace() {
     const telemetry = useDroneStore(s => s.telemetry)
     const telStatus = useDroneStore(s => s.telemetryStatus)
@@ -996,18 +1085,7 @@ function SensorsWorkspace() {
                         <p style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: connected ? '#4ade80' : '#6b7280', margin: '0 0 2px' }}>{connected ? `${healthy}/4 sensors reporting` : 'No drone connected'}</p>
                         <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.25)', margin: 0 }}>{connected ? (healthy === 4 ? 'All sensors healthy — pre-flight check passed' : 'Some sensors not reporting — check wiring') : 'Connect via the Connection section to see live sensor health'}</p>
                     </div>
-                    <Card title="CALIBRATION">
-                        {['Compass', 'Accelerometer', 'Gyroscope', 'Level Horizon', 'Airspeed (if fitted)'].map((name, i, arr) => (
-                            <div key={name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: i < arr.length - 1 ? 12 : 0, borderBottom: i < arr.length - 1 ? '1px solid hsl(var(--app-border))' : 'none', marginBottom: i < arr.length - 1 ? 12 : 0 }}>
-                                <div>
-                                    <p style={{ fontSize: 12, fontWeight: 500, color: 'hsl(var(--app-text))', margin: 0 }}>{name}</p>
-                                    <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>Status: not calibrated</p>
-                                </div>
-                                <button disabled style={{ padding: '5px 12px', borderRadius: 7, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text-muted))', fontSize: 11, fontFamily: 'monospace', cursor: 'not-allowed', opacity: 0.4 }}>Start</button>
-                            </div>
-                        ))}
-                    </Card>
-                    <LockedNote text="Calibration wizard requires MAVLink parameter write — coming in a future update" />
+                    <CalibrationPanel connected={connected} />
                 </div>
             </G2>
         </div>

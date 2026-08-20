@@ -81,6 +81,11 @@ def _manager(reports: str = "HOLD"):
     t._running = True
     t._address = "udpin://127.0.0.1:1"
     t._status_text = []
+    # The status-text loop also drives the calibration picture (see
+    # test_sensor_calibration). Hand-built managers have to carry that handle
+    # too, or the feed raises and the loop that carries the autopilot's own
+    # refusal reasons ends on the first message.
+    t._calibration = None
     t._status_event = None
     t.last_action_error = None
     t._MODE_CONFIRM_S = 0.3          # instance override; the class value is a radio round trip
