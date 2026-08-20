@@ -49,17 +49,27 @@ const MODEL_URL = '/models/drone.glb'
 
 export interface Attitude { roll: number; pitch: number; yaw: number }
 
+/** What the operator is being asked to DO right now.
+ *
+ *  Inferring this from "are we in position yet" was the reported confusion:
+ *  during a compass calibration the arrow appeared while turning the aircraft,
+ *  vanished the moment it arrived — and arriving is exactly when PX4 starts
+ *  wanting it ROTATED. So the two instructions are now separate states with
+ *  separate arrows, and neither is guessed. */
+export type StageMode = 'reorient' | 'rotate' | 'hold' | 'idle'
+
 export function DroneScene({
-    attitude, targetSide, accent = '#22d3ee', matched = false,
-    live = true, height = 300,
+    attitude, targetSide, mode = 'idle', accent = '#22d3ee',
+    live = true, height = 360,
 }: {
     /** Live IMU attitude in degrees, or null to rest the model level. */
     attitude: Attitude | null
     /** The side PX4 is asking for, or null when nothing is being asked. */
     targetSide: CalSide | null
+    /** reorient = turn it to the target; rotate = spin it about that axis;
+     *  hold = keep it still; idle = nothing being asked. */
+    mode?: StageMode
     accent?: string
-    /** True once the aircraft is close enough to the requested attitude. */
-    matched?: boolean
     /** False freezes the props — a calibration happens with motors off. */
     live?: boolean
     height?: number
@@ -68,8 +78,8 @@ export function DroneScene({
     // Inputs the render loop reads every frame. Held in a ref rather than
     // closed over, so a 10 Hz telemetry update does not tear down and rebuild
     // a WebGL context ten times a second.
-    const input = useRef({ attitude, targetSide, accent, matched, live })
-    input.current = { attitude, targetSide, accent, matched, live }
+    const input = useRef({ attitude, targetSide, accent, mode, live })
+    input.current = { attitude, targetSide, accent, mode, live }
 
     useEffect(() => {
         const host = hostRef.current
@@ -89,7 +99,7 @@ export function DroneScene({
         // version by another route: an operator cannot read an orientation
         // they have to squint at.
         const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100)
-        camera.position.set(4.1, 3.0, 5.4)
+        camera.position.set(4.5, 3.3, 5.9)
 
         // A generated room environment rather than an HDRI file: proper image-
         // based lighting, so metal reads as metal and every edge has a lit side
@@ -193,8 +203,15 @@ export function DroneScene({
         const wanted = new THREE.Quaternion()
         const euler = new THREE.Euler(0, 0, 0, 'YXZ')
         const accentColour = new THREE.Color()
+        // Reused every frame — allocating vectors inside a 60 Hz loop is how a
+        // smooth panel becomes a stuttering one after a minute of GC pressure.
+        const up = new THREE.Vector3()
+        const axisVec = new THREE.Vector3()
+        const Y_UP = new THREE.Vector3(0, 1, 0)
         let raf = 0
         let spin = 0
+        let demoSpin = 0
+        const Y_AXIS = new THREE.Vector3(0, 1, 0)
         const clock = new THREE.Clock()
 
         const frame = () => {
@@ -229,35 +246,70 @@ export function DroneScene({
             shown.slerp(wanted, 1 - Math.pow(0.002, dt))
             craft.quaternion.copy(shown)
 
+            // DEMONSTRATE THE SWEEP. During `rotate` the model turns about its
+            // own vertical at the pace PX4 wants, so "rotate it steadily" is
+            // shown at a speed rather than described in words.
+            //
+            // APPLIED AFTER THE COPY, and accumulated. The first cut called
+            // rotateOnAxis by one frame's worth and then had the next frame's
+            // quaternion copy overwrite it, so the model sat at a fixed small
+            // offset and never actually turned.
+            if (inp.mode === 'rotate') {
+                demoSpin = (demoSpin + dt * 0.8) % (Math.PI * 2)
+                craft.rotateOnAxis(Y_AXIS, demoSpin)
+            } else {
+                demoSpin = 0
+            }
+
             // Props idle slowly — enough to look alive, never fast enough to
             // suggest the motors are armed during a calibration.
             spin += dt * (inp.live ? 1.6 : 0)
             parts.rotors.forEach((r, i) => { r.rotation.y = spin * (i % 2 ? -1 : 1) })
 
-            accentColour.set(inp.matched ? '#4ade80' : inp.accent)
+
+
+            accentColour.set(inp.accent)
             parts.accents.forEach(m => {
                 m.color.lerp(accentColour, 0.15)
                 m.emissive.lerp(accentColour, 0.15)
             })
 
-            // THE ARROW: the shortest turn from where the aircraft is to where
-            // it is wanted, drawn in the plane of that turn. Hidden once the
-            // two agree, because an arrow still pointing somewhere is an
-            // instruction, and there is nothing left to do.
-            if (inp.targetSide && !inp.matched) {
-                const cur = new THREE.Vector3(0, 1, 0).applyQuaternion(shown)
-                const tgt = new THREE.Vector3(0, 1, 0).applyQuaternion(orientationFor(inp.targetSide))
+            // TWO DIFFERENT INSTRUCTIONS, TWO DIFFERENT ARROWS.
+            //
+            //  reorient — the shortest turn from where the aircraft is to where
+            //             it is wanted, drawn in the plane of that turn.
+            //  rotate   — a compass sweep about the axis it is ALREADY on, which
+            //             is what PX4 asks for once an orientation is detected.
+            //             This is the one that used to vanish at exactly the
+            //             moment it became the instruction.
+            //  hold     — nothing. Any arrow at all reads as "keep moving it",
+            //             and moving it is what fails an accelerometer side.
+            if (inp.mode === 'reorient' && inp.targetSide) {
+                const cur = up.set(0, 1, 0).applyQuaternion(shown).clone()
+                const tgt = up.set(0, 1, 0).applyQuaternion(orientationFor(inp.targetSide)).clone()
                 const angle = cur.angleTo(tgt)
                 if (angle > 0.12) {
-                    const axis = new THREE.Vector3().crossVectors(cur, tgt).normalize()
+                    // Parallel vectors have no cross product; near 180° the
+                    // axis is numerically anything at all, so a stable fallback
+                    // keeps the arrow from flickering across the screen.
+                    axisVec.crossVectors(cur, tgt)
+                    if (axisVec.lengthSq() < 1e-6) axisVec.set(0, 0, 1)
+                    axisVec.normalize()
                     arrow.group.visible = true
-                    arrow.group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis)
-                    arrow.setSweep(angle)
+                    arrow.group.quaternion.setFromUnitVectors(Y_UP, axisVec)
                     arrow.setColour(accentColour)
-                    arrow.group.rotateY(spin * 0.6)          // marching, so the DIRECTION reads
+                    arrow.group.rotateY(spin * 0.8)          // marching, so the DIRECTION reads
                 } else {
                     arrow.group.visible = false
                 }
+            } else if (inp.mode === 'rotate') {
+                // About the aircraft's own vertical, wherever that is pointing
+                // now — the axis PX4 detected, not a world axis.
+                axisVec.set(0, 1, 0).applyQuaternion(shown).normalize()
+                arrow.group.visible = true
+                arrow.group.quaternion.setFromUnitVectors(Y_UP, axisVec)
+                arrow.setColour(accentColour)
+                arrow.group.rotateY(spin * 1.4)
             } else {
                 arrow.group.visible = false
             }
@@ -310,6 +362,13 @@ export function DroneScene({
 // turn is often about the nose axis, which puts the arc in a VERTICAL plane
 // where the viewport is shortest.
 const ARROW_R = 2.55
+//: A rotation arrow is ICONOGRAPHY, not a gauge. Drawn proportional to the
+//: angle still to go, a 90° turn came out as a quarter arc with most of a
+//: circle of empty space between the tail and the head — which reads as a
+//: stray stroke rather than "turn it this way". Kept near-complete so the
+//: direction is unmistakable; how far is left to the colour and the words,
+//: which say it better than an arc length nobody measures.
+const ARROW_SWEEP = Math.PI * 1.62
 
 function buildRotationArrow() {
     const group = new THREE.Group()
@@ -319,7 +378,7 @@ function buildRotationArrow() {
         side: THREE.DoubleSide, depthTest: false,
     })
     const torus = new THREE.Mesh(
-        new THREE.TorusGeometry(ARROW_R, 0.075, 10, 72, Math.PI / 2), material)
+        new THREE.TorusGeometry(ARROW_R, 0.075, 10, 96, ARROW_SWEEP), material)
     torus.rotation.x = Math.PI / 2      // into the XZ plane; +theta runs +X -> -Z
     torus.renderOrder = 10
     group.add(torus)
@@ -332,20 +391,17 @@ function buildRotationArrow() {
     const UP = new THREE.Vector3(0, 1, 0)
     const tangent = new THREE.Vector3()
 
-    const setSweep = (angle: number) => {
-        const sweep = Math.max(0.45, Math.min(Math.PI * 0.92, angle))
-        torus.geometry.dispose()
-        torus.geometry = new THREE.TorusGeometry(ARROW_R, 0.075, 10, 72, sweep)
+    const place = (sweep: number) => {
         head.position.set(Math.cos(sweep) * ARROW_R, 0, -Math.sin(sweep) * ARROW_R)
         // d/dtheta of that position, normalised — the way the arc is heading
         // where it stops.
         tangent.set(-Math.sin(sweep), 0, -Math.cos(sweep)).normalize()
         head.quaternion.setFromUnitVectors(UP, tangent)
     }
-    setSweep(Math.PI / 2)
+    place(ARROW_SWEEP)
 
     return {
-        group, setSweep,
+        group,
         setColour: (c: THREE.Color) => { material.color.lerp(c, 0.2) },
         dispose: () => { torus.geometry.dispose(); headGeo.dispose(); material.dispose() },
     }

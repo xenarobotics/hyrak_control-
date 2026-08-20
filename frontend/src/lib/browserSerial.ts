@@ -19,7 +19,7 @@ export type SerialPortLike = {
     writable: WritableStream<Uint8Array> | null
 }
 
-export type GrantedRadio = { port: SerialPortLike; label: string }
+export type GrantedRadio = { port: SerialPortLike; label: string; isFc?: boolean }
 
 type SerialApi = {
     getPorts(): Promise<SerialPortLike[]>
@@ -36,6 +36,36 @@ let active = false
 export const browserSerialSupported = () =>
     typeof navigator !== 'undefined' && 'serial' in navigator
 
+/** Why the browser cannot open a USB port, in words the operator can act on.
+ *  null when it can.
+ *
+ *  THE UI USED TO JUST HIDE THE BUTTON. A flight controller plugged straight
+ *  into USB works in the desktop app and appears to be unsupported in the
+ *  browser, with no control to press and nothing saying why — and the usual
+ *  cause is not the browser at all. `navigator.serial` exists ONLY IN A SECURE
+ *  CONTEXT, so reaching the dev server at http://192.168.x.x:3000 removes the
+ *  entire Web Serial API while https://<the same machine> and
+ *  http://localhost:3000 both keep it. That is invisible from the page and
+ *  produces exactly the reported symptom.
+ */
+export function serialUnavailableReason(): string | null {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') return null
+    if ('serial' in navigator) return null
+    if (!window.isSecureContext) {
+        return (
+            `This page is on ${window.location.origin}, which the browser does not ` +
+            `treat as a secure context — USB access is switched off entirely. ` +
+            `Open it over HTTPS, or as http://localhost:${window.location.port || '3000'} ` +
+            `on the machine the cable is plugged into.`
+        )
+    }
+    const ua = navigator.userAgent
+    if (/Firefox\//.test(ua)) return 'Firefox does not implement Web Serial. Use Chrome or Edge.'
+    if (/Safari\//.test(ua) && !/Chrome\//.test(ua)) return 'Safari does not implement Web Serial. Use Chrome or Edge.'
+    if (/Android|iPhone|iPad/.test(ua)) return 'Mobile browsers do not implement Web Serial. Use a desktop browser or the desktop app.'
+    return 'This browser does not implement Web Serial. Use Chrome or Edge, or the desktop app.'
+}
+
 export const isBrowserSerialActive = () => active
 
 export const getSerialApi = (): SerialApi | null =>
@@ -43,13 +73,33 @@ export const getSerialApi = (): SerialApi | null =>
         ? (navigator as unknown as { serial: SerialApi }).serial
         : null
 
-// Friendly names for common telemetry-radio USB bridge chips.
+// USB devices this app expects to see. BOTH KINDS, because the port picker
+// is the same one either way: a telemetry radio on the ground, or the flight
+// controller itself on the end of a USB cable. The list said "radio"
+// throughout, which reads as "this is not the control for a flight
+// controller" — and the one thing an operator with a cable in their hand
+// needs is to know that it is.
 const VENDOR_NAMES: Record<number, string> = {
     0x0403: 'FTDI radio',        // 3DR ground module
     0x10c4: 'SiK radio (CP210x)',
-    0x26ac: '3DR / PX4',
     0x067b: 'Prolific serial',
     0x1a86: 'CH340 serial',
+    // Flight controllers over USB CDC-ACM.
+    0x26ac: 'PX4 / 3DR flight controller',
+    0x1209: 'PX4 flight controller',
+    0x2dae: 'Cube (Hex) flight controller',
+    0x0483: 'STM32 flight controller',
+    0x35a7: 'ARK flight controller',
+}
+
+/** True for vendor IDs that are a flight controller rather than a radio. USB
+ *  CDC ignores the baud rate entirely, so offering a SiK radio's 57600 next to
+ *  one is noise at best and a wrong lead when the link does not come up. */
+const FC_VENDORS = new Set([0x26ac, 0x1209, 0x2dae, 0x0483, 0x35a7])
+
+export function isFlightController(port: SerialPortLike): boolean {
+    const vid = port.getInfo().usbVendorId
+    return vid !== undefined && FC_VENDORS.has(vid)
 }
 
 const hex = (n?: number) =>
@@ -68,7 +118,11 @@ export async function listGrantedPorts(): Promise<GrantedRadio[]> {
             const info = q.getInfo()
             return info.usbVendorId === vid && info.usbProductId === pid
         })
-        return { port: p, label: dupes.length > 1 ? `${name} #${i + 1}` : name }
+        return {
+            port: p,
+            label: dupes.length > 1 ? `${name} #${i + 1}` : name,
+            isFc: vid !== undefined && FC_VENDORS.has(vid),
+        }
     })
 }
 

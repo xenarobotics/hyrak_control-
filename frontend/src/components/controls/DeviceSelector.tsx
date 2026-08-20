@@ -57,7 +57,8 @@ export function DeviceSelector() {
     // combination, not a special case.
     const {
         desktop, radios, nativeRadios, source, setSource, baud, setBaud,
-        refreshNativeRadios, addRadio, browserSerialSupported,
+        refreshNativeRadios, addRadio, browserSerialSupported, serialUnavailable,
+        selectedIsFc,
         connect: handleConnect, disconnect: handleDisconnect, disconnecting,
         telemetryStatus, telemetryError, isConnected, isConnecting, sitlNeedsDesktop,
     } = useTelemetryLink()
@@ -138,12 +139,22 @@ export function DeviceSelector() {
                         <button
                             onClick={addRadio}
                             className="ml-auto text-zinc-600 hover:text-zinc-400 transition-colors"
-                            title="Add a USB radio plugged into this device"
+                            title="Add a USB radio or flight controller plugged into this device"
                         >
                             <Plus size={12} />
                         </button>
                     )}
                 </div>
+
+                {/* WHY THERE IS NO "+" TO PRESS. Hiding the control left a
+                    flight controller that works in the desktop app looking
+                    simply unsupported in the browser, and the usual cause is
+                    the page's ORIGIN rather than the browser. */}
+                {serialUnavailable && (
+                    <p className="text-[10px] font-mono text-amber-400/80 leading-relaxed mb-1.5 break-words">
+                        {serialUnavailable}
+                    </p>
+                )}
 
                 <Select
                     value={source}
@@ -193,7 +204,13 @@ export function DeviceSelector() {
                 {/* Baud only applies to a real serial radio. 57600 is the SiK
                     default and what PX4's TELEM ports ship at; 115200 is the
                     other one people actually hit. */}
-                {(source.startsWith('radio-') || source.startsWith('nradio-')) && (
+                {selectedIsFc && (
+                    <p className="mt-1.5 text-[10px] font-mono text-zinc-500 leading-relaxed">
+                        Flight controller over USB — the baud rate is ignored by
+                        the CDC serial link, so there is nothing to match.
+                    </p>
+                )}
+                {!selectedIsFc && (source.startsWith('radio-') || source.startsWith('nradio-')) && (
                     <div className="mt-1.5 flex items-center gap-1.5">
                         <span className="text-[10px] font-mono text-zinc-500">BAUD</span>
                         <Select

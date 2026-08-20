@@ -72,7 +72,7 @@ const MAV_PRESETS = [
 const DOMAIN_META: { id: SectionId; label: string; icon: React.ElementType; desc: string }[] = [
     { id: 'connection', label: 'Connection',  icon: Radio,             desc: 'MAVLink link to your drone or SITL simulator' },
     { id: 'vehicle',    label: 'Vehicle',     icon: Plane,             desc: 'Drone identity, airframe type, and firmware' },
-    { id: 'sensors',    label: 'Sensors',     icon: Gauge,             desc: 'Sensor health and EKF fusion pipeline' },
+    { id: 'sensors',    label: 'Sensors',     icon: Gauge,             desc: 'Live sensor health and calibration' },
     { id: 'radio',      label: 'Radio & RC',  icon: SlidersHorizontal, desc: 'Stick layout and flight mode channel assignments' },
     { id: 'power',      label: 'Power',       icon: Battery,           desc: 'Battery pack configuration and failsafe thresholds' },
     { id: 'safety',     label: 'Safety',      icon: Shield,            desc: 'Failsafes, terrain following, and geofence limits' },
@@ -253,45 +253,6 @@ function NetworkTopology({ connected, address }: { connected: boolean; address: 
             {/* Labels */}
             <text x={90} y={14} textAnchor="middle" fontSize={7} fontFamily="monospace" fill={connected ? 'rgba(34,211,238,0.6)' : 'rgba(75,85,99,0.5)'}>MAVLink</text>
             <text x={230} y={14} textAnchor="middle" fontSize={7} fontFamily="monospace" fill={connected ? 'rgba(74,222,128,0.6)' : 'rgba(75,85,99,0.5)'}>MAVSDK</text>
-        </svg>
-    )
-}
-
-function EKFFlow({ states }: { states: { gps: boolean|null; imu: boolean|null; mag: boolean|null; baro: boolean|null } }) {
-    const sensors: { key: keyof typeof states; label: string; y: number }[] = [
-        { key: 'gps',  label: 'GPS',  y: 6  },
-        { key: 'imu',  label: 'IMU',  y: 24 },
-        { key: 'mag',  label: 'MAG',  y: 42 },
-        { key: 'baro', label: 'BARO', y: 60 },
-    ]
-    return (
-        <svg viewBox="0 0 340 80" style={{ width: '100%', display: 'block' }}>
-            {sensors.map(s => {
-                const ok = states[s.key]
-                const c = ok === null ? '#4b5563' : ok ? '#4ade80' : '#f87171'
-                return (
-                    <g key={s.key}>
-                        <rect x={2} y={s.y} width={48} height={14} rx={4} fill={`${c}18`} stroke={c} strokeWidth={1} />
-                        <text x={26} y={s.y+10} textAnchor="middle" fontSize={8} fontFamily="monospace" fontWeight="700" fill={c}>{s.label}</text>
-                        <line x1={50} y1={s.y+7} x2={118} y2={38} stroke={c} strokeWidth={0.8} opacity={0.4} />
-                    </g>
-                )
-            })}
-            {/* EKF */}
-            <rect x={118} y={22} width={56} height={32} rx={6} fill="rgba(34,211,238,0.1)" stroke="#22d3ee" strokeWidth={1.5} />
-            <text x={146} y={35} textAnchor="middle" fontSize={9} fontFamily="monospace" fontWeight="700" fill="#22d3ee">EKF</text>
-            <text x={146} y={47} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="rgba(34,211,238,0.5)">FUSION</text>
-            {/* EKF → POS */}
-            <line x1={174} y1={38} x2={226} y2={38} stroke="#22d3ee" strokeWidth={1.5} opacity={0.5} />
-            <polygon points="226,34 234,38 226,42" fill="#22d3ee" opacity={0.5} />
-            {/* POS ESTIM */}
-            <rect x={234} y={22} width={56} height={32} rx={6} fill="rgba(251,191,36,0.08)" stroke="#fbbf24" strokeWidth={1} />
-            <text x={262} y={35} textAnchor="middle" fontSize={9} fontFamily="monospace" fontWeight="700" fill="#fbbf24">POS</text>
-            <text x={262} y={47} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="rgba(251,191,36,0.5)">ESTIM</text>
-            {/* POS → FC */}
-            <line x1={290} y1={38} x2={320} y2={38} stroke="#fbbf24" strokeWidth={1.5} opacity={0.4} />
-            <polygon points="320,34 328,38 320,42" fill="#fbbf24" opacity={0.4} />
-            <rect x={328} y={26} width={10} height={24} rx={3} fill="rgba(74,222,128,0.1)" stroke="#4ade80" strokeWidth={1} />
         </svg>
     )
 }
@@ -1031,81 +992,114 @@ function SensorsWorkspace() {
         )
     }
 
+    // TWO COLUMNS: what the sensors are DOING on the left, what you can DO to
+    // them on the right.
+    //
+    // The EKF fusion diagram is gone. It occupied the full width and most of
+    // the height to say one thing — that four sensors feed one filter — which
+    // is true on every PX4 aircraft ever built, never changes, and is not
+    // something an operator acts on. It pushed the live health readings and
+    // the calibration controls, which are the two reasons to open this page,
+    // below the fold.
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* EKF pipeline diagram */}
-            <Panel title="EKF SENSOR FUSION PIPELINE" accent="#22d3ee">
-                <EKFFlow states={states} />
-                <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.2)', margin: 0, lineHeight: 1.6 }}>
-                    The Extended Kalman Filter fuses all sensor inputs to produce a single best-estimate of position, velocity, and attitude. All four sensors feed the same EKF.
-                </p>
-            </Panel>
-
-            <G2>
-                {/* Left: sensor health instruments */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {/* GPS */}
-                    <Panel accent={states.gps === null ? undefined : states.gps ? '#4ade80' : '#f87171'}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                            <div style={{ width: 40, height: 40, borderRadius: 10, background: states.gps ? 'rgba(74,222,128,0.12)' : 'rgba(75,85,99,0.12)', border: `1.5px solid ${states.gps ? '#4ade80' : '#4b5563'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                <div style={{ width: 14, height: 14, borderRadius: '50%', background: states.gps === null ? '#4b5563' : states.gps ? '#4ade80' : '#f87171' }} />
-                            </div>
-                            <div style={{ flex: 1 }}>
-                                <p style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0', margin: 0 }}>GPS / GNSS</p>
-                                <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)', margin: '2px 0 0' }}>{connected && telemetry?.position ? `${telemetry.position.latitude_deg?.toFixed(6)}° / ${telemetry.position.longitude_deg?.toFixed(6)}°` : 'Global position fix'}</p>
-                            </div>
-                            <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 700, color: states.gps === null ? '#4b5563' : states.gps ? '#4ade80' : '#f87171' }}>{states.gps === null ? 'N/A' : states.gps ? 'FIX' : 'NO FIX'}</span>
-                        </div>
-                    </Panel>
-                    {/* IMU */}
-                    <Panel accent={states.imu === null ? undefined : states.imu ? '#4ade80' : '#f87171'}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                            <div style={{ width: 40, height: 40, borderRadius: 10, background: states.imu ? 'rgba(74,222,128,0.12)' : 'rgba(75,85,99,0.12)', border: `1.5px solid ${states.imu ? '#4ade80' : '#4b5563'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                <div style={{ width: 14, height: 14, borderRadius: 3, background: states.imu === null ? '#4b5563' : states.imu ? '#4ade80' : '#f87171' }} />
-                            </div>
-                            <div style={{ flex: 1 }}>
-                                <p style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0', margin: 0 }}>IMU (Accel + Gyro)</p>
-                                <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)', margin: '2px 0 0' }}>
-                                    {connected && telemetry?.attitude ? `R ${telemetry.attitude.roll_deg?.toFixed(1)}° P ${telemetry.attitude.pitch_deg?.toFixed(1)}° Y ${telemetry.attitude.yaw_deg?.toFixed(1)}°` : 'Roll, pitch, yaw rates'}
-                                </p>
-                            </div>
-                            <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 700, color: states.imu === null ? '#4b5563' : states.imu ? '#4ade80' : '#f87171' }}>{states.imu === null ? 'N/A' : states.imu ? 'OK' : 'ERR'}</span>
-                        </div>
-                    </Panel>
-                    {/* Compass */}
-                    <Panel accent={states.mag === null ? undefined : states.mag ? '#4ade80' : '#f87171'}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                            <CompassGauge heading={telemetry?.heading_deg ?? null} size={72} />
-                            <div style={{ flex: 1 }}>
-                                <p style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0', margin: 0 }}>Compass / Mag</p>
-                                <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)', margin: '2px 0 0' }}>Magnetometer heading reference</p>
-                            </div>
-                            <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 700, color: states.mag === null ? '#4b5563' : states.mag ? '#4ade80' : '#f87171' }}>{states.mag === null ? 'N/A' : states.mag ? 'OK' : 'ERR'}</span>
-                        </div>
-                    </Panel>
-                    {/* Baro */}
-                    <Panel accent={states.baro === null ? undefined : states.baro ? '#4ade80' : '#f87171'}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                            <AltBar alt={connected && telemetry?.position ? telemetry.position.relative_altitude_m ?? null : null} label="ALT AGL" />
-                            <div style={{ flex: 1 }}>
-                                <p style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0', margin: 0 }}>Barometer</p>
-                                <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)', margin: '2px 0 0' }}>Pressure altimeter — AGL estimate</p>
-                            </div>
-                            <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 700, color: states.baro === null ? '#4b5563' : states.baro ? '#4ade80' : '#f87171' }}>{states.baro === null ? 'N/A' : states.baro ? 'OK' : 'ERR'}</span>
-                        </div>
-                    </Panel>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 1fr) minmax(380px, 1.15fr)', gap: 14, alignItems: 'start' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{
+                    padding: '10px 13px', borderRadius: 10,
+                    background: connected ? 'rgba(74,222,128,0.06)' : 'rgba(75,85,99,0.08)',
+                    border: `1px solid ${connected ? 'rgba(74,222,128,0.2)' : 'rgba(75,85,99,0.2)'}`,
+                }}>
+                    <p style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: connected ? '#4ade80' : '#6b7280', margin: 0 }}>
+                        {connected ? `${healthy}/4 sensors reporting` : 'No drone connected'}
+                    </p>
+                    <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>
+                        {connected
+                            ? (healthy === 4 ? 'All four are producing data' : 'Something is not reporting — check wiring and the message log')
+                            : 'Connect in the Connection section to see live sensor health'}
+                    </p>
                 </div>
 
-                {/* Right: calibration */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <div style={{ padding: '11px 14px', borderRadius: 10, background: connected ? 'rgba(74,222,128,0.06)' : 'rgba(75,85,99,0.08)', border: `1px solid ${connected ? 'rgba(74,222,128,0.2)' : 'rgba(75,85,99,0.2)'}` }}>
-                        <p style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: connected ? '#4ade80' : '#6b7280', margin: '0 0 2px' }}>{connected ? `${healthy}/4 sensors reporting` : 'No drone connected'}</p>
-                        <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.25)', margin: 0 }}>{connected ? (healthy === 4 ? 'All sensors healthy — pre-flight check passed' : 'Some sensors not reporting — check wiring') : 'Connect via the Connection section to see live sensor health'}</p>
+                <SensorRow
+                    ok={states.gps} title="GPS / GNSS"
+                    detail={connected && telemetry?.position
+                        ? `${telemetry.position.latitude_deg?.toFixed(6)}° / ${telemetry.position.longitude_deg?.toFixed(6)}°`
+                        : 'Global position fix'}
+                    extra={connected ? `${telemetry?.gps?.satellites_visible ?? 0} sats · fix ${telemetry?.gps?.fix_type ?? 0}` : undefined}
+                    badge={states.gps === null ? 'N/A' : states.gps ? 'FIX' : 'NO FIX'}
+                    icon={<span style={{ width: 13, height: 13, borderRadius: '50%', background: states.gps ? '#4ade80' : '#4b5563' }} />}
+                />
+                <SensorRow
+                    ok={states.imu} title="IMU — accelerometer + gyro"
+                    detail={connected && telemetry?.attitude
+                        ? `R ${telemetry.attitude.roll_deg?.toFixed(1)}°  P ${telemetry.attitude.pitch_deg?.toFixed(1)}°  Y ${telemetry.attitude.yaw_deg?.toFixed(1)}°`
+                        : 'Roll, pitch and yaw'}
+                    badge={states.imu === null ? 'N/A' : states.imu ? 'OK' : 'ERR'}
+                    icon={<span style={{ width: 13, height: 13, borderRadius: 3, background: states.imu ? '#4ade80' : '#4b5563' }} />}
+                />
+                <Panel accent={states.mag === null ? undefined : states.mag ? '#4ade80' : '#f87171'}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <CompassGauge heading={telemetry?.heading_deg ?? null} size={64} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0', margin: 0 }}>Compass</p>
+                            <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>
+                                {connected && telemetry?.heading_deg != null
+                                    ? `heading ${telemetry.heading_deg.toFixed(0)}°`
+                                    : 'Magnetic heading reference'}
+                            </p>
+                        </div>
+                        <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 700, color: states.mag === null ? '#4b5563' : states.mag ? '#4ade80' : '#f87171' }}>
+                            {states.mag === null ? 'N/A' : states.mag ? 'OK' : 'ERR'}
+                        </span>
                     </div>
-                    <CalibrationPanel connected={connected} refusal={refusal} busy={busy} start={start} />
-                </div>
-            </G2>
+                </Panel>
+                <Panel accent={states.baro === null ? undefined : states.baro ? '#4ade80' : '#f87171'}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <AltBar alt={connected && telemetry?.position ? telemetry.position.relative_altitude_m ?? null : null} label="ALT AGL" />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0', margin: 0 }}>Barometer</p>
+                            <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>
+                                Pressure altimeter — height above launch
+                            </p>
+                        </div>
+                        <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 700, color: states.baro === null ? '#4b5563' : states.baro ? '#4ade80' : '#f87171' }}>
+                            {states.baro === null ? 'N/A' : states.baro ? 'OK' : 'ERR'}
+                        </span>
+                    </div>
+                </Panel>
+            </div>
+
+            <CalibrationPanel connected={connected} refusal={refusal} busy={busy} start={start} />
         </div>
+    )
+}
+
+/** One live sensor reading. Same shape for all of them, so the eye can scan
+ *  the column instead of re-reading four different layouts. */
+function SensorRow({ ok, title, detail, extra, badge, icon }: {
+    ok: boolean | null; title: string; detail: string; extra?: string
+    badge: string; icon: React.ReactNode
+}) {
+    const colour = ok === null ? '#4b5563' : ok ? '#4ade80' : '#f87171'
+    return (
+        <Panel accent={ok === null ? undefined : colour}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{
+                    width: 38, height: 38, borderRadius: 10, flexShrink: 0,
+                    background: ok ? 'rgba(74,222,128,0.12)' : 'rgba(75,85,99,0.12)',
+                    border: `1.5px solid ${colour}`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                    {icon}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0', margin: 0 }}>{title}</p>
+                    <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '2px 0 0', wordBreak: 'break-word' }}>
+                        {detail}{extra ? `  ·  ${extra}` : ''}
+                    </p>
+                </div>
+                <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 700, color: colour }}>{badge}</span>
+            </div>
+        </Panel>
     )
 }
 

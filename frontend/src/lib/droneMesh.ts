@@ -44,6 +44,105 @@ function roundedRect(w: number, h: number, r: number): THREE.Shape {
     return s
 }
 
+// ── Propeller ────────────────────────────────────────────────────────────────
+//
+// ONE MESH, not a hub with two boxes stuck on it. The box version read as two
+// sticks, and it read that way because that is what it was: a real propeller
+// is a continuous surface whose chord tapers and whose pitch twists along the
+// span, and none of that survives being approximated by a cuboid.
+//
+// Built rather than downloaded on purpose. A model off the internet arrives
+// with a licence to honour, a file to ship and an axis convention to fight,
+// and the shape wanted here is a lofted surface with four numbers in it. The
+// door for a supplied asset is loadDroneModel() at the bottom of this file —
+// that path takes a whole airframe, propellers included.
+
+const BLADE_SEGMENTS = 22
+const BLADE_ROOT = 0.13
+const BLADE_TIP = 1.12
+/** Total washout from root to tip, radians. Real props twist a lot — a blade
+ *  with a constant angle is the flat plate the last version looked like. */
+const BLADE_TWIST = 0.62
+
+/** Chord at a fraction of the span. Narrow at the root, widest around 60%,
+ *  rounded off at the tip — the planform that makes a propeller recognisable
+ *  in silhouette, which is the only way it is seen edge-on. */
+function chordAt(t: number): number {
+    return 0.1 + 0.24 * Math.sin(Math.PI * Math.min(1, t * 0.92 + 0.06))
+}
+
+/** One blade, along +X, as a lofted surface: a cambered chord line swept
+ *  outward while it tapers and twists.
+ *
+ *  `hand` flips the pitch, which is what makes a CW and a CCW propeller
+ *  different objects. Adjacent rotors on a quad turn opposite ways, and two
+ *  identical props on a four-motor aircraft is the kind of detail that reads
+ *  as wrong without the viewer being able to say why.
+ */
+function bladeGeometry(hand: number): THREE.BufferGeometry {
+    const positions: number[] = []
+    const indices: number[] = []
+    const rows = BLADE_SEGMENTS
+    const cols = 6                       // points across the chord
+
+    for (let i = 0; i <= rows; i++) {
+        const t = i / rows
+        const span = BLADE_ROOT + (BLADE_TIP - BLADE_ROOT) * t
+        const chord = chordAt(t)
+        // Washout: most of the twist is near the root, none at the tip.
+        const twist = BLADE_TWIST * (1 - t) * hand
+        for (let j = 0; j <= cols; j++) {
+            const c = j / cols - 0.5                       // -0.5 .. 0.5 across chord
+            // Camber: a shallow arc rather than a flat line, so the two faces
+            // shade differently and the blade has an obvious leading edge.
+            const camber = 0.055 * (0.25 - c * c)
+            const yz = new THREE.Vector2(camber, c * chord)
+                .rotateAround(new THREE.Vector2(0, 0), twist)
+            positions.push(span, yz.x, yz.y)
+        }
+    }
+    for (let i = 0; i < rows; i++) {
+        for (let j = 0; j < cols; j++) {
+            const a = i * (cols + 1) + j
+            const b = a + cols + 1
+            indices.push(a, b, a + 1, b, b + 1, a + 1)
+        }
+    }
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    g.setIndex(indices)
+    g.computeVertexNormals()
+    return g
+}
+
+/** Hub plus both blades as ONE geometry, built synchronously.
+ *
+ *  Merged by hand rather than through BufferGeometryUtils so buildDrone stays
+ *  synchronous — an async model means a frame where the aircraft has no
+ *  propellers, and the panel's whole job is to be looked at.
+ */
+export function mergeSync(sign: number): THREE.BufferGeometry {
+    const hub = new THREE.CylinderGeometry(0.115, 0.135, 0.15, 20)
+    const blade = bladeGeometry(sign)
+    const blades = [blade, blade.clone().rotateY(Math.PI)]
+    const parts = [hub, ...blades].map(g => g.index ? g.toNonIndexed() : g)
+    let n = 0
+    for (const g of parts) n += g.getAttribute('position').count
+    const pos = new Float32Array(n * 3)
+    let o = 0
+    for (const g of parts) {
+        pos.set(g.getAttribute('position').array as Float32Array, o)
+        o += g.getAttribute('position').count * 3
+    }
+    hub.dispose()
+    blades.forEach(g => g.dispose())
+    parts.forEach(g => g.dispose())
+    const out = new THREE.BufferGeometry()
+    out.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+    out.computeVertexNormals()
+    return out
+}
+
 export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     const root = new THREE.Group()
     const rotors: THREE.Object3D[] = []
@@ -126,13 +225,22 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
 
     // ── Arms, motors, rotors ─────────────────────────────────────────────
     const armGeo = track(new THREE.CylinderGeometry(0.085, 0.13, 1.55, 14))
-    const canGeo = track(new THREE.CylinderGeometry(0.2, 0.23, 0.3, 20))
-    const bellGeo = track(new THREE.CylinderGeometry(0.235, 0.2, 0.1, 20))
-    const hubGeo = track(new THREE.CylinderGeometry(0.075, 0.075, 0.12, 12))
-    const bladeGeo = track(new THREE.BoxGeometry(1.15, 0.03, 0.26))
+    const canGeo = track(new THREE.CylinderGeometry(0.19, 0.225, 0.26, 24))
+    const bellGeo = track(new THREE.CylinderGeometry(0.245, 0.215, 0.2, 24))
     const legGeo = track(new THREE.CylinderGeometry(0.05, 0.04, 0.75, 10))
     const footGeo = track(new THREE.CapsuleGeometry(0.055, 0.42, 4, 10))
     const ledGeo = track(new THREE.SphereGeometry(0.115, 14, 12))
+
+    // Two handednesses, shared by four rotors. Built synchronously from the
+    // hub so the model is never briefly propeller-less; the merged version
+    // swaps in when the util resolves.
+    const propMat = mat(new THREE.MeshStandardMaterial({
+        color: 0x1a1f27, metalness: 0.25, roughness: 0.55,
+        side: THREE.DoubleSide,
+    }))
+    const propGeo: THREE.BufferGeometry[] = [
+        track(mergeSync(1)), track(mergeSync(-1)),
+    ]
 
     ARM_ANGLES.forEach((deg, i) => {
         const front = deg === 45 || deg === 315
@@ -148,32 +256,25 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
         a.add(arm)
 
         const can = new THREE.Mesh(canGeo, dark)
-        can.position.set(0, 0.17, -1.62)
+        can.position.set(0, 0.15, -1.62)
         can.castShadow = true
         a.add(can)
 
         const bell = new THREE.Mesh(bellGeo, front ? accentBody : shell)
-        bell.position.set(0, 0.33, -1.62)
+        bell.position.set(0, 0.35, -1.62)
         a.add(bell)
 
-        // Rotor: a hub plus two blades, spun by the render loop. Real blades
-        // rather than a disc, because a disc at rest is a plate and the model
-        // has to look right STANDING STILL — which, during a calibration, is
-        // the only way it is ever seen.
-        const rotor = new THREE.Group()
-        rotor.position.set(0, 0.46, -1.62)
-        const hub = new THREE.Mesh(hubGeo, dark)
-        rotor.add(hub)
-        for (const side of [0, Math.PI]) {
-            const blade = new THREE.Mesh(bladeGeo, mat(new THREE.MeshStandardMaterial({
-                color: 0x1b2029, metalness: 0.1, roughness: 0.75,
-                transparent: true, opacity: 0.95,
-            })))
-            blade.position.set(Math.cos(side) * 0.62, 0.02, Math.sin(side) * 0.62)
-            blade.rotation.y = side
-            blade.rotation.z = (i % 2 === 0 ? 1 : -1) * 0.14   // pitch, and it alternates
-            rotor.add(blade)
-        }
+        // Rotor: ONE mesh — hub and both blades in a single lofted geometry.
+        // Real blades rather than a disc, because a disc at rest is a plate and
+        // the model has to look right STANDING STILL, which during a
+        // calibration is the only way it is ever seen.
+        //
+        // Adjacent rotors turn opposite ways on a quad, so their blades are
+        // mirrored. Building both handedness once and sharing the geometry
+        // keeps it to two buffers for four rotors.
+        const rotor = new THREE.Mesh(propGeo[i % 2], propMat)
+        rotor.position.set(0, 0.5, -1.62)
+        rotor.castShadow = true
         a.add(rotor)
         rotors.push(rotor)
 

@@ -14,8 +14,7 @@
 
 import { useMemo } from 'react'
 
-import { DroneScene } from '@/components/config/DroneScene'
-import { orientationFor } from '@/components/config/DroneScene'
+import { DroneScene, orientationFor, type StageMode } from '@/components/config/DroneScene'
 import { useDroneStore } from '@/store/drone'
 import type { CalibrationState, CalSide } from '@/types/calibration'
 import { Check, X, Loader, CircleAlert, RotateCw } from 'lucide-react'
@@ -36,6 +35,11 @@ const SIDE_WORDS: Record<CalSide, string> = {
     right: 'On its RIGHT side',
     front: 'Nose down, tail up',
     back: 'Tail down, nose up',
+}
+
+/** Three letters per position, so the queue names itself. */
+const SIDE_ABBR: Record<CalSide, string> = {
+    down: 'LVL', up: 'INV', left: 'LFT', right: 'RGT', front: 'NSE', back: 'TAL',
 }
 
 /** How close counts as holding the requested position. Generous: PX4's own
@@ -83,7 +87,26 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry }: {
         return THREE.MathUtils.radToDeg(up.angleTo(want)) < MATCH_DEGREES
     }, [target, live?.roll, live?.pitch, live?.yaw])
 
-    const accent = failed ? FAIL_C : done ? DONE_C : matched ? DONE_C : running ? ACTIVE_C : IDLE_C
+    // WHAT IS BEING ASKED FOR, decided once and used by every part of the
+    // panel — the words, the colour and the arrow cannot disagree.
+    //
+    // A COMPASS IS NOT AN ACCELEROMETER. PX4 detects an orientation and then
+    // wants the aircraft ROTATED about it; an accelerometer wants it held dead
+    // still in the same position. Reaching the position therefore means
+    // opposite things for the two, which is why arriving used to make the
+    // arrow disappear on a compass at exactly the moment it became the
+    // instruction.
+    const isCompass = state.sensor === 'mag'
+    const mode: StageMode = !running || !target ? 'idle'
+        : !matched ? 'reorient'
+        : isCompass ? 'rotate'
+        : 'hold'
+
+    const accent = failed ? FAIL_C
+        : done ? DONE_C
+        : mode === 'rotate' ? ACTIVE_C
+        : mode === 'hold' ? DONE_C
+        : running ? ACTIVE_C : IDLE_C
 
     // ONE SENTENCE, and it is the position when there is one. PX4's own line
     // is kept underneath rather than promoted — "hold vehicle still on a
@@ -91,13 +114,17 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry }: {
     const headline = done ? 'Calibration complete'
         : failed ? 'Calibration failed'
         : cancelled ? 'Calibration cancelled'
-        : target ? SIDE_WORDS[target]
+        : mode === 'rotate' ? 'Now ROTATE it — keep turning'
+        : mode === 'hold' ? 'HOLD IT STILL'
+        : target ? `Turn it: ${SIDE_WORDS[target]}`
         : state.instruction || 'Waiting for the autopilot…'
 
     const subline = done ? 'The new offsets are saved on the aircraft'
         : failed ? (state.error || 'The autopilot did not accept the calibration')
         : cancelled ? 'Nothing was written to the aircraft'
-        : target ? (matched ? 'Hold it there — do not move it' : 'Turn the aircraft to match the outline')
+        : mode === 'rotate' ? 'Turn it steadily about the axis the arrow circles, at about the speed shown'
+        : mode === 'hold' ? 'Do not move it until this position is ticked off'
+        : mode === 'reorient' ? 'Match the position shown — the arrow is the way round'
         : ''
 
     return (
@@ -122,19 +149,34 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry }: {
                 </span>
                 {oriented && (
                     <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-                        {/* Six dots. Position in the queue, nothing else — the
-                            first version labelled all six and made the operator
-                            hunt for the one being asked for. */}
-                        <span style={{ display: 'flex', gap: 4 }}>
+                        {/* SIX POSITIONS, EACH NAMED. Bare dots said how far
+                            along the queue was and nothing about WHICH
+                            positions were left — so an operator halfway
+                            through could not tell whether they still owed it
+                            nose-down or tail-down. Three letters is enough to
+                            name it and short enough to fit. */}
+                        <span style={{ display: 'flex', gap: 7 }}>
                             {order.map(side => {
                                 const st = state.sides?.[side]
+                                const c = st === 'done' ? DONE_C : st === 'active' ? ACTIVE_C : '#4b5563'
                                 return (
-                                    <span key={side} style={{
-                                        width: 8, height: 8, borderRadius: '50%',
-                                        background: st === 'done' ? DONE_C : st === 'active' ? ACTIVE_C : 'transparent',
-                                        border: `1.5px solid ${st === 'done' ? DONE_C : st === 'active' ? ACTIVE_C : '#4b5563'}`,
-                                        transition: 'background 250ms, border-color 250ms',
-                                    }} />
+                                    <span key={side} title={SIDE_WORDS[side]} style={{
+                                        display: 'flex', flexDirection: 'column',
+                                        alignItems: 'center', gap: 3,
+                                    }}>
+                                        <span style={{
+                                            width: 9, height: 9, borderRadius: '50%',
+                                            background: st === 'done' ? DONE_C : st === 'active' ? ACTIVE_C : 'transparent',
+                                            border: `1.5px solid ${c}`,
+                                            transition: 'background 250ms, border-color 250ms',
+                                        }} />
+                                        <span style={{
+                                            fontSize: 8.5, fontFamily: 'monospace', color: c,
+                                            fontWeight: st === 'active' ? 700 : 400, letterSpacing: 0.3,
+                                        }}>
+                                            {SIDE_ABBR[side]}
+                                        </span>
+                                    </span>
                                 )
                             })}
                         </span>
@@ -164,8 +206,8 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry }: {
                 <DroneScene
                     attitude={live}
                     targetSide={running ? target : null}
+                    mode={mode}
                     accent={accent}
-                    matched={matched}
                     live={running}
                     height={430}
                 />

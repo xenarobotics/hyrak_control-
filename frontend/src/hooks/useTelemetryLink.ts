@@ -21,7 +21,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import {
     browserSerialSupported, getSerialApi, listGrantedPorts,
-    requestRadioPort, type GrantedRadio,
+    requestRadioPort, serialUnavailableReason, type GrantedRadio,
 } from '@/lib/browserSerial'
 import { useDrone } from '@/hooks/useDrone'
 import { getLocalRelayUrl } from '@/lib/localRfRelay'
@@ -166,14 +166,22 @@ export function useTelemetryLink() {
     ]
 
     const isSerial = source.startsWith('radio-') || source.startsWith('nradio-')
+    const selectedIsFc = source.startsWith('radio-')
+        ? !!radios[Number(source.slice(6))]?.isFc
+        : false
 
     return {
         desktop,
         radios, nativeRadios, options,
         source, setSource,
-        baud, setBaud, isSerial,
+        baud, setBaud, isSerial, selectedIsFc,
         refreshRadios, refreshNativeRadios, addRadio,
         browserSerialSupported: browserSerialSupported(),
+        // Named rather than merely absent. A flight controller on a USB cable
+        // works in the desktop app and looks unsupported here, and the cause
+        // is usually the page's origin rather than the browser — see
+        // serialUnavailableReason.
+        serialUnavailable: serialUnavailableReason(),
         connect, disconnect, disconnecting,
         telemetryStatus, telemetryError,
         isConnected: telemetryStatus === 'connected',
