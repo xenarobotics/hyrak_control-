@@ -75,6 +75,18 @@ async def _execute_drone_action(tel, action: str, data: dict) -> dict:
     if action == "set_mode":
         mode = data.get("mode", "HOLD")
         return {"action": action, "mode": mode, "ok": await tel.set_flight_mode(mode)}
+    if action == "handover_to_pilot":
+        # THE OPERATOR'S ROUTE TO HANDING THE AIRCRAFT OVER, which until now
+        # only existed on the transmitter and only worked if the airframe's
+        # RC parameters allowed it. This one needs nothing but the link.
+        ok, detail = await tel.handover_to_pilot()
+        return {"action": action, "ok": ok,
+                "msg": f"Pilot has the aircraft in {detail}" if ok else None,
+                "error": None if ok else f"No manual mode would take: {detail}"}
+    if action == "resume_from_pilot":
+        return {"action": action, "ok": await tel.resume_from_pilot()}
+    if action == "rc_takeover_check":
+        return {"action": action, "ok": True, "report": await tel.rc_takeover_readiness()}
     if action == "takeoff":
         alt = data.get("altitude")
         return {"action": action, "ok": await tel.takeoff(float(alt) if alt is not None else None)}
@@ -203,8 +215,38 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             except Exception as e:
                 logger.debug(f"Could not forward FC message: {e}")
 
+        def on_pilot_override(mode: str):
+            """The aircraft left Offboard without us asking — a human has it.
+
+            STOPPING THE TRACKER IS THE POINT, and it has to happen here rather
+            than in the telemetry manager, which knows nothing about analyzers.
+            A tracker left armed keeps computing a chase; the aircraft is only
+            spared it because PX4 is discarding the setpoints, and that lasts
+            exactly until something re-enters Offboard.
+            """
+            async def _stand_down():
+                try:
+                    if vision_pool:
+                        analyzer = vision_pool.get_for_session(session.session_id)
+                        if isinstance(analyzer, _pursuit_analyzers()):
+                            analyzer.set_tracking(session.session_id, False)
+                    # Both, because which one armed the follow depends on the
+                    # subject kind and this is not the moment to guess: a
+                    # control left showing "following" after the pilot has
+                    # taken the aircraft is the exact lie this fixes.
+                    await sio.emit("tracking_status", {"active": False}, to=sid)
+                    await sio.emit("vehicle_tracking_status", {"active": False}, to=sid)
+                    await sio.emit("pilot_override", {"mode": mode}, to=sid)
+                except Exception as e:
+                    logger.error(f"Pilot-override stand-down failed: {e}")
+            try:
+                asyncio.create_task(_stand_down())
+            except RuntimeError:
+                pass
+
         manager = TelemetryManager(on_update=on_telemetry_update,
-                                   on_fc_message=on_fc_message)
+                                   on_fc_message=on_fc_message,
+                                   on_pilot_override=on_pilot_override)
         # TELL IT WHAT THE LINK REALLY IS, before start() picks stream rates.
         #
         # The address cannot say. In this product the radio is plugged into the

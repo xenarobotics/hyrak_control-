@@ -103,8 +103,22 @@ export function FollowControls({
             // since started working is worse than none.
             window.setTimeout(() => setArmError(null), 8000)
         }
+        // WHY THE FOLLOW STOPPED, in the place that was showing it running.
+        // A pilot taking the aircraft on their mode switch disarms the tracker
+        // from the backend, so this control flips back to "Follow" on its own
+        // — correctly, and with no explanation at all. "It just stopped" is
+        // the report that costs a debugging round; it stopped because somebody
+        // took the aircraft, and that is worth one line.
+        const onPilot = (d: { mode?: string }) => {
+            setArmError(
+                `Follow stopped — the pilot took the aircraft${d?.mode ? ` in ${d.mode}` : ''}. ` +
+                `Take control back in the flight controls before following again.`
+            )
+            window.setTimeout(() => setArmError(null), 12000)
+        }
         socket.on('error', onError)
-        return () => { socket.off('error', onError) }
+        socket.on('pilot_override', onPilot)
+        return () => { socket.off('error', onError); socket.off('pilot_override', onPilot) }
     }, [])
 
     const [dist, setDist] = useState(targetRatio ?? 0.22)

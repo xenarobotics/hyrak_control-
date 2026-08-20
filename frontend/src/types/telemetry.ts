@@ -72,4 +72,15 @@ export interface TelemetrySnapshot {
      *  commanded. The cause is on the vehicle (parameter, barometer, ground
      *  effect), so this reports rather than corrects. */
     altitude_warning?: string | null
+    /** True while THIS APP is the one flying — i.e. it started Offboard and
+     *  believes it still holds it. Not the same question as the flight mode:
+     *  after a pilot takes over, the mode line and this disagree, which is the
+     *  only time the difference matters. */
+    offboard_active?: boolean
+    /** The mode PX4 moved to when the aircraft left Offboard WITHOUT the app
+     *  asking — the pilot took it, on the mode switch or on the sticks. Null
+     *  while the app still holds it. Latched: it stays set until control is
+     *  taken back deliberately, so a stray tap cannot snatch the aircraft out
+     *  of a pilot's hands mid-recovery. */
+    pilot_override?: string | null
 }

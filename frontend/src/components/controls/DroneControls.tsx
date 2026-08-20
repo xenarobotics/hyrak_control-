@@ -12,7 +12,8 @@ import {
 } from '@/components/ui/select'
 import {
     Shield, ShieldOff, PlaneTakeoff,
-    RotateCcw, MapPin, PlaneLanding, Loader
+    RotateCcw, MapPin, PlaneLanding, Loader,
+    Hand, Cpu
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FLIGHT_MODES, modeOptionFor, modeLabel } from '@/lib/flightModes'
@@ -46,6 +47,14 @@ export function DroneControls() {
         const t = setTimeout(() => setModeError(null), 12000)
         return () => clearTimeout(t)
     }, [lastActionResult])
+
+    // WHO IS FLYING is a different question from WHICH MODE, and only the
+    // second was ever on screen. They agree right up until the moment they
+    // stop — a pilot taking the aircraft on their mode switch — which is the
+    // one moment the operator needs to be told.
+    const appIsFlying  = telemetry?.offboard_active ?? false
+    const pilotHasIt   = telemetry?.pilot_override ?? null
+    const handoverPending = pendingAction?.action === 'handover_to_pilot'
 
     const armed = telemetry?.flight_mode?.is_armed ?? false
     // Sent, not yet acknowledged. On a 3DR radio that gap is about a second,
@@ -162,6 +171,58 @@ export function DroneControls() {
                 <p className="text-[10px] font-mono text-red-400/90 leading-relaxed break-words">
                     {modeError}
                 </p>
+            )}
+
+            {/* WHO IS FLYING.
+                Shown only when there is something to say — an aircraft nobody
+                is flying autonomously needs no band, and a control that is
+                always there stops being read.
+
+                The pilot's own route out of Offboard is their mode switch or
+                their sticks, and BOTH depend on aircraft parameters this app
+                does not own: COM_RC_IN_MODE decides whether the transmitter
+                reaches PX4 at all, COM_RC_OVERRIDE bit 1 decides whether the
+                sticks do anything during Offboard, and it is CLEAR by default.
+                The button below depends on none of that — it stops Offboard
+                and commands a stick-flown mode over the link. It also covers
+                the case the switch cannot: PX4 acts on the mode switch when it
+                CHANGES, so a switch already sitting in the slot the pilot
+                wants does nothing until they toggle away and back. */}
+            {!swarmEnabled && pilotHasIt && (
+                <div className="space-y-2 px-3 py-2 rounded-lg"
+                    style={{ background: 'rgba(251,146,60,.1)', border: '1px solid rgba(251,146,60,.4)' }}
+                >
+                    <div className="flex items-center gap-1.5 text-[10px] font-mono font-bold text-orange-400">
+                        <Hand size={12} /> PILOT HAS CONTROL
+                    </div>
+                    <p className="text-[10px] font-mono leading-relaxed text-orange-300/80">
+                        The aircraft left Offboard for {pilotHasIt} without this app
+                        asking. Tracking has stopped and will not restart on its own.
+                    </p>
+                    <Button
+                        size="sm" variant="outline"
+                        className="w-full font-mono text-xs gap-1.5 border-cyan-500/40 text-cyan-500 hover:bg-cyan-500/10"
+                        disabled={!connected}
+                        onClick={() => sendAction('resume_from_pilot')}
+                        title="Allow the app to fly this aircraft again. Does not re-enter Offboard by itself."
+                    >
+                        <Cpu size={12} /> TAKE CONTROL BACK
+                    </Button>
+                </div>
+            )}
+
+            {!swarmEnabled && !pilotHasIt && appIsFlying && (
+                <Button
+                    size="sm" variant="outline"
+                    className="w-full font-mono text-xs gap-1.5 border-orange-500/40 text-orange-500 hover:bg-orange-500/10"
+                    disabled={!connected || handoverPending}
+                    onClick={() => sendAction('handover_to_pilot')}
+                    title="Stop Offboard and put PX4 in a stick-flown mode, so the transmitter is live immediately"
+                >
+                    {handoverPending
+                        ? <><Loader size={12} className="animate-spin" /> HANDING OVER…</>
+                        : <><Hand size={12} /> GIVE TO PILOT</>}
+                </Button>
             )}
 
             {/* Arm / Disarm */}

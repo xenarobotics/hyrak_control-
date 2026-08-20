@@ -105,6 +105,20 @@ class TelemetrySnapshot:
     # barometer, ground effect) and no code here can fix it — only report it
     # while the operator can still act.
     altitude_warning: Optional[str] = None
+    # ── Who is flying ────────────────────────────────────────────────────
+    # WHETHER THE APP IS COMMANDING IS NOT THE SAME QUESTION AS WHICH MODE
+    # THE AIRCRAFT IS IN, and until now only the second was on the wire. The
+    # operator could see "OFFBOARD" and infer the app was flying, but not the
+    # reverse: an app that BELIEVES it is flying while PX4 has already handed
+    # the aircraft to the pilot looked identical to one that is.
+    offboard_active: bool = False
+    # Set to the mode PX4 moved to when the aircraft left Offboard WITHOUT
+    # this app asking — i.e. the pilot took it, on the mode switch or on the
+    # sticks. None means the app still holds it (or never did). This is a
+    # LATCH, not a live comparison: it stays set until somebody deliberately
+    # takes control back, so that a stray tap cannot snatch the aircraft out
+    # of a pilot's hands mid-recovery.
+    pilot_override: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -127,6 +141,8 @@ class TelemetrySnapshot:
             "measured_rates": dict(self.measured_rates),
             "commanded_altitude_m": self.commanded_altitude_m,
             "altitude_warning": self.altitude_warning,
+            "offboard_active": self.offboard_active,
+            "pilot_override": self.pilot_override,
         }
 
 

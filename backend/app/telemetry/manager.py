@@ -65,9 +65,16 @@ class TelemetryManager:
     _FLEET_EMIT_RATE_HZ = 3   # fleet drones — lower to avoid overwhelming mavsdk_server queue
 
     def __init__(self, on_update: Optional[Callable[[dict], None]] = None, fleet_mode: bool = False,
-                 on_fc_message: Optional[Callable[[dict], None]] = None):
+                 on_fc_message: Optional[Callable[[dict], None]] = None,
+                 on_pilot_override: Optional[Callable[[str], None]] = None):
         self._drone: Optional[System] = None
         self._on_update = on_update
+        # Called with the mode PX4 moved to, the moment the aircraft leaves
+        # Offboard without this app asking. The event layer uses it to stop
+        # every tracker, because a tracker that keeps computing setpoints
+        # while a human flies the aircraft is a tracker waiting to grab it
+        # back the instant anything re-enters Offboard.
+        self._on_pilot_override = on_pilot_override
         # Every line the autopilot says, pushed on as it arrives.
         #
         # These were already being collected — the refusal-reason work needed
@@ -85,6 +92,16 @@ class TelemetryManager:
         self._connected = False
         self._offboard_active = False
         self._offboard_hold_alt: Optional[float] = None  # relative altitude (m) to hold during AI/offboard tracking
+        # Latched when the pilot takes the aircraft; see _note_pilot_override.
+        self._pilot_override_mode: Optional[str] = None
+        # Monotonic deadline before which a departure from Offboard is OURS.
+        #
+        # The alternative — a boolean cleared once the mode has settled — races
+        # the flight-mode subscription, which is a separate task reading a 1 Hz
+        # HEARTBEAT-derived stream. A window is honest about what is actually
+        # being asserted: "we asked for a mode change just now, so the next one
+        # to arrive is the answer to it and not a pilot."
+        self._offboard_release_until: float = 0.0
         # Monotonic time of the last velocity setpoint from the commanding loop.
         # 0.0 = none yet, which the watchdog treats as "not commanding" rather
         # than "stale" — an armed Offboard session that has never been given a
@@ -609,6 +626,8 @@ class TelemetryManager:
                 name = str(mode).replace("FlightMode.", "")
                 changed = self._snapshot.flight_mode.mode != name
                 self._snapshot.flight_mode.mode = name
+                if changed:
+                    self._check_offboard_departure(name)
                 self._emit(force=changed)
         except asyncio.CancelledError:
             pass
@@ -622,6 +641,13 @@ class TelemetryManager:
                     break
                 changed = self._snapshot.flight_mode.is_armed != armed
                 self._snapshot.flight_mode.is_armed = armed
+                if changed and not armed:
+                    # A DISARM ENDS THE ARGUMENT. The latch exists to stop the
+                    # app grabbing an aircraft out of a flying pilot's hands;
+                    # on the ground there is nothing to grab, and leaving it
+                    # set would make the next flight refuse to arm Offboard
+                    # for a reason that stopped being true when the props did.
+                    self._clear_pilot_override()
                 self._emit(force=changed)
         except asyncio.CancelledError:
             pass
@@ -1605,6 +1631,7 @@ class TelemetryManager:
         import time as _time
         sent = _time.monotonic()
         self.last_action_error = None
+        self._expect_offboard_exit()
         try:
             await self._drone.action.disarm()
             logger.info("✅ Disarmed")
@@ -1619,6 +1646,7 @@ class TelemetryManager:
         Kills motors immediately regardless of state.
         Only use in genuine emergency — drone will fall.
         """
+        self._expect_offboard_exit()
         try:
             await self._drone.action.kill()
             logger.warning("🚨 EMERGENCY KILL SENT")
@@ -1636,11 +1664,249 @@ class TelemetryManager:
             logger.error(f"Reboot failed: {e}")
             return False
 
+    # ── Who is flying: Offboard <-> pilot handover ────────────────────────
+    #
+    # THE APP'S BELIEF THAT IT IS FLYING WAS NEVER CHECKED AGAINST THE
+    # AIRCRAFT. `_offboard_active` was set by start_offboard, cleared by
+    # stop_offboard, and read by the watchdog — three places, all of them this
+    # process. PX4 can end Offboard on its own at any moment, and does, every
+    # time a pilot takes over: on the mode switch, or on the sticks when
+    # COM_RC_OVERRIDE allows it. Nothing here noticed.
+    #
+    # What that cost, in order of how bad it is:
+    #
+    #   1. THE TRACKER KEPT RUNNING. A follow that is mid-chase stayed armed,
+    #      still computing setpoints, still calling set_velocity_body. PX4
+    #      discards those while a human is flying — but the app is then one
+    #      re-entry away from resuming a chase the pilot took over to stop.
+    #   2. THE WATCHDOG KEPT THE STREAM ALIVE. It re-sends a zero setpoint
+    #      every 200 ms, deliberately, so Offboard never goes stale. After a
+    #      takeover that means PX4's offboard-loss failsafe never fires and
+    #      Offboard stays instantly re-enterable for the rest of the flight.
+    #   3. THE UI STILL SAID "FOLLOWING". The one moment the operator most
+    #      needs to know who has the aircraft is the moment it changed hands,
+    #      and that was the moment the screen went stale.
+    #
+    # So the departure is now detected, latched, and announced.
+
+    #: How long after WE ask for a mode change a departure from Offboard is
+    #: still attributable to us. Generous against a 1 Hz HEARTBEAT: PX4 may
+    #: take a beat to report, and the cost of being late is a false "the pilot
+    #: took over" — which stops the tracker and tells the operator something
+    #: that is not true. The cost of being early is nothing, because the pilot
+    #: taking over inside our own two-second window still ends in the same
+    #: place: the app is not flying and does not think it is.
+    _OFFBOARD_RELEASE_WINDOW_S = 2.0
+
+    def _expect_offboard_exit(self) -> None:
+        """Call immediately BEFORE any action of ours that ends Offboard."""
+        self._offboard_release_until = time.monotonic() + self._OFFBOARD_RELEASE_WINDOW_S
+
+    def _check_offboard_departure(self, mode_name: str) -> None:
+        """Did the aircraft just leave Offboard, and was it us who asked?"""
+        if not self._offboard_active or mode_name == "OFFBOARD":
+            return
+        if time.monotonic() < self._offboard_release_until:
+            return  # our own stop/land/RTL, arriving as expected
+        self._note_pilot_override(mode_name)
+
+    def _note_pilot_override(self, mode_name: str) -> None:
+        """The pilot has the aircraft. Stand down, loudly."""
+        self._offboard_active = False
+        self._offboard_hold_alt = None
+        self._last_velocity_cmd_t = 0.0
+        self._offboard_stale = False
+        self._pilot_override_mode = mode_name
+        self._snapshot.offboard_active = False
+        self._snapshot.pilot_override = mode_name
+        logger.warning(
+            f"PILOT HAS CONTROL — the aircraft left Offboard for {mode_name} "
+            f"without this app asking. Tracking stops; Offboard will not be "
+            f"re-entered until control is taken back deliberately."
+        )
+        if self._on_pilot_override:
+            try:
+                self._on_pilot_override(mode_name)
+            except Exception as e:
+                logger.error(f"Pilot-override callback failed: {e}")
+
+    def _clear_pilot_override(self) -> None:
+        if self._pilot_override_mode is None:
+            return
+        logger.info(f"Pilot override cleared (was {self._pilot_override_mode})")
+        self._pilot_override_mode = None
+        self._snapshot.pilot_override = None
+
+    @property
+    def pilot_has_control(self) -> bool:
+        return self._pilot_override_mode is not None
+
+    #: Modes to hand the aircraft to, in order of preference. POSITION is what
+    #: a pilot recovering an aircraft wants — it holds position when the sticks
+    #: are centred, so letting go is safe. ALTITUDE needs no position estimate,
+    #: and STABILIZED needs nothing at all: if the reason the pilot is taking
+    #: over is that the position estimate died, POSITION is exactly the mode
+    #: PX4 will refuse, and refusing to hand over at all would be the worst
+    #: possible answer to "give me the aircraft".
+    _HANDOVER_MODES = ("POSITION", "ALTITUDE", "STABILIZED")
+
+    async def handover_to_pilot(self) -> tuple[bool, str]:
+        """Deliberately give the aircraft to the human, from the ground station.
+
+        This is the OTHER half of the bridge. The pilot's own route out of
+        Offboard is their mode switch or their sticks, and that depends on
+        aircraft parameters this app does not own (see rc_takeover_readiness).
+        This route depends on nothing but the link: it stops Offboard and puts
+        PX4 into a stick-flown mode, so the transmitter is live the moment the
+        operator presses it — including when the mode switch is already sitting
+        in the slot they want, which PX4 acts on only when it CHANGES and so
+        would otherwise require them to toggle away and back.
+        """
+        self._expect_offboard_exit()
+        if self._offboard_active:
+            await self.stop_offboard()
+        tried: list[str] = []
+        for mode in self._HANDOVER_MODES:
+            self._expect_offboard_exit()
+            if await self.set_flight_mode(mode):
+                self._pilot_override_mode = mode
+                self._snapshot.pilot_override = mode
+                self._emit(force=True)
+                logger.warning(f"HANDED OVER TO PILOT — aircraft is in {mode}")
+                return True, mode
+            tried.append(f"{mode} ({self.last_action_error or 'refused'})")
+        # Every stick mode refused. Say so plainly rather than reporting a
+        # handover that did not happen — the operator is about to let go.
+        detail = "; ".join(tried)
+        logger.error(f"Handover failed — the aircraft refused every manual mode: {detail}")
+        return False, detail
+
+    async def resume_from_pilot(self) -> bool:
+        """Take control back, deliberately. Clears the latch only — it does not
+        re-enter Offboard, because Offboard is entered by arming a tracking
+        mode and that is a separate decision the operator makes on purpose."""
+        if self._pilot_override_mode is None:
+            return True
+        self._clear_pilot_override()
+        self._emit(force=True)
+        return True
+
+    #: The parameters that decide whether the transmitter can take the
+    #: aircraft back, with what each value means for that one question.
+    #: Read, never written: these belong to whoever set the airframe up, and a
+    #: ground station that quietly rewrites RC behaviour mid-campaign is a
+    #: worse problem than the one it solves.
+    _RC_TAKEOVER_PARAMS = ("COM_RC_IN_MODE", "COM_RC_OVERRIDE",
+                           "COM_RC_STICK_OV", "COM_RCL_EXCEPT", "RC_MAP_FLTMODE")
+
+    async def rc_takeover_readiness(self) -> dict:
+        """Can the pilot actually take this aircraft back? Answered before
+        takeoff, from the aircraft's own parameters, instead of discovered at
+        the moment it matters.
+
+        Returns {"ok": bool, "findings": [{param, value, verdict, detail}],
+                 "unreadable": [str]}.
+        """
+        params = await self.get_all_params()
+        if not params:
+            return {"ok": False, "findings": [],
+                    "unreadable": list(self._RC_TAKEOVER_PARAMS),
+                    "error": "Could not read parameters from the flight controller"}
+        findings: list[dict] = []
+        unreadable: list[str] = []
+        for name in self._RC_TAKEOVER_PARAMS:
+            entry = params.get(name)
+            if entry is None:
+                unreadable.append(name)
+                continue
+            verdict, detail = self._rc_param_verdict(name, entry["value"])
+            findings.append({"param": name, "value": entry["value"],
+                             "verdict": verdict, "detail": detail})
+        ok = all(f["verdict"] == "ok" for f in findings) and not unreadable
+        return {"ok": ok, "findings": findings, "unreadable": unreadable}
+
+    @staticmethod
+    def _rc_param_verdict(name: str, value) -> tuple[str, str]:
+        """One parameter, judged against one question: can the pilot take over?
+
+        Deliberately narrow. These parameters mean other things too, and this
+        is not a general configuration audit — it is the answer to whether the
+        transmitter is live, which is the question being asked.
+        """
+        v = int(value) if isinstance(value, (int, float)) and float(value).is_integer() else value
+        if name == "COM_RC_IN_MODE":
+            if v == 1:
+                return "blocked", ("Joystick only — PX4 ignores the transmitter "
+                                   "entirely, including its mode switch")
+            if v == 4:
+                return "blocked", "Stick input disabled — no stick or switch reaches PX4"
+            if v == 3:
+                return "warn", ("'RC and Joystick, keep first' — whichever manual "
+                                "source PX4 hears FIRST owns the aircraft for the "
+                                "rest of the session. If this ground station's "
+                                "virtual joystick sends before the transmitter is "
+                                "on, the transmitter is locked out until reboot")
+            return "ok", "The transmitter reaches PX4"
+        if name == "COM_RC_OVERRIDE":
+            bits = int(v) if isinstance(v, int) else 0
+            if not bits & 2:
+                return "warn", ("Stick override is NOT enabled for Offboard (bit 1 "
+                                "clear) — moving the sticks while the app is flying "
+                                "does nothing. The mode switch still works; set 3 "
+                                "if you want the sticks alone to take the aircraft")
+            if not bits & 1:
+                return "warn", ("Stick override is not enabled for auto modes "
+                                "(bit 0 clear) — sticks do nothing in HOLD/RTL, "
+                                "which is where the aircraft sits after takeoff")
+            return "ok", "Sticks take the aircraft in both auto and Offboard"
+        if name == "COM_RC_STICK_OV":
+            try:
+                pct = float(v)
+            except (TypeError, ValueError):
+                return "warn", "Unreadable threshold"
+            if pct >= 50:
+                return "warn", (f"{pct:g}% of full deflection needed to trigger "
+                                f"override — a large, deliberate movement")
+            if pct <= 5:
+                return "warn", (f"{pct:g}% — low enough that stick noise or trim "
+                                f"could take the aircraft off the app unasked")
+            return "ok", f"{pct:g}% stick movement triggers override"
+        if name == "COM_RCL_EXCEPT":
+            bits = int(v) if isinstance(v, int) else 0
+            if bits & 4:
+                return "ok", "RC loss is not a failsafe while in Offboard"
+            return "ok", ("RC loss triggers the failsafe in Offboard — correct "
+                          "for a manned-recovery setup, and worth knowing if the "
+                          "transmitter is ever off during an AI flight")
+        if name == "RC_MAP_FLTMODE":
+            channel = int(v) if isinstance(v, (int, float)) else 0
+            if channel == 0:
+                return "warn", ("No channel is mapped to the flight-mode switch — "
+                                "the switch on the transmitter changes nothing. "
+                                "Map it, and set COM_FLTMODE1..6")
+            return "ok", f"Flight-mode switch is on RC channel {channel}"
+        return "ok", ""
+
     async def start_offboard(self) -> bool:
         """
         Starts Offboard mode.
         Must send at least one setpoint before calling this.
         """
+        if self._pilot_override_mode is not None:
+            # REFUSING HERE IS THE WHOLE POINT OF THE LATCH. The pilot took the
+            # aircraft; every follow control in the UI is still on screen and
+            # still tappable, and one tap must not put an autonomous chase back
+            # on an aircraft somebody is hand-flying out of trouble.
+            logger.warning(
+                f"Offboard refused — the pilot has the aircraft "
+                f"(took it in {self._pilot_override_mode})"
+            )
+            self.last_action_error = (
+                f"The pilot has the aircraft — it was taken over in "
+                f"{self._pilot_override_mode}. Take control back before flying it "
+                f"from here."
+            )
+            return False
         try:
             # Send neutral setpoint first — required by PX4
             await self._drone.offboard.set_velocity_body(
@@ -1648,6 +1914,7 @@ class TelemetryManager:
             )
             await self._drone.offboard.start()
             self._offboard_active = True
+            self._snapshot.offboard_active = True
             # Lock the altitude AI tracking should hold — callers (human/person
             # tracker) only ever send forward/right/yaw, never a vertical
             # component, so without this the drone has no active altitude
@@ -1661,6 +1928,9 @@ class TelemetryManager:
 
     async def stop_offboard(self) -> bool:
         """Stops Offboard mode and returns to HOLD."""
+        # Claimed BEFORE the aircraft is touched: the mode change we are about
+        # to cause must not come back looking like a pilot taking over.
+        self._expect_offboard_exit()
         try:
             # Send zero velocity before stopping
             await self._drone.offboard.set_velocity_body(
@@ -1669,6 +1939,7 @@ class TelemetryManager:
             await asyncio.sleep(0.1)
             await self._drone.offboard.stop()
             self._offboard_active = False
+            self._snapshot.offboard_active = False
             self._offboard_hold_alt = None
             # Cleared so the next Offboard session starts with no command
             # history rather than inheriting this one's last timestamp.
@@ -1837,6 +2108,9 @@ class TelemetryManager:
         whose preconditions are not met without saying so.
         """
         mode = mode.upper()
+        # An operator choosing a mode from the app's own menu is this app
+        # ending Offboard, not a pilot taking the aircraft.
+        self._expect_offboard_exit()
         if mode not in self._MODE_REPORTS_AS:
             logger.warning(f"Unknown flight mode: {mode}")
             self.last_action_error = f"{mode} is not a mode this aircraft offers"

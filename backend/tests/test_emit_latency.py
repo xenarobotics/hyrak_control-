@@ -37,6 +37,13 @@ def _manager():
     t._fleet_mode = False
     t._last_emit = 0.0
     t._on_update = _Recorder()
+    # The subscriptions under test also reconcile who is flying (see
+    # test_pilot_handover): a mode leaving OFFBOARD, or a disarm, is inspected
+    # on the way past. Hand-built managers have to carry that state too.
+    t._on_pilot_override = None
+    t._offboard_active = False
+    t._pilot_override_mode = None
+    t._offboard_release_until = 0.0
     return t
 
 
