@@ -44,6 +44,18 @@ export interface ActionResult {
      *  only thing that distinguishes "the drone said no" from "the command
      *  never got there". Without it both look like a dead radio. */
     error?: string
+    /** rc_takeover_check only — the aircraft's own answer to "can the pilot
+     *  take this back?", read from its parameters. */
+    report?: RcTakeoverReport
+}
+
+/** Whether the transmitter can take the aircraft back, answered from the
+ *  aircraft's parameters before takeoff rather than discovered in the air. */
+export interface RcTakeoverReport {
+    ok: boolean
+    findings: { param: string; value: number; verdict: 'ok' | 'warn' | 'blocked'; detail: string }[]
+    unreadable: string[]
+    error?: string
 }
 
 interface DroneStore {

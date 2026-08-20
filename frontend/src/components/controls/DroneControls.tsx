@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 
 import { useDrone } from '@/hooks/useDrone'
-import { useDroneStore } from '@/store/drone'
+import { useDroneStore, type RcTakeoverReport } from '@/store/drone'
 import { useSwarmStore } from '@/store/swarm'
 import { Button } from '@/components/ui/button'
 import {
@@ -13,7 +13,7 @@ import {
 import {
     Shield, ShieldOff, PlaneTakeoff,
     RotateCcw, MapPin, PlaneLanding, Loader,
-    Hand, Cpu
+    Hand, Cpu, Radio
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FLIGHT_MODES, modeOptionFor, modeLabel } from '@/lib/flightModes'
@@ -55,6 +55,17 @@ export function DroneControls() {
     const appIsFlying  = telemetry?.offboard_active ?? false
     const pilotHasIt   = telemetry?.pilot_override ?? null
     const handoverPending = pendingAction?.action === 'handover_to_pilot'
+
+    // CAN THE PILOT TAKE THIS BACK AT ALL — answered from the aircraft's own
+    // parameters on the ground, which is the only place the answer is cheap.
+    // Runs on request, not automatically: it downloads the full parameter
+    // table, which is seconds on SITL and half a minute on a 3DR radio.
+    const [rcReport, setRcReport] = useState<RcTakeoverReport | null>(null)
+    const rcPending = pendingAction?.action === 'rc_takeover_check'
+    useEffect(() => {
+        if (lastActionResult?.action !== 'rc_takeover_check') return
+        setRcReport(lastActionResult.report ?? null)
+    }, [lastActionResult])
 
     const armed = telemetry?.flight_mode?.is_armed ?? false
     // Sent, not yet acknowledged. On a 3DR radio that gap is about a second,
@@ -223,6 +234,57 @@ export function DroneControls() {
                         ? <><Loader size={12} className="animate-spin" /> HANDING OVER…</>
                         : <><Hand size={12} /> GIVE TO PILOT</>}
                 </Button>
+            )}
+
+            {/* RC takeover readiness.
+                These parameters belong to whoever set the airframe up, so this
+                READS and never writes: a ground station that quietly rewrites
+                RC behaviour mid-campaign is a worse problem than the one it
+                solves, and the operator would have no idea it had happened. */}
+            {!swarmEnabled && (
+                <div className="space-y-1.5">
+                    <Button
+                        size="sm" variant="outline"
+                        className="w-full font-mono text-[11px] gap-1.5 hover:border-cyan-500/50 hover:text-cyan-500"
+                        disabled={!connected || rcPending}
+                        onClick={() => sendAction('rc_takeover_check')}
+                        title="Read the parameters that decide whether the transmitter can take the aircraft back"
+                    >
+                        {rcPending
+                            ? <><Loader size={11} className="animate-spin" /> READING PARAMS…</>
+                            : <><Radio size={11} /> RC TAKEOVER CHECK</>}
+                    </Button>
+                    {rcReport && (
+                        <div className="px-2.5 py-2 rounded-lg space-y-1"
+                            style={{
+                                background: rcReport.ok ? 'rgba(34,197,94,.08)' : 'rgba(251,146,60,.08)',
+                                border: `1px solid ${rcReport.ok ? 'rgba(34,197,94,.3)' : 'rgba(251,146,60,.35)'}`,
+                            }}
+                        >
+                            <div className={cn('text-[10px] font-mono font-bold',
+                                rcReport.ok ? 'text-green-400' : 'text-orange-400')}>
+                                {rcReport.ok
+                                    ? 'THE PILOT CAN TAKE THIS AIRCRAFT BACK'
+                                    : 'RC TAKEOVER IS NOT FULLY CONFIGURED'}
+                            </div>
+                            {rcReport.error && (
+                                <p className="text-[10px] font-mono text-orange-300/80">{rcReport.error}</p>
+                            )}
+                            {rcReport.findings.filter(f => f.verdict !== 'ok').map(f => (
+                                <p key={f.param} className="text-[10px] font-mono leading-relaxed break-words"
+                                    style={{ color: f.verdict === 'blocked' ? '#f87171' : '#fdba74' }}
+                                >
+                                    <span className="font-bold">{f.param}={f.value}</span> — {f.detail}
+                                </p>
+                            ))}
+                            {rcReport.unreadable.length > 0 && (
+                                <p className="text-[10px] font-mono text-orange-300/70 break-words">
+                                    Not present on this airframe: {rcReport.unreadable.join(', ')}
+                                </p>
+                            )}
+                        </div>
+                    )}
+                </div>
             )}
 
             {/* Arm / Disarm */}
