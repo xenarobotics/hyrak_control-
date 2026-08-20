@@ -53,13 +53,25 @@ SIDE_INSTRUCTIONS = {
 #: MAVSDK plugin method per sensor, and whether the sensor has six sides to
 #: work through. One table, so the socket layer, the manager and the UI cannot
 #: disagree about which sensors exist.
+#: `timeout` is a CEILING, not an expectation — the whole point is that a
+#: calibration which never ends is REPORTED rather than left spinning. PX4 can
+#: stop streaming without a verdict (a routine that aborted internally, a
+#: dropped final STATUSTEXT), and the operator has no way to tell that apart
+#: from one still working. The operator-paced ones get minutes because the
+#: aircraft spends most of that time in a human's hands.
 SENSORS = {
-    "gyro":  {"method": "calibrate_gyro",        "label": "Gyroscope",       "oriented": False},
-    "accel": {"method": "calibrate_accelerometer", "label": "Accelerometer", "oriented": True},
-    "mag":   {"method": "calibrate_magnetometer", "label": "Compass",        "oriented": True},
-    "level": {"method": "calibrate_level_horizon", "label": "Level Horizon", "oriented": False},
-    "gimbal": {"method": "calibrate_gimbal_accelerometer", "label": "Gimbal Accel", "oriented": False},
+    "gyro":  {"method": "calibrate_gyro",        "label": "Gyroscope",       "oriented": False, "timeout": 90.0},
+    "accel": {"method": "calibrate_accelerometer", "label": "Accelerometer", "oriented": True,  "timeout": 420.0},
+    "mag":   {"method": "calibrate_magnetometer", "label": "Compass",        "oriented": True,  "timeout": 420.0},
+    "level": {"method": "calibrate_level_horizon", "label": "Level Horizon", "oriented": False, "timeout": 90.0},
+    "gimbal": {"method": "calibrate_gimbal_accelerometer", "label": "Gimbal Accel", "oriented": False, "timeout": 90.0},
 }
+
+#: PX4 refuses a level-horizon calibration whose starting attitude is already
+#: off by more than this, and says so only as a failure minutes later. Checked
+#: up front instead, because "put it on something actually flat" is advice the
+#: operator can act on before they have wasted the attempt.
+LEVEL_MAX_TILT_DEG = 5.0
 
 #: How PX4 names each sensor inside its own messages, mapped back to our key.
 #: "calibration started: 2 mag" has to land on the same session the operator

@@ -58,6 +58,11 @@ export interface Attitude { roll: number; pitch: number; yaw: number }
  *  separate arrows, and neither is guessed. */
 export type StageMode = 'reorient' | 'rotate' | 'hold' | 'idle'
 
+/** A jump this big between two samples of a 10 Hz stream is not a movement. */
+const GLITCH_RAD = THREE.MathUtils.degToRad(90)
+/** …unless the next sample lands near the same place, in which case it was. */
+const CONFIRM_RAD = THREE.MathUtils.degToRad(35)
+
 export function DroneScene({
     attitude, targetSide, mode = 'idle', accent = '#22d3ee',
     live = true, height = 360,
@@ -116,13 +121,27 @@ export function DroneScene({
             } catch { /* lights below still carry the scene */ }
         })()
 
-        scene.add(new THREE.HemisphereLight(0xbcd4ff, 0x14181f, 1.1))
-        const key = new THREE.DirectionalLight(0xffffff, 2.2)
+        // THREE-POINT, and each one is doing a job.
+        //
+        // The first pass was a hard white key plus a cyan rim, which blew the
+        // canopy to a mirror and left the underside — the skids, the gimbal,
+        // the whole half of the aircraft that says WHICH WAY UP — as an
+        // unreadable black mass. That matters more here than it would on a
+        // product shot: half the orientations this panel asks for put the
+        // bottom of the aircraft towards the viewer.
+        scene.add(new THREE.HemisphereLight(0xc8dcff, 0x2a3444, 1.35))
+        const key = new THREE.DirectionalLight(0xfff4e6, 1.85)
         key.position.set(5, 8, 4)
         scene.add(key)
-        const rim = new THREE.DirectionalLight(0x7dd3fc, 1.5)
-        rim.position.set(-6, 2, -5)
+        // Cool rim from behind, to separate the airframe from the background.
+        const rim = new THREE.DirectionalLight(0x7dd3fc, 1.25)
+        rim.position.set(-6, 3, -6)
         scene.add(rim)
+        // Bounce off the ground, so the underside is lit rather than merely
+        // less dark.
+        const bounce = new THREE.DirectionalLight(0x9fb4d0, 0.8)
+        bounce.position.set(0, -5, 2)
+        scene.add(bounce)
 
         // Contact shadow. A blurred blob on the ground, not a shadow map — it
         // costs nothing and it is what stops the aircraft looking like it is
@@ -211,6 +230,7 @@ export function DroneScene({
         let raf = 0
         let spin = 0
         let demoSpin = 0
+        let pending: THREE.Quaternion | null = null
         const Y_AXIS = new THREE.Vector3(0, 1, 0)
         const clock = new THREE.Clock()
 
@@ -239,6 +259,30 @@ export function DroneScene({
                 wanted.copy(orientationFor(inp.targetSide))
             } else {
                 wanted.identity()
+            }
+            // REJECT ONE-FRAME TELEPORTS.
+            //
+            // PX4 reports attitude as Euler angles, and near ±90° of pitch —
+            // which is exactly where a compass calibration spends its time —
+            // roll and yaw are degenerate: two consecutive samples can differ
+            // by 180° while describing almost the same attitude. Fed straight
+            // in, the model snapped right over and back, which is the "for a
+            // split second it completely shifts orientation" flicker.
+            //
+            // Nothing physical moves 90° between two samples of a 10 Hz
+            // stream, so a lone jump that large is discarded. If the NEXT
+            // sample agrees with the rejected one it is real after all and is
+            // taken — so a genuinely fast movement costs one frame of lag
+            // rather than being filtered out.
+            if (inp.attitude && shown.angleTo(wanted) > GLITCH_RAD) {
+                if (pending && pending.angleTo(wanted) < CONFIRM_RAD) {
+                    pending = null
+                } else {
+                    pending = wanted.clone()
+                    wanted.copy(shown)
+                }
+            } else {
+                pending = null
             }
             // Eased, not snapped: a 10 Hz attitude stream applied raw is a
             // stutter, and the smoothing also stops radio dropouts reading as
@@ -368,7 +412,8 @@ const ARROW_R = 2.55
 //: stray stroke rather than "turn it this way". Kept near-complete so the
 //: direction is unmistakable; how far is left to the colour and the words,
 //: which say it better than an arc length nobody measures.
-const ARROW_SWEEP = Math.PI * 1.62
+const ARROW_SWEEP = Math.PI * 1.58
+const HEAD_LEN = 0.66
 
 function buildRotationArrow() {
     const group = new THREE.Group()
@@ -383,7 +428,7 @@ function buildRotationArrow() {
     torus.renderOrder = 10
     group.add(torus)
 
-    const headGeo = new THREE.ConeGeometry(0.24, 0.62, 18)
+    const headGeo = new THREE.ConeGeometry(0.26, HEAD_LEN, 20)
     const head = new THREE.Mesh(headGeo, material)
     head.renderOrder = 10
     group.add(head)
@@ -392,11 +437,17 @@ function buildRotationArrow() {
     const tangent = new THREE.Vector3()
 
     const place = (sweep: number) => {
-        head.position.set(Math.cos(sweep) * ARROW_R, 0, -Math.sin(sweep) * ARROW_R)
-        // d/dtheta of that position, normalised — the way the arc is heading
-        // where it stops.
+        // d/dtheta of the arc position, normalised — the way the arc is
+        // heading where it stops.
         tangent.set(-Math.sin(sweep), 0, -Math.cos(sweep)).normalize()
         head.quaternion.setFromUnitVectors(UP, tangent)
+        // PUSHED FORWARD BY HALF ITS LENGTH. A cone is centred on its own
+        // middle, so placing it AT the arc's end buried half of it in the arc
+        // and the head read as a lump partway along the line rather than as
+        // the point of the arrow. Its base now meets the end of the stroke.
+        head.position
+            .set(Math.cos(sweep) * ARROW_R, 0, -Math.sin(sweep) * ARROW_R)
+            .addScaledVector(tangent, HEAD_LEN * 0.5)
     }
     place(ARROW_SWEEP)
 

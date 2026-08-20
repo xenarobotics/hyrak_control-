@@ -14,6 +14,8 @@ by a lossy radio, or change wording between firmware releases.
 NOTHING HERE HAS TOUCHED AN AIRCRAFT. Every line below is a real PX4 message
 format from calibration_messages.h, replayed against the state machine.
 """
+import contextlib
+
 import pytest
 
 from app.telemetry.calibration import (
@@ -507,3 +509,180 @@ def test_starting_replaces_a_finished_session_rather_than_stacking():
     ok, _ = asyncio.run(t.start_calibration("gyro"))
     assert ok is True
     assert t._calibration.state.sensor == "gyro"
+
+
+# --------------------------------------------------------------------------- #
+# Reported: cancel, then unable to calibrate anything again                     #
+# --------------------------------------------------------------------------- #
+
+def test_every_sensor_has_a_timeout():
+    """A calibration that stops producing a verdict looks exactly like one
+    still working, and the operator holding the aircraft has no way to tell
+    them apart. Level Horizon sat there indefinitely for precisely this
+    reason."""
+    for key, spec in SENSORS.items():
+        assert spec.get("timeout", 0) > 0, key
+        # Operator-paced ones are minutes; the automatic ones must not be, or
+        # a hang is indistinguishable from patience.
+        assert spec["timeout"] <= 600, key
+
+
+def test_the_hands_off_calibrations_time_out_quickly():
+    """Gyro and level need the aircraft PUT DOWN and left alone — there is no
+    human in the loop to be slow, so a long wait means something is wrong."""
+    assert SENSORS["gyro"]["timeout"] <= 120
+    assert SENSORS["level"]["timeout"] <= 120
+
+
+def test_a_level_calibration_is_refused_when_the_aircraft_is_not_level():
+    """PX4 refuses it and reports that as a FAILURE a long way down the line.
+    The attitude is already on the snapshot, so the answer is available before
+    the attempt is wasted."""
+    t = _mgr()
+    t._snapshot.attitude.roll_deg = 11.0
+    why = t.calibration_refusal("level")
+    assert why and "level" in why.lower() and "11" in why
+
+
+def test_a_level_calibration_is_allowed_when_it_is_level():
+    t = _mgr()
+    t._snapshot.attitude.roll_deg = 1.2
+    t._snapshot.attitude.pitch_deg = -0.8
+    assert t.calibration_refusal("level") is None
+
+
+def test_only_level_cares_about_tilt():
+    """A compass calibration is DONE by turning the aircraft over. Refusing it
+    for not being level would refuse it always."""
+    t = _mgr()
+    t._snapshot.attitude.roll_deg = 40.0
+    assert t.calibration_refusal("mag") is None
+    assert t.calibration_refusal("accel") is None
+
+
+@pytest.mark.parametrize("name,expect", [
+    ("BUSY", "already running"),
+    ("FAILED_ARMED", "armed"),
+    ("UNSUPPORTED", "does not offer"),
+    ("NO_SYSTEM", "no vehicle"),
+    ("CONNECTION_ERROR", "link dropped"),
+])
+def test_the_autopilots_own_verdict_reaches_the_operator(name, expect):
+    """BUSY, FAILED_ARMED and UNSUPPORTED are three different problems with
+    three different fixes. Flattened to "the calibration did not complete",
+    every one of them sent the operator looking in the wrong place."""
+    from app.telemetry.manager import TelemetryManager
+
+    class _Result:
+        def __init__(self, n):
+            self.result = type("R", (), {"name": n})()
+
+    err = Exception("boom")
+    err._result = _Result(name)
+    assert expect in TelemetryManager._calibration_reason(err).lower()
+
+
+def test_a_timeout_keeps_its_own_words():
+    from app.telemetry.manager import TelemetryManager
+    msg = TelemetryManager._calibration_reason(
+        TimeoutError("the aircraft stopped reporting after 90s"))
+    assert "stopped reporting" in msg
+
+
+@pytest.mark.asyncio
+async def test_starting_reaps_a_stream_left_open_by_the_last_run():
+    """THE REPORTED LOCKOUT. MAVSDK's calibration plugin is single-flight, so a
+    gRPC stream still open from a cancelled run made every subsequent
+    calibrate_* come straight back BUSY — presenting as "started, then
+    instantly failed", for the rest of the session."""
+    import asyncio
+
+    started = asyncio.Event()
+
+    async def _never_ends():
+        started.set()
+        await asyncio.sleep(3600)
+
+    class _Cal:
+        async def calibrate_gyro(self):
+            if False:
+                yield None
+
+    t = _mgr(running="accel")
+    t._calibration.state.phase = "cancelled"
+    t._drone = type("D", (), {"calibration": _Cal()})()
+    t._calibration_task = asyncio.create_task(_never_ends())
+    await started.wait()
+
+    ok, why = await t.start_calibration("gyro")
+    assert ok is True, why
+    assert t._calibration_task is not None
+    # The old one is gone, not merely forgotten.
+    await asyncio.sleep(0)
+    assert not any(
+        task.get_coro().__name__ == "_never_ends"      # type: ignore[attr-defined]
+        for task in asyncio.all_tasks() if not task.done()
+    )
+
+
+@pytest.mark.asyncio
+async def test_reaping_is_bounded_so_a_wedged_stream_cannot_block_a_retry():
+    """A gRPC read that does not wake up on the first cancel must not be able
+    to hold the operator out of the calibration they are trying to run
+    instead. MAVSDK's stream is exactly that shape — blocked inside a native
+    read, not on an await this loop controls."""
+    import asyncio
+    import time as _t
+
+    swallowed = asyncio.Event()
+
+    async def _slow_to_die():
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            swallowed.set()
+            # Ignores the first cancel, the way a stream stuck in a native read
+            # does — but only for longer than the reap's budget, so this test
+            # cannot leak a task into the next one.
+            await asyncio.sleep(4.0)
+
+    t = _mgr()
+    leftover = asyncio.create_task(_slow_to_die())
+    t._calibration_task = leftover
+    await asyncio.sleep(0)
+
+    began = _t.monotonic()
+    await t._reap_calibration_task()
+    elapsed = _t.monotonic() - began
+
+    assert swallowed.is_set(), "the task was never asked to stop"
+    assert elapsed < 5.0, f"reaping blocked for {elapsed:.1f}s"
+    assert t._calibration_task is None
+
+    leftover.cancel()
+    with contextlib.suppress(asyncio.CancelledError, Exception):
+        await leftover
+
+
+@pytest.mark.asyncio
+async def test_cancel_marks_the_panel_before_it_waits_on_the_aircraft():
+    """Cancelling used to wait on a 5 s ACK and then on a gRPC read that may
+    never wake up, so the button sat doing nothing for seconds — on the one
+    control an operator presses because something is already wrong."""
+    import asyncio
+
+    seen: list[str] = []
+
+    class _Cal:
+        async def cancel(self):
+            seen.append("phase-at-cancel:" + t._calibration.state.phase)
+            await asyncio.sleep(0.05)
+
+    t = _mgr(running="accel")
+    t._calibration.feed("[cal] calibration started: 2 accel")
+    t._drone = type("D", (), {"calibration": _Cal()})()
+    t._on_calibration = lambda st: seen.append("emit:" + st["phase"])
+    await t.cancel_calibration()
+
+    assert "emit:cancelled" in seen
+    assert seen.index("emit:cancelled") < seen.index("phase-at-cancel:cancelled")

@@ -153,7 +153,7 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     const mat = <T extends THREE.Material>(m: T) => { materials.push(m); return m }
 
     const shell = mat(new THREE.MeshStandardMaterial({
-        color: 0x2c3440, metalness: 0.35, roughness: 0.45,
+        color: 0x323b48, metalness: 0.3, roughness: 0.5,
     }))
     const dark = mat(new THREE.MeshStandardMaterial({
         color: 0x171b22, metalness: 0.5, roughness: 0.35,
@@ -193,7 +193,7 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     // top, which is the whole question this control asks.
     const canopyGeo = track(new THREE.SphereGeometry(0.78, 32, 20, 0, Math.PI * 2, 0, Math.PI / 2))
     const canopy = new THREE.Mesh(canopyGeo, mat(new THREE.MeshStandardMaterial({
-        color: 0x39434f, metalness: 0.55, roughness: 0.22,
+        color: 0x3c4653, metalness: 0.32, roughness: 0.34,
     })))
     canopy.scale.set(0.95, 0.72, 1.3)
     canopy.position.y = 0.21
@@ -207,28 +207,51 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     nose.position.set(0, 0.14, -1.2)
     root.add(nose)
 
-    // ── Gimbal ball, under the nose ──────────────────────────────────────
-    const gimbalArm = new THREE.Mesh(
-        track(new THREE.CylinderGeometry(0.07, 0.07, 0.28, 12)), dark)
-    gimbalArm.position.set(0, -0.32, -0.62)
-    root.add(gimbalArm)
-    const gimbal = new THREE.Mesh(track(new THREE.SphereGeometry(0.26, 24, 16)), dark)
-    gimbal.position.set(0, -0.52, -0.66)
-    gimbal.castShadow = true
-    root.add(gimbal)
-    const lens = new THREE.Mesh(
-        track(new THREE.CylinderGeometry(0.13, 0.15, 0.1, 20)),
-        mat(new THREE.MeshStandardMaterial({ color: 0x05070a, metalness: 0.9, roughness: 0.08 })))
-    lens.rotation.x = Math.PI / 2
-    lens.position.set(0, -0.52, -0.88)
-    root.add(lens)
+    // ── Gimbal, under the nose ───────────────────────────────────────────
+    //
+    // A yoke, a ball and a lens barrel rather than a sphere on a peg. It is
+    // the only asymmetric thing hanging off the airframe, which makes it the
+    // feature that tells an operator at a glance which way the aircraft is
+    // facing and which way up it is — worth more here than anywhere else on
+    // the model.
+    const yokeSide = track(new THREE.BoxGeometry(0.05, 0.3, 0.16))
+    for (const x of [-0.2, 0.2]) {
+        const y = new THREE.Mesh(yokeSide, dark)
+        y.position.set(x, -0.34, -0.7)
+        root.add(y)
+    }
+    const yokeTop = new THREE.Mesh(track(new THREE.BoxGeometry(0.45, 0.07, 0.16)), dark)
+    yokeTop.position.set(0, -0.21, -0.7)
+    root.add(yokeTop)
+
+    const gimbalBody = new THREE.Mesh(
+        track(new THREE.CapsuleGeometry(0.17, 0.16, 6, 18)), shell)
+    gimbalBody.rotation.x = Math.PI / 2
+    gimbalBody.position.set(0, -0.47, -0.72)
+    gimbalBody.castShadow = true
+    root.add(gimbalBody)
+
+    const barrel = new THREE.Mesh(
+        track(new THREE.CylinderGeometry(0.14, 0.16, 0.16, 24)), dark)
+    barrel.rotation.x = Math.PI / 2
+    barrel.position.set(0, -0.47, -0.9)
+    root.add(barrel)
+    const glass = new THREE.Mesh(
+        track(new THREE.SphereGeometry(0.125, 20, 14, 0, Math.PI * 2, 0, Math.PI / 2)),
+        mat(new THREE.MeshStandardMaterial({
+            color: 0x0a1622, metalness: 1.0, roughness: 0.06,
+        })))
+    glass.rotation.x = -Math.PI / 2
+    glass.position.set(0, -0.47, -0.97)
+    root.add(glass)
 
     // ── Arms, motors, rotors ─────────────────────────────────────────────
     const armGeo = track(new THREE.CylinderGeometry(0.085, 0.13, 1.55, 14))
     const canGeo = track(new THREE.CylinderGeometry(0.19, 0.225, 0.26, 24))
     const bellGeo = track(new THREE.CylinderGeometry(0.245, 0.215, 0.2, 24))
-    const legGeo = track(new THREE.CylinderGeometry(0.05, 0.04, 0.75, 10))
-    const footGeo = track(new THREE.CapsuleGeometry(0.055, 0.42, 4, 10))
+    const legGeo = track(new THREE.CylinderGeometry(0.055, 0.042, 0.86, 12))
+    const skidGeo = track(new THREE.CapsuleGeometry(0.052, 1.5, 6, 12))
+    const skidPadGeo = track(new THREE.CylinderGeometry(0.075, 0.085, 0.05, 12))
     const ledGeo = track(new THREE.SphereGeometry(0.115, 14, 12))
 
     // Two handednesses, shared by four rotors. Built synchronously from the
@@ -273,20 +296,20 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
         // mirrored. Building both handedness once and sharing the geometry
         // keeps it to two buffers for four rotors.
         const rotor = new THREE.Mesh(propGeo[i % 2], propMat)
-        rotor.position.set(0, 0.5, -1.62)
+        rotor.position.set(0, 0.56, -1.62)
         rotor.castShadow = true
         a.add(rotor)
         rotors.push(rotor)
 
-        // Landing leg under each arm, angled out.
+        // Landing leg under each arm, splayed outward. Two struts per side
+        // meeting a skid rail below, which is what an aircraft carrying a
+        // gimbal actually stands on — and it gives the model a definite
+        // BOTTOM, so "upside down" is unmistakable without reading a label.
         const leg = new THREE.Mesh(legGeo, carbon)
-        leg.position.set(0, -0.42, -0.86)
-        leg.rotation.x = -0.28
+        leg.position.set(0, -0.5, -0.9)
+        leg.rotation.x = -0.3
+        leg.rotation.z = 0.12
         a.add(leg)
-        const foot = new THREE.Mesh(footGeo, dark)
-        foot.rotation.x = Math.PI / 2
-        foot.position.set(0, -0.78, -0.98)
-        a.add(foot)
 
         // Navigation LEDs — green forward, red aft, as on the real thing.
         const led = new THREE.Mesh(ledGeo, front ? accentLed : mat(new THREE.MeshStandardMaterial({
@@ -295,6 +318,20 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
         led.position.set(0, -0.02, -1.62)
         a.add(led)
     })
+
+    // The two skid rails, running fore-and-aft under the leg pairs.
+    for (const x of [-1.02, 1.02]) {
+        const skid = new THREE.Mesh(skidGeo, dark)
+        skid.rotation.x = Math.PI / 2
+        skid.position.set(x, -0.92, 0)
+        skid.castShadow = true
+        root.add(skid)
+        for (const z of [-0.72, 0.72]) {
+            const pad = new THREE.Mesh(skidPadGeo, carbon)
+            pad.position.set(x, -0.97, z)
+            root.add(pad)
+        }
+    }
 
     const dispose = () => {
         geometries.forEach(g => g.dispose())

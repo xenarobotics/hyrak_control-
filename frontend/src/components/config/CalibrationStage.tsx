@@ -17,7 +17,7 @@ import { useMemo } from 'react'
 import { DroneScene, orientationFor, type StageMode } from '@/components/config/DroneScene'
 import { useDroneStore } from '@/store/drone'
 import type { CalibrationState, CalSide } from '@/types/calibration'
-import { Check, X, Loader, CircleAlert, RotateCw } from 'lucide-react'
+import { Check, X, Loader, CircleAlert, RotateCw, Gauge } from 'lucide-react'
 import * as THREE from 'three'
 
 const ACTIVE_C = '#fbbf24'
@@ -37,6 +37,13 @@ const SIDE_WORDS: Record<CalSide, string> = {
     back: 'Tail down, nose up',
 }
 
+/** Short names for the done / still-to-do lists. Long enough to be a
+ *  position, short enough that six of them fit on one line. */
+const SIDE_SHORT: Record<CalSide, string> = {
+    down: 'level', up: 'inverted', left: 'left side', right: 'right side',
+    front: 'nose down', back: 'tail down',
+}
+
 /** Three letters per position, so the queue names itself. */
 const SIDE_ABBR: Record<CalSide, string> = {
     down: 'LVL', up: 'INV', left: 'LFT', right: 'RGT', front: 'NSE', back: 'TAL',
@@ -48,13 +55,16 @@ const SIDE_ABBR: Record<CalSide, string> = {
  *  adjusting while the calibration was already counting. */
 const MATCH_DEGREES = 22
 
-export function CalibrationStage({ state, onCancel, onDismiss, onRetry }: {
+export function CalibrationStage({ state, onCancel, onDismiss, onRetry, children }: {
     state: CalibrationState
     onCancel: () => void
     onDismiss: () => void
     onRetry: () => void
+    /** The calibration options, rendered underneath the aircraft. */
+    children?: React.ReactNode
 }) {
     const attitude = useDroneStore(s => s.telemetry?.attitude)
+    const idle = state.phase === 'idle'
     const running = state.phase === 'starting' || state.phase === 'running'
     const failed = state.phase === 'failed'
     const done = state.phase === 'done'
@@ -63,6 +73,8 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry }: {
     const order = (state.side_order ?? ['down', 'up', 'left', 'right', 'front', 'back']) as CalSide[]
     const oriented = Object.keys(state.sides ?? {}).length > 0
     const doneCount = order.filter(s => state.sides?.[s] === 'done').length
+    const doneList = order.filter(s => state.sides?.[s] === 'done').map(s => SIDE_SHORT[s])
+    const pendingList = order.filter(s => state.sides?.[s] === 'pending').map(s => SIDE_SHORT[s])
     const target = (state.active_side ?? null) as CalSide | null
 
     const live = attitude
@@ -111,7 +123,8 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry }: {
     // ONE SENTENCE, and it is the position when there is one. PX4's own line
     // is kept underneath rather than promoted — "hold vehicle still on a
     // pending side" is true and useless next to "On its LEFT side".
-    const headline = done ? 'Calibration complete'
+    const headline = idle ? 'Pick a calibration below'
+        : done ? 'Calibration complete'
         : failed ? 'Calibration failed'
         : cancelled ? 'Calibration cancelled'
         : mode === 'rotate' ? 'Now ROTATE it — keep turning'
@@ -119,7 +132,8 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry }: {
         : target ? `Turn it: ${SIDE_WORDS[target]}`
         : state.instruction || 'Waiting for the autopilot…'
 
-    const subline = done ? 'The new offsets are saved on the aircraft'
+    const subline = idle ? 'The aircraft above follows your live attitude — turn the real one and it turns with it'
+        : done ? 'The new offsets are saved on the aircraft'
         : failed ? (state.error || 'The autopilot did not accept the calibration')
         : cancelled ? 'Nothing was written to the aircraft'
         : mode === 'rotate' ? 'Turn it steadily about the axis the arrow circles, at about the speed shown'
@@ -133,19 +147,16 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry }: {
             padding: 16, borderRadius: 12,
             background: 'hsl(var(--app-surface-2))',
             border: `1px solid ${accent}44`,
-            // Capped and centred. Left to fill a wide monitor the aircraft
-            // ends up a small object adrift in a very large empty box, which
-            // is the same legibility problem as drawing it too small.
-            maxWidth: 1020, width: '100%', margin: '0 auto',
         }}>
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
                 {running ? <Loader size={14} className="animate-spin" color={accent} />
                     : done ? <Check size={15} color={DONE_C} />
                     : failed ? <CircleAlert size={15} color={FAIL_C} />
+                    : idle ? <Gauge size={14} color={accent} />
                     : <X size={15} color="#6b7280" />}
                 <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: accent, letterSpacing: 0.4 }}>
-                    {(state.label || state.sensor).toUpperCase()}
+                    {(state.label || state.sensor || 'CALIBRATION').toUpperCase()}
                 </span>
                 {oriented && (
                     <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -194,7 +205,7 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry }: {
 
             {/* Progress off a real number. No indefinite shimmer — a bar that
                 moves on its own is a bar that lies about a stalled run. */}
-            <div style={{ height: 4, borderRadius: 2, background: 'hsl(var(--app-surface))', overflow: 'hidden' }}>
+            <div style={{ height: 4, borderRadius: 2, background: 'hsl(var(--app-surface))', overflow: 'hidden', opacity: idle ? 0 : 1 }}>
                 <div style={{
                     height: '100%', width: `${Math.max(0, Math.min(100, state.progress ?? 0))}%`,
                     background: accent, transition: 'width 400ms ease-out',
@@ -240,6 +251,34 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry }: {
                         {subline}
                     </p>
                 )}
+                {/* NAMED, not just counted. "2/6" says how far along the queue
+                    is and nothing about which positions are still owed, so an
+                    operator halfway through cannot tell whether they have
+                    already done nose-down. The dots carry the same fact as
+                    colour; this carries it as words, which is what someone
+                    reads when they are trying to plan the next move. */}
+                {running && oriented && (
+                    <p style={{ fontSize: 11, margin: '7px 0 0', lineHeight: 1.6, fontFamily: 'monospace' }}>
+                        {doneList.length > 0 && (
+                            <>
+                                <span style={{ color: DONE_C }}>Done</span>
+                                <span style={{ color: 'hsl(var(--app-text-muted))' }}> {doneList.join(' · ')}</span>
+                            </>
+                        )}
+                        {doneList.length > 0 && pendingList.length > 0 && (
+                            <span style={{ color: 'hsl(var(--app-text-muted))' }}>{'   '}</span>
+                        )}
+                        {pendingList.length > 0 && (
+                            <>
+                                <span style={{ color: '#94a3b8' }}>Still to do</span>
+                                <span style={{ color: 'hsl(var(--app-text-muted))' }}> {pendingList.join(' · ')}</span>
+                            </>
+                        )}
+                        {pendingList.length === 0 && doneList.length > 0 && (
+                            <span style={{ color: DONE_C }}>   — that was the last one</span>
+                        )}
+                    </p>
+                )}
                 {/* THE AUTOPILOT'S OWN WORDS, small and last. When a firmware
                     changes wording the parser has not caught up with, this line
                     is the difference between a panel one release behind and a
@@ -252,7 +291,7 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry }: {
             </div>
 
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {running ? (
+                {idle ? null : running ? (
                     <button onClick={onCancel} style={btn(FAIL_C)}
                         title="Stops the routine on the aircraft as well as here">
                         <X size={12} /> CANCEL
@@ -270,6 +309,8 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry }: {
                     </>
                 )}
             </div>
+
+            {children}
         </div>
     )
 }

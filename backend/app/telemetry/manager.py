@@ -27,7 +27,9 @@ from mavsdk.offboard import (
     AttitudeRate,
     VelocityBodyYawspeed,
 )
-from app.telemetry.calibration import CalibrationSession, SENSORS
+from app.telemetry.calibration import (
+    LEVEL_MAX_TILT_DEG, SENSORS, CalibrationSession,
+)
 from app.telemetry.schemas import (
     TelemetrySnapshot,
     AttitudeData,
@@ -2597,6 +2599,20 @@ class TelemetryManager:
             return "The aircraft is airborne"
         if self._offboard_active:
             return "Stop the tracking mode that is flying this aircraft first"
+        if sensor == "level":
+            # PX4 refuses a level calibration that starts off-level, and says
+            # so as a FAILURE a long way down the line. The attitude is already
+            # on the snapshot, so the answer is available before the attempt.
+            att = self._snapshot.attitude
+            tilt = max(abs(att.roll_deg), abs(att.pitch_deg))
+            if tilt > LEVEL_MAX_TILT_DEG:
+                return (
+                    f"The aircraft is sitting {tilt:.1f}° off level "
+                    f"(roll {att.roll_deg:+.1f}°, pitch {att.pitch_deg:+.1f}°). "
+                    f"Level Horizon sets what level MEANS, so it has to start "
+                    f"within {LEVEL_MAX_TILT_DEG:g}° — put it on something "
+                    f"genuinely flat first."
+                )
         return None
 
     async def start_calibration(self, sensor: str) -> tuple[bool, str]:
@@ -2605,6 +2621,18 @@ class TelemetryManager:
         if refusal:
             logger.warning(f"Calibration refused ({sensor}): {refusal}")
             return False, refusal
+
+        # A LINGERING STREAM IS WHY THE NEXT CALIBRATION FAILED.
+        #
+        # Cancelling stopped the routine on the aircraft and marked the session
+        # cancelled, but the previous run's gRPC stream could still be open —
+        # MAVSDK's calibration plugin is single-flight, so every subsequent
+        # calibrate_* came straight back BUSY and presented as "started, then
+        # instantly failed", for the rest of the session. Reaped here rather
+        # than only in cancel_calibration, so a stream left behind by ANY route
+        # (a failure mid-run, a link drop, a cancel that timed out) cannot
+        # poison the next attempt.
+        await self._reap_calibration_task()
 
         # A finished or cancelled session is simply replaced — starting is the
         # operator's way of dismissing the last verdict.
@@ -2616,11 +2644,36 @@ class TelemetryManager:
         logger.info(f"🧭 Calibration started: {SENSORS[sensor]['label']}")
         return True, ""
 
+    async def _reap_calibration_task(self) -> None:
+        """Make sure no calibration stream is still open. Bounded: a gRPC read
+        that will not wake up must not be able to block a new attempt."""
+        task = self._calibration_task
+        self._calibration_task = None
+        if task is None or task.done():
+            return
+        task.cancel()
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=3.0)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
+        except Exception:
+            pass
+
     async def _run_calibration(self, sensor: str) -> None:
         session = self._calibration
         method = getattr(self._drone.calibration, SENSORS[sensor]["method"])
+        limit = float(SENSORS[sensor].get("timeout", 120.0))
+        deadline = time.monotonic() + limit
         try:
             async for progress in method():
+                if time.monotonic() > deadline:
+                    # SAY SO RATHER THAN SPIN. A calibration that stops
+                    # producing a verdict looks identical to one still working,
+                    # and the operator holding the aircraft has no way to tell.
+                    raise TimeoutError(
+                        f"the aircraft stopped reporting after {limit:.0f}s — "
+                        f"the calibration did not finish"
+                    )
                 if session is not self._calibration:
                     return                      # superseded or cancelled
                 changed = False
@@ -2645,9 +2698,9 @@ class TelemetryManager:
             session.state.instruction = "Calibration cancelled"
             raise
         except Exception as e:
-            reason = self._plain(e, "the calibration did not complete")
+            reason = self._calibration_reason(e)
             session.finish(False, reason)
-            logger.error(f"Calibration failed ({sensor}): {e}")
+            logger.error(f"Calibration failed ({sensor}): {e!r}")
         finally:
             if session is self._calibration:
                 self._emit_calibration()
@@ -2666,22 +2719,52 @@ class TelemetryManager:
         """
         if self._calibration is None:
             return False
+        # THE PANEL CHANGES FIRST. Cancelling used to wait on a 5 s ACK and then
+        # on a gRPC read that may not wake up at all, so the button sat there
+        # doing nothing for seconds — which reads as a cancel that did not land,
+        # on the one control an operator presses because something is wrong.
+        # The aircraft is still told, and told first among the awaits; the
+        # operator is simply no longer made to watch.
+        self._calibration.state.phase = "cancelled"
+        self._calibration.state.instruction = "Calibration cancelled"
+        self._emit_calibration()
+
         try:
-            await asyncio.wait_for(self._drone.calibration.cancel(), timeout=5.0)
+            await asyncio.wait_for(self._drone.calibration.cancel(), timeout=2.0)
         except Exception as e:
             logger.warning(f"Calibration cancel not acknowledged: {e}")
-        task = self._calibration_task
-        if task is not None and not task.done():
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await task
-        self._calibration_task = None
-        if self._calibration is not None:
-            self._calibration.state.phase = "cancelled"
-            self._calibration.state.instruction = "Calibration cancelled"
-            self._emit_calibration()
+        await self._reap_calibration_task()
         logger.info("Calibration cancelled")
         return True
+
+    @staticmethod
+    def _calibration_reason(err: Exception) -> str:
+        """The autopilot's own verdict, when it gave one.
+
+        MAVSDK wraps the result in a CalibrationError whose str() is a Python
+        repr; BUSY, FAILED_ARMED and UNSUPPORTED are completely different
+        problems with completely different fixes, and flattening all three to
+        "the calibration did not complete" sent the operator looking in the
+        wrong place every time.
+        """
+        result = getattr(getattr(err, "_result", None), "result", None)
+        name = getattr(result, "name", None) or str(result or "")
+        explain = {
+            "BUSY": "the autopilot is already running a calibration — wait a moment and try again",
+            "FAILED_ARMED": "the vehicle is armed",
+            "COMMAND_DENIED": "the autopilot refused the command",
+            "UNSUPPORTED": "this autopilot does not offer that calibration",
+            "NO_SYSTEM": "no vehicle is connected",
+            "CONNECTION_ERROR": "the link dropped during the calibration",
+            "TIMEOUT": "the autopilot did not answer",
+            "CANCELLED": "the calibration was cancelled",
+        }.get(name)
+        if explain:
+            return explain
+        if isinstance(err, TimeoutError):
+            return str(err)
+        detail = str(getattr(err, "_result", None) or err).strip()
+        return detail or "the calibration did not complete"
 
     def dismiss_calibration(self) -> None:
         """Clear a FINISHED calibration so the panel returns to its resting

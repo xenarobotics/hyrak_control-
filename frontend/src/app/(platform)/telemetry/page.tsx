@@ -893,20 +893,27 @@ function VehicleWorkspace({ v, onUpdate }: { v: VehicleProfile; onUpdate: (p: Pa
 // already in the message log and on the arming refusal. Inventing a green tick
 // here would be inventing a fact.
 
-function CalibrationPanel({ connected, refusal, busy, start }: {
+function CalibrationPanel({ connected, refusal, busy, start, active, phase }: {
     connected: boolean
     refusal: string | null
     busy: boolean
     start: (sensor: string) => void
+    active: string
+    phase: string
 }) {
     return (
-        <Card title="CALIBRATION">
-            {CAL_SENSORS.map((sensor, i) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+            {CAL_SENSORS.map((sensor, i) => {
+                const isActive = active === sensor.key && phase !== 'idle'
+                const state = isActive ? phase : null
+                return (
                 <div key={sensor.key} style={{
                     display: 'flex', alignItems: 'flex-start', gap: 12,
-                    paddingBottom: i < CAL_SENSORS.length - 1 ? 12 : 0,
-                    borderBottom: i < CAL_SENSORS.length - 1 ? '1px solid hsl(var(--app-border))' : 'none',
-                    marginBottom: i < CAL_SENSORS.length - 1 ? 12 : 0,
+                    padding: '11px 12px', borderRadius: 9,
+                    background: isActive ? 'rgba(251,191,36,0.06)' : 'transparent',
+                    border: `1px solid ${isActive ? 'rgba(251,191,36,0.28)' : 'transparent'}`,
+                    borderBottom: i < CAL_SENSORS.length - 1 && !isActive
+                        ? '1px solid hsl(var(--app-border))' : undefined,
                 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                         <p style={{ fontSize: 12, fontWeight: 600, color: 'hsl(var(--app-text))', margin: 0 }}>
@@ -937,10 +944,14 @@ function CalibrationPanel({ connected, refusal, busy, start }: {
                             opacity: connected && !busy ? 1 : 0.45,
                         }}
                     >
-                        Start
+                        {state === 'running' || state === 'starting' ? 'Running'
+                            : state === 'done' ? 'Done'
+                            : state === 'failed' ? 'Retry'
+                            : 'Start'}
                     </button>
                 </div>
-            ))}
+                )
+            })}
             {/* The refusal belongs where the button was pressed. The autopilot
                 answers "no, the vehicle is armed" in a sentence, and dropping
                 it would leave a button that looks broken. */}
@@ -959,7 +970,7 @@ function CalibrationPanel({ connected, refusal, busy, start }: {
                 readout IS the check. Airspeed applies to fixed-wing only and is
                 not exposed by the flight-control library this uses.
             </p>
-        </Card>
+        </div>
     )
 }
 
@@ -979,19 +990,6 @@ function SensorsWorkspace() {
     const states = { gps: connected ? gpsOk : null, imu: connected ? imuOk : null, mag: connected ? magOk : null, baro: connected ? baroOk : null }
     const healthy = Object.values(states).filter(v => v === true).length
 
-    // While one is running there is exactly one thing to look at, and every
-    // other panel here is reference material the operator will read later.
-    if (cal.phase !== 'idle') {
-        return (
-            <CalibrationStage
-                state={cal}
-                onCancel={cancel}
-                onDismiss={dismiss}
-                onRetry={() => start(cal.sensor)}
-            />
-        )
-    }
-
     // TWO COLUMNS: what the sensors are DOING on the left, what you can DO to
     // them on the right.
     //
@@ -1002,7 +1000,7 @@ function SensorsWorkspace() {
     // the calibration controls, which are the two reasons to open this page,
     // below the fold.
     return (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 1fr) minmax(380px, 1.15fr)', gap: 14, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 0.72fr) minmax(560px, 1.6fr)', gap: 14, alignItems: 'start' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{
                     padding: '10px 13px', borderRadius: 10,
@@ -1068,7 +1066,23 @@ function SensorsWorkspace() {
                 </Panel>
             </div>
 
-            <CalibrationPanel connected={connected} refusal={refusal} busy={busy} start={start} />
+            {/* ONE VIEW, NOT TWO. Starting a calibration used to replace the
+                page, so the options vanished the moment one was chosen and the
+                operator lost the map of what else there was to do. The
+                aircraft sits at the top permanently — following live attitude
+                even when nothing is running, which is a useful instrument in
+                its own right — and the options stay underneath it throughout. */}
+            <CalibrationStage
+                state={cal}
+                onCancel={cancel}
+                onDismiss={dismiss}
+                onRetry={() => start(cal.sensor)}
+            >
+                <CalibrationPanel
+                    connected={connected} refusal={refusal} busy={busy}
+                    start={start} active={cal.sensor} phase={cal.phase}
+                />
+            </CalibrationStage>
         </div>
     )
 }
