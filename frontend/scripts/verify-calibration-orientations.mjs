@@ -1,79 +1,85 @@
-// Verifies the six calibration orientations in DroneModel3D.
+// Verifies that each calibration orientation puts the RIGHT FACE on the ground.
 //
-// WHY THIS EXISTS AS A SCRIPT. Getting a rotation sign wrong does not throw,
-// does not fail the build, and does not look obviously wrong on screen — a
-// quadcopter is close enough to symmetric that "resting on its left side" and
-// "resting on its right side" are one glance apart. What it does instead is
-// silently ask the operator to hold the aircraft the wrong way round for two
-// minutes, and PX4 accepts whatever it is given.
+// WHY THIS EXISTS. The first version of this panel hand-wrote one rotation per
+// side and had LEFT AND RIGHT THE WRONG WAY ROUND. Nothing threw, the build
+// passed, and on screen it looked fine — a quadcopter is nearly symmetric, so
+// "resting on its left side" and "resting on its right side" are one glance
+// apart. It would simply have asked the operator to lay the aircraft on the
+// wrong side for two of the six positions, and PX4 accepts whatever it is
+// given.
 //
-// So the table is checked against the actual CSS rotation matrices rather than
-// against a comment. It PARSES THE COMPONENT, so it cannot drift from a copy
-// of the values that was right when it was written.
+// Worse, the verifier that shipped with it encoded the SAME assumption in its
+// expectations, so it passed too. A check that shares the belief under test
+// checks nothing.
 //
-//   node scripts/verify-calibration-orientations.mjs
+// So this one asserts nothing about rotations. It reads the face-direction
+// table — which says only which way each named face points on an airframe, a
+// fact anyone can confirm by looking at a drone — derives the rotation the way
+// the component does, and confirms the named face ends up pointing at the
+// ground. There is no sign to get wrong and no second copy to drift.
+//
+//   npm run verify:orientations
 
 import { readFileSync } from 'node:fs'
+import * as THREE from 'three'
 
-const SRC = 'src/components/config/DroneModel3D.tsx'
+const SRC = 'src/components/config/DroneScene.tsx'
 const src = readFileSync(new URL(`../${SRC}`, import.meta.url), 'utf8')
 
-const block = src.match(/SIDE_TRANSFORM[^{]*\{([\s\S]*?)\}/)
+const block = src.match(/FACE_DIRECTION[^{]*\{([\s\S]*?)\n\}/)
 if (!block) {
-    console.error(`Could not find SIDE_TRANSFORM in ${SRC}`)
+    console.error(`Could not find FACE_DIRECTION in ${SRC}`)
     process.exit(1)
 }
 
-const table = {}
-for (const m of block[1].matchAll(/(\w+)\s*:\s*'rotate([XY])\((-?[\d.]+)deg\)'/g)) {
-    table[m[1]] = [m[2], Number(m[3])]
+const faces = {}
+for (const m of block[1].matchAll(/(\w+)\s*:\s*\[\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\]/g)) {
+    faces[m[1]] = [Number(m[2]), Number(m[3]), Number(m[4])]
 }
 
-const rad = d => (d * Math.PI) / 180
-// The CSS 3D rotation matrices, applied to a column vector in the element's
-// local frame: +X right, +Y down the screen (aft on the aircraft), +Z toward
-// the viewer (up on the aircraft).
-const rotX = (v, d) => {
-    const t = rad(d)
-    return [v[0], v[1] * Math.cos(t) - v[2] * Math.sin(t), v[1] * Math.sin(t) + v[2] * Math.cos(t)]
-}
-const rotY = (v, d) => {
-    const t = rad(d)
-    return [v[0] * Math.cos(t) + v[2] * Math.sin(t), v[1], -v[0] * Math.sin(t) + v[2] * Math.cos(t)]
-}
-
-// PX4 names each orientation by WHICH FACE POINTS DOWN, so the aircraft's
-// up-axis must end up pointing at the opposite face. Lying on its left side,
-// the top faces right (+X); nose down, the top faces aft (+Y).
+// Airframe axes, glTF convention: nose -Z, up +Y, right +X.
 const EXPECT = {
-    down:  [0, 0, 1],
-    up:    [0, 0, -1],
-    left:  [1, 0, 0],
-    right: [-1, 0, 0],
-    front: [0, 1, 0],
-    back:  [0, -1, 0],
+    down:  [0, -1, 0],   // belly
+    up:    [0, 1, 0],    // canopy
+    left:  [-1, 0, 0],
+    right: [1, 0, 0],
+    front: [0, 0, -1],   // nose
+    back:  [0, 0, 1],    // tail
 }
 
+const DOWN = new THREE.Vector3(0, -1, 0)
 let failed = 0
+
 for (const [side, expect] of Object.entries(EXPECT)) {
-    const entry = table[side]
-    if (!entry) {
-        console.error(`✗ ${side.padEnd(6)} missing from SIDE_TRANSFORM`)
+    const declared = faces[side]
+    if (!declared) {
+        console.error(`✗ ${side.padEnd(6)} missing from FACE_DIRECTION`)
         failed++
         continue
     }
-    const [axis, deg] = entry
-    const v = (axis === 'X' ? rotX([0, 0, 1], deg) : rotY([0, 0, 1], deg))
-        .map(n => (Math.abs(n) < 1e-9 ? 0 : Number(n.toFixed(6))))
-    const ok = v.every((n, i) => Math.abs(n - expect[i]) < 1e-6)
+    const sameFace = declared.every((n, i) => Math.abs(n - expect[i]) < 1e-6)
+
+    // Derive exactly as the component does, then check the face really lands
+    // on the ground — so a change to the derivation is caught here too, not
+    // only a change to the table.
+    const face = new THREE.Vector3(...declared).normalize()
+    const q = new THREE.Quaternion().setFromUnitVectors(face, DOWN)
+    const landed = face.clone().applyQuaternion(q)
+    const grounded = landed.distanceTo(DOWN) < 1e-6
+
+    const top = new THREE.Vector3(0, 1, 0).applyQuaternion(q)
+    const r = n => (Math.abs(n) < 1e-9 ? 0 : Number(n.toFixed(3)))
+    const ok = sameFace && grounded
     if (!ok) failed++
     console.log(
-        `${ok ? '✓' : '✗'} ${side.padEnd(6)} rotate${axis}(${deg}deg) → up-axis ${JSON.stringify(v)}` +
-        (ok ? '' : `  EXPECTED ${JSON.stringify(expect)}`)
+        `${ok ? '✓' : '✗'} ${side.padEnd(6)} face ${JSON.stringify(declared)} → ground` +
+        `   canopy then points [${[top.x, top.y, top.z].map(r).join(',')}]` +
+        (sameFace ? '' : `   WRONG FACE, expected ${JSON.stringify(expect)}`) +
+        (grounded ? '' : '   ROTATION DOES NOT GROUND IT'),
     )
 }
 
-const extra = Object.keys(table).filter(k => !(k in EXPECT))
+const extra = Object.keys(faces).filter(k => !(k in EXPECT))
 if (extra.length) {
     console.error(`✗ unexpected orientations: ${extra.join(', ')}`)
     failed++

@@ -467,3 +467,43 @@ def test_a_raising_calibration_feed_cannot_kill_the_refusal_reasons():
 
     assert len(t._status_text) == 2, "the subscription died on the first message"
     assert "Arming denied" in t._status_text[-1][2]
+
+
+def test_a_cancelled_calibration_does_not_block_the_next_one():
+    """REPORTED. Cancel one and the next attempt came back "already running —
+    cancel it first", which is the app telling the operator to do the thing
+    they just did. The session outlives its calibration on purpose so the
+    verdict can be read; testing for its EXISTENCE refused every start after
+    the first."""
+    t = _mgr(running="accel")
+    t._calibration.state.phase = "cancelled"
+    assert t.calibration_refusal("mag") is None
+
+
+def test_a_finished_calibration_does_not_block_the_next_one():
+    t = _mgr(running="accel")
+    t._calibration.finish(True)
+    assert t.calibration_refusal("accel") is None
+
+
+def test_a_running_calibration_still_blocks_a_second():
+    t = _mgr(running="accel")
+    t._calibration.feed("[cal] calibration started: 2 accel")
+    why = t.calibration_refusal("mag")
+    assert why and "already running" in why
+
+
+def test_starting_replaces_a_finished_session_rather_than_stacking():
+    import asyncio
+
+    class _Cal:
+        async def calibrate_gyro(self):
+            if False:
+                yield None
+
+    t = _mgr(running="accel")
+    t._calibration.finish(False, "moved")
+    t._drone = type("D", (), {"calibration": _Cal()})()
+    ok, _ = asyncio.run(t.start_calibration("gyro"))
+    assert ok is True
+    assert t._calibration.state.sensor == "gyro"

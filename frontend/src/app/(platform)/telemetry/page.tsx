@@ -932,13 +932,12 @@ function VehicleWorkspace({ v, onUpdate }: { v: VehicleProfile; onUpdate: (p: Pa
 // already in the message log and on the arming refusal. Inventing a green tick
 // here would be inventing a fact.
 
-function CalibrationPanel({ connected }: { connected: boolean }) {
-    const { state, refusal, busy, start, cancel, dismiss } = useCalibration()
-
-    if (state.phase !== 'idle') {
-        return <CalibrationStage state={state} onCancel={cancel} onDismiss={dismiss} />
-    }
-
+function CalibrationPanel({ connected, refusal, busy, start }: {
+    connected: boolean
+    refusal: string | null
+    busy: boolean
+    start: (sensor: string) => void
+}) {
     return (
         <Card title="CALIBRATION">
             {CAL_SENSORS.map((sensor, i) => (
@@ -1004,6 +1003,11 @@ function CalibrationPanel({ connected }: { connected: boolean }) {
 }
 
 function SensorsWorkspace() {
+    // Held here rather than inside the panel because a RUNNING calibration
+    // takes the whole workspace. Squeezed into the right-hand column under a
+    // full-height EKF diagram, the aircraft was below the fold at the exact
+    // moment the operator is holding a drone in both hands and cannot scroll.
+    const { state: cal, refusal, busy, start, cancel, dismiss } = useCalibration()
     const telemetry = useDroneStore(s => s.telemetry)
     const telStatus = useDroneStore(s => s.telemetryStatus)
     const connected = telStatus === 'connected'
@@ -1013,6 +1017,19 @@ function SensorsWorkspace() {
     const baroOk = connected && (telemetry?.position?.relative_altitude_m ?? 0) !== 0
     const states = { gps: connected ? gpsOk : null, imu: connected ? imuOk : null, mag: connected ? magOk : null, baro: connected ? baroOk : null }
     const healthy = Object.values(states).filter(v => v === true).length
+
+    // While one is running there is exactly one thing to look at, and every
+    // other panel here is reference material the operator will read later.
+    if (cal.phase !== 'idle') {
+        return (
+            <CalibrationStage
+                state={cal}
+                onCancel={cancel}
+                onDismiss={dismiss}
+                onRetry={() => start(cal.sensor)}
+            />
+        )
+    }
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -1085,7 +1102,7 @@ function SensorsWorkspace() {
                         <p style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: connected ? '#4ade80' : '#6b7280', margin: '0 0 2px' }}>{connected ? `${healthy}/4 sensors reporting` : 'No drone connected'}</p>
                         <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.25)', margin: 0 }}>{connected ? (healthy === 4 ? 'All sensors healthy — pre-flight check passed' : 'Some sensors not reporting — check wiring') : 'Connect via the Connection section to see live sensor health'}</p>
                     </div>
-                    <CalibrationPanel connected={connected} />
+                    <CalibrationPanel connected={connected} refusal={refusal} busy={busy} start={start} />
                 </div>
             </G2>
         </div>

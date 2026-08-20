@@ -1,221 +1,229 @@
 'use client'
 
-// The calibration stage: what the operator looks at while holding an aircraft.
+// What the operator looks at while holding an aircraft.
 //
-// ONE RULE RUNS THROUGH ALL OF IT. Nothing on this panel may show progress the
-// autopilot has not reported. A side turns green because PX4 said that side is
-// done, never because the animation reached the end of its loop — an operator
-// who trusts a green square and sets the aircraft down mid-side gets a
-// calibration that fails at the last step with no clue why.
+// SIMPLER THAN THE FIRST ATTEMPT, ON PURPOSE. That one showed six labelled
+// side chips at once and asked the operator to work out which of them was
+// being requested. QGroundControl asks for one position at a time and that is
+// the right shape: a calibration is a queue, not a dashboard. Six dots say how
+// far along it is; the aircraft and the arrow say what to do next.
 //
-// So the movement is decoration over state, and the state is carried by colour
-// and words as well, which is also what makes the panel work with reduced
-// motion turned on.
+// ONE RULE RUNS THROUGH ALL OF IT: nothing here may show progress the
+// autopilot has not reported. A dot fills because PX4 said that side is done,
+// never because an animation reached the end of its loop.
 
-import { DroneModel3D, SIDE_NAMES, type Side } from '@/components/config/DroneModel3D'
-import type { CalibrationState, CalSide, SideState } from '@/types/calibration'
+import { useMemo } from 'react'
+
+import { DroneScene } from '@/components/config/DroneScene'
+import { orientationFor } from '@/components/config/DroneScene'
+import { useDroneStore } from '@/store/drone'
+import type { CalibrationState, CalSide } from '@/types/calibration'
 import { Check, X, Loader, CircleAlert, RotateCw } from 'lucide-react'
+import * as THREE from 'three'
 
-const PENDING_C = '#4b5563'
 const ACTIVE_C = '#fbbf24'
 const DONE_C = '#4ade80'
 const FAIL_C = '#f87171'
+const IDLE_C = '#22d3ee'
 
-function sideColour(s: SideState | undefined): string {
-    return s === 'done' ? DONE_C : s === 'active' ? ACTIVE_C : PENDING_C
+/** Plain-language name for the position being asked for. "back" and "front"
+ *  name which face points DOWN and read backwards to most people the first
+ *  time, so the words on screen describe the aircraft, not the enum. */
+const SIDE_WORDS: Record<CalSide, string> = {
+    down: 'Level, sitting normally',
+    up: 'Upside down',
+    left: 'On its LEFT side',
+    right: 'On its RIGHT side',
+    front: 'Nose down, tail up',
+    back: 'Tail down, nose up',
 }
 
-/** The circular arrow that says "rotate this". Drawn as a dashed arc whose
- *  dashes march round the circle, so the DIRECTION is visible — a pulsing ring
- *  says "something is happening here" and leaves the operator guessing which
- *  way to turn, which is the one thing this control exists to answer. */
-function RotationArrow({ colour, active, size }: {
-    colour: string; active: boolean; size: number
-}) {
-    const r = size / 2 - 10
-    return (
-        <svg
-            width={size} height={size}
-            style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
-            aria-hidden
-        >
-            <circle
-                cx={size / 2} cy={size / 2} r={r}
-                fill="none" stroke={colour} strokeOpacity={active ? 0.85 : 0.25}
-                strokeWidth={2} strokeDasharray="10 8" strokeLinecap="round"
-                className={active ? 'hyrak-cal-anim' : undefined}
-                style={active ? { animation: 'hyrak-cal-arrow 1.1s linear infinite' } : undefined}
-            />
-            {/* Head, so the arc reads as an arrow rather than a dotted ring. */}
-            <polygon
-                points={`${size / 2 + r - 6},14 ${size / 2 + r + 6},14 ${size / 2 + r},26`}
-                fill={colour} fillOpacity={active ? 0.9 : 0.3}
-            />
-        </svg>
-    )
-}
+/** How close counts as holding the requested position. Generous: PX4's own
+ *  detector is looser than this, so a "hold it there" that appeared only at a
+ *  tighter tolerance than the autopilot's would have the operator still
+ *  adjusting while the calibration was already counting. */
+const MATCH_DEGREES = 22
 
-function SideChip({ side, state }: { side: CalSide; state: SideState | undefined }) {
-    const c = sideColour(state)
-    const isActive = state === 'active'
-    return (
-        <div
-            className={isActive ? 'hyrak-cal-anim' : undefined}
-            style={{
-                display: 'flex', alignItems: 'center', gap: 7,
-                padding: '6px 9px', borderRadius: 8,
-                background: state === 'done' ? 'rgba(74,222,128,0.10)'
-                    : isActive ? 'rgba(251,191,36,0.14)' : 'rgba(75,85,99,0.10)',
-                border: `1px solid ${c}${state === 'pending' ? '40' : '66'}`,
-                animation: isActive ? 'hyrak-cal-pulse 1.3s ease-in-out infinite' : undefined,
-            }}
-        >
-            <span style={{
-                width: 15, height: 15, borderRadius: 4, flexShrink: 0,
-                background: state === 'done' ? DONE_C : 'transparent',
-                border: `1.5px solid ${c}`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-                {state === 'done' && <Check size={10} strokeWidth={3.5} color="#0b1220" />}
-            </span>
-            <span style={{
-                fontSize: 11, fontFamily: 'monospace', fontWeight: isActive ? 700 : 500,
-                color: state === 'pending' ? 'hsl(var(--app-text-muted))' : c,
-                whiteSpace: 'nowrap',
-            }}>
-                {SIDE_NAMES[side as Side] ?? side}
-            </span>
-        </div>
-    )
-}
-
-export function CalibrationStage({ state, onCancel, onDismiss }: {
+export function CalibrationStage({ state, onCancel, onDismiss, onRetry }: {
     state: CalibrationState
     onCancel: () => void
     onDismiss: () => void
+    onRetry: () => void
 }) {
-    const order = (state.side_order ?? ['down', 'up', 'left', 'right', 'front', 'back']) as CalSide[]
-    const oriented = Object.keys(state.sides ?? {}).length > 0
+    const attitude = useDroneStore(s => s.telemetry?.attitude)
     const running = state.phase === 'starting' || state.phase === 'running'
     const failed = state.phase === 'failed'
     const done = state.phase === 'done'
     const cancelled = state.phase === 'cancelled'
 
-    // The model shows the side PX4 is asking for. With nothing asked yet it
-    // rests level, which is where the aircraft already is.
-    const shown = (state.active_side ?? 'down') as Side
-    // A compass is the only one where the instruction is "turn it", so it is
-    // the only one that spins. An accelerometer spinning would be telling the
-    // operator to do the exact thing that ruins the reading.
-    const spin = running && state.sensor === 'mag' && !!state.active_side
+    const order = (state.side_order ?? ['down', 'up', 'left', 'right', 'front', 'back']) as CalSide[]
+    const oriented = Object.keys(state.sides ?? {}).length > 0
+    const doneCount = order.filter(s => state.sides?.[s] === 'done').length
+    const target = (state.active_side ?? null) as CalSide | null
 
-    const accent = failed ? FAIL_C : done ? DONE_C : running ? ACTIVE_C : '#22d3ee'
+    const live = attitude
+        ? { roll: attitude.roll_deg ?? 0, pitch: attitude.pitch_deg ?? 0, yaw: attitude.yaw_deg ?? 0 }
+        : null
+
+    // IS THE OPERATOR ALREADY HOLDING IT RIGHT? Answered from the IMU rather
+    // than waited for from PX4, so the aircraft turns green the moment the
+    // position is reached instead of a second later when the autopilot has
+    // finished agreeing. The autopilot still decides when the side is DONE —
+    // this only decides when to stop telling them to keep turning.
+    const matched = useMemo(() => {
+        if (!target || !live) return false
+        const e = new THREE.Euler(
+            THREE.MathUtils.degToRad(live.pitch),
+            THREE.MathUtils.degToRad(-live.yaw),
+            THREE.MathUtils.degToRad(-live.roll),
+            'YXZ',
+        )
+        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(new THREE.Quaternion().setFromEuler(e))
+        const want = new THREE.Vector3(0, 1, 0).applyQuaternion(orientationFor(target))
+        return THREE.MathUtils.radToDeg(up.angleTo(want)) < MATCH_DEGREES
+    }, [target, live?.roll, live?.pitch, live?.yaw])
+
+    const accent = failed ? FAIL_C : done ? DONE_C : matched ? DONE_C : running ? ACTIVE_C : IDLE_C
+
+    // ONE SENTENCE, and it is the position when there is one. PX4's own line
+    // is kept underneath rather than promoted — "hold vehicle still on a
+    // pending side" is true and useless next to "On its LEFT side".
+    const headline = done ? 'Calibration complete'
+        : failed ? 'Calibration failed'
+        : cancelled ? 'Calibration cancelled'
+        : target ? SIDE_WORDS[target]
+        : state.instruction || 'Waiting for the autopilot…'
+
+    const subline = done ? 'The new offsets are saved on the aircraft'
+        : failed ? (state.error || 'The autopilot did not accept the calibration')
+        : cancelled ? 'Nothing was written to the aircraft'
+        : target ? (matched ? 'Hold it there — do not move it' : 'Turn the aircraft to match the outline')
+        : ''
 
     return (
         <div style={{
-            display: 'flex', flexDirection: 'column', gap: 14,
+            display: 'flex', flexDirection: 'column', gap: 12,
             padding: 16, borderRadius: 12,
             background: 'hsl(var(--app-surface-2))',
             border: `1px solid ${accent}44`,
+            // Capped and centred. Left to fill a wide monitor the aircraft
+            // ends up a small object adrift in a very large empty box, which
+            // is the same legibility problem as drawing it too small.
+            maxWidth: 1020, width: '100%', margin: '0 auto',
         }}>
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
                 {running ? <Loader size={14} className="animate-spin" color={accent} />
                     : done ? <Check size={15} color={DONE_C} />
                     : failed ? <CircleAlert size={15} color={FAIL_C} />
-                    : <X size={15} color={PENDING_C} />}
-                <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: accent }}>
-                    {state.label || state.sensor.toUpperCase()}
-                    {done ? ' — COMPLETE' : failed ? ' — FAILED' : cancelled ? ' — CANCELLED' : ''}
+                    : <X size={15} color="#6b7280" />}
+                <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: accent, letterSpacing: 0.4 }}>
+                    {(state.label || state.sensor).toUpperCase()}
                 </span>
-                <span style={{ marginLeft: 'auto', fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
-                    {typeof state.progress === 'number' ? `${state.progress}%` : ''}
-                </span>
+                {oriented && (
+                    <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {/* Six dots. Position in the queue, nothing else — the
+                            first version labelled all six and made the operator
+                            hunt for the one being asked for. */}
+                        <span style={{ display: 'flex', gap: 4 }}>
+                            {order.map(side => {
+                                const st = state.sides?.[side]
+                                return (
+                                    <span key={side} style={{
+                                        width: 8, height: 8, borderRadius: '50%',
+                                        background: st === 'done' ? DONE_C : st === 'active' ? ACTIVE_C : 'transparent',
+                                        border: `1.5px solid ${st === 'done' ? DONE_C : st === 'active' ? ACTIVE_C : '#4b5563'}`,
+                                        transition: 'background 250ms, border-color 250ms',
+                                    }} />
+                                )
+                            })}
+                        </span>
+                        <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
+                            {doneCount}/{order.length}
+                        </span>
+                    </span>
+                )}
+                {!oriented && (
+                    <span style={{ marginLeft: 'auto', fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
+                        {state.progress ?? 0}%
+                    </span>
+                )}
             </div>
 
-            {/* Progress. A real bar off a real number — there is no indefinite
-                shimmer here, because a bar that moves on its own is a bar that
-                lies about a stalled calibration. */}
-            <div style={{ height: 5, borderRadius: 3, background: 'hsl(var(--app-surface))', overflow: 'hidden' }}>
+            {/* Progress off a real number. No indefinite shimmer — a bar that
+                moves on its own is a bar that lies about a stalled run. */}
+            <div style={{ height: 4, borderRadius: 2, background: 'hsl(var(--app-surface))', overflow: 'hidden' }}>
                 <div style={{
                     height: '100%', width: `${Math.max(0, Math.min(100, state.progress ?? 0))}%`,
-                    background: accent, borderRadius: 3,
-                    transition: 'width 400ms ease-out',
+                    background: accent, transition: 'width 400ms ease-out',
                 }} />
             </div>
 
-            <div style={{ display: 'flex', gap: 18, alignItems: 'center', flexWrap: 'wrap' }}>
-                {/* The aircraft */}
-                <div style={{ position: 'relative', width: 190, height: 190, flexShrink: 0 }}>
-                    <DroneModel3D
-                        side={shown} spin={spin} accent={accent} size={190}
-                        dim={!running}
-                    />
-                    {state.sensor === 'mag' && (
-                        <RotationArrow colour={accent} active={spin} size={190} />
-                    )}
-                </div>
-
-                {/* What to do */}
-                <div style={{ flex: 1, minWidth: 220, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <p style={{
-                        fontSize: 13, fontWeight: 600, lineHeight: 1.5, margin: 0,
-                        color: failed ? FAIL_C : 'hsl(var(--app-text))',
+            {/* The aircraft */}
+            <div style={{ position: 'relative' }}>
+                <DroneScene
+                    attitude={live}
+                    targetSide={running ? target : null}
+                    accent={accent}
+                    matched={matched}
+                    live={running}
+                    height={430}
+                />
+                {!live && running && (
+                    <span style={{
+                        position: 'absolute', left: 12, bottom: 10,
+                        fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))',
                     }}>
-                        {state.instruction || (running ? 'Waiting for the autopilot…' : '')}
-                    </p>
-
-                    {oriented && (
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(112px,1fr))', gap: 6 }}>
-                            {order.map(side => (
-                                <SideChip key={side} side={side} state={state.sides?.[side]} />
-                            ))}
-                        </div>
-                    )}
-
-                    {/* THE AUTOPILOT'S OWN WORDS, kept beside our translation of
-                        them. When a firmware changes wording the parser has not
-                        caught up with, this line is the difference between a
-                        panel that is one release behind and a panel that is
-                        lying. */}
-                    {state.detail && (
-                        <p style={{
-                            fontSize: 10, fontFamily: 'monospace', margin: 0,
-                            color: 'hsl(var(--app-text-muted))', wordBreak: 'break-word',
-                        }}>
-                            FC: {state.detail}
-                        </p>
-                    )}
-                    {state.error && (
-                        <p style={{ fontSize: 11, fontFamily: 'monospace', color: FAIL_C, margin: 0 }}>
-                            {state.error}
-                        </p>
-                    )}
-                </div>
+                        No attitude telemetry — showing the requested position instead of the live one
+                    </span>
+                )}
+                <span style={{
+                    position: 'absolute', right: 12, bottom: 10,
+                    fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))',
+                }}>
+                    drag to orbit
+                </span>
             </div>
 
-            <div style={{ display: 'flex', gap: 8 }}>
+            {/* One instruction */}
+            <div>
+                <p style={{
+                    fontSize: 17, fontWeight: 600, margin: 0, lineHeight: 1.35,
+                    color: failed ? FAIL_C : matched ? DONE_C : 'hsl(var(--app-text))',
+                }}>
+                    {headline}
+                </p>
+                {subline && (
+                    <p style={{ fontSize: 12, margin: '4px 0 0', color: 'hsl(var(--app-text-muted))', lineHeight: 1.5 }}>
+                        {subline}
+                    </p>
+                )}
+                {/* THE AUTOPILOT'S OWN WORDS, small and last. When a firmware
+                    changes wording the parser has not caught up with, this line
+                    is the difference between a panel one release behind and a
+                    panel that is lying. */}
+                {state.detail && (
+                    <p style={{ fontSize: 10, fontFamily: 'monospace', margin: '6px 0 0', color: 'hsl(var(--app-text-muted))', opacity: 0.75, wordBreak: 'break-word' }}>
+                        FC: {state.detail}
+                    </p>
+                )}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {running ? (
-                    <button
-                        onClick={onCancel}
-                        style={btn(FAIL_C)}
-                        title="Stop the calibration on the aircraft as well as here"
-                    >
+                    <button onClick={onCancel} style={btn(FAIL_C)}
+                        title="Stops the routine on the aircraft as well as here">
                         <X size={12} /> CANCEL
                     </button>
                 ) : (
                     <>
-                        <button onClick={onDismiss} style={btn('#22d3ee')}>
-                            <Check size={12} /> CLOSE
+                        <button onClick={onDismiss} style={btn(IDLE_C)}>
+                            <Check size={12} /> DONE
                         </button>
-                        {failed && (
-                            <span style={{
-                                fontSize: 10, fontFamily: 'monospace', alignSelf: 'center',
-                                color: 'hsl(var(--app-text-muted))',
-                            }}>
-                                <RotateCw size={10} style={{ display: 'inline', marginRight: 4 }} />
-                                Nothing was written to the aircraft — it is safe to try again
-                            </span>
+                        {(failed || cancelled) && (
+                            <button onClick={onRetry} style={btn(ACTIVE_C)}>
+                                <RotateCw size={12} /> TRY AGAIN
+                            </button>
                         )}
                     </>
                 )}
@@ -227,7 +235,7 @@ export function CalibrationStage({ state, onCancel, onDismiss }: {
 function btn(colour: string): React.CSSProperties {
     return {
         display: 'flex', alignItems: 'center', gap: 6,
-        padding: '6px 13px', borderRadius: 8,
+        padding: '7px 15px', borderRadius: 8,
         background: 'transparent', border: `1px solid ${colour}66`,
         color: colour, fontSize: 11, fontFamily: 'monospace', fontWeight: 600,
         cursor: 'pointer',

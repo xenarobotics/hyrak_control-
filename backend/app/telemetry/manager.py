@@ -2581,7 +2581,12 @@ class TelemetryManager:
             return f"{sensor} is not a sensor this aircraft can calibrate from here"
         if not self._connected:
             return "No drone connected"
-        if self._calibration is not None:
+        # RUNNING, not merely present. The session OUTLIVES its calibration on
+        # purpose — the operator has to be able to read the verdict — so
+        # testing for existence refused every start after the first. Cancel one
+        # and the next attempt came back "already running, cancel it first",
+        # which is the app telling you to do the thing you just did.
+        if self._calibration is not None and self._calibration.state.phase in ("starting", "running"):
             return (
                 f"A {SENSORS[self._calibration.state.sensor]['label']} calibration "
                 f"is already running — cancel it first"
@@ -2601,6 +2606,8 @@ class TelemetryManager:
             logger.warning(f"Calibration refused ({sensor}): {refusal}")
             return False, refusal
 
+        # A finished or cancelled session is simply replaced — starting is the
+        # operator's way of dismissing the last verdict.
         self._calibration = CalibrationSession(sensor)
         self._emit_calibration()
         self._calibration_task = asyncio.create_task(

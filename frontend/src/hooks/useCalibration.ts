@@ -23,7 +23,14 @@ export function useCalibration() {
         }
         const onResult = (r: { action?: string; ok?: boolean; error?: string }) => {
             if (r?.action !== 'start_calibration') return
-            setRefusal(r.ok ? null : (r.error || 'The drone refused to start the calibration'))
+            if (r.ok) { setRefusal(null); return }
+            // BACK TO IDLE, not just "show the reason". The optimistic start
+            // switched the panel to the stage view, and the reason is rendered
+            // on the picker — so a refusal left the operator watching "asking
+            // the autopilot…" forever with the explanation on a screen they
+            // could no longer see.
+            setRefusal(r.error || 'The drone refused to start the calibration')
+            setState(IDLE)
         }
         socket.on('calibration_state', onState)
         socket.on('action_result', onResult)
