@@ -48,3 +48,38 @@ export function getTelemetryBaud(): number {
 export function setTelemetryBaud(v: number): void {
     if (typeof window !== 'undefined') localStorage.setItem(BAUD_KEY, String(v))
 }
+
+// ── Which link the operator picked ───────────────────────────────────────────
+//
+// PERSISTED SO TWO CONTROLS CAN SHOW THE SAME CHOICE. This used to live only
+// in DeviceSelector's `useState('sitl')`, which was fine while the Fly tab was
+// the only place a link could be picked. The status bar now offers the same
+// choice from Mission and AI, and two components each holding their own copy
+// of "which radio" is how they end up disagreeing about which one is
+// connected — the operator switches port in the bar, walks to Fly, and finds
+// the old one still selected.
+const SOURCE_KEY = 'hyrak-telemetry-source'
+
+/** Fired when the link selection changes, so a control mounted elsewhere
+ *  updates immediately rather than on next mount. Same pattern the status-bar
+ *  toggle already uses — localStorage has no in-tab change event. */
+export const LINK_CHANGE_EVENT = 'hyrak-link-changed'
+
+/** 'sitl' | 'radio-<i>' (Web Serial) | 'nradio-<i>' (native serial)
+ *  | 'air-unit-udp' | 'local-relay' | 'siyi-udp' */
+export const DEFAULT_TELEMETRY_SOURCE = 'sitl'
+
+export function getTelemetrySource(): string {
+    if (typeof window === 'undefined') return DEFAULT_TELEMETRY_SOURCE
+    try {
+        return localStorage.getItem(SOURCE_KEY) || DEFAULT_TELEMETRY_SOURCE
+    } catch {
+        return DEFAULT_TELEMETRY_SOURCE
+    }
+}
+
+export function setTelemetrySource(v: string): void {
+    if (typeof window === 'undefined') return
+    localStorage.setItem(SOURCE_KEY, v)
+    window.dispatchEvent(new CustomEvent<string>(LINK_CHANGE_EVENT, { detail: v }))
+}

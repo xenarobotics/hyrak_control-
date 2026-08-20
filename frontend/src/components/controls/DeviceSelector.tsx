@@ -1,17 +1,13 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
-import {
-    browserSerialSupported, getSerialApi, listGrantedPorts,
-    requestRadioPort, type GrantedRadio,
-} from '@/lib/browserSerial'
-import { useDrone } from '@/hooks/useDrone'
 import { getLocalRelayUrl, setLocalRelayUrl, DEFAULT_LOCAL_RELAY_URL } from '@/lib/localRfRelay'
-import { getSiyiTelemetryTarget, setSiyiTelemetryTarget, startSiyiTelemetry, DEFAULT_SIYI_TELEMETRY_TARGET } from '@/lib/siyiTelemetryRelay'
-import { isDesktopApp } from '@/lib/nativeBridge'
-import { listNativeSerialPorts, type NativeRadio } from '@/lib/nativeSerialRelay'
-import { getTelemetryBaud, setTelemetryBaud } from '@/lib/linkSettings'
+import { getSiyiTelemetryTarget, setSiyiTelemetryTarget, DEFAULT_SIYI_TELEMETRY_TARGET } from '@/lib/siyiTelemetryRelay'
+// The link selection itself lives in a hook, shared with the status bar's
+// compact picker — two copies of "which radio is selected" is how the two
+// controls end up disagreeing. See hooks/useTelemetryLink.ts.
+import { useTelemetryLink } from '@/hooks/useTelemetryLink'
 import { getRfDownlinkPort, getRfUplinkPort, getRfFanoutPort, setRfFanoutPort,
          getRfUplinkHost, setRfUplinkHost, DEFAULT_RF_UPLINK_HOST } from '@/lib/rfBridge'
 import {
@@ -59,104 +55,20 @@ export function DeviceSelector() {
     // Either way this is INDEPENDENT of the video source above: a USB radio
     // for telemetry with a SIYI or HYRAK air-unit feed for video is a normal
     // combination, not a special case.
-    const desktop = isDesktopApp()
-    const [radios, setRadios] = useState<GrantedRadio[]>([])
-    const [nativeRadios, setNativeRadios] = useState<NativeRadio[]>([])
-    // 'sitl' | 'radio-<i>' (Web Serial) | 'nradio-<i>' (native) | 'local-relay' | 'siyi-udp'
-    const [source, setSource] = useState<string>('sitl')
+    const {
+        desktop, radios, nativeRadios, source, setSource, baud, setBaud,
+        refreshNativeRadios, addRadio, browserSerialSupported,
+        connect: handleConnect, disconnect: handleDisconnect, disconnecting,
+        telemetryStatus, telemetryError, isConnected, isConnecting, sitlNeedsDesktop,
+    } = useTelemetryLink()
+
+    // These four are text fields with exactly one editor — this panel — and
+    // they are persisted the moment they are typed, so the hook's connect()
+    // reads them back from storage rather than being handed them.
     const [relayUrl, setRelayUrl] = useState(() => getLocalRelayUrl())
     const [siyiTarget, setSiyiTarget] = useState(() => getSiyiTelemetryTarget())
-    // Default comes from Settings -> Comm links; DEFAULT_SERIAL_BAUD remains
-    // the fallback when nothing has been saved.
-    const [baud, setBaud] = useState(() => getTelemetryBaud())
     const [rfFanout, setRfFanout] = useState(() => getRfFanoutPort())
-    const [disconnecting, setDisconnecting] = useState(false)
     const [rfUplinkHost, setRfUplinkHostState] = useState(() => getRfUplinkHost())
-
-    const { telemetryStatus, telemetryError, connectBrowserSerial, connectNativeSerial, connectNativeRf, connectLocalRelay, connectRemoteSitl, disconnectTelemetry } = useDrone()
-
-    const refreshRadios = useCallback(async () => {
-        const list = await listGrantedPorts()
-        setRadios(list)
-        // Selected radio unplugged → fall back to SITL
-        setSource(s => (s.startsWith('radio-') && !list[Number(s.slice(6))] ? 'sitl' : s))
-    }, [])
-
-    const refreshNativeRadios = useCallback(async () => {
-        const list = await listNativeSerialPorts()
-        setNativeRadios(list)
-        setSource(s => (s.startsWith('nradio-') && !list[Number(s.slice(7))] ? 'sitl' : s))
-    }, [])
-
-    useEffect(() => {
-        if (desktop) {
-            // No plug/unplug event to subscribe to natively — the refresh
-            // button re-lists, which is all QGC does too.
-            void refreshNativeRadios()
-            return
-        }
-        const api = getSerialApi()
-        if (!api) return
-        void refreshRadios()
-        api.addEventListener?.('connect', refreshRadios)
-        api.addEventListener?.('disconnect', refreshRadios)
-        return () => {
-            api.removeEventListener?.('connect', refreshRadios)
-            api.removeEventListener?.('disconnect', refreshRadios)
-        }
-    }, [desktop, refreshRadios, refreshNativeRadios])
-
-    // One-time grant: browser picker → radio joins the list permanently.
-    const addRadio = async () => {
-        const granted = await requestRadioPort()
-        if (!granted) return // cancelled
-        const list = await listGrantedPorts()
-        setRadios(list)
-        const idx = list.findIndex(r => r.port === granted)
-        if (idx >= 0) setSource(`radio-${idx}`)
-    }
-
-    const isConnected = telemetryStatus === 'connected'
-    const isConnecting = telemetryStatus === 'connecting'
-
-    // SITL bridges the CLIENT'S own SITL through the desktop app's native
-    // UDP bridge — a plain browser tab has no way to reach udp:14540, so
-    // the option is shown but not connectable there (no relay-script
-    // fallback; browser users are pointed at the desktop app instead).
-    const sitlNeedsDesktop = source === 'sitl' && !isDesktopApp()
-
-    const handleDisconnect = async () => {
-        setDisconnecting(true)
-        try { await disconnectTelemetry() } finally { setDisconnecting(false) }
-    }
-
-    const handleConnect = () => {
-        if (source.startsWith('nradio-')) {
-            const radio = nativeRadios[Number(source.slice(7))]
-            if (radio) void connectNativeSerial(radio.path, baud)
-            return
-        }
-        if (source.startsWith('radio-')) {
-            const radio = radios[Number(source.slice(6))]
-            if (radio) void connectBrowserSerial(radio.port, baud)
-            return
-        }
-        if (source === 'air-unit-udp') {
-            void connectNativeRf()
-            return
-        }
-        if (source === 'local-relay') {
-            void connectLocalRelay(relayUrl)
-            return
-        }
-        if (source === 'siyi-udp') {
-            // Its own path rather than connectLocalRelay: that one dials a
-            // WebSocket relay agent, this binds a UDP socket natively.
-            void startSiyiTelemetry(siyiTarget)
-            return
-        }
-        void connectRemoteSitl()
-    }
 
     if (!mounted) {
         return <div className="space-y-3 min-h-[190px]" />
@@ -222,7 +134,7 @@ export function DeviceSelector() {
                         >
                             <RefreshCw size={11} />
                         </button>
-                    ) : browserSerialSupported() && (
+                    ) : browserSerialSupported && (
                         <button
                             onClick={addRadio}
                             className="ml-auto text-zinc-600 hover:text-zinc-400 transition-colors"
@@ -286,7 +198,7 @@ export function DeviceSelector() {
                         <span className="text-[10px] font-mono text-zinc-500">BAUD</span>
                         <Select
                             value={String(baud)}
-                            onValueChange={(v) => { if (v) { setBaud(Number(v)); setTelemetryBaud(Number(v)) } }}
+                            onValueChange={(v) => { if (v) setBaud(Number(v)) }}
                             disabled={isConnected}
                         >
                             <SelectTrigger className="h-7 flex-1 text-[11px] font-mono bg-zinc-900 border-zinc-700">

@@ -18,6 +18,8 @@ import {
 import { gpsFixLabel, gpsFixColor, batteryTextColor, connectionQuality, connectionQualityColor } from '@/lib/osd'
 import { FLIGHT_MODES, modeOptionFor, modeLabel } from '@/lib/flightModes'
 import { FcMessageLog } from '@/components/layout/FcMessageLog'
+import { StatusBarLinks } from '@/components/layout/StatusBarLinks'
+import { getStatusBarLinksEnabled, STATUSBAR_LINKS_CHANGE_EVENT } from '@/lib/statusBarSettings'
 
 // Altitude is only genuinely unavailable when a tracking loop is ACTIVELY
 // driving it — that is, Follow is armed AND the mode is on Auto altitude.
@@ -92,6 +94,18 @@ export function StatusBar() {
     const { sendAction, arm, disarm } = useDrone()
     const { isStreaming, stats } = useWebRTCContext()
     const online = useOnlineStatus()
+
+    // Opt-in, and read on mount rather than during render — localStorage does
+    // not exist while the server renders this. The event keeps a bar that is
+    // already mounted in step with the Settings toggle, which is the same
+    // problem the bar's own toggle already solves this way.
+    const [linksOn, setLinksOn] = useState(false)
+    useEffect(() => {
+        setLinksOn(getStatusBarLinksEnabled())
+        const onChange = (e: Event) => setLinksOn(Boolean((e as CustomEvent<boolean>).detail))
+        window.addEventListener(STATUSBAR_LINKS_CHANGE_EVENT, onChange)
+        return () => window.removeEventListener(STATUSBAR_LINKS_CHANGE_EVENT, onChange)
+    }, [])
 
     const [altInput, setAltInput] = useState('')
     const [killConfirm, setKillConfirm] = useState(false)
@@ -394,6 +408,14 @@ export function StatusBar() {
                     </button>
                 )}
             </div>
+
+            {/* ── Link pickers (opt-in) ────────────────────────────────── */}
+            {linksOn && (
+                <>
+                    <Divider />
+                    <StatusBarLinks />
+                </>
+            )}
 
             {/* ── Controls ─────────────────────────────────────────────── */}
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>

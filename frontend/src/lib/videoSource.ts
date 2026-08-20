@@ -592,3 +592,110 @@ export function setReceiverPassthrough(on: boolean): void {
         localStorage.setItem(RECEIVER_PASSTHROUGH_KEY, on ? '1' : '0')
     }
 }
+
+// ── The video source catalogue, as DATA ─────────────────────────────────────
+//
+// MOVED HERE FROM settings/page.tsx, which was its only reader until the
+// status bar grew a compact picker. Left where it was, the bar would have
+// needed its own hand-written list of sources — and the comment three lines
+// down already records what that costs: adding 'Ground decoder' silently
+// dropped a whole group from a hardcoded list, so the source existed, worked,
+// and could not be selected. One catalogue, next to the type it describes.
+//
+// Nine sources were previously a wall of chips, and each dependent control was
+// gated by its own hand-written boolean. That is how `air_unit_gst` came to be
+// missing from one gate while present in another — the SRT latency dial simply
+// did not render on the mode that needs it most, and nothing about the code
+// made that visible. Each source now declares which rows it needs, once, and
+// the rows read that declaration.
+//
+// `needs` keys map 1:1 to the conditional rows below:
+//   udpPort   local UDP port the video arrives on
+//   fanout    verbatim copy to a second local port
+//   rtspUrl   camera address this machine (or the server) opens
+//   rtspXport TCP/UDP for the camera leg
+//   relay     uplink transport + SRT latency window
+//   preview   local preview tuning (fragmenting, live-edge clamp)
+//   gst       GStreamer-specific (jitter buffer, decode path)
+//   receiver  ground decoder address, transport, latency, decode path
+//   capture   browser capture resolution/fps/feed mode
+export type SourceNeed = 'udpPort' | 'fanout' | 'rtspUrl' | 'rtspXport'
+    | 'relay' | 'preview' | 'gst' | 'receiver' | 'capture'
+
+export interface SourceSpec {
+    value: VideoSource
+    label: string
+    group: 'Browser' | 'Air unit (RF)' | 'RTSP camera' | 'Ground decoder'
+    /** One line the operator can act on — what it does and what it requires. */
+    blurb: string
+    needs: SourceNeed[]
+    /** True when the SERVER opens the stream, so the server must be able to
+     *  reach the source. This is the single most common misconfiguration. */
+    serverReaches?: boolean
+    desktopOnly?: boolean
+}
+
+export const VIDEO_SOURCES: SourceSpec[] = [
+    {
+        value: 'hyrak_receiver', label: 'HYRAK Receiver', group: 'Ground decoder',
+        blurb: 'The ground decoder over Ethernet. Decodes in the browser engine, so it needs nothing installed and runs the same on Windows, Linux and ARM64 — the only air-unit mode that does.',
+        needs: ['receiver', 'relay'], desktopOnly: true,
+    },
+    {
+        value: 'camera', label: 'Camera (webcam)', group: 'Browser',
+        blurb: 'This device\'s webcam, sent over WebRTC. Works anywhere.',
+        needs: ['capture'],
+    },
+    {
+        value: 'rtsp_camera', label: 'RTSP as camera', group: 'RTSP camera',
+        blurb: 'This machine decodes the RTSP URL and sends it as an ordinary camera track. Traverses NAT like a webcam; costs a re-encode.',
+        needs: ['rtspUrl', 'rtspXport', 'capture'],
+    },
+    {
+        value: 'siyi_rtsp', label: 'SIYI (RTSP, server pulls)', group: 'RTSP camera',
+        blurb: 'The SERVER opens the camera URL. Only works when the server shares a network with the camera — off a dev machine, it never does.',
+        needs: ['rtspUrl'], serverReaches: true,
+    },
+    {
+        value: 'rtsp_relay', label: 'RTSP relay', group: 'RTSP camera',
+        blurb: 'This machine pulls the camera and forwards the original bytes with no re-encode, plus a local preview. The deployment choice for an RTSP camera.',
+        needs: ['rtspUrl', 'rtspXport', 'relay', 'preview'], desktopOnly: true,
+    },
+    {
+        value: 'rtsp_datachannel', label: 'RTSP → DataChannel', group: 'RTSP camera',
+        blurb: 'Bit-exact and NAT-traversing: raw RTP over a DataChannel, so H.265 survives untouched. Uses ffmpeg only to speak RTSP.',
+        needs: ['rtspUrl', 'rtspXport', 'preview'], desktopOnly: true,
+    },
+    {
+        value: 'air_unit_gst', label: 'Air unit → GStreamer', group: 'Air unit (RF)',
+        blurb: 'Preferred on Linux. One GStreamer pipeline owns the UDP port and tees it: hardware-decoded local preview + bit-exact H.265 SRT uplink. Needs GStreamer installed.',
+        needs: ['udpPort', 'gst', 'relay'], desktopOnly: true,
+    },
+    {
+        value: 'air_unit_datachannel', label: 'Air unit → DataChannel', group: 'Air unit (RF)',
+        blurb: 'No ffmpeg at all — wfb_rx already delivers RTP/H.265, so the app just forwards datagrams. Traverses NAT, but every packet crosses the JS event loop.',
+        needs: ['udpPort', 'fanout', 'preview'], desktopOnly: true,
+    },
+    {
+        value: 'air_unit_srt', label: 'Air unit → SRT', group: 'Air unit (RF)',
+        blurb: 'ffmpeg copies the RF feed to the server over SRT with an explicit latency budget. Needs a reachable UDP port on the server.',
+        needs: ['udpPort', 'relay', 'preview'], desktopOnly: true,
+    },
+    {
+        value: 'air_unit_udp', label: 'Air unit (UDP, server reads)', group: 'Air unit (RF)',
+        blurb: 'The SERVER binds the UDP port and reads RTP directly. No QGroundControl involved — but wfb_rx must be delivering to that port ON THE SERVER, so this only works when the ground station and server are the same machine.',
+        needs: ['udpPort'], serverReaches: true,
+    },
+]
+
+/** Group names in catalogue order, de-duplicated. Adding a source with a new
+ *  group is now enough to make it appear. */
+export const SOURCE_GROUPS = [...new Set(VIDEO_SOURCES.map(s => s.group))]
+
+export function specFor(source: VideoSource): SourceSpec | undefined {
+    return VIDEO_SOURCES.find(s => s.value === source)
+}
+
+export function sourceNeeds(source: VideoSource, need: SourceNeed): boolean {
+    return specFor(source)?.needs.includes(need) ?? false
+}
