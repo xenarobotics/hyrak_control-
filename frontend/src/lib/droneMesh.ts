@@ -197,7 +197,10 @@ function hullGeometry(): THREE.BufferGeometry {
             const b = (i + 1) * HULL_COLS + j
             const c = i * HULL_COLS + j2
             const d = (i + 1) * HULL_COLS + j2
-            indices.push(a, b, c, b, d, c)
+            // Wound OUTWARD. The first cut had these reversed, which
+            // culled the near wall and drew the inside of the far one — the
+            // hull looked transparent and lit wrong everywhere at once.
+            indices.push(a, c, b, b, c, d)
         }
     }
     const g = new THREE.BufferGeometry()
@@ -219,11 +222,16 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     // The light warm-gray of a commercial airframe. On this app's dark
     // stage it is also simply the most legible choice — the hull is the
     // brightest thing in the scene, so the silhouette reads first.
-    const shell = mat(new THREE.MeshStandardMaterial({
-        color: 0x99a0aa, metalness: 0.22, roughness: 0.42,
+    // MeshPhysicalMaterial for the shell: the clearcoat layer is the
+    // glossy-over-matte finish of an injection-moulded product, which no
+    // single-lobe standard material can fake.
+    const shell = mat(new THREE.MeshPhysicalMaterial({
+        color: 0x9aa1ab, metalness: 0.1, roughness: 0.5,
+        clearcoat: 0.65, clearcoatRoughness: 0.22,
     }))
-    const shellLight = mat(new THREE.MeshStandardMaterial({
-        color: 0xb3b9c2, metalness: 0.18, roughness: 0.38,
+    const shellLight = mat(new THREE.MeshPhysicalMaterial({
+        color: 0xb3b9c2, metalness: 0.08, roughness: 0.45,
+        clearcoat: 0.5, clearcoatRoughness: 0.25,
     }))
     const armShell = mat(new THREE.MeshStandardMaterial({
         color: 0x525a66, metalness: 0.3, roughness: 0.5,
@@ -265,6 +273,16 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
 
     // Forward obstacle-sensor eyes, toed slightly outward — the detail that
     // most says "commercial aircraft", and a second nose cue after the gimbal.
+    const visor = new THREE.Mesh(
+        track(new THREE.SphereGeometry(0.42, 24, 16)),
+        mat(new THREE.MeshPhysicalMaterial({
+            color: 0x10161f, metalness: 0.4, roughness: 0.1,
+            clearcoat: 1.0, clearcoatRoughness: 0.08,
+        })))
+    visor.scale.set(0.95, 0.5, 0.62)
+    visor.position.set(0, 0.28, -0.98)
+    root.add(visor)
+
     const eyeGeo = track(new THREE.SphereGeometry(0.075, 14, 12))
     const eyeMat = mat(new THREE.MeshStandardMaterial({
         color: 0x0a1622, metalness: 0.9, roughness: 0.12,

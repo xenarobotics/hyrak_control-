@@ -15,6 +15,7 @@ import {
     Download, Upload, Power,
     Satellite, Compass as CompassIcon, Activity, Mountain,
     Move3d, Camera, AlignCenterHorizontal, RotateCw, Loader,
+    ArrowUp, FlipVertical2,
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { PX4_META, getGroupFromKey, humanizeParamKey, type PX4Group, type PX4Meta } from '@/lib/px4-params-meta'
@@ -1046,27 +1047,43 @@ function CalCard({ sensor, verdict, connected, busy, isActive, phase, progress, 
 // ── Mount orientation ────────────────────────────────────────────────────────
 //
 // QGC's "set orientations" step, in our shape. Two parameters decide how the
-// autopilot and the external compass are physically turned relative to the
-// airframe; calibrating with either one wrong produces offsets that pass and
-// then fly wrong. Both are int params applied at BOOT, so a change here is
-// not real until the FC restarts — which is why the reboot prompt is wired
-// to this card and not left for the operator to know about.
+// autopilot board and the external compass are physically turned relative to
+// the airframe; calibrating with either one wrong produces offsets that pass
+// and then fly wrong. Both are applied at BOOT, so a change here is not real
+// until the FC restarts — which is why the reboot prompt is wired to this
+// card and not left for the operator to know about.
+//
+// A DIAL, NOT A DROPDOWN. The first cut was two <select>s full of strings
+// like "Roll 180° Yaw 270°", which asks the operator to compose rotations in
+// their head. But every standard mount rotation (MAV enum 0–15) is exactly
+// "which way does the board arrow point" × "is it upside down" — so that is
+// the control: eight arrow buttons that POINT the way, and one flip toggle.
+// PITCH_180 (12) is the same orientation as upside-down + yaw 180 and is
+// encoded as such.
 
 const MOUNT_PARAMS = [
-    { key: 'SENS_BOARD_ROT', label: 'Autopilot', tip: 'How the flight controller board is physically rotated relative to the airframe. Leave at None if the arrow on the board points at the nose.' },
-    { key: 'CAL_MAG0_ROT', label: 'Compass', tip: 'How the external compass is rotated relative to the airframe. Auto lets PX4 detect it during compass calibration — the right choice unless detection has failed.' },
+    { key: 'SENS_BOARD_ROT', label: 'Autopilot board', tip: 'Which way the arrow printed on the flight controller points, relative to the nose. Straight up = it points at the nose. Flip adds "mounted upside-down".' },
+    { key: 'CAL_MAG0_ROT', label: 'External compass', tip: 'Which way the compass module\'s arrow points, relative to the nose. AUTO lets PX4 detect it during compass calibration — the right choice unless detection has failed.' },
 ] as const
 
-const ROTATIONS: { v: number; l: string }[] = [
-    { v: 0, l: 'None' },
-    { v: 1, l: 'Yaw 45°' }, { v: 2, l: 'Yaw 90°' }, { v: 3, l: 'Yaw 135°' }, { v: 4, l: 'Yaw 180°' },
-    { v: 5, l: 'Yaw 225°' }, { v: 6, l: 'Yaw 270°' }, { v: 7, l: 'Yaw 315°' },
-    { v: 8, l: 'Roll 180°' }, { v: 10, l: 'Roll 180° Yaw 90°' }, { v: 14, l: 'Roll 180° Yaw 270°' },
-    { v: 12, l: 'Pitch 180°' },
-]
+/** value 0–15 → { upside, yawIdx }; the yaw dial and flip toggle are a
+ *  complete, unambiguous encoding of all sixteen standard rotations. */
+function decodeRotation(v: number): { upside: boolean; yawIdx: number } | null {
+    if (v < 0 || v > 15) return null
+    return { upside: v >= 8, yawIdx: v % 8 }
+}
+
+function rotationName(v: number | null): string {
+    if (v === null) return '…'
+    if (v === -1) return 'Auto-detect'
+    const d = decodeRotation(v)
+    if (!d) return `ROTATION #${v}`
+    const yaw = d.yawIdx === 0 ? 'Forward' : `Yaw ${d.yawIdx * 45}°`
+    return d.upside ? `${yaw} · upside-down` : yaw
+}
 
 function MountOrientation({ connected }: { connected: boolean }) {
-    // null = not read yet. The selects show the aircraft's ACTUAL values,
+    // null = not read yet. The dial shows the aircraft's ACTUAL values,
     // fetched one param at a time — not the 30 s everything-download.
     const [values, setValues] = useState<Record<string, number | null>>({ SENS_BOARD_ROT: null, CAL_MAG0_ROT: null })
     const [rebootNeeded, setRebootNeeded] = useState(false)
@@ -1093,7 +1110,6 @@ function MountOrientation({ connected }: { connected: boolean }) {
         socket.on('param_set_ack', onSet)
         for (const p of MOUNT_PARAMS) socket.emit('get_param', { key: p.key, param_type: 'int' })
         return () => { socket.off('param_get_ack', onGet); socket.off('param_set_ack', onSet) }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [connected])
 
     const write = (key: string, value: number) => {
@@ -1101,10 +1117,21 @@ function MountOrientation({ connected }: { connected: boolean }) {
         getSocket().emit('set_param', { key, value, param_type: 'int' })
     }
 
+    const dialBtn = (active: boolean, enabled: boolean): React.CSSProperties => ({
+        width: 30, height: 30, borderRadius: 8, padding: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: active ? 'rgba(34,211,238,0.14)' : 'transparent',
+        border: `1px solid ${active ? 'rgba(34,211,238,0.6)' : 'hsl(var(--app-border))'}`,
+        color: active ? '#22d3ee' : 'hsl(var(--app-text-muted))',
+        cursor: enabled ? 'pointer' : 'not-allowed',
+        opacity: enabled || active ? 1 : 0.4,
+        transition: 'border-color 150ms, background 150ms',
+    })
+
     return (
         <div style={{
-            display: 'flex', flexDirection: 'column', gap: 8,
-            padding: '10px 12px', borderRadius: 10,
+            display: 'flex', flexDirection: 'column', gap: 10,
+            padding: '11px 12px', borderRadius: 10,
             background: 'hsl(var(--app-surface-2))',
             border: `1px solid ${rebootNeeded ? 'rgba(251,191,36,0.4)' : 'hsl(var(--app-border))'}`,
         }}>
@@ -1112,33 +1139,63 @@ function MountOrientation({ connected }: { connected: boolean }) {
                 <span style={{ fontSize: 11.5, fontWeight: 600, color: 'hsl(var(--app-text))' }}>Mount orientation</span>
                 <Tip text="Set these BEFORE calibrating: offsets computed with a wrong mount rotation pass the calibration and then fly wrong. Applied at boot — changing either needs a reboot." />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                {MOUNT_PARAMS.map(pm => {
-                    const v = values[pm.key]
-                    return (
-                        <label key={pm.key} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 9.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', letterSpacing: '0.06em' }}>
-                                {pm.label.toUpperCase()} <Tip text={pm.tip} />
+            {MOUNT_PARAMS.map(pm => {
+                const v = values[pm.key]
+                const known = v !== null
+                const dec = known ? decodeRotation(v) : null
+                const isAuto = v === -1
+                const enabled = connected && known
+                return (
+                    <div key={pm.key} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 9.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', letterSpacing: '0.06em' }}>
+                            {pm.label.toUpperCase()} <Tip text={pm.tip} />
+                            <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, color: known ? '#22d3ee' : 'hsl(var(--app-text-muted))' }}>
+                                {connected ? (known ? rotationName(v) : 'reading…') : '—'}
                             </span>
-                            <select
-                                value={v ?? ''}
-                                disabled={!connected || v === null}
-                                onChange={e => write(pm.key, Number(e.target.value))}
-                                style={{
-                                    padding: '5px 8px', borderRadius: 7, fontSize: 11, fontFamily: 'monospace',
-                                    background: 'hsl(var(--app-surface))', color: 'hsl(var(--app-text))',
-                                    border: '1px solid hsl(var(--app-border))',
-                                    cursor: connected && v !== null ? 'pointer' : 'not-allowed',
+                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                            {pm.key === 'CAL_MAG0_ROT' && (
+                                <button
+                                    onClick={() => enabled && write(pm.key, -1)}
+                                    disabled={!enabled}
+                                    title="Let PX4 detect the compass rotation during calibration"
+                                    style={{ ...dialBtn(isAuto, enabled), width: 'auto', padding: '0 9px', fontSize: 9.5, fontFamily: 'monospace', fontWeight: 700 }}
+                                >
+                                    AUTO
+                                </button>
+                            )}
+                            {/* The dial: each button IS the direction the board arrow
+                                points. No composing "Roll 180 Yaw 270" in your head. */}
+                            {Array.from({ length: 8 }, (_, i) => {
+                                const active = !isAuto && dec !== null && dec.yawIdx === i
+                                return (
+                                    <button
+                                        key={i}
+                                        onClick={() => enabled && write(pm.key, ((!isAuto && dec?.upside) ? 8 : 0) + i)}
+                                        disabled={!enabled}
+                                        title={i === 0 ? 'Arrow points at the nose' : `Arrow turned ${i * 45}° clockwise from the nose`}
+                                        style={dialBtn(active, enabled)}
+                                    >
+                                        <ArrowUp size={14} style={{ transform: `rotate(${i * 45}deg)` }} />
+                                    </button>
+                                )
+                            })}
+                            <button
+                                onClick={() => {
+                                    if (!enabled) return
+                                    const d = !isAuto ? dec : null
+                                    write(pm.key, ((d?.upside) ? 0 : 8) + (d?.yawIdx ?? 0))
                                 }}
+                                disabled={!enabled}
+                                title="The board is mounted component-side down (adds Roll 180°)"
+                                style={{ ...dialBtn(!isAuto && dec !== null && dec.upside, enabled), width: 'auto', padding: '0 9px', fontSize: 9.5, fontFamily: 'monospace', fontWeight: 700 }}
                             >
-                                {v === null && <option value="">{connected ? 'reading…' : '—'}</option>}
-                                {pm.key === 'CAL_MAG0_ROT' && <option value={-1}>Auto-detect</option>}
-                                {ROTATIONS.map(r => <option key={r.v} value={r.v}>{r.l}</option>)}
-                            </select>
-                        </label>
-                    )
-                })}
-            </div>
+                                <FlipVertical2 size={12} style={{ marginRight: 4 }} /> FLIPPED
+                            </button>
+                        </div>
+                    </div>
+                )
+            })}
             {error && (
                 <p style={{ fontSize: 10, fontFamily: 'monospace', color: '#f87171', margin: 0 }}>{error}</p>
             )}
