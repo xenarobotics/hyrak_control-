@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useTheme } from '@/lib/theme'
-import { getUiFont, setUiFont, getUiZoom, setUiZoom, UI_FONTS, UI_ZOOMS, type UiFont } from '@/lib/uiPrefs'
+import { getUiFont, setUiFont, getUiZoom, setUiZoom, getUiTextSize, setUiTextSize, UI_FONTS, UI_ZOOMS, UI_TEXT_SIZES, type UiFont, type UiTextSize } from '@/lib/uiPrefs'
 import {
     Sun, Moon, MoonStar, Info, Zap,
     SlidersHorizontal, Video, Bot, Map, Route, Bell, Database, Keyboard, AlertTriangle, Radio,
@@ -149,6 +149,7 @@ function DisplayGroup() {
     const { theme, setTheme } = useTheme()
     const [font, setFont] = useState<UiFont>(() => getUiFont())
     const [zoom, setZoom] = useState<number>(() => getUiZoom())
+    const [textSize, setTextSize] = useState<UiTextSize>(() => getUiTextSize())
 
     return (
         <>
@@ -175,6 +176,17 @@ function DisplayGroup() {
                         value={font}
                         onChange={v => { setFont(v as UiFont); setUiFont(v as UiFont) }}
                         options={UI_FONTS.map(f => ({ value: f.value, label: f.label }))}
+                    />
+                }
+            />
+            <PrefRow
+                label="Text size"
+                sub="Grows the type only and leaves the layout alone. Combine with Interface scale below if everything should grow."
+                right={
+                    <ChipGroup
+                        value={textSize}
+                        onChange={v => { setTextSize(v as UiTextSize); setUiTextSize(v as UiTextSize) }}
+                        options={UI_TEXT_SIZES.map(t => ({ value: t.value, label: t.label }))}
                     />
                 }
             />

@@ -15,6 +15,7 @@ dependencies = [
     "av>=12.3.0,<13.0.0",
     "mavsdk>=2.2.0",
     "pyserial>=3.5",
+    "pymavlink>=2.4.40",
     "torch>=2.4.1",
     "torchvision>=0.19.1",
     "ultralytics>=8.3.2",

@@ -44,6 +44,13 @@ export interface SensorHealthData {
     armable: boolean
 }
 
+/** The RC receiver as the autopilot sees it. */
+export interface RcStatusData {
+    was_available: boolean
+    available: boolean
+    signal_pct: number
+}
+
 export interface FlightModeData {
     mode: string
     is_armed: boolean
@@ -59,6 +66,7 @@ export interface TelemetrySnapshot {
     flight_mode: FlightModeData
     /** Optional so an older backend that doesn't send it can't crash the UI. */
     health?: SensorHealthData
+    rc?: RcStatusData
     groundspeed_m_s: number
     heading_deg: number
     home_distance_m: number

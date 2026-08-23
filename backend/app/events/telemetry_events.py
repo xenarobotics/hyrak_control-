@@ -3,6 +3,7 @@ import logging
 from app.sessions import observer
 from app.sessions.manager import SessionManager
 from app.telemetry import serial_bridge
+from app.telemetry.rc_monitor import RcChannelMonitor
 from app.telemetry.schemas import DroneCommand
 from app.sessions.models import AnalysisMode
 
@@ -141,6 +142,31 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
     Registers all Socket.IO events for telemetry, drone commands, and mode switching.
     vision_pool is passed in so set_analysis_mode can re-register sessions.
     """
+
+    # ── Raw RC channels, for the Radio & RC page ─────────────────────────
+    # One passive monitor for the whole server, started lazily on the first
+    # client that asks for it. Broadcast rather than per-session: channel
+    # values are not secrets, and the aircraft has exactly one transmitter.
+    rc_monitor = RcChannelMonitor(
+        lambda payload: asyncio.get_event_loop().create_task(
+            sio.emit("rc_channels", payload)
+        )
+    )
+
+    @sio.on("start_rc_monitor")
+    async def on_start_rc_monitor(sid):
+        """Ask for live RC channel data. Replies rc_monitor_status with
+        {listening, port, live} — `listening` false means the port could not
+        be bound; `live` false means bound but nothing is arriving, which is
+        what a serial-only link (USB FC) looks like and the page must say so
+        rather than show dead bars."""
+        ok = await rc_monitor.start()
+        await sio.emit("rc_monitor_status", {
+            "listening": ok,
+            "port": rc_monitor._port,
+            "live": rc_monitor.live,
+        }, to=sid)
+
 
     @sio.on("connect_telemetry")
     async def on_connect_telemetry(sid, data):

@@ -81,8 +81,8 @@ export function DeviceSelector() {
             {/* Camera selector — not applicable to server-sourced feeds */}
             <div>
                 <div className="flex items-center gap-1.5 mb-1.5">
-                    <Camera size={12} className="text-zinc-500" />
-                    <span className="text-xs text-zinc-500 font-mono">{needsCamera ? 'CAMERA' : 'VIDEO SOURCE'}</span>
+                    <Camera size={12} className="text-app-text-muted" />
+                    <span className="text-xs text-app-text-muted font-mono">{needsCamera ? 'CAMERA' : 'VIDEO SOURCE'}</span>
                     {needsCamera && (
                         <button
                             onClick={scanCams}
@@ -95,7 +95,7 @@ export function DeviceSelector() {
                 </div>
 
                 {!needsCamera ? (
-                    <div className="h-8 flex items-center px-2 rounded text-xs font-mono bg-zinc-900 border border-zinc-700 text-zinc-500 truncate">
+                    <div className="h-8 flex items-center px-2 rounded text-xs font-mono bg-app-surface border border-app-border text-app-text-muted truncate">
                         {SOURCE_LABELS[videoSource]}
                     </div>
                 ) : (
@@ -106,7 +106,7 @@ export function DeviceSelector() {
                         >
                             {/* w-full + truncate keeps long webcam labels from
                                 widening the side panel into horizontal scroll */}
-                            <SelectTrigger className="h-8 w-full max-w-full text-xs font-mono bg-zinc-900 border-zinc-700 overflow-hidden [&>span]:truncate [&>span]:min-w-0 [&>span]:text-left">
+                            <SelectTrigger className="h-8 w-full max-w-full text-xs font-mono bg-app-surface border-app-border overflow-hidden [&>span]:truncate [&>span]:min-w-0 [&>span]:text-left">
                                 <SelectValue placeholder={camLoading ? 'Scanning...' : 'No cameras found'} />
                             </SelectTrigger>
                             <SelectContent>
@@ -123,8 +123,8 @@ export function DeviceSelector() {
             {/* Telemetry source — detected client radios (like the camera) or SITL */}
             <div>
                 <div className="flex items-center gap-1.5 mb-1.5">
-                    <Satellite size={12} className="text-zinc-500" />
-                    <span className="text-xs text-zinc-500 font-mono">TELEMETRY</span>
+                    <Satellite size={12} className="text-app-text-muted" />
+                    <span className="text-xs text-app-text-muted font-mono">TELEMETRY</span>
                     {/* Desktop needs no grant, so "+" (which opens nothing in
                         Electron) is replaced by a plain re-scan. */}
                     {desktop ? (
@@ -161,7 +161,7 @@ export function DeviceSelector() {
                     onValueChange={(v) => v && setSource(v)}
                     disabled={isConnected}
                 >
-                    <SelectTrigger className="h-8 w-full max-w-full text-xs font-mono bg-zinc-900 border-zinc-700 overflow-hidden [&>span]:truncate [&>span]:min-w-0 [&>span]:text-left">
+                    <SelectTrigger className="h-8 w-full max-w-full text-xs font-mono bg-app-surface border-app-border overflow-hidden [&>span]:truncate [&>span]:min-w-0 [&>span]:text-left">
                         <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -205,20 +205,20 @@ export function DeviceSelector() {
                     default and what PX4's TELEM ports ship at; 115200 is the
                     other one people actually hit. */}
                 {selectedIsFc && (
-                    <p className="mt-1.5 text-[10px] font-mono text-zinc-500 leading-relaxed">
+                    <p className="mt-1.5 text-[10px] font-mono text-app-text-muted leading-relaxed">
                         Flight controller over USB — the baud rate is ignored by
                         the CDC serial link, so there is nothing to match.
                     </p>
                 )}
                 {!selectedIsFc && (source.startsWith('radio-') || source.startsWith('nradio-')) && (
                     <div className="mt-1.5 flex items-center gap-1.5">
-                        <span className="text-[10px] font-mono text-zinc-500">BAUD</span>
+                        <span className="text-[10px] font-mono text-app-text-muted">BAUD</span>
                         <Select
                             value={String(baud)}
                             onValueChange={(v) => { if (v) setBaud(Number(v)) }}
                             disabled={isConnected}
                         >
-                            <SelectTrigger className="h-7 flex-1 text-[11px] font-mono bg-zinc-900 border-zinc-700">
+                            <SelectTrigger className="h-7 flex-1 text-[11px] font-mono bg-app-surface border-app-border">
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -232,14 +232,14 @@ export function DeviceSelector() {
                     </div>
                 )}
                 {desktop && nativeRadios.length === 0 && (
-                    <p className="mt-1.5 text-[10px] font-mono text-zinc-500 leading-relaxed">
+                    <p className="mt-1.5 text-[10px] font-mono text-app-text-muted leading-relaxed">
                         No serial ports found. Plug the radio in and hit refresh — on Linux you
                         may also need to be in the <span className="text-zinc-400">dialout</span> group.
                     </p>
                 )}
                 {source === 'air-unit-udp' && (
                     <>
-                        <p className="mt-1.5 text-[10px] font-mono text-zinc-500 leading-relaxed">
+                        <p className="mt-1.5 text-[10px] font-mono text-app-text-muted leading-relaxed">
                             Reads udp:{getRfDownlinkPort()} / sends to {rfUplinkHost}:{getRfUplinkPort()} —
                             no relay agent needed. Just run start-gs.sh.
                         </p>
@@ -251,7 +251,7 @@ export function DeviceSelector() {
                             command vanishes into loopback with no error anywhere
                             and telemetry keeps streaming perfectly. */}
                         <div className="mt-1.5 flex items-center gap-1.5">
-                            <span className="text-[10px] font-mono text-zinc-500 shrink-0">TX HOST</span>
+                            <span className="text-[10px] font-mono text-app-text-muted shrink-0">TX HOST</span>
                             <input
                                 value={rfUplinkHost}
                                 onChange={e => {
@@ -261,11 +261,11 @@ export function DeviceSelector() {
                                 disabled={isConnected}
                                 placeholder={DEFAULT_RF_UPLINK_HOST}
                                 title="Where wfb_tx listens. This machine only if the RF decoder runs here — put the decoder's address here otherwise, or commands go nowhere while telemetry keeps working."
-                                className="h-7 w-full rounded px-2 text-[11px] font-mono bg-zinc-900 border border-zinc-700 text-zinc-300 outline-none disabled:opacity-60"
+                                className="h-7 w-full rounded px-2 text-[11px] font-mono bg-app-surface border border-app-border text-app-text outline-none disabled:opacity-60"
                             />
                         </div>
                         <div className="mt-1.5 flex items-center gap-1.5">
-                            <span className="text-[10px] font-mono text-zinc-500 shrink-0">QGC PORT</span>
+                            <span className="text-[10px] font-mono text-app-text-muted shrink-0">QGC PORT</span>
                             <input
                                 type="number"
                                 min={0}
@@ -277,10 +277,10 @@ export function DeviceSelector() {
                                     if (v >= 0 && v < 65536) setRfFanoutPort(v)
                                 }}
                                 disabled={isConnected}
-                                className="h-7 w-full rounded px-2 text-[11px] font-mono bg-zinc-900 border border-zinc-700 text-zinc-300 outline-none disabled:opacity-60"
+                                className="h-7 w-full rounded px-2 text-[11px] font-mono bg-app-surface border border-app-border text-app-text outline-none disabled:opacity-60"
                             />
                         </div>
-                        <p className="mt-1 text-[10px] font-mono text-zinc-500 leading-relaxed">
+                        <p className="mt-1 text-[10px] font-mono text-app-text-muted leading-relaxed">
                             {rfFanout > 0
                                 ? `Copy of the downlink sent to udp:${rfFanout} — point QGC's UDP link at that port instead of ${getRfDownlinkPort()} (only one program can own a port). Downlink only: QGC can read params and download the mission, but cannot command the aircraft through this.`
                                 : `0 = off. Set a port (e.g. ${getRfDownlinkPort() + 2}) to let QGroundControl watch the same telemetry alongside HYRAK.`}
@@ -293,7 +293,7 @@ export function DeviceSelector() {
                         onChange={e => { setRelayUrl(e.target.value); setLocalRelayUrl(e.target.value) }}
                         disabled={isConnected}
                         placeholder={DEFAULT_LOCAL_RELAY_URL}
-                        className="mt-1.5 h-7 w-full rounded px-2 text-[11px] font-mono bg-zinc-900 border border-zinc-700 text-zinc-300 outline-none disabled:opacity-60"
+                        className="mt-1.5 h-7 w-full rounded px-2 text-[11px] font-mono bg-app-surface border border-app-border text-app-text outline-none disabled:opacity-60"
                     />
                 )}
                 {source === 'siyi-udp' && (
@@ -303,15 +303,15 @@ export function DeviceSelector() {
                             onChange={e => { setSiyiTarget(e.target.value); setSiyiTelemetryTarget(e.target.value) }}
                             disabled={isConnected}
                             placeholder={DEFAULT_SIYI_TELEMETRY_TARGET}
-                            className="mt-1.5 h-7 w-full rounded px-2 text-[11px] font-mono bg-zinc-900 border border-zinc-700 text-zinc-300 outline-none disabled:opacity-60"
+                            className="mt-1.5 h-7 w-full rounded px-2 text-[11px] font-mono bg-app-surface border border-app-border text-app-text outline-none disabled:opacity-60"
                         />
-                        <p className="mt-1 text-[10px] font-mono text-zinc-500 leading-relaxed">
+                        <p className="mt-1 text-[10px] font-mono text-app-text-muted leading-relaxed">
                             Target host:port, same as QGC&apos;s UDP link. Local port is ephemeral — the ground unit replies to us.
                         </p>
                     </>
                 )}
                 {sitlNeedsDesktop && (
-                    <p className="mt-1.5 text-[10px] font-mono text-zinc-500 leading-relaxed">
+                    <p className="mt-1.5 text-[10px] font-mono text-app-text-muted leading-relaxed">
                         SITL requires the HYRAK desktop app — <a href="/" className="underline text-zinc-400 hover:text-zinc-200">download it here</a>, then connect to the PX4 SITL running on your machine.
                     </p>
                 )}

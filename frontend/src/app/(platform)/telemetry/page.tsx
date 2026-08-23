@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useDroneStore } from '@/store/drone'
 import { useCalibration } from '@/hooks/useCalibration'
 import { CalibrationStage } from '@/components/config/CalibrationStage'
@@ -1407,78 +1407,526 @@ function SensorsWorkspace() {
 
 // ── RADIO ─────────────────────────────────────────────────────────────────────
 
-const RC_MODE_MAP: Record<string, { left: [string, string]; right: [string, string] }> = {
-    '1': { left: ['Pitch ↑↓', 'Roll ←→'],     right: ['Throttle ↑↓', 'Yaw ←→'] },
-    '2': { left: ['Throttle ↑↓', 'Yaw ←→'],   right: ['Pitch ↑↓', 'Roll ←→'] },
-    '3': { left: ['Pitch ↑↓', 'Yaw ←→'],      right: ['Throttle ↑↓', 'Roll ←→'] },
-    '4': { left: ['Throttle ↑↓', 'Roll ←→'],  right: ['Pitch ↑↓', 'Yaw ←→'] },
+// ── RADIO & RC ───────────────────────────────────────────────────────────────
+//
+// QGC's Radio setup, in our shape: everything the transmitter does to the
+// aircraft is decided by PX4 parameters, and every control here reads and
+// writes THOSE — nothing on this page is app-local preference dressed up as
+// configuration (the previous version stored a mode list in localStorage
+// that no aircraft ever saw).
+//
+// Live channel data comes from the backend's RC monitor, which listens to
+// the raw MAVLink stream — MAVSDK itself does not expose channels. That
+// feed exists on UDP links (SITL, the RF bridge); a USB-serial FC cannot
+// share its port, and the page SAYS so instead of showing dead bars.
+
+/** COM_FLTMODE1..6 values, PX4's commander mode slots. */
+const FLTMODE_OPTS: { v: number; l: string }[] = [
+    { v: -1, l: 'Unassigned' },
+    { v: 0, l: 'Manual' }, { v: 8, l: 'Stabilized' }, { v: 6, l: 'Acro' },
+    { v: 1, l: 'Altitude' }, { v: 2, l: 'Position' },
+    { v: 3, l: 'Mission' }, { v: 4, l: 'Hold' }, { v: 5, l: 'Return' },
+    { v: 7, l: 'Offboard' }, { v: 10, l: 'Takeoff' }, { v: 11, l: 'Land' },
+    { v: 12, l: 'Follow Me' }, { v: 14, l: 'Orbit' },
+]
+
+const SWITCH_PARAMS = [
+    { key: 'RC_MAP_ARM_SW', label: 'Arm switch', tip: 'Arms and disarms on a switch instead of the stick gesture. 0 = unassigned.' },
+    { key: 'RC_MAP_KILL_SW', label: 'Kill switch', tip: 'Immediately stops the motors. Assign this one — it is the hardware answer to a flyaway.' },
+    { key: 'RC_MAP_RETURN_SW', label: 'Return switch', tip: 'Triggers Return-to-Launch.' },
+    { key: 'RC_MAP_OFFB_SW', label: 'Offboard switch', tip: 'Hands control to the companion app (this one) and takes it back.' },
+    { key: 'RC_MAP_LOITER_SW', label: 'Hold switch', tip: 'Parks the aircraft where it is.' },
+] as const
+
+const AXIS_PARAMS = ['RC_MAP_ROLL', 'RC_MAP_PITCH', 'RC_MAP_THROTTLE', 'RC_MAP_YAW'] as const
+
+const RC_PARAM_KEYS: string[] = [
+    'RC_MAP_FLTMODE', ...SWITCH_PARAMS.map(p => p.key), ...AXIS_PARAMS,
+]
+
+/** Which physical stick carries which axis, per transmitter mode. x/y name
+ *  the axis on that gimbal; throttle has no centring spring so its value
+ *  maps bottom-to-top rather than around centre. */
+const STICK_LAYOUT: Record<string, { left: { x: string; y: string }; right: { x: string; y: string } }> = {
+    '1': { left: { x: 'yaw', y: 'pitch' }, right: { x: 'roll', y: 'throttle' } },
+    '2': { left: { x: 'yaw', y: 'throttle' }, right: { x: 'roll', y: 'pitch' } },
+    '3': { left: { x: 'roll', y: 'pitch' }, right: { x: 'yaw', y: 'throttle' } },
+    '4': { left: { x: 'roll', y: 'throttle' }, right: { x: 'yaw', y: 'pitch' } },
 }
 
-function RadioWorkspace({ r, onUpdate }: { r: RadioProfile; onUpdate: (p: Partial<RadioProfile>) => void }) {
-    const m = RC_MODE_MAP[r.rcMode] ?? RC_MODE_MAP['2']
-    function Stick({ axes, label }: { axes: [string, string]; label: string }) {
-        return (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                <div style={{ width: 80, height: 80, borderRadius: 14, background: '#060b10', border: '1px solid rgba(255,255,255,0.08)', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <div style={{ position: 'absolute', top: 0, bottom: 0, left: '50%', width: 1, background: 'hsl(var(--app-border))' }} />
-                    <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', height: 1, background: 'hsl(var(--app-border))' }} />
-                    <div style={{ position: 'absolute', top: 6, left: 0, right: 0, textAlign: 'center', fontSize: 8, fontFamily: 'monospace', color: '#22d3ee', opacity: 0.7 }}>{axes[0].split(' ')[0]}</div>
-                    <div style={{ position: 'absolute', bottom: 6, left: 0, right: 0, textAlign: 'center', fontSize: 8, fontFamily: 'monospace', color: '#22d3ee', opacity: 0.7 }}>{axes[1].split(' ')[0]}</div>
-                    <div style={{ width: 16, height: 16, borderRadius: '50%', background: '#22d3ee', opacity: 0.85, boxShadow: '0 0 10px rgba(34,211,238,0.4)', zIndex: 1 }} />
-                </div>
-                <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)', letterSpacing: '0.08em' }}>{label.toUpperCase()} STICK</span>
-            </div>
-        )
+const AXIS_SHORT: Record<string, string> = { roll: 'ROLL', pitch: 'PITCH', yaw: 'YAW', throttle: 'THR' }
+
+type WizPhase = 'idle' | 'capturing' | 'review' | 'writing' | 'done'
+
+function RadioWorkspace() {
+    const telemetry = useDroneStore(s => s.telemetry)
+    const telStatus = useDroneStore(s => s.telemetryStatus)
+    const connected = telStatus === 'connected'
+    const armed = telemetry?.flight_mode?.is_armed ?? false
+    const rc = telemetry?.rc
+
+    // ── PX4 parameters: the actual configuration ─────────────────────────
+    const [params, setParams] = useState<Record<string, number | null>>({})
+    const [paramErr, setParamErr] = useState<string | null>(null)
+
+    useEffect(() => {
+        if (!connected) { setParams({}); return }
+        const socket = getSocket()
+        const keys = new Set([...RC_PARAM_KEYS, ...Array.from({ length: 6 }, (_, i) => `COM_FLTMODE${i + 1}`)])
+        const onGet = (r: { key: string; ok: boolean; value: number | null }) => {
+            if (keys.has(r.key) && r.ok) setParams(v => ({ ...v, [r.key]: r.value }))
+        }
+        const onSet = (r: { key: string; ok: boolean; value: number; error?: string }) => {
+            if (!keys.has(r.key)) return
+            if (r.ok) { setParams(v => ({ ...v, [r.key]: r.value })); setParamErr(null) }
+            else setParamErr(r.error || `The aircraft did not accept ${r.key}`)
+        }
+        socket.on('param_get_ack', onGet)
+        socket.on('param_set_ack', onSet)
+        for (const k of keys) socket.emit('get_param', { key: k, param_type: 'int' })
+        return () => { socket.off('param_get_ack', onGet); socket.off('param_set_ack', onSet) }
+    }, [connected])
+
+    const writeParam = (key: string, value: number) => {
+        setParamErr(null)
+        getSocket().emit('set_param', { key, value, param_type: 'int' })
     }
-    // 6-position switch visualization
-    const switchColors = ['#4ade80','#22d3ee','#fbbf24','#f97316','#c084fc','#f87171']
+
+    // ── Live channels from the backend RC monitor ────────────────────────
+    const [channels, setChannels] = useState<number[]>([])
+    const [chanCount, setChanCount] = useState(0)
+    const [monitor, setMonitor] = useState<{ listening: boolean; port: number } | null>(null)
+    const lastFrameAt = useRef(0)
+    const [, forceTick] = useState(0)
+
+    useEffect(() => {
+        const socket = getSocket()
+        const onChans = (p: { channels: number[]; count: number }) => {
+            lastFrameAt.current = Date.now()
+            setChannels(p.channels)
+            setChanCount(p.count)
+        }
+        const onStatus = (st: { listening: boolean; port: number }) => setMonitor(st)
+        socket.on('rc_channels', onChans)
+        socket.on('rc_monitor_status', onStatus)
+        socket.emit('start_rc_monitor')
+        // The "live" light must go OUT when frames stop — poll the recency.
+        const t = setInterval(() => forceTick(x => x + 1), 1000)
+        return () => { socket.off('rc_channels', onChans); socket.off('rc_monitor_status', onStatus); clearInterval(t) }
+    }, [])
+
+    const live = Date.now() - lastFrameAt.current < 3000 && channels.length > 0
+
+    // ── Stick calibration wizard ─────────────────────────────────────────
+    const [wiz, setWiz] = useState<WizPhase>('idle')
+    const [wizErr, setWizErr] = useState<string | null>(null)
+    const ranges = useRef<{ min: number; max: number }[]>([])
+    const [trims, setTrims] = useState<number[]>([])
+    const [writeProgress, setWriteProgress] = useState('')
+
+    useEffect(() => {
+        if (wiz !== 'capturing' || !live) return
+        const r = ranges.current
+        channels.forEach((v, i) => {
+            if (v <= 0) return
+            if (!r[i]) r[i] = { min: v, max: v }
+            else { r[i].min = Math.min(r[i].min, v); r[i].max = Math.max(r[i].max, v) }
+        })
+    }, [channels, wiz, live])
+
+    const startCapture = () => {
+        ranges.current = []
+        setTrims([])
+        setWizErr(null)
+        setWiz('capturing')
+    }
+    const finishCapture = () => {
+        // The position everything is LEFT in becomes the trim — which is why
+        // the instruction ends "…finish centred, throttle down".
+        setTrims([...channels])
+        setWiz('review')
+    }
+    const writeCalibration = async () => {
+        setWiz('writing')
+        const socket = getSocket()
+        const rows = calRows()
+        for (const row of rows) {
+            setWriteProgress(`CH${row.ch}…`)
+            socket.emit('set_param', { key: `RC${row.ch}_MIN`, value: row.min, param_type: 'float' })
+            socket.emit('set_param', { key: `RC${row.ch}_TRIM`, value: row.trim, param_type: 'float' })
+            socket.emit('set_param', { key: `RC${row.ch}_MAX`, value: row.max, param_type: 'float' })
+            // Sequenced politely: three writes per channel is plenty for a
+            // serial link to swallow at once.
+            await new Promise(res => setTimeout(res, 350))
+        }
+        setWriteProgress('')
+        setWiz('done')
+    }
+    const calRows = () => ranges.current
+        .map((r, i) => r ? {
+            ch: i + 1, min: r.min, max: r.max,
+            trim: Math.max(r.min, Math.min(r.max, trims[i] ?? Math.round((r.min + r.max) / 2))),
+            moved: r.max - r.min >= 300,
+        } : null)
+        .filter((x): x is NonNullable<typeof x> => x !== null && x.moved)
+
+    // ── Stick positions for the transmitter drawing ──────────────────────
+    const [visualMode, setVisualMode] = useState<string>(() => ls('hyrak-rc-visual-mode', '2'))
+    const layout = STICK_LAYOUT[visualMode] ?? STICK_LAYOUT['2']
+    const axisChannel = (axis: string): number => {
+        const key = axis === 'roll' ? 'RC_MAP_ROLL' : axis === 'pitch' ? 'RC_MAP_PITCH'
+            : axis === 'yaw' ? 'RC_MAP_YAW' : 'RC_MAP_THROTTLE'
+        return params[key] ?? 0
+    }
+    const axisValue = (axis: string): number => {
+        const ch = axisChannel(axis)
+        if (!live || ch < 1 || ch > channels.length) return axis === 'throttle' ? -1 : 0
+        const raw = channels[ch - 1]
+        if (raw <= 0) return 0
+        return Math.max(-1, Math.min(1, (raw - 1500) / 400))
+    }
+
+    const modeChannel = params['RC_MAP_FLTMODE'] ?? null
 
     return (
-        <G2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <Card title="STICK LAYOUT">
-                    <Field label="RC MODE">
-                        <AppSelect value={r.rcMode as any} onChange={rcMode => onUpdate({ rcMode })} options={[
-                            { value: '1', label: 'Mode 1 — Pitch/Roll L, Throttle/Yaw R' },
-                            { value: '2', label: 'Mode 2 — Throttle/Yaw L, Pitch/Roll R' },
-                            { value: '3', label: 'Mode 3 — Pitch/Yaw L, Throttle/Roll R' },
-                            { value: '4', label: 'Mode 4 — Throttle/Roll L, Pitch/Yaw R' },
-                        ]} />
-                    </Field>
-                    <div style={{ display: 'flex', justifyContent: 'center', gap: 28, paddingTop: 6 }}>
-                        <Stick axes={m.left} label="Left" />
-                        <Stick axes={m.right} label="Right" />
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 1fr) minmax(500px, 1.35fr)', gap: 14, alignItems: 'start' }}>
+            {/* LEFT — what the transmitter is WIRED to do */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <SectionHeader
+                    title="RC LINK"
+                    hint="as the autopilot sees it"
+                    right={<StatusChip
+                        status={!connected ? 'off' : rc?.available ? 'ok' : 'warn'}
+                        text={!connected ? 'OFF' : rc?.available ? `RECEIVER OK${rc.signal_pct > 0 ? ` · ${rc.signal_pct.toFixed(0)}%` : ''}` : rc?.was_available ? 'SIGNAL LOST' : 'NO RECEIVER'}
+                    />}
+                />
+                {/* The honest line about live channels. */}
+                <div style={{
+                    padding: '9px 12px', borderRadius: 10, fontSize: 10, fontFamily: 'monospace',
+                    lineHeight: 1.6, color: 'hsl(var(--app-text-muted))',
+                    background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
+                }}>
+                    {live
+                        ? <>Live channel data is flowing — the transmitter drawing and the bars on the right are your real sticks.</>
+                        : monitor?.listening
+                            ? <>Listening for raw RC channels on udp/{monitor.port} — nothing arriving. A USB-serial FC cannot share its port; connect via UDP (SITL or the RF air unit) for live sticks and calibration. Mode and switch assignment below work on any link.</>
+                            : <>The backend could not open the RC channel listener. Mode and switch assignment below still work.</>}
+                </div>
+
+                <SectionHeader
+                    title="FLIGHT MODES"
+                    hint="written to the aircraft, not stored in the app"
+                />
+                <div style={{
+                    display: 'flex', flexDirection: 'column', gap: 8,
+                    padding: '11px 12px', borderRadius: 10,
+                    background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: 'hsl(var(--app-text))', flex: 1 }}>Mode switch channel</span>
+                        <Tip text="The transmitter channel your mode switch sends on (RC_MAP_FLTMODE). A 3-position switch reaches slots 1, 4 and 6; a 6-position reaches all." />
+                        <select
+                            value={modeChannel ?? ''}
+                            disabled={!connected || modeChannel === null}
+                            onChange={e => writeParam('RC_MAP_FLTMODE', Number(e.target.value))}
+                            style={selStyle(connected && modeChannel !== null)}
+                        >
+                            {modeChannel === null && <option value="">{connected ? '…' : '—'}</option>}
+                            <option value={0}>Unassigned</option>
+                            {Array.from({ length: 18 }, (_, i) => <option key={i + 1} value={i + 1}>CH{i + 1}</option>)}
+                        </select>
                     </div>
-                </Card>
-                <Panel title="CHANNEL 5 — FLIGHT MODE SWITCH" accent="#fbbf24">
-                    <div style={{ display: 'flex', gap: 6 }}>
-                        {r.modes.slice(0,6).map((mode, i) => (
-                            <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-                                <div style={{ width: 10, height: 24, borderRadius: 3, background: `${switchColors[i]}25`, border: `1.5px solid ${switchColors[i]}60` }} />
-                                <span style={{ fontSize: 7, fontFamily: 'monospace', color: switchColors[i], textAlign: 'center', lineHeight: 1.2, writingMode: 'vertical-rl', transform: 'rotate(180deg)', height: 48, overflow: 'hidden' }}>{mode}</span>
+                    {Array.from({ length: 6 }, (_, i) => {
+                        const key = `COM_FLTMODE${i + 1}`
+                        const v = params[key]
+                        const enabled = connected && v !== null && v !== undefined && (modeChannel ?? 0) > 0
+                        return (
+                            <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                <span style={{
+                                    width: 24, height: 24, borderRadius: 7, flexShrink: 0,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    fontSize: 10, fontFamily: 'monospace', fontWeight: 700,
+                                    background: 'rgba(34,211,238,0.1)', color: '#22d3ee',
+                                    border: '1px solid rgba(34,211,238,0.3)',
+                                }}>{i + 1}</span>
+                                <select
+                                    value={v ?? ''}
+                                    disabled={!enabled}
+                                    onChange={e => writeParam(key, Number(e.target.value))}
+                                    style={{ ...selStyle(enabled), flex: 1 }}
+                                >
+                                    {(v === null || v === undefined) && <option value="">{connected ? '…' : '—'}</option>}
+                                    {FLTMODE_OPTS.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
+                                </select>
                             </div>
-                        ))}
-                    </div>
-                    <p style={{ fontSize: 9, fontFamily: 'monospace', color: 'rgba(255,255,255,0.2)', margin: 0, lineHeight: 1.5 }}>Each column = one switch position on your transmitter. Assign up to 6 modes.</p>
-                </Panel>
+                        )
+                    })}
+                    {(modeChannel ?? 0) === 0 && modeChannel !== null && (
+                        <p style={{ fontSize: 9.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: 0 }}>
+                            Slots stay disabled until a mode switch channel is assigned.
+                        </p>
+                    )}
+                </div>
+
+                <SectionHeader title="SWITCHES" hint="one channel each, 0 = unassigned" />
+                <div style={{
+                    display: 'flex', flexDirection: 'column', gap: 7,
+                    padding: '11px 12px', borderRadius: 10,
+                    background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
+                }}>
+                    {SWITCH_PARAMS.map(sw => {
+                        const v = params[sw.key]
+                        const enabled = connected && v !== null && v !== undefined
+                        return (
+                            <div key={sw.key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ fontSize: 11, color: 'hsl(var(--app-text))', flex: 1 }}>{sw.label}</span>
+                                <Tip text={sw.tip} />
+                                <select
+                                    value={v ?? ''}
+                                    disabled={!enabled}
+                                    onChange={e => writeParam(sw.key, Number(e.target.value))}
+                                    style={selStyle(enabled)}
+                                >
+                                    {(v === null || v === undefined) && <option value="">{connected ? '…' : '—'}</option>}
+                                    <option value={0}>—</option>
+                                    {Array.from({ length: 18 }, (_, i) => <option key={i + 1} value={i + 1}>CH{i + 1}</option>)}
+                                </select>
+                            </div>
+                        )
+                    })}
+                </div>
+                {paramErr && (
+                    <p style={{ fontSize: 10, fontFamily: 'monospace', color: '#f87171', margin: 0, lineHeight: 1.5 }}>{paramErr}</p>
+                )}
             </div>
 
-            <Card title="FLIGHT MODE SLOTS">
-                <p style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '0 0 4px', lineHeight: 1.6 }}>Assign a flight mode to each switch position. Matches Ch 5/6 positions on most transmitters.</p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {r.modes.map((mode, i) => (
-                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <div style={{ width: 26, height: 26, borderRadius: 7, background: `${switchColors[i]}18`, border: `1.5px solid ${switchColors[i]}50`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                <span style={{ fontSize: 10, fontFamily: 'monospace', fontWeight: 700, color: switchColors[i] }}>{i+1}</span>
-                            </div>
-                            <div style={{ flex: 1 }}>
-                                <AppSelect value={mode as any} options={FLIGHT_MODES_LIST.map(f => ({ value: f, label: f }))} onChange={v => onUpdate({ modes: r.modes.map((x, j) => j === i ? v : x) })} />
-                            </div>
+            {/* RIGHT — the transmitter, drawn */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{
+                    padding: 14, borderRadius: 12,
+                    background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                        <span style={{ fontSize: 11.5, fontWeight: 600, color: 'hsl(var(--app-text))', flex: 1 }}>
+                            Transmitter {live && <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#4ade80', marginLeft: 6 }}>● LIVE</span>}
+                        </span>
+                        <span style={{ fontSize: 9.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>stick layout</span>
+                        {['1', '2', '3', '4'].map(m => (
+                            <button key={m} onClick={() => { setVisualMode(m); lsSet('hyrak-rc-visual-mode', m) }} style={{
+                                width: 24, height: 24, borderRadius: 6, padding: 0,
+                                background: visualMode === m ? 'rgba(34,211,238,0.14)' : 'transparent',
+                                border: `1px solid ${visualMode === m ? 'rgba(34,211,238,0.6)' : 'hsl(var(--app-border))'}`,
+                                color: visualMode === m ? '#22d3ee' : 'hsl(var(--app-text-muted))',
+                                fontSize: 10.5, fontFamily: 'monospace', fontWeight: 700, cursor: 'pointer',
+                            }}>{m}</button>
+                        ))}
+                    </div>
+                    <TransmitterSvg
+                        layout={layout}
+                        axisValue={axisValue}
+                        live={live}
+                        modeChannel={modeChannel ?? 0}
+                        modeValue={live && (modeChannel ?? 0) >= 1 ? channels[(modeChannel ?? 1) - 1] ?? 0 : 0}
+                    />
+                    {/* Channel bars — only when the data is real. */}
+                    {live && (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(52px, 1fr))', gap: 6, marginTop: 10 }}>
+                            {channels.slice(0, Math.max(chanCount, 8)).map((v, i) => {
+                                const pct = v > 0 ? Math.max(0, Math.min(100, ((v - 1000) / 1000) * 100)) : 0
+                                return (
+                                    <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                        <div style={{ height: 5, borderRadius: 3, background: 'hsl(var(--app-surface))', overflow: 'hidden' }}>
+                                            <div style={{ height: '100%', width: `${pct}%`, background: '#22d3ee', transition: 'width 80ms linear' }} />
+                                        </div>
+                                        <span style={{ fontSize: 8.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
+                                            {i + 1} · {v > 0 ? v : '—'}
+                                        </span>
+                                    </div>
+                                )
+                            })}
                         </div>
-                    ))}
+                    )}
                 </div>
-            </Card>
-        </G2>
+
+                {/* Stick calibration */}
+                <div style={{
+                    display: 'flex', flexDirection: 'column', gap: 8,
+                    padding: '12px 14px', borderRadius: 12,
+                    background: wiz === 'capturing' ? 'rgba(251,191,36,0.05)' : 'hsl(var(--app-surface-2))',
+                    border: `1px solid ${wiz === 'capturing' ? 'rgba(251,191,36,0.45)' : 'hsl(var(--app-border))'}`,
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 11.5, fontWeight: 600, color: 'hsl(var(--app-text))', flex: 1 }}>Stick calibration</span>
+                        <Tip text="Teaches PX4 each channel's real endpoints and centre (RCn_MIN / TRIM / MAX). Channels that move less than 300µs during capture are left untouched, so an idle knob cannot be miscalibrated by accident." />
+                    </div>
+                    {wiz === 'idle' && (
+                        <>
+                            <p style={{ fontSize: 10.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: 0, lineHeight: 1.6 }}>
+                                {!live ? 'Needs live channel data — see the RC LINK note on the left.'
+                                    : armed ? 'Refused while armed.'
+                                    : 'Records your sticks\' real endpoints while you move them, then writes the result to the aircraft.'}
+                            </p>
+                            <button onClick={startCapture} disabled={!live || armed} style={wizBtn(live && !armed, '#22d3ee')}>
+                                START CAPTURE
+                            </button>
+                        </>
+                    )}
+                    {wiz === 'capturing' && (
+                        <>
+                            <p style={{ fontSize: 11, color: 'hsl(var(--app-text))', margin: 0, lineHeight: 1.6, fontWeight: 600 }}>
+                                Move BOTH sticks through their full range — corners included — and flip every switch both ways.
+                            </p>
+                            <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: 0, lineHeight: 1.6 }}>
+                                Finish with everything centred and the throttle all the way DOWN — that final position becomes the trim — then press done.
+                            </p>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                                <button onClick={finishCapture} style={wizBtn(true, '#4ade80')}>DONE — REVIEW</button>
+                                <button onClick={() => setWiz('idle')} style={wizBtn(true, '#f87171')}>CANCEL</button>
+                            </div>
+                        </>
+                    )}
+                    {(wiz === 'review' || wiz === 'writing' || wiz === 'done') && (
+                        <>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr', gap: '3px 12px', fontSize: 10, fontFamily: 'monospace' }}>
+                                <span style={{ color: 'hsl(var(--app-text-muted))' }}>CH</span>
+                                <span style={{ color: 'hsl(var(--app-text-muted))' }}>MIN</span>
+                                <span style={{ color: 'hsl(var(--app-text-muted))' }}>TRIM</span>
+                                <span style={{ color: 'hsl(var(--app-text-muted))' }}>MAX</span>
+                                {calRows().map(r => (
+                                    <React.Fragment key={r.ch}>
+                                        <span style={{ color: '#22d3ee', fontWeight: 700 }}>{r.ch}</span>
+                                        <span style={{ color: 'hsl(var(--app-text))' }}>{r.min}</span>
+                                        <span style={{ color: 'hsl(var(--app-text))' }}>{r.trim}</span>
+                                        <span style={{ color: 'hsl(var(--app-text))' }}>{r.max}</span>
+                                    </React.Fragment>
+                                ))}
+                            </div>
+                            {calRows().length === 0 && (
+                                <p style={{ fontSize: 10, fontFamily: 'monospace', color: '#fbbf24', margin: 0 }}>
+                                    Nothing moved more than 300µs — there is nothing to write.
+                                </p>
+                            )}
+                            {wiz === 'review' && (
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                    <button onClick={writeCalibration} disabled={calRows().length === 0 || armed}
+                                        style={wizBtn(calRows().length > 0 && !armed, '#4ade80')}>
+                                        WRITE TO AIRCRAFT
+                                    </button>
+                                    <button onClick={startCapture} style={wizBtn(true, '#fbbf24')}>RECAPTURE</button>
+                                    <button onClick={() => setWiz('idle')} style={wizBtn(true, '#f87171')}>DISCARD</button>
+                                </div>
+                            )}
+                            {wiz === 'writing' && (
+                                <p style={{ fontSize: 10.5, fontFamily: 'monospace', color: '#fbbf24', margin: 0 }}>
+                                    Writing {writeProgress}
+                                </p>
+                            )}
+                            {wiz === 'done' && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                    <p style={{ fontSize: 10.5, fontFamily: 'monospace', color: '#4ade80', margin: 0, flex: 1 }}>
+                                        Written. Verify on the bars above: full stick = full bar, centred = middle.
+                                    </p>
+                                    <button onClick={() => setWiz('idle')} style={wizBtn(true, '#22d3ee')}>DONE</button>
+                                </div>
+                            )}
+                        </>
+                    )}
+                    {wizErr && <p style={{ fontSize: 10, fontFamily: 'monospace', color: '#f87171', margin: 0 }}>{wizErr}</p>}
+                </div>
+            </div>
+        </div>
+    )
+}
+
+function selStyle(enabled: boolean): React.CSSProperties {
+    return {
+        padding: '5px 8px', borderRadius: 7, fontSize: 11, fontFamily: 'monospace',
+        background: 'hsl(var(--app-surface))', color: 'hsl(var(--app-text))',
+        border: '1px solid hsl(var(--app-border))', minWidth: 92,
+        cursor: enabled ? 'pointer' : 'not-allowed', opacity: enabled ? 1 : 0.5,
+    }
+}
+
+function wizBtn(enabled: boolean, colour: string): React.CSSProperties {
+    return {
+        padding: '6px 14px', borderRadius: 7, background: 'transparent',
+        border: `1px solid ${enabled ? `${colour}77` : 'hsl(var(--app-border))'}`,
+        color: enabled ? colour : 'hsl(var(--app-text-muted))',
+        fontSize: 10.5, fontFamily: 'monospace', fontWeight: 700,
+        cursor: enabled ? 'pointer' : 'not-allowed', opacity: enabled ? 1 : 0.5,
+    }
+}
+
+/** The transmitter, drawn — QGC shows photos of one; a drawing can move.
+ *  When live channel data flows the sticks ARE the operator's sticks;
+ *  without it they rest centred (throttle down) as a wiring diagram. */
+function TransmitterSvg({ layout, axisValue, live, modeChannel, modeValue }: {
+    layout: { left: { x: string; y: string }; right: { x: string; y: string } }
+    axisValue: (axis: string) => number
+    live: boolean
+    modeChannel: number
+    modeValue: number
+}) {
+    const stick = (cx: number, cy: number, ax: { x: string; y: string }) => {
+        const R = 30
+        const dx = axisValue(ax.x) * R
+        // throttle: -1 (down) at bottom; others: +1 up
+        const dy = -axisValue(ax.y) * R
+        return { kx: cx + dx, ky: cy + dy }
+    }
+    const L = stick(118, 128, layout.left)
+    const Rk = stick(302, 128, layout.right)
+    const modePos = modeValue > 0 ? Math.max(0, Math.min(1, (modeValue - 1000) / 1000)) : 0
+    return (
+        <svg viewBox="0 0 420 232" style={{ width: '100%', height: 'auto', display: 'block' }}>
+            {/* body */}
+            <rect x={20} y={38} width={380} height={168} rx={26}
+                fill="hsl(var(--app-surface))" stroke="hsl(var(--app-border))" strokeWidth={1.5} />
+            {/* antenna */}
+            <line x1={52} y1={44} x2={20} y2={8} stroke="hsl(var(--app-text-muted))" strokeWidth={3.5} strokeLinecap="round" />
+            <circle cx={18} cy={6} r={4} fill="hsl(var(--app-text-muted))" />
+            {/* shoulder switches; the mode switch is the marked one */}
+            {[100, 160, 260, 320].map((x, i) => {
+                const isMode = modeChannel > 0 && i === 3
+                return (
+                    <g key={x}>
+                        <rect x={x - 11} y={26} width={22} height={12} rx={4}
+                            fill={isMode ? 'rgba(34,211,238,0.18)' : 'hsl(var(--app-surface))'}
+                            stroke={isMode ? '#22d3ee' : 'hsl(var(--app-border))'} strokeWidth={1.2} />
+                        {isMode && (
+                            <>
+                                <circle cx={x - 6 + modePos * 12} cy={32} r={2.6} fill="#22d3ee" />
+                                <text x={x} y={20} textAnchor="middle" fontSize={7.5} fontFamily="monospace" fill="#22d3ee">
+                                    MODE{modeChannel > 0 ? ` CH${modeChannel}` : ''}
+                                </text>
+                            </>
+                        )}
+                    </g>
+                )
+            })}
+            {/* gimbal wells */}
+            {[{ cx: 118, k: L, ax: layout.left }, { cx: 302, k: Rk, ax: layout.right }].map(({ cx, k, ax }, i) => (
+                <g key={i}>
+                    <circle cx={cx} cy={128} r={44} fill="hsl(var(--app-bg))" stroke="hsl(var(--app-border))" strokeWidth={1.5} />
+                    <line x1={cx - 34} y1={128} x2={cx + 34} y2={128} stroke="hsl(var(--app-border))" strokeWidth={0.8} />
+                    <line x1={cx} y1={94} x2={cx} y2={162} stroke="hsl(var(--app-border))" strokeWidth={0.8} />
+                    {/* stick */}
+                    <line x1={cx} y1={128} x2={k.kx} y2={k.ky} stroke={live ? '#22d3ee' : 'hsl(var(--app-text-muted))'} strokeWidth={4} strokeLinecap="round" opacity={0.8} />
+                    <circle cx={k.kx} cy={k.ky} r={11} fill={live ? '#22d3ee' : 'hsl(var(--app-text-muted))'} />
+                    <circle cx={k.kx} cy={k.ky} r={5.5} fill="hsl(var(--app-surface))" />
+                    {/* axis labels */}
+                    <text x={cx} y={186} textAnchor="middle" fontSize={9} fontFamily="monospace" fill="hsl(var(--app-text-muted))">
+                        {AXIS_SHORT[ax.y]} ↑↓ · {AXIS_SHORT[ax.x]} ←→
+                    </text>
+                </g>
+            ))}
+            {/* screen */}
+            <rect x={186} y={96} width={48} height={30} rx={5} fill="hsl(var(--app-bg))" stroke="hsl(var(--app-border))" strokeWidth={1.2} />
+            <text x={210} y={115} textAnchor="middle" fontSize={8.5} fontFamily="monospace"
+                fill={live ? '#4ade80' : 'hsl(var(--app-text-muted))'}>
+                {live ? 'RC OK' : 'NO RX'}
+            </text>
+        </svg>
     )
 }
 
@@ -2543,7 +2991,7 @@ export default function ConfigPage() {
                         {section === 'connection' && <ConnectionWorkspace address={address} setAddress={v => { setAddress(v); lsSet('hyrak-mav-address', v) }} />}
                         {section === 'vehicle'    && <VehicleWorkspace v={vehicle} onUpdate={upV} />}
                         {section === 'sensors'    && <SensorsWorkspace />}
-                        {section === 'radio'      && <RadioWorkspace r={radio} onUpdate={upR} />}
+                        {section === 'radio'      && <RadioWorkspace />}
                         {section === 'power'      && <PowerWorkspace p={power} onUpdate={upP} />}
                         {section === 'safety'     && <SafetyWorkspace s={safety} onUpdate={upS} />}
                         {section === 'flight'     && <FlightWorkspace f={flight} onUpdate={upF} rthAlt={safety.rthAlt} maxAlt={safety.maxAlt} maxAltEnabled={safety.maxAltEnabled} />}

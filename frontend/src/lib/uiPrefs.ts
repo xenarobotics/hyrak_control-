@@ -18,8 +18,16 @@ export const UI_FONTS: { value: UiFont; label: string }[] = [
  *  breaks every panel that was sized around it. */
 export const UI_ZOOMS = [90, 100, 110, 120, 135] as const
 
+export type UiTextSize = 'default' | 'large' | 'xlarge'
+export const UI_TEXT_SIZES: { value: UiTextSize; label: string }[] = [
+    { value: 'default', label: 'Default' },
+    { value: 'large', label: 'Large (+15%)' },
+    { value: 'xlarge', label: 'Extra large (+30%)' },
+]
+
 const FONT_KEY = 'hyrak-ui-font'
 const ZOOM_KEY = 'hyrak-ui-zoom'
+const TEXTSIZE_KEY = 'hyrak-ui-textsize'
 
 export function getUiFont(): UiFont {
     if (typeof window === 'undefined') return 'default'
@@ -54,4 +62,21 @@ export function applyUiZoom(pct: number) {
     // Firefox 126+ and Safari — and unlike a font-size hack it scales the
     // panels WITH the text, which is what "make everything bigger" means.
     document.documentElement.style.zoom = pct === 100 ? '' : String(pct / 100)
+}
+
+export function getUiTextSize(): UiTextSize {
+    if (typeof window === 'undefined') return 'default'
+    const v = localStorage.getItem(TEXTSIZE_KEY)
+    return (UI_TEXT_SIZES.some(t => t.value === v) ? v : 'default') as UiTextSize
+}
+
+export function setUiTextSize(size: UiTextSize) {
+    localStorage.setItem(TEXTSIZE_KEY, size)
+    applyUiTextSize(size)
+}
+
+export function applyUiTextSize(size: UiTextSize) {
+    const d = document.documentElement
+    if (size === 'default') delete d.dataset.fontsize
+    else d.dataset.fontsize = size
 }

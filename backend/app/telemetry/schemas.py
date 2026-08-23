@@ -41,6 +41,17 @@ class GPSData:
 
 
 @dataclass
+class RcStatusData:
+    """The RC receiver as the AUTOPILOT sees it — the only view that
+    matters for "will the sticks work": a transmitter that is on but not
+    bound shows here as unavailable."""
+
+    was_available: bool = False
+    available: bool = False
+    signal_pct: float = 0.0
+
+
+@dataclass
 class SensorHealthData:
     """The autopilot's own verdict on each sensor, from the MAVSDK health
     stream (SYS_STATUS / heartbeat health bits on the wire).
@@ -94,6 +105,7 @@ class TelemetrySnapshot:
     gps: GPSData = field(default_factory=GPSData)
     flight_mode: FlightModeData = field(default_factory=FlightModeData)
     health: SensorHealthData = field(default_factory=SensorHealthData)
+    rc: RcStatusData = field(default_factory=RcStatusData)
     groundspeed_m_s: float = 0.0
     heading_deg: float = 0.0
     home_distance_m: float = 0.0
@@ -155,6 +167,7 @@ class TelemetrySnapshot:
             "gps": self.gps.__dict__,
             "flight_mode": self.flight_mode.__dict__,
             "health": self.health.__dict__,
+            "rc": self.rc.__dict__,
             "groundspeed_m_s": self.groundspeed_m_s,
             "heading_deg": self.heading_deg,
             "home_distance_m": self.home_distance_m,

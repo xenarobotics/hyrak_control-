@@ -39,6 +39,7 @@ from app.telemetry.schemas import (
     GPSData,
     FlightModeData,
     SensorHealthData,
+    RcStatusData,
     DroneCommand,
 )
 
@@ -527,6 +528,7 @@ class TelemetryManager:
                 asyncio.create_task(self._subscribe_wind(),            name="tel_wind"),
                 asyncio.create_task(self._subscribe_home(),            name="tel_home"),
                 asyncio.create_task(self._subscribe_health(),          name="tel_health"),
+                asyncio.create_task(self._subscribe_rc_status(),       name="tel_rc"),
                 asyncio.create_task(self._subscribe_mission_progress(),name="tel_mission"),
                 asyncio.create_task(self._poll_mission_finished(),     name="tel_mission_finished"),
                 # Event-driven, no rate, no cost until the FC speaks — and it
@@ -879,6 +881,27 @@ class TelemetryManager:
             pass
         except Exception as e:
             logger.error(f"Health subscription error: {e}")
+
+    async def _subscribe_rc_status(self):
+        """RC receiver state, from the autopilot's side of the link — the
+        Radio page's "is the transmitter actually reaching the aircraft"
+        light. Event-driven on change, like health."""
+        try:
+            async for rc in self._drone.telemetry.rc_status():
+                if not self._running:
+                    break
+                new = RcStatusData(
+                    was_available=rc.was_available_once,
+                    available=rc.is_available,
+                    signal_pct=round(rc.signal_strength_percent, 1),
+                )
+                changed = new != self._snapshot.rc
+                self._snapshot.rc = new
+                self._emit(force=changed)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"RC status subscription error: {e}")
 
     async def _subscribe_mission_progress(self):
         """

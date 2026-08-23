@@ -128,12 +128,12 @@ export function TelemetryPanel() {
         <div className="flex flex-col gap-2 h-full">
             {/* Search */}
             <div className="relative">
-                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-app-text-muted" />
                 <Input
                     value={search}
                     onChange={e => setSearch(e.target.value)}
                     placeholder="Search fields..."
-                    className="h-7 pl-7 text-xs font-mono bg-zinc-900 border-zinc-700"
+                    className="h-7 pl-7 text-xs font-mono bg-app-surface border-app-border"
                 />
             </div>
 
@@ -166,7 +166,7 @@ export function TelemetryPanel() {
                                             key={field.key}
                                             className="flex justify-between items-center px-2 py-1 rounded hover:bg-zinc-800/50"
                                         >
-                                            <span className="text-xs text-zinc-500">{field.label}</span>
+                                            <span className="text-xs text-app-text-muted">{field.label}</span>
                                             <span className="text-xs font-mono text-zinc-200 tabular-nums">
                                                 {field.value}
                                                 {field.unit && (
