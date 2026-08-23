@@ -965,10 +965,12 @@ const CAL_ICON: Record<string, React.ElementType> = {
     level: AlignCenterHorizontal, gimbal: Camera,
 }
 
-/** One calibration on offer. The whole card is the control; its border is
- *  the state — amber while running, green once the autopilot says the
- *  offsets are good, amber-edged "needs calibration" when it says they are
- *  not, and neutral where PX4 keeps no verdict (level, gimbal). */
+/** One calibration on offer. The whole row is compact — the what-and-why
+ *  text lives behind the info dot, because five always-open paragraphs made
+ *  the list taller than the screen and nobody re-reads them per flight. The
+ *  border is the state: amber while running or owed, green once the
+ *  autopilot (or this session's completed run) says the offsets are good,
+ *  neutral where PX4 keeps no verdict. */
 function CalCard({ sensor, verdict, connected, busy, isActive, phase, progress, onStart }: {
     sensor: (typeof CAL_SENSORS)[number]
     verdict: boolean | null
@@ -992,44 +994,37 @@ function CalCard({ sensor, verdict, connected, busy, isActive, phase, progress, 
     const clickable = connected && !busy
     return (
         <div style={{
-            display: 'flex', alignItems: 'flex-start', gap: 11,
-            padding: '11px 12px', borderRadius: 10,
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '9px 12px', borderRadius: 10,
             background: running ? 'rgba(251,191,36,0.05)' : 'hsl(var(--app-surface-2))',
             border: `1px solid ${border ? `${border}4a` : 'hsl(var(--app-border))'}`,
             boxShadow: border ? `inset 3px 0 0 ${border}${verdict === true && !running ? '55' : ''}` : undefined,
             transition: 'border-color 250ms, background 250ms',
         }}>
             <span style={{
-                width: 30, height: 30, borderRadius: 8, flexShrink: 0, marginTop: 1,
+                width: 28, height: 28, borderRadius: 8, flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 background: border ? `${border}14` : 'hsl(var(--app-surface))',
                 color: border ?? 'hsl(var(--app-text-muted))',
             }}>
-                {running ? <Loader size={15} className="animate-spin" /> : <Icon size={15} />}
+                {running ? <Loader size={14} className="animate-spin" /> : <Icon size={14} />}
             </span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: 'hsl(var(--app-text))' }}>
-                        {sensor.label}
-                    </span>
-                    <span style={{ fontSize: 9.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
-                        {sensor.mins}
-                    </span>
-                    {chip}
-                </div>
-                {/* WHAT IT IS FOR AND WHAT RUINS IT, at the moment of choosing.
-                    A compass calibrated indoors passes and is then wrong, which
-                    is not something an operator can discover from the result. */}
-                <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '3px 0 0', lineHeight: 1.55 }}>
-                    {sensor.blurb}
-                </p>
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'hsl(var(--app-text))' }}>
+                    {sensor.label}
+                </span>
+                <span style={{ fontSize: 9.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
+                    {sensor.mins}
+                </span>
+                <Tip text={sensor.blurb} />
+                {chip}
             </div>
             <button
                 onClick={onStart}
                 disabled={!clickable}
                 title={connected ? `Start ${sensor.label} calibration` : 'Connect to the drone first'}
                 style={{
-                    padding: '5px 13px', borderRadius: 7, flexShrink: 0, marginTop: 1,
+                    padding: '5px 13px', borderRadius: 7, flexShrink: 0,
                     background: 'transparent',
                     border: `1px solid ${clickable ? 'rgba(34,211,238,0.45)' : 'hsl(var(--app-border))'}`,
                     color: clickable ? '#22d3ee' : 'hsl(var(--app-text-muted))',
@@ -1048,11 +1043,147 @@ function CalCard({ sensor, verdict, connected, busy, isActive, phase, progress, 
     )
 }
 
+// ── Mount orientation ────────────────────────────────────────────────────────
+//
+// QGC's "set orientations" step, in our shape. Two parameters decide how the
+// autopilot and the external compass are physically turned relative to the
+// airframe; calibrating with either one wrong produces offsets that pass and
+// then fly wrong. Both are int params applied at BOOT, so a change here is
+// not real until the FC restarts — which is why the reboot prompt is wired
+// to this card and not left for the operator to know about.
+
+const MOUNT_PARAMS = [
+    { key: 'SENS_BOARD_ROT', label: 'Autopilot', tip: 'How the flight controller board is physically rotated relative to the airframe. Leave at None if the arrow on the board points at the nose.' },
+    { key: 'CAL_MAG0_ROT', label: 'Compass', tip: 'How the external compass is rotated relative to the airframe. Auto lets PX4 detect it during compass calibration — the right choice unless detection has failed.' },
+] as const
+
+const ROTATIONS: { v: number; l: string }[] = [
+    { v: 0, l: 'None' },
+    { v: 1, l: 'Yaw 45°' }, { v: 2, l: 'Yaw 90°' }, { v: 3, l: 'Yaw 135°' }, { v: 4, l: 'Yaw 180°' },
+    { v: 5, l: 'Yaw 225°' }, { v: 6, l: 'Yaw 270°' }, { v: 7, l: 'Yaw 315°' },
+    { v: 8, l: 'Roll 180°' }, { v: 10, l: 'Roll 180° Yaw 90°' }, { v: 14, l: 'Roll 180° Yaw 270°' },
+    { v: 12, l: 'Pitch 180°' },
+]
+
+function MountOrientation({ connected }: { connected: boolean }) {
+    // null = not read yet. The selects show the aircraft's ACTUAL values,
+    // fetched one param at a time — not the 30 s everything-download.
+    const [values, setValues] = useState<Record<string, number | null>>({ SENS_BOARD_ROT: null, CAL_MAG0_ROT: null })
+    const [rebootNeeded, setRebootNeeded] = useState(false)
+    const [error, setError] = useState<string | null>(null)
+
+    useEffect(() => {
+        if (!connected) { setValues({ SENS_BOARD_ROT: null, CAL_MAG0_ROT: null }); setRebootNeeded(false); return }
+        const socket = getSocket()
+        const onGet = (r: { key: string; ok: boolean; value: number | null }) => {
+            if (r.key !== 'SENS_BOARD_ROT' && r.key !== 'CAL_MAG0_ROT') return
+            if (r.ok) setValues(v => ({ ...v, [r.key]: r.value }))
+        }
+        const onSet = (r: { key: string; ok: boolean; value: number; error?: string }) => {
+            if (r.key !== 'SENS_BOARD_ROT' && r.key !== 'CAL_MAG0_ROT') return
+            if (r.ok) {
+                setValues(v => ({ ...v, [r.key]: r.value }))
+                setRebootNeeded(true)
+                setError(null)
+            } else {
+                setError(r.error || `The aircraft did not accept ${r.key}`)
+            }
+        }
+        socket.on('param_get_ack', onGet)
+        socket.on('param_set_ack', onSet)
+        for (const p of MOUNT_PARAMS) socket.emit('get_param', { key: p.key, param_type: 'int' })
+        return () => { socket.off('param_get_ack', onGet); socket.off('param_set_ack', onSet) }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [connected])
+
+    const write = (key: string, value: number) => {
+        setError(null)
+        getSocket().emit('set_param', { key, value, param_type: 'int' })
+    }
+
+    return (
+        <div style={{
+            display: 'flex', flexDirection: 'column', gap: 8,
+            padding: '10px 12px', borderRadius: 10,
+            background: 'hsl(var(--app-surface-2))',
+            border: `1px solid ${rebootNeeded ? 'rgba(251,191,36,0.4)' : 'hsl(var(--app-border))'}`,
+        }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 11.5, fontWeight: 600, color: 'hsl(var(--app-text))' }}>Mount orientation</span>
+                <Tip text="Set these BEFORE calibrating: offsets computed with a wrong mount rotation pass the calibration and then fly wrong. Applied at boot — changing either needs a reboot." />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {MOUNT_PARAMS.map(pm => {
+                    const v = values[pm.key]
+                    return (
+                        <label key={pm.key} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 9.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', letterSpacing: '0.06em' }}>
+                                {pm.label.toUpperCase()} <Tip text={pm.tip} />
+                            </span>
+                            <select
+                                value={v ?? ''}
+                                disabled={!connected || v === null}
+                                onChange={e => write(pm.key, Number(e.target.value))}
+                                style={{
+                                    padding: '5px 8px', borderRadius: 7, fontSize: 11, fontFamily: 'monospace',
+                                    background: 'hsl(var(--app-surface))', color: 'hsl(var(--app-text))',
+                                    border: '1px solid hsl(var(--app-border))',
+                                    cursor: connected && v !== null ? 'pointer' : 'not-allowed',
+                                }}
+                            >
+                                {v === null && <option value="">{connected ? 'reading…' : '—'}</option>}
+                                {pm.key === 'CAL_MAG0_ROT' && <option value={-1}>Auto-detect</option>}
+                                {ROTATIONS.map(r => <option key={r.v} value={r.v}>{r.l}</option>)}
+                            </select>
+                        </label>
+                    )
+                })}
+            </div>
+            {error && (
+                <p style={{ fontSize: 10, fontFamily: 'monospace', color: '#f87171', margin: 0 }}>{error}</p>
+            )}
+            {rebootNeeded && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <p style={{ fontSize: 10, fontFamily: 'monospace', color: '#fbbf24', margin: 0, flex: 1, lineHeight: 1.5 }}>
+                        Saved — applied at boot. Reboot the FC, then recalibrate.
+                    </p>
+                    <button
+                        onClick={() => { getSocket().emit('drone_action', { action: 'reboot' }); setRebootNeeded(false) }}
+                        style={{
+                            padding: '4px 12px', borderRadius: 7, background: 'transparent',
+                            border: '1px solid rgba(251,191,36,0.5)', color: '#fbbf24',
+                            fontSize: 10.5, fontFamily: 'monospace', fontWeight: 700, cursor: 'pointer',
+                        }}
+                        title="Restarts the flight controller. Only works while disarmed — the link will drop and reconnect."
+                    >
+                        REBOOT FC
+                    </button>
+                </div>
+            )}
+        </div>
+    )
+}
+
 function SensorsWorkspace() {
     const { state: cal, refusal, busy, start, cancel, dismiss } = useCalibration()
     const telemetry = useDroneStore(s => s.telemetry)
     const telStatus = useDroneStore(s => s.telemetryStatus)
     const connected = telStatus === 'connected'
+
+    // COMPLETED THIS SESSION. PX4 keeps no health flag for level horizon or
+    // the gimbal, so their cards had no way to ever turn green — a level
+    // calibration finished successfully and the card sat there unchanged,
+    // which reads as "it didn't work". The plugin's own success verdict is
+    // just as authoritative as a health flag, so a run that finished OK
+    // paints the card green for the rest of the session (and bridges the
+    // second or two before a fresh health message confirms the others).
+    const [doneSession, setDoneSession] = useState<Record<string, boolean>>({})
+    useEffect(() => {
+        if (cal.phase === 'done' && cal.sensor) {
+            setDoneSession(d => d[cal.sensor] ? d : { ...d, [cal.sensor]: true })
+        }
+    }, [cal.phase, cal.sensor])
+    useEffect(() => { if (!connected) setDoneSession({}) }, [connected])
 
     // PX4's own health flags, or null until the first health message — the
     // difference between "the autopilot says not calibrated" and "nobody has
@@ -1064,11 +1195,15 @@ function SensorsWorkspace() {
     const att = telemetry?.attitude
 
     const gpsStatus: SensorStatus = !connected ? 'off' : fix >= 3 ? 'ok' : 'warn'
+    // A run that just finished OK counts as calibrated even while the health
+    // flag is still the pre-calibration one — the flag catches up within a
+    // second, and the status card disagreeing with the freshly green
+    // calibration card below it reads as a bug.
     const imuStatus: SensorStatus = !connected ? 'off'
-        : health ? (health.gyro_cal_ok && health.accel_cal_ok ? 'ok' : 'warn')
+        : health ? ((health.gyro_cal_ok || doneSession.gyro) && (health.accel_cal_ok || doneSession.accel) ? 'ok' : 'warn')
         : att ? 'ok' : 'warn'
     const magStatus: SensorStatus = !connected ? 'off'
-        : health ? (health.mag_cal_ok ? 'ok' : 'warn')
+        : health ? (health.mag_cal_ok || doneSession.mag ? 'ok' : 'warn')
         : 'ok'
     // PX4 keeps no baro verdict — it re-zeroes at boot. "Reporting" is the
     // honest claim, and the live altitude beside it is the actual check.
@@ -1130,14 +1265,18 @@ function SensorsWorkspace() {
 
                 <SectionHeader
                     title="CALIBRATION"
-                    hint={connected ? 'runs on the aircraft — watch the model on the right' : 'connect to enable'}
+                    hint={connected ? 'watch the model on the right' : 'connect to enable'}
+                    right={<Tip text="No barometer or GPS calibration exists in PX4: the barometer is zeroed at every boot and the GNSS receiver calibrates itself — the live readout above IS the check. Airspeed applies to fixed-wing only." />}
                 />
+                <MountOrientation connected={connected} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {CAL_SENSORS.map(sensor => (
                         <CalCard
                             key={sensor.key}
                             sensor={sensor}
-                            verdict={health ? (CAL_HEALTH_FLAG[sensor.key] ? health[CAL_HEALTH_FLAG[sensor.key]] : null) : null}
+                            verdict={doneSession[sensor.key] ? true
+                                : health && CAL_HEALTH_FLAG[sensor.key] ? health[CAL_HEALTH_FLAG[sensor.key]]
+                                : null}
                             connected={connected}
                             busy={busy}
                             isActive={cal.sensor === sensor.key && cal.phase !== 'idle'}
@@ -1155,16 +1294,6 @@ function SensorsWorkspace() {
                         {refusal}
                     </p>
                 )}
-                {/* Named rather than silently absent. "Where is the barometer
-                    calibration" costs a support round, and the answer — there
-                    is no such command — is short. */}
-                <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: 0, lineHeight: 1.6 }}>
-                    No barometer or GPS calibration is offered because PX4 has none:
-                    the barometer is zeroed at every boot and the GNSS receiver
-                    calibrates itself. Both are shown live above — that readout IS
-                    the check. Airspeed applies to fixed-wing only and is not
-                    exposed by the flight-control library this uses.
-                </p>
             </div>
 
             {/* ONE VIEW, NOT TWO. Starting a calibration used to replace the
@@ -1177,6 +1306,7 @@ function SensorsWorkspace() {
                 onCancel={cancel}
                 onDismiss={dismiss}
                 onRetry={() => start(cal.sensor)}
+                onReboot={() => getSocket().emit('drone_action', { action: 'reboot' })}
             />
         </div>
     )

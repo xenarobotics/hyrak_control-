@@ -55,11 +55,13 @@ const SIDE_ABBR: Record<CalSide, string> = {
  *  adjusting while the calibration was already counting. */
 const MATCH_DEGREES = 22
 
-export function CalibrationStage({ state, onCancel, onDismiss, onRetry }: {
+export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot }: {
     state: CalibrationState
     onCancel: () => void
     onDismiss: () => void
     onRetry: () => void
+    /** Fired by the reboot prompt after a compass calibration. */
+    onReboot?: () => void
 }) {
     const attitude = useDroneStore(s => s.telemetry?.attitude)
     const idle = state.phase === 'idle'
@@ -130,7 +132,13 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry }: {
         : target ? `Turn it: ${SIDE_WORDS[target]}`
         : state.instruction || 'Waiting for the autopilot…'
 
+    // PX4 applies a new compass calibration at BOOT — QGC prompts for the
+    // reboot and so do we, or the operator flies on the old offsets while
+    // the screen says calibrated.
+    const wantsReboot = done && state.sensor === 'mag'
+
     const subline = idle ? 'The aircraft above follows your live attitude — turn the real one and it turns with it'
+        : wantsReboot ? 'Saved — PX4 applies a compass calibration at boot, so reboot before flying'
         : done ? 'The new offsets are saved on the aircraft'
         : failed ? (state.error || 'The autopilot did not accept the calibration')
         : cancelled ? 'Nothing was written to the aircraft'
@@ -298,8 +306,14 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry }: {
                     </button>
                 ) : (
                     <>
+                        {wantsReboot && onReboot && (
+                            <button onClick={() => { onReboot(); onDismiss() }} style={btn(ACTIVE_C)}
+                                title="Restarts the flight controller. Only works while disarmed — the link will drop and reconnect.">
+                                <RotateCw size={12} /> REBOOT FC
+                            </button>
+                        )}
                         <button onClick={onDismiss} style={btn(IDLE_C)}>
-                            <Check size={12} /> DONE
+                            <Check size={12} /> {wantsReboot ? 'LATER' : 'DONE'}
                         </button>
                         {(failed || cancelled) && (
                             <button onClick={onRetry} style={btn(ACTIVE_C)}>

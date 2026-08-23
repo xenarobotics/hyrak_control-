@@ -96,3 +96,34 @@ async def test_a_flag_flip_is_pushed_immediately_and_repeats_are_not():
     # to the throttle.
     assert len(t._on_update.pushes) == 2
     assert t._snapshot.health.mag_cal_ok is True
+
+
+@pytest.mark.asyncio
+async def test_get_param_reads_one_value_not_the_whole_download():
+    """The mount-orientation selects ask for two ints; the only prior read
+    path was fetch_params, a 5-30 s download of every parameter."""
+    t = _manager()
+    t._connected = True
+
+    class _Param:
+        async def get_param_int(self, name):
+            assert name == "SENS_BOARD_ROT"
+            return 4
+
+    t._drone = type("D", (), {"param": _Param()})()
+    assert await t.get_param("SENS_BOARD_ROT", "int") == 4
+
+
+@pytest.mark.asyncio
+async def test_get_param_answers_none_rather_than_raising():
+    """A param the FC does not have must come back as "unreadable", not as a
+    crashed socket handler."""
+    t = _manager()
+    t._connected = True
+
+    class _Param:
+        async def get_param_int(self, name):
+            raise RuntimeError("PARAM_ERROR")
+
+    t._drone = type("D", (), {"param": _Param()})()
+    assert await t.get_param("NOPE", "int") is None

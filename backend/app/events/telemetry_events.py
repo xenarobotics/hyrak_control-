@@ -1088,6 +1088,27 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 to=sid,
             )
 
+    @sio.on("get_param")
+    async def on_get_param(sid, data):
+        """Read a single parameter. Payload: {key, param_type?}.
+        Emits param_get_ack: {key, ok, value}. One read, not the 30 s
+        everything-download fetch_params runs — the sensors page asks for
+        two mount rotations and must not pay that price."""
+        session = session_manager.get_by_socket(sid)
+        if not session:
+            return
+        tel = session_manager.get_telemetry(session.session_id)
+        key = data.get("key", "")
+        if not tel or not tel.is_connected:
+            await sio.emit("param_get_ack", {"key": key, "ok": False, "value": None}, to=sid)
+            return
+        value = await tel.get_param(key, data.get("param_type", "int"))
+        await sio.emit(
+            "param_get_ack",
+            {"key": key, "ok": value is not None, "value": value},
+            to=sid,
+        )
+
     @sio.on("set_param")
     async def on_set_param(sid, data):
         """Write a single parameter to the flight controller.

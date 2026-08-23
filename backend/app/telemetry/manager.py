@@ -2846,6 +2846,31 @@ class TelemetryManager:
             logger.error(f"get_all_params failed: {e}")
             return {}
 
+    async def get_param(self, name: str, param_type: str = "int"):
+        """Read ONE parameter from the flight controller.
+
+        Exists because the only alternative was fetch_params — a 5–30 s
+        download of every parameter on the aircraft — which is the wrong
+        price for the sensors page asking "which way is the compass
+        mounted". Returns the value, or None when it cannot be read.
+        """
+        if not self._drone or not self._connected:
+            return None
+        try:
+            if param_type == "int":
+                return await asyncio.wait_for(
+                    self._drone.param.get_param_int(name), timeout=8.0
+                )
+            return await asyncio.wait_for(
+                self._drone.param.get_param_float(name), timeout=8.0
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"get_param {name}: timed out")
+            return None
+        except Exception as e:
+            logger.error(f"get_param {name} failed: {e}")
+            return None
+
     async def set_param(self, name: str, value: float, param_type: str = "float") -> bool:
         """Write a single parameter to the flight controller and wait for ACK."""
         if not self._drone or not self._connected:

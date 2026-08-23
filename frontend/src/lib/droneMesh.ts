@@ -143,6 +143,70 @@ export function mergeSync(sign: number): THREE.BufferGeometry {
     return out
 }
 
+// ── Fuselage ─────────────────────────────────────────────────────────────────
+//
+// A LOFTED MONOCOQUE, NOT A BOX WITH A DOME ON IT. The extruded-rectangle
+// body read as a student project for exactly the reason a moulded airframe
+// does not: a real fuselage is one continuous surface whose cross-section
+// swells and tapers along its length. This is the same loft technique as the
+// propeller blade — superellipse cross-sections (softly squared sides, the
+// signature of injection-moulded shells) swept nose to tail under a width, a
+// height and a camber profile, with the canopy hump folded into the height
+// profile rather than glued on top.
+
+const HULL_ROWS = 42
+const HULL_COLS = 28
+
+/** sign(v)·|v|^(2/p): the superellipse exponent map. p=2 is an ellipse;
+ *  higher p squares the sides off the way a moulded shell does. */
+function superp(v: number, p: number): number {
+    return Math.sign(v) * Math.pow(Math.abs(v), 2 / p)
+}
+
+function hullGeometry(): THREE.BufferGeometry {
+    const positions: number[] = []
+    const indices: number[] = []
+    for (let i = 0; i <= HULL_ROWS; i++) {
+        const t = i / HULL_ROWS                    // 0 = nose tip, 1 = tail tip
+        const z = -1.5 + t * 2.9
+        // Width: quick rise off the nose, widest just ahead of centre, long
+        // gentle taper into the tail. The asymmetry is what makes the shape
+        // read as pointing somewhere.
+        const wProfile = Math.sin(Math.PI * Math.pow(t, 0.66))
+        const w = Math.max(0.012, 0.84 * Math.pow(wProfile, 0.6))
+        // Height, split at the waterline: the top carries a gaussian canopy
+        // hump peaking over the battery bay; the belly stays shallower and
+        // flatter, which is where the flat-bottomed, humped-top silhouette
+        // of every commercial airframe comes from.
+        const hump = 1 + 0.5 * Math.exp(-Math.pow((t - 0.44) / 0.2, 2))
+        const hUp = Math.max(0.012, 0.4 * Math.pow(Math.sin(Math.PI * Math.pow(t, 0.74)), 0.7) * hump)
+        const hDn = Math.max(0.012, 0.3 * Math.pow(wProfile, 0.62))
+        const cy = 0.1
+        for (let j = 0; j < HULL_COLS; j++) {
+            const th = (j / HULL_COLS) * Math.PI * 2
+            const x = w * superp(Math.cos(th), 2.6)
+            const sv = Math.sin(th)
+            const y = cy + (sv >= 0 ? hUp : hDn) * superp(sv, 2.2)
+            positions.push(x, y, z)
+        }
+    }
+    for (let i = 0; i < HULL_ROWS; i++) {
+        for (let j = 0; j < HULL_COLS; j++) {
+            const j2 = (j + 1) % HULL_COLS         // wrap the seam so normals stay smooth
+            const a = i * HULL_COLS + j
+            const b = (i + 1) * HULL_COLS + j
+            const c = i * HULL_COLS + j2
+            const d = (i + 1) * HULL_COLS + j2
+            indices.push(a, b, c, b, d, c)
+        }
+    }
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    g.setIndex(indices)
+    g.computeVertexNormals()
+    return g
+}
+
 export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     const root = new THREE.Group()
     const rotors: THREE.Object3D[] = []
@@ -152,13 +216,17 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     const track = <T extends THREE.BufferGeometry>(g: T) => { geometries.push(g); return g }
     const mat = <T extends THREE.Material>(m: T) => { materials.push(m); return m }
 
+    // The light warm-gray of a commercial airframe. On this app's dark
+    // stage it is also simply the most legible choice — the hull is the
+    // brightest thing in the scene, so the silhouette reads first.
     const shell = mat(new THREE.MeshStandardMaterial({
-        color: 0x46505e, metalness: 0.28, roughness: 0.48,
+        color: 0x99a0aa, metalness: 0.22, roughness: 0.42,
     }))
-    // Lighter top surfaces — the two-tone break is what makes a moulded
-    // airframe read as designed rather than extruded.
     const shellLight = mat(new THREE.MeshStandardMaterial({
-        color: 0x5c6673, metalness: 0.25, roughness: 0.42,
+        color: 0xb3b9c2, metalness: 0.18, roughness: 0.38,
+    }))
+    const armShell = mat(new THREE.MeshStandardMaterial({
+        color: 0x525a66, metalness: 0.3, roughness: 0.5,
     }))
     const dark = mat(new THREE.MeshStandardMaterial({
         color: 0x171b22, metalness: 0.5, roughness: 0.35,
@@ -184,31 +252,28 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     const accentLed = makeAccent(2.2)
 
     // ── Fuselage ─────────────────────────────────────────────────────────
-    const bodyGeo = track(new THREE.ExtrudeGeometry(roundedRect(1.55, 2.1, 0.42), {
-        depth: 0.46, bevelEnabled: true, bevelSize: 0.09, bevelThickness: 0.09,
-        bevelSegments: 4, curveSegments: 18,
+    const hull = new THREE.Mesh(track(hullGeometry()), shell)
+    hull.castShadow = true
+    root.add(hull)
+
+    // Belly plate — the darker underside break line every moulded airframe
+    // has, and a strong "this side is the bottom" cue.
+    const belly = new THREE.Mesh(track(hullGeometry()), dark)
+    belly.scale.set(0.78, 0.42, 0.8)
+    belly.position.y = -0.08
+    root.add(belly)
+
+    // Forward obstacle-sensor eyes, toed slightly outward — the detail that
+    // most says "commercial aircraft", and a second nose cue after the gimbal.
+    const eyeGeo = track(new THREE.SphereGeometry(0.075, 14, 12))
+    const eyeMat = mat(new THREE.MeshStandardMaterial({
+        color: 0x0a1622, metalness: 0.9, roughness: 0.12,
     }))
-    bodyGeo.center()
-    const body = new THREE.Mesh(bodyGeo, shell)
-    body.rotation.x = -Math.PI / 2          // extruded in Z, stood up into Y
-    body.castShadow = true
-    root.add(body)
-
-    // Canopy — a clipped sphere. The single biggest cue that the top is the
-    // top, which is the whole question this control asks.
-    const canopyGeo = track(new THREE.SphereGeometry(0.78, 32, 20, 0, Math.PI * 2, 0, Math.PI / 2))
-    const canopy = new THREE.Mesh(canopyGeo, shellLight)
-    canopy.scale.set(0.95, 0.72, 1.3)
-    canopy.position.y = 0.21
-    canopy.castShadow = true
-    root.add(canopy)
-
-    // Nose flash, so FORWARD is unmistakable at any angle.
-    const noseGeo = track(new THREE.ConeGeometry(0.26, 0.68, 4))
-    const nose = new THREE.Mesh(noseGeo, accentBody)
-    nose.rotation.set(Math.PI / 2, 0, Math.PI / 4)
-    nose.position.set(0, 0.14, -1.2)
-    root.add(nose)
+    for (const x of [-0.2, 0.2]) {
+        const eye = new THREE.Mesh(eyeGeo, eyeMat)
+        eye.position.set(x, 0.16, -1.32)
+        root.add(eye)
+    }
 
     // ── Gimbal, under the nose ───────────────────────────────────────────
     //
@@ -228,7 +293,7 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     root.add(yokeTop)
 
     const gimbalBody = new THREE.Mesh(
-        track(new THREE.CapsuleGeometry(0.17, 0.16, 6, 18)), shell)
+        track(new THREE.CapsuleGeometry(0.17, 0.16, 6, 18)), dark)
     gimbalBody.rotation.x = Math.PI / 2
     gimbalBody.position.set(0, -0.47, -0.72)
     gimbalBody.castShadow = true
@@ -239,6 +304,10 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     barrel.rotation.x = Math.PI / 2
     barrel.position.set(0, -0.47, -0.9)
     root.add(barrel)
+    const lensRing = new THREE.Mesh(
+        track(new THREE.TorusGeometry(0.15, 0.022, 10, 28)), accentBody)
+    lensRing.position.set(0, -0.47, -0.955)
+    root.add(lensRing)
     const glass = new THREE.Mesh(
         track(new THREE.SphereGeometry(0.125, 20, 14, 0, Math.PI * 2, 0, Math.PI / 2)),
         mat(new THREE.MeshStandardMaterial({
@@ -255,17 +324,17 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     // silhouette a second orientation cue that survives any camera angle —
     // the gimbal says nose, this says tail.
     const mast = new THREE.Mesh(
-        track(new THREE.CylinderGeometry(0.035, 0.045, 0.5, 10)), dark)
-    mast.position.set(0, 0.62, 0.72)
+        track(new THREE.CylinderGeometry(0.035, 0.05, 0.34, 10)), dark)
+    mast.position.set(0, 0.5, 0.78)
     root.add(mast)
     const puck = new THREE.Mesh(
-        track(new THREE.CylinderGeometry(0.24, 0.26, 0.09, 24)), shellLight)
-    puck.position.set(0, 0.9, 0.72)
+        track(new THREE.CylinderGeometry(0.22, 0.24, 0.08, 24)), shellLight)
+    puck.position.set(0, 0.69, 0.78)
     puck.castShadow = true
     root.add(puck)
     const puckTop = new THREE.Mesh(
-        track(new THREE.CylinderGeometry(0.09, 0.11, 0.03, 16)), accentBody)
-    puckTop.position.set(0, 0.96, 0.72)
+        track(new THREE.CylinderGeometry(0.085, 0.1, 0.03, 16)), accentBody)
+    puckTop.position.set(0, 0.74, 0.78)
     root.add(puckTop)
 
     const antGeo = track(new THREE.CylinderGeometry(0.028, 0.034, 0.62, 8))
@@ -282,7 +351,12 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     }
 
     // ── Arms, motors, rotors ─────────────────────────────────────────────
-    const armGeo = track(new THREE.CylinderGeometry(0.085, 0.13, 1.55, 14))
+    // A moulded slab, not a tube: wider than tall, with real corner
+    // rounding — the cross-section of every injection-moulded arm.
+    const armGeo = track(new THREE.ExtrudeGeometry(roundedRect(0.22, 0.11, 0.045), {
+        depth: 1.35, bevelEnabled: true, bevelSize: 0.02, bevelThickness: 0.02,
+        bevelSegments: 2, curveSegments: 8,
+    }))
     const canGeo = track(new THREE.CylinderGeometry(0.19, 0.225, 0.26, 24))
     const bellGeo = track(new THREE.CylinderGeometry(0.245, 0.215, 0.2, 24))
     const legGeo = track(new THREE.CylinderGeometry(0.055, 0.042, 0.86, 12))
@@ -308,19 +382,20 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
         a.rotation.y = THREE.MathUtils.degToRad(-deg)
         root.add(a)
 
-        const arm = new THREE.Mesh(armGeo, front ? accentBody : carbon)
-        arm.rotation.x = Math.PI / 2
-        arm.rotation.z = 0
-        arm.position.set(0, 0.02, -0.92)
+        const arm = new THREE.Mesh(armGeo, armShell)
+        // Extruded along +Z; flipped to run outward, rooted INSIDE the hull
+        // so the joint is hidden, with a slight rise to the motor.
+        arm.rotation.x = Math.PI + 0.055
+        arm.position.set(0, 0.13, -0.32)
         arm.castShadow = true
         a.add(arm)
 
-        const can = new THREE.Mesh(canGeo, dark)
+        const can = new THREE.Mesh(canGeo, armShell)
         can.position.set(0, 0.15, -1.62)
         can.castShadow = true
         a.add(can)
 
-        const bell = new THREE.Mesh(bellGeo, front ? accentBody : shell)
+        const bell = new THREE.Mesh(bellGeo, front ? accentBody : dark)
         bell.position.set(0, 0.35, -1.62)
         a.add(bell)
 
@@ -356,7 +431,7 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
 
         // Navigation LEDs — green forward, red aft, as on the real thing.
         const led = new THREE.Mesh(ledGeo, front ? accentLed : mat(new THREE.MeshStandardMaterial({
-            color: 0xf87171, emissive: 0xf87171, emissiveIntensity: 1.2,
+            color: 0xef4444, emissive: 0xdc2626, emissiveIntensity: 0.85,
         })))
         led.position.set(0, -0.02, -1.62)
         a.add(led)
