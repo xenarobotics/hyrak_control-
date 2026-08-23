@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { useTheme } from '@/lib/theme'
+import { getUiFont, setUiFont, getUiZoom, setUiZoom, UI_FONTS, UI_ZOOMS, type UiFont } from '@/lib/uiPrefs'
 import {
-    Sun, Moon, Info, Zap,
+    Sun, Moon, MoonStar, Info, Zap,
     SlidersHorizontal, Video, Bot, Map, Route, Bell, Database, Keyboard, AlertTriangle, Radio,
     type LucideIcon,
 } from 'lucide-react'
@@ -146,20 +147,45 @@ function ChipGroup<T extends string>({ value, options, onChange }: {
 
 function DisplayGroup() {
     const { theme, setTheme } = useTheme()
+    const [font, setFont] = useState<UiFont>(() => getUiFont())
+    const [zoom, setZoom] = useState<number>(() => getUiZoom())
 
     return (
         <>
             <PrefRow
                 label="Theme"
-                sub="Changes the colour scheme of the entire interface"
+                sub="Classic is the original palette. Midnight is the reworked dark — brighter secondary text and visible panel edges, for reading dense pages at a glance. Bright is the light theme."
                 right={
                     <SegmentControl
                         value={(theme as any) ?? 'dark'}
-                        onChange={v => setTheme(v as 'dark' | 'light')}
+                        onChange={v => setTheme(v as 'dark' | 'midnight' | 'light')}
                         options={[
-                            { value: 'dark',   label: 'Dark',   icon: <Moon size={12} /> },
-                            { value: 'light',  label: 'Light',  icon: <Sun size={12} /> },
+                            { value: 'dark',     label: 'Classic',  icon: <Moon size={12} /> },
+                            { value: 'midnight', label: 'Midnight', icon: <MoonStar size={12} /> },
+                            { value: 'light',    label: 'Bright',   icon: <Sun size={12} /> },
                         ]}
+                    />
+                }
+            />
+            <PrefRow
+                label="Font"
+                sub="Interface typeface. Telemetry values and coordinates stay monospaced regardless — they are mono for column alignment, not style."
+                right={
+                    <ChipGroup
+                        value={font}
+                        onChange={v => { setFont(v as UiFont); setUiFont(v as UiFont) }}
+                        options={UI_FONTS.map(f => ({ value: f.value, label: f.label }))}
+                    />
+                }
+            />
+            <PrefRow
+                label="Interface scale"
+                sub="Scales the entire interface — panels with their text, so nothing overflows. Use this if the text reads too small."
+                right={
+                    <ChipGroup
+                        value={String(zoom)}
+                        onChange={v => { const n = Number(v); setZoom(n); setUiZoom(n) }}
+                        options={UI_ZOOMS.map(z => ({ value: String(z), label: `${z}%` }))}
                     />
                 }
             />

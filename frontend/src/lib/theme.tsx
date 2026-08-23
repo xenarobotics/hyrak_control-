@@ -2,7 +2,10 @@
 
 import { createContext, useContext, useEffect, useState } from 'react'
 
-type Theme = 'dark' | 'light'
+// 'dark' is the original palette, kept untouched as the classic default.
+// 'midnight' is the reworked dark — same shadcn variables (it stacks the
+// .dark class), higher-contrast app tokens. 'light' is the bright theme.
+type Theme = 'dark' | 'midnight' | 'light'
 
 const ThemeContext = createContext<{ theme: Theme; setTheme: (t: Theme) => void }>({
     theme: 'dark',
@@ -19,16 +22,19 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         const saved = localStorage.getItem('theme')
-        if (saved === 'light' || saved === 'dark') setThemeState(saved)
+        if (saved === 'light' || saved === 'dark' || saved === 'midnight') setThemeState(saved)
     }, [])
 
     const setTheme = (t: Theme) => {
         setThemeState(t)
         localStorage.setItem('theme', t)
         const root = document.documentElement
-        root.classList.remove('dark', 'light')
-        root.classList.add(t)
-        root.style.colorScheme = t
+        root.classList.remove('dark', 'light', 'midnight')
+        // midnight KEEPS the .dark class: the shadcn variable block and every
+        // `dark:` utility follow it, and midnight only re-tints the app tokens.
+        if (t === 'midnight') root.classList.add('dark', 'midnight')
+        else root.classList.add(t)
+        root.style.colorScheme = t === 'light' ? 'light' : 'dark'
     }
 
     return <ThemeContext.Provider value={{ theme, setTheme }}>{children}</ThemeContext.Provider>

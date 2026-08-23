@@ -1,0 +1,56 @@
+// Interface preferences that are not the colour theme: font family and UI
+// scale. Both are DOM-level (an attribute and a zoom style on <html>), so
+// they apply to every page without threading a context through the tree —
+// and both are re-applied before first paint by the inline script in
+// app/layout.tsx, so a reload doesn't flash the defaults.
+
+export type UiFont = 'default' | 'system' | 'ubuntu' | 'inter'
+export const UI_FONTS: { value: UiFont; label: string }[] = [
+    { value: 'default', label: 'Geist (default)' },
+    { value: 'system', label: 'System sans' },
+    { value: 'ubuntu', label: 'Ubuntu' },
+    { value: 'inter', label: 'Inter' },
+]
+
+/** Percent. 100 = as designed. The whole interface scales — the request
+ *  behind this was "the text is too small", and scaling only the text
+ *  breaks every panel that was sized around it. */
+export const UI_ZOOMS = [90, 100, 110, 120, 135] as const
+
+const FONT_KEY = 'hyrak-ui-font'
+const ZOOM_KEY = 'hyrak-ui-zoom'
+
+export function getUiFont(): UiFont {
+    if (typeof window === 'undefined') return 'default'
+    const v = localStorage.getItem(FONT_KEY)
+    return (UI_FONTS.some(f => f.value === v) ? v : 'default') as UiFont
+}
+
+export function setUiFont(font: UiFont) {
+    localStorage.setItem(FONT_KEY, font)
+    applyUiFont(font)
+}
+
+export function applyUiFont(font: UiFont) {
+    const d = document.documentElement
+    if (font === 'default') delete d.dataset.font
+    else d.dataset.font = font
+}
+
+export function getUiZoom(): number {
+    if (typeof window === 'undefined') return 100
+    const v = Number(localStorage.getItem(ZOOM_KEY))
+    return UI_ZOOMS.includes(v as (typeof UI_ZOOMS)[number]) ? v : 100
+}
+
+export function setUiZoom(pct: number) {
+    localStorage.setItem(ZOOM_KEY, String(pct))
+    applyUiZoom(pct)
+}
+
+export function applyUiZoom(pct: number) {
+    // CSS zoom on the root: standardised in 2024, supported by Chromium,
+    // Firefox 126+ and Safari — and unlike a font-size hack it scales the
+    // panels WITH the text, which is what "make everything bigger" means.
+    document.documentElement.style.zoom = pct === 100 ? '' : String(pct / 100)
+}

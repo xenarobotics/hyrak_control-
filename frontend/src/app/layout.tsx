@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { Geist, Geist_Mono } from 'next/font/google'
+import { Geist, Geist_Mono, Ubuntu, Inter } from 'next/font/google'
 import { ThemeProvider } from '@/lib/theme'
 import './globals.css'
 
@@ -10,6 +10,19 @@ const geistSans = Geist({
 
 const geistMono = Geist_Mono({
   variable: '--font-geist-mono',
+  subsets: ['latin'],
+})
+
+// Self-hosted at build time so the font preference works offline — a ground
+// station in a field must not depend on a fonts CDN.
+const ubuntu = Ubuntu({
+  variable: '--font-ubuntu',
+  subsets: ['latin'],
+  weight: ['400', '500', '700'],
+})
+
+const inter = Inter({
+  variable: '--font-inter',
   subsets: ['latin'],
 })
 
@@ -34,11 +47,11 @@ export default function RootLayout({
           suppressHydrationWarning
           dangerouslySetInnerHTML={{
             __html:
-              "try{var t=localStorage.getItem('theme');t=t==='light'?'light':'dark';var d=document.documentElement;d.classList.add(t);d.style.colorScheme=t}catch(e){}",
+              "try{var t=localStorage.getItem('theme');var d=document.documentElement;if(t==='midnight'){d.classList.add('dark','midnight');d.style.colorScheme='dark'}else{t=t==='light'?'light':'dark';d.classList.add(t);d.style.colorScheme=t}var f=localStorage.getItem('hyrak-ui-font');if(f&&f!=='default')d.dataset.font=f;var z=Number(localStorage.getItem('hyrak-ui-zoom'));if(z&&z!==100)d.style.zoom=String(z/100)}catch(e){}",
           }}
         />
       </head>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`} suppressHydrationWarning>
+      <body className={`${geistSans.variable} ${geistMono.variable} ${ubuntu.variable} ${inter.variable} antialiased`} suppressHydrationWarning>
         <ThemeProvider>
           {children}
         </ThemeProvider>

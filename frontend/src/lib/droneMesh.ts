@@ -257,7 +257,12 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     // Bright enough to carry the calibration state on its own: the AIRCRAFT
     // turning amber and then green is the signal, not a badge beside it.
     const accentBody = makeAccent(0.55)
-    const accentLed = makeAccent(2.2)
+    const navRed = mat(new THREE.MeshStandardMaterial({
+        color: 0xef4444, emissive: 0xdc2626, emissiveIntensity: 0.85,
+    }))
+    const navGreen = mat(new THREE.MeshStandardMaterial({
+        color: 0x22c55e, emissive: 0x16a34a, emissiveIntensity: 0.85,
+    }))
 
     // ── Fuselage ─────────────────────────────────────────────────────────
     const hull = new THREE.Mesh(track(hullGeometry()), shell)
@@ -377,7 +382,6 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     }))
     const canGeo = track(new THREE.CylinderGeometry(0.19, 0.225, 0.26, 24))
     const bellGeo = track(new THREE.CylinderGeometry(0.245, 0.215, 0.2, 24))
-    const legGeo = track(new THREE.CylinderGeometry(0.055, 0.042, 0.86, 12))
     const skidGeo = track(new THREE.CapsuleGeometry(0.052, 1.5, 6, 12))
     const skidPadGeo = track(new THREE.CylinderGeometry(0.075, 0.085, 0.05, 12))
     const ledGeo = track(new THREE.SphereGeometry(0.115, 14, 12))
@@ -437,34 +441,56 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
         nut.position.set(0, 0.12, 0)
         rotor.add(nut)
 
-        // Landing leg under each arm, splayed outward. Two struts per side
-        // meeting a skid rail below, which is what an aircraft carrying a
-        // gimbal actually stands on — and it gives the model a definite
-        // BOTTOM, so "upside down" is unmistakable without reading a label.
-        const leg = new THREE.Mesh(legGeo, carbon)
-        leg.position.set(0, -0.5, -0.9)
-        leg.rotation.x = -0.3
-        leg.rotation.z = 0.12
-        a.add(leg)
-
-        // Navigation LEDs — green forward, red aft, as on the real thing.
-        const led = new THREE.Mesh(ledGeo, front ? accentLed : mat(new THREE.MeshStandardMaterial({
-            color: 0xef4444, emissive: 0xdc2626, emissiveIntensity: 0.85,
-        })))
+        // Navigation LEDs, aviation convention: PORT (left) red, STARBOARD
+        // (right) green. Deliberately NOT the calibration accent — position
+        // lights that changed colour with the panel state would unteach the
+        // one convention they exist to teach. ARM_ANGLES run clockwise from
+        // the nose, so 45 and 135 are the starboard pair.
+        const starboard = deg === 45 || deg === 135
+        const led = new THREE.Mesh(ledGeo, starboard ? navGreen : navRed)
         led.position.set(0, -0.02, -1.62)
         a.add(led)
     })
 
-    // The two skid rails, running fore-and-aft under the leg pairs.
-    for (const x of [-1.02, 1.02]) {
+    // ── Landing gear ─────────────────────────────────────────────────────
+    //
+    // BUILT POINT-TO-POINT. The first cut placed one tilted leg per arm and
+    // two skid rails at hand-guessed coordinates, and they met nothing: the
+    // legs hung clear of the fuselage and the rails floated under them. A
+    // strut is a line between two points that both exist — where it leaves
+    // the belly and where it lands on the rail — so those are the inputs,
+    // and the cylinder is derived. There is no coordinate to guess wrong.
+    const SKID_X = 0.98
+    const SKID_Y = -0.9
+    const strut = (from: THREE.Vector3, to: THREE.Vector3, r: number) => {
+        const dir = new THREE.Vector3().subVectors(to, from)
+        const len = dir.length()
+        const g = track(new THREE.CylinderGeometry(r * 0.8, r, len, 10))
+        const m = new THREE.Mesh(g, carbon)
+        m.position.copy(from).addScaledVector(dir, 0.5)
+        m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize())
+        m.castShadow = true
+        root.add(m)
+    }
+    for (const sx of [-1, 1]) {
+        // Rail first, then two struts that END on its centreline. The strut
+        // tops start INSIDE the hull (the belly at |x| 0.45 is ~0.2 deep),
+        // so the joint is buried the way a moulded socket would be.
         const skid = new THREE.Mesh(skidGeo, dark)
         skid.rotation.x = Math.PI / 2
-        skid.position.set(x, -0.92, 0)
+        skid.position.set(sx * SKID_X, SKID_Y, 0)
         skid.castShadow = true
         root.add(skid)
+        for (const sz of [-0.55, 0.55]) {
+            strut(
+                new THREE.Vector3(sx * 0.42, -0.05, sz),
+                new THREE.Vector3(sx * SKID_X, SKID_Y + 0.03, sz),
+                0.055,
+            )
+        }
         for (const z of [-0.72, 0.72]) {
             const pad = new THREE.Mesh(skidPadGeo, carbon)
-            pad.position.set(x, -0.97, z)
+            pad.position.set(sx * SKID_X, SKID_Y - 0.05, z)
             root.add(pad)
         }
     }
