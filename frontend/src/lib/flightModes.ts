@@ -3,13 +3,13 @@
 // THIS LIST AND THE BACKEND USED TO DISAGREE. Seven modes were offered and
 // four were implemented: STABILIZED, MISSION and OFFBOARD fell through to an
 // "Unknown flight mode" warning, so selecting them did nothing and said
-// nothing. POSITION was worse — it was silently aliased to HOLD, so the one
+// nothing. POSITION was worse - it was silently aliased to HOLD, so the one
 // mode that appeared to work was reporting a mode nobody had asked for.
 //
 // Every entry here is now sent for real and confirmed against telemetry before
 // the UI calls it done. OFFBOARD is deliberately NOT offered: PX4 rejects it
 // unless setpoints are already streaming, so it can only ever be entered by
-// the AI tracking modes that produce them — a menu item for it could not do
+// the AI tracking modes that produce them - a menu item for it could not do
 // anything but fail.
 
 export interface FlightModeOption {
@@ -36,7 +36,7 @@ export const FLIGHT_MODES: FlightModeOption[] = [
     {
         value: 'ALTITUDE', label: 'Altitude',
         description: 'Manual sticks with altitude hold, no position hold',
-        requires: 'RC for stick input — it will drift with the wind',
+        requires: 'RC for stick input - it will drift with the wind',
     },
     {
         value: 'STABILIZED', label: 'Stabilized',
@@ -58,7 +58,7 @@ export const FLIGHT_MODES: FlightModeOption[] = [
 
 /** What telemetry reports, mapped back to the option that produced it.
  *
- *  The menu had no idea what mode the aircraft was actually in — its trigger
+ *  The menu had no idea what mode the aircraft was actually in - its trigger
  *  said "Change flight mode..." forever. So selecting Position and landing in
  *  Hold looked identical to selecting Position and getting Position, and the
  *  only way to notice was to read the separate mode chip and know that POSCTL
@@ -80,12 +80,12 @@ export function modeOptionFor(reported: string | undefined | null): string {
     return REPORTED_AS[reported.toUpperCase()] ?? ''
 }
 
-/** The live mode as a label, including the ones that are NOT selectable —
+/** The live mode as a label, including the ones that are NOT selectable -
  *  Offboard, Takeoff, Manual, Acro, Ready. Those are real states the aircraft
  *  reports and the operator needs to see; they are simply not things this
  *  menu can put it into. */
 export function modeLabel(reported: string | undefined | null): string {
-    if (!reported) return '—'
+    if (!reported) return '-'
     const opt = FLIGHT_MODES.find(m => m.value === modeOptionFor(reported))
     if (opt) return opt.label
     const pretty: Record<string, string> = {

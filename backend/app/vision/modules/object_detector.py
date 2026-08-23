@@ -79,6 +79,6 @@ class ObjectDetector(BaseAnalyzer):
             color     = (220, 220, 220) if is_person else (150, 150, 150)
             thickness = 2 if is_person else 1
             draw_brackets(frame_bgr, x1, y1, x2, y2, color, thickness=thickness)
-            # Class name only — no confidence percentage
+            # Class name only - no confidence percentage
             draw_badge(frame_bgr, det["name"], x1, max(16, y1 - 4))
         return frame_bgr

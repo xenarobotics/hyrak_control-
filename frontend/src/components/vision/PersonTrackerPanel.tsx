@@ -15,7 +15,7 @@ import { FaceGalleryPanel } from './FaceGalleryPanel'
 import { fetchFollowTuning } from '@/lib/calibration'
 
 // Kept in sync with backend defaults (person_tracker.py _make_state: yaw_pd
-// kp=30/kd=4/max_output=55) — yaw-axis units (deg/s output). A prior 0-2
+// kp=30/kd=4/max_output=55) - yaw-axis units (deg/s output). A prior 0-2
 // range here meant any slider touch sent values 15-300x weaker than the
 // real default and silently crushed tracking responsiveness.
 const PD_DEFAULTS = { kp: 30.0, kd: 4.0, max_output: 55, deadband: 0.05 }
@@ -165,7 +165,7 @@ export function PersonTrackerPanel() {
 
     // Tracking used to be gated on an uploaded reference photo alone, which
     // meant tapping somebody on the video could never actually start a
-    // follow — the button stayed disabled saying "upload photo first". There
+    // follow - the button stayed disabled saying "upload photo first". There
     // are three legitimate ways to have a target now, and any of them should
     // arm it: an uploaded photo, a face matched from the database, or the
     // operator simply pointing at someone.
@@ -175,7 +175,7 @@ export function PersonTrackerPanel() {
 
     // ── Enrol from the live feed ─────────────────────────────────────────
     // The gallery then holds this camera, this lens, this angle and this
-    // light — which is what the recogniser is actually asked to match later.
+    // light - which is what the recogniser is actually asked to match later.
     // An uploaded photo is a different imaging problem and matches less well.
     const [enrolName, setEnrolName] = useState('')
     const [enrolMsg, setEnrolMsg] = useState<string | null>(null)
@@ -352,7 +352,7 @@ export function PersonTrackerPanel() {
                             <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
                                 {isTracking
                                     ? faceConfirmed
-                                        ? `Match confirmed — ${(similarity * 100).toFixed(0)}% similarity`
+                                        ? `Match confirmed - ${(similarity * 100).toFixed(0)}% similarity`
                                         : searching ? 'Searching for target…' : 'Waiting for face lock…'
                                     : 'Ready to track'}
                             </div>
@@ -450,7 +450,7 @@ export function PersonTrackerPanel() {
                     Upload reference photo
                 </span>
                 <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
-                    JPEG or PNG — clear front-facing face
+                    JPEG or PNG - clear front-facing face
                 </span>
             </button>
         )
@@ -507,7 +507,7 @@ export function PersonTrackerPanel() {
                     <MoveVertical size={13} style={{ marginTop: 1, flexShrink: 0 }} />
                     <span>
                         <b>{elevate.elevating ? 'Auto-elevating' : 'Cannot climb'}</b>
-                        {' — '}{elevate.reason}
+                        {' - '}{elevate.reason}
                     </span>
                 </div>
             )}
@@ -542,7 +542,7 @@ export function PersonTrackerPanel() {
                 Faster and more accurate than uploading a photo: the gallery
                 ends up holding this camera, lens, angle and lighting, which
                 is what the recogniser is later asked to match. Several shots
-                across ~2s, not one — a single pose matches that pose and
+                across ~2s, not one - a single pose matches that pose and
                 little else, and pose variation is the main way recognition
                 fails at drone standoff. */}
             {capture ? (
@@ -862,7 +862,7 @@ export function PersonTrackerPanel() {
                 </div>
             )}
 
-            {/* PD tuning — collapsible */}
+            {/* PD tuning - collapsible */}
             <div style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid hsl(var(--app-border))' }}>
                 <button
                     onClick={() => setPdOpen(o => !o)}

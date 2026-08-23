@@ -27,7 +27,7 @@ export function setStatusBarEnabled(v: boolean) {
 // controls every operator wants everywhere (Land, Kill); the link pickers are
 // setup, and setup controls sitting permanently next to a KILL button are
 // clutter for most flights. Turned on for the deployments that retask a
-// vehicle mid-session — changing camera or telemetry port from Mission or AI
+// vehicle mid-session - changing camera or telemetry port from Mission or AI
 // without walking back to Fly.
 const LINKS_KEY = 'hyrak-statusbar-links-enabled'
 

@@ -1,30 +1,30 @@
-// Where the video feed for a stream comes from — the browser's own camera
+// Where the video feed for a stream comes from - the browser's own camera
 // (default), the backend reading a UDP RTP/H.265 stream directly from a
 // custom RF air unit (see backend/app/webrtc/udp_video_source.py and
 // communication/start-gs.sh), or the backend pulling an RTSP feed straight
-// from a camera on the network — e.g. a SIYI transmission module's gimbal
+// from a camera on the network - e.g. a SIYI transmission module's gimbal
 // camera at rtsp://192.168.144.25:8554/video1 (see
 // backend/app/webrtc/rtsp_video_source.py). Persisted like the other video
 // prefs in videoSettings.ts, kept in its own file since it changes what
 // gets sent in the WebRTC offer rather than just codec/resolution tuning.
 // Set once in Settings, read from wherever a stream is started (Fly,
-// Modules) — not a per-tab choice.
+// Modules) - not a per-tab choice.
 
 // 'rtsp_relay' is the zero-transcode path (desktop only): the app pulls the
 // same RTSP URL as 'siyi_rtsp' but does it from THIS machine and forwards
 // the camera's original bytes to the backend with ffmpeg -c copy, while
 // serving the operator a local preview off the same process. Use it
 // whenever the camera is reachable from the laptop rather than the server
-// — which, off a developer's desk, is always. See
+// - which, off a developer's desk, is always. See
 // desktop/src/bridges/rtspRelayBridge.ts and docs/video-transport-modes.md.
 // 'rtsp_camera' decodes the same RTSP URL locally and sends it as an
 // ORDINARY WebRTC camera track. It is deliberately NOT server-sourced: the
-// backend cannot tell it from a webcam, which is the entire point — it needs
+// backend cannot tell it from a webcam, which is the entire point - it needs
 // no reachable server port and traverses NAT like any other camera.
 // The two DataChannel modes are the newest transport and the only one that is
 // BOTH bit-exact and NAT-traversing (docs/ARCHITECTURE.md, ADR-009). The desktop
-// app opens its own WebRTC PeerConnection carrying no media track — just a
-// DataChannel of raw RTP — so no codec is negotiated and H.265 passes through
+// app opens its own WebRTC PeerConnection carrying no media track - just a
+// DataChannel of raw RTP - so no codec is negotiated and H.265 passes through
 // untouched. aiortc cannot negotiate H.265 on a media track, which is what
 // forced a transcode in every other client-sourced mode.
 //
@@ -32,7 +32,7 @@
 //                           to RTP with -c copy. One process, no re-encode.
 //   'air_unit_datachannel'  The custom RF air unit. NO ffmpeg at all: wfb_rx
 //                           already delivers RTP/H.265 to udp:5600 (see
-//                           communication/luckfox_pico_airunit — air_video_udp
+//                           communication/luckfox_pico_airunit - air_video_udp
 //                           hardware-encodes and packetises to RTP itself), so
 //                           the bridge only forwards datagrams. The cheapest
 //                           path in the app, and bit-identical to what the
@@ -49,15 +49,15 @@ export type VideoSource =
     | 'rtsp_camera'
     | 'rtsp_datachannel'
     | 'air_unit_datachannel'
-    // The air unit over SRT. Same relay machinery as 'rtsp_relay' — ffmpeg
-    // `-c copy` on this machine pushing MPEG-TS to a backend listener — but
+    // The air unit over SRT. Same relay machinery as 'rtsp_relay' - ffmpeg
+    // `-c copy` on this machine pushing MPEG-TS to a backend listener - but
     // reading wfb_rx's RTP off udp:5600 instead of pulling a camera.
     //
     // Exists because SRT and the DataChannel fail in opposite directions, and
     // only measurement on a real link decides between them:
     //   SRT          libsrt (C), an EXPLICIT latency budget inside which loss
     //                is retransmitted. UDP-only, and needs a reachable public
-    //                port on the server — so a UDP-blocking firewall kills it
+    //                port on the server - so a UDP-blocking firewall kills it
     //                outright.
     //   DataChannel  werift (TypeScript) SCTP, and TURN over TLS/:443 when
     //                everything else is blocked. Connects almost anywhere, but
@@ -66,31 +66,31 @@ export type VideoSource =
     // The air unit through a single GStreamer pipeline on this machine.
     //
     // Structurally different from every mode above, and the reason it exists:
-    // ONE process owns udp:5600 and serves both consumers off a `tee` —
+    // ONE process owns udp:5600 and serves both consumers off a `tee` -
     // a hardware-decoded local preview for the pilot, and a bit-exact H.265
     // SRT uplink for the server's AI. Consequences:
     //
     //   * No video packet passes through JavaScript. The DataChannel path
     //     reads RTP on Electron's single event loop, and when that loop
-    //     stalls the kernel discards datagrams before any copy exists —
+    //     stalls the kernel discards datagrams before any copy exists -
     //     invisible loss that corrupts the preview and the server equally.
     //   * Hardware codecs are actually reachable. The BUNDLED ffmpeg reports
     //     only `vdpau` for -hwaccels: no VAAPI, no QSV. Measured on 1080p20
-    //     H.265 — ffmpeg preview ~79% of a core, GStreamer software 41%,
+    //     H.265 - ffmpeg preview ~79% of a core, GStreamer software 41%,
     //     GStreamer hardware 4.4%.
     //   * The pilot's picture never round-trips to the server, so it does not
     //     depend on the uplink being healthy.
     //
-    // Requires GStreamer on the client (Linux only in practice — the air unit
+    // Requires GStreamer on the client (Linux only in practice - the air unit
     // ground station is Linux-only anyway, since wfb_rx is).
     | 'air_unit_gst'
 
-    // The HYRAK Receiver — the ground DECODER's feed
+    // The HYRAK Receiver - the ground DECODER's feed
     // (docs/PC_VIDEO_TELEMETRY_INTEGRATION.md, docs/HYRAK_RECEIVER.md).
     //
     // Different hardware from every mode above. air_unit_* assume wfb_rx runs
     // on THIS machine, which means the RTL8812EU driver, the wfb-ng build and
-    // the RF keys all have to be here — Linux-only, and a support burden per
+    // the RF keys all have to be here - Linux-only, and a support burden per
     // client. The decoder is a separate box that owns all of that and hands
     // this PC plain compressed H.265 over Ethernet.
     //
@@ -98,20 +98,20 @@ export type VideoSource =
     //
     //   * It runs on Windows, Linux and ARM64 from one installer with nothing
     //     else installed. The picture is painted by WebCodecs, and the codec
-    //     it is fed is H.264 — the one codec every Chromium decodes on every
+    //     it is fed is H.264 - the one codec every Chromium decodes on every
     //     platform. Getting there costs a transcode, which is nearly free on
     //     hardware (4.4% of a core) and is what the proven air_unit_srt mode
     //     has always done. H.265 passthrough is available as a toggle but is
     //     NOT the default: Chromium reports HEVC support it cannot honour.
     //   * Three transports with genuinely different trade-offs, chosen in
-    //     Settings — see ReceiverTransport below.
+    //     Settings - see ReceiverTransport below.
     //   * It is not tied to udp:5600 being local, so any PC on the network can
     //     be the ground station.
     | 'hyrak_receiver'
 
 export type RelayTransport = 'srt' | 'tcp' | 'udp'
 
-// How ffmpeg opens the CAMERA leg — not to be confused with RelayTransport,
+// How ffmpeg opens the CAMERA leg - not to be confused with RelayTransport,
 // which is how the copied video reaches the SERVER. Two different hops that
 // happen to offer similar choices.
 //
@@ -120,7 +120,7 @@ export type RelayTransport = 'srt' | 'tcp' | 'udp'
 //
 //   tcp   Nothing is lost. But a retransmission stalls everything queued
 //         behind it (head-of-line blocking), so on a marginal WiFi link the
-//         delay ACCUMULATES rather than glitching — a plausible cause of a
+//         delay ACCUMULATES rather than glitching - a plausible cause of a
 //         steady ~1s lag that no amount of downstream tuning can touch.
 //   udp   Late packets are simply missing. Loss shows as artifacts instead
 //         of delay, which is the right trade for a pilot view.
@@ -157,7 +157,7 @@ export const DEFAULT_RELAY_TRANSPORT: RelayTransport = 'srt'
 // corruption that actually came from the desktop pipeline shedding compressed
 // frames (fixed in 0.1.49), not from the window being too small.
 //
-// This is a FIXED delay, not a ceiling — SRT's TSBPD releases every packet at
+// This is a FIXED delay, not a ceiling - SRT's TSBPD releases every packet at
 // a constant offset from its timestamp, so a healthy link never converges to
 // something lower once the stream is stable. In air_unit_gst mode it delays
 // only the server's copy; the pilot's preview is local and unaffected.
@@ -186,7 +186,7 @@ const RTSP_TRANSPORTS: RtspTransport[] = ['tcp', 'udp']
 const PREVIEW_FRAG_MODES: PreviewFragMode[] = ['low', 'compatible']
 
 // Sources where the backend produces the track and the browser sends no
-// camera. Single definition — five call sites used to spell this out
+// camera. Single definition - five call sites used to spell this out
 // inline and adding a fourth source meant finding all of them.
 export function isServerSourced(v: VideoSource): boolean {
     return v === 'air_unit_udp' || v === 'siyi_rtsp' || v === 'rtsp_relay'
@@ -196,13 +196,13 @@ export function isServerSourced(v: VideoSource): boolean {
         // Same: GStreamer pushes SRT to the relay listener, the browser's
         // offer is recvonly and it never produces a track.
         || v === 'air_unit_gst'
-        // Same again — the receiver's uplink branch pushes SRT to the relay
+        // Same again - the receiver's uplink branch pushes SRT to the relay
         // listener while the pilot's picture stays local.
         || v === 'hyrak_receiver'
         // The DataChannel modes ARE server-sourced from the browser's point of
         // view: the desktop pushes RTP on a SEPARATE PeerConnection, the server
         // writes it to a loopback UDP port, and the browser's own offer is
-        // recvonly — it never produces a track. Contrast rtsp_camera, which is
+        // recvonly - it never produces a track. Contrast rtsp_camera, which is
         // deliberately NOT server-sourced because the browser really does send a
         // camera-like track there.
         || v === 'rtsp_datachannel' || v === 'air_unit_datachannel'
@@ -216,7 +216,7 @@ export function usesDataChannelSender(v: VideoSource): boolean {
 }
 
 // Only a real webcam needs the operator to pick a device. 'rtsp_camera'
-// produces a MediaStream like a camera does, but its source is a URL — so
+// produces a MediaStream like a camera does, but its source is a URL - so
 // gating Start on a camera selection would leave the button permanently
 // disabled.
 export function needsCameraSelection(v: VideoSource): boolean {
@@ -268,12 +268,12 @@ export function setAirUnitVideoPort(port: number): void {
 //
 // Exists because exactly one process can receive a unicast UDP port. Taking
 // 5600 to stream the feed necessarily takes it away from whatever local viewer
-// was already reading it — a ground station running wfb-gs's gst-decode.sh
+// was already reading it - a ground station running wfb-gs's gst-decode.sh
 // being the case that actually came up. Pointing that viewer at the fan-out
 // port instead gives both: one capture, two consumers, byte-identical (nothing
 // in the path parses the payload).
 //
-// 0 = off, which is the default — it costs a send() per packet and most setups
+// 0 = off, which is the default - it costs a send() per packet and most setups
 // have no second viewer.
 export const DEFAULT_AIR_UNIT_FANOUT_PORT = 0
 
@@ -314,7 +314,7 @@ export function getRelayLatencyMs(): number {
         // reported as "RCV-DROPPED N packet(s) ... delayed" followed by
         // corrupt MPEG-TS downstream. SRT needs 2.5-4x RTT for a NAK plus
         // resend, and RTT is >=35ms to anywhere real (41ms to our own relay),
-        // so anything under ~80ms cannot retransmit at all — it only adds its
+        // so anything under ~80ms cannot retransmit at all - it only adds its
         // own delay. Values below the floor are treated as stale and fall back
         // to the default rather than being honoured.
         return v >= 80 && v <= 2000 ? v : DEFAULT_RELAY_LATENCY_MS
@@ -366,7 +366,7 @@ export function getPreviewFragDurationUs(): number {
  *
  *  0.1.41 shipped a 720p cap on the theory that the client's i5 could not
  *  sustain the 1080p x264 encode and was overflowing its UDP buffer. Tested
- *  in the field WITH client-overlay confirmed engaged: no improvement — so
+ *  in the field WITH client-overlay confirmed engaged: no improvement - so
  *  the encode was not the bottleneck and the cap only cost resolution.
  *  Reverted to native, and made a frontend setting rather than a bridge
  *  constant so the next value can be tried by reloading a page instead of
@@ -391,13 +391,13 @@ export function setPreviewMaxHeight(h: number): void {
 //
 // Default raised 10 -> 60, and the floor 0 -> 30. The pipeline runs this
 // buffer with drop-on-latency=true, so this value is not "how long we are
-// willing to wait" — it is "how late a packet may be before we THROW IT
+// willing to wait" - it is "how late a packet may be before we THROW IT
 // AWAY". At 10ms that discarded packets on a link with no actual loss,
 // because ordinary Wi-Fi jitter exceeds 10ms, and a discarded packet in a
 // compressed stream breaks every frame referencing it until the next IDR.
 //
 // The floor matters as much as the default: a value stored back when 10 was
-// the default would otherwise keep overriding this, silently, forever — the
+// the default would otherwise keep overriding this, silently, forever - the
 // same failure that kept relay latency pinned at 20ms (see getRelayLatencyMs).
 const DEFAULT_GST_JITTER_MS = 60
 const MIN_GST_JITTER_MS = 30
@@ -418,7 +418,7 @@ export function setGstJitterMs(ms: number): void {
 }
 
 // 'auto' prefers hardware and falls back on its own; the explicit values are
-// for diagnosis — proving a fault is or isn't the GPU without guessing.
+// for diagnosis - proving a fault is or isn't the GPU without guessing.
 export type GstAccel = 'auto' | 'hardware' | 'software'
 
 export function getGstAccel(): GstAccel {
@@ -464,7 +464,7 @@ export function setLiveEdgeClamp(on: boolean): void {
 //          must allow the port inbound. Best on a direct cable you control.
 //   rtsp   WE connect outward, so the decoder needs to know nothing about this
 //          PC and no inbound firewall rule is involved. Over TCP the picture
-//          stays clean because lost packets are retransmitted — but TCP's
+//          stays clean because lost packets are retransmitted - but TCP's
 //          head-of-line blocking has no ceiling, so delay can accumulate
 //          rather than glitch. This is why VLC looks clean and runs ~0.5s
 //          behind.
@@ -472,7 +472,7 @@ export function setLiveEdgeClamp(on: boolean): void {
 //          inside an explicit latency window and dropped outside it, so delay
 //          cannot grow the way TCP's can. We still connect outward, so it
 //          keeps RTSP's firewall and addressing story. Needs `srt: yes` in
-//          MediaMTX on the decoder — which is the same process already serving
+//          MediaMTX on the decoder - which is the same process already serving
 //          RTSP, NOT a second wfb_rx, so it costs the board almost nothing.
 export type ReceiverTransport = 'udp' | 'rtsp' | 'srt'
 
@@ -531,7 +531,7 @@ export function setReceiverTransport(t: ReceiverTransport): void {
     if (typeof window !== 'undefined') localStorage.setItem(RECEIVER_TRANSPORT_KEY, t)
 }
 
-/** Stored per transport — switching udp<->srt otherwise carries over a number
+/** Stored per transport - switching udp<->srt otherwise carries over a number
  *  that was tuned for a different mechanism. */
 export function getReceiverLatencyMs(t: ReceiverTransport = getReceiverTransport()): number {
     if (typeof window === 'undefined') return DEFAULT_RECEIVER_LATENCY_MS[t]
@@ -564,15 +564,15 @@ export function setReceiverAccel(a: GstAccel): void {
 // Send the decoder's H.265 straight to the screen with nothing transcoding it.
 //
 // DEFAULT OFF, and that is a correction rather than caution. It was the
-// default, on the theory that skipping a transcode must be better — but
+// default, on the theory that skipping a transcode must be better - but
 // Chromium's HEVC support is platform-gated and, measured on the reference
 // laptop, will answer isConfigSupported() with TRUE and then fail the actual
 // decode ("Decoding error", black pane). H.264 has none of that ambiguity: it
 // decodes everywhere, which is exactly why the older air_unit_srt mode
 // transcodes its preview to H.264 with libx264 and has always just worked.
 //
-// So the default path now spends a transcode — cheap on hardware (measured
-// 4.4% of a core against 79% for the software equivalent) — to buy a codec
+// So the default path now spends a transcode - cheap on hardware (measured
+// 4.4% of a core against 79% for the software equivalent) - to buy a codec
 // that cannot surprise us. Passthrough stays available because on a Windows
 // machine with a modern NVIDIA GPU it is genuinely the better path, and it
 // costs one toggle to find out.
@@ -597,14 +597,14 @@ export function setReceiverPassthrough(on: boolean): void {
 //
 // MOVED HERE FROM settings/page.tsx, which was its only reader until the
 // status bar grew a compact picker. Left where it was, the bar would have
-// needed its own hand-written list of sources — and the comment three lines
+// needed its own hand-written list of sources - and the comment three lines
 // down already records what that costs: adding 'Ground decoder' silently
 // dropped a whole group from a hardcoded list, so the source existed, worked,
 // and could not be selected. One catalogue, next to the type it describes.
 //
 // Nine sources were previously a wall of chips, and each dependent control was
 // gated by its own hand-written boolean. That is how `air_unit_gst` came to be
-// missing from one gate while present in another — the SRT latency dial simply
+// missing from one gate while present in another - the SRT latency dial simply
 // did not render on the mode that needs it most, and nothing about the code
 // made that visible. Each source now declares which rows it needs, once, and
 // the rows read that declaration.
@@ -626,7 +626,7 @@ export interface SourceSpec {
     value: VideoSource
     label: string
     group: 'Browser' | 'Air unit (RF)' | 'RTSP camera' | 'Ground decoder'
-    /** One line the operator can act on — what it does and what it requires. */
+    /** One line the operator can act on - what it does and what it requires. */
     blurb: string
     needs: SourceNeed[]
     /** True when the SERVER opens the stream, so the server must be able to
@@ -638,7 +638,7 @@ export interface SourceSpec {
 export const VIDEO_SOURCES: SourceSpec[] = [
     {
         value: 'hyrak_receiver', label: 'HYRAK Receiver', group: 'Ground decoder',
-        blurb: 'The ground decoder over Ethernet. Decodes in the browser engine, so it needs nothing installed and runs the same on Windows, Linux and ARM64 — the only air-unit mode that does.',
+        blurb: 'The ground decoder over Ethernet. Decodes in the browser engine, so it needs nothing installed and runs the same on Windows, Linux and ARM64 - the only air-unit mode that does.',
         needs: ['receiver', 'relay'], desktopOnly: true,
     },
     {
@@ -653,7 +653,7 @@ export const VIDEO_SOURCES: SourceSpec[] = [
     },
     {
         value: 'siyi_rtsp', label: 'SIYI (RTSP, server pulls)', group: 'RTSP camera',
-        blurb: 'The SERVER opens the camera URL. Only works when the server shares a network with the camera — off a dev machine, it never does.',
+        blurb: 'The SERVER opens the camera URL. Only works when the server shares a network with the camera - off a dev machine, it never does.',
         needs: ['rtspUrl'], serverReaches: true,
     },
     {
@@ -673,7 +673,7 @@ export const VIDEO_SOURCES: SourceSpec[] = [
     },
     {
         value: 'air_unit_datachannel', label: 'Air unit → DataChannel', group: 'Air unit (RF)',
-        blurb: 'No ffmpeg at all — wfb_rx already delivers RTP/H.265, so the app just forwards datagrams. Traverses NAT, but every packet crosses the JS event loop.',
+        blurb: 'No ffmpeg at all - wfb_rx already delivers RTP/H.265, so the app just forwards datagrams. Traverses NAT, but every packet crosses the JS event loop.',
         needs: ['udpPort', 'fanout', 'preview'], desktopOnly: true,
     },
     {
@@ -683,7 +683,7 @@ export const VIDEO_SOURCES: SourceSpec[] = [
     },
     {
         value: 'air_unit_udp', label: 'Air unit (UDP, server reads)', group: 'Air unit (RF)',
-        blurb: 'The SERVER binds the UDP port and reads RTP directly. No QGroundControl involved — but wfb_rx must be delivering to that port ON THE SERVER, so this only works when the ground station and server are the same machine.',
+        blurb: 'The SERVER binds the UDP port and reads RTP directly. No QGroundControl involved - but wfb_rx must be delivering to that port ON THE SERVER, so this only works when the ground station and server are the same machine.',
         needs: ['udpPort'], serverReaches: true,
     },
 ]

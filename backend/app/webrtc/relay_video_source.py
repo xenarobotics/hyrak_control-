@@ -5,13 +5,13 @@ Server-side ingestion for the desktop app's zero-transcode RTSP relay
 The client can't hand us its camera directly: a SIYI ground unit lives on
 its own hotspot at 192.168.144.25, reachable only from the laptop plugged
 into it, and that laptop is behind NAT. RTSP is a *pull* protocol, so the
-server can never fetch it — the laptop has to push. It pushes the camera's
+server can never fetch it - the laptop has to push. It pushes the camera's
 ORIGINAL bytes (ffmpeg -c copy, no re-encode), so what arrives here is
 bit-identical to what the camera produced.
 
 Why there is an ffmpeg subprocess here instead of just handing the URL to
 MediaPlayer: PyAV's bundled FFmpeg is built WITHOUT libsrt, so it raises
-ProtocolNotFoundError on any srt:// URL — verified, and there is no libsrt
+ProtocolNotFoundError on any srt:// URL - verified, and there is no libsrt
 in its av.libs. The system ffmpeg does have SRT. So one `-c copy` ffmpeg
 receives the SRT connection and re-emits plain MPEG-TS to loopback UDP,
 which PyAV opens happily. That hop is a remux, not a transcode: no decode,
@@ -43,7 +43,7 @@ logger = logging.getLogger("verocore.webrtc.relay_video_source")
 #
 # 3478, not 9000. Measured 2026-07-31 on the operator's own network: UDP to
 # ports 3478 and 8801 reached the relay, while 443 and 9000 were dropped
-# before leaving the network — the packets never arrived, with no error
+# before leaving the network - the packets never arrived, with no error
 # anywhere. That is an entire class of silent, un-debuggable failure sitting
 # on the client's side of the link, where we have no visibility at all.
 #
@@ -51,7 +51,7 @@ logger = logging.getLogger("verocore.webrtc.relay_video_source")
 # which is exactly the population that would also want to fly a drone over
 # the internet. 8801 (Zoom) is the fallback if a network somehow blocks STUN.
 #
-# The VPS relay's DNAT rule must cover the SAME range — see
+# The VPS relay's DNAT rule must cover the SAME range - see
 # docs/srt-deployment.md and the memory note on the Vultr relay.
 _PUBLIC_PORT_BASE = 3478
 _PUBLIC_PORT_LIMIT = 3578
@@ -64,7 +64,7 @@ VALID_TRANSPORTS = ("srt", "tcp", "udp")
 # hours and warns steadily cannot grow this without limit.
 _STDERR_RING_LINES = 60
 
-# SRT receiver buffer, milliseconds — the window inside which a lost packet can
+# SRT receiver buffer, milliseconds - the window inside which a lost packet can
 # be retransmitted, and therefore also a FLOOR on glass-to-glass latency.
 #
 # SRT's own guidance is 2.5-4x RTT; below ~2.5x there is not enough time for a
@@ -76,7 +76,7 @@ _STDERR_RING_LINES = 60
 # 120 -> 300 -> 150. The 300 was an over-correction and is worth recording as
 # such: it was chosen after seeing "RCV-DROPPED … delayed" and corrupt MPEG-TS
 # at 120ms, and I attributed that to the window being too small. It was not.
-# The corruption came from the desktop pipeline shedding COMPRESSED frames —
+# The corruption came from the desktop pipeline shedding COMPRESSED frames -
 # `queue leaky=downstream max-size-time=500ms` on the uplink tee branch, and an
 # rtpjitterbuffer running `latency=10 drop-on-latency=true`. Both are fixed
 # (desktop 0.1.49), and with an intact stream the window no longer has to
@@ -87,14 +87,14 @@ _STDERR_RING_LINES = 60
 # 2.5-4x RTT, so the useful band is ~105-170ms. 150 sits at ~3.6x, which allows
 # a NAK plus resend with margin for the max-RTT case.
 #
-# IMPORTANT — this is a FIXED delay, not a ceiling. SRT delivers via TSBPD
+# IMPORTANT - this is a FIXED delay, not a ceiling. SRT delivers via TSBPD
 # (timestamp-based packet delivery): every packet is released at a constant
 # offset from its send timestamp, so a healthy link does NOT drain the window
 # and converge to a lower figure once the stream is stable. Whatever is set
 # here is added to the server's view of the world for the whole session. That
 # is why lowering it is the single most effective thing available on this path.
 #
-# It costs the PILOT nothing in air_unit_gst mode — their preview is decoded
+# It costs the PILOT nothing in air_unit_gst mode - their preview is decoded
 # locally off the same GStreamer pipeline and never waits on the uplink. The
 # only thing it delays is the server's copy, i.e. how fresh the AI's view is.
 DEFAULT_LATENCY_MS = 150
@@ -126,7 +126,7 @@ def _listen_url(transport: str, port: int, latency_ms: int, passphrase: str = ""
             # AES on the wire AND admission control in one mechanism.
             #
             # This listener is the only part of the system that must be
-            # reachable from the public internet on a raw port — it cannot go
+            # reachable from the public internet on a raw port - it cannot go
             # through the cloudflared tunnel, which carries no arbitrary UDP.
             # Without a passphrase ffmpeg's SRT listener accepts ANY caller, so
             # anyone who found the open port could inject their own video into
@@ -161,7 +161,7 @@ class RelayIngest:
         self.loopback_port = _free_port(_LOOPBACK_PORT_BASE, _LOOPBACK_PORT_LIMIT, "udp")
         self.proc: subprocess.Popen | None = None
         # Bounded ring of ffmpeg's most recent stderr lines, filled by a
-        # draining thread — see _drain_stderr for why a thread is required.
+        # draining thread - see _drain_stderr for why a thread is required.
         self._stderr_lines: deque[str] = deque(maxlen=_STDERR_RING_LINES)
         self._stderr_thread: threading.Thread | None = None
 
@@ -169,7 +169,7 @@ class RelayIngest:
         ffmpeg = shutil.which("ffmpeg")
         if not ffmpeg:
             raise RuntimeError(
-                "ffmpeg not found on PATH — required to receive the relay uplink "
+                "ffmpeg not found on PATH - required to receive the relay uplink "
                 "(PyAV's bundled build has no SRT support)."
             )
         args = [
@@ -190,13 +190,13 @@ class RelayIngest:
 
     def open_track(self, timeout: float = 25.0):
         """aiortc-compatible video track reading the remuxed loopback feed.
-        Blocking (ffmpeg probes synchronously) — call via run_in_executor.
+        Blocking (ffmpeg probes synchronously) - call via run_in_executor.
 
         RETRIES until `timeout` rather than opening once. PyAV's open on a
         silent UDP port fails fast with "Immediate exit requested" instead of
         waiting the full timeout, so a single attempt is really a race
         against the laptop: it has to establish SRT and push a first keyframe
-        — an internet round trip plus a GOP — before the server looks. That
+        - an internet round trip plus a GOP - before the server looks. That
         race is exactly what was failing. Retrying converts it into a plain
         wait, which is what it should have been."""
         deadline = time.monotonic() + timeout
@@ -221,7 +221,7 @@ class RelayIngest:
                         "flags": "low_delay",
                         # 0, not 100000. max_delay is a reorder window, and
                         # the comment above already stated the reason it is
-                        # pointless here — SRT delivers in order, by
+                        # pointless here - SRT delivers in order, by
                         # construction, having already done the retransmission
                         # and resequencing upstream of this hop. Holding
                         # packets another 100ms in case an earlier one is
@@ -252,7 +252,7 @@ class RelayIngest:
 
         raise RuntimeError(
             f"No video arrived on {self.transport}:{self.public_port} within {timeout:.0f}s. "
-            f"The laptop never completed its push — check it is on the camera's network and "
+            f"The laptop never completed its push - check it is on the camera's network and "
             f"can reach this server on that port. ffmpeg: "
             f"{self.stderr_tail().strip() or '(no output)'} (last: {last_err})"
         )
@@ -260,18 +260,18 @@ class RelayIngest:
     def _start_stderr_drain(self) -> None:
         """Continuously reads ffmpeg's stderr into a bounded ring.
 
-        This is NOT just for nicer diagnostics — without it a long-running relay
+        This is NOT just for nicer diagnostics - without it a long-running relay
         eventually HANGS. stderr is a pipe with a ~64KB kernel buffer; once it
         fills, ffmpeg blocks on write() and stops relaying video, silently and
         permanently. The old stderr_tail() only ever read after the process had
         exited (`poll() is not None`), so nothing drained the pipe while it was
-        alive: any relay left running long enough to emit 64KB of warnings —
+        alive: any relay left running long enough to emit 64KB of warnings -
         "Non-monotonous DTS", PES errors, and similar, which a live feed
-        produces steadily — would freeze with no error anywhere.
+        produces steadily - would freeze with no error anywhere.
 
         The desktop side never had this bug: rtspRelayBridge.ts attaches
         `proc.stderr.on('data', ...)` and keeps a 4000-char tail. This is the
-        same design, in the shape Python needs — a blocking readline loop, so it
+        same design, in the shape Python needs - a blocking readline loop, so it
         gets its own daemon thread.
         """
         if not self.proc or not self.proc.stderr:
@@ -299,7 +299,7 @@ class RelayIngest:
 
     def stderr_tail(self) -> str:
         """Most recent ffmpeg output. Works while the process is RUNNING, which
-        the previous implementation could not do — and running is exactly when a
+        the previous implementation could not do - and running is exactly when a
         stalled relay needs explaining."""
         return "\n".join(self._stderr_lines)[-500:]
 
@@ -324,8 +324,8 @@ def allocate(session_id: str, transport: str = "srt", latency_ms: int = DEFAULT_
     unconditionally, which turned every ordinary retry into a self-inflicted
     failure: the client re-runs `allocate` (mode switch, reconnect, a second
     Start click), the old ffmpeg is killed while an earlier `open_track` is
-    still blocked reading its loopback port — that read then dies with
-    "Immediate exit requested" — and the public port MOVES, so a laptop that
+    still blocked reading its loopback port - that read then dies with
+    "Immediate exit requested" - and the public port MOVES, so a laptop that
     had already begun pushing to the old port is now talking to nothing.
 
     An existing, live relay for the same session with the same transport is

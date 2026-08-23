@@ -35,7 +35,7 @@ import { VIDEO_SOURCES, SOURCE_GROUPS, specFor, sourceNeeds,
 
 // Sources that push to the backend's relay listener, and therefore expose the
 // uplink transport and SRT latency controls. air_unit_gst was missing here,
-// which hid the latency dial on the one mode that most needs it — the SRT
+// which hid the latency dial on the one mode that most needs it - the SRT
 // window governs how far the AI overlay trails the locally-decoded picture.
 const USES_RELAY: VideoSource[] = ['rtsp_relay', 'air_unit_srt', 'air_unit_gst', 'hyrak_receiver']
 
@@ -155,7 +155,7 @@ function DisplayGroup() {
         <>
             <PrefRow
                 label="Theme"
-                sub="Classic is the original palette. Midnight is the reworked dark — brighter secondary text and visible panel edges, for reading dense pages at a glance. Bright is the light theme."
+                sub="Classic is the original palette. Midnight is the reworked dark - brighter secondary text and visible panel edges, for reading dense pages at a glance. Bright is the light theme."
                 right={
                     <SegmentControl
                         value={(theme as any) ?? 'dark'}
@@ -170,7 +170,7 @@ function DisplayGroup() {
             />
             <PrefRow
                 label="Font"
-                sub="Interface typeface, applied everywhere — headings, descriptions, status chips and the task bar. The default keeps telemetry monospaced for column alignment; any other choice restyles those too."
+                sub="Interface typeface, applied everywhere - headings, descriptions, status chips and the task bar. The default keeps telemetry monospaced for column alignment; any other choice restyles those too."
                 right={
                     <ChipGroup
                         value={font}
@@ -192,7 +192,7 @@ function DisplayGroup() {
             />
             <PrefRow
                 label="Interface scale"
-                sub="Scales the entire interface — panels with their text, so nothing overflows. Use this if the text reads too small."
+                sub="Scales the entire interface - panels with their text, so nothing overflows. Use this if the text reads too small."
                 right={
                     <ChipGroup
                         value={String(zoom)}
@@ -213,12 +213,12 @@ function StatusBarGroup() {
         <>
             <PrefRow
                 label="Show status bar"
-                sub="Persistent bar on Mission / AI / Config / Settings — altitude, arm/takeoff, flight mode, GPS, connectivity, plus quick Land / Emergency kill. Hidden on the Fly tab, which already has its own controls."
+                sub="Persistent bar on Mission / AI / Config / Settings - altitude, arm/takeoff, flight mode, GPS, connectivity, plus quick Land / Emergency kill. Hidden on the Fly tab, which already has its own controls."
                 right={<Toggle value={enabled} onChange={() => { const v = !enabled; setEnabled(v); setStatusBarEnabled(v) }} />}
             />
             <PrefRow
                 label="Link controls in the status bar"
-                sub="Adds video-source, camera and telemetry-link pickers to the bar, so a vehicle can be retasked from Mission or AI without going back to Fly. Off by default — these are setup controls, and they sit next to Emergency kill. They show the SAME selection as the Fly tab, and changing the video source or camera restarts a running stream."
+                sub="Adds video-source, camera and telemetry-link pickers to the bar, so a vehicle can be retasked from Mission or AI without going back to Fly. Off by default - these are setup controls, and they sit next to Emergency kill. They show the SAME selection as the Fly tab, and changing the video source or camera restarts a running stream."
                 right={<Toggle value={links} onChange={() => { const v = !links; setLinks(v); setStatusBarLinksEnabled(v) }} />}
             />
         </>
@@ -289,7 +289,7 @@ function MapGroup() {
             />
             <PrefRow
                 label="Tile caching"
-                sub="Cache map tiles locally — faster reload in areas you've already visited"
+                sub="Cache map tiles locally - faster reload in areas you've already visited"
                 tip="Stored in browser IndexedDB. Clear browser data to remove the cache."
                 right={<Toggle value={cache} onChange={() => { const v = !cache; setCache(v); lsSet('hyrak-map-cache', v) }} />}
             />
@@ -394,14 +394,14 @@ function ShortcutsGroup() {
 }
 
 // Desktop-app-only. Starts/stops the native air-unit-video bridge
-// (desktop/src/bridges/airUnitVideoBridge.ts) — same technique as
+// (desktop/src/bridges/airUnitVideoBridge.ts) - same technique as
 // air_unit_relay/video_webcam.sh (SDP + low-latency ffmpeg options,
 // hardware decode when a VAAPI-capable ffmpeg is available, feeds a
 // v4l2loopback device), just built into the app instead of a script the
 // client has to run separately. Once running, pick "HyrakAirUnit" from
-// the ordinary Camera dropdown above — this row only starts the feed,
+// the ordinary Camera dropdown above - this row only starts the feed,
 // it doesn't change how the browser consumes it. Shares useAirUnitVideoBridge
-// (and its bridge id) with the Fly tab's own Start control — starting it
+// (and its bridge id) with the Fly tab's own Start control - starting it
 // from either place is reflected in both, since it's the same underlying
 // bridge connection.
 function NativeAirUnitVideoRow({ source }: { source: VideoSource }) {
@@ -412,20 +412,20 @@ function NativeAirUnitVideoRow({ source }: { source: VideoSource }) {
 
     useEffect(() => { setMounted(true) }, [])
 
-    // Always render SOMETHING here rather than silently disappearing —
+    // Always render SOMETHING here rather than silently disappearing -
     // a row that vanishes with no explanation reads as "this feature
     // doesn't exist" rather than "here's what you need to do first",
     // which is what was actually happening (this used to hide itself
     // completely whenever source wasn't 'camera', with zero indication
-    // why — easy to land on across devices with different saved settings).
+    // why - easy to land on across devices with different saved settings).
     if (!mounted) return null
 
     if (!isDesktopApp()) {
         return (
             <PrefRow
                 label="Native air-unit video bridge"
-                sub="Desktop app only — this browser tab can't run it"
-                right={<span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>—</span>}
+                sub="Desktop app only - this browser tab can't run it"
+                right={<span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>-</span>}
             />
         )
     }
@@ -434,7 +434,7 @@ function NativeAirUnitVideoRow({ source }: { source: VideoSource }) {
         return (
             <PrefRow
                 label="Native air-unit video bridge"
-                sub="Set Video source (above) to 'Camera' first — this feeds a camera device, it doesn't replace that setting"
+                sub="Set Video source (above) to 'Camera' first - this feeds a camera device, it doesn't replace that setting"
                 right={<span style={{ fontSize: 11, fontFamily: 'monospace', color: '#f59e0b' }}>Needs Camera source</span>}
             />
         )
@@ -444,7 +444,7 @@ function NativeAirUnitVideoRow({ source }: { source: VideoSource }) {
         <>
             <PrefRow
                 label="Native air-unit video bridge"
-                sub="Feeds the HyrakAirUnit camera device directly — no separate video_webcam.sh to run"
+                sub="Feeds the HyrakAirUnit camera device directly - no separate video_webcam.sh to run"
                 tip="Reads your air unit's RF video link (see start-gs.sh) the same way video_webcam.sh does, built into the app instead. Once running, pick 'HyrakAirUnit' from the Camera dropdown above like any other webcam (also startable from the Fly tab's device panel directly). Uses hardware decode automatically when a VAAPI-capable ffmpeg is available on this machine, same as before."
                 right={
                     <button
@@ -513,7 +513,7 @@ function NativeAirUnitVideoRow({ source }: { source: VideoSource }) {
 // Exists because a roaming laptop silently left the ground unit's network seven
 // times in one evening, and each time the failure surfaced as a video/telemetry
 // timeout rather than as "you are on the wrong network". Reports the subnet, not
-// the SSID — the SSID was misleading, since a bridging ground unit hands out the
+// the SSID - the SSID was misleading, since a bridging ground unit hands out the
 // upstream router's addresses while the camera stays on its own subnet.
 function NetworkCheckRow() {
     const [report, setReport] = useState<ProbeReport | null>(null)
@@ -532,7 +532,7 @@ function NetworkCheckRow() {
         <PrefRow
             label="Hardware reachability"
             sub="Whether this machine can reach the camera and ground unit right now"
-            tip="Green means on your own subnet — reached directly, the reliable case. Amber means reachable but ROUTED through a gateway, which depends on another device forwarding and is what fails intermittently. Red means unreachable: either this machine is on the wrong network, or the hardware is off. This deliberately reports your SUBNET rather than the WiFi name, because a ground unit that bridges to a phone hands out the phone's addresses while the camera stays on its own subnet — so the network name proves nothing."
+            tip="Green means on your own subnet - reached directly, the reliable case. Amber means reachable but ROUTED through a gateway, which depends on another device forwarding and is what fails intermittently. Red means unreachable: either this machine is on the wrong network, or the hardware is off. This deliberately reports your SUBNET rather than the WiFi name, because a ground unit that bridges to a phone hands out the phone's addresses while the camera stays on its own subnet - so the network name proves nothing."
             right={
                 <div style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 11, maxWidth: 340 }}>
                     {report?.error && (
@@ -546,7 +546,7 @@ function NetworkCheckRow() {
                                     {r.label}: {r.ok ? (r.onLink ? 'OK' : 'routed') : 'unreachable'}
                                 </span>
                                 <div style={{ color: 'hsl(var(--app-text-dim))', fontSize: 10, whiteSpace: 'normal', lineHeight: 1.4 }}>
-                                    {r.host}:{r.port} — {explainResult(r, report.addresses)}
+                                    {r.host}:{r.port} - {explainResult(r, report.addresses)}
                                 </div>
                             </div>
                         )
@@ -597,7 +597,7 @@ function RtspPathRow() {
         return () => clearInterval(t)
     }, [])
 
-    // MJPEG is a safety net, not an acceptable steady state — 20fps with no
+    // MJPEG is a safety net, not an acceptable steady state - 20fps with no
     // inter-frame compression, through <img> -> canvas -> rAF -> captureStream.
     // It gets a warning colour so it can never quietly become the norm again.
     const colour = !info.rung
@@ -610,7 +610,7 @@ function RtspPathRow() {
         <PrefRow
             label="Active video path"
             sub="Which rung of the RTSP fallback ladder is carrying video right now"
-            tip="The ladder tries, best first: direct (no re-encode, needs an H.264 camera) → H.264 transcode (for an H.265 camera, since Chromium ships no software HEVC decoder) → MJPEG (last resort, cannot fail on codec but is 20fps and has no inter-frame compression). Green is best, amber is a re-encode, red means you are on the fallback and latency will be roughly 3x worse. Buffer is the browser's own playback backlog — if that number is small while the picture is still late, the delay is upstream of the browser."
+            tip="The ladder tries, best first: direct (no re-encode, needs an H.264 camera) → H.264 transcode (for an H.265 camera, since Chromium ships no software HEVC decoder) → MJPEG (last resort, cannot fail on codec but is 20fps and has no inter-frame compression). Green is best, amber is a re-encode, red means you are on the fallback and latency will be roughly 3x worse. Buffer is the browser's own playback backlog - if that number is small while the picture is still late, the delay is upstream of the browser."
             right={
                 <div style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 11, maxWidth: 300 }}>
                     <div style={{ color: colour, fontWeight: 600 }}>
@@ -623,7 +623,7 @@ function RtspPathRow() {
                     </div>
                     {info.failures.length > 0 && (
                         <div style={{ color: '#f87171', marginTop: 4, fontSize: 10, whiteSpace: 'normal', lineHeight: 1.4 }}>
-                            {info.failures.map((f, i) => <div key={i}>skipped — {f}</div>)}
+                            {info.failures.map((f, i) => <div key={i}>skipped - {f}</div>)}
                         </div>
                     )}
                 </div>
@@ -667,8 +667,8 @@ function VideoGroup() {
         <>
             <PrefRow
                 label="Video source"
-                sub={isStreaming ? "Can't switch mid-stream — stop and restart to apply" : 'Applies to the next stream started from any tab (Fly, Modules)'}
-                tip="Camera uses your device's webcam like normal. Air unit (UDP) skips the browser entirely and has the backend read your RF link's video feed directly (see backend/app/webrtc/udp_video_source.py). SIYI RTSP has the BACKEND pull the camera — only works when the server is on the same network as the camera, which off a dev machine it never is. RTSP relay is the one to use for a real deployment: THIS machine pulls the camera and forwards the original bytes to the server without re-encoding, and shows you a local preview off the same process (desktop app only). The two DataChannel modes are the newest and the only ones that are BOTH bit-exact and NAT-traversing: the desktop opens its own WebRTC PeerConnection carrying raw RTP with no media track, so no codec is negotiated and H.265 survives untouched (aiortc can only negotiate VP8/H.264 on a track, which forces a transcode everywhere else). 'RTSP -> DataChannel' uses ffmpeg purely to speak RTSP. 'Air unit -> DataChannel' uses no ffmpeg at all — wfb_rx already delivers RTP/H.265 to the port, so the app just forwards datagrams; it is the cheapest path here and bit-identical to what the drone's encoder produced. 'Air unit -> GStreamer' is the newest and the one to prefer on Linux: a SINGLE GStreamer pipeline owns udp:5600 and splits it with a tee — a hardware-decoded local preview for the pilot, and a bit-exact H.265 SRT uplink for the server's AI. Nothing passes through JavaScript (the DataChannel path reads every packet on Electron's one event loop, and drops them silently when it stalls), and hardware codecs are actually reachable — the bundled ffmpeg has no VAAPI at all. Measured on 1080p20: ffmpeg preview ~79% of a core, GStreamer software 41%, GStreamer hardware 4.4%. Needs GStreamer installed on this machine. Resolution/fps/feed-mode below don't apply to any backend-sourced mode."
+                sub={isStreaming ? "Can't switch mid-stream - stop and restart to apply" : 'Applies to the next stream started from any tab (Fly, Modules)'}
+                tip="Camera uses your device's webcam like normal. Air unit (UDP) skips the browser entirely and has the backend read your RF link's video feed directly (see backend/app/webrtc/udp_video_source.py). SIYI RTSP has the BACKEND pull the camera - only works when the server is on the same network as the camera, which off a dev machine it never is. RTSP relay is the one to use for a real deployment: THIS machine pulls the camera and forwards the original bytes to the server without re-encoding, and shows you a local preview off the same process (desktop app only). The two DataChannel modes are the newest and the only ones that are BOTH bit-exact and NAT-traversing: the desktop opens its own WebRTC PeerConnection carrying raw RTP with no media track, so no codec is negotiated and H.265 survives untouched (aiortc can only negotiate VP8/H.264 on a track, which forces a transcode everywhere else). 'RTSP -> DataChannel' uses ffmpeg purely to speak RTSP. 'Air unit -> DataChannel' uses no ffmpeg at all - wfb_rx already delivers RTP/H.265 to the port, so the app just forwards datagrams; it is the cheapest path here and bit-identical to what the drone's encoder produced. 'Air unit -> GStreamer' is the newest and the one to prefer on Linux: a SINGLE GStreamer pipeline owns udp:5600 and splits it with a tee - a hardware-decoded local preview for the pilot, and a bit-exact H.265 SRT uplink for the server's AI. Nothing passes through JavaScript (the DataChannel path reads every packet on Electron's one event loop, and drops them silently when it stalls), and hardware codecs are actually reachable - the bundled ffmpeg has no VAAPI at all. Measured on 1080p20: ffmpeg preview ~79% of a core, GStreamer software 41%, GStreamer hardware 4.4%. Needs GStreamer installed on this machine. Resolution/fps/feed-mode below don't apply to any backend-sourced mode."
                 right={
                     <select
                         value={source}
@@ -687,7 +687,7 @@ function VideoGroup() {
                         {/* Derived from the catalogue, NOT a hand-written list.
                             It was hardcoded to three groups, so adding
                             'Ground decoder' silently dropped the entire group
-                            from the dropdown — the source existed, worked, and
+                            from the dropdown - the source existed, worked, and
                             could not be selected. Exactly the class of bug the
                             data-driven catalogue above was introduced to kill,
                             reintroduced two lines from it. */}
@@ -706,7 +706,7 @@ function VideoGroup() {
 
             {/* What the selected source actually does, and what it needs to
                 work. Nine sources differ mostly in WHO opens the stream and
-                whether that machine can reach it — which was buried in one
+                whether that machine can reach it - which was buried in one
                 enormous tooltip nobody could read at the moment of choosing. */}
             {specFor(source) && (
                 <div style={{
@@ -719,7 +719,7 @@ function VideoGroup() {
                     {specFor(source)!.blurb}
                     {specFor(source)!.serverReaches && (
                         <div style={{ marginTop: 6, color: '#f59e0b' }}>
-                            Requires the SERVER to reach the source directly — not this laptop.
+                            Requires the SERVER to reach the source directly - not this laptop.
                         </div>
                     )}
                     {specFor(source)!.desktopOnly && !isDesktopApp() && (
@@ -734,7 +734,7 @@ function VideoGroup() {
                 <PrefRow
                     label="Air unit video port"
                     sub="Local UDP port the backend reads the RTP/H.265 video stream from"
-                    tip="Matches whatever port your ground-station wfb_rx (or equivalent) delivers video to — see communication/start-gs.sh. Default 5600."
+                    tip="Matches whatever port your ground-station wfb_rx (or equivalent) delivers video to - see communication/start-gs.sh. Default 5600."
                     right={
                         <input
                             type="number"
@@ -758,7 +758,7 @@ function VideoGroup() {
             {sourceNeeds(source, 'fanout') && (
                 <PrefRow
                     label="Local fan-out port"
-                    sub="Re-send a verbatim copy of the video to another local UDP port — 0 to disable"
+                    sub="Re-send a verbatim copy of the video to another local UDP port - 0 to disable"
                     tip="Only one program can receive a UDP port, so streaming the feed takes it away from any local viewer already reading it (gst-decode.sh reads 5600). Set e.g. 5601 here and point that viewer at 5601 instead: one capture, two consumers, identical bytes. gst-launch-1.0 udpsrc port=5601 caps='application/x-rtp,media=video,encoding-name=H265,clock-rate=90000,payload=96' ! rtpjitterbuffer latency=50 ! rtph265depay ! h265parse ! avdec_h265 ! autovideosink sync=false"
                     right={
                         <input
@@ -780,14 +780,14 @@ function VideoGroup() {
                     }
                 />
             )}
-            {/* Camera address — only for sources that actually open one. The
+            {/* Camera address - only for sources that actually open one. The
                 air-unit modes were previously inside this same block and got
                 an RTSP URL field they have no use for. */}
             {sourceNeeds(source, 'rtspUrl') && (
                 <>
                     <PrefRow
                         label="Camera URL"
-                        sub="RTSP address this machine pulls from — the SIYI ground unit on its own hotspot"
+                        sub="RTSP address this machine pulls from - the SIYI ground unit on its own hotspot"
                         tip="Shares the same saved value as SIYI (RTSP) mode. The difference is who opens it: relay mode opens it from THIS laptop, which is the only machine that can actually reach 192.168.144.x."
                         right={
                             <input
@@ -810,8 +810,8 @@ function VideoGroup() {
             {sourceNeeds(source, 'rtspXport') && (
                 <PrefRow
                     label="Camera transport"
-                        sub="How ffmpeg opens the RTSP feed — the hop from the SIYI ground unit to this laptop"
-                        tip="Independent of the uplink transport below: this is the CAMERA leg, not the server leg. TCP loses nothing, but a retransmission stalls everything queued behind it (head-of-line blocking) — so on a weak or distant hotspot link the delay ACCUMULATES instead of glitching, which can be hundreds of milliseconds of standing lag. UDP drops late packets instead of waiting for them, so loss shows as brief artifacts and can never pile up; it also pins ffmpeg's packet-reorder buffer to zero, which otherwise exists purely to wait. Try UDP if the feed is steadily late rather than stuttery. TCP is the default and the known-good setting."
+                        sub="How ffmpeg opens the RTSP feed - the hop from the SIYI ground unit to this laptop"
+                        tip="Independent of the uplink transport below: this is the CAMERA leg, not the server leg. TCP loses nothing, but a retransmission stalls everything queued behind it (head-of-line blocking) - so on a weak or distant hotspot link the delay ACCUMULATES instead of glitching, which can be hundreds of milliseconds of standing lag. UDP drops late packets instead of waiting for them, so loss shows as brief artifacts and can never pile up; it also pins ffmpeg's packet-reorder buffer to zero, which otherwise exists purely to wait. Try UDP if the feed is steadily late rather than stuttery. TCP is the default and the known-good setting."
                         right={
                             <ChipGroup
                                 value={rtspTransport}
@@ -826,14 +826,14 @@ function VideoGroup() {
             )}
 
             {/* Local preview tuning. Both rows drive a <video> element, which
-                the GStreamer/WebCodecs path does not use — it renders to a
+                the GStreamer/WebCodecs path does not use - it renders to a
                 canvas with no playback buffer to fragment or clamp. */}
             {sourceNeeds(source, 'preview') && (
                 <>
                     <PrefRow
                         label="Preview fragmenting"
                         sub="Size of the chunks the local preview is cut into"
-                        tip="A fragmented-MP4 fragment is only written once it is complete, so this value is added to the preview's delay in full. Low latency cuts at 20 ms — under one frame at 30fps, so the fragment boundary stops mattering at all. Compatible is the original 100 ms; switch back to it if short fragments upset playback anywhere."
+                        tip="A fragmented-MP4 fragment is only written once it is complete, so this value is added to the preview's delay in full. Low latency cuts at 20 ms - under one frame at 30fps, so the fragment boundary stops mattering at all. Compatible is the original 100 ms; switch back to it if short fragments upset playback anywhere."
                         right={
                             <ChipGroup
                                 value={fragMode}
@@ -848,7 +848,7 @@ function VideoGroup() {
                     <PrefRow
                         label="Live-edge clamp"
                         sub="Drain the browser's playback buffer back toward the newest frame"
-                        tip="Chromium settles a few hundred ms behind its own newest buffered frame when it starts a live stream, and never catches up on its own — frames arrive at exactly the rate they are consumed, so the startup backlog is permanent. This nudges playback slightly above 1.0x until the backlog is spent, then returns to normal. Side effect: motion runs a little fast for about a second after a stream starts. Read the current backlog in the DevTools console with __hyrakLiveEdge()."
+                        tip="Chromium settles a few hundred ms behind its own newest buffered frame when it starts a live stream, and never catches up on its own - frames arrive at exactly the rate they are consumed, so the startup backlog is permanent. This nudges playback slightly above 1.0x until the backlog is spent, then returns to normal. Side effect: motion runs a little fast for about a second after a stream starts. Read the current backlog in the DevTools console with __hyrakLiveEdge()."
                         right={<Toggle value={liveEdge} onChange={() => { const next = !liveEdge; setLiveEdgeState(next); setLiveEdgeClamp(next) }} />}
                     />
                 </>
@@ -859,7 +859,7 @@ function VideoGroup() {
                     <PrefRow
                         label="Uplink transport"
                         sub="How the copied video reaches the server"
-                        tip="SRT retransmits lost packets inside a bounded window, so loss becomes a brief glitch instead of a freeze — the right default. TCP delivers everything but stalls the whole stream while it recovers a lost packet; use it only where UDP is blocked entirely (some campus and hotel networks). Plain UDP never retransmits at all — LAN only."
+                        tip="SRT retransmits lost packets inside a bounded window, so loss becomes a brief glitch instead of a freeze - the right default. TCP delivers everything but stalls the whole stream while it recovers a lost packet; use it only where UDP is blocked entirely (some campus and hotel networks). Plain UDP never retransmits at all - LAN only."
                         right={
                             <ChipGroup
                                 value={relayTransport}
@@ -876,7 +876,7 @@ function VideoGroup() {
                         <PrefRow
                             label="SRT latency window"
                             sub="Milliseconds of buffer for retransmitting lost packets (min 80)"
-                            tip="A floor on delay as well as the retransmission budget: packets lost further back than this cannot be recovered. SRT needs 2.5-4x the round-trip time, so anything under ~80 ms cannot retransmit at all and only adds its own delay — values below that are ignored. In air_unit_gst mode this does NOT delay your video, which is decoded locally; it delays only the server's copy, and therefore how far the AI overlay boxes trail the picture. Through a relay VPS use ~300 ms; testing against a server on your own machine or LAN, 80-120 ms is plenty."
+                            tip="A floor on delay as well as the retransmission budget: packets lost further back than this cannot be recovered. SRT needs 2.5-4x the round-trip time, so anything under ~80 ms cannot retransmit at all and only adds its own delay - values below that are ignored. In air_unit_gst mode this does NOT delay your video, which is decoded locally; it delays only the server's copy, and therefore how far the AI overlay boxes trail the picture. Through a relay VPS use ~300 ms; testing against a server on your own machine or LAN, 80-120 ms is plenty."
                             right={
                                 <input
                                     type="number"
@@ -904,7 +904,7 @@ function VideoGroup() {
                 </>
             )}
 
-            {/* HYRAK Receiver — the ground decoder. The address is a REQUIRED
+            {/* HYRAK Receiver - the ground decoder. The address is a REQUIRED
                 setting rather than a constant: the decoder ships with a static
                 IP today, but a client on a different subnet has no way to
                 reach it and no way to say so if this is hardcoded. */}
@@ -913,7 +913,7 @@ function VideoGroup() {
                     <PrefRow
                         label="Ground decoder address"
                         sub="IP of the HYRAK ground decoder on the Ethernet link"
-                        tip="The decoder terminates the RF link and hands this PC decrypted, compressed video — no driver, no keys, no wfb-ng on this machine. It ships with a static address (192.168.50.12 on the tested link). If the picture never appears, check this first: an address on a different subnet from this PC cannot be reached no matter what the transport is."
+                        tip="The decoder terminates the RF link and hands this PC decrypted, compressed video - no driver, no keys, no wfb-ng on this machine. It ships with a static address (192.168.50.12 on the tested link). If the picture never appears, check this first: an address on a different subnet from this PC cannot be reached no matter what the transport is."
                         right={
                             <input
                                 type="text"
@@ -931,7 +931,7 @@ function VideoGroup() {
                     <PrefRow
                         label="Transport"
                         sub="How the video gets from the decoder to this PC"
-                        tip="RTSP is the default and the right answer for almost everyone: THIS PC connects outward, so the decoder needs no knowledge of your address and no inbound firewall rule is involved. Over TCP nothing is lost, but TCP recovers a lost packet by stalling everything behind it with no upper bound — which is why VLC looks clean and runs about half a second behind. SRT keeps RTSP's addressing and firewall behaviour and fixes the unbounded part: loss is retransmitted only inside the latency window below and dropped outside it, so delay cannot accumulate. It needs 'srt: yes' enabled in MediaMTX on the decoder — the same process that already serves RTSP, so it costs that board almost nothing. UDP is the lowest latency of the three and the most fragile operationally: the decoder PUSHES, so it must be configured with this PC's address, and Windows Firewall must allow the port inbound — both fail as a black screen rather than as a message."
+                        tip="RTSP is the default and the right answer for almost everyone: THIS PC connects outward, so the decoder needs no knowledge of your address and no inbound firewall rule is involved. Over TCP nothing is lost, but TCP recovers a lost packet by stalling everything behind it with no upper bound - which is why VLC looks clean and runs about half a second behind. SRT keeps RTSP's addressing and firewall behaviour and fixes the unbounded part: loss is retransmitted only inside the latency window below and dropped outside it, so delay cannot accumulate. It needs 'srt: yes' enabled in MediaMTX on the decoder - the same process that already serves RTSP, so it costs that board almost nothing. UDP is the lowest latency of the three and the most fragile operationally: the decoder PUSHES, so it must be configured with this PC's address, and Windows Firewall must allow the port inbound - both fail as a black screen rather than as a message."
                         right={
                             <ChipGroup
                                 value={rxTransport}
@@ -940,7 +940,7 @@ function VideoGroup() {
                                     setReceiverTransport(v)
                                     // Latency is stored per transport, so the
                                     // displayed value has to follow the switch
-                                    // — showing an SRT budget next to a UDP
+                                    // - showing an SRT budget next to a UDP
                                     // jitter buffer would be a lie.
                                     setRxLatencyState(getReceiverLatencyMs(v))
                                 }}
@@ -957,7 +957,7 @@ function VideoGroup() {
                         sub={rxTransport === 'srt'
                             ? 'Milliseconds within which lost packets are recovered'
                             : 'Milliseconds of buffer absorbing arrival jitter'}
-                        tip="The same dial means different things per transport, which is why it is stored separately for each. On UDP and RTSP it absorbs variation in arrival time; on SRT it is the retransmission budget itself and is also a floor on delay. Lower is snappier and less tolerant: 20-25ms runs cleanly on a direct cable, but if you see micro-stutter — visible, not something the logs will show — go back up toward 50. There is no universally right number; tune it against your actual link."
+                        tip="The same dial means different things per transport, which is why it is stored separately for each. On UDP and RTSP it absorbs variation in arrival time; on SRT it is the retransmission budget itself and is also a floor on delay. Lower is snappier and less tolerant: 20-25ms runs cleanly on a direct cable, but if you see micro-stutter - visible, not something the logs will show - go back up toward 50. There is no universally right number; tune it against your actual link."
                         right={
                             <input
                                 type="number"
@@ -979,13 +979,13 @@ function VideoGroup() {
                     <PrefRow
                         label="H.265 passthrough"
                         sub="Send the decoder's H.265 to the screen with nothing transcoding it"
-                        tip="Off by default, and that is deliberate. Skipping the transcode sounds strictly better, but Chromium's HEVC support is platform-gated and will report that it supports H.265 and then fail the actual decode — a black picture with only 'Decoding error' to show for it, which is what happened on this machine. With this off, the stream is converted to H.264 first, which every Chromium decodes everywhere; on hardware that conversion costs about 4% of one core. Worth turning ON to test on a Windows machine with a modern NVIDIA GPU, where the platform decoder is solid and the transcode is pure waste. If it fails, the app detects the real decode error and falls back on its own for the rest of the session."
+                        tip="Off by default, and that is deliberate. Skipping the transcode sounds strictly better, but Chromium's HEVC support is platform-gated and will report that it supports H.265 and then fail the actual decode - a black picture with only 'Decoding error' to show for it, which is what happened on this machine. With this off, the stream is converted to H.264 first, which every Chromium decodes everywhere; on hardware that conversion costs about 4% of one core. Worth turning ON to test on a Windows machine with a modern NVIDIA GPU, where the platform decoder is solid and the transcode is pure waste. If it fails, the app detects the real decode error and falls back on its own for the rest of the session."
                         right={<Toggle value={rxPassthrough} onChange={() => { const next = !rxPassthrough; setRxPassthroughState(next); setReceiverPassthrough(next) }} />}
                     />
                     <PrefRow
                         label="Decode path"
                         sub={`Auto probes this machine and falls back on its own (default ${DEFAULT_RECEIVER_LATENCY_MS[rxTransport]}ms buffer)`}
-                        tip="Leave this on Auto. The receiver prefers passing H.265 straight to the browser engine, which reaches your GPU through the OS and costs nothing to install — that is what makes one download work on Windows, Linux and ARM64 alike. If this machine's browser engine cannot decode H.265 it transcodes to H.264 first, using hardware if any is genuinely usable and stepping down through decode-on-GPU/encode-in-software to all-software until something runs. Forcing Software is a diagnostic: it proves whether a fault is the GPU without guessing. The path actually running is reported on the video pane."
+                        tip="Leave this on Auto. The receiver prefers passing H.265 straight to the browser engine, which reaches your GPU through the OS and costs nothing to install - that is what makes one download work on Windows, Linux and ARM64 alike. If this machine's browser engine cannot decode H.265 it transcodes to H.264 first, using hardware if any is genuinely usable and stepping down through decode-on-GPU/encode-in-software to all-software until something runs. Forcing Software is a diagnostic: it proves whether a fault is the GPU without guessing. The path actually running is reported on the video pane."
                         right={
                             <ChipGroup
                                 value={rxAccel}
@@ -1009,7 +1009,7 @@ function VideoGroup() {
                     <PrefRow
                         label="Jitter buffer"
                         sub="Milliseconds the RTP buffer will wait for a late packet (min 30)"
-                        tip="Paired with drop-on-latency, so this is not 'how long we wait' but 'how late a packet may be before it is DISCARDED'. Ordinary Wi-Fi jitter exceeds 10 ms, and a discarded packet in a compressed stream breaks every frame that references it until the next keyframe — which the server logs as 'Could not find ref with POC'. 60 ms is the smallest value that survives normal Wi-Fi. Raise to 100-150 on a long or lossy RF link; it costs that much delay on your local preview."
+                        tip="Paired with drop-on-latency, so this is not 'how long we wait' but 'how late a packet may be before it is DISCARDED'. Ordinary Wi-Fi jitter exceeds 10 ms, and a discarded packet in a compressed stream breaks every frame that references it until the next keyframe - which the server logs as 'Could not find ref with POC'. 60 ms is the smallest value that survives normal Wi-Fi. Raise to 100-150 on a long or lossy RF link; it costs that much delay on your local preview."
                         right={
                             <input
                                 type="number"
@@ -1020,7 +1020,7 @@ function VideoGroup() {
                                 onChange={e => {
                                     const v = Number(e.target.value)
                                     setGstJitterState(v)
-                                    // Floor matches getGstJitterMs — below 30 the value
+                                    // Floor matches getGstJitterMs - below 30 the value
                                     // would be stored and then silently ignored.
                                     if (v >= 30 && v <= 2000) setGstJitterMs(v)
                                 }}
@@ -1035,7 +1035,7 @@ function VideoGroup() {
                     <PrefRow
                         label="Decode path"
                         sub="Hardware uses the GPU; software is roughly ten times the CPU"
-                        tip="Auto prefers hardware and falls back on its own — and demotes itself permanently for the session if the hardware pipeline dies twice quickly. Measured on 1080p20 H.265: GStreamer hardware 4.4% of a core, software 41.3%, bundled-ffmpeg preview ~79%. Force software only when debugging a driver problem."
+                        tip="Auto prefers hardware and falls back on its own - and demotes itself permanently for the session if the hardware pipeline dies twice quickly. Measured on 1080p20 H.265: GStreamer hardware 4.4% of a core, software 41.3%, bundled-ffmpeg preview ~79%. Force software only when debugging a driver problem."
                         right={
                             <ChipGroup
                                 value={gstAccel}
@@ -1054,7 +1054,7 @@ function VideoGroup() {
             <PrefRow
                 label="AI module feed"
                 sub="Applies when the next stream starts"
-                tip="Direct + overlay shows your camera feed directly and draws AI results on top — sharpest video, lowest latency, and roughly half the bandwidth since no video is sent back from the server. The overlays lag the video by one inference (~100 ms). Processed shows the server-rendered feed — video and annotations perfectly in sync, but quality is limited by the return encode and bandwidth is higher. Depth mapping and enhance always use the processed feed."
+                tip="Direct + overlay shows your camera feed directly and draws AI results on top - sharpest video, lowest latency, and roughly half the bandwidth since no video is sent back from the server. The overlays lag the video by one inference (~100 ms). Processed shows the server-rendered feed - video and annotations perfectly in sync, but quality is limited by the return encode and bandwidth is higher. Depth mapping and enhance always use the processed feed."
                 right={
                     <ChipGroup
                         value={feed}
@@ -1069,7 +1069,7 @@ function VideoGroup() {
             <PrefRow
                 label="Standby uplink"
                 sub={isStreaming ? 'Applied live to the running stream' : 'Applies while no AI mode is active'}
-                tip="What the browser sends the server while you're just flying (no AI mode running) — the server only uses it for the admin dashboard's live preview; your own view is always the full local feed. Full sends the resolution/fps chosen below. Eco sends a small 8 fps preview instead, freeing this machine's CPU — important on low-power ground stations that are also decoding an RF video link. Auto picks Eco only when the selected camera is the HyrakAirUnit virtual webcam (air-unit ground stations), Full otherwise. AI modes always uplink at full quality regardless."
+                tip="What the browser sends the server while you're just flying (no AI mode running) - the server only uses it for the admin dashboard's live preview; your own view is always the full local feed. Full sends the resolution/fps chosen below. Eco sends a small 8 fps preview instead, freeing this machine's CPU - important on low-power ground stations that are also decoding an RF video link. Auto picks Eco only when the selected camera is the HyrakAirUnit virtual webcam (air-unit ground stations), Full otherwise. AI modes always uplink at full quality regardless."
                 right={
                     <ChipGroup
                         value={standby}
@@ -1090,7 +1090,7 @@ function VideoGroup() {
             <PrefRow
                 label="Capture priority"
                 sub={isStreaming ? 'Applied live to the running stream' : 'Applies when the stream starts'}
-                tip="How the browser's encoder spends bitrate on the way to the server. Smooth prioritises motion: under congestion the resolution drops and the frame rate holds — right for flying and for watching. Detail prioritises fine detail: the frame rate drops and the RESOLUTION holds, the encoder is told to preserve detail rather than smooth motion, and the bitrate ceiling roughly doubles. Use Detail for number plates and any small text: a plate is only a few hundred pixels of high-frequency detail, which is exactly what a motion-tuned encoder discards first, and a dropped frame costs nothing because the plate is still there on the next one. Note this only affects browser camera capture — every backend-sourced mode already delivers the original bytes untouched."
+                tip="How the browser's encoder spends bitrate on the way to the server. Smooth prioritises motion: under congestion the resolution drops and the frame rate holds - right for flying and for watching. Detail prioritises fine detail: the frame rate drops and the RESOLUTION holds, the encoder is told to preserve detail rather than smooth motion, and the bitrate ceiling roughly doubles. Use Detail for number plates and any small text: a plate is only a few hundred pixels of high-frequency detail, which is exactly what a motion-tuned encoder discards first, and a dropped frame costs nothing because the plate is still there on the next one. Note this only affects browser camera capture - every backend-sourced mode already delivers the original bytes untouched."
                 right={
                     <ChipGroup
                         value={capture}
@@ -1170,7 +1170,7 @@ function CrowdGroup() {
             <PrefRow
                 label="Density sensitivity"
                 sub="How many people in frame count as light / moderate / dense"
-                tip="Whole-frame headcount depends entirely on how tight the drone is framed and its altitude — there's no single correct value. Tight flags density sooner (good for confined spaces); Loose needs more people before warning (good for wide-open areas). Applies live if a crowd-management stream is running."
+                tip="Whole-frame headcount depends entirely on how tight the drone is framed and its altitude - there's no single correct value. Tight flags density sooner (good for confined spaces); Loose needs more people before warning (good for wide-open areas). Applies live if a crowd-management stream is running."
                 right={
                     <ChipGroup
                         value={preset}
@@ -1188,7 +1188,7 @@ function CrowdGroup() {
                 <PrefRow
                     label="Custom thresholds"
                     sub="People in frame: up to Light = green, up to Moderate = orange, above = red"
-                    tip="Your own numbers, for when you have counted them. A venue with a known safe occupancy, or a site you have flown before, has better thresholds than any preset here — these depend on lens, altitude and framing, so nobody can pick them for you. Moderate is always kept at least one above Light, otherwise the orange band vanishes and the count jumps straight from green to red."
+                    tip="Your own numbers, for when you have counted them. A venue with a known safe occupancy, or a site you have flown before, has better thresholds than any preset here - these depend on lens, altitude and framing, so nobody can pick them for you. Moderate is always kept at least one above Light, otherwise the orange band vanishes and the count jumps straight from green to red."
                     right={
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             {([
@@ -1243,9 +1243,9 @@ function MissionGroup() {
     )
 }
 
-// Desktop-app-only — nothing renders in the browser build (isDesktopApp()
+// Desktop-app-only - nothing renders in the browser build (isDesktopApp()
 // is false there). Manual mirror of the same consent-gated flow the
-// startup UpdatePrompt uses (components/updater/UpdatePrompt.tsx) — this
+// startup UpdatePrompt uses (components/updater/UpdatePrompt.tsx) - this
 // is the "check right now" entry point, that one is the "we noticed on
 // launch" entry point. Both just call the same native updater API.
 type UpdateStatus = 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'downloaded' | 'error'
@@ -1256,7 +1256,7 @@ function DesktopUpdateRow() {
     const [newVersion, setNewVersion] = useState('')
     const [status, setStatus]     = useState<UpdateStatus>('idle')
     const [statusMsg, setStatusMsg] = useState('')
-    // Undefined until the first progress event — distinguishes "authorized,
+    // Undefined until the first progress event - distinguishes "authorized,
     // nothing has moved yet" from "0% downloaded", which look identical if you
     // only track a number.
     const [progress, setProgress] = useState<{ percent: number; transferred?: number; total?: number; rate?: number } | null>(null)
@@ -1275,7 +1275,7 @@ function DesktopUpdateRow() {
                 setStatus('available'); setStatusMsg(`v${event.version} available`)
             }
             // download-progress / downloaded were dropped on the floor here, so
-            // this row went silent for the entire download — the one part of
+            // this row went silent for the entire download - the one part of
             // the flow where the user most wants to see something happening.
             else if (event.type === 'download-progress') {
                 setStatus('downloading')
@@ -1290,7 +1290,7 @@ function DesktopUpdateRow() {
             else if (event.type === 'downloaded') {
                 setStatus('downloaded')
                 if (event.version) setNewVersion(event.version)
-                setStatusMsg('Downloaded — restart to apply')
+                setStatusMsg('Downloaded - restart to apply')
             }
             else if (event.type === 'error') {
                 setStatus('error')
@@ -1332,7 +1332,7 @@ function DesktopUpdateRow() {
             <PrefRow
                 label="Desktop app"
                 sub={version ? `Installed version ${version}` : undefined}
-                tip="This app's native shell (bridges + updater) rarely changes — most day-to-day updates are the site itself, which always loads live and needs no update step at all."
+                tip="This app's native shell (bridges + updater) rarely changes - most day-to-day updates are the site itself, which always loads live and needs no update step at all."
                 right={
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         {statusMsg && status !== 'error' && (
@@ -1425,7 +1425,7 @@ function AboutGroup() {
 // These are properties of the airframe and the mission: they must apply to any
 // session from any browser and survive a restart, so the backend owns them
 // (backend/app/vision/calibration.py) and this renders whatever field table it
-// serves. Ranges and help text are NOT duplicated here — that is how a form
+// serves. Ranges and help text are NOT duplicated here - that is how a form
 // starts accepting values the backend then rejects.
 
 function CalibrationRow({ field, onSave, busy }: {
@@ -1454,7 +1454,7 @@ function CalibrationRow({ field, onSave, busy }: {
 
     const sub = [
         field.overridden ? 'measured' : 'default',
-        field.min !== undefined ? `${field.min}–${field.max}${field.unit ? ' ' + field.unit : ''}` : '',
+        field.min !== undefined ? `${field.min}-${field.max}${field.unit ? ' ' + field.unit : ''}` : '',
     ].filter(Boolean).join('  ·  ')
 
     return (
@@ -1543,7 +1543,7 @@ function CameraCalibrationGroup() {
     if (offline) {
         return (
             <p style={{ fontSize: 12, color: '#fbbf24', lineHeight: 1.6 }}>
-                Backend unreachable — calibration is stored on the server, so it
+                Backend unreachable - calibration is stored on the server, so it
                 cannot be read or changed right now.
             </p>
         )
@@ -1566,7 +1566,7 @@ function CameraCalibrationGroup() {
                 }}>
                     <Info size={13} style={{ marginTop: 1, flexShrink: 0 }} />
                     <span>
-                        <b>Not calibrated yet</b> — these are deploy-time defaults.
+                        <b>Not calibrated yet</b> - these are deploy-time defaults.
                         Speed, distance and ground position all scale directly off
                         the horizontal FOV, so measure it before trusting any of
                         them: fill the frame edge-to-edge with a target of known
@@ -1584,7 +1584,7 @@ function CameraCalibrationGroup() {
                 visible without flying to find out. */}
             <PrefRow
                 label="Implied geometry"
-                sub="Derived from the values above — not editable"
+                sub="Derived from the values above - not editable"
                 tip="Vertical FOV is what decides whether ONE fixed mount angle can cover both a shallow view (for reading plates and faces) and a steep one (for ground projection). GSD is metres per pixel at nadir: it tells you whether a target has enough pixels to analyse at that height."
                 right={
                     <div style={{ fontSize: 11, fontFamily: 'monospace', textAlign: 'right', color: 'hsl(var(--app-text-muted))', lineHeight: 1.6 }}>
@@ -1627,7 +1627,7 @@ function FollowTuningGroup() {
         <>
             <p style={{ fontSize: 11, color: 'hsl(var(--app-text-muted))', lineHeight: 1.6, margin: '0 0 6px' }}>
                 How hard the drone turns to keep a subject centred, for{' '}
-                <b>every</b> mode that can follow one — human tracking, person
+                <b>every</b> mode that can follow one - human tracking, person
                 tracking, crowd management, traffic management and vehicle-plate
                 tracking. Yaw is the axis that decides whether the subject stays
                 in frame at all.
@@ -1639,14 +1639,14 @@ function FollowTuningGroup() {
                 the Settings values "don't work" after watching a panel slider
                 win. The panel sliders are per-session and were here first. */}
             <p style={{ fontSize: 11, color: 'hsl(var(--app-text-muted))', lineHeight: 1.6, margin: '8px 0 0' }}>
-                Applied when a tracking mode next <b>starts</b> — unlike the
+                Applied when a tracking mode next <b>starts</b> - unlike the
                 camera calibration above, which takes effect on the next frame.
                 Switch AI mode, or restart the stream, to pick up a change.
             </p>
             <p style={{ fontSize: 11, color: 'hsl(var(--app-text-muted))', lineHeight: 1.6, margin: '6px 0 0' }}>
                 These are the values every mode <i>starts</i> from. Human
                 Tracking and Person Tracker also keep their own sliders for
-                changing them between runs — those act on the running session
+                changing them between runs - those act on the running session
                 only, and are not saved here.
             </p>
         </>
@@ -1680,7 +1680,7 @@ function VisionLimitsGroup() {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-// The groups above are pure content — no headings of their own. Section
+// The groups above are pure content - no headings of their own. Section
 // headings live HERE instead, so the page's structure is declarative and
 // visible in one place rather than implied by the order of eleven components
 // that each printed their own label. Adding a settings group means adding a
@@ -1714,9 +1714,9 @@ function LinkGroup() {
             <PrefRow
                 label="Link status"
                 sub={connected
-                    ? 'Connected — the link can be released from here or from the Fly tab'
+                    ? 'Connected - the link can be released from here or from the Fly tab'
                     : 'No telemetry link'}
-                tip="Disconnecting stops whichever local relay owns the radio (Web Serial, native serial or native RF) BEFORE telling the server to forget the link — otherwise the still-running relay would immediately re-establish it from its own traffic."
+                tip="Disconnecting stops whichever local relay owns the radio (Web Serial, native serial or native RF) BEFORE telling the server to forget the link - otherwise the still-running relay would immediately re-establish it from its own traffic."
                 right={
                     connected ? (
                         <button
@@ -1749,7 +1749,7 @@ function LinkGroup() {
             <PrefRow
                 label="Default MAVLink address"
                 sub="Pre-filled in the Fly tab's connect box"
-                tip="udp://:14540 is PX4 SITL's default. For a real vehicle over a network link use the address the autopilot streams to, e.g. udp://:14550. Serial radios do not use this — pick the port and baud below instead."
+                tip="udp://:14540 is PX4 SITL's default. For a real vehicle over a network link use the address the autopilot streams to, e.g. udp://:14550. Serial radios do not use this - pick the port and baud below instead."
                 right={
                     <input
                         value={address}
@@ -1766,7 +1766,7 @@ function LinkGroup() {
             <PrefRow
                 label="Radio baud rate"
                 sub="Default for serial telemetry radios"
-                tip="SiK-family radios (the common 433/915 MHz modules) ship at 57600. RFD900 and some clones use 115200. A wrong baud opens the port successfully and then delivers nothing decodable, which looks exactly like a dead radio — so if the port connects but no telemetry arrives, try the other value here first."
+                tip="SiK-family radios (the common 433/915 MHz modules) ship at 57600. RFD900 and some clones use 115200. A wrong baud opens the port successfully and then delivers nothing decodable, which looks exactly like a dead radio - so if the port connects but no telemetry arrives, try the other value here first."
                 right={
                     <select
                         value={baud}
@@ -1883,7 +1883,7 @@ function SettingsNav({ active, onSelect }: { active: string; onSelect: (id: stri
 export default function SettingsPage() {
     // Every group below reads a localStorage-backed preference straight into
     // its initial state (theme, video source, units, ...). The server has no
-    // localStorage to read, so it always renders the fallback default —
+    // localStorage to read, so it always renders the fallback default -
     // whenever a saved value differs, the client's first render disagrees
     // with the server-rendered HTML and React flags a hydration mismatch
     // (harmless in practice, but noisy and technically unsound). Delaying
@@ -1907,7 +1907,7 @@ export default function SettingsPage() {
 
                 <div style={{ padding: '18px 0 14px' }}>
                     <h1 style={{ fontSize: 16, fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>App Settings</h1>
-                    <p style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '3px 0 0' }}>Preferences saved to this device — not sent to the drone</p>
+                    <p style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '3px 0 0' }}>Preferences saved to this device - not sent to the drone</p>
                 </div>
 
                 {mounted && (
@@ -1921,7 +1921,7 @@ export default function SettingsPage() {
                             {active.sections.map(({ label, Body }) => (
                                 <div key={label}>
                                     {/* A lone section whose name just repeats the category heading
-                                        would be pure noise — only show the divider when it adds
+                                        would be pure noise - only show the divider when it adds
                                         information (several sections, or a different name). */}
                                     {(active.sections.length > 1 || label !== active.label.toUpperCase()) && (
                                         <GroupLabel text={label} />

@@ -1,4 +1,4 @@
-// Turn-radius path expansion for mission uploads — shared by the single-drone
+// Turn-radius path expansion for mission uploads - shared by the single-drone
 // upload flow (mission page) and the fleet mission panel so every drone flies
 // the same geometry the map displays.
 
@@ -26,7 +26,7 @@ function computeBearing(lat1: number, lng1: number, lat2: number, lng2: number):
 // next point along the actual flight path (including Bezier arc tangents).
 export function expandWaypointsWithTurnRadius(allWaypoints: Waypoint[], autoHeading = false): UploadWp[] {
     // RTL is a separate, non-mission control now (see rtlPosition in the mission
-    // store) — defensively strip any legacy 'rtl'-type entries before building
+    // store) - defensively strip any legacy 'rtl'-type entries before building
     // the uploaded mission so they never end up as a mission item.
     const waypoints = allWaypoints.filter(w => w.type !== 'rtl')
 
@@ -80,7 +80,7 @@ export function expandWaypointsWithTurnRadius(allWaypoints: Waypoint[], autoHead
 
         // Each intermediate Bezier point gets an acceptance radius ≈ half the arc
         // step spacing so the drone flows through the arc without stopping at each
-        // point. PX4 for multirotors has no built-in turn-radius arc generator —
+        // point. PX4 for multirotors has no built-in turn-radius arc generator -
         // `acceptance_radius_m` only controls when to switch to the next waypoint.
         // With is_fly_through=True + a proper acceptance radius the drone naturally
         // blends through consecutive points and traces the Bezier shape.

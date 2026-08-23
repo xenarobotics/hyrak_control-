@@ -36,20 +36,20 @@ _TRACKER_CFG = make_bytetrack_cfg("verocore_bt_")
 #   YAW   : keep person horizontally centred (err_x → yaw_deg_s)
 #            Primary axis. Fast response. Person exits frame if this lags.
 #
-#   ALTITUDE: AUTO only — keep person vertically centred (err_y → down_m_s)
+#   ALTITUDE: AUTO only - keep person vertically centred (err_y → down_m_s)
 #            Secondary axis. Slow + large deadband so it doesn't fight distance.
 #            In FIXED the altitude is held and this axis does not run.
 #
 #   DISTANCE: → forward_m_s, from a DIFFERENT SENSOR IN EACH ALTITUDE MODE,
 #            because which sensor is honest depends on whether height is free:
 #
-#              AUTO  — apparent size (bbox height ratio). Altitude is moving,
+#              AUTO  - apparent size (bbox height ratio). Altitude is moving,
 #                      so the subject's frame row is not a range signal.
-#              FIXED — the subject's FOOT ROW in frame. With height held, the
+#              FIXED - the subject's FOOT ROW in frame. With height held, the
 #                      row is range: high in frame is far (drive FORWARD), low
 #                      in frame is near (drive BACK). See pursuit.foot_row.
 #
-#            Scaled down while yaw error is large — but only when driving
+#            Scaled down while yaw error is large - but only when driving
 #            FORWARD. A retreat is never throttled; see the yaw_factor use.
 #
 # Key constraint: DO NOT use integral on distance or altitude axes.
@@ -58,7 +58,7 @@ _TRACKER_CFG = make_bytetrack_cfg("verocore_bt_")
 # fast then suddenly reverses).
 #
 # The bbox height ratio is smoothed with a separate EMA (α=0.12) before it
-# hits the PD controller. YOLO bbox sizes fluctuate ±3–5% per frame naturally;
+# hits the PD controller. YOLO bbox sizes fluctuate ±3-5% per frame naturally;
 # without input smoothing the derivative term amplifies this noise.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -79,7 +79,7 @@ _YAW_PRIORITY_FLOOR = 0.35
 # Standing adult, the ruler position-based ranging needs.
 _SUBJECT_HEIGHT_M = 1.7
 
-# Bbox height EMA smoothing factor — lower = smoother but slower to react.
+# Bbox height EMA smoothing factor - lower = smoother but slower to react.
 # 0.12 gives ~8-frame time constant, which at 20fps ≈ 0.4 s lag (acceptable).
 _HEIGHT_EMA_ALPHA = 0.12
 
@@ -90,7 +90,7 @@ _HEIGHT_EMA_ALPHA = 0.12
 MAX_PURSUIT_SPEED_M_S = 2.5
 
 # What to command while the target is not visible lives in pursuit.blind_command
-# — in SECONDS, not frames. The frame-counted _PHASE_HOLD/_PHASE_SWEEP pair that
+# - in SECONDS, not frames. The frame-counted _PHASE_HOLD/_PHASE_SWEEP pair that
 # used to sit here replayed the last full-speed command for a window whose real
 # duration depended on how fast inference happened to be running; see the
 # BLIND FLIGHT section of pursuit.py.
@@ -99,24 +99,24 @@ MAX_PURSUIT_SPEED_M_S = 2.5
 def _make_state() -> Dict[str, Any]:
     return {
         # ── PD controllers ────────────────────────────────────────────────
-        # Yaw: fast, tight deadband — keeps person in frame
-        # max_output=55: PX4 stock MPC_YAWRAUTO_MAX is 60deg/s — stay under it
+        # Yaw: fast, tight deadband - keeps person in frame
+        # max_output=55: PX4 stock MPC_YAWRAUTO_MAX is 60deg/s - stay under it
         # with a small margin so offboard setpoints aren't rate-limited upstream.
         # Yaw: the primary axis. Gains come from the operator's saved follow
         # tuning (Settings -> AI Modules -> FOLLOW TUNING), so every mode starts
         # from the same numbers instead of five copies of the same literals.
         "yaw_pd": new_yaw_pd(),
-        # Altitude: gentle, wide deadband — avoids fighting distance axis
+        # Altitude: gentle, wide deadband - avoids fighting distance axis
         "alt_pd": PDController(kp=1.5,  kd=0.3, max_output=1.0,  deadband=0.10),
-        # Distance: slow deadband — bbox size is noisy but 0.04 still filters YOLO jitter.
+        # Distance: slow deadband - bbox size is noisy but 0.04 still filters YOLO jitter.
         # max_output=2.5m/s: the old 0.8 was below normal walking pace (~1.4m/s),
         # so the drone could never close distance on a person walking away from
         # it. 2.5 covers a jogging pace with headroom under PX4's 10m/s cap.
-        # Units are FRACTION OF RANGE, not fill difference — see
+        # Units are FRACTION OF RANGE, not fill difference - see
         # controllers.range_error_ratio for why, and for the measured
         # dead zone this replaced (1.4m at 8.6m, 46m at 50m).
         "dist_pd": PDController(kp=4.0, kd=1.0, max_output=2.5, deadband=0.08),
-        # The Fixed-altitude distance axis — see pursuit.new_row_pd.
+        # The Fixed-altitude distance axis - see pursuit.new_row_pd.
         "row_pd":  new_row_pd(),
         # ── Smoothing ─────────────────────────────────────────────────────
         "kalman":     KalmanXY(),
@@ -128,7 +128,7 @@ def _make_state() -> Dict[str, Any]:
         "last_drone_command": None,
         "last_known_center":  None,   # normalised (fx/W, fy/H)
         "frames_lost":        0,
-        # Monotonic time the target was last actually SEEN — the
+        # Monotonic time the target was last actually SEEN - the
         # reacquisition ladder is keyed on seconds, not frames.
         "last_seen_t":        0.0,
         "last_yaw_dir":       1.0,
@@ -227,7 +227,7 @@ class HumanTracker(BaseAnalyzer):
         # Each mode hands the forward axis to a different sensor, so the PD the
         # other one was using is left holding a derivative in units that no
         # longer apply. Reset the incoming pair, and re-take the row reference
-        # from wherever the subject is now — the altitude that was reached under
+        # from wherever the subject is now - the altitude that was reached under
         # the old mode is the height this reference has to describe.
         if mode == "fixed":
             state["alt_pd"].reset()
@@ -239,10 +239,10 @@ class HumanTracker(BaseAnalyzer):
 
     def set_tracking_params(self, client_id: str, target_distance_ratio: float):
         """Adjust target follow distance.
-        0.15 → far (~8–10 m), 0.25 → default (~5–6 m), 0.40 → close (~2–3 m).
+        0.15 → far (~8-10 m), 0.25 → default (~5-6 m), 0.40 → close (~2-3 m).
 
         In FIXED altitude the forward axis reads the frame row, not apparent
-        size, so a ratio alone would not reach it — CLOSER / FURTHER would
+        size, so a ratio alone would not reach it - CLOSER / FURTHER would
         silently stop working in the mode that is the default. The ratio is
         still stored (Auto uses it) and its DIRECTION of change is applied to
         the target row as well, which keeps one operator concept driving
@@ -257,7 +257,7 @@ class HumanTracker(BaseAnalyzer):
 
         if state.get("altitude_mode") != "auto" and state.get("target_row") is not None:
             # A bigger ratio means "fill more of the frame", i.e. closer, and
-            # closer means the feet sit LOWER — a larger row.
+            # closer means the feet sit LOWER - a larger row.
             if ratio > previous:
                 state["target_row"] = clamp_row_target(state["target_row"] + ROW_NUDGE_STEP)
             elif ratio < previous:
@@ -283,7 +283,7 @@ class HumanTracker(BaseAnalyzer):
         cx_n, cy_n = 0.5, 0.5   # normalised frame centre
 
         # Pre-resizing with cv2 skips the Python-side cost of letterboxing at
-        # 1080p every frame. imgsz must be passed alongside it — see the note
+        # 1080p every frame. imgsz must be passed alongside it - see the note
         # in crowd_manager: without it ultralytics rescales back to 640 and
         # any width above 640 buys nothing.
         frame_proc, sx, sy = self.resize_for_inference(frame_bgr)
@@ -315,7 +315,7 @@ class HumanTracker(BaseAnalyzer):
                     "box":          [x1, y1, x2, y2],
                     "area":         (x2 - x1) * (y2 - y1),
                     "conf":         round(float(conf), 2),
-                    # Normalised to [0, 1] — consistent with Kalman noise tuning
+                    # Normalised to [0, 1] - consistent with Kalman noise tuning
                     "cx_n":         (x1 + x2) / (2 * W),
                     "cy_n":         (y1 + y2) / (2 * H),
                     "height_ratio": (y2 - y1) / H,
@@ -333,7 +333,7 @@ class HumanTracker(BaseAnalyzer):
             tracking     = state.get("tracking", False)
             yaw_pd       = state["yaw_pd"]
             alt_pd       = state["alt_pd"]
-            # dist_pd / row_pd are reached through state, in distance_axis —
+            # dist_pd / row_pd are reached through state, in distance_axis -
             # which of the two runs depends on the altitude mode.
             kalman       = state["kalman"]
             smoother     = state["smoother"]
@@ -373,7 +373,7 @@ class HumanTracker(BaseAnalyzer):
                 state["last_known_center"] = (fx_n, fy_n)
 
                 # ── Bbox height EMA ───────────────────────────────────────
-                # YOLO bbox heights fluctuate ±3–5% between frames. Smoothing
+                # YOLO bbox heights fluctuate ±3-5% between frames. Smoothing
                 # the input prevents the derivative term from amplifying noise.
                 prev_h = state["height_ema"]
                 h_raw  = target["height_ratio"]
@@ -393,7 +393,7 @@ class HumanTracker(BaseAnalyzer):
                     # ── Undo viewing-angle foreshortening ─────────────────
                     # A standing person is a VERTICAL extent, so its projection
                     # shrinks by cos(depression). Apparent size then goes as
-                    # sin(2*phi) and PEAKS at 45deg — meaning past that point a
+                    # sin(2*phi) and PEAKS at 45deg - meaning past that point a
                     # subject moving closer looks SMALLER, the controller reads
                     # "moving away" and drives forward, bringing them closer
                     # still. A feedback loop aimed at the subject. Measured at
@@ -430,7 +430,7 @@ class HumanTracker(BaseAnalyzer):
                     #
                     # FIXED: the frame row. Altitude is held, so the row the
                     # subject's feet sit on is horizontal range and nothing
-                    # else — high in frame is far, low in frame is near. This
+                    # else - high in frame is far, low in frame is near. This
                     # is what the mode was missing: err_alt was computed and
                     # thrown away, so vertical framing drove NOTHING, and the
                     # only thing left steering forward/back was apparent size.
@@ -453,14 +453,14 @@ class HumanTracker(BaseAnalyzer):
                     # error worse. Both axes correct together.
                     yaw_factor = max(_YAW_PRIORITY_FLOOR,
                                      1.0 - abs(err_yaw) / _YAW_PRIORITY_THRESHOLD)
-                    # A retreat is never throttled — see pursuit.scale_forward.
+                    # A retreat is never throttled - see pursuit.scale_forward.
                     forward_m_s = scale_forward(forward_raw, yaw_factor, alt_mode)
 
                     # ── Auto-elevate: the chase fallback ──────────────────
                     # Only when the target is genuinely pulling away, and only
                     # inside both ceilings. Overrides the altitude axis because
                     # holding the subject in frame at all outranks holding them
-                    # vertically centred — a perfectly framed empty sky is
+                    # vertically centred - a perfectly framed empty sky is
                     # worse than an off-centre target.
                     elevate = None
                     if forward_m_s > 0:
@@ -475,7 +475,7 @@ class HumanTracker(BaseAnalyzer):
                         elevate = decide_elevation(
                             target_outpacing=is_outpaced(
                                 forward_m_s, MAX_PURSUIT_SPEED_M_S, limits,
-                                # Whichever error is actually driving the axis —
+                                # Whichever error is actually driving the axis -
                                 # in Fixed that is the subject climbing the
                                 # frame, in Auto it is them shrinking.
                                 target_growing_distance=range_err > 0.01,
@@ -490,7 +490,7 @@ class HumanTracker(BaseAnalyzer):
                     if elevate is None:
                         state["elevate"] = None
 
-                    # THE ALTITUDE FLOOR AND CEILING — see pursuit.limit_descent
+                    # THE ALTITUDE FLOOR AND CEILING - see pursuit.limit_descent
                     # and limit_climb. Applied here, at the single point every
                     # vertical command converges on, rather than at each source.
                     # The ceiling matters most for the operator's ▲ nudge, which
@@ -531,7 +531,7 @@ class HumanTracker(BaseAnalyzer):
             else:
                 state["frames_lost"] += 1
                 fl = state["frames_lost"]
-                state["height_ema"] = None   # reset EMA — distance context is stale
+                state["height_ema"] = None   # reset EMA - distance context is stale
 
                 if tracking:
                     searching = True
@@ -577,7 +577,7 @@ class HumanTracker(BaseAnalyzer):
         SIZE (de-foreshortened) is the primary and the only one that works
         without telemetry. POSITION (where the subject's feet meet the ground
         plane) is fused in as the view steepens, because that is exactly where
-        the size estimate degrades and the position one sharpens — see
+        the size estimate degrades and the position one sharpens - see
         geometry.blend_weight_for_position for the measured crossover.
 
         Returns h_ema unchanged when there is no pose, so every no-telemetry
@@ -605,11 +605,11 @@ class HumanTracker(BaseAnalyzer):
 
         # FEET, NOT CENTRE. The comment here said exactly this while the code
         # passed the box centre, and the centre floats half a subject's height
-        # off the ground — so its ray cleared the subject and struck the ground
+        # off the ground - so its ray cleared the subject and struck the ground
         # BEYOND them. The over-estimate is AGL/(AGL - h/2), independent of
         # viewing angle: +17% at 6 m AGL, +27% at 4 m, +40% at 3 m. Range too
         # long reads as "further than wanted", which commands FORWARD, and the
-        # position estimate is weighted in hardest at steep depression — i.e.
+        # position estimate is weighted in hardest at steep depression - i.e.
         # exactly when the subject is low in the frame and the drone should have
         # been backing off. Reported from flight as "person on the lower side of
         # frame and it moves forward instead of back".

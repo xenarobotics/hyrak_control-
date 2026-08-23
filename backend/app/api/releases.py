@@ -6,7 +6,7 @@ ranged request returns HTTP 200 with the FULL body and no Accept-Ranges.
 That breaks electron-updater's differential downloader, which Range-fetches
 the block map embedded at the tail of the AppImage before downloading
 anything. The updater then sits consuming a 143 MB body it believes is a
-~150 KB range, emitting no `download-progress` the entire time — a progress
+~150 KB range, emitting no `download-progress` the entire time - a progress
 bar frozen at 0% with no error.
 
 desktop 0.1.6 set `disableDifferentialDownload = true`, which fixes it for
@@ -16,7 +16,7 @@ update stalls, so they can never reach a build that has the flag. A
 bootstrap deadlock that no client-side change can break.
 
 Serving Range properly resolves it for every already-deployed version at
-once, and is what an installer endpoint should do anyway — it's also what
+once, and is what an installer endpoint should do anyway - it's also what
 makes a interrupted download resumable.
 """
 import logging
@@ -110,7 +110,7 @@ def register_releases_routes(app, releases_dir: Path):
             start = int(start_s)
             end = int(end_s) if end_s else size - 1
         elif end_s:
-            # "bytes=-N" — the LAST N bytes. This is the exact form
+            # "bytes=-N" - the LAST N bytes. This is the exact form
             # electron-updater uses to fetch the embedded block map.
             suffix = int(end_s)
             if suffix == 0:

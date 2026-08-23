@@ -31,15 +31,15 @@ import { clampToLiveEdge } from '@/lib/liveEdge'
 import { WebCodecsVideo } from '@/components/video/WebCodecsVideo'
 
 const SOURCE_LABELS: Record<string, string> = {
-    air_unit_udp: 'Air unit (UDP) — set in Settings',
-    siyi_rtsp: 'SIYI (RTSP) — set in Settings',
-    rtsp_relay: 'RTSP relay (this machine) — set in Settings',
-    rtsp_camera: 'RTSP as camera — set in Settings',
-    air_unit_datachannel: 'Air unit (DataChannel) — set in Settings',
-    rtsp_datachannel: 'RTSP (DataChannel) — set in Settings',
-    air_unit_srt: 'Air unit (SRT relay) — set in Settings',
-    air_unit_gst: 'Air unit (GStreamer) — set in Settings',
-    hyrak_receiver: 'HYRAK Receiver (ground decoder) — set in Settings',
+    air_unit_udp: 'Air unit (UDP) - set in Settings',
+    siyi_rtsp: 'SIYI (RTSP) - set in Settings',
+    rtsp_relay: 'RTSP relay (this machine) - set in Settings',
+    rtsp_camera: 'RTSP as camera - set in Settings',
+    air_unit_datachannel: 'Air unit (DataChannel) - set in Settings',
+    rtsp_datachannel: 'RTSP (DataChannel) - set in Settings',
+    air_unit_srt: 'Air unit (SRT relay) - set in Settings',
+    air_unit_gst: 'Air unit (GStreamer) - set in Settings',
+    hyrak_receiver: 'HYRAK Receiver (ground decoder) - set in Settings',
 }
 
 function ResultsPanel() {
@@ -75,9 +75,9 @@ export default function ModulesPage() {
     } = useWebRTCContext()
 
     // Server-sourced modes (air-unit UDP, SIYI RTSP) have no browser camera
-    // at all — the camera dropdown and its "must have one selected" gate on
+    // at all - the camera dropdown and its "must have one selected" gate on
     // Start don't apply. Starts as 'camera' (matches server-rendered HTML,
-    // which has no localStorage to read) and is set for real after mount —
+    // which has no localStorage to read) and is set for real after mount -
     // reading getVideoSource() straight into the initial state would make
     // the server and client's first render disagree whenever a non-default
     // source is saved, which React flags as a hydration mismatch.
@@ -119,7 +119,7 @@ export default function ModulesPage() {
     const [statsOpen, setStatsOpen] = useState(true)
     const [modesOpen, setModesOpen] = useState(true)
     const [maximized, setMaximized] = useState(false)
-    // Fill (cover) crops a 4:3 / 16:10 camera to fit a 16:9 panel — which
+    // Fill (cover) crops a 4:3 / 16:10 camera to fit a 16:9 panel - which
     // hides frame the AI is still analysing. Fit letterboxes instead so the
     // whole sensor is visible. The overlay canvas is handed the same value:
     // if the two disagree, boxes and clicks land in the wrong place.
@@ -131,21 +131,21 @@ export default function ModulesPage() {
     // LOCAL picture (sharp, zero-latency) with AI results drawn on a
     // canvas; processed feed shows the server-rendered remote stream.
     // "Local picture" is the webcam MediaStream for camera sources, or the
-    // air unit's in-app preview (lib/airUnitPreview.ts) — a loopback HTTP
+    // air unit's in-app preview (lib/airUnitPreview.ts) - a loopback HTTP
     // URL, so it goes on `src` and srcObject must be cleared, or srcObject
     // wins and the pane stays black.
     const airUnitPreviewUrl = useAirUnitPreview()
     const gst = useGstPreview()
     const receiver = useReceiver()
     const localPreviewUrl = gst?.previewUrl ?? receiver?.previewUrl ?? airUnitPreviewUrl
-    // Canvas path — no <video>, no live-edge clamp. The overlay canvas sits on
+    // Canvas path - no <video>, no live-edge clamp. The overlay canvas sits on
     // top of it exactly as before, since CvOverlayCanvas positions absolutely
     // and scales by CSS.
     //
     // Gated on overlayActive, NOT merely on the pipeline running. In PROCESSED
     // feed mode the pane must show the server's annotated video (remoteStream),
-    // and rendering the local preview instead means the annotated frames — the
-    // entire point of that mode — are never displayed at all. Depth-mapping and
+    // and rendering the local preview instead means the annotated frames - the
+    // entire point of that mode - are never displayed at all. Depth-mapping and
     // enhance are always processed, since they transform the frame itself.
     const wcUrl = overlayActive
         ? (gst?.webcodecs ? gst.previewUrl : (receiver?.previewUrl ?? null))
@@ -160,9 +160,9 @@ export default function ModulesPage() {
         if (overlayActive && localPreviewUrl && !localStream) {
             el.srcObject = null
             if (el.src !== localPreviewUrl) el.src = localPreviewUrl
-            // Same live-edge drain as the fly tab — a progressive stream in a
+            // Same live-edge drain as the fly tab - a progressive stream in a
             // <video> otherwise settles a few hundred ms behind live.
-            // Forced on for the GStreamer preview — see VideoStream.tsx.
+            // Forced on for the GStreamer preview - see VideoStream.tsx.
             return (gst?.previewUrl || getLiveEdgeClamp()) ? clampToLiveEdge(el) : undefined
         }
         el.removeAttribute('src')
@@ -186,7 +186,7 @@ export default function ModulesPage() {
     return (
         <div style={{ display: 'flex', height: '100%', gap: 10, overflow: 'hidden' }}>
 
-            {/* LEFT — mode selector */}
+            {/* LEFT - mode selector */}
             <div style={{
                 width: modesOpen ? 190 : 36, flexShrink: 0,
                 transition: 'width 0.2s',
@@ -210,12 +210,12 @@ export default function ModulesPage() {
 
                 {modesOpen && (
                     <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        {/* Mode buttons — disabled while streaming */}
+                        {/* Mode buttons - disabled while streaming */}
                         <div style={{ opacity: isStreaming ? 0.5 : 1, pointerEvents: isStreaming ? 'none' : 'auto' }}>
                             <ModeSelector />
                         </div>
 
-                        {/* Camera selector — not applicable to server-sourced feeds */}
+                        {/* Camera selector - not applicable to server-sourced feeds */}
                         {serverSourced ? (
                             <div style={{ padding: '0 2px' }}>
                                 <p style={{
@@ -282,7 +282,7 @@ export default function ModulesPage() {
 
                         {/* What the connect is blocked on. Without this the
                             operator watches "Connecting" for 25s and learns
-                            nothing — and blames whichever mode they picked,
+                            nothing - and blames whichever mode they picked,
                             because the wait is the same for all of them. */}
                         {startDetail && !isStreaming && (
                             <div style={{
@@ -312,7 +312,7 @@ export default function ModulesPage() {
                 )}
             </div>
 
-            {/* CENTER — processed video, NO OSD */}
+            {/* CENTER - processed video, NO OSD */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
                 <div
                     ref={containerRef}
@@ -327,7 +327,7 @@ export default function ModulesPage() {
                         minHeight: 0,
                     }}
                 >
-                    {/* Main video — clean, no OSD */}
+                    {/* Main video - clean, no OSD */}
                     {wcUrl ? (
                         <WebCodecsVideo
                             src={wcUrl}
@@ -386,7 +386,7 @@ export default function ModulesPage() {
                         </div>
                     )}
 
-                    {/* PiP — raw local feed (redundant when the main view IS the raw feed) */}
+                    {/* PiP - raw local feed (redundant when the main view IS the raw feed) */}
                     {isStreaming && localStream && !overlayActive && (
                         <div style={{
                             position: 'absolute', bottom: 44, left: 8,
@@ -420,7 +420,7 @@ export default function ModulesPage() {
                             <Button size="sm" variant="outline" className="h-7 px-2 text-[10px]"
                                 title={videoFit === 'fit'
                                     ? 'Showing the whole frame (letterboxed). Click to fill the panel.'
-                                    : 'Filling the panel — a 4:3 or 16:10 camera is cropped. Click to show the whole frame.'}
+                                    : 'Filling the panel - a 4:3 or 16:10 camera is cropped. Click to show the whole frame.'}
                                 onClick={() => {
                                     const next: VideoFit = videoFit === 'fit' ? 'fill' : 'fit'
                                     setVideoFitState(next); setVideoFit(next)
@@ -462,7 +462,7 @@ export default function ModulesPage() {
                     {statsOpen && (
                         <div style={{ padding: '10px 12px' }}>
                             {/* Every row here used to come from pc.getStats(), which
-                                reports NOTHING in overlay mode — no video crosses the
+                                reports NOTHING in overlay mode - no video crosses the
                                 PeerConnection, so FPS/bitrate/RTT/jitter/loss all sat
                                 at zero permanently and looked like a broken feed.
                                 ModulePerformance sources each figure from wherever the
@@ -473,7 +473,7 @@ export default function ModulesPage() {
                 </div>
             </div>
 
-            {/* RIGHT — results */}
+            {/* RIGHT - results */}
             <div style={{
                 width: 250, flexShrink: 0,
                 borderRadius: 12,

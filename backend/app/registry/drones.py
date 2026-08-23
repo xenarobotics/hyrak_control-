@@ -1,5 +1,5 @@
 """
-Drone registry — maps a flight controller's hardware UID to a persistent
+Drone registry - maps a flight controller's hardware UID to a persistent
 drone record. Every function degrades to None/[] when the DB is offline,
 so callers never need their own fallback logic.
 """

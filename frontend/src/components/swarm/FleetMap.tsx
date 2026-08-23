@@ -129,7 +129,7 @@ export default function FleetMap() {
         })}
       </MapContainer>
 
-      {/* Altitude chips — one per drone, matches marker colors */}
+      {/* Altitude chips - one per drone, matches marker colors */}
       <div className="absolute bottom-2 left-2 z-[1000] flex flex-wrap gap-1 max-w-[70%]">
         {positioned.map(d => (
           <button

@@ -1,5 +1,5 @@
 // Turns a networked RTSP camera into an ordinary MediaStream, so it can ride
-// the EXACT path a webcam already uses — no backend changes, no reachable
+// the EXACT path a webcam already uses - no backend changes, no reachable
 // server port, no NAT traversal problem.
 //
 // Why this exists next to the direct SRT relay (rtsp_relay):
@@ -11,7 +11,7 @@
 //   rtsp_camera  (this) laptop decodes locally and sends the result as a
 //                normal WebRTC camera track. Costs an encode, but WebRTC
 //                traverses NAT via STUN/TURN and works on essentially any
-//                network — including ones that block UDP outright, via TURN
+//                network - including ones that block UDP outright, via TURN
 //                over TLS:443.
 //
 // The chain deliberately avoids re-encoding on the ffmpeg side. ffmpeg does
@@ -63,7 +63,7 @@ export function getReportedCodec(): string | null {
 
 // Which rung of the fallback ladder is actually carrying video, and why the
 // better ones were skipped. Kept at module scope because the ladder resolves
-// inside startRtspCameraStream() and the answer is needed long afterwards —
+// inside startRtspCameraStream() and the answer is needed long afterwards -
 // diagnosing "why is the feed slow" without knowing which path is live means
 // guessing, which cost this project two build cycles.
 let activeRung: string | null = null
@@ -88,7 +88,7 @@ if (typeof window !== 'undefined') {
 
 // A dedicated, permanent subscription. ffmpeg only prints its input stream
 // line once it has actually connected to the camera, which is AFTER the
-// preview URL is known — so the short-lived listener in waitForPreviewUrl is
+// preview URL is known - so the short-lived listener in waitForPreviewUrl is
 // already gone by then and would never see it.
 if (typeof window !== 'undefined' && isDesktopApp()) {
     nativeBridge()?.onEvent((event: BridgeEvent) => {
@@ -133,11 +133,11 @@ function waitForPreviewUrl(timeoutMs: number): Promise<string> {
  *  is not subject to Chromium's missing software H.265 support. */
 export async function startRtspCameraStream(): Promise<MediaStream> {
     if (!isDesktopApp()) {
-        throw new Error('RTSP camera needs the HYRAK desktop app — a browser tab cannot open RTSP.')
+        throw new Error('RTSP camera needs the HYRAK desktop app - a browser tab cannot open RTSP.')
     }
     await stopRtspCameraStream()
     // Three rungs, best first. The camera's codec decides which one works,
-    // and we cannot know it until ffmpeg has connected — so rather than
+    // and we cannot know it until ffmpeg has connected - so rather than
     // probing first, just descend on failure.
     //
     //   1. -c copy       no re-encode at all. Works when the camera is H.264.
@@ -180,7 +180,7 @@ export async function startRtspCameraStream(): Promise<MediaStream> {
         } catch (e) {
             const msg = `${attempt.label}: ${(e as Error).message}`
             failures.push(msg)
-            console.warn(`RTSP camera rung failed — ${msg}`)
+            console.warn(`RTSP camera rung failed - ${msg}`)
             await stopRtspCameraStream()
         }
     }
@@ -192,7 +192,7 @@ async function startViaFmp4(transcode: boolean): Promise<MediaStream> {
 
     // Subscribe BEFORE starting. The bridge emits its status event before
     // start() resolves, so subscribing afterwards misses it and then waits
-    // out the full timeout for an event that already fired — which is
+    // out the full timeout for an event that already fired - which is
     // exactly what "Relay did not report a preview URL in time" was.
     // Marked handled up front: when start() returns the URL directly this
     // promise is never awaited, and an unawaited rejection 15s later would
@@ -213,7 +213,7 @@ async function startViaFmp4(transcode: boolean): Promise<MediaStream> {
     })
     if (started && !started.ok) throw new Error(started.error ?? 'Could not start RTSP camera')
 
-    // start() returns the URL directly — the awaited promise cannot be
+    // start() returns the URL directly - the awaited promise cannot be
     // missed. The event subscription above stays only as a fallback for a
     // desktop build older than 0.1.10, which doesn't return meta yet.
     const returnedUrl = started?.meta?.previewUrl
@@ -225,13 +225,13 @@ async function startViaFmp4(transcode: boolean): Promise<MediaStream> {
     el.muted = true
     el.autoplay = true
     el.playsInline = true
-    // Never attached to the DOM — this element exists only as a decoder.
+    // Never attached to the DOM - this element exists only as a decoder.
     el.src = previewUrl
     videoEl = el
 
     await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(
-            () => reject(new Error('No video decoded from the camera within 15s — is the RTSP URL right?')),
+            () => reject(new Error('No video decoded from the camera within 15s - is the RTSP URL right?')),
             PREVIEW_TIMEOUT_MS,
         )
         el.onloadeddata = () => { clearTimeout(timer); resolve() }
@@ -248,7 +248,7 @@ async function startViaFmp4(transcode: boolean): Promise<MediaStream> {
                 case 2: // MEDIA_ERR_NETWORK
                     reject(new Error(
                         `Could not fetch the local preview stream${detail}. The relay is running but the `
-                        + 'page could not read from it — likely the loopback HTTP request being blocked.',
+                        + 'page could not read from it - likely the loopback HTTP request being blocked.',
                     ))
                     break
                 case 3: // MEDIA_ERR_DECODE
@@ -262,7 +262,7 @@ async function startViaFmp4(transcode: boolean): Promise<MediaStream> {
                     // unconditionally, which was actively harmful: the real
                     // cause was a truncated fMP4 (the bridge served no
                     // ftyp/moov), and on the TRANSCODE rung the stream is
-                    // H.264 — so "switch your camera to H.264" was advice for
+                    // H.264 - so "switch your camera to H.264" was advice for
                     // a stream that already was H.264. That sent four releases
                     // of latency work down the wrong path. Never attribute a
                     // decode failure to the INPUT codec on a rung that
@@ -270,7 +270,7 @@ async function startViaFmp4(transcode: boolean): Promise<MediaStream> {
                     reject(new Error(transcode
                         ? `Browser rejected the transcoded H.264 stream${detail}. The output codec is `
                           + 'H.264, which Chromium can always decode, so this points at a malformed '
-                          + 'container rather than a codec gap — check that the preview stream begins '
+                          + 'container rather than a codec gap - check that the preview stream begins '
                           + `with ftyp+moov (ffprobe should NOT say "no tfhd was found").${codecNote}`
                         : `This machine cannot play the camera's codec directly${detail}. Chromium ships `
                           + 'no SOFTWARE H.265 decoder, so an H.265 camera plays only where hardware '
@@ -281,12 +281,12 @@ async function startViaFmp4(transcode: boolean): Promise<MediaStream> {
                     reject(new Error(`Preview playback failed${detail}.${codecNote}`))
             }
         }
-        el.play().catch(() => { /* autoplay policy — muted playback should still start */ })
+        el.play().catch(() => { /* autoplay policy - muted playback should still start */ })
     })
 
     // Only now that frames are decoding. Chromium has by this point already
     // built up whatever standing buffer it wanted, and that buffer is the
-    // biggest single term in the preview's delay — captureStream() lifts
+    // biggest single term in the preview's delay - captureStream() lifts
     // frames out at the element's PLAYBACK position, so anything sitting
     // ahead of it is latency handed straight to the operator and to WebRTC.
     if (getLiveEdgeClamp()) stopClamp = clampToLiveEdge(el)
@@ -302,8 +302,8 @@ async function startViaFmp4(transcode: boolean): Promise<MediaStream> {
 
 /** Fallback: ffmpeg DECODES the camera and serves MJPEG, which every browser
  *  can display in an <img> regardless of the original codec. Costs a JPEG
- *  encode on the laptop and a decode in the browser — strictly worse than
- *  the -c copy path — but it removes the browser codec dependency entirely,
+ *  encode on the laptop and a decode in the browser - strictly worse than
+ *  the -c copy path - but it removes the browser codec dependency entirely,
  *  which is the whole point when Chromium can't decode H.265. */
 async function startViaMjpeg(): Promise<MediaStream> {
     const started = await nativeBridge()?.start('rtsp', RTSP_MJPEG_BRIDGE_ID, {

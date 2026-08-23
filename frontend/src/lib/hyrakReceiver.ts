@@ -1,6 +1,6 @@
 'use client'
 
-// Drives the HYRAK Receiver bridge (desktop/src/bridges/receiverBridge.ts) —
+// Drives the HYRAK Receiver bridge (desktop/src/bridges/receiverBridge.ts) -
 // the PC side of the ground decoder.
 //
 // Two things make this different from gstPreview.ts, and both are here rather
@@ -12,9 +12,9 @@
 //    H.264 (roughly a core at 1080p30). So the capability is measured here and
 //    handed down, never guessed by the bridge.
 //
-// 2. WHICH CODEC ACTUALLY ARRIVED. The bridge can step DOWN mid-session — a
+// 2. WHICH CODEC ACTUALLY ARRIVED. The bridge can step DOWN mid-session - a
 //    hardware element that registered but cannot run gets found out only when
-//    it dies — so the codec is republished on every status event and the video
+//    it dies - so the codec is republished on every status event and the video
 //    component re-configures. Trusting the codec we asked for produces a black
 //    pane with no error, which is the worst thing to debug on a client's
 //    machine.
@@ -56,7 +56,7 @@ export interface ReceiverStatus {
     transport?: string
     source?: string
     latencyMs?: number
-    /** Process is up but nothing has arrived yet — "waiting", not "working". */
+    /** Process is up but nothing has arrived yet - "waiting", not "working". */
     receiving?: boolean
     stalled?: boolean
     demoted?: boolean
@@ -93,7 +93,7 @@ let hevcRejected = false
 /** Called when the renderer's VideoDecoder actually FAILS on the passthrough
  *  path, as opposed to declining it up front.
  *
- *  This exists because `isConfigSupported` is a claim, not a guarantee — a
+ *  This exists because `isConfigSupported` is a claim, not a guarantee - a
  *  driver can advertise HEVC and then fault on a real stream, and that is
  *  precisely the class of machine we cannot test on. The bridge's own ladder
  *  cannot catch it: its pipeline is healthy, the bytes are flowing, and the
@@ -105,7 +105,7 @@ export async function fallbackFromHevc(reason: string): Promise<void> {
     if (hevcRejected) return
     if (lastStatus?.codec !== 'hevc') return
     hevcRejected = true
-    console.warn('[hyrak-receiver] H.265 was advertised but failed to decode — '
+    console.warn('[hyrak-receiver] H.265 was advertised but failed to decode - '
         + `restarting as H.264. Reason: ${reason}`)
     try {
         await startReceiver(lastAlloc)
@@ -119,7 +119,7 @@ if (typeof window !== 'undefined' && isDesktopApp()) {
         if (event.bridge !== RECEIVER_BRIDGE || event.id !== RECEIVER_BRIDGE_ID) return
         const meta = event.meta ?? {}
         // Only lifecycle events carry `connected`. Informational ones must not
-        // be mistaken for a shutdown — that exact bug wiped the preview URL one
+        // be mistaken for a shutdown - that exact bug wiped the preview URL one
         // second after every successful start in an earlier bridge and made the
         // whole local-view feature silently inert in the field.
         if (!('connected' in meta)) return
@@ -131,8 +131,8 @@ if (typeof window !== 'undefined' && isDesktopApp()) {
             if (meta.stalled) {
                 console.warn('[hyrak-receiver] stalled:', meta.error)
             }
-            // The AI uplink failing is invisible locally — the preview plays
-            // on regardless — so it gets its own loud line rather than being
+            // The AI uplink failing is invisible locally - the preview plays
+            // on regardless - so it gets its own loud line rather than being
             // folded into general status.
             if (meta.uplinkIssue) {
                 console.error('[hyrak-receiver]', meta.error)
@@ -170,7 +170,7 @@ if (typeof window !== 'undefined' && isDesktopApp()) {
 export async function startReceiver(alloc?: RelayAllocation): Promise<ReceiverStatus> {
     if (!isDesktopApp()) {
         throw new Error(
-            'The HYRAK Receiver needs the desktop app — a browser tab cannot open a '
+            'The HYRAK Receiver needs the desktop app - a browser tab cannot open a '
             + 'UDP socket or speak RTSP/SRT.')
     }
     await stopReceiver()
@@ -179,7 +179,7 @@ export async function startReceiver(alloc?: RelayAllocation): Promise<ReceiverSt
 
     // Claim the decoder's feeds for this machine before starting the
     // pipeline. The decoder pushes to ONE direct-UDP client and otherwise
-    // guesses from its DHCP lease file — which cannot see a statically
+    // guesses from its DHCP lease file - which cannot see a statically
     // addressed PC, and keeps aiming at a departed machine for up to 12 hours
     // after it leaves. A stale destination here is a black video pane with
     // nothing visibly wrong at either end.
@@ -191,7 +191,7 @@ export async function startReceiver(alloc?: RelayAllocation): Promise<ReceiverSt
 
     const transport = getReceiverTransport()
     // Passthrough is opt-in. Chromium answering "yes I support HEVC" is not
-    // evidence that it will decode this stream — see getReceiverPassthrough —
+    // evidence that it will decode this stream - see getReceiverPassthrough -
     // so the capability query only runs when the operator has asked for it,
     // and a previous real failure latches it off for the session.
     const hevcOk = getReceiverPassthrough() && !hevcRejected && await canDecodeHevc()
@@ -213,7 +213,7 @@ export async function startReceiver(alloc?: RelayAllocation): Promise<ReceiverSt
             ? {
                 uplinkHost: alloc.host,
                 uplinkPort: alloc.port,
-                // From the ALLOCATION, not from a local setting — the backend
+                // From the ALLOCATION, not from a local setting - the backend
                 // has already opened a listener of exactly one kind, and
                 // pushing a different one fails silently on both sides.
                 uplinkTransport: alloc.transport,
@@ -232,7 +232,7 @@ export async function startReceiver(alloc?: RelayAllocation): Promise<ReceiverSt
     const m = result.meta ?? {}
     const status: ReceiverStatus = {
         previewUrl: typeof m.previewUrl === 'string' && m.previewUrl ? m.previewUrl : null,
-        // From the bridge, never from `hevcOk` — the bridge may have had to
+        // From the bridge, never from `hevcOk` - the bridge may have had to
         // pick a different rung than the one we implied.
         codec: m.codec === 'hevc' ? 'hevc' : 'h264',
         backend: m.backend ? String(m.backend) : undefined,
@@ -263,7 +263,7 @@ export async function stopReceiver(): Promise<void> {
 
 /** Reactive status for components. */
 export function useReceiver(): ReceiverStatus | null {
-    // Starts null to match server-rendered HTML, then syncs after mount — same
+    // Starts null to match server-rendered HTML, then syncs after mount - same
     // hydration reasoning as the other video hooks.
     const [status, setStatus] = useState<ReceiverStatus | null>(null)
     useEffect(() => {

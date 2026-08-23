@@ -157,7 +157,7 @@ export default function SurveyPlanner() {
         )}
       </div>
 
-      {/* Replace warning — only shown on first generate when manual wps exist */}
+      {/* Replace warning - only shown on first generate when manual wps exist */}
       {showReplaceWarning && (
         <div
           className="rounded-lg px-3 py-2 flex items-start gap-2"
@@ -189,7 +189,7 @@ export default function SurveyPlanner() {
 
       {/* Action buttons */}
       <div className="flex gap-2 mt-1">
-        {/* Clear Area — removes the drawn polygon so user can redraw */}
+        {/* Clear Area - removes the drawn polygon so user can redraw */}
         <button
           onClick={clearSurveyPolygon}
           disabled={surveyPolygon.length === 0}
@@ -235,7 +235,7 @@ export default function SurveyPlanner() {
         </button>
       </div>
 
-      {/* Multi-drone survey — visible in swarm mode with 2+ connected drones */}
+      {/* Multi-drone survey - visible in swarm mode with 2+ connected drones */}
       <FleetSurveyPanel />
 
       {/* Hint */}

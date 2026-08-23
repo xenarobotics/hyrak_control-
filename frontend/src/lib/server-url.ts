@@ -16,7 +16,7 @@ export function getServerUrl(): string {
     return process.env.NEXT_PUBLIC_SERVER_URL
   }
 
-  // SSR / Node.js — no window object
+  // SSR / Node.js - no window object
   if (typeof window === 'undefined') {
     return 'http://localhost:8001'
   }

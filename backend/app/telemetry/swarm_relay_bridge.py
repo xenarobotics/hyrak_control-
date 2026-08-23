@@ -1,7 +1,7 @@
 """Browser-relayed multi-drone SITL bridge for the cloud deployment.
 
 This is SerialBridge (see serial_bridge.py) generalized from one drone to N.
-A client's own PX4 SITL swarm runs entirely on THEIR machine — none of its
+A client's own PX4 SITL swarm runs entirely on THEIR machine - none of its
 UDP traffic is reachable from this server directly, same reason a real
 telemetry radio or the air-unit's RF link isn't. A local companion tool
 (sitl_relay/swarm_relay.py) binds each drone instance's well-known local
@@ -9,14 +9,14 @@ MAVLink port and multiplexes all of them over ONE WebSocket to the browser,
 tagging every frame with a 1-byte drone_id header. The browser doesn't
 interpret the bytes, it just relays tagged frames to/from this bridge over
 socket.io (swarm_relay_uplink / swarm_relay_downlink), and this bridge
-demultiplexes them into one loopback UDP endpoint PER DRONE — each endpoint
+demultiplexes them into one loopback UDP endpoint PER DRONE - each endpoint
 is exactly what swarm_events.py hands a TelemetryManager, in place of the
 direct udpin://0.0.0.0:{port} it uses when SITL runs on this same machine.
 
     N SITL instances ⇄ swarm_relay.py ⇄ (WS, drone_id-tagged) ⇄ browser
     ⇄ socket.io ⇄ SwarmRelayBridge ⇄ N mavsdk_servers
 
-One bridge per session — each client's swarm is entirely their own, and a
+One bridge per session - each client's swarm is entirely their own, and a
 drone_id only needs to be unique WITHIN a session (see the per-session
 fleet storage in sessions/manager.py and swarm_events.py).
 """
@@ -41,7 +41,7 @@ def _free_udp_port() -> int:
 
 
 class _DroneEndpoint(asyncio.DatagramProtocol):
-    """One loopback UDP socket for one drone in the bridge's fleet —
+    """One loopback UDP socket for one drone in the bridge's fleet -
     mavsdk_server for this drone connects here exactly as if it were
     talking to a local SITL instance directly."""
 
@@ -84,7 +84,7 @@ class SwarmRelayBridge:
         self._drones: dict[int, _DroneEndpoint] = {}
 
     async def get_or_create_port(self, drone_id: int) -> int:
-        """Loopback port THIS drone's TelemetryManager should connect to —
+        """Loopback port THIS drone's TelemetryManager should connect to -
         created on first use, reused after (mirrors SerialBridge.address,
         just one port per drone instead of one for the whole bridge)."""
         ep = self._drones.get(drone_id)

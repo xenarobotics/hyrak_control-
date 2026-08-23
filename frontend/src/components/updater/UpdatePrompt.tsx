@@ -2,7 +2,7 @@
 
 // Desktop-app-only update prompt. The native shell checks for updates on
 // launch (see desktop/src/updater.ts) but never downloads or installs
-// anything without explicit authorization here — this is that
+// anything without explicit authorization here - this is that
 // authorization step, not a status display. Renders nothing in the
 // browser build (isDesktopApp() is false there, and window.hyrakNative
 // doesn't exist).
@@ -62,7 +62,7 @@ export function UpdatePrompt() {
                 setStage('ready')
             } else if (event.type === 'error') {
                 // Previously ignored here on the grounds that a background
-                // CHECK failing is not worth interrupting anyone for. True —
+                // CHECK failing is not worth interrupting anyone for. True -
                 // but the same event also carries DOWNLOAD failures, and
                 // swallowing those left this panel stuck on "Downloading… 0%"
                 // forever with no way to tell that it had died. Only surface
@@ -74,7 +74,7 @@ export function UpdatePrompt() {
                     return 'failed'
                 })
             }
-            // 'checking' / 'not-available' — nothing to show for a background
+            // 'checking' / 'not-available' - nothing to show for a background
             // check; Settings → About surfaces those.
         }
         const unsubscribe = updater.onEvent(onEvent)
@@ -91,7 +91,7 @@ export function UpdatePrompt() {
         stallTimer.current = setTimeout(() => {
             setStage(prev => {
                 if (prev !== 'downloading') return prev
-                setErrorMsg('No response from the updater after 20s — the download never started.')
+                setErrorMsg('No response from the updater after 20s - the download never started.')
                 return 'failed'
             })
         }, NO_PROGRESS_TIMEOUT_MS)
@@ -169,7 +169,7 @@ export function UpdatePrompt() {
                             ) : null}
                         </div>
                         <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'hsl(var(--app-surface-2))' }}>
-                            {/* No bytes yet means no honest percentage to draw — an
+                            {/* No bytes yet means no honest percentage to draw - an
                                 indeterminate sweep says "working" without claiming 0%. */}
                             <div
                                 className={progress.transferred === undefined ? 'h-full w-1/3 animate-pulse rounded-full' : 'h-full rounded-full transition-all'}
@@ -213,7 +213,7 @@ export function UpdatePrompt() {
                 {stage === 'ready' && (
                     <>
                         <p style={{ color: 'hsl(var(--app-text-muted))' }}>
-                            HYRAK {version} downloaded. Restart to apply — takes a few seconds.
+                            HYRAK {version} downloaded. Restart to apply - takes a few seconds.
                         </p>
                         <button
                             onClick={handleRestart}

@@ -1,5 +1,5 @@
 // Crowd-management / vehicle-plate-tracking data lives in Postgres and is
-// retained by default (no auto-purge — reversed from the first version of
+// retained by default (no auto-purge - reversed from the first version of
 // this feature, which force-downloaded + deleted on every stop). These
 // helpers back the "previous sessions" history panel plus the optional
 // manual export/clear actions.
@@ -27,10 +27,10 @@ export interface PlateHistoryRow {
     session_id: string
     track_id: number
     // This module's own persistent identity for the vehicle (e.g.
-    // "VH-000042"), distinct from track_id — survives a ByteTrack id change.
+    // "VH-000042"), distinct from track_id - survives a ByteTrack id change.
     // Nullable: rows written before the feature existed have none.
     vehicle_id: string | null
-    /** "" when no plate was ever read — the row still describes a vehicle. */
+    /** "" when no plate was ever read - the row still describes a vehicle. */
     plate_text: string
     ocr_confidence: number
     /** Pixels across the plate. The honest quality indicator for a reading. */
@@ -45,7 +45,7 @@ export interface PlateHistoryRow {
     last_seen: string | null
     /** The plate crop. */
     image_path: string | null
-    /** The whole-vehicle shot — what makes a row checkable by a human. */
+    /** The whole-vehicle shot - what makes a row checkable by a human. */
     vehicle_image_path: string | null
 }
 
@@ -76,7 +76,7 @@ export function plateImageUrl(eventId: string): string {
     return `${getServerUrl()}/api/vision/plate-history/${eventId}/image`
 }
 
-// Human-readable stamp for filenames/labels — "when this happened", not a
+// Human-readable stamp for filenames/labels - "when this happened", not a
 // raw session id or epoch number, per the "names like time or location"
 // ask.
 export function toFileStamp(iso?: string | null): string {
@@ -90,9 +90,9 @@ export function shortLocation(lat: number | null, lng: number | null): string | 
     return `${lat.toFixed(4)}, ${lng.toFixed(4)}`
 }
 
-// Read-only — does not delete anything. Downloads a zip of the GIVEN
+// Read-only - does not delete anything. Downloads a zip of the GIVEN
 // session's rows (CSV + images for plates). Works for any past session,
-// not just the currently active one — every entry in the history list can
+// not just the currently active one - every entry in the history list can
 // be pulled individually.
 export async function downloadSessionReport(sessionId: string, kind: 'crowd-report' | 'plate-report', label?: string) {
     try {
@@ -112,7 +112,7 @@ export async function downloadSessionReport(sessionId: string, kind: 'crowd-repo
     }
 }
 
-// Explicit, operator-triggered — wipes ALL crowd/plate history (not just
+// Explicit, operator-triggered - wipes ALL crowd/plate history (not just
 // the current session). Requires the same token other mutating admin
 // actions use (see PersonTrackerPanel.tsx's clear_reference call).
 export async function clearHistory(kind: 'crowd-history' | 'plate-history'): Promise<boolean> {

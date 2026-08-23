@@ -1,13 +1,13 @@
 // Temporal smoothing for client-drawn AI overlays.
 //
-// The problem this solves is not network loss — it is that inference is a
+// The problem this solves is not network loss - it is that inference is a
 // SAMPLED signal being drawn as if it were continuous. cv_results arrives at
 // the analyzer's rate (~10-15Hz) while the video runs at 20-30fps, and the
 // canvas previously redrew only when a payload landed, clearing first. Two
 // artefacts follow, and the operator reads both as "the app is glitching":
 //
 //   * BLANKING. One payload where a detection falls under the confidence
-//     threshold — a person turning, a plate glaring, a partial occlusion —
+//     threshold - a person turning, a plate glaring, a partial occlusion -
 //     removes the box completely for one interval. Detectors are stochastic
 //     frame to frame; a UI that mirrors that literally will strobe.
 //   * TELEPORTING. Boxes jump between inference results instead of moving,
@@ -15,11 +15,11 @@
 //
 // So: keep a short-lived track per object, interpolate its box continuously,
 // and fade rather than cut. A box that genuinely leaves the frame still
-// disappears — just over ~250ms instead of instantly, which reads as the
+// disappears - just over ~250ms instead of instantly, which reads as the
 // object leaving rather than the software failing.
 //
 // Deliberately client-side only. The server keeps emitting exactly what it
-// detected, unsmoothed and unembellished — this must never invent a detection
+// detected, unsmoothed and unembellished - this must never invent a detection
 // that inference did not produce, only hold and move ones it did. Anything
 // else would put fiction in front of a pilot.
 
@@ -36,7 +36,7 @@ export interface RawItem {
 
 /** A raw item plus the fields the renderer needs. `box` is interpolated. */
 export interface SmoothedItem extends RawItem {
-    /** 0..1 — fade in on appearance, out on disappearance. */
+    /** 0..1 - fade in on appearance, out on disappearance. */
     _a: number
 }
 
@@ -51,7 +51,7 @@ const FADE_IN_MS = 110
 // Identity-bearing overlays hold for far less time.
 //
 // The generic hold exists to stop boxes strobing when a detector misses a
-// frame — worth ~580ms of latency for a box. It is NOT worth it for a NAME:
+// frame - worth ~580ms of latency for a box. It is NOT worth it for a NAME:
 // a label that lingers half a second after somebody leaves frame is asserting
 // that a specific person is somewhere they are not, which is worse than a
 // flickering box and is what "it still shows him after he walks out" is.
@@ -66,7 +66,7 @@ const IDENTITY_FADE_OUT_MS = 90
 //
 // It is the wrong trade when the boxes ARE the subject. In person-ID and the
 // single-target trackers, a box outliving the person by half a second looks
-// like the drone still sees somebody who has walked out of frame — and in a
+// like the drone still sees somebody who has walked out of frame - and in a
 // mode whose whole job is "who is that", a stale box is a claim about a
 // person. Those modes get a much shorter hold; the crowd keeps the long one.
 export const MODE_HOLD_MS: Record<string, [hold: number, fade: number]> = {
@@ -79,7 +79,7 @@ export const MODE_HOLD_MS: Record<string, [hold: number, fade: number]> = {
 
 // Exponential position smoothing time constant. Frame-rate independent via
 // 1 - exp(-dt/TAU), so behaviour does not change with display refresh rate.
-// 55ms is roughly "catches up within one inference interval" — tight enough
+// 55ms is roughly "catches up within one inference interval" - tight enough
 // that the box never visibly trails a moving subject, loose enough to absorb
 // the coordinate noise a detector produces on a static one.
 const TAU_MS = 55
@@ -96,7 +96,7 @@ const IOU_MATCH = 0.3
 // the field: the detector misses a moving person for two or three intervals,
 // they travel further than their own width, and the returning detection does
 // not overlap the held box AT ALL. IoU is then 0, no match is found, a second
-// track is created — and because the first is still inside its hold window,
+// track is created - and because the first is still inside its hold window,
 // the operator sees the SAME PERSON boxed twice, in two places.
 //
 // So a track also matches if the new box's centre is within this multiple of
@@ -178,7 +178,7 @@ function association(t: Track, box: Box, now: number): number {
  *  payloads and samples it continuously. One instance per list. */
 export class BoxSmoother {
     /** Hold/fade are per-instance so an identity list can be far snappier
-     *  than a plain box list — see IDENTITY_HOLD_MS. */
+     *  than a plain box list - see IDENTITY_HOLD_MS. */
     constructor(
         private holdMs = HOLD_MS,
         private fadeOutMs = FADE_OUT_MS,
@@ -196,7 +196,7 @@ export class BoxSmoother {
     ingest(items: RawItem[], now = performance.now()): void {
         const unmatched = new Set(this.tracks)
 
-        // Explicit ids first — when a module supplies one it is authoritative
+        // Explicit ids first - when a module supplies one it is authoritative
         // and must never be overridden by a geometric guess.
         const geometric: RawItem[] = []
         for (const item of items) {
@@ -244,7 +244,7 @@ export class BoxSmoother {
     private spawn(key: string | null, item: RawItem, now: number): Track {
         return {
             key, name: item.name,
-            // Starts where it was measured — fading in from the right place,
+            // Starts where it was measured - fading in from the right place,
             // rather than sliding in from a previous object's.
             shown: [...item.box] as Box,
             target: item.box,
@@ -283,7 +283,7 @@ export class BoxSmoother {
 
             if (t.gone !== null && since > this.holdMs) {
                 const fading = since - this.holdMs
-                if (fading >= this.fadeOutMs) continue   // fully gone — drop it
+                if (fading >= this.fadeOutMs) continue   // fully gone - drop it
                 alpha = 1 - fading / this.fadeOutMs
             }
 

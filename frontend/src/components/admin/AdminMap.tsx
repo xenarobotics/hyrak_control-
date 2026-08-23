@@ -4,7 +4,7 @@
 // the drone has a GPS fix, dashed/muted when only the client's IP-derived
 // approximate location is known. Clicking a marker opens the detail panel;
 // selecting a drone anywhere flies the map to it. Import this with
-// next/dynamic({ ssr: false }) — leaflet touches window at import time.
+// next/dynamic({ ssr: false }) - leaflet touches window at import time.
 
 import { useEffect, useRef, useState } from 'react'
 import { MapContainer, TileLayer, Marker, Polygon, Tooltip, useMap } from 'react-leaflet'
@@ -144,7 +144,7 @@ export default function AdminMap({
                         }}
                     >
                         <Tooltip sticky>
-                            {z.properties.name} — {z.properties.zone_class.toUpperCase()}
+                            {z.properties.name} - {z.properties.zone_class.toUpperCase()}
                         </Tooltip>
                     </Polygon>
                 ))}

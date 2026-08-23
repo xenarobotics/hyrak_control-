@@ -12,7 +12,7 @@ from app.utils.geo import haversine_m
 
 logger = logging.getLogger("verocore.events.swarm")
 
-# Must match frontend FLEET_COLORS in lib/fleet.ts — indexed by (drone_id - 1)
+# Must match frontend FLEET_COLORS in lib/fleet.ts - indexed by (drone_id - 1)
 DRONE_COLORS = [
     '#3b82f6', '#f59e0b', '#10b981', '#a855f7', '#ef4444',
     '#06b6d4', '#f97316', '#ec4899', '#84cc16', '#6366f1',
@@ -46,13 +46,13 @@ _SCAN_CONCURRENCY = 8
 
 # Scanning is CPU/process-cheap but a mavsdk_server spawn storm across many
 # concurrent scans is not, so scans still queue globally rather than running
-# in parallel — this only throttles scan throughput, it doesn't share any
+# in parallel - this only throttles scan throughput, it doesn't share any
 # drone STATE between sessions (each scan only ever touches its own
 # session's fleet; see session_manager.get_fleet_drone).
 _scan_lock = asyncio.Lock()
 
 # Batched fleet telemetry: managers write their latest snapshot keyed by
-# (session_id, drone_id) — each session's fleet is independent, so two
+# (session_id, drone_id) - each session's fleet is independent, so two
 # sessions can each have their own "drone 1" without either seeing the
 # other's data. A per-session emitter ships ONE fleet_telemetry event for
 # that session's drones at ~3 Hz on that session's own socket.
@@ -62,7 +62,7 @@ _fleet_seen: dict[tuple[str, int], float] = {}      # (session_id, drone_id) →
 _fleet_emitters: dict[str, asyncio.Task] = {}       # session_id → emitter task
 
 # Fleet drone DB identities. PX4 SITL instances share one firmware UID, so
-# identity is the (session, instance id) pair, not just the instance id —
+# identity is the (session, instance id) pair, not just the instance id -
 # otherwise "Drone 1" from two different clients' independent swarms would
 # collide onto the SAME registry record and flight history. Real hardware
 # connects through the primary (browser-radio) path, which reads the true
@@ -74,7 +74,7 @@ _fleet_db_ids: dict[tuple[str, int], str] = {}      # (session_id, drone_id) →
 # session's fleet SEPARATELY: low battery (warn, then auto-RTL), stale
 # telemetry, live inter-drone separation, and fleet-mission completion are
 # all computed within one session's own drones only, and `fleet_alert`
-# events go only to that session's own socket — never broadcast to every
+# events go only to that session's own socket - never broadcast to every
 # swarm user on the server.
 _SUP_INTERVAL = 1.0
 _BATT_WARN_PCT = 25.0
@@ -117,7 +117,7 @@ def cleanup_session_fleet_state(session_id: str) -> None:
     The TelemetryManagers themselves are already stopped by
     SessionManager.release_fleet_user() (called from session_manager.destroy
     on disconnect, or directly by the set_swarm_mode-disable handler below).
-    This just clears the per-session entries kept in THIS module's dicts —
+    This just clears the per-session entries kept in THIS module's dicts -
     without it, a tab closed without an explicit swarm disable would leave
     its drone ids sitting in these dicts forever.
     """
@@ -153,7 +153,7 @@ async def _server_alive_for_port(port: int) -> bool:
 def register_swarm_events(sio, session_manager: SessionManager):
 
     def _fleet_snapshot_cb(session_id: str, drone_id: int):
-        """Telemetry callback for a fleet drone — stores the snapshot keyed
+        """Telemetry callback for a fleet drone - stores the snapshot keyed
         by (session_id, drone_id) for the batched per-session emitters.
         Also feeds the flight recorder (armed→disarmed = one flight, same as
         primary drones) once the drone has a registry identity."""
@@ -192,7 +192,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
             _sup_task["task"] = None
 
     async def _supervise_one_fleet(session_id: str):
-        """One session's watchdog pass — battery/link/separation/mission
+        """One session's watchdog pass - battery/link/separation/mission
         checks only ever compare drones WITHIN this session's own fleet, and
         alerts go only to this session's own socket."""
         fleet = session_manager.get_fleet(session_id)
@@ -225,7 +225,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
             in_air = bool(fm.get("is_in_air")) or pos.get("relative_altitude_m", 0.0) > 1.0
             batt = snap.get("battery", {}).get("remaining_percent")
 
-            # Link staleness — snapshots normally arrive every ~1 s
+            # Link staleness - snapshots normally arrive every ~1 s
             seen = _fleet_seen.get(key)
             if seen and now - seen > _LINK_STALE_S:
                 if not st.get("link_lost"):
@@ -237,7 +237,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
                 st["link_lost"] = False
                 await alert(did, "link_restored", "info", f"Drone {did}: telemetry restored")
 
-            # Battery: warn at 25%, auto-RTL (PX4 RETURN — flies home
+            # Battery: warn at 25%, auto-RTL (PX4 RETURN - flies home
             # and lands) at 15% while airborne
             if batt is not None and armed:
                 if batt < _BATT_RTL_PCT and in_air and not st.get("rtl_done"):
@@ -248,8 +248,8 @@ def register_swarm_events(sio, session_manager: SessionManager):
                     except Exception:
                         pass
                     await alert(did, "auto_rtl", "critical",
-                                f"Drone {did}: battery {batt:.0f}% — auto-RTL "
-                                f"{'engaged' if ok else 'FAILED — take manual control'}")
+                                f"Drone {did}: battery {batt:.0f}% - auto-RTL "
+                                f"{'engaged' if ok else 'FAILED - take manual control'}")
                 elif batt < _BATT_WARN_PCT and now - st.get("batt_warned_at", 0) > 60:
                     st["batt_warned_at"] = now
                     await alert(did, "low_battery", "warn",
@@ -279,7 +279,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
                     pos.get("relative_altitude_m", 0.0),
                 ))
 
-        # Live separation between airborne drones — within this session's
+        # Live separation between airborne drones - within this session's
         # fleet only, never across two different clients' independent sims.
         for i in range(len(armed_air)):
             for j in range(i + 1, len(armed_air)):
@@ -304,7 +304,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
                 if sid_ == session_id:
                     s["mission_done"] = False
             await alert(0, "fleet_complete", "info",
-                        f"Fleet mission complete — {len(dones)} drone(s) finished")
+                        f"Fleet mission complete - {len(dones)} drone(s) finished")
 
     def _ensure_fleet_emitter(session_id: str):
         task = _fleet_emitters.get(session_id)
@@ -335,7 +335,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
 
     @sio.on("connect_swarm_relay")
     async def on_connect_swarm_relay(sid, data=None):
-        """Browser announces its local swarm_relay.py agent is up — see
+        """Browser announces its local swarm_relay.py agent is up - see
         swarm_relay_bridge.py. Registering the bridge BEFORE scanning is
         what makes scan_swarm_drones route through it instead of trying to
         connect to literal server-local ports."""
@@ -351,7 +351,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
     @sio.on("swarm_relay_uplink")
     async def on_swarm_relay_uplink(sid, data):
         """One drone_id-tagged MAVLink frame from the browser's local relay
-        agent — [drone_id: 1 byte][raw MAVLink bytes]. De-tag and hand to
+        agent - [drone_id: 1 byte][raw MAVLink bytes]. De-tag and hand to
         that drone's loopback endpoint."""
         if not isinstance(data, (bytes, bytearray)) or len(data) < 1:
             return
@@ -370,7 +370,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
         Scan for PX4 SITL drones by attempting a real MAVSDK connection to each
         candidate port with a timeout. kill_stale is endpoint-scoped in
         TelemetryManager, so each connect/stop only touches the mavsdk_server
-        bound to ITS OWN port — the primary drone and other fleet drones are
+        bound to ITS OWN port - the primary drone and other fleet drones are
         never affected.
 
         Payload: { count } (drones 1..count) or legacy { port_start, port_end }
@@ -397,7 +397,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
             ports      = list(range(port_start, port_end + 1))
 
         await sio.emit("swarm_scan_started", {"ports": ports}, to=sid)
-        logger.info(f"Scanning {len(ports)} ports for SITL drones: {ports[0]}–{ports[-1]}")
+        logger.info(f"Scanning {len(ports)} ports for SITL drones: {ports[0]}-{ports[-1]}")
 
         # This session is now a fleet user. Mark it and start its emitter up
         # front so telemetry is flowing as soon as the first drone attaches.
@@ -412,7 +412,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
         # (see swarm_relay_bridge.py + sitl_relay/swarm_relay.py) registers
         # a bridge for this session before scanning. When present, each
         # drone gets its own per-session loopback port instead of a literal
-        # server-local port — so two sessions can scan the identical
+        # server-local port - so two sessions can scan the identical
         # drone_id range (matching the identical port numbers on each
         # client's OWN machine) without ever touching the same OS port.
         # Falls back to the direct same-machine connect when no bridge is
@@ -429,19 +429,19 @@ def register_swarm_events(sio, session_manager: SessionManager):
                 existing = session_manager.get_fleet_drone(session.session_id, drone_id)
                 if existing:
                     # Check the manager's ACTUAL bound port, not the scan's
-                    # candidate port — those differ once bridged (the real
+                    # candidate port - those differ once bridged (the real
                     # mavsdk_server sits on a dynamic per-drone loopback
                     # port, not the client's literal SITL port number).
                     existing_port = int(existing.address.rsplit(":", 1)[-1])
                     if await _server_alive_for_port(existing_port):
-                        # Healthy — re-announce so a freshly reloaded page sees it
+                        # Healthy - re-announce so a freshly reloaded page sees it
                         asyncio.create_task(_register_fleet_drone(session.session_id, drone_id))
                         await sio.emit("swarm_drone_status", {
                             "drone_id": drone_id, "connected": True, "name": name, "color": color,
                         }, to=sid)
                         logger.info(f"Fleet drone {drone_id} already attached and healthy")
                         return entry
-                    # Attached but its mavsdk_server is dead — stop it fully BEFORE
+                    # Attached but its mavsdk_server is dead - stop it fully BEFORE
                     # reconnecting (a fire-and-forget stop could kill the new server).
                     logger.warning(f"Fleet drone {drone_id} attached but server dead, reconnecting")
                     session_manager.pop_fleet_drone(session.session_id, drone_id)
@@ -463,7 +463,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
                     address = f"udpin://0.0.0.0:{port}"
 
                 try:
-                    # kill_stale=True is safe here — it's scoped to this port only,
+                    # kill_stale=True is safe here - it's scoped to this port only,
                     # and clears any stale server left over from a previous session
                     # (the cause of "drones won't reconnect after page reload").
                     ok = await asyncio.wait_for(
@@ -507,21 +507,21 @@ def register_swarm_events(sio, session_manager: SessionManager):
         """
         Frontend toggled swarm mode. Each session owns its own fleet now, so
         disabling always tears down THIS session's drones (and only this
-        session's) — no other client's fleet is affected either way.
+        session's) - no other client's fleet is affected either way.
         """
         session = session_manager.get_by_socket(sid)
         if not session:
             return
         if bool(data.get("enabled", True)):
-            return  # enable needs no backend prep — the scan does the work
+            return  # enable needs no backend prep - the scan does the work
         stopped = await session_manager.release_fleet_user(session.session_id)
         for did in [d for (sid_, d) in list(_fleet_seen) if sid_ == session.session_id]:
             _end_fleet_flight(session.session_id, did)
         cleanup_session_fleet_state(session.session_id)
         if stopped:
-            logger.info(f"Swarm disabled — stopped {stopped} fleet drone(s) for session {session.session_id[:8]}")
+            logger.info(f"Swarm disabled - stopped {stopped} fleet drone(s) for session {session.session_id[:8]}")
         else:
-            logger.info(f"Swarm disabled for session {session.session_id[:8]} — no drones were connected")
+            logger.info(f"Swarm disabled for session {session.session_id[:8]} - no drones were connected")
 
     @sio.on("connect_swarm_drone")
     async def on_connect_swarm_drone(sid, data):
@@ -535,7 +535,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
         name     = str(data.get("name",  f"Drone {drone_id}"))
         color    = str(data.get("color", color_for_drone(drone_id)))
 
-        # Same relay check as the scan path — if this session bridged its
+        # Same relay check as the scan path - if this session bridged its
         # own remote swarm, route through it instead of a literal server
         # port (which the "port" field means on the CLIENT's machine here).
         relay = swarm_relay_bridge.get_bridge(session.session_id)
@@ -556,7 +556,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
             on_update=_fleet_snapshot_cb(session.session_id, drone_id),
             fleet_mode=True,
         )
-        # kill_stale is scoped to this port — cannot affect the primary drone
+        # kill_stale is scoped to this port - cannot affect the primary drone
         connected = await manager.connect(address, kill_stale=True)
 
         if not connected:
@@ -575,7 +575,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
         await sio.emit("swarm_drone_status", {
             "drone_id": drone_id, "connected": True, "name": name, "color": color,
         }, to=sid)
-        logger.info(f"Fleet drone {drone_id} ({name}) connected — session {session.session_id[:8]}")
+        logger.info(f"Fleet drone {drone_id} ({name}) connected - session {session.session_id[:8]}")
 
     @sio.on("disconnect_swarm_drone")
     async def on_disconnect_swarm_drone(sid, data):
@@ -594,7 +594,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
         _sup_drone.pop(key, None)
         _end_fleet_flight(session.session_id, drone_id)
         await sio.emit("swarm_drone_status", {"drone_id": drone_id, "connected": False}, to=sid)
-        logger.info(f"Fleet drone {drone_id} disconnected — session {session.session_id[:8]}")
+        logger.info(f"Fleet drone {drone_id} disconnected - session {session.session_id[:8]}")
 
     @sio.on("swarm_action")
     async def on_swarm_action(sid, data):
@@ -621,7 +621,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
             logger.error(f"Swarm action {action} on drone {drone_id} failed: {e}")
             await sio.emit("swarm_action_result", {
                 "drone_id": drone_id, "action": action, "ok": False,
-                "msg": "Drone link lost — rescan the fleet",
+                "msg": "Drone link lost - rescan the fleet",
             }, to=sid)
             await sio.emit("swarm_drone_status", {
                 "drone_id": drone_id, "connected": False,
@@ -639,7 +639,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
         drone k (in ascending id order) gets altitude + k*stagger, so a
         group takeoff never stacks two drones at the same height.
 
-        stagger_s > 0 delays drone k's action by k*stagger_s seconds — used
+        stagger_s > 0 delays drone k's action by k*stagger_s seconds - used
         for fleet mission starts so drones lift off one after another instead
         of climbing into each other's prop wash. stagger_order (list of drone
         ids) overrides the id-ascending delay order, so the client can launch
@@ -732,7 +732,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
                 await sio.emit("swarm_mission_upload_result", {
                     "drone_id": drone_id, "ok": False, "blocked": "red",
                     "can_request": bool(db_id), "zones": path_check["zones"],
-                    "msg": f"Blocked — crosses NO-FLY (red) zone: {names} — permission required",
+                    "msg": f"Blocked - crosses NO-FLY (red) zone: {names} - permission required",
                 }, to=sid)
                 logger.warning(f"Fleet mission blocked for drone {drone_id} (red zones: {names})")
                 return
@@ -747,13 +747,13 @@ def register_swarm_events(sio, session_manager: SessionManager):
                     "msg": f"Mission passes through restricted (orange) zone: {names}",
                 }, to=sid)
                 return
-            zone_warn = f" — passes orange zone: {names}"
+            zone_warn = f" - passes orange zone: {names}"
 
         try:
             ok, err = await tel.upload_mission(waypoints, terrain_follow=terrain_follow)
         except Exception as e:
             logger.error(f"Swarm mission upload to drone {drone_id} failed: {e}")
-            ok, err = False, "Drone link lost — rescan the fleet"
+            ok, err = False, "Drone link lost - rescan the fleet"
         await sio.emit("swarm_mission_upload_result", {
             "drone_id": drone_id, "ok": ok,
             "count": len(waypoints) if ok else 0,

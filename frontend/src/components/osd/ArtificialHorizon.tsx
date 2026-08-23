@@ -30,7 +30,7 @@ export function ArtificialHorizon({ width = 400, height = 300 }: Props) {
             preserveAspectRatio="xMidYMid meet"
             style={{ overflow: 'hidden', pointerEvents: 'none', display: 'block' }}
         >
-            {/* Pitch ladder — rotates with roll, translates with pitch */}
+            {/* Pitch ladder - rotates with roll, translates with pitch */}
             <g transform={`rotate(${-roll}, ${cx}, ${cy}) translate(0, ${pitch * pxPerDeg})`}>
                 {ladderLines.map(deg => {
                     if (deg === 0) return null
@@ -53,7 +53,7 @@ export function ArtificialHorizon({ width = 400, height = 300 }: Props) {
                                 x2={cx + lineW / 2} y2={y}
                                 stroke="white" strokeWidth={deg % 10 === 0 ? 1 : 0.6}
                             />
-                            {/* Degree label — right side only */}
+                            {/* Degree label - right side only */}
                             {isLarge && (
                                 <text
                                     x={cx + lineW / 2 + 6} y={y + 3.5}
@@ -69,7 +69,7 @@ export function ArtificialHorizon({ width = 400, height = 300 }: Props) {
                     )
                 })}
 
-                {/* Horizon line — zero pitch */}
+                {/* Horizon line - zero pitch */}
                 <line
                     x1={cx - width * 0.35} y1={cy}
                     x2={cx - width * 0.06} y2={cy}
@@ -82,7 +82,7 @@ export function ArtificialHorizon({ width = 400, height = 300 }: Props) {
                 />
             </g>
 
-            {/* Fixed aircraft reticle — always centered, never rotates */}
+            {/* Fixed aircraft reticle - always centered, never rotates */}
             <g transform={`translate(${cx}, ${cy})`}>
                 {/* Left wing bar */}
                 <rect x={-width * 0.12} y={-1.5} width={width * 0.08} height={3}
@@ -100,7 +100,7 @@ export function ArtificialHorizon({ width = 400, height = 300 }: Props) {
                 />
             </g>
 
-            {/* Pitch angle readout — subtle, bottom of element */}
+            {/* Pitch angle readout - subtle, bottom of element */}
             <text
                 x={cx + width * 0.38} y={cy + 4}
                 fontSize={9} fill="rgba(255,255,255,0.45)"

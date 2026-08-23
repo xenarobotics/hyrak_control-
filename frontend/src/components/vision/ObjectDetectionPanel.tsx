@@ -69,7 +69,7 @@ export function ObjectDetectionPanel() {
         [stable, search],
     )
 
-    // Timing is noisy by nature — a median ignores the occasional outlier
+    // Timing is noisy by nature - a median ignores the occasional outlier
     // instead of dragging the readout around with it.
     const totalCount = useEasedNumber(cvResults?.total_count ?? 0)
     const personCount = useEasedNumber(cvResults?.person_count ?? 0)

@@ -42,7 +42,7 @@ class GPSData:
 
 @dataclass
 class RcStatusData:
-    """The RC receiver as the AUTOPILOT sees it — the only view that
+    """The RC receiver as the AUTOPILOT sees it - the only view that
     matters for "will the sticks work": a transmitter that is on but not
     bound shows here as unavailable."""
 
@@ -57,13 +57,13 @@ class SensorHealthData:
     stream (SYS_STATUS / heartbeat health bits on the wire).
 
     THIS IS WHAT "CALIBRATED" MEANS ON THE SENSORS PAGE. The UI used to infer
-    sensor health from the data itself — heading != 0 meant the compass was
-    fine — which reports a healthy compass as broken whenever the aircraft
+    sensor health from the data itself - heading != 0 meant the compass was
+    fine - which reports a healthy compass as broken whenever the aircraft
     happens to face magnetic north. PX4 already computes the real answer and
     QGC displays exactly these flags; now so do we.
 
     `received` separates "the autopilot says not calibrated" from "no health
-    message has arrived yet" — without it a freshly connected aircraft would
+    message has arrived yet" - without it a freshly connected aircraft would
     flash every sensor red for the first second.
     """
     received: bool = False
@@ -89,12 +89,12 @@ class TelemetrySnapshot:
     Complete drone state at a point in time.
     This is what gets emitted to the frontend via Socket.IO.
 
-    All fields come directly from MAVLink messages via MAVSDK — no extra
+    All fields come directly from MAVLink messages via MAVSDK - no extra
     hardware required beyond standard PX4 quadrotor sensors (IMU + GPS).
 
     Wind: estimated by PX4 EKF2 from GPS velocity vs. airspeed delta.
           Available via WIND_COV MAVLink message / MAVSDK telemetry.fixedwing_metrics
-          (works on multirotors too when flying — PX4 always runs wind estimation).
+          (works on multirotors too when flying - PX4 always runs wind estimation).
     Mission index: from MISSION_CURRENT MAVLink msg (MAVSDK mission.mission_progress).
     Home position: from HOME_POSITION MAVLink msg (MAVSDK telemetry.home).
     """
@@ -109,7 +109,7 @@ class TelemetrySnapshot:
     groundspeed_m_s: float = 0.0
     heading_deg: float = 0.0
     home_distance_m: float = 0.0
-    # Wind estimation from PX4 EKF2 (no extra sensor — derived from GPS+IMU)
+    # Wind estimation from PX4 EKF2 (no extra sensor - derived from GPS+IMU)
     wind_north_m_s: float = 0.0
     wind_east_m_s: float = 0.0
     # Active mission waypoint index (-1 = no mission active)
@@ -127,11 +127,11 @@ class TelemetrySnapshot:
     # are two different numbers and only one of them was ever visible.
     #
     # Commanding 2 m and levelling at 5 m is not detectable from the altitude
-    # readout alone — it reads 5 and looks like a correct 5. The operator has
+    # readout alone - it reads 5 and looks like a correct 5. The operator has
     # to remember what they typed and notice the difference, which is exactly
     # what does not happen on a busy flight line. Carrying the target on the
     # snapshot lets the UI put them side by side and say so.
-    # MEASURED stream rates, Hz, keyed by stream name — what the link actually
+    # MEASURED stream rates, Hz, keyed by stream name - what the link actually
     # delivered, not what was requested. On a 3DR radio the ceiling is set by
     # AIR_SPEED and ECC on the radio itself, which nothing here can read, so
     # the only honest answer to "how fast can this link go" is to turn the
@@ -140,7 +140,7 @@ class TelemetrySnapshot:
     commanded_altitude_m: Optional[float] = None
     # Filled once the climb has settled and the two disagree by more than the
     # tolerance. Plain text, because the cause is on the VEHICLE (parameter,
-    # barometer, ground effect) and no code here can fix it — only report it
+    # barometer, ground effect) and no code here can fix it - only report it
     # while the operator can still act.
     altitude_warning: Optional[str] = None
     # ── Who is flying ────────────────────────────────────────────────────
@@ -151,7 +151,7 @@ class TelemetrySnapshot:
     # the aircraft to the pilot looked identical to one that is.
     offboard_active: bool = False
     # Set to the mode PX4 moved to when the aircraft left Offboard WITHOUT
-    # this app asking — i.e. the pilot took it, on the mode switch or on the
+    # this app asking - i.e. the pilot took it, on the mode switch or on the
     # sticks. None means the app still holds it (or never did). This is a
     # LATCH, not a live comparison: it stays set until somebody deliberately
     # takes control back, so that a stray tap cannot snatch the aircraft out
@@ -195,7 +195,7 @@ class DroneCommand:
     throttle: float = 0.5
 
     def __post_init__(self):
-        # Hard clamp — never send out-of-range values to a drone
+        # Hard clamp - never send out-of-range values to a drone
         self.roll = max(-1.0, min(1.0, self.roll))
         self.pitch = max(-1.0, min(1.0, self.pitch))
         self.yaw = max(-1.0, min(1.0, self.yaw))

@@ -1,8 +1,8 @@
 """
 Geodesy helpers shared across the platform.
 
-Exists because `_haversine_m` had already been written twice — in
-flights/recorder.py and events/swarm_events.py — and group follow needed a
+Exists because `_haversine_m` had already been written twice - in
+flights/recorder.py and events/swarm_events.py - and group follow needed a
 third. Three private copies of the same six lines is how two of them end up
 disagreeing about the earth's radius, and the one that matters is always the
 one nobody re-read.
@@ -10,7 +10,7 @@ one nobody re-read.
 import math
 
 #: Mean earth radius. Haversine assumes a sphere, which costs ~0.3% against
-#: WGS84 — a decimetre over the tens of metres this is used for, and far below
+#: WGS84 - a decimetre over the tens of metres this is used for, and far below
 #: the metre-scale noise of the GPS fixes being differenced.
 EARTH_RADIUS_M = 6_371_000.0
 

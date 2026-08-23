@@ -1,7 +1,7 @@
 'use client'
 
 // Persistent, opt-in status/control bar shown above every platform tab
-// (Fly/Mission/AI/Config/Settings) — not just the Fly page's own OSD. Gives
+// (Fly/Mission/AI/Config/Settings) - not just the Fly page's own OSD. Gives
 // the operator drone status + Land/Kill without having to switch tabs.
 // Toggled from Settings → "Status bar" (frontend/src/lib/statusBarSettings.ts),
 // default on.
@@ -22,7 +22,7 @@ import { StatusBarLinks } from '@/components/layout/StatusBarLinks'
 import { getStatusBarLinksEnabled, STATUSBAR_LINKS_CHANGE_EVENT } from '@/lib/statusBarSettings'
 
 // Altitude is only genuinely unavailable when a tracking loop is ACTIVELY
-// driving it — that is, Follow is armed AND the mode is on Auto altitude.
+// driving it - that is, Follow is armed AND the mode is on Auto altitude.
 // Issuing a position-mode goto then would fight the PD loop.
 //
 // This used to be a list of MODE NAMES, which locked the control the moment
@@ -95,7 +95,7 @@ export function StatusBar() {
     const { isStreaming, stats } = useWebRTCContext()
     const online = useOnlineStatus()
 
-    // Opt-in, and read on mount rather than during render — localStorage does
+    // Opt-in, and read on mount rather than during render - localStorage does
     // not exist while the server renders this. The event keeps a bar that is
     // already mounted in step with the Settings toggle, which is the same
     // problem the bar's own toggle already solves this way.
@@ -127,7 +127,7 @@ export function StatusBar() {
     // is_in_air comes from its own MAVLink stream at 1 Hz over a serial radio,
     // and that one subscription failing (or simply not being served by a given
     // PX4 build) leaves the flag false while the drone is plainly flying. The
-    // bar then kept offering TAKEOFF instead of SET ALT — and a takeoff sent to
+    // bar then kept offering TAKEOFF instead of SET ALT - and a takeoff sent to
     // an already-airborne vehicle is rejected, so the box looked dead no matter
     // what was typed into it. The backend's goto_altitude has always used this
     // same two-source test; the UI deciding which button to show did not, so the
@@ -140,7 +140,7 @@ export function StatusBar() {
     const droneLinked = telemetryStatus === 'connected'
     const commandedAlt = telemetry?.commanded_altitude_m ?? null
     const altWarning = telemetry?.altitude_warning ?? null
-    // Only once airborne and settled — during the climb the gap is expected and
+    // Only once airborne and settled - during the climb the gap is expected and
     // flagging it would make the indicator meaningless by the time it matters.
     const altMismatch = commandedAlt != null && inAir && altWarning != null
     // Live state, not mode name: locked only while a follow is actually
@@ -159,7 +159,7 @@ export function StatusBar() {
         sendAction(inAir ? 'set_altitude' : 'takeoff', { altitude })
         // Confirm the command left, so typing a number and getting no visible
         // response is never ambiguous. Pressing Enter previously did nothing
-        // at all — the key was never bound — which read as "altitude control
+        // at all - the key was never bound - which read as "altitude control
         // is broken" rather than "use the button".
         setAltSent(altitude)
         if (altSentTimer.current) clearTimeout(altSentTimer.current)
@@ -170,7 +170,7 @@ export function StatusBar() {
     //
     // Every altitude action already came back over `action_result` with an ok
     // flag, and the bar showed the same cheerful "→ 5m" either way. So a
-    // rejection — no position fix, arm timed out, PX4 refusing a reposition —
+    // rejection - no position fix, arm timed out, PX4 refusing a reposition -
     // was indistinguishable from success, and the only symptom left was a
     // drone that did not move. That is precisely "I type a number and nothing
     // changes".
@@ -188,8 +188,8 @@ export function StatusBar() {
 
     // "COMMANDS ARE NOT REACHING THE DRONE" IS USUALLY THE DRONE SAYING NO.
     //
-    // A refused arm and a dead radio produced the identical UI — the button
-    // simply did not latch — so the natural conclusion was that the telemetry
+    // A refused arm and a dead radio produced the identical UI - the button
+    // simply did not latch - so the natural conclusion was that the telemetry
     // link had failed, and the next hour went into the radio. Meanwhile the
     // refusal itself had travelled back over that radio, which proves it
     // works. The autopilot names the cause ("Arming denied: ...", "Preflight
@@ -242,7 +242,7 @@ export function StatusBar() {
                 const q = connectionQuality(stats.roundTripTime, stats.packetLoss)
                 const qColor = connectionQualityColor(q)
                 return (
-                    <Chip title={`Video link — ${q}, ${stats.roundTripTime.toFixed(0)}ms`}>
+                    <Chip title={`Video link - ${q}, ${stats.roundTripTime.toFixed(0)}ms`}>
                         <SignalMedium size={12} style={{ color: qColor }} />
                         <span style={{ color: qColor, textTransform: 'uppercase' }}>{q}</span>
                     </Chip>
@@ -271,7 +271,7 @@ export function StatusBar() {
             </BarButton>
 
             {refusal && (
-                <Chip title={`${refusal.action.replace(/_/g, ' ')} refused by the drone — ${refusal.reason}. The refusal came back over the telemetry link, so the link itself is working.`}>
+                <Chip title={`${refusal.action.replace(/_/g, ' ')} refused by the drone - ${refusal.reason}. The refusal came back over the telemetry link, so the link itself is working.`}>
                     <TriangleAlert size={12} style={{ color: '#f87171' }} />
                     <span style={{
                         color: '#f87171', maxWidth: 340, overflow: 'hidden',
@@ -322,11 +322,11 @@ export function StatusBar() {
                 WHAT WAS ASKED FOR SITS NEXT TO WHAT THE DRONE REPORTS.
                 Those are two different numbers and only one of them was ever
                 on screen. A drone commanded to 2 m and holding 5 m shows "5.0"
-                — a perfectly ordinary-looking reading that is only wrong if you
+                - a perfectly ordinary-looking reading that is only wrong if you
                 still remember what you typed, which on a flight line nobody
                 does. Side by side, the disagreement is the display. */}
             <Chip title={commandedAlt != null
-                ? `Commanded ${commandedAlt.toFixed(1)} m — drone reports ${alt.toFixed(1)} m`
+                ? `Commanded ${commandedAlt.toFixed(1)} m - drone reports ${alt.toFixed(1)} m`
                 : 'Current altitude (relative to takeoff)'}>
                 <Navigation size={12} style={{ color: altMismatch ? '#f87171' : '#60a5fa' }} />
                 <span style={{ fontWeight: 700, color: altMismatch ? '#f87171' : undefined }}>
@@ -357,7 +357,7 @@ export function StatusBar() {
                     value={altInput}
                     onChange={e => setAltInput(e.target.value)}
                     // Enter is the obvious way to submit a number typed into a
-                    // box, and it was not wired — so the whole control looked
+                    // box, and it was not wired - so the whole control looked
                     // dead to anyone who did not spot the button beside it.
                     onKeyDown={e => { if (e.key === 'Enter') handleAltAction() }}
                     disabled={altitudeLocked}
@@ -447,7 +447,7 @@ export function StatusBar() {
                         </button>
                     </div>
                 ) : (
-                    <BarButton onClick={handleKillClick} disabled={!droneLinked} color="#f87171" title="Immediately cuts motors — use only for genuine emergencies">
+                    <BarButton onClick={handleKillClick} disabled={!droneLinked} color="#f87171" title="Immediately cuts motors - use only for genuine emergencies">
                         <TriangleAlert size={13} /> KILL
                     </BarButton>
                 )}

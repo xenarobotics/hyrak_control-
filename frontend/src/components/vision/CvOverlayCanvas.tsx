@@ -53,7 +53,7 @@ function densityLevel(count: number, lightMax: number, moderateMax: number): 'gr
     return 'red'
 }
 
-// Search phase thresholds — keep in sync with the tracker modules
+// Search phase thresholds - keep in sync with the tracker modules
 const PHASE_HOLD = 90
 const PHASE_SWEEP = 180
 
@@ -150,7 +150,7 @@ function drawHeadingArrow(
     ctx.restore()
 }
 
-// Solid accent pill — for the ONE thing that matters in frame (a recognised
+// Solid accent pill - for the ONE thing that matters in frame (a recognised
 // name, the followed target). Deliberately louder than drawBadge so the
 // hierarchy is obvious at a glance.
 function drawPill(
@@ -268,7 +268,7 @@ function drawPersonTracking(ctx: CanvasRenderingContext2D, r: CVResult, W: numbe
     const faceConfirmed = r.face_confirmed ?? false
 
     // Name EVERY recognised person, not just the followed one. Showing a name
-    // is the point of face recognition — a box labelled "PERSON FOUND" tells an
+    // is the point of face recognition - a box labelled "PERSON FOUND" tells an
     // operator nothing they could not already see. Distinct colour from the
     // target so "recognised" and "being chased" are separable at a glance.
     const byTrack = new Map((r.identities ?? []).map(i => [i.track_id, i]))
@@ -278,7 +278,7 @@ function drawPersonTracking(ctx: CanvasRenderingContext2D, r: CVResult, W: numbe
         const [x1, y1, x2, y2] = p.box
         ctx.globalAlpha = alphaOf(p)
         // GREEN = in the database, and the only thing that gets text: the
-        // name. AMBER = a person, not recognised — no caption at all, because
+        // name. AMBER = a person, not recognised - no caption at all, because
         // "unknown" is already said by the colour, and the side panel carries
         // the detail. Captioning every stranger is what made the frame noisy.
         if (ident) {
@@ -316,7 +316,7 @@ function drawPersonTracking(ctx: CanvasRenderingContext2D, r: CVResult, W: numbe
             )
         } else {
             // Selected but not yet flying at them. A name if we have one and
-            // nothing otherwise — "PERSON FOUND" told the operator nothing
+            // nothing otherwise - "PERSON FOUND" told the operator nothing
             // they could not already see.
             drawSubjectRing(ctx, x1, y1, x2, y2, C.locked, 2.5)
             drawCrosshair(ctx, tx, ty, C.locked, 6, 10)
@@ -353,7 +353,7 @@ function drawCrowdManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: numb
     // The grid is ALWAYS drawn while this mode is active.
     //
     // It used to be gated on more than one occupied cell, which made the whole
-    // sectional view vanish in the most ordinary case — a few people standing
+    // sectional view vanish in the most ordinary case - a few people standing
     // together, or an empty frame. "Which zone is busiest" is the reason the
     // grid exists, and a density map that only appears once the crowd has
     // already spread out is no use to an operator.
@@ -390,7 +390,7 @@ function drawCrowdManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: numb
     }
     ctx.globalAlpha = 1
 
-    // The followed person — on top, so the crowd never hides them.
+    // The followed person - on top, so the crowd never hides them.
     const followed = (r.people ?? []).find(p => p.id === sel)
     if (followed) {
         const [x1, y1, x2, y2] = followed.box
@@ -409,13 +409,13 @@ function drawCrowdManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: numb
         }
     }
 
-    // No top HUD bar / COUNT-PEAK-LEVEL badges on the video itself — that
+    // No top HUD bar / COUNT-PEAK-LEVEL badges on the video itself - that
     // lives in the results panel now, feed stays clean.
 }
 
 /** The locked/followed subject, drawn so it is unmistakable among a dozen
  *  identical boxes: a solid rounded ring plus a soft outer glow. Brackets
- *  alone are not enough once the frame is busy — which is exactly when
+ *  alone are not enough once the frame is busy - which is exactly when
  *  knowing which one the drone is chasing matters most. */
 function drawLockedRing(
     ctx: CanvasRenderingContext2D,
@@ -434,7 +434,7 @@ function drawLockedRing(
     ctx.globalAlpha = 1
 }
 
-/** Soft-glow rounded ring — the modern replacement for corner brackets on
+/** Soft-glow rounded ring - the modern replacement for corner brackets on
  *  anything that is a subject rather than clutter. */
 function drawSubjectRing(
     ctx: CanvasRenderingContext2D,
@@ -453,11 +453,11 @@ function drawSubjectRing(
 
 function drawVehicleTracking(ctx: CanvasRenderingContext2D, r: CVResult, W: number, H: number) {
     // One vehicle, one identity: this module attaches plate/colour/type/speed
-    // to a persistent vehicle_id rather than a raw tracker id — same unified
+    // to a persistent vehicle_id rather than a raw tracker id - same unified
     // list shape as traffic-management's vehicle drawing, without the
     // crowd/face parts that module also carries.
     //
-    // Counts, telemetry and ALPR availability live in the side panel — this
+    // Counts, telemetry and ALPR availability live in the side panel - this
     // canvas draws only vehicles, their plates, and the follow guide.
     const tracking = r.tracking ?? false
     for (const v of r.vehicles ?? []) {
@@ -468,8 +468,8 @@ function drawVehicleTracking(ctx: CanvasRenderingContext2D, r: CVResult, W: numb
         else drawSubjectRing(ctx, x1, y1, x2, y2, C.vehicle, 1.5, 0.7)
 
         // ONE thing on screen per vehicle: the plate. vehicle_id, colour,
-        // type and speed were all crammed into a single dense caption —
-        // "719257C VH-000001 blue car ~48km/h" — which is what actually read
+        // type and speed were all crammed into a single dense caption -
+        // "719257C VH-000001 blue car ~48km/h" - which is what actually read
         // as dated, not the chip style. All of it is already in the side
         // panel, laid out properly, and none of it needs to be read off a
         // moving picture.
@@ -479,7 +479,7 @@ function drawVehicleTracking(ctx: CanvasRenderingContext2D, r: CVResult, W: numb
         // often the only read a passing vehicle will ever give.
         if (v.plate) {
             const text = `${v.plate}${v.plate_strong ? '' : '?'}`
-            // Solid pill for the followed vehicle, quiet chip for the rest —
+            // Solid pill for the followed vehicle, quiet chip for the rest -
             // hierarchy by weight, not by cramming in more words.
             if (locked) drawPill(ctx, text, x1, y1, C.active)
             else drawBadge(ctx, text, x1, Math.max(16, y1 - 4),
@@ -494,7 +494,7 @@ function drawVehicleTracking(ctx: CanvasRenderingContext2D, r: CVResult, W: numb
                             v.plate_strong ? C.known : C.unknown, 2)
         }
 
-        // Recentering guide for the locked, actively-followed vehicle — same
+        // Recentering guide for the locked, actively-followed vehicle - same
         // shape as human-tracking's: a line from frame centre to the target,
         // so which way (and how far) it sits off-centre is visible at a
         // glance rather than something to infer from the PD command alone.
@@ -515,7 +515,7 @@ function drawVehicleTracking(ctx: CanvasRenderingContext2D, r: CVResult, W: numb
 // Which list each mode draws, so payloads can be routed to a smoother
 // without the draw functions needing to know smoothing exists.
 // A LIST per mode, not one field. traffic-management draws vehicles AND
-// people, and while only one could be smoothed the other was drawn raw — so
+// people, and while only one could be smoothed the other was drawn raw - so
 // person boxes snapped between detections at the analyser's rate while vehicle
 // boxes glided. That is exactly the "smooth in other modules, jumping here"
 // report: crowd-management smooths 'people', traffic did not.
@@ -531,7 +531,7 @@ const SMOOTHED_FIELDS: Record<string, string[]> = {
 // A mode listed in CLICK_TO_SELECT or drawn by the switch below must ALSO be
 // in OVERLAY_CAPABLE (lib/videoSettings.ts), or this component is never
 // mounted for it and every interaction here is dead code. In dev that
-// disagreement is now loud instead of silent — traffic-management sat in this
+// disagreement is now loud instead of silent - traffic-management sat in this
 // map with a full draw function and a click handler while falling through to
 // the processed feed, which cost several rounds of debugging the wrong layer.
 if (process.env.NODE_ENV !== 'production') {
@@ -540,7 +540,7 @@ if (process.env.NODE_ENV !== 'production') {
             if (!overlayCapableModes().includes(m)) {
                 console.error(
                     `[CvOverlayCanvas] "${m}" expects a client overlay but is not in `
-                    + 'OVERLAY_CAPABLE — the canvas will never mount, so hover and '
+                    + 'OVERLAY_CAPABLE - the canvas will never mount, so hover and '
                     + 'click-to-follow cannot work in that mode.',
                 )
             }
@@ -557,13 +557,13 @@ const CLICK_TO_SELECT: Record<string, true> = {
     'traffic-management': true,
     'vehicle-plate-tracking': true,
     // Crowd management follows one person out of the crowd with the same
-    // tracker ids it counts with — selection is the same click.
+    // tracker ids it counts with - selection is the same click.
     'crowd-management': true,
 }
 
 // Modes whose click target is a VEHICLE (keyed by track_id) rather than a
 // person (keyed by id). Both traffic-management and vehicle-plate-tracking
-// follow a vehicle the same way — same event, same payload shape.
+// follow a vehicle the same way - same event, same payload shape.
 const VEHICLE_CLICK_MODES: Record<string, true> = {
     'traffic-management': true,
     'vehicle-plate-tracking': true,
@@ -603,7 +603,7 @@ function toSourceCoords(
     }
 }
 
-/** Smallest box containing the point — smallest, because a person standing in
+/** Smallest box containing the point - smallest, because a person standing in
  *  front of a larger overlapping box is the one being pointed at. */
 function hitTest(
     boxes: { id: number; box: [number, number, number, number] }[],
@@ -628,12 +628,12 @@ function drawTrafficManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: nu
     // busiest" over a static venue. Traffic is watched moving, and there the
     // tinted cells and their per-cell numbers sit on top of the vehicles and
     // people the operator is actually trying to look at, while the same
-    // headcount is already on the panel — laid out properly, and readable
+    // headcount is already on the panel - laid out properly, and readable
     // without staring through it.
     //
     // Same reasoning retires the corner readout: vehicle/people/plate counts
     // and the telemetry and ALPR warnings are all panel material. What earns
-    // space on the video is only what is POSITIONAL — a box has to be on the
+    // space on the video is only what is POSITIONAL - a box has to be on the
     // picture because it points at something in the picture. A number does
     // not.
 
@@ -654,7 +654,7 @@ function drawTrafficManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: nu
         } else if (p.in_group) {
             // A group member that is not the primary. Same accent so the group
             // reads as one thing, thinner ring so which subject the labelling
-            // comes from is still obvious — that is the one the operator needs
+            // comes from is still obvious - that is the one the operator needs
             // when deciding who to drop.
             drawSubjectRing(ctx, x1, y1, x2, y2, C.active, 2, 0.9)
             drawPill(ctx, (ident?.name ?? 'IN GROUP').toUpperCase(), x1, y1, C.active)
@@ -735,8 +735,8 @@ function drawTrafficManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: nu
         // The plate bracket is placed RELATIVE to the vehicle box, so it
         // travels with the vehicle and vanishes with it. Drawn from absolute
         // coordinates it sat wherever the plate had been when OCR last ran on
-        // that vehicle — which, on a per-frame budget of a couple of calls, is
-        // often seconds and half a frame ago — and then lingered there while
+        // that vehicle - which, on a per-frame budget of a couple of calls, is
+        // often seconds and half a frame ago - and then lingered there while
         // the box itself was smoothed and faded away.
         if (v.plate_box_rel) {
             const [fx1, fy1, fx2, fy2] = v.plate_box_rel
@@ -786,7 +786,7 @@ function drawTrafficManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: nu
         ctx.strokeStyle = accent
         ctx.lineWidth = 2
         // Dashed, so it never reads as a detection. It is a constraint, not a
-        // subject — nothing in the picture is that rectangle.
+        // subject - nothing in the picture is that rectangle.
         ctx.setLineDash([10, 7])
         ctx.globalAlpha = 0.9
         ctx.strokeRect(gx1 * W, gy1 * H, (gx2 - gx1) * W, (gy2 - gy1) * H)
@@ -821,13 +821,13 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
     // Read by the render loop to draw a hover ring, so clicking is
     // discoverable rather than a hidden feature.
     const hovered = useRef<number | null>(null)
-    // Optimistic selection feedback — see the draw block.
+    // Optimistic selection feedback - see the draw block.
     const pending = useRef<{ box: [number, number, number, number]; at: number } | null>(null)
     const clickable = !!CLICK_TO_SELECT[mode]
 
     // The newest payload, read by the render loop. Kept in a ref rather than
     // used as an effect dependency: rendering is driven by the DISPLAY, not by
-    // socket arrivals. That decoupling is the whole point — it is what lets a
+    // socket arrivals. That decoupling is the whole point - it is what lets a
     // 12Hz detector drive a 60Hz overlay, and what stops one dropped detection
     // from blanking the frame.
     const latest = useRef<CVResult | null>(null)
@@ -848,7 +848,7 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
         lastPayload.current = cvResults
     }, [cvResults, mode])
 
-    // Switching modes must not carry tracks across — the lists mean different
+    // Switching modes must not carry tracks across - the lists mean different
     // things and the ids do not correspond.
     useEffect(() => {
         smoothers.current.reset()
@@ -874,7 +874,7 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
 
             // SUPERSAMPLE THE BACKING STORE.
             //
-            // The canvas used to be exactly the source frame — 1280x720, say —
+            // The canvas used to be exactly the source frame - 1280x720, say -
             // and then CSS-stretched to fill the player. On a HiDPI screen
             // that is a 1280-wide bitmap blown up to 2560+ device pixels, so
             // every ring, pill and character came out soft and blocky. The
@@ -887,7 +887,7 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
             const rect = canvas.getBoundingClientRect()
             const dpr = window.devicePixelRatio || 1
             // Never below 1 (that would blur boxes to gain nothing) and capped
-            // at 3 — beyond that the memory cost climbs quadratically for a
+            // at 3 - beyond that the memory cost climbs quadratically for a
             // difference no one can see.
             const ss = rect.width > 0
                 ? Math.min(3, Math.max(1, (rect.width * dpr) / W))
@@ -930,11 +930,11 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
             // Hover affordance, drawn last so it sits over the module's own
             // boxes. Only in modes where a click does something.
             // Hover / touch affordance: a rounded highlight and nothing else.
-            // No caption — the operator already knows what tapping a target
+            // No caption - the operator already knows what tapping a target
             // does once, and a label on every hover is noise over the picture.
             if (CLICK_TO_SELECT[mode] && hovered.current !== null) {
                 // Must search the SAME lists targetsNow() offers, or a target
-                // can be hoverable and clickable while showing no highlight —
+                // can be hoverable and clickable while showing no highlight -
                 // which reads as a dead control. That was happening to people
                 // in traffic-management: hovering set the id, the lookup
                 // searched vehicles only, and nothing lit up.
@@ -959,7 +959,7 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
 
             // A click that has not round-tripped to the server yet. Without
             // this the ONLY feedback is the next payload, so any failure
-            // anywhere in the chain is indistinguishable from a dead control —
+            // anywhere in the chain is indistinguishable from a dead control -
             // which is exactly how this felt.
             if (pending.current !== null && performance.now() - pending.current.at < 1200) {
                 const b = pending.current.box
@@ -979,13 +979,13 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
     }, [mode])
 
     // Which list a click tests against. Vehicle modes key on track_id, not
-    // id — so it is normalised here instead of duplicating the hit-test.
+    // id - so it is normalised here instead of duplicating the hit-test.
     /** What can be clicked, IN THE POSITIONS THEY ARE DRAWN.
      *
      *  This used to hit-test the raw payload while the canvas drew the
      *  SMOOTHED boxes, so the two disagreed by exactly the interpolation lag.
      *  The operator aims at the box they can see and the test runs against one
-     *  somewhere else — the click lands in the gap and nothing is emitted, no
+     *  somewhere else - the click lands in the gap and nothing is emitted, no
      *  error, no feedback.
      *
      *  Small when detections are fast, which is why it went unnoticed. In
@@ -1015,7 +1015,7 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
                 .filter(v => v.track_id != null)
                 .map(v => ({ id: v.track_id as number, box: v.box }))
             // traffic-management follows PEOPLE as well as vehicles, and both
-            // come out of one ByteTrack pass — so their ids share a space and
+            // come out of one ByteTrack pass - so their ids share a space and
             // a person is just another target in the same list. No separate
             // event and no "which kind did you mean" in the payload.
             if (mode === 'traffic-management') {
@@ -1063,7 +1063,7 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
             getSocket().emit('select_person', { person_id: id })
             return
         }
-        // person-tracking follows an ENROLLED IDENTITY, not a track — the lock
+        // person-tracking follows an ENROLLED IDENTITY, not a track - the lock
         // has to survive the track id changing when someone leaves and returns.
         // So a click only means something on a person who has been named.
         const ident = (latest.current?.identities ?? []).find(
@@ -1074,7 +1074,7 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
         } else {
             // Not an enrolled face. Previously this did nothing at all, which
             // is indistinguishable from a broken control. Fall back to
-            // following the TRACK, the same way human-tracking does — the
+            // following the TRACK, the same way human-tracking does - the
             // operator pointed at a person, so follow that person.
             getSocket().emit('select_person', { person_id: id })
             pending.current = null
@@ -1094,7 +1094,7 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
             style={{
                 position: 'absolute', inset: 0,
                 width: '100%', height: '100%',
-                // MUST match the video element — see toSourceCoords.
+                // MUST match the video element - see toSourceCoords.
                 objectFit: fit === 'fit' ? 'contain' : 'cover',
                 // Transparent to clicks EXCEPT where one does something, so it
                 // never steals input from the controls underneath.

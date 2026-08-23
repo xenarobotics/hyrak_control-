@@ -126,7 +126,7 @@ export function partitionSurveyLines(
     acc += lengths[i]
     const remainingLines = lines.length - i - 1
     const remainingGroups = groups - partitions.length - 1
-    // Close the group once it reaches its share — but never starve the
+    // Close the group once it reaches its share - but never starve the
     // remaining groups of at least one line each.
     if (
       remainingGroups > 0 &&

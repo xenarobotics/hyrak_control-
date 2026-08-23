@@ -24,7 +24,7 @@ export interface GroupResult {
 }
 
 // Supervisor alerts (fleet_alert events): low battery, auto-RTL, link loss,
-// separation, fleet completion. Shown in the fleet panels — never map popups.
+// separation, fleet completion. Shown in the fleet panels - never map popups.
 export interface FleetAlert {
     droneId: number
     kind: string
@@ -34,7 +34,7 @@ export interface FleetAlert {
 }
 
 // Persist swarm-enabled flag so it survives page reload within the same browser session.
-// Drones themselves are NOT persisted — they're repopulated by auto-scan on reconnect.
+// Drones themselves are NOT persisted - they're repopulated by auto-scan on reconnect.
 const SESSION_KEY = 'hyrak_swarm_enabled'
 function readPersistedEnabled(): boolean {
     if (typeof window === 'undefined') return false
@@ -70,7 +70,7 @@ interface SwarmStore {
     setGroupResult: (r: GroupResult | null) => void
 }
 
-// Shared upsert used by every path telemetry/status can arrive through —
+// Shared upsert used by every path telemetry/status can arrive through -
 // scan events, per-drone status, and batched fleet telemetry all race each
 // other, so any of them may see a drone id before the store knows it.
 function upsertEntry(drones: Record<number, DroneEntry>, id: number): DroneEntry {
@@ -100,7 +100,7 @@ export const useSwarmStore = create<SwarmStore>((set) => ({
         // mavsdk_server, so re-enabling always reconnects from a clean slate.
         try {
             getSocket().emit('set_swarm_mode', { enabled: v })
-        } catch { /* socket not up yet — backend cleans on disconnect anyway */ }
+        } catch { /* socket not up yet - backend cleans on disconnect anyway */ }
         set((s) => ({
             enabled: v,
             drones: v ? s.drones : {},
@@ -116,7 +116,7 @@ export const useSwarmStore = create<SwarmStore>((set) => ({
 
     setScanStatus: (s) => set({ scanStatus: s }),
 
-    // Clear stale drone entries — called when socket reconnects so the
+    // Clear stale drone entries - called when socket reconnects so the
     // auto-rescan can repopulate with fresh connections.
     clearFleet: () => set({ drones: {}, activeDroneId: null, scanStatus: 'idle', selectedIds: [] }),
 
@@ -168,7 +168,7 @@ export const useSwarmStore = create<SwarmStore>((set) => ({
         }
     }),
 
-    // Batched fleet telemetry — ONE store update per fleet_telemetry event,
+    // Batched fleet telemetry - ONE store update per fleet_telemetry event,
     // regardless of fleet size. Per-drone updates at 3 Hz each re-render the
     // whole UI 30×/s with 10 drones; this caps it at the emit rate (~3×/s).
     updateFleetTelemetry: (map) => set((s) => {

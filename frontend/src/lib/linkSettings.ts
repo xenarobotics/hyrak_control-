@@ -1,7 +1,7 @@
 // Persisted defaults for the telemetry / command links.
 //
-// These were previously literals at their point of use — `useState('udp://:14540')`
-// in TelemetryConnect, `useState(DEFAULT_SERIAL_BAUD)` in DeviceSelector — so
+// These were previously literals at their point of use - `useState('udp://:14540')`
+// in TelemetryConnect, `useState(DEFAULT_SERIAL_BAUD)` in DeviceSelector - so
 // an operator whose radio runs at 115200, or whose vehicle is not on the SITL
 // default port, retyped the same value on every single connect. Saving them is
 // the whole feature; nothing else about the connect flow changes.
@@ -9,7 +9,7 @@
 const ADDRESS_KEY = 'hyrak-telemetry-address'
 const BAUD_KEY = 'hyrak-telemetry-baud'
 
-/** PX4 SITL's default MAVLink port — the right guess for a dev machine, and
+/** PX4 SITL's default MAVLink port - the right guess for a dev machine, and
  *  harmless anywhere else since it is only a prefill. */
 export const DEFAULT_TELEMETRY_ADDRESS = 'udp://:14540'
 
@@ -56,13 +56,13 @@ export function setTelemetryBaud(v: number): void {
 // the only place a link could be picked. The status bar now offers the same
 // choice from Mission and AI, and two components each holding their own copy
 // of "which radio" is how they end up disagreeing about which one is
-// connected — the operator switches port in the bar, walks to Fly, and finds
+// connected - the operator switches port in the bar, walks to Fly, and finds
 // the old one still selected.
 const SOURCE_KEY = 'hyrak-telemetry-source'
 
 /** Fired when the link selection changes, so a control mounted elsewhere
  *  updates immediately rather than on next mount. Same pattern the status-bar
- *  toggle already uses — localStorage has no in-tab change event. */
+ *  toggle already uses - localStorage has no in-tab change event. */
 export const LINK_CHANGE_EVENT = 'hyrak-link-changed'
 
 /** 'sitl' | 'radio-<i>' (Web Serial) | 'nradio-<i>' (native serial)

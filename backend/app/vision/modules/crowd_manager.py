@@ -1,5 +1,5 @@
 """
-Crowd management — live people count, density (green/orange/red),
+Crowd management - live people count, density (green/orange/red),
 sectional density + sustained-density alerts, per BaseAnalyzer's usual
 YOLO+ByteTrack shape (same tracker as human_tracker.py/person_tracker.py).
 
@@ -10,15 +10,15 @@ CCTV desktop app), adapted to this repo's per-frame analyzer shape.
 One deliberate correction vs. that source: it presents "cumulative unique
 footfall" (distinct ByteTrack IDs ever seen) as a hard number. On a MOVING
 drone camera the same people can be re-seen and get new IDs, or the same
-crowd can be revisited — so that number is exposed here as
+crowd can be revisited - so that number is exposed here as
 `distinct_tracks_seen` (an upper-bound-ish diagnostic), never framed as a
 real footfall count. `peak_count` (max simultaneous count this session) is
 the honest headline stat instead.
 
-DB writes and admin alerts aren't done directly here — this method runs in
+DB writes and admin alerts aren't done directly here - this method runs in
 a worker thread (BaseAnalyzer's executor), not the asyncio event loop.
 Decisions are queued onto the returned meta dict; stream_track.py's recv()
-(already back in the event loop) dispatches them — see
+(already back in the event loop) dispatches them - see
 app/vision/persistence.py and app/events/admin_events.py.
 """
 import logging
@@ -55,7 +55,7 @@ logger = logging.getLogger("verocore.vision.crowd_manager")
 
 _TRACKER_CFG = make_bytetrack_cfg("verocore_crowd_bt_")
 
-# Operator-adjustable per session via set_thresholds() (Settings page) —
+# Operator-adjustable per session via set_thresholds() (Settings page) -
 # whole-frame density is FOV-dependent, there's no universally correct
 # default (same caveat the source project's own README calls out).
 _DEFAULT_LIGHT_MAX = 8
@@ -66,7 +66,7 @@ _ALERT_SUSTAIN_S = 8.0      # a section must stay RED this long before alerting
 _ALERT_COOLDOWN_S = 30.0    # ...and won't re-fire for the same section sooner than this
 _SNAPSHOT_INTERVAL_S = 2.0
 # Trend sampling. 2s x 150 = the last 5 minutes, which is the window that
-# actually answers "is this building or settling" — the question a live
+# actually answers "is this building or settling" - the question a live
 # headcount alone cannot answer, and the one that decides whether you act
 # before a crush rather than after it.
 _HISTORY_INTERVAL_S = 2.0
@@ -83,7 +83,7 @@ _HEIGHT_EMA_ALPHA = 0.12
 _YAW_PRIORITY_THRESHOLD = 0.30
 _YAW_PRIORITY_FLOOR = 0.35
 MAX_PURSUIT_SPEED_M_S = 2.5
-# Blind-flight policy is shared and expressed in seconds — see pursuit.py.
+# Blind-flight policy is shared and expressed in seconds - see pursuit.py.
 
 _LEVEL_COLOR_BGR = {"green": (0, 200, 0), "orange": (0, 165, 255), "red": (0, 0, 230)}
 
@@ -137,7 +137,7 @@ def _make_state() -> Dict[str, Any]:
         "yaw_pd": new_yaw_pd(),
         "alt_pd": PDController(kp=1.5, kd=0.3, max_output=1.0, deadband=0.10),
         "dist_pd": PDController(kp=4.0, kd=1.0, max_output=2.5, deadband=0.08),
-        # The Fixed-altitude distance axis — see pursuit.new_row_pd.
+        # The Fixed-altitude distance axis - see pursuit.new_row_pd.
         "row_pd": new_row_pd(),
         "kalman": KalmanXY(),
         "smoother": VelocitySmoother(alpha=0.4),
@@ -176,7 +176,7 @@ class CrowdManager(BaseAnalyzer):
 
         Persisting is what makes them stick: state is rebuilt from scratch
         every time an analyzer is created, so a value that lives only in
-        session state is lost on the next stream — which is exactly how custom
+        session state is lost on the next stream - which is exactly how custom
         thresholds kept reverting to the defaults a few seconds in.
         """
         lo = max(1, int(light_max))
@@ -189,7 +189,7 @@ class CrowdManager(BaseAnalyzer):
         try:
             _cal.save({"crowd_light_max": lo, "crowd_moderate_max": hi})
         except Exception as e:
-            # A failed write must not break the live session — the running
+            # A failed write must not break the live session - the running
             # values above are already applied.
             logger.warning(f"Could not persist density thresholds: {e}")
         logger.info(f"Session {client_id[:8]}: density thresholds -> {lo}/{hi} (persisted)")
@@ -223,7 +223,7 @@ class CrowdManager(BaseAnalyzer):
         # imgsz MUST match the pre-resized width. Ultralytics letterboxes to
         # imgsz (default 640) internally, so handing it a 1280-wide frame
         # without saying so just downscales it straight back and the extra
-        # resolution is thrown away — the altitude ceiling would not move.
+        # resolution is thrown away - the altitude ceiling would not move.
         results = self.model.track(
             frame_proc, classes=[0], imgsz=self.imgsz_for(frame_proc),
             device=self.device, half=self.half, verbose=False, conf=0.4,
@@ -247,7 +247,7 @@ class CrowdManager(BaseAnalyzer):
         section_counts: Dict[int, int] = {}
 
         # Single session per analyzer instance (worker_pool loads one
-        # instance per session, same as human_tracker.py) — one iteration.
+        # instance per session, same as human_tracker.py) - one iteration.
         state = None
         for _client_id, s in self._client_state.items():
             state = s
@@ -446,7 +446,7 @@ class CrowdManager(BaseAnalyzer):
 
     def set_tracking_params(self, client_id: str, target_distance_ratio: float) -> None:
         """In Fixed altitude the forward axis reads the frame row, so the ratio
-        alone would not reach it — the DIRECTION of change is applied to the
+        alone would not reach it - the DIRECTION of change is applied to the
         target row as well, keeping CLOSER / FURTHER working in both modes."""
         st = self._client_state.get(client_id)
         if st is None:
@@ -468,7 +468,7 @@ class CrowdManager(BaseAnalyzer):
         """
         Same PD stack as human_tracker, driven off the crowd tracker's own
         ByteTrack ids. Returns None only when nothing is selected or tracking
-        is disarmed — never while armed, because a gap in the Offboard setpoint
+        is disarmed - never while armed, because a gap in the Offboard setpoint
         stream hands control to PX4's failsafe (see plate_tracker's
         _search_command for what that cost).
         """
@@ -535,7 +535,7 @@ class CrowdManager(BaseAnalyzer):
 
         yaw_factor = max(_YAW_PRIORITY_FLOOR,
                          1.0 - abs(err_yaw) / _YAW_PRIORITY_THRESHOLD)
-        # A retreat is never throttled — see pursuit.scale_forward.
+        # A retreat is never throttled - see pursuit.scale_forward.
         forward_m_s = scale_forward(forward_raw, yaw_factor, alt_mode)
 
         elevate = None
@@ -594,7 +594,7 @@ class CrowdManager(BaseAnalyzer):
         SIZE (de-foreshortened) is the primary and the only one that works
         without telemetry. POSITION (where the subject's feet meet the ground
         plane) is fused in as the view steepens, because that is exactly where
-        the size estimate degrades and the position one sharpens — see
+        the size estimate degrades and the position one sharpens - see
         geometry.blend_weight_for_position for the measured crossover.
 
         Returns h_ema unchanged when there is no pose, so every no-telemetry
@@ -622,11 +622,11 @@ class CrowdManager(BaseAnalyzer):
 
         # FEET, NOT CENTRE. The comment here said exactly this while the code
         # passed the box centre, and the centre floats half a subject's height
-        # off the ground — so its ray cleared the subject and struck the ground
+        # off the ground - so its ray cleared the subject and struck the ground
         # BEYOND them. The over-estimate is AGL/(AGL - h/2), independent of
         # viewing angle: +17% at 6 m AGL, +27% at 4 m, +40% at 3 m. Range too
         # long reads as "further than wanted", which commands FORWARD, and the
-        # position estimate is weighted in hardest at steep depression — i.e.
+        # position estimate is weighted in hardest at steep depression - i.e.
         # exactly when the subject is low in the frame and the drone should have
         # been backing off. Reported from flight as "person on the lower side of
         # frame and it moves forward instead of back".
@@ -655,8 +655,8 @@ class CrowdManager(BaseAnalyzer):
         #
         # It used to be gated on `len(section_counts) > 1`, i.e. only once
         # people occupied two different cells. That made the whole sectional
-        # view vanish in the most ordinary case — a handful of people standing
-        # together, or an empty frame — and "which zone is busiest" is the
+        # view vanish in the most ordinary case - a handful of people standing
+        # together, or an empty frame - and "which zone is busiest" is the
         # reason the grid exists. An operator cannot read a density map that
         # only appears once the crowd has already spread out.
         #
@@ -677,7 +677,7 @@ class CrowdManager(BaseAnalyzer):
                     # regions that matter, and an empty frame became a wire
                     # mesh. The occupied cells are the information.
                     continue
-                # Each zone's own density, not the whole-frame level — a packed
+                # Each zone's own density, not the whole-frame level - a packed
                 # corner of an otherwise-empty frame should read red locally
                 # even if the overall frame is green.
                 sec_color = _LEVEL_COLOR_BGR.get(
@@ -714,7 +714,7 @@ class CrowdManager(BaseAnalyzer):
                 cv2.circle(frame_bgr, (tx, ty), 8, col, 1, cv2.LINE_AA)
                 cv2.circle(frame_bgr, (cx, cy), 3, (180, 180, 180), -1, cv2.LINE_AA)
 
-        # No top HUD bar / COUNT-PEAK-LEVEL badges on the video itself —
+        # No top HUD bar / COUNT-PEAK-LEVEL badges on the video itself -
         # that lives in the results panel now, feed stays clean (Japesh:
         # get rid of the black bar + top-left/top-right annotations).
         return frame_bgr

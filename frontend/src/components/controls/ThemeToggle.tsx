@@ -11,7 +11,7 @@ export function ThemeToggle() {
 
     useEffect(() => { setMounted(true) }, [])
 
-    // Render placeholder until mounted — prevents hydration mismatch
+    // Render placeholder until mounted - prevents hydration mismatch
     if (!mounted) {
         return (
             <div className="w-12 h-10 rounded-lg" />

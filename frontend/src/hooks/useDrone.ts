@@ -31,7 +31,7 @@ export function useDrone() {
             connectSocket()
         }
 
-        // Named handler refs — .off(fn) removes ONLY this handler,
+        // Named handler refs - .off(fn) removes ONLY this handler,
         // not all handlers for the event (which happens with bare .off('event')).
         // Critical: multiple components call useDrone(); without named refs,
         // one component's cleanup nukes every other component's listeners.
@@ -68,7 +68,7 @@ export function useDrone() {
         // The backend's generic `error` event had NO listener at all, so every
         // path that reports failure that way instead of via telemetry_status
         // (e.g. connect_browser_serial's "No session found") left the UI stuck
-        // on "connecting" forever with nothing to show — the connect flow can
+        // on "connecting" forever with nothing to show - the connect flow can
         // only ever be un-stuck by a telemetry_status event. Treat it as a
         // failed connect whenever a connect is what we were waiting on.
         const onServerError = (data: { msg?: string }) => {
@@ -80,7 +80,7 @@ export function useDrone() {
             }
         }
 
-        // Primary drone telemetry — suppressed when a fleet drone has focus so
+        // Primary drone telemetry - suppressed when a fleet drone has focus so
         // the OSD/HUD always shows the actively controlled vehicle's data.
         const onTelUpdate = (data: TelemetrySnapshot) => {
             const { enabled, activeDroneId } = useSwarmStore.getState()
@@ -95,7 +95,7 @@ export function useDrone() {
         const onTrackingStatus = (_data: { active: boolean }) => { /* handled in panel */ }
         const onMissionUpload  = (data: { ok: boolean; count?: number; terrain_follow?: boolean; msg: string }) =>
             store.setMissionUploadResult(data)
-        // Swarm mission upload result — mirror to primary store so the mission
+        // Swarm mission upload result - mirror to primary store so the mission
         // page's upload indicator, orange-ack dialog and red/permit flow all
         // work for fleet drones exactly like the primary drone.
         const onSwarmMissionUpload = (data: {
@@ -119,7 +119,7 @@ export function useDrone() {
         const onFcMessage      = (data: { severity: string; text: string; rank: number; ts: number }) =>
             store.addFcMessage(data)
 
-        // Fleet drone telemetry — updates swarm store and also mirrors to the
+        // Fleet drone telemetry - updates swarm store and also mirrors to the
         // primary store when this drone is the actively selected one.
         // We also mirror telemetryStatus → 'connected' so every connection-gated
         // UI element (ARM button, Upload button, mission controls) enables itself
@@ -138,13 +138,13 @@ export function useDrone() {
             }
         }
 
-        // Batched fleet telemetry — one event carries the latest snapshot for
+        // Batched fleet telemetry - one event carries the latest snapshot for
         // every fleet drone. Single store update, then mirror the actively
         // controlled drone into the primary store (OSD/HUD/connection gates).
         const onFleetTelemetry = (data: { drones: Record<string, TelemetrySnapshot> }) => {
             const swarm = useSwarmStore.getState()
             // In-flight packets can arrive just after the user disables swarm
-            // mode — applying them would resurrect the cleared drone list.
+            // mode - applying them would resurrect the cleared drone list.
             if (!swarm.enabled) return
             swarm.updateFleetTelemetry(data.drones)
             const active = swarm.activeDroneId
@@ -157,7 +157,7 @@ export function useDrone() {
             }
         }
 
-        // Group command result — stash in the swarm store for FleetAside feedback
+        // Group command result - stash in the swarm store for FleetAside feedback
         const onSwarmGroupResult = (data: {
             action: string; ok_count: number; total: number
             results: Array<{ drone_id: number; ok: boolean; msg?: string }>
@@ -167,7 +167,7 @@ export function useDrone() {
             })
         }
 
-        // Supervisor alerts — into the swarm store for the fleet panels
+        // Supervisor alerts - into the swarm store for the fleet panels
         const onFleetAlert = (data: {
             drone_id: number; kind: string
             severity: 'info' | 'warn' | 'critical'; msg: string; at: number
@@ -186,7 +186,7 @@ export function useDrone() {
             )
         }
 
-        // Swarm action result — route to primary store so DroneControls sees it
+        // Swarm action result - route to primary store so DroneControls sees it
         const onSwarmActionResult = (data: { drone_id: number; action: string; ok: boolean }) => {
             const { activeDroneId } = useSwarmStore.getState()
             if (data.drone_id === activeDroneId) {
@@ -194,7 +194,7 @@ export function useDrone() {
             }
         }
 
-        // Auto-scan results — populate store so FleetAside shows drones before
+        // Auto-scan results - populate store so FleetAside shows drones before
         // the individual swarm_drone_status events arrive.
         const onSwarmScanStarted = (_data: { ports: number[] }) => {
             useSwarmStore.getState().setScanStatus('scanning')
@@ -219,7 +219,7 @@ export function useDrone() {
             if (prev.activeDroneId === state.activeDroneId) return
 
             if (state.activeDroneId === null) {
-                // Deselected — gates should close
+                // Deselected - gates should close
                 useDroneStore.getState().setTelemetryStatus('disconnected')
                 return
             }
@@ -230,7 +230,7 @@ export function useDrone() {
             if (newDrone?.telemetry) {
                 useDroneStore.getState().setTelemetry(newDrone.telemetry)
             } else {
-                // No telemetry received yet — clear stale values
+                // No telemetry received yet - clear stale values
                 useDroneStore.setState({ telemetry: null })
             }
             if (newDrone?.connected) {
@@ -289,7 +289,7 @@ export function useDrone() {
             socket.off('swarm_scan_started',    onSwarmScanStarted)
             socket.off('swarm_scan_result',     onSwarmScanResult)
             swarmSub()
-            // DO NOT call disconnectSocket() here — socket lives for app lifetime
+            // DO NOT call disconnectSocket() here - socket lives for app lifetime
         }
     }, [])
 
@@ -301,15 +301,15 @@ export function useDrone() {
     /** Tears the link down from this end.
      *
      *  The backend has handled `disconnect_telemetry` all along
-     *  (events/telemetry_events.py) — it ends the flight recording, drops zone
-     *  monitoring and clears the session's drone — but nothing in the UI ever
+     *  (events/telemetry_events.py) - it ends the flight recording, drops zone
+     *  monitoring and clears the session's drone - but nothing in the UI ever
      *  emitted it, and TelemetryConnect hid its whole control block once
      *  connected. So a link could be established and then never released
      *  without reloading the page or restarting the backend.
      *
      *  Stops the LOCAL relay first. Every connect path other than a plain
      *  server-side UDP address is really "this device owns the radio and
-     *  forwards MAVLink" — browser Web Serial, native serial, native RF — and
+     *  forwards MAVLink" - browser Web Serial, native serial, native RF - and
      *  those keep pumping regardless of what the server thinks. Telling the
      *  server to forget the link while a relay is still feeding it would have
      *  it immediately re-establish from the incoming traffic. */
@@ -328,14 +328,14 @@ export function useDrone() {
             if (isRemoteSitlRelayActive()) await stopRemoteSitlRelay()
         } catch (err) {
             // A relay that fails to close cleanly must not block the
-            // disconnect — the server-side teardown is what matters.
+            // disconnect - the server-side teardown is what matters.
             console.error('Local relay teardown failed', err)
         }
         getSocket().emit('disconnect_telemetry')
         store.setTelemetryStatus('disconnected')
     }, [])
 
-    // Cloud flow: the radio is on the USER'S device — the browser reads it
+    // Cloud flow: the radio is on the USER'S device - the browser reads it
     // via Web Serial and relays MAVLink to the backend (lib/browserSerial.ts).
     const connectBrowserSerial = useCallback(async (radio: SerialPortLike, baudRate = 57600) => {
         if (isBrowserSerialActive()) return
@@ -351,14 +351,14 @@ export function useDrone() {
     }, [])
 
     // Same radio, same bytes, but opened natively instead of through Web
-    // Serial — the desktop app's only working serial path, since Electron
+    // Serial - the desktop app's only working serial path, since Electron
     // ships navigator.serial with no port picker behind it
     // (see lib/nativeSerialRelay.ts).
     const connectNativeSerial = useCallback(async (path: string, baudRate = DEFAULT_SERIAL_BAUD) => {
         if (isNativeSerialActive()) return
         store.setTelemetryStatus('connecting')
         // A port that opens but never speaks is the common failure here (baud
-        // mismatch, unpaired radios) — report that rather than the backend's
+        // mismatch, unpaired radios) - report that rather than the backend's
         // generic timeout, same as the SITL bridge does.
         setSerialSilenceHandler((message) => {
             store.setTelemetryError(message)
@@ -375,7 +375,7 @@ export function useDrone() {
     }, [])
 
     // Same wfb-ng ground station as connectLocalRelay, but reading its UDP
-    // ports directly instead of through telemetry_relay.py — desktop only
+    // ports directly instead of through telemetry_relay.py - desktop only
     // (see lib/nativeRfRelay.ts). Preferred where available: one fewer process
     // for the operator to remember to start.
     const connectNativeRf = useCallback(async () => {
@@ -396,7 +396,7 @@ export function useDrone() {
     }, [])
 
     // Same cloud flow, but for a custom RF air unit (wfb-ng) instead of a
-    // USB radio — the browser can't read raw UDP directly, so a local relay
+    // USB radio - the browser can't read raw UDP directly, so a local relay
     // agent re-exposes it as a loopback WebSocket (lib/localRfRelay.ts).
     const connectLocalRelay = useCallback(async (url?: string) => {
         if (isLocalRelayActive()) return
@@ -411,13 +411,13 @@ export function useDrone() {
     }, [])
 
     // The client's own SITL instance (port 14540, the classic PX4 default),
-    // bridged via the desktop app's native UDP bridge — desktop only, no
+    // bridged via the desktop app's native UDP bridge - desktop only, no
     // browser path (see lib/remoteSitlRelay.ts).
     const connectRemoteSitl = useCallback(async (port?: number) => {
         if (isRemoteSitlRelayActive()) return
         store.setTelemetryStatus('connecting')
         // The port binding succeeding tells us nothing about whether SITL is
-        // actually sending — report that specific case with its actual causes
+        // actually sending - report that specific case with its actual causes
         // instead of waiting out the backend's generic mavsdk timeout.
         setSitlSilenceHandler((message) => {
             store.setTelemetryError(message)
@@ -434,7 +434,7 @@ export function useDrone() {
     }, [])
 
     // Command routing. In swarm mode the CHECKBOXES are the only command
-    // targets — one group action to every ticked drone (tick one box to fly
+    // targets - one group action to every ticked drone (tick one box to fly
     // one drone). The highlighted (CTRL) drone only selects whose telemetry
     // is shown; with nothing ticked, commands are inert. Swarm off → primary.
     const sendAction = useCallback((action: string, payload?: Record<string, unknown>) => {
@@ -447,14 +447,14 @@ export function useDrone() {
             return
         }
         // Mark it in flight BEFORE emitting. Everything up to the drone's ACK
-        // is dead air — the button does not change, no spinner appears, and on
+        // is dead air - the button does not change, no spinner appears, and on
         // a 3DR radio that lasts about a second, which is long enough to read
         // as a click that missed. The press itself is the one event we can
         // report instantly, so report it.
         store.setPendingAction(action)
         getSocket().emit('drone_action', { action, ...payload })
         // A result that never comes must not leave the button spinning
-        // forever — that trades one misleading state for a worse one. Clear
+        // forever - that trades one misleading state for a worse one. Clear
         // it only if THIS press is still the pending one, so a later command
         // is never cancelled by an earlier press's timer.
         const mine = useDroneStore.getState().pendingAction

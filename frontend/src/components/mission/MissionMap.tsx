@@ -21,7 +21,7 @@ import type { Waypoint } from '@/types/mission'
 import { getServerUrl } from '@/lib/server-url'
 import { ZONE_COLORS, zoneRings, type ZoneFeature } from '@/components/admin/zones'
 
-// ── Flight zones (green/orange/red) — pilots plan around these ─────────────
+// ── Flight zones (green/orange/red) - pilots plan around these ─────────────
 
 function FlightZonesOverlay() {
   const [zones, setZones] = useState<ZoneFeature[]>([])
@@ -103,7 +103,7 @@ const rtlIcon = L.divIcon({
   iconAnchor: [11, 11],
 })
 
-// Red, matching the 3D view's drone billboard exactly — drone position should
+// Red, matching the 3D view's drone billboard exactly - drone position should
 // look the same regardless of which view you're in.
 function makeDroneIcon(heading: number): L.DivIcon {
   return L.divIcon({
@@ -141,7 +141,7 @@ function makeDroneIcon(heading: number): L.DivIcon {
   })
 }
 
-// Fleet drone icon — colored circle with short name label, distinct from main drone
+// Fleet drone icon - colored circle with short name label, distinct from main drone
 function makeFleetDroneIcon(name: string, color: string, isActive: boolean): L.DivIcon {
   const label = name.replace(/drone\s*/i, '#')
   const sz = isActive ? 40 : 34
@@ -314,7 +314,7 @@ export default function MissionMap() {
   const activePlanKey      = useMissionStore(s => s.activePlanKey)
 
   // RTL is a separate, non-mission control (see rtlPosition in the mission
-  // store) — never part of the orderable/flown path. Defensive filter in case
+  // store) - never part of the orderable/flown path. Defensive filter in case
   // older persisted data still has a legacy 'rtl' type entry.
   const waypoints = useMemo(() => rawWaypoints.filter(w => w.type !== 'rtl'), [rawWaypoints])
   const rtlWp = getRtlWaypoint()
@@ -343,7 +343,7 @@ export default function MissionMap() {
     return waypoints.length - start >= 2 ? buildSmoothPath2D(waypoints.slice(start)) : []
   }, [waypoints, missionCurrentIndex, smoothPath])
 
-  // Drone position trail — last 60 positions for a flight path ghost
+  // Drone position trail - last 60 positions for a flight path ghost
   const [droneTrail, setDroneTrail] = useState<[number, number][]>([])
   const lastTrailPos = useRef<{ lat: number; lng: number } | null>(null)
 
@@ -387,7 +387,7 @@ export default function MissionMap() {
       <DronePositionTracker />
       <FlightZonesOverlay />
 
-      {/* Planned flight path (no active mission) — cyan when terrain-follow is on
+      {/* Planned flight path (no active mission) - cyan when terrain-follow is on
           (path adapts to terrain), blue when off (fixed altitude relative to home) */}
       {missionCurrentIndex < 0 && smoothPath.length >= 2 && (
         <>
@@ -404,8 +404,8 @@ export default function MissionMap() {
         </>
       )}
 
-      {/* Active mission: completed legs — solid, bold, fully-opaque green (no
-          glow underlayer here, unlike the planned/remaining path — elapsed
+      {/* Active mission: completed legs - solid, bold, fully-opaque green (no
+          glow underlayer here, unlike the planned/remaining path - elapsed
           progress should read as solid and certain, not stylistic) */}
       {missionCurrentIndex >= 1 && completedPath.length >= 2 && (
         <Polyline positions={completedPath} pathOptions={{ color: '#22c55e', weight: 5, opacity: 1 }} />
@@ -424,7 +424,7 @@ export default function MissionMap() {
         <Marker position={[homePosition.lat, homePosition.lng]} icon={homeIcon} />
       )}
 
-      {/* RTL marker — where the drone goes when RTL is triggered */}
+      {/* RTL marker - where the drone goes when RTL is triggered */}
       {waypoints.length > 0 && (
         <Marker position={[rtlWp.lat, rtlWp.lng]} icon={rtlIcon} />
       )}
@@ -456,7 +456,7 @@ export default function MissionMap() {
           }}
         />
       )}
-      {/* Survey vertex dots — draggable to edit polygon */}
+      {/* Survey vertex dots - draggable to edit polygon */}
       {surveyMode && surveyPolygon.map((p, i) => (
         <Marker
           key={`sv_${i}`}
@@ -493,7 +493,7 @@ export default function MissionMap() {
         <WaypointMarker key={wp.id} wp={wp} index={i} />
       ))}
 
-      {/* Fleet mission lanes (swarm mode) — every OTHER connected drone's
+      {/* Fleet mission lanes (swarm mode) - every OTHER connected drone's
           banked plan drawn as a dashed line in its color, so the operator sees
           the whole fleet's routes while editing one. The active drone's plan
           is the working set and renders as the normal editable mission. */}
@@ -512,7 +512,7 @@ export default function MissionMap() {
           )
         })}
 
-      {/* Fleet drone positions (swarm mode) — each gets a distinct colored icon
+      {/* Fleet drone positions (swarm mode) - each gets a distinct colored icon
           with the drone label inside, so overlapping positions are still readable */}
       {swarmEnabled && Object.values(fleetDrones).map(drone => {
         const pos = drone.telemetry?.position

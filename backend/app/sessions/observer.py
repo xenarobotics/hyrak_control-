@@ -1,4 +1,4 @@
-"""Admin observer registry — which /admin sockets are watching which session.
+"""Admin observer registry - which /admin sockets are watching which session.
 
 The server already terminates every client's video (vision pool) and MAVLink
 (mavsdk_server via SerialBridge), but all of it is routed back only to its
@@ -30,7 +30,7 @@ def unwatch(session_id: str, sid: str):
 
 
 def drop_sid(sid: str):
-    """An admin socket disconnected — forget everything it was watching."""
+    """An admin socket disconnected - forget everything it was watching."""
     for session_id in list(_watching):
         unwatch(session_id, sid)
 

@@ -4,7 +4,7 @@
 
 const UNITS = ['B', 'KB', 'MB', 'GB', 'TB']
 
-/** 15728640 → "15.0 MB". Binary steps (1024), decimal-ish labels — matching
+/** 15728640 → "15.0 MB". Binary steps (1024), decimal-ish labels - matching
  *  what electron-updater's own numbers mean and what installers conventionally
  *  display. */
 export function formatBytes(bytes: number, decimals = 1): string {

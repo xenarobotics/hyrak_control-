@@ -5,7 +5,7 @@ from typing import Dict, Optional, Tuple
 
 class PDController:
     """
-    Pure PD controller — no integral term.
+    Pure PD controller - no integral term.
 
     For drone tracking, integral causes windup: when the drone overshoots its target
     position and the error flips sign, the accumulated integral opposes the correction
@@ -22,7 +22,7 @@ class PDController:
 
     def compute(self, error: float) -> float:
         if abs(error) < self.deadband:
-            # Inside deadband — zero both error and derivative to prevent
+            # Inside deadband - zero both error and derivative to prevent
             # the derivative term from pulling the output while error is small
             self._prev_error = 0.0
             return 0.0
@@ -121,7 +121,7 @@ def range_error_ratio(target_size_ratio: float, actual_size_ratio: float) -> flo
     Distance error as a FRACTION OF THE TARGET RANGE, from apparent size alone.
 
     Returns >0 when the subject is further away than wanted (close in), <0 when
-    it is nearer than wanted (back off) — the same sign convention as the raw
+    it is nearer than wanted (back off) - the same sign convention as the raw
     size difference it replaces.
 
     WHY NOT JUST (target - actual), WHICH IS WHAT THIS REPLACED
@@ -135,7 +135,7 @@ def range_error_ratio(target_size_ratio: float, actual_size_ratio: float) -> flo
             slant  50m  (4.3% fill) ->  subject can move 46.3m before any reaction
 
         The dead zone grows as range SQUARED, so the controller is progressively
-        blinder the further out it works — and at close range the same coarseness
+        blinder the further out it works - and at close range the same coarseness
         means a subject walking a metre toward the drone produces no response at
         all. Both were reported from real flights before this existed.
 
@@ -149,13 +149,13 @@ def range_error_ratio(target_size_ratio: float, actual_size_ratio: float) -> flo
 
             (range_now - range_target) / range_target  ==  (target - actual) / actual
 
-        The unknown scale factor — subject height, focal length — cancels
+        The unknown scale factor - subject height, focal length - cancels
         completely. A deadband on this is a PERCENTAGE of range, which means
         the same tolerance at every distance, and it works without anyone
         having measured the lens.
     """
     if actual_size_ratio <= 1e-6:
-        # Subject has no measurable size — no range information at all. 0.0
+        # Subject has no measurable size - no range information at all. 0.0
         # rather than a huge number: withholding a command is correct here,
         # and dividing by a near-zero size would fabricate a violent one.
         return 0.0

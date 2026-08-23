@@ -1,9 +1,9 @@
-// Web Serial relay — the telemetry counterpart of camera sharing in the
+// Web Serial relay - the telemetry counterpart of camera sharing in the
 // cloud model. The user's radio (3DR/SiK) is plugged into THEIR device; the
 // browser opens it via the Web Serial API and pipes raw MAVLink bytes to the
 // backend over socket.io, where a loopback bridge feeds them into
 // mavsdk_server (see backend app/telemetry/serial_bridge.py).
-// Web Serial is Chrome/Edge desktop only — not Firefox/Safari/mobile.
+// Web Serial is Chrome/Edge desktop only - not Firefox/Safari/mobile.
 //
 // QGC-like port handling: the browser can only enumerate ports the user has
 // granted ONCE (via the picker); after that, listGrantedPorts() returns every
@@ -41,7 +41,7 @@ export const browserSerialSupported = () =>
  *
  *  THE UI USED TO JUST HIDE THE BUTTON. A flight controller plugged straight
  *  into USB works in the desktop app and appears to be unsupported in the
- *  browser, with no control to press and nothing saying why — and the usual
+ *  browser, with no control to press and nothing saying why - and the usual
  *  cause is not the browser at all. `navigator.serial` exists ONLY IN A SECURE
  *  CONTEXT, so reaching the dev server at http://192.168.x.x:3000 removes the
  *  entire Web Serial API while https://<the same machine> and
@@ -54,7 +54,7 @@ export function serialUnavailableReason(): string | null {
     if (!window.isSecureContext) {
         return (
             `This page is on ${window.location.origin}, which the browser does not ` +
-            `treat as a secure context — USB access is switched off entirely. ` +
+            `treat as a secure context - USB access is switched off entirely. ` +
             `Open it over HTTPS, or as http://localhost:${window.location.port || '3000'} ` +
             `on the machine the cable is plugged into.`
         )
@@ -77,7 +77,7 @@ export const getSerialApi = (): SerialApi | null =>
 // is the same one either way: a telemetry radio on the ground, or the flight
 // controller itself on the end of a USB cable. The list said "radio"
 // throughout, which reads as "this is not the control for a flight
-// controller" — and the one thing an operator with a cable in their hand
+// controller" - and the one thing an operator with a cable in their hand
 // needs is to know that it is.
 const VENDOR_NAMES: Record<number, string> = {
     0x0403: 'FTDI radio',        // 3DR ground module
@@ -128,7 +128,7 @@ export async function listGrantedPorts(): Promise<GrantedRadio[]> {
 
 // One-time grant: opens the browser's picker (needs a user gesture). Returns
 // the granted port, or null if the user cancelled. After this the radio shows
-// up in listGrantedPorts() on every future visit — no more popups.
+// up in listGrantedPorts() on every future visit - no more popups.
 export async function requestRadioPort(): Promise<SerialPortLike | null> {
     const api = getSerialApi()
     if (!api) return null
@@ -145,8 +145,8 @@ export async function requestRadioPort(): Promise<SerialPortLike | null> {
 // radio at 57600 baud fills that in ~45ms, so any main-thread stall of that
 // length (a video frame decode, a canvas redraw, a GC pause) throws a
 // buffer-overrun error and drops bytes out of the MAVLink stream. 16KB
-// gives ~2.7s of cushion at 57600 baud — comfortably more than any UI
-// hiccup — at the cost of a little extra read latency, which MAVLink
+// gives ~2.7s of cushion at 57600 baud - comfortably more than any UI
+// hiccup - at the cost of a little extra read latency, which MAVLink
 // doesn't care about.
 const _SERIAL_BUFFER_SIZE = 16384
 
@@ -160,13 +160,13 @@ export async function startBrowserSerial(radio: SerialPortLike, baudRate = 57600
     const socket = getSocket()
     socket.on('serial_downlink', onDownlink)
     // The backend waits for the drone's heartbeat to arrive through this
-    // relay, so start pumping bytes immediately — don't wait for status.
+    // relay, so start pumping bytes immediately - don't wait for status.
     socket.emit('connect_browser_serial', { source: 'web-serial' })
     void readLoop()
 }
 
 // Per the Web Serial spec, these read() errors mean a few bytes were lost
-// (radio momentarily outran the buffer) — the port itself is still fine.
+// (radio momentarily outran the buffer) - the port itself is still fine.
 // MAVLink resyncs on the next valid packet's start marker, so the right
 // move is to grab a fresh reader and keep going, not tear down the link.
 const _RECOVERABLE_SERIAL_ERRORS = new Set([
@@ -192,7 +192,7 @@ async function readLoop() {
             } catch (err) {
                 const name = (err as { name?: string } | undefined)?.name
                 if (name && _RECOVERABLE_SERIAL_ERRORS.has(name)) {
-                    console.warn(`Serial ${name} — a few bytes were dropped, resuming`)
+                    console.warn(`Serial ${name} - a few bytes were dropped, resuming`)
                 } else {
                     throw err
                 }
@@ -202,7 +202,7 @@ async function readLoop() {
             }
         }
     } catch (err) {
-        console.error('Browser serial read failed — radio unplugged?', err)
+        console.error('Browser serial read failed - radio unplugged?', err)
     }
     if (active) void stopBrowserSerial()
 }

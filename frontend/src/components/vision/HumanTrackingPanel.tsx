@@ -12,9 +12,9 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { fetchFollowTuning } from '@/lib/calibration'
 
-// Default PD values — kept in sync with backend defaults (human_tracker.py
+// Default PD values - kept in sync with backend defaults (human_tracker.py
 // _make_state: yaw_pd kp=30/kd=4/max_output=55). These are yaw-axis units
-// (deg/s output), not the 0-2 range this used to show — that mismatch meant
+// (deg/s output), not the 0-2 range this used to show - that mismatch meant
 // touching any slider sent values 15-300x weaker than the real default and
 // silently crushed tracking responsiveness.
 const PD_DEFAULTS = { kp: 30.0, kd: 4.0, max_output: 55, deadband: 0.05 }
@@ -34,7 +34,7 @@ const PD_PARAMS = [
         min: 10, max: 50, step: 1,
         unit: '',
         format: (v: number) => v.toFixed(0),
-        tooltip: 'How strongly the drone reacts when the subject moves off-centre (proportional gain Kp). Higher = snappier tracking. Too high causes oscillation — the drone will overshoot and correct repeatedly.',
+        tooltip: 'How strongly the drone reacts when the subject moves off-centre (proportional gain Kp). Higher = snappier tracking. Too high causes oscillation - the drone will overshoot and correct repeatedly.',
     },
     {
         key: 'kd' as const,
@@ -431,7 +431,7 @@ export function HumanTrackingPanel() {
                 </div>
             )}
 
-            {/* PD Parameters — collapsible */}
+            {/* PD Parameters - collapsible */}
             <div style={{
                 borderRadius: 8, overflow: 'hidden',
                 border: '1px solid hsl(var(--app-border))',
@@ -495,7 +495,7 @@ export function HumanTrackingPanel() {
                     background: '#E6F1FB18', border: '1px solid #85B7EB',
                     fontSize: 11, fontFamily: 'monospace', color: '#60a5fa',
                 }}>
-                    ↓ Click a person to select them — IDs are stable across frames
+                    ↓ Click a person to select them - IDs are stable across frames
                 </div>
             )}
 

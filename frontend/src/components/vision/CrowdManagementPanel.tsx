@@ -37,7 +37,7 @@ function StatTile({ label, value }: { label: string; value: number | string }) {
 
 /** Headcount over time. A live number cannot tell a steady crowd from one
  *  that doubled in the last minute, and that difference is the entire reason
- *  to be watching. Plain SVG — no chart library for nine points of data. */
+ *  to be watching. Plain SVG - no chart library for nine points of data. */
 function TrendSpark({ history, trend }: {
     history: { t: number; n: number }[]
     trend: number | null | undefined
@@ -73,7 +73,7 @@ function TrendSpark({ history, trend }: {
                     Trend
                 </span>
                 <span style={{ marginLeft: 'auto', fontSize: 11, fontFamily: 'monospace', color: col }}>
-                    {trend == null ? '—'
+                    {trend == null ? '-'
                         : `${trend > 0 ? '+' : ''}${trend.toFixed(0)}/min`}
                     {rising ? '  rising' : falling ? '  easing' : '  steady'}
                 </span>
@@ -95,7 +95,7 @@ function TrendSpark({ history, trend }: {
 }
 
 /** Names for the nine cells. "North Gate is dense" is actionable over a
- *  radio; "section 4 is dense" has to be decoded first — and the backend
+ *  radio; "section 4 is dense" has to be decoded first - and the backend
  *  puts whatever is set here straight into the alert text. */
 function ZoneNames({ names, counts }: {
     names: Record<string, string>
@@ -137,7 +137,7 @@ function ZoneNames({ names, counts }: {
                             value={draft[String(i)] ?? ''}
                             onChange={e => save(i, e.target.value)}
                             placeholder={`zone ${i}`}
-                            title={`Grid cell ${i}${counts?.[i] ? ` — ${counts[i]} people now` : ''}`}
+                            title={`Grid cell ${i}${counts?.[i] ? ` - ${counts[i]} people now` : ''}`}
                             style={{
                                 width: '100%', padding: '4px 6px', borderRadius: 6,
                                 fontSize: 10, minWidth: 0,
@@ -160,7 +160,7 @@ export function CrowdManagementPanel() {
     const [alerts, setAlerts] = useState<CrowdAlertRow[]>([])
 
     // Apply the operator's saved density preset (Settings page) as soon as
-    // this mode's analyzer is up — otherwise it only takes effect if they
+    // this mode's analyzer is up - otherwise it only takes effect if they
     // happen to touch Settings while already streaming.
     useEffect(() => {
         const { lightMax, moderateMax } = getCrowdThresholds()
@@ -173,7 +173,7 @@ export function CrowdManagementPanel() {
     // before the stream negotiates, so the analyzer does not exist yet and the
     // handler silently no-ops. The operator then sees their custom numbers
     // ignored with nothing to indicate why. Comparing against what the backend
-    // actually reports is self-healing — it converges as soon as the analyzer
+    // actually reports is self-healing - it converges as soon as the analyzer
     // is up, and costs nothing once the two agree.
     useEffect(() => {
         if (!cvResults) return
@@ -193,7 +193,7 @@ export function CrowdManagementPanel() {
     useEffect(() => { loadHistory() }, [])
 
     // Refresh it the moment a session stops, so the new entry shows up
-    // without the operator having to do anything — give the last async DB
+    // without the operator having to do anything - give the last async DB
     // writes (fire-and-forget from stream_track.py) a moment to land first.
     const wasStreaming = useRef(false)
     useEffect(() => {
@@ -280,7 +280,7 @@ export function CrowdManagementPanel() {
                     background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
                 }}>
                     Distinct tracks seen this session: <b>{cvResults?.distinct_tracks_seen ?? 0}</b>.
-                    This can overcount if the drone revisits the same area — it is
+                    This can overcount if the drone revisits the same area - it is
                     not a certified footfall figure.
                 </div>
 
@@ -294,7 +294,7 @@ export function CrowdManagementPanel() {
                 )}
             </div>
 
-            {/* ── Recent (bottom half) — always visible, no tab click ──── */}
+            {/* ── Recent (bottom half) - always visible, no tab click ──── */}
             <div style={{
                 flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 6,
                 borderTop: '1px solid hsl(var(--app-border))', paddingTop: 8,
@@ -321,7 +321,7 @@ export function CrowdManagementPanel() {
                             }}>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                                     <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text))' }}>
-                                        {s.started ? new Date(s.started).toLocaleString() : '—'}
+                                        {s.started ? new Date(s.started).toLocaleString() : '-'}
                                     </span>
                                     <span style={{ fontSize: 10, color: 'hsl(var(--app-text-muted))' }}>peak {s.peak_count}</span>
                                 </div>
@@ -341,7 +341,7 @@ export function CrowdManagementPanel() {
                                 color: 'hsl(var(--app-text-muted))',
                             }}>
                                 <span style={{ color: '#f87171', fontFamily: 'monospace' }}>{a.t ? new Date(a.t).toLocaleTimeString() : ''}</span>
-                                {' — '}{a.message}
+                                {' - '}{a.message}
                             </div>
                         ))}
                         {sessions.length === 0 && alerts.length === 0 && (

@@ -1,10 +1,10 @@
-// Local RF relay bridge — the wfb-ng counterpart of browserSerial.ts. Your
+// Local RF relay bridge - the wfb-ng counterpart of browserSerial.ts. Your
 // own air unit's ground-station side (start-gs.sh) delivers raw MAVLink
 // over UDP on THIS laptop's loopback (127.0.0.1:14550 downlink,
-// :14551 uplink) — no browser API can read a raw UDP socket directly. A
+// :14551 uplink) - no browser API can read a raw UDP socket directly. A
 // tiny local relay agent (see air_unit_relay/telemetry_relay.py) re-exposes
-// that over a plain ws://127.0.0.1 WebSocket — loopback only, never the
-// internet — and this connects to THAT the same way browserSerial.ts opens
+// that over a plain ws://127.0.0.1 WebSocket - loopback only, never the
+// internet - and this connects to THAT the same way browserSerial.ts opens
 // a serial port, then relays raw MAVLink bytes to the backend over the
 // EXISTING serial_uplink/serial_downlink events. backend/app/telemetry/
 // serial_bridge.py doesn't know or care where the bytes came from, so this
@@ -53,19 +53,19 @@ export async function startLocalRelay(url: string = DEFAULT_LOCAL_RELAY_URL): Pr
             socket.onmessage = onRelayMessage
             socket.onclose = () => { if (active) void stopLocalRelay() }
             socket.onerror = () => { /* handled via onclose */ }
-            // Backend waits for the drone's heartbeat through this relay —
+            // Backend waits for the drone's heartbeat through this relay -
             // start it the moment the socket is up, same as browserSerial.
             io.emit('connect_browser_serial', { source: 'local-rf-agent' })
             resolve()
         }
         socket.onerror = () => {
-            reject(new Error(`Couldn't reach the local relay agent at ${url} — is telemetry_relay.py running on this machine?`))
+            reject(new Error(`Couldn't reach the local relay agent at ${url} - is telemetry_relay.py running on this machine?`))
         }
     })
 }
 
 // Bytes from the relay agent are the drone's downlink telemetry (it read
-// them off wfb_rx's UDP 14550) — "uplink" here matches serial_bridge.py's
+// them off wfb_rx's UDP 14550) - "uplink" here matches serial_bridge.py's
 // existing naming: data flowing UP to feed mavsdk_server, same as a real
 // radio's received bytes always were.
 function onRelayMessage(event: MessageEvent) {
@@ -74,7 +74,7 @@ function onRelayMessage(event: MessageEvent) {
     }
 }
 
-// mavsdk's outgoing replies (commands to the drone) — forward to the relay
+// mavsdk's outgoing replies (commands to the drone) - forward to the relay
 // agent, which sends them out as UDP to wfb_tx's uplink listener (:14551).
 function onDownlink(data: ArrayBuffer) {
     if (ws && ws.readyState === WebSocket.OPEN) {

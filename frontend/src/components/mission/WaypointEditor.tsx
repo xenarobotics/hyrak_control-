@@ -122,7 +122,7 @@ export default function WaypointEditor() {
         </div>
 
         <p className="text-[10px] font-mono leading-relaxed" style={{ color: '#9ca3af' }}>
-          Where the drone flies when RTL is triggered — aborts the current mission immediately
+          Where the drone flies when RTL is triggered - aborts the current mission immediately
           and goes here. Defaults to the takeoff point until you set a custom position.
         </p>
 
@@ -217,7 +217,7 @@ export default function WaypointEditor() {
     if (prev) return computeBearing(prev.lat, prev.lng, wp.lat, wp.lng)
     return null
   }, [autoHeading, wp, waypoints, index])
-  // 'rtl' is excluded — RTL is edited via its own separate panel entry now
+  // 'rtl' is excluded - RTL is edited via its own separate panel entry now
   const typeOptions: WaypointType[] = ['takeoff', 'waypoint', 'loiter', 'land']
 
   return (
@@ -353,14 +353,14 @@ export default function WaypointEditor() {
           onChange={v => updateWaypoint(wp.id, { holdTime: v })}
         />
         {autoHeading ? (
-          // Auto-heading is ON — show the computed bearing, disable manual editing
+          // Auto-heading is ON - show the computed bearing, disable manual editing
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-mono font-bold" style={{ color: '#e5e7eb' }}>Yaw</span>
               <div className="flex items-center gap-1.5">
                 <Compass size={11} color="#fbbf24" />
                 <span className="text-[10px] font-mono font-semibold tabular-nums" style={{ color: '#fbbf24' }}>
-                  {autoYaw !== null ? `${autoYaw.toFixed(0)}°` : '—'}
+                  {autoYaw !== null ? `${autoYaw.toFixed(0)}°` : '-'}
                 </span>
                 <span className="text-[9px] font-mono w-7" style={{ color: '#6b7280' }}>auto</span>
               </div>
@@ -378,7 +378,7 @@ export default function WaypointEditor() {
               />
             </div>
             <p className="text-[9px] font-mono" style={{ color: '#6b7280' }}>
-              Auto Heading ON — yaw set at upload
+              Auto Heading ON - yaw set at upload
             </p>
           </div>
         ) : (

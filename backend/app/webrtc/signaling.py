@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("verocore.webrtc.signaling")
 
-# One relay shared across all peers — efficient media routing
+# One relay shared across all peers - efficient media routing
 relay = MediaRelay()
 
 
@@ -34,7 +34,7 @@ def _on_link_networks() -> "list[ipaddress.IPv4Network]":
     A route with no gateway is on-link: its destinations are reachable by
     talking to them directly, which is exactly the property that makes it safe
     to hand our address on that route to a client. Routes THROUGH a gateway are
-    excluded, and so is the default route — under it every address in the world
+    excluded, and so is the default route - under it every address in the world
     would look local.
 
     Linux-only by way of /proc/net/route. Anywhere else this returns nothing
@@ -49,7 +49,7 @@ def _on_link_networks() -> "list[ipaddress.IPv4Network]":
                 if len(cols) < 8:
                     continue
                 # Each field is the 32-bit value in network byte order,
-                # hex-printed from a little-endian word — so 0100A8C0 reads
+                # hex-printed from a little-endian word - so 0100A8C0 reads
                 # back as 192.168.0.1.
                 gateway = int.from_bytes(bytes.fromhex(cols[2]), "little")
                 if gateway != 0:
@@ -97,13 +97,13 @@ def _relay_host_for(client_ip: str | None, public_host: str) -> str:
     reference setup: ~40ms added, plus a total dependency on the client's
     network permitting outbound UDP on an arbitrary high port. Restrictive
     networks (a university's, in the case that prompted this) allow UDP only on
-    53 and 123, which kills SRT while leaving the LAN video path untouched —
+    53 and 123, which kills SRT while leaving the LAN video path untouched -
     presenting as "the ground decoder previews fine but the AI modules never
     receive anything".
 
     So: for a client that shares a network with us, hand back the address on
     OUR side of that shared network and skip the internet entirely. The kernel
-    already knows which one that is — connecting a UDP socket sends no packets
+    already knows which one that is - connecting a UDP socket sends no packets
     and just resolves the source address it would pick for that destination,
     which correctly yields 127.0.0.1 for a client on this machine, the LAN
     address for a client on the LAN, and the WireGuard address for a client in
@@ -115,12 +115,12 @@ def _relay_host_for(client_ip: str | None, public_host: str) -> str:
     look local and get handed an unreachable address. That is what
     `relay_prefer_local_host` exists to switch off.
 
-    A private address is NOT on its own evidence of a shared network — a
+    A private address is NOT on its own evidence of a shared network - a
     client on some other 192.168.x LAN is as unreachable as any host on the
     internet, and asking the kernel for a source address towards it just
     returns whatever the DEFAULT route uses, which that client cannot reach.
     Measured while writing this: with the laptop on 10.183.197.7, a client
-    claiming 192.168.0.55 resolved to 10.183.197.7 — plausible and wrong. So
+    claiming 192.168.0.55 resolved to 10.183.197.7 - plausible and wrong. So
     the client must fall inside a network we are actually attached to.
     """
     try:
@@ -128,13 +128,13 @@ def _relay_host_for(client_ip: str | None, public_host: str) -> str:
     except ValueError:
         return public_host
     # Same machine, the dominant case: the desktop app and the server normally
-    # run together. Loopback is the obvious form of it, but not the only one —
+    # run together. Loopback is the obvious form of it, but not the only one -
     # a browser reaching this host by its own global address arrives with that
     # address as the peer, which looks remote and is not. Observed on the
     # reference laptop, whose UI connects over its own public IPv6.
     #
     # Both answer 127.0.0.1 rather than the address asked about, because the
-    # relay listener binds 0.0.0.0 (see _listen_url) and so accepts IPv4 only —
+    # relay listener binds 0.0.0.0 (see _listen_url) and so accepts IPv4 only -
     # handing back an IPv6 host would produce a connect that cannot land.
     if addr.is_loopback or _is_own_address(addr):
         return "127.0.0.1"
@@ -145,7 +145,7 @@ def _relay_host_for(client_ip: str | None, public_host: str) -> str:
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            # Port 9 (discard) is never contacted — connect() on UDP sends
+            # Port 9 (discard) is never contacted - connect() on UDP sends
             # nothing and only resolves the local address for that route.
             s.connect((str(addr), 9))
             return s.getsockname()[0]
@@ -190,7 +190,7 @@ def _sort_relay_urls(urls) -> list[str]:
             return (1, 0)
         if u.startswith("turn:"):
             return (2, 0)
-        return (3, 0)  # stun — irrelevant to turn selection
+        return (3, 0)  # stun - irrelevant to turn selection
 
     return sorted(urls, key=rank)
 
@@ -251,7 +251,7 @@ def register_webrtc_events(
         MUST happen before the offer: the client needs somewhere to push,
         and on_offer waits for real frames to already be arriving.
 
-        The address returned is a RAW SRT/TCP endpoint, not HTTP — it does
+        The address returned is a RAW SRT/TCP endpoint, not HTTP - it does
         NOT pass through the cloudflared tunnel, so `relay_public_host` has
         to name a directly reachable host with the relay ports forwarded.
 
@@ -289,7 +289,7 @@ def register_webrtc_events(
         if host != cfg.relay_public_host:
             logger.info(
                 f"Relay for {session.session_id[:8]}: client {session.client_ip} shares a "
-                f"network — pushing to {host}:{ingest.public_port} instead of "
+                f"network - pushing to {host}:{ingest.public_port} instead of "
                 f"{cfg.relay_public_host or '(unset)'}, skipping the internet round trip"
             )
 
@@ -301,7 +301,7 @@ def register_webrtc_events(
             "streamId": ingest.token,
             # Let the UI say what's wrong instead of leaving the operator to
             # debug a silent SRT connect timeout. A local client always has a
-            # reachable address, even with relay_public_host unset — so this
+            # reachable address, even with relay_public_host unset - so this
             # tracks the host we actually chose, not just the config value.
             "hostConfigured": bool(host),
         }
@@ -320,7 +320,7 @@ def register_webrtc_events(
         """Accepts the desktop app's DataChannel offer for bit-exact video.
 
         A SECOND PeerConnection, separate from the browser's, carrying no media
-        tracks at all — only a DataChannel of raw RTP packets. That is what
+        tracks at all - only a DataChannel of raw RTP packets. That is what
         makes H.265 possible: aiortc's video codec table is VP8/H.264 only, so
         HEVC cannot ride a media track here, but a DataChannel does not
         negotiate codecs. See datachannel_video_source.py.
@@ -350,7 +350,7 @@ def register_webrtc_events(
             @channel.on("message")
             def on_message(message):
                 # Straight through, unchanged. Any parsing here would defeat
-                # the entire point — the payload is deliberately opaque so the
+                # the entire point - the payload is deliberately opaque so the
                 # codec never has to be negotiated.
                 if isinstance(message, (bytes, bytearray)):
                     ingest.feed(bytes(message))
@@ -376,7 +376,7 @@ def register_webrtc_events(
             return {"error": str(e)}
 
         # The port is returned so the caller can pass it back in the browser's
-        # offer. The browser never discovers it any other way — it has no
+        # offer. The browser never discovers it any other way - it has no
         # session_id and no view of this PeerConnection.
         return {
             "sdp": pc.localDescription.sdp,
@@ -402,7 +402,7 @@ def register_webrtc_events(
 
         # Build RTCPeerConnection
         ice_servers = data.get("iceServers", [])
-        # Only pass the fields aiortc knows — browser dicts can carry extras
+        # Only pass the fields aiortc knows - browser dicts can carry extras
         # (credentialType etc.) that would TypeError in the dataclass.
         # aiortc uses only the FIRST turn/turns url it encounters, so sort
         # TLS/TCP relays first: turn-over-UDP (the provider default first
@@ -423,10 +423,10 @@ def register_webrtc_events(
 
         # Client-overlay stream: the browser displays a LOCAL picture (its own
         # camera, or the desktop app's air-unit preview) and draws cv_results
-        # on a canvas — no downlink video at all. The uplink still feeds
+        # on a canvas - no downlink video at all. The uplink still feeds
         # inference, drone commands and the observer, and this side skips the
         # outbound H.264 encode entirely (~0.79 core/session at 1080p,
-        # measured — the thing that capped delivery at 8.3fps of a 20fps
+        # measured - the thing that capped delivery at 8.3fps of a 20fps
         # source).
         #
         # This used to be forced off for server-sourced feeds on the theory
@@ -479,13 +479,13 @@ def register_webrtc_events(
 
         if server_sourced:
             # No browser video track incoming (the offer only declares a
-            # recvonly video transceiver) — source frames straight from the
+            # recvonly video transceiver) - source frames straight from the
             # network instead of waiting on pc.on("track").
             try:
                 if video_source == "siyi_rtsp":
                     from app.webrtc.rtsp_video_source import open_rtsp_video
                     rtsp_url = data.get("rtspUrl") or "rtsp://192.168.144.25:8554/video1"
-                    # Blocking (ffmpeg probes synchronously) — must not run
+                    # Blocking (ffmpeg probes synchronously) - must not run
                     # directly on the event loop, it would freeze every other
                     # session (telemetry, other streams) for up to the timeout.
                     source_track = await asyncio.get_event_loop().run_in_executor(
@@ -496,7 +496,7 @@ def register_webrtc_events(
                 ):
                     # The desktop app is pushing the ORIGINAL bytes to a
                     # listener allocated earlier via
-                    # /api/webrtc/video-relay/allocate — nothing to open
+                    # /api/webrtc/video-relay/allocate - nothing to open
                     # outbound here, just attach to what's already arriving.
                     #
                     # Every one of these lands here and they are indistinguishable
@@ -504,14 +504,14 @@ def register_webrtc_events(
                     # how video ARRIVES (SRT/TCP/UDP into RelayIngest), not by
                     # what the client pointed ffmpeg at. rtsp_relay pulled a
                     # camera, air_unit_srt read wfb_rx's RTP off udp:5600,
-                    # hyrak_receiver read the ground decoder over Ethernet — by
+                    # hyrak_receiver read the ground decoder over Ethernet - by
                     # the time it reaches this listener all of them are MPEG-TS
                     # carrying the source's untouched frames.
                     from app.webrtc import relay_video_source
                     ingest = relay_video_source.get(session.session_id)
                     if ingest is None:
                         raise RuntimeError(
-                            "No video relay allocated for this session — the desktop app "
+                            "No video relay allocated for this session - the desktop app "
                             "must call POST /api/webrtc/video-relay/allocate and start "
                             "relaying before sending the offer."
                         )
@@ -521,7 +521,7 @@ def register_webrtc_events(
                     # app to push video. For that whole time the operator sees
                     # a spinner and nothing else, and if it then fails they
                     # have watched "connecting" for 25 seconds and learned
-                    # nothing — which reads as the mode being broken rather
+                    # nothing - which reads as the mode being broken rather
                     # than the uplink being silent. It is the same 25 s
                     # whichever analysis mode is selected, so it also makes an
                     # uplink problem look like it belongs to whatever mode
@@ -529,7 +529,7 @@ def register_webrtc_events(
                     #
                     # ffmpeg already knows. It is the process holding the
                     # listener, and its stderr says whether the source ever
-                    # connected — "404 Not Found" from the camera reaches this
+                    # connected - "404 Not Found" from the camera reaches this
                     # tail immediately, 25 s before the timeout fires.
                     async def _report_wait():
                         started = asyncio.get_event_loop().time()
@@ -559,7 +559,7 @@ def register_webrtc_events(
                     # them to a loopback UDP port. Nothing new to decode here:
                     # this is byte-identical to what the air unit puts on the
                     # wire, so the SAME H.265 reader handles it. That reuse is
-                    # the whole reason this transport is viable — it never
+                    # the whole reason this transport is viable - it never
                     # touches aiortc's VP8/H.264-only codec negotiation.
                     #
                     # Both DataChannel modes land here and are indistinguishable
@@ -571,7 +571,7 @@ def register_webrtc_events(
                     ingest = datachannel_video_source.get(session.session_id)
                     if ingest is None:
                         raise RuntimeError(
-                            "No DataChannel video ingest for this session — the desktop "
+                            "No DataChannel video ingest for this session - the desktop "
                             "app must send `datachannel_video_offer` and start pushing "
                             "before this offer."
                         )
@@ -583,7 +583,7 @@ def register_webrtc_events(
                             timeout=15.0,
                             # No reorder window. SCTP delivered these in order
                             # (ordered:true) and this is a loopback socket, so
-                            # there is nothing to wait for — and waiting is 100ms
+                            # there is nothing to wait for - and waiting is 100ms
                             # of pure latency. This is the single biggest lever
                             # measured on the gap to siyi_rtsp.
                             max_delay_us=0,
@@ -598,13 +598,13 @@ def register_webrtc_events(
                 # open_air_unit_video's SDP declares the stream format
                 # statically from the SDP text alone, so it "succeeds" the
                 # instant it's opened regardless of whether any real packets
-                # are actually arriving — there's nothing to probe when the
+                # are actually arriving - there's nothing to probe when the
                 # format is pre-declared. Left unchecked, a genuinely dead
-                # feed (nothing sending to this port at all — e.g. the
+                # feed (nothing sending to this port at all - e.g. the
                 # ground station is on a different machine than this
                 # backend and its UDP traffic never left its own loopback)
                 # would still negotiate a "connected" WebRTC session that
-                # silently never delivers a single frame — connected but
+                # silently never delivers a single frame - connected but
                 # black, no error anywhere. Confirm one real frame actually
                 # arrives before treating this as a working source.
                 try:
@@ -612,7 +612,7 @@ def register_webrtc_events(
                 except asyncio.TimeoutError:
                     source_track.stop()
                     raise RuntimeError(
-                        f"Opened {video_source} but no video frames arrived within 5s — "
+                        f"Opened {video_source} but no video frames arrived within 5s - "
                         f"is the source actually sending to this server (not just to its "
                         f"own machine's localhost)?"
                     )
@@ -621,14 +621,14 @@ def register_webrtc_events(
                 msg = str(e)
                 if video_source in ("rtsp_relay", "air_unit_srt", "air_unit_gst"):
                     # ffmpeg's own words are far more useful than "no frames
-                    # arrived" — it knows whether the SRT handshake was ever
+                    # arrived" - it knows whether the SRT handshake was ever
                     # attempted, which distinguishes a blocked UDP path from
                     # a laptop that simply isn't relaying.
                     from app.webrtc import relay_video_source
                     ingest = relay_video_source.get(session.session_id)
                     tail = ingest.stderr_tail() if ingest else ""
                     if tail:
-                        msg = f"{msg} — relay listener said: {tail.strip()}"
+                        msg = f"{msg} - relay listener said: {tail.strip()}"
                     await relay_video_source.release_async(session.session_id)
                 elif video_source in ("rtsp_datachannel", "air_unit_datachannel"):
                     # The single most useful thing to know here is whether the
@@ -641,13 +641,13 @@ def register_webrtc_events(
                     if ingest is not None:
                         s = ingest.stats()
                         msg = (
-                            f"{msg} — DataChannel forwarded {s['packets']} packets "
+                            f"{msg} - DataChannel forwarded {s['packets']} packets "
                             f"({s['bytes'] / 1e6:.1f} MB) to udp:{s['loopbackPort']}"
                             + (
                                 ". Nothing arrived from the client at all."
                                 if s["packets"] == 0
                                 else ". Packets arrived but were not decodable as "
-                                     "RTP/H.265 — check the client's payload type."
+                                     "RTP/H.265 - check the client's payload type."
                             )
                         )
                     # Deliberately NOT released here: the desktop's DataChannel

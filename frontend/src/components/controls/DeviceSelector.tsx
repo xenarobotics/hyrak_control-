@@ -5,7 +5,7 @@ import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { getLocalRelayUrl, setLocalRelayUrl, DEFAULT_LOCAL_RELAY_URL } from '@/lib/localRfRelay'
 import { getSiyiTelemetryTarget, setSiyiTelemetryTarget, DEFAULT_SIYI_TELEMETRY_TARGET } from '@/lib/siyiTelemetryRelay'
 // The link selection itself lives in a hook, shared with the status bar's
-// compact picker — two copies of "which radio is selected" is how the two
+// compact picker - two copies of "which radio is selected" is how the two
 // controls end up disagreeing. See hooks/useTelemetryLink.ts.
 import { useTelemetryLink } from '@/hooks/useTelemetryLink'
 import { getRfDownlinkPort, getRfUplinkPort, getRfFanoutPort, setRfFanoutPort,
@@ -20,10 +20,10 @@ import { cn } from '@/lib/utils'
 import { getVideoSource, isServerSourced, needsCameraSelection } from '@/lib/videoSource'
 
 const SOURCE_LABELS: Record<string, string> = {
-    air_unit_udp: 'Air unit (UDP) — set in Settings',
-    siyi_rtsp: 'SIYI (RTSP) — set in Settings',
-    rtsp_relay: 'RTSP relay (this machine) — set in Settings',
-    rtsp_camera: 'RTSP as camera — set in Settings',
+    air_unit_udp: 'Air unit (UDP) - set in Settings',
+    siyi_rtsp: 'SIYI (RTSP) - set in Settings',
+    rtsp_relay: 'RTSP relay (this machine) - set in Settings',
+    rtsp_camera: 'RTSP as camera - set in Settings',
 }
 
 export function DeviceSelector() {
@@ -35,7 +35,7 @@ export function DeviceSelector() {
     } = useWebRTCContext()
 
     // Server-sourced feeds (air-unit UDP, SIYI RTSP) don't use a browser
-    // camera — the source is picked once in Settings, not per-tab here.
+    // camera - the source is picked once in Settings, not per-tab here.
     const [videoSource] = useState(() => getVideoSource())
     const serverSourced = isServerSourced(videoSource)
     // rtsp_camera isn't server-sourced, but it still has no device to pick.
@@ -43,11 +43,11 @@ export function DeviceSelector() {
 
     // Telemetry source is a CLIENT device, like the camera: radios plugged
     // into the user's machine, listed by name (QGC-style). The server never
-    // has a radio — no server ports. How they're enumerated differs by shell:
+    // has a radio - no server ports. How they're enumerated differs by shell:
     //
     //   browser  "+" opens Chrome's picker; the one-time grant makes the radio
     //            appear here on every future visit, live on plug/unplug.
-    //   desktop  every port is listed immediately — no grant, no picker.
+    //   desktop  every port is listed immediately - no grant, no picker.
     //            Electron ships navigator.serial but no chooser UI behind it,
     //            so "+" opened nothing at all; the native SerialBridge's
     //            list() is used instead (see lib/nativeSerialRelay.ts).
@@ -63,7 +63,7 @@ export function DeviceSelector() {
         telemetryStatus, telemetryError, isConnected, isConnecting, sitlNeedsDesktop,
     } = useTelemetryLink()
 
-    // These four are text fields with exactly one editor — this panel — and
+    // These four are text fields with exactly one editor - this panel - and
     // they are persisted the moment they are typed, so the hook's connect()
     // reads them back from storage rather than being handed them.
     const [relayUrl, setRelayUrl] = useState(() => getLocalRelayUrl())
@@ -78,7 +78,7 @@ export function DeviceSelector() {
     return (
         <div className="space-y-3">
 
-            {/* Camera selector — not applicable to server-sourced feeds */}
+            {/* Camera selector - not applicable to server-sourced feeds */}
             <div>
                 <div className="flex items-center gap-1.5 mb-1.5">
                     <Camera size={12} className="text-app-text-muted" />
@@ -120,7 +120,7 @@ export function DeviceSelector() {
                 )}
             </div>
 
-            {/* Telemetry source — detected client radios (like the camera) or SITL */}
+            {/* Telemetry source - detected client radios (like the camera) or SITL */}
             <div>
                 <div className="flex items-center gap-1.5 mb-1.5">
                     <Satellite size={12} className="text-app-text-muted" />
@@ -206,7 +206,7 @@ export function DeviceSelector() {
                     other one people actually hit. */}
                 {selectedIsFc && (
                     <p className="mt-1.5 text-[10px] font-mono text-app-text-muted leading-relaxed">
-                        Flight controller over USB — the baud rate is ignored by
+                        Flight controller over USB - the baud rate is ignored by
                         the CDC serial link, so there is nothing to match.
                     </p>
                 )}
@@ -233,19 +233,19 @@ export function DeviceSelector() {
                 )}
                 {desktop && nativeRadios.length === 0 && (
                     <p className="mt-1.5 text-[10px] font-mono text-app-text-muted leading-relaxed">
-                        No serial ports found. Plug the radio in and hit refresh — on Linux you
+                        No serial ports found. Plug the radio in and hit refresh - on Linux you
                         may also need to be in the <span className="text-zinc-400">dialout</span> group.
                     </p>
                 )}
                 {source === 'air-unit-udp' && (
                     <>
                         <p className="mt-1.5 text-[10px] font-mono text-app-text-muted leading-relaxed">
-                            Reads udp:{getRfDownlinkPort()} / sends to {rfUplinkHost}:{getRfUplinkPort()} —
+                            Reads udp:{getRfDownlinkPort()} / sends to {rfUplinkHost}:{getRfUplinkPort()} -
                             no relay agent needed. Just run start-gs.sh.
                         </p>
                         {/* THE SETTING THAT COSTS A FLIGHT WHEN IT IS WRONG, and
                             it used to be a literal in the code. Downlink needs no
-                            address — it is a bind, so it hears whoever sends. The
+                            address - it is a bind, so it hears whoever sends. The
                             uplink is a send TO somewhere, and if that somewhere is
                             this PC while wfb_tx runs on a decoder board, every
                             command vanishes into loopback with no error anywhere
@@ -260,7 +260,7 @@ export function DeviceSelector() {
                                 }}
                                 disabled={isConnected}
                                 placeholder={DEFAULT_RF_UPLINK_HOST}
-                                title="Where wfb_tx listens. This machine only if the RF decoder runs here — put the decoder's address here otherwise, or commands go nowhere while telemetry keeps working."
+                                title="Where wfb_tx listens. This machine only if the RF decoder runs here - put the decoder's address here otherwise, or commands go nowhere while telemetry keeps working."
                                 className="h-7 w-full rounded px-2 text-[11px] font-mono bg-app-surface border border-app-border text-app-text outline-none disabled:opacity-60"
                             />
                         </div>
@@ -282,7 +282,7 @@ export function DeviceSelector() {
                         </div>
                         <p className="mt-1 text-[10px] font-mono text-app-text-muted leading-relaxed">
                             {rfFanout > 0
-                                ? `Copy of the downlink sent to udp:${rfFanout} — point QGC's UDP link at that port instead of ${getRfDownlinkPort()} (only one program can own a port). Downlink only: QGC can read params and download the mission, but cannot command the aircraft through this.`
+                                ? `Copy of the downlink sent to udp:${rfFanout} - point QGC's UDP link at that port instead of ${getRfDownlinkPort()} (only one program can own a port). Downlink only: QGC can read params and download the mission, but cannot command the aircraft through this.`
                                 : `0 = off. Set a port (e.g. ${getRfDownlinkPort() + 2}) to let QGroundControl watch the same telemetry alongside HYRAK.`}
                         </p>
                     </>
@@ -306,13 +306,13 @@ export function DeviceSelector() {
                             className="mt-1.5 h-7 w-full rounded px-2 text-[11px] font-mono bg-app-surface border border-app-border text-app-text outline-none disabled:opacity-60"
                         />
                         <p className="mt-1 text-[10px] font-mono text-app-text-muted leading-relaxed">
-                            Target host:port, same as QGC&apos;s UDP link. Local port is ephemeral — the ground unit replies to us.
+                            Target host:port, same as QGC&apos;s UDP link. Local port is ephemeral - the ground unit replies to us.
                         </p>
                     </>
                 )}
                 {sitlNeedsDesktop && (
                     <p className="mt-1.5 text-[10px] font-mono text-app-text-muted leading-relaxed">
-                        SITL requires the HYRAK desktop app — <a href="/" className="underline text-zinc-400 hover:text-zinc-200">download it here</a>, then connect to the PX4 SITL running on your machine.
+                        SITL requires the HYRAK desktop app - <a href="/" className="underline text-zinc-400 hover:text-zinc-200">download it here</a>, then connect to the PX4 SITL running on your machine.
                     </p>
                 )}
             </div>
@@ -320,7 +320,7 @@ export function DeviceSelector() {
             {/* Connect / Disconnect.
                 THE CONNECTED STATE HAD NO WAY OUT. This button showed
                 "CONNECTED" and still called handleConnect, so the only thing
-                a connected operator could do here was connect again — and
+                a connected operator could do here was connect again - and
                 releasing the radio (to hand it to QGC, to power-cycle it, to
                 switch sources) meant reloading the page. Settings has always
                 had a Disconnect, and its own help text claimed the link
@@ -358,7 +358,7 @@ export function DeviceSelector() {
                 </Button>
             )}
 
-            {/* Why the last attempt failed — a silent spinner-stop tells the
+            {/* Why the last attempt failed - a silent spinner-stop tells the
                 operator nothing; the actual reason always does. */}
             {telemetryError && !isConnected && !isConnecting && (
                 <p className="text-[10px] font-mono text-red-400/90 leading-relaxed break-words">

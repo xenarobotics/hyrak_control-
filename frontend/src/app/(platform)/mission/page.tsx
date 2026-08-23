@@ -25,7 +25,7 @@ import {
   Compass, Crosshair, ChevronDown,
 } from 'lucide-react'
 
-// Leaflet accesses `window` — no SSR
+// Leaflet accesses `window` - no SSR
 const MissionMap = dynamic(() => import('@/components/mission/MissionMap'), {
   ssr: false,
   loading: () => (
@@ -46,7 +46,7 @@ const MissionMap3D = dynamic(() => import('@/components/mission/MissionMap3D'), 
   ),
 })
 
-// ── Solid dark panel — no more pure translucent ─────────────────────────────
+// ── Solid dark panel - no more pure translucent ─────────────────────────────
 
 function Panel({ children, className, style }: {
   children: React.ReactNode
@@ -165,7 +165,7 @@ export default function MissionPage() {
   const [showCamDropdown, setShowCamDropdown] = useState(false)
   const rtlDismissedRef = useRef(false)
   const rtlTargetRef    = useRef<{ lat: number; lng: number } | null>(null)
-  // Fleet RTL: ids of the drones sent home — each is tracked against ITS OWN
+  // Fleet RTL: ids of the drones sent home - each is tracked against ITS OWN
   // home position for the arrival check, and the land confirmation targets
   // exactly these drones even if the tick boxes change meanwhile.
   const returningIdsRef = useRef<number[]>([])
@@ -192,7 +192,7 @@ export default function MissionPage() {
   const [approvedPermits, setApprovedPermits] = useState<MyPermit[]>([])
   const [showPermits, setShowPermits] = useState(false)
 
-  // In swarm mode permits belong to the ACTIVE fleet drone — every permit
+  // In swarm mode permits belong to the ACTIVE fleet drone - every permit
   // request/list call must name it explicitly.
   const permitScope = useCallback((): { fleet_drone_id?: number } => {
     const { enabled, activeDroneId } = useSwarmStore.getState()
@@ -217,7 +217,7 @@ export default function MissionPage() {
   }, [permitScope])
 
   // Refresh permits whenever the drone (re)connects or the active fleet drone
-  // changes — identity is resolved shortly after connect, so retry with delay.
+  // changes - identity is resolved shortly after connect, so retry with delay.
   useEffect(() => {
     if (telStatus !== 'connected') { setApprovedPermits([]); return }
     getSocket().emit('list_my_permits', permitScope())
@@ -389,19 +389,19 @@ export default function MissionPage() {
     if (d < 8) setRtlLandConfirmVisible(true)
   }, [rtlReturning, telemetry?.position, rtlLandConfirmVisible, swarmEnabled, swarmDrones])
 
-  // Surface failed start/pause/RTL commands instead of failing silently —
+  // Surface failed start/pause/RTL commands instead of failing silently -
   // previously a failed start_mission left the UI looking unchanged, so users
   // had to guess and retry via Pause→Resume to get the mission going.
   useEffect(() => {
     if (!lastActionResult) return
     const FAILURE_MSG: Record<string, string> = {
-      start_mission: 'Start failed — drone did not confirm MISSION mode. Try again.',
+      start_mission: 'Start failed - drone did not confirm MISSION mode. Try again.',
       arm_and_start_mission: 'Arm & start failed',
-      restart_mission: 'Restart failed — drone did not confirm MISSION mode. Try again.',
+      restart_mission: 'Restart failed - drone did not confirm MISSION mode. Try again.',
       arm_and_restart_mission: 'Arm & restart failed',
       pause_mission: 'Pause failed',
-      goto_custom_rtl: 'RTL failed — check drone connection',
-      rtl_home: 'RTL failed — check drone connection',
+      goto_custom_rtl: 'RTL failed - check drone connection',
+      rtl_home: 'RTL failed - check drone connection',
     }
     if (!lastActionResult.ok && FAILURE_MSG[lastActionResult.action]) {
       setUploadError(FAILURE_MSG[lastActionResult.action])
@@ -414,7 +414,7 @@ export default function MissionPage() {
     if (!isUploading) return
     const t = setTimeout(() => {
       setIsUploading(false)
-      setUploadError('Upload timed out — check drone connection and backend logs')
+      setUploadError('Upload timed out - check drone connection and backend logs')
     }, 30000)
     return () => clearTimeout(t)
   }, [isUploading])
@@ -426,7 +426,7 @@ export default function MissionPage() {
   const estBatteryDraw = Math.round(estMinutes * 10)
   const batteryWarning = batteryPct !== null && estBatteryDraw > batteryPct * 0.8
 
-  // Mission state from flight mode — more reliable than index alone:
+  // Mission state from flight mode - more reliable than index alone:
   //   MISSION mode  → drone is actively executing waypoints
   //   index >= 0, wasMissionRef set, not MISSION → actually paused mid-mission
   //   index >= 0 but wasMissionRef false → just uploaded, show "Start" not "Resume"
@@ -563,7 +563,7 @@ export default function MissionPage() {
       })
     } else {
       if (telStatus !== 'connected') {
-        setUploadError('Drone not connected — connect via Telemetry first')
+        setUploadError('Drone not connected - connect via Telemetry first')
         return
       }
       setIsUploading(true)
@@ -582,7 +582,7 @@ export default function MissionPage() {
     <div className="relative w-full h-full overflow-hidden rounded-xl border"
       style={{ borderColor: 'hsl(var(--app-border))' }}>
 
-      {/* Full-bleed map — 2D or 3D */}
+      {/* Full-bleed map - 2D or 3D */}
       {mapView === '3d' ? <MissionMap3D /> : <MissionMap />}
 
       {/* Hidden file input */}
@@ -631,7 +631,7 @@ export default function MissionPage() {
                   >
                     <div className="text-zinc-200 truncate">&ldquo;{p.description}&rdquo;</div>
                     <div className="text-zinc-600 mt-0.5">
-                      {p.waypoints.length} waypoints — click to load (fly as approved; edits
+                      {p.waypoints.length} waypoints - click to load (fly as approved; edits
                       invalidate the permit)
                     </div>
                   </button>
@@ -675,7 +675,7 @@ export default function MissionPage() {
         </div>
       )}
 
-      {/* ── Mission status strip — absolute top of screen, pushes toolbar down ── */}
+      {/* ── Mission status strip - absolute top of screen, pushes toolbar down ── */}
       {missionExecuting && !rtlLandConfirmVisible && (
         <div
           className="absolute top-0 left-0 right-0 z-[3000] flex items-center gap-3 px-4 py-1"
@@ -742,7 +742,7 @@ export default function MissionPage() {
         </div>
       )}
 
-      {/* Fleet RTL progress chip — visible while the group is returning */}
+      {/* Fleet RTL progress chip - visible while the group is returning */}
       {rtlReturning && swarmEnabled && fleetRtlArrived && !rtlLandConfirmVisible && (
         <div
           className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[2400] flex items-center gap-2 px-3 py-1.5 rounded-xl border font-mono text-[10px] font-bold"
@@ -754,11 +754,11 @@ export default function MissionPage() {
           }}
         >
           <Home size={12} color="#c084fc" />
-          RTL — {fleetRtlArrived.n}/{fleetRtlArrived.total} AT HOME
+          RTL - {fleetRtlArrived.n}/{fleetRtlArrived.total} AT HOME
         </div>
       )}
 
-      {/* RTL confirm-land popup — shown when drone arrives at RTL point */}
+      {/* RTL confirm-land popup - shown when drone arrives at RTL point */}
       {rtlLandConfirmVisible && (
         <div
           className="absolute inset-0 z-[3500] flex items-center justify-center"
@@ -815,7 +815,7 @@ export default function MissionPage() {
                 onClick={() => {
                   setRtlLandConfirmVisible(false)
                   setRtlReturning(false)
-                  // Land exactly the drones that were sent home — the tick
+                  // Land exactly the drones that were sent home - the tick
                   // boxes may have changed since the RTL was issued.
                   if (swarmEnabled && returningIdsRef.current.length > 0) {
                     getSocket().emit('swarm_group_action', {
@@ -828,14 +828,14 @@ export default function MissionPage() {
                 className="flex-1 py-2 rounded-lg text-[11px] font-mono font-bold flex items-center justify-center gap-1.5"
                 style={{ background: 'rgba(192,132,252,.25)', color: '#e9d5ff', border: '1px solid rgba(192,132,252,.4)' }}
               >
-                <Home size={13} /> Ground Clear — Land{swarmEnabled && returningIdsRef.current.length > 1 ? ` (${returningIdsRef.current.length})` : ''}
+                <Home size={13} /> Ground Clear - Land{swarmEnabled && returningIdsRef.current.length > 1 ? ` (${returningIdsRef.current.length})` : ''}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── Top centre toolbar — shifts down when mission status strip is visible ── */}
+      {/* ── Top centre toolbar - shifts down when mission status strip is visible ── */}
       <div className={`absolute ${toolbarTop} z-[2000] flex items-center gap-2 flex-wrap justify-center transition-all duration-200`}
         style={{ left: leftOpen ? 'calc(224px + 24px)' : '24px', right: rightOpen ? 'calc(224px + 24px)' : '24px' }}>
         {/* Default altitude & speed */}
@@ -937,7 +937,7 @@ export default function MissionPage() {
           <div className="w-1.5 h-1.5 rounded-full" style={{ background: autoHeading ? '#fbbf24' : '#374151' }} />
         </button>
 
-        {/* Follow Drone — split button: left = toggle, right = camera mode dropdown */}
+        {/* Follow Drone - split button: left = toggle, right = camera mode dropdown */}
         {isConnected && telemetry?.position && telemetry.position.latitude_deg !== 0 && (
           <div
             className="relative flex items-center rounded-xl select-none"
@@ -965,7 +965,7 @@ export default function MissionPage() {
                   : 'Follow'}
               </span>
             </button>
-            {/* Separator + chevron — always shown so user can pre-select mode before enabling follow */}
+            {/* Separator + chevron - always shown so user can pre-select mode before enabling follow */}
             <div className="w-px h-4" style={{ background: followDrone ? 'rgba(59,130,246,.4)' : 'rgba(255,255,255,.1)' }} />
             <button
               onClick={() => setShowCamDropdown(s => !s)}
@@ -975,7 +975,7 @@ export default function MissionPage() {
             >
               <ChevronDown size={11} />
             </button>
-            {/* Camera mode dropdown — always accessible */}
+            {/* Camera mode dropdown - always accessible */}
             {showCamDropdown && (
               <div
                 className="absolute top-full mt-1.5 left-0 rounded-xl border shadow-2xl z-[2200] overflow-hidden"
@@ -1069,9 +1069,9 @@ export default function MissionPage() {
               }}
             />
           )}
-          {/* RTL — aborts whatever the drone is doing and repositions to the
+          {/* RTL - aborts whatever the drone is doing and repositions to the
               RTL point set in the waypoint panel (defaults to takeoff position).
-              Fleet mode: every ticked drone flies to ITS OWN home instead — a
+              Fleet mode: every ticked drone flies to ITS OWN home instead - a
               shared point would stack the whole fleet on one spot. */}
           {isConnected && (
             <ToolBtn
@@ -1082,7 +1082,7 @@ export default function MissionPage() {
                   const { selectedIds, drones } = useSwarmStore.getState()
                   const targets = selectedIds.filter(id => drones[id]?.connected)
                   if (targets.length === 0) {
-                    setUploadError('Tick drones in the fleet panel first — RTL targets ticked drones')
+                    setUploadError('Tick drones in the fleet panel first - RTL targets ticked drones')
                     return
                   }
                   returningIdsRef.current = targets
@@ -1126,7 +1126,7 @@ export default function MissionPage() {
               if (missionExecuting) {
                 sendAction('pause_mission')
               } else {
-                // Always show dialog — handles arm check, preflight, and resume
+                // Always show dialog - handles arm check, preflight, and resume
                 setShowStartConfirm(true)
               }
             }}
@@ -1141,7 +1141,7 @@ export default function MissionPage() {
         </Panel>
       </div>
 
-      {/* ── Left panel — waypoint list ────────────────────────────────── */}
+      {/* ── Left panel - waypoint list ────────────────────────────────── */}
       <div className={cn(
         `absolute ${panelTop} bottom-14 left-3 z-[1000] transition-all duration-200`,
         leftOpen ? 'w-56' : 'w-0',
@@ -1213,7 +1213,7 @@ export default function MissionPage() {
         {leftOpen ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
       </button>
 
-      {/* ── Right panel — waypoint editor ─────────────────────────────── */}
+      {/* ── Right panel - waypoint editor ─────────────────────────────── */}
       <div className={cn(
         `absolute ${panelTop} bottom-14 right-3 z-[1000] transition-all duration-200`,
         rightOpen ? 'w-56' : 'w-0',
@@ -1337,10 +1337,10 @@ export default function MissionPage() {
                   if (!missionUploaded && !missionPaused) return
                   setShowStartConfirm(false)
                   if (missionPaused) {
-                    // Resume from current waypoint — do not reset sequence
+                    // Resume from current waypoint - do not reset sequence
                     sendAction(isArmed ? 'start_mission' : 'arm_and_start_mission')
                   } else {
-                    // Fresh start — reset to waypoint 0 before starting
+                    // Fresh start - reset to waypoint 0 before starting
                     sendAction(isArmed ? 'restart_mission' : 'arm_and_restart_mission')
                   }
                 }}
@@ -1405,7 +1405,7 @@ export default function MissionPage() {
                     turnRadius: 0,
                   }))
                   importWaypoints(wps)
-                  // It's already on the drone — record its signature as uploaded
+                  // It's already on the drone - record its signature as uploaded
                   const st = useMissionStore.getState()
                   markPlanUploaded(st.activePlanKey, planSignature(st.waypoints))
                   setDroneMissionOffer(null)
@@ -1420,7 +1420,7 @@ export default function MissionPage() {
         </div>
       )}
 
-      {/* ── Bottom bar — stats + map layer switcher ───────────────────── */}
+      {/* ── Bottom bar - stats + map layer switcher ───────────────────── */}
       <Panel className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-3 px-4 py-2">
         {/* Map layer segmented control */}
         <div className="flex items-center rounded-lg overflow-hidden"
@@ -1456,7 +1456,7 @@ export default function MissionPage() {
         <Stat icon={<Clock size={12} />}        label="Est. time" value={fmtTime(missionStats.estimatedTimeS)} />
         <div className="w-px h-6 bg-gray-700" />
         <Stat icon={<ArrowUpDown size={12} />}  label="Max alt"   value={`${missionStats.maxAltitude} m`} />
-        {/* Battery warning — only shown when drone connected */}
+        {/* Battery warning - only shown when drone connected */}
         {batteryPct !== null && (
           <>
             <div className="w-px h-6 bg-gray-700" />
@@ -1469,7 +1469,7 @@ export default function MissionPage() {
             />
           </>
         )}
-        {/* Wind — only shown when drone connected and wind > 0.5 m/s */}
+        {/* Wind - only shown when drone connected and wind > 0.5 m/s */}
         {windSpeed > 0.5 && (
           <>
             <div className="w-px h-6 bg-gray-700" />
@@ -1478,7 +1478,7 @@ export default function MissionPage() {
               label="Wind"
               value={`${windSpeed.toFixed(1)} m/s`}
               warn={windSpeed > 8}
-              warnMsg="Strong wind — check flight safety"
+              warnMsg="Strong wind - check flight safety"
             />
           </>
         )}
@@ -1493,7 +1493,7 @@ function ToolBtn({ icon, label, onClick, disabled, accent, danger }: {
   icon: React.ReactNode; label: string; onClick: () => void
   disabled?: boolean; accent?: boolean; danger?: boolean
 }) {
-  let color = '#e5e7eb'  // gray-200 — bright white-ish
+  let color = '#e5e7eb'  // gray-200 - bright white-ish
   let bg = 'rgba(255,255,255,.06)'
   let hoverBg = 'rgba(255,255,255,.14)'
   if (accent) { color = '#93c5fd'; bg = 'rgba(59,130,246,.15)'; hoverBg = 'rgba(59,130,246,.28)' }

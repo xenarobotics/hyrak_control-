@@ -38,7 +38,7 @@ _SR_MODELS = {
     "4x": ("FSRCNN-small_x4.pb", 4),
 }
 
-# Tuned for cv2.bilateralFilter — edge-preserving, fast enough for live use.
+# Tuned for cv2.bilateralFilter - edge-preserving, fast enough for live use.
 # Targets the kind of speckle/snow noise analog (non-digital) FPV links pick
 # up from RF interference, unlike Gaussian blur this keeps edges sharp.
 _DENOISE_LEVELS = {
@@ -77,7 +77,7 @@ def _gamma_lut(gamma: float) -> np.ndarray:
 class Enhancer(BaseAnalyzer):
     """
     Per-session tunable denoise -> color grade -> sharpen -> resize pipeline.
-    Pure OpenCV, no model weights to load — switching into this mode is
+    Pure OpenCV, no model weights to load - switching into this mode is
     instant, unlike the YOLO/InsightFace/depth modules.
     """
 
@@ -145,7 +145,7 @@ class Enhancer(BaseAnalyzer):
 
         if (now - last_run) < min_interval and client_id in self._client_last_frame:
             # Reuse the last enhanced frame instead of recomputing. This caps
-            # CPU/GPU work, not the video itself — the raw feed keeps
+            # CPU/GPU work, not the video itself - the raw feed keeps
             # streaming at the camera's native rate; frames between updates
             # just repeat the last enhanced result.
             out = self._client_last_frame[client_id]

@@ -19,7 +19,7 @@ export function getSocket(): Socket {
         // DEV ONLY: a handle for driving the UI from the console.
         //
         // Panels that only appear while something is happening on the aircraft
-        // — a calibration mid-run, a follow mid-chase — could not be looked at
+        // - a calibration mid-run, a follow mid-chase - could not be looked at
         // without an aircraft, so they were designed blind and reviewed once,
         // late, by the one person who has the hardware. `__hyrakSocket.emit`
         // is the server-bound half; the useful half is calling the listeners

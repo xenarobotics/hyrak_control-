@@ -16,7 +16,7 @@ export const colorForDrone = (id: number) =>
 // port) is skipped, so instances 10+ shift up by one. Drone id == instance id.
 export const portForDrone = (id: number) => (id > 9 ? 14541 + id : 14540 + id)
 
-// How many drone ids the auto-scan probes (1..N). Testing cap — the
+// How many drone ids the auto-scan probes (1..N). Testing cap - the
 // architecture itself has no fleet-size limit.
 export const FLEET_SCAN_COUNT = 30
 

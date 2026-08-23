@@ -1,15 +1,15 @@
 """
-Vehicle / number-plate tracking — identify, tag, and follow ONE vehicle.
+Vehicle / number-plate tracking - identify, tag, and follow ONE vehicle.
 =========================================================================
 
 Distinct from traffic-management (vision/modules/traffic_manager.py), which
 is the composed module answering "how much traffic, how many people, who is
 here". This module answers a narrower question: "find THIS vehicle, keep
-everything known about it attached to one identity, and — if asked — fly
+everything known about it attached to one identity, and - if asked - fly
 after it."
 
 A CUSTOM VEHICLE IDENTITY, SEPARATE FROM ByteTrack's track_id
-    ByteTrack ids are cheap and disposable — an occlusion, a missed detection
+    ByteTrack ids are cheap and disposable - an occlusion, a missed detection
     frame, or the vehicle briefly leaving frame all mint a new one for the
     SAME physical car. That is fine for per-frame tracking but wrong for
     "this is vehicle #4302 we saw three minutes ago", which is what an
@@ -19,14 +19,14 @@ A CUSTOM VEHICLE IDENTITY, SEPARATE FROM ByteTrack's track_id
     first tracked, independent of track_id. If its plate later reads and
     matches a plate already seen this session under a DIFFERENT vehicle_id
     (the earlier sighting's track fragmented), the vehicle_id is re-attached
-    to the earlier identity rather than minting a new one — the same
+    to the earlier identity rather than minting a new one - the same
     "durable identity survives a track-id change" idea traffic_manager uses
     for locking, applied here to the identity itself.
 
 ONE OCR CALL PER FRAME, ON A VEHICLE CROP
     fast-alpr letterboxes its input to 384x384, so a call costs the same
     whatever it is given. A plate on a 400px-wide vehicle is ~22px after a
-    full-frame call letterboxes 1920 down to 384 — unreadable. The SAME call
+    full-frame call letterboxes 1920 down to 384 - unreadable. The SAME call
     on the vehicle's own crop letterboxes 400 to 384 and yields ~107px.
     Reading plates from a full frame is close to impossible; this module
     always reads from a crop, budgeted at one call per frame and spent on
@@ -36,7 +36,7 @@ FOLLOW + AUTO-ELEVATE
     Clicking a vehicle locks it; a separate Follow command arms the flight
     behaviour, so locking and flying are two deliberate steps. While
     following, the drone tracks the vehicle down at whatever altitude and
-    speed that takes — a plate is no longer needed once the whole vehicle is
+    speed that takes - a plate is no longer needed once the whole vehicle is
     locked, so climbing to hold the car in frame does not cost the module
     anything it still needs. Uses the same three-axis PD shape and
     auto-elevate fallback as human_tracker/traffic_manager (see
@@ -46,7 +46,7 @@ Registration/owner lookup is intentionally left as a documented no-op
 extension hook, same as before: resolving a plate to an owner needs an
 authorized RTO/DMV data source, not something to fabricate or scrape.
 
-Like the other analyzer modules, this runs in BaseAnalyzer's worker thread —
+Like the other analyzer modules, this runs in BaseAnalyzer's worker thread -
 DB writes are queued onto meta["_pending_db"] for stream_track.py's recv()
 (back in the event loop) to actually dispatch.
 """
@@ -86,22 +86,22 @@ logger = logging.getLogger("verocore.vision.plate_tracker")
 
 try:
     from fast_alpr import ALPR
-except ImportError:  # pragma: no cover — dependency declared in pyproject
+except ImportError:  # pragma: no cover - dependency declared in pyproject
     ALPR = None
 
 # Every road user the COCO model can actually name. bicycle and train were
-# missing, so a cyclist simply did not exist to this module — no id, no row,
+# missing, so a cyclist simply did not exist to this module - no id, no row,
 # and nothing to lock onto.
 #
 # What COCO CANNOT give us is worth stating plainly: there is no class for an
 # auto-rickshaw, tractor, or tempo. Those are detected, but reported as
-# whichever of the classes below the model finds nearest — usually "car" or
+# whichever of the classes below the model finds nearest - usually "car" or
 # "truck". The vehicle_id, colour, speed and plate are all still correct; only
 # the type label is approximate. Naming them properly needs a model trained on
 # them, not a longer list here.
 _VEHICLE_CLASSES = {"car", "truck", "bus", "motorcycle", "bicycle", "train"}
 # COCO indices: 1 bicycle, 2 car, 3 motorcycle, 5 bus, 6 train, 7 truck.
-# Filtered at the detector call itself, not after — cheaper than running the
+# Filtered at the detector call itself, not after - cheaper than running the
 # head over every COCO class and discarding what is not a vehicle.
 _VEHICLE_CLASS_IDS = [1, 2, 3, 5, 6, 7]
 
@@ -141,7 +141,7 @@ _VEHICLE_TRACKER_CFG = make_bytetrack_cfg("verocore_veh_")
 # So quality is RECORDED, not enforced. Each reading carries its confidence,
 # its pixel width, how many frames agreed, and whether it matches a known
 # plate grammar. The UI tones a weak read differently and the CSV carries the
-# numbers — which lets a human judge a reading, instead of this module
+# numbers - which lets a human judge a reading, instead of this module
 # silently deciding on their behalf that it never happened.
 _OCR_MIN_CONF = 0.35
 # The only size floor, and it rejects specks rather than small plates: a
@@ -154,7 +154,7 @@ _PLATE_AGREEMENT_STRONG = 2
 # Overlap needed to call two plate boxes on consecutive frames the same
 # plate, for readings YOLO gave us no vehicle box for. Loose (0.2, not the
 # usual 0.5) because these boxes are small and move a long way frame to
-# frame — the drone drifts and the vehicle moves — and fragmenting one plate
+# frame - the drone drifts and the vehicle moves - and fragmenting one plate
 # into several identities is worse here than occasionally merging two.
 _PLATE_ONLY_IOU = 0.2
 
@@ -164,7 +164,7 @@ _COLOUR_GOOD_ENOUGH = 0.55
 
 # How long an out-of-frame vehicle is kept in the live registry before being
 # retired (logged if it has a plate, then dropped). Separate from the
-# pursuit lock's own "seconds lost" — this is about bookkeeping the vehicle
+# pursuit lock's own "seconds lost" - this is about bookkeeping the vehicle
 # record, not about whether the drone is still chasing it.
 _VEHICLE_RETIRE_AFTER_S = 3.0
 
@@ -174,22 +174,22 @@ _HEIGHT_EMA_ALPHA = 0.12
 _YAW_PRIORITY_THRESHOLD = 0.30
 # Forward authority never drops below this fraction, however far off
 # boresight the vehicle sits. Without a floor, forward hits exactly zero well
-# before the vehicle is anywhere near the frame edge — measured at ~20deg off
-# axis — which spends most of a real chase yawing in place. See the note in
+# before the vehicle is anywhere near the frame edge - measured at ~20deg off
+# axis - which spends most of a real chase yawing in place. See the note in
 # _follow for the measurement.
 _YAW_PRIORITY_FLOOR = 0.35
 MAX_PURSUIT_SPEED_M_S = 2.5     # keep in step with dist_pd max_output
 
-# PX4's Offboard mode requires a CONTINUOUS setpoint stream — MAVSDK's
+# PX4's Offboard mode requires a CONTINUOUS setpoint stream - MAVSDK's
 # set_velocity_body sends exactly one MAVLink message per call, nothing
-# repeats it on its own — and a gap past PX4's offboard-loss timeout hands
+# repeats it on its own - and a gap past PX4's offboard-loss timeout hands
 # control to PX4's own failsafe, whose default action (COM_OBL_ACT) on many
 # airframes is LAND. So while tracking is armed, _follow must ALWAYS return a
 # command, never None, even for the frames where the locked vehicle simply
-# is not visible — those frames are routine here (a missed detection, an
+# is not visible - those frames are routine here (a missed detection, an
 # occlusion, the vehicle at the frame edge) in a way they are not for a
 # continuous body track. What that command should BE is pursuit.blind_command:
-# hold briefly, fade the translation out, sweep, then hover — never silence,
+# hold briefly, fade the translation out, sweep, then hover - never silence,
 # and never a frozen full-speed command either.
 
 _VEHICLE_ID_PREFIX = "VH"
@@ -200,7 +200,7 @@ _CAPTURE_ROOT = os.path.join(str(ROOT_DIR), ".data", "plate_captures")
 # text doesn't already match the expected grammar).
 _CONFUSION_MAP = str.maketrans({"O": "0", "I": "1", "S": "5", "B": "8"})
 # Indian plate grammar: 2-letter state code, 1-2 digit RTO code, 1-3 letter
-# series (optional), 4 digits — e.g. MH12AB1234, DL5CAB1234, TS09EA0001.
+# series (optional), 4 digits - e.g. MH12AB1234, DL5CAB1234, TS09EA0001.
 _INDIA_PLATE_RE = re.compile(r"^[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{4}$")
 
 
@@ -208,7 +208,7 @@ def fetch_registration_details(plate_text: str) -> dict:
     """
     Hook for looking up owner/registration info against an AUTHORIZED
     source (e.g. an RTO/Vahan integration, or a licensed vehicle-data
-    API) — never wired to anything by default. Resolving a plate to an
+    API) - never wired to anything by default. Resolving a plate to an
     owner without that authorization is not something this codebase should
     fabricate or scrape. Left as a documented no-op; returns {} (=
     "not looked up / unavailable").
@@ -223,7 +223,7 @@ def _clean_plate_text(raw: str) -> str:
 def _validate_and_correct(raw: str) -> str:
     """Cleans OCR output; if it doesn't match the Indian plate grammar,
     tries a digit/letter confusion correction before giving up. Never
-    drops a reading outright — a non-matching but cleaned string is still
+    drops a reading outright - a non-matching but cleaned string is still
     returned (useful for non-Indian plates / partial reads)."""
     text = _clean_plate_text(raw)
     if not text:
@@ -300,7 +300,7 @@ class _Vehicle:
     @property
     def plate_strong(self) -> bool:
         """Whether the reading has independent corroboration. Drives how the
-        UI tones it — never whether it is kept."""
+        UI tones it - never whether it is kept."""
         return bool(self.plate) and self.plate_votes >= _PLATE_AGREEMENT_STRONG
 
 
@@ -323,7 +323,7 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         "color_counts": {},
         "peak_in_frame": 0,
         "speed_note": None,
-        # Effective calibration, not the raw .env default — an operator who
+        # Effective calibration, not the raw .env default - an operator who
         # tuned the window in Settings expects it to apply.
         "speed": SpeedEstimator(calibration.effective()["speed_fit_window_frames"]),
         # Plates read where YOLO found no vehicle around them, tracked by
@@ -343,17 +343,17 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         "elevate": None,
         # Operator-adjustable "hold here" distance, expressed as target vehicle
         # height / frame height. Was a hardcoded constant; made adjustable
-        # because there is no altitude-independent right answer — see
+        # because there is no altitude-independent right answer - see
         # set_tracking_params.
         "target_distance_ratio": _DEFAULT_SIZE_RATIO,
         # 'fixed' = hold the altitude Offboard started at; 'auto' = drive
         # altitude to keep the vehicle vertically centred. See _follow.
         "altitude_mode": "fixed",
         # m/s NED (-=up, +=down) from the operator's hold buttons. Fixed mode
-        # only — auto mode owns the axis.
+        # only - auto mode owns the axis.
         "altitude_nudge_v": 0.0,
         # Keeps the Offboard setpoint stream alive across frames where the
-        # locked vehicle is briefly not visible — see the Offboard-keepalive note.
+        # locked vehicle is briefly not visible - see the Offboard-keepalive note.
         "last_drone_command": None,
         "last_yaw_dir": 1.0,
         # Yaw: the primary axis. Gains come from the operator's saved follow
@@ -361,11 +361,11 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         # from the same numbers instead of five copies of the same literals.
         "yaw_pd": new_yaw_pd(),
         "alt_pd": PDController(kp=1.5, kd=0.3, max_output=1.0, deadband=0.10),
-        # Units are FRACTION OF RANGE, not fill difference — see
+        # Units are FRACTION OF RANGE, not fill difference - see
         # controllers.range_error_ratio for why, and for the measured
         # dead zone this replaced (1.4m at 8.6m, 46m at 50m).
         "dist_pd": PDController(kp=4.0, kd=1.0, max_output=2.5, deadband=0.08),
-        # The Fixed-altitude distance axis — see pursuit.new_row_pd.
+        # The Fixed-altitude distance axis - see pursuit.new_row_pd.
         "row_pd": new_row_pd(),
         # Frame row Fixed mode holds the vehicle's ground contact on; None =
         # take it from the subject on the next frame.
@@ -377,7 +377,7 @@ def _make_state(session_id: str) -> Dict[str, Any]:
 
 class PlateTracker(BaseAnalyzer):
     """
-    Vehicle identity, plate, colour, type, speed, and follow — for whichever
+    Vehicle identity, plate, colour, type, speed, and follow - for whichever
     vehicles the drone sees, addressed by a persistent id rather than the raw
     tracker id.
     """
@@ -425,7 +425,7 @@ class PlateTracker(BaseAnalyzer):
             return
         # A vehicle in frame when the operator stops the session never gets
         # the chance to age out of the registry, so without this flush its row
-        # — plate included — is silently discarded. That is exactly what "ran
+        # - plate included - is silently discarded. That is exactly what "ran
         # a session, saw plates, nothing in the history afterward" looks like
         # from the outside.
         rows = [r for v in state["vehicles"].values()
@@ -434,7 +434,7 @@ class PlateTracker(BaseAnalyzer):
             return
         # Location has to be attached here too. The live path gets it in
         # stream_track.recv(), which is not involved once the session is
-        # tearing down — so rows flushed here would otherwise be the only ones
+        # tearing down - so rows flushed here would otherwise be the only ones
         # missing lat/lng, which is worse than a consistent gap because it
         # looks like the GPS dropped out at the end of every flight.
         try:
@@ -480,9 +480,9 @@ class PlateTracker(BaseAnalyzer):
         of frame height. Lower = hold farther back, higher = hold closer.
 
         WHY THIS HAS TO BE ADJUSTABLE RATHER THAN A FIXED CONSTANT.
-        There is no altitude-independent right answer, and — unlike a
+        There is no altitude-independent right answer, and - unlike a
         person's standing height, which is a stable ~1.7m regardless of
-        heading — a vehicle's apparent height in frame depends on its
+        heading - a vehicle's apparent height in frame depends on its
         heading relative to the camera as much as its distance: a car driving
         broadside shows its long axis, the same car driving straight at the
         camera shows only its narrow front. The same physical range can
@@ -490,7 +490,7 @@ class PlateTracker(BaseAnalyzer):
         vehicle happens to be pointed.
         A fixed target that happens to be smaller than however large the
         vehicle actually appears at lock range means err_dist = target - h_ema
-        is negative from the moment Follow arms and STAYS negative — the
+        is negative from the moment Follow arms and STAYS negative - the
         drone commands backward continuously, regardless of what the vehicle
         then does, because the target was simply unreachable at that range.
         That is indistinguishable from "forward is broken" unless the operator
@@ -505,7 +505,7 @@ class PlateTracker(BaseAnalyzer):
         state["height_ema"] = None    # new target applies immediately
 
         # In Fixed altitude the forward axis reads the frame row, not apparent
-        # size, so the ratio alone would not reach it — this control would go
+        # size, so the ratio alone would not reach it - this control would go
         # dead in the default mode. The DIRECTION of change is applied to the
         # target row too, so one operator concept drives either sensor.
         if state.get("altitude_mode") != "auto" and state.get("target_row") is not None:
@@ -521,7 +521,7 @@ class PlateTracker(BaseAnalyzer):
         """'fixed' = hold the altitude Offboard started at (nudge buttons still
         apply). 'auto' = altitude PD keeps the vehicle vertically centred.
 
-        Auto-elevate overrides BOTH — holding a fleeing vehicle in frame at all
+        Auto-elevate overrides BOTH - holding a fleeing vehicle in frame at all
         outranks either altitude policy.
         """
         if client_id not in self._client_state or mode not in ("fixed", "auto"):
@@ -595,7 +595,7 @@ class PlateTracker(BaseAnalyzer):
         if existing and existing != vehicle.vehicle_id:
             logger.info(
                 f"vehicle #{vehicle.track_id}: plate {vehicle.plate} matches "
-                f"{existing} — re-identified as the same vehicle "
+                f"{existing} - re-identified as the same vehicle "
                 f"(was {vehicle.vehicle_id})"
             )
             vehicle.vehicle_id = existing
@@ -607,10 +607,10 @@ class PlateTracker(BaseAnalyzer):
     def _alpr_detections(self, img, ox: int, oy: int) -> List[dict]:
         """
         One fast-alpr call, normalised into plain dicts in FULL-FRAME
-        coordinates (hence ox/oy, the crop's origin — without adding it back
+        coordinates (hence ox/oy, the crop's origin - without adding it back
         the overlay bracket and the logged box would both be meaningless).
 
-        Applies only the two cheap sanity filters — a minimum area that
+        Applies only the two cheap sanity filters - a minimum area that
         rejects specks, and a minimum OCR confidence. Everything else about
         the reading's quality is measured and carried along rather than used
         to discard it; see the module-level note above _OCR_MIN_CONF.
@@ -662,7 +662,7 @@ class PlateTracker(BaseAnalyzer):
         """
         Read every plate this frame can offer, then attach each to a vehicle.
 
-        Whole frame PLUS one crop per vehicle — see the module note above
+        Whole frame PLUS one crop per vehicle - see the module note above
         _OCR_MIN_CONF for why both passes earn their keep. A detection is
         matched to the vehicle whose box contains its centre; readings that
         match no vehicle are still kept (via _unmatched_vehicle) because at
@@ -671,7 +671,7 @@ class PlateTracker(BaseAnalyzer):
 
         AT MOST ONE READING PER VEHICLE PER FRAME.
         The two passes usually both see the same plate, so applying every
-        detection would score one frame as two agreeing reads — and
+        detection would score one frame as two agreeing reads - and
         `plate_votes` is supposed to mean independent FRAMES, not passes over
         the same photons. Left unchecked, a single frame marked its own
         reading corroborated, which is precisely the "one confident wrong
@@ -720,7 +720,7 @@ class PlateTracker(BaseAnalyzer):
 
         Tracked by overlap on the PLATE box across frames, in its own id space
         (negative track ids, so it can never collide with a ByteTrack id).
-        Type stays "unknown" — it is genuinely unknown, and guessing "car"
+        Type stays "unknown" - it is genuinely unknown, and guessing "car"
         would put a fabricated field in a permanent row.
         """
         pool: Dict[int, _Vehicle] = state["plate_only"]
@@ -757,15 +757,15 @@ class PlateTracker(BaseAnalyzer):
         if text == v.plate:
             v.plate_votes += 1
             if conf <= v.plate_conf:
-                return          # same string, no better look — nothing to redo
+                return          # same string, no better look - nothing to redo
         elif conf > v.plate_conf or not v.plate:
             # A different string. Starts at one vote rather than inheriting the
-            # previous string's count — that inheritance is what once let five
+            # previous string's count - that inheritance is what once let five
             # different readings look like a settled answer.
             v.plate = text
             v.plate_votes = 1
         else:
-            return              # a weaker competing string — ignore
+            return              # a weaker competing string - ignore
 
         v.plate_conf = max(v.plate_conf, conf)
         v.plate_px_w = det["px_w"]
@@ -783,7 +783,7 @@ class PlateTracker(BaseAnalyzer):
         """
         Write BOTH images: the plate crop and the whole vehicle.
 
-        A ~40x18px plate crop on its own is unreviewable — you cannot tell a
+        A ~40x18px plate crop on its own is unreviewable - you cannot tell a
         plate from a badge from a video overlay. The vehicle shot is what
         makes a row checkable by a human afterwards.
 
@@ -830,7 +830,7 @@ class PlateTracker(BaseAnalyzer):
         seen, since most vehicles never turn a readable plate toward the
         camera.
 
-        Written once per vehicle — `logged` is set here, on the only path that
+        Written once per vehicle - `logged` is set here, on the only path that
         ever builds a row. Shared between the per-frame retire loop (a vehicle
         that has left frame) and unregister_client (a vehicle still on screen
         when the session simply stops), because a plate read seconds before
@@ -919,7 +919,7 @@ class PlateTracker(BaseAnalyzer):
                 in_frame.append(v)
 
                 # Colour: re-read only while it is still unconvincing, then
-                # frozen — a vehicle entering frame is often half-occluded.
+                # frozen - a vehicle entering frame is often half-occluded.
                 if v.color_conf < _COLOUR_GOOD_ENOUGH:
                     col, cconf = classify_vehicle_color(frame_bgr, full)
                     if cconf > v.color_conf:
@@ -961,11 +961,11 @@ class PlateTracker(BaseAnalyzer):
             # Speed is GEOMETRY, and the geometry needs a height. Without
             # telemetry there is no metres-per-pixel, so a number here would be
             # invented rather than measured. Say which of the two is missing
-            # instead of leaving the field blank — a silent absence is
+            # instead of leaving the field blank - a silent absence is
             # indistinguishable from a broken estimator, which is exactly how
             # this read from the outside.
             state["speed_note"] = (
-                "no telemetry — speed needs altitude to turn pixels into metres"
+                "no telemetry - speed needs altitude to turn pixels into metres"
                 if ctx is not None else "no frame context yet"
             )
 
@@ -1009,8 +1009,8 @@ class PlateTracker(BaseAnalyzer):
                     "color": v.color or "unknown",
                     "color_conf": round(v.color_conf, 2),
                     # The reading is always reported. Its strength travels
-                    # alongside it — votes, confidence, pixel width, and
-                    # whether it matches a known plate grammar — so the UI can
+                    # alongside it - votes, confidence, pixel width, and
+                    # whether it matches a known plate grammar - so the UI can
                     # tone a weak read without the module having to suppress
                     # it. Suppressing weak reads is what made this mode look
                     # broken; see the note above _OCR_MIN_CONF.
@@ -1045,7 +1045,7 @@ class PlateTracker(BaseAnalyzer):
             "elevate": state.get("elevate"),
             "drone_command": drone_command,
             # What the follow distance controller is actually chasing, made
-            # visible rather than left implicit — "the drone only moves
+            # visible rather than left implicit - "the drone only moves
             # backward" is indistinguishable from "target unreachable at this
             # range" unless both numbers are on screen at once.
             "target_distance_ratio": round(
@@ -1077,7 +1077,7 @@ class PlateTracker(BaseAnalyzer):
 
         Same three-axis PD shape as human_tracker/traffic_manager (yaw
         primary, distance via apparent size, altitude secondary) plus the
-        auto-elevate fallback when the vehicle outruns the airframe — climb
+        auto-elevate fallback when the vehicle outruns the airframe - climb
         to widen the ground footprint rather than lose it, since a fixed
         camera mount cannot simply look further ahead the way a gimbal would.
         A plate is not needed once the whole vehicle is locked, so trading
@@ -1085,7 +1085,7 @@ class PlateTracker(BaseAnalyzer):
         still needs.
         """
         # An operator request takes effect as soon as that vehicle is in
-        # frame — locking a track that is not visible would commit the
+        # frame - locking a track that is not visible would commit the
         # aircraft to nothing.
         wanted = state.get("follow_request_track_id")
         if wanted is not None:
@@ -1111,11 +1111,11 @@ class PlateTracker(BaseAnalyzer):
         if target is None:
             state["frames_lost"] = state.get("frames_lost", 0) + 1
             # The plate/vehicle_id is the identity that survives a track id
-            # change, so it is kept rather than cleared — a re-read of the
+            # change, so it is kept rather than cleared - a re-read of the
             # same characters is the same vehicle, not a guess.
             if not state.get("tracking"):
                 return None
-            # NEVER None here while armed — see the Offboard-keepalive note above.
+            # NEVER None here while armed - see the Offboard-keepalive note above.
             return self._search_command(state)
 
         state["frames_lost"] = 0
@@ -1147,7 +1147,7 @@ class PlateTracker(BaseAnalyzer):
         # 45deg, which means past that point a target moving closer looks
         # SMALLER and the controller drives forward toward it. See
         # geometry.deforeshorten_size.
-        # Vehicle height in metres — the ruler the position estimate needs.
+        # Vehicle height in metres - the ruler the position estimate needs.
         _widths = get_settings().vehicle_widths_m or {}
         _vh = 1.5 if target.type not in ("truck", "bus") else 3.2
         # Where the vehicle meets the road. Drives the Fixed-mode distance
@@ -1157,21 +1157,21 @@ class PlateTracker(BaseAnalyzer):
         h_eff, _phi = self._range_observable(
             h_ema, pose, ctx, fx_n, fy_n, foot_n, W, H, _vh
         )
-        # Fraction-of-range — see controllers.range_error_ratio.
+        # Fraction-of-range - see controllers.range_error_ratio.
         err_dist = range_error_ratio(target_ratio, h_eff)
 
         yaw_deg_s = state["yaw_pd"].compute(err_yaw)
 
         # ── Altitude ─────────────────────────────────────────────────────
-        # FIXED  — hold the altitude Offboard started at (telemetry.py runs
+        # FIXED  - hold the altitude Offboard started at (telemetry.py runs
         #          its own P-hold whenever this axis is commanded 0), moving
         #          only on an operator nudge. Vertical framing is left alone.
-        # AUTO   — drive altitude to keep the vehicle vertically centred.
+        # AUTO   - drive altitude to keep the vehicle vertically centred.
         #
         # FIXED is the default here, deliberately, and it is the opposite of
         # the assumption an earlier version made. Because the camera is
         # rigidly mounted and tilted down, a subject's VERTICAL position in
-        # frame is mostly a RANGE signal, not an altitude one — the distance
+        # frame is mostly a RANGE signal, not an altitude one - the distance
         # controller above already reads range, more directly, from apparent
         # size. So chasing vertical framing with altitude is a second
         # controller acting on the same underlying quantity, and it showed:
@@ -1198,15 +1198,15 @@ class PlateTracker(BaseAnalyzer):
         # FORWARD KEEPS A FLOOR RATHER THAN BEING GATED TO ZERO.
         #
         # A previous version zeroed forward entirely once the vehicle was
-        # ~20deg off boresight (err_yaw >= _YAW_PRIORITY_THRESHOLD) — measured,
+        # ~20deg off boresight (err_yaw >= _YAW_PRIORITY_THRESHOLD) - measured,
         # a vehicle only a third of the way toward the frame edge produced
         # forward_m_s == 0.0 outright, with only yaw commanded. That is a
         # normal moment mid-chase (the vehicle turned, or yaw simply has not
         # caught up yet), not an edge case, so the drone spent most of a
         # chase yawing in place while the vehicle it was meant to be closing
         # on kept its lead. _YAW_PRIORITY_FLOOR keeps SOME forward authority
-        # at any angle, so the two axes correct together — yaw recentres while
-        # distance is still being closed — rather than forward waiting its
+        # at any angle, so the two axes correct together - yaw recentres while
+        # distance is still being closed - rather than forward waiting its
         # turn.
         yaw_factor = max(
             _YAW_PRIORITY_FLOOR, 1.0 - abs(err_yaw) / _YAW_PRIORITY_THRESHOLD
@@ -1220,7 +1220,7 @@ class PlateTracker(BaseAnalyzer):
             state=state, altitude_mode=alt_mode,
             foot_row_n=foot_n, size_range_error=err_dist,
         )
-        # A retreat is never throttled — see pursuit.scale_forward.
+        # A retreat is never throttled - see pursuit.scale_forward.
         forward_m_s = scale_forward(forward_raw, yaw_factor, alt_mode)
 
         # Auto-elevate: only when the vehicle is genuinely pulling away, and
@@ -1248,8 +1248,8 @@ class PlateTracker(BaseAnalyzer):
         state["elevate"] = elevate.to_dict() if elevate else None
 
         # THE ALTITUDE FLOOR. Last thing before the command is emitted, so it
-        # catches every source of descent — the altitude PD, an operator nudge,
-        # anything added later — rather than each of them separately. Without
+        # catches every source of descent - the altitude PD, an operator nudge,
+        # anything added later - rather than each of them separately. Without
         # it a sustained descent flew a SITL aircraft into the ground; see
         # pursuit.limit_descent.
         # The ceiling belongs at the same point, and it matters most for the
@@ -1295,7 +1295,7 @@ class PlateTracker(BaseAnalyzer):
         SIZE (de-foreshortened) is the primary and the only one that works
         without telemetry. POSITION (where the subject's feet meet the ground
         plane) is fused in as the view steepens, because that is exactly where
-        the size estimate degrades and the position one sharpens — see
+        the size estimate degrades and the position one sharpens - see
         geometry.blend_weight_for_position for the measured crossover.
 
         Returns h_ema unchanged when there is no pose, so every no-telemetry
@@ -1323,11 +1323,11 @@ class PlateTracker(BaseAnalyzer):
 
         # FEET, NOT CENTRE. The comment here said exactly this while the code
         # passed the box centre, and the centre floats half a subject's height
-        # off the ground — so its ray cleared the subject and struck the ground
+        # off the ground - so its ray cleared the subject and struck the ground
         # BEYOND them. The over-estimate is AGL/(AGL - h/2), independent of
         # viewing angle: +17% at 6 m AGL, +27% at 4 m, +40% at 3 m. Range too
         # long reads as "further than wanted", which commands FORWARD, and the
-        # position estimate is weighted in hardest at steep depression — i.e.
+        # position estimate is weighted in hardest at steep depression - i.e.
         # exactly when the subject is low in the frame and the drone should have
         # been backing off. Reported from flight as "person on the lower side of
         # frame and it moves forward instead of back".
@@ -1365,7 +1365,7 @@ class PlateTracker(BaseAnalyzer):
 
     def draw_overlay(self, frame_bgr: np.ndarray, meta: Dict[str, Any]) -> np.ndarray:
         H, W = frame_bgr.shape[:2]
-        # Counts, telemetry/ALPR availability etc. live in the side panel —
+        # Counts, telemetry/ALPR availability etc. live in the side panel -
         # putting them on the video too is redundant clutter over the one
         # thing the feed actually needs to show: the vehicles and their
         # plates.
@@ -1377,7 +1377,7 @@ class PlateTracker(BaseAnalyzer):
 
             # ONE thing on screen per vehicle: the plate. vehicle_id, colour,
             # type and speed all used to be crammed into a single dense
-            # caption, which is what read as dated — not the chip style. Every
+            # caption, which is what read as dated - not the chip style. Every
             # one of those is already in the side panel, laid out properly,
             # and none of it needs reading off a moving picture.
             #
@@ -1398,7 +1398,7 @@ class PlateTracker(BaseAnalyzer):
                 px1, py1, px2, py2 = v["plate_box"]
                 draw_ring(frame_bgr, px1, py1, px2, py2, pcol, 2, radius=5)
 
-            # Recentering guide for the locked, actively-followed vehicle —
+            # Recentering guide for the locked, actively-followed vehicle -
             # same shape as human_tracker's: a line from frame centre to the
             # target, so which way (and how far) the target sits off-centre
             # is visible at a glance, not something to infer from the PD

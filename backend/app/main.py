@@ -17,7 +17,7 @@ if __name__ == "__main__":
         port=settings.port,
         log_level=settings.log_level,
         reload=True,
-        # Without reload_dirs, uvicorn watches the whole CWD (backend/) recursively —
+        # Without reload_dirs, uvicorn watches the whole CWD (backend/) recursively -
         # including .venv/ and any runtime files mavsdk_server or Python write during
         # a connect cycle. That was triggering a full worker reload (killing every
         # open WebSocket, including live telemetry) on every connect_telemetry call.

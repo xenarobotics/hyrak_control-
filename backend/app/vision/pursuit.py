@@ -2,7 +2,7 @@
 Pursuit policy: the chase fallback and the reacquisition ladder.
 ================================================================
 
-Two behaviours that share one idea — DEGRADE VISIBLY, NEVER SILENTLY. Both
+Two behaviours that share one idea - DEGRADE VISIBLY, NEVER SILENTLY. Both
 failures this module handles (a target outrunning the drone, a target
 disappearing) end with the drone doing something autonomous while nobody is
 sure whether it still has the right subject. So every state here is named,
@@ -11,7 +11,7 @@ reported, and bounded in time.
 AUTO-ELEVATE IS AN EXCEPTION PATH, NOT A MODE
     It fires only when a locked target is genuinely outpacing the airframe.
     Climbing widens the ground footprint, which is the only way a fixed-mount
-    camera can keep a faster target in frame — it cannot simply look further
+    camera can keep a faster target in frame - it cannot simply look further
     ahead the way a gimbal would.
 
     Bounded by TWO independent ceilings, because they fail differently and the
@@ -82,7 +82,7 @@ class PursuitLimits:
     climb_rate_m_s: float = 1.2
     # Fraction of the airframe's top speed at which the target counts as
     # outpacing us. Below 1.0 so the climb starts BEFORE the target is gone,
-    # rather than after — by the time forward speed is saturated the gap is
+    # rather than after - by the time forward speed is saturated the gap is
     # already opening.
     outpaced_fraction: float = 0.85
 
@@ -102,7 +102,7 @@ class PursuitLimits:
 @dataclass
 class ElevateDecision:
     """Why the drone is or is not climbing. `reason` is meant for the operator,
-    not the log — a climb the pilot cannot explain is a climb they will fight."""
+    not the log - a climb the pilot cannot explain is a climb they will fight."""
     climb_m_s: float          # NED: negative is UP
     elevating: bool
     blocked_by: Optional[str] = None
@@ -140,13 +140,13 @@ def decide_elevation(
     if agl_m is None:
         return ElevateDecision(
             0.0, False, blocked_by="no_altitude",
-            reason="target outpacing us, but AGL is unknown — refusing to climb blind",
+            reason="target outpacing us, but AGL is unknown - refusing to climb blind",
         )
 
     if agl_m >= limits.max_altitude_agl_m:
         return ElevateDecision(
             0.0, False, blocked_by="altitude_cap",
-            reason=(f"at the {limits.max_altitude_agl_m:.0f} m ceiling — "
+            reason=(f"at the {limits.max_altitude_agl_m:.0f} m ceiling - "
                     f"cannot climb further; target will be lost"),
         )
 
@@ -157,7 +157,7 @@ def decide_elevation(
         return ElevateDecision(
             0.0, False, blocked_by="depression_cap",
             reason=(f"looking down at {depression_deg:.0f}deg "
-                    f"(cap {limits.max_depression_deg:.0f}deg) — climbing further "
+                    f"(cap {limits.max_depression_deg:.0f}deg) - climbing further "
                     f"would make faces and plates unreadable"),
         )
 
@@ -168,7 +168,7 @@ def decide_elevation(
         else limits.climb_rate_m_s
     return ElevateDecision(
         -abs(rate), True,          # NED: negative is up
-        reason=(f"target outpacing us — climbing at {rate:.1f} m/s to widen "
+        reason=(f"target outpacing us - climbing at {rate:.1f} m/s to widen "
                 f"the footprint ({headroom:.0f} m of headroom)"),
     )
 
@@ -183,7 +183,7 @@ def is_outpaced(
     Is the target pulling away?
 
     Requires BOTH a near-saturated forward command and the distance actually
-    increasing. Saturation alone is not enough — a drone accelerating hard from
+    increasing. Saturation alone is not enough - a drone accelerating hard from
     a standstill is briefly at full command while closing, and climbing then
     would be exactly wrong.
     """
@@ -207,13 +207,13 @@ def lock_state_for(
     if visible:
         return LockState.LOCKED, ""
     if seconds_lost <= COAST_UNTIL_S:
-        # Nothing visible changes here on purpose — see the module docstring.
+        # Nothing visible changes here on purpose - see the module docstring.
         return LockState.COASTING, f"briefly hidden ({seconds_lost:.1f}s)"
     if seconds_lost <= REID_UNTIL_S:
         return LockState.SEARCHING, f"re-identifying ({seconds_lost:.1f}s)"
     if seconds_lost <= WIDEN_UNTIL_S:
         return LockState.SEARCHING, f"widening search ({seconds_lost:.1f}s)"
-    return LockState.LOST, f"lost {seconds_lost:.0f}s ago — holding position"
+    return LockState.LOST, f"lost {seconds_lost:.0f}s ago - holding position"
 
 
 def should_widen_search(seconds_lost: float) -> bool:
@@ -242,7 +242,7 @@ def limit_descent(
     Returns (allowed_down_m_s, reason_if_limited).
 
     THIS EXISTS BECAUSE ITS ABSENCE CRASHED A SITL FLIGHT.
-    Every tracking mode could command descent without bound — decide_elevation
+    Every tracking mode could command descent without bound - decide_elevation
     enforced a ceiling and there was no floor anywhere in the codebase. A
     vehicle-follow run held a sustained +0.5 m/s descent for twelve seconds,
     took the aircraft 6.6m -> 2.5m -> 0m, and PX4 finished with "invalid
@@ -252,27 +252,27 @@ def limit_descent(
 
     Only DESCENT is limited here. limit_climb is the counterpart, and the two
     are kept apart because the bound each enforces is a different KIND of bound
-    — terrain versus airspace law — and the operator has to be told which.
+    - terrain versus airspace law - and the operator has to be told which.
 
-    Unknown AGL blocks descent entirely — the same stance decide_elevation
+    Unknown AGL blocks descent entirely - the same stance decide_elevation
     takes on climbing blind, for the same reason: without a height reading
     neither bound can be enforced, and of the two possible mistakes, refusing
     to descend is the recoverable one.
     """
     if down_m_s <= 0.0:
-        return down_m_s, None          # climbing or level — not this function's job
+        return down_m_s, None          # climbing or level - not this function's job
 
     if agl_m is None:
-        return 0.0, ("no AGL reading — refusing to descend blind")
+        return 0.0, ("no AGL reading - refusing to descend blind")
 
     floor = limits.min_altitude_agl_m
     if agl_m <= floor:
-        return 0.0, (f"at the {floor:.1f} m altitude floor — descent blocked")
+        return 0.0, (f"at the {floor:.1f} m altitude floor - descent blocked")
 
     headroom = agl_m - floor
     if headroom < _DESCENT_TAPER_M:
         eased = down_m_s * (headroom / _DESCENT_TAPER_M)
-        return eased, (f"{headroom:.1f} m above the {floor:.1f} m floor — "
+        return eased, (f"{headroom:.1f} m above the {floor:.1f} m floor - "
                        f"descent eased to {eased:.2f} m/s")
     return down_m_s, None
 
@@ -291,7 +291,7 @@ def limit_climb(
     negative. Returns (allowed_down_m_s, reason_if_limited).
 
     THE GAP THIS CLOSES. decide_elevation enforces the ceiling on the climbs IT
-    decides — auto-elevate, the chase fallback — and every module applied
+    decides - auto-elevate, the chase fallback - and every module applied
     limit_descent to catch descent from any source. Nothing enforced the ceiling
     on a climb from any OTHER source, and there is one: the operator's ▲ nudge
     in Fixed altitude mode, which reaches down_m_s having passed through no
@@ -306,7 +306,7 @@ def limit_climb(
     UNKNOWN AGL PASSES THROUGH, WHICH IS THE OPPOSITE OF WHAT limit_descent
     DOES, and the asymmetry is deliberate. decide_elevation ALREADY refuses to
     climb without an AGL reading, so the only climb that can reach here blind is
-    the operator's held ▲ — a deliberate, human-in-the-loop command from someone
+    the operator's held ▲ - a deliberate, human-in-the-loop command from someone
     watching their own altitude readout. Zeroing it would kill a manual control
     outright in exchange for a ceiling we cannot measure anyway, whereas the
     descent guard is protecting against an AUTONOMOUS descent nobody asked for,
@@ -315,19 +315,19 @@ def limit_climb(
     rather than being assumed.
     """
     if down_m_s >= 0.0:
-        return down_m_s, None          # descending or level — not this function's job
+        return down_m_s, None          # descending or level - not this function's job
 
     if agl_m is None:
-        return down_m_s, ("no AGL reading — altitude ceiling is not being enforced")
+        return down_m_s, ("no AGL reading - altitude ceiling is not being enforced")
 
     ceiling = limits.max_altitude_agl_m
     if agl_m >= ceiling:
-        return 0.0, (f"at the {ceiling:.0f} m altitude ceiling — climb blocked")
+        return 0.0, (f"at the {ceiling:.0f} m altitude ceiling - climb blocked")
 
     headroom = ceiling - agl_m
     if headroom < _CLIMB_TAPER_M:
         eased = down_m_s * (headroom / _CLIMB_TAPER_M)
-        return eased, (f"{headroom:.1f} m below the {ceiling:.0f} m ceiling — "
+        return eased, (f"{headroom:.1f} m below the {ceiling:.0f} m ceiling - "
                        f"climb eased to {abs(eased):.2f} m/s")
     return down_m_s, None
 
@@ -340,12 +340,12 @@ def limit_climb(
 # the row a subject's FEET occupy in the frame is a direct and monotonic
 # measure of horizontal range. Further away is higher up the frame; closer is
 # lower down. With altitude fixed there is nothing else in the geometry left
-# free to move, so the row IS the range signal — and apparent size, which was
+# free to move, so the row IS the range signal - and apparent size, which was
 # driving this axis, is a far worse one for the job.
 #
 # THIS NEEDS NO CAMERA ANGLE, NO FIELD OF VIEW AND NO SUBJECT HEIGHT.
 # Every one of those would only put a SCALE on the response, and the PD gain
-# already does that. The SIGN — the whole question of forward versus back —
+# already does that. The SIGN - the whole question of forward versus back -
 # follows from the single fact that the camera points downward at all. So this
 # path keeps working on a rig nobody has calibrated, which the size path does
 # not: size ranging needs the mount tilt to de-foreshorten and the subject's
@@ -353,7 +353,7 @@ def limit_climb(
 #
 # WHY THE FEET AND NOT THE BOX CENTRE. A box centre floats at half the
 # subject's height, so it climbs the frame as the subject draws nearer and the
-# box grows taller — putting range error into the very signal that is supposed
+# box grows taller - putting range error into the very signal that is supposed
 # to measure range. The bottom edge sits on the ground plane and does not move
 # for any reason except the subject's actual position.
 
@@ -371,7 +371,7 @@ _ROW_TARGET_MAX = 0.92
 #: when they are nearly underneath the aircraft.
 _ROW_FOOT_OFF_FRAME = 0.985
 #: What to report while the feet are off-frame: a definite, bounded "back off"
-#: — clear of any sane deadband, small enough not to lurch.
+#: - clear of any sane deadband, small enough not to lurch.
 _ROW_TRUNCATED_ERROR = -0.08
 #: One press of CLOSER / FURTHER, in frame heights.
 ROW_NUDGE_STEP = 0.05
@@ -398,8 +398,8 @@ def frame_row_range_error(foot_row_n: float, target_row_n: float) -> float:
     """
     Range error for the Fixed-altitude forward axis, in frame heights.
 
-    POSITIVE means the subject sits ABOVE the row we want them on — further away
-    than wanted, so move FORWARD. NEGATIVE means they have dropped below it —
+    POSITIVE means the subject sits ABOVE the row we want them on - further away
+    than wanted, so move FORWARD. NEGATIVE means they have dropped below it -
     too close, so move BACK. Deliberately the same sign convention as
     range_error_ratio, so one distance PD reads either source the same way up
     and the two are interchangeable at the call site.
@@ -408,7 +408,7 @@ def frame_row_range_error(foot_row_n: float, target_row_n: float) -> float:
         # Ground contact is off the bottom of the frame. The row error is not
         # measurable, and the ONE thing we know is that the subject is very
         # close, so this must never be allowed to read as "far" and command
-        # forward — which is exactly what an understated foot_row would do.
+        # forward - which is exactly what an understated foot_row would do.
         return _ROW_TRUNCATED_ERROR
     return target_row_n - foot_row_n
 
@@ -417,12 +417,12 @@ def row_reference_is_stale(altitude_mode: str, down_m_s: float) -> bool:
     """
     Does the target row need re-taking?
 
-    Row ranging assumes a HELD altitude — that is its entire premise. The
+    Row ranging assumes a HELD altitude - that is its entire premise. The
     moment the aircraft moves vertically, from an operator nudge or from
     auto-elevate, the map from row to range changes underneath the reference and
     the subject appears to move without having moved. Climbing makes the
     depression steeper, drops the subject down the frame, and reads as "too
-    close" — so an uncorrected reference would command a RETREAT during exactly
+    close" - so an uncorrected reference would command a RETREAT during exactly
     the climb auto-elevate ordered to chase something pulling away.
 
     Re-taking the row while altitude is moving costs nothing and fixes it: the
@@ -444,7 +444,7 @@ def new_yaw_pd():
     set_pd_params; crowd management, traffic management and vehicle-plate
     tracking constructed the identical PDController with the identical literals
     and had nothing at all wired to it. So three modes flew on deploy-time
-    defaults permanently, and — worse than that — a tuning session in Human
+    defaults permanently, and - worse than that - a tuning session in Human
     Tracking taught the operator nothing that transferred, because the numbers
     they had just learned could not be entered anywhere else.
 
@@ -482,7 +482,7 @@ def new_row_pd():
     The row->range map is left deliberately un-linearised. Near the top of the
     frame a small row change is a large distance change and near the bottom the
     reverse, so the response is firm when the subject is far and gentle when
-    they are close — which is what you would tune for by hand anyway.
+    they are close - which is what you would tune for by hand anyway.
     """
     from app.vision.controllers import PDController
     return PDController(kp=8.0, kd=1.5, max_output=2.5, deadband=0.025)
@@ -497,7 +497,7 @@ def distance_axis(
 ) -> Tuple[float, float]:
     """
     The forward/back command before yaw priority, plus the error that produced
-    it — choosing whichever sensor the current altitude mode makes honest.
+    it - choosing whichever sensor the current altitude mode makes honest.
 
     FIXED  -> the frame row. Height is held, so the row the subject's feet sit
               on is horizontal range and nothing else.
@@ -505,8 +505,8 @@ def distance_axis(
               row is not a range signal.
 
     Shared rather than copied into each module because the five had already
-    drifted apart once — one of them still computes its size error as a raw fill
-    difference where the rest use a fraction of range — and *which sensor owns
+    drifted apart once - one of them still computes its size error as a raw fill
+    difference where the rest use a fraction of range - and *which sensor owns
     the forward axis* is not a thing that should be able to differ between them.
 
     Seeds target_row from the subject on first use. A row nobody has observed
@@ -522,7 +522,7 @@ def distance_axis(
 
 def scale_forward(forward_raw: float, yaw_factor: float, altitude_mode: str) -> float:
     """
-    Apply yaw priority — to a FORWARD command only.
+    Apply yaw priority - to a FORWARD command only.
 
     Yaw priority exists to stop the aircraft charging at a subject it has not
     centred yet. A subject too CLOSE is the one case where the drone should be
@@ -545,13 +545,13 @@ def scale_forward(forward_raw: float, yaw_factor: float, altitude_mode: str) -> 
 #
 #   1. The last command before a target leaves the frame is systematically the
 #      LARGEST one. A subject exits frame because it is off-axis, or fast, or
-#      far — the exact conditions under which the yaw PD is near its 55 deg/s
+#      far - the exact conditions under which the yaw PD is near its 55 deg/s
 #      clamp and the distance PD near its 2.5 m/s clamp. So the command that
 #      got frozen and replayed was close to full authority, every time.
 #
 #   2. The window was counted in FRAMES, and the analysis loop drops frames
 #      (see base.py: "dt IS NOT 1/fps"). 90 frames is ~3 s on a fast GPU and
-#      ~18 s when the model is loaded or the source is slow — over 40 m of
+#      ~18 s when the model is loaded or the source is slow - over 40 m of
 #      blind travel. The window stretched longest exactly when vision was
 #      least able to end it, which is precisely backwards.
 #
@@ -562,7 +562,7 @@ def scale_forward(forward_raw: float, yaw_factor: float, altitude_mode: str) -> 
 # turning after a subject that just left the frame edge is how it comes back
 # and a yaw costs no ground track.
 #
-# The stream itself must never stop — a gap in the Offboard setpoint stream
+# The stream itself must never stop - a gap in the Offboard setpoint stream
 # hands the aircraft to PX4's own failsafe, whose default action on many
 # airframes is LAND. So every function here returns a command, never None.
 
@@ -570,7 +570,7 @@ def scale_forward(forward_raw: float, yaw_factor: float, altitude_mode: str) -> 
 # reacting to it; at the 2.5 m/s clamp this is ~1 m of travel.
 BLIND_HOLD_S = 0.4
 # Translation reaches zero here. Total worst-case blind ground track is ~2 m,
-# and it is over before COAST_UNTIL_S ends — so the aircraft has already
+# and it is over before COAST_UNTIL_S ends - so the aircraft has already
 # stopped translating while the operator is still reading "briefly hidden".
 BLIND_DECAY_UNTIL_S = 1.2
 # Sweeping stops and the aircraft holds. Deliberately equal to WIDEN_UNTIL_S:
@@ -585,7 +585,7 @@ BLIND_GIVE_UP_S = WIDEN_UNTIL_S
 SWEEP_YAW_DEG_S = 12.0
 
 # Only ever used to convert a frame count into a comparable number of seconds.
-# Not a measurement and not a promise about the real rate — see blind_elapsed_s
+# Not a measurement and not a promise about the real rate - see blind_elapsed_s
 # for why being wrong in either direction is safe.
 _NOMINAL_ANALYSIS_FPS = 20.0
 
@@ -636,7 +636,7 @@ def _velocity(forward: float, right: float, down: float, yaw: float) -> Dict[str
 
 
 def hover_command() -> Dict[str, Any]:
-    """A live setpoint that means "stay put" — not the absence of a setpoint,
+    """A live setpoint that means "stay put" - not the absence of a setpoint,
     which means "PX4 decides"."""
     return _velocity(0.0, 0.0, 0.0, 0.0)
 
@@ -651,7 +651,7 @@ def blind_command(
     """
     The command for a frame in which the locked target is not visible.
 
-    Never returns None, at any point on the ladder, for any input — see the
+    Never returns None, at any point on the ladder, for any input - see the
     section note above for what a gap in the Offboard stream costs.
 
     Rungs, on blind_elapsed_s:

@@ -1,17 +1,17 @@
 'use client'
 
-// /admin — HYRAK operations console (no credentials for now; the socket
+// /admin - HYRAK operations console (no credentials for now; the socket
 // still needs the normal app token).
 //
 // Left rail tabs:
-//   MAP     — live map of every connected client. GPS fix = solid marker;
+//   MAP     - live map of every connected client. GPS fix = solid marker;
 //             no fix = dashed marker at the client's IP-derived approximate
 //             location. Full-height session column on the left; selecting a
 //             drone highlights + flies the map to it and opens the right
 //             detail panel (video, flight data, identity, permits).
-//   DRONES  — persistent registry with dropdown + search; per-drone detail
+//   DRONES  - persistent registry with dropdown + search; per-drone detail
 //             shows live status, video/telemetry when online, and permits.
-//   ZONES / PERMITS — arrive with the geofencing phase.
+//   ZONES / PERMITS - arrive with the geofencing phase.
 //
 // Open this in its OWN tab: it marks its socket session as admin on the
 // backend so it doesn't count as a client.
@@ -66,7 +66,7 @@ type SessionInfo = {
     approx_location: ApproxLocation
 }
 
-// Swarm SITL drones — connected server-side (UDP), not through a client
+// Swarm SITL drones - connected server-side (UDP), not through a client
 // session, so they arrive in a separate list with the same live shape.
 type FleetDroneInfo = {
     drone_id: number
@@ -196,7 +196,7 @@ export default function AdminPage() {
                 const sData = await sRes.json()
                 const dData = await dRes.json()
                 if (alive) {
-                    // Only replace state when content actually changed — a new
+                    // Only replace state when content actually changed - a new
                     // array identity every 2s makes leaflet re-mount markers
                     // and polygons, which reads as map jitter.
                     const nextS = sData.sessions ?? []
@@ -209,7 +209,7 @@ export default function AdminPage() {
                     setDrones(prev =>
                         JSON.stringify(prev) === JSON.stringify(nextD) ? prev : nextD)
                 }
-            } catch { /* backend down — keep last data */ }
+            } catch { /* backend down - keep last data */ }
         }
         void poll()
         const id = setInterval(poll, 2000)
@@ -303,7 +303,7 @@ export default function AdminPage() {
         }
     }, [sessions, fleetDrones, selected])
 
-    // Fleet ids ('fleet-N') are selectable but never socket-watched — SITL
+    // Fleet ids ('fleet-N') are selectable but never socket-watched - SITL
     // drones have no client session to mirror video/telemetry from; their
     // live state comes from the 2s /api/sessions poll instead.
     const watch = useCallback((sessionId: string | null) => {
@@ -354,7 +354,7 @@ export default function AdminPage() {
     const watchedFleet = selected?.startsWith('fleet-')
         ? fleetDrones.find(f => `fleet-${f.drone_id}` === selected) ?? null
         : null
-    // Fleet drones carry a registry identity (sitl-instance-N) — show the
+    // Fleet drones carry a registry identity (sitl-instance-N) - show the
     // registry name (renameable in the DRONES tab) when it exists.
     const fleetName = useCallback((f: FleetDroneInfo) =>
         drones.find(d => d.id === f.db_id || d.hardware_uid === f.hardware_uid)?.name
@@ -376,7 +376,7 @@ export default function AdminPage() {
         ...fleetDrones.map(f => f.hardware_uid),
     ])
 
-    // The landing map only shows real drones — sessions without telemetry
+    // The landing map only shows real drones - sessions without telemetry
     // (browser open, nothing linked) stay off the list and the map.
     const telemSessions = sessions.filter(s => s.telemetry_connected)
 
@@ -482,7 +482,7 @@ export default function AdminPage() {
                         <div className="flex-1 relative min-w-0">
                             <AdminMap drones={mapDrones} zones={zones} onSelect={toggleSelect} />
 
-                            {/* Active drones column — mission-page panel style */}
+                            {/* Active drones column - mission-page panel style */}
                             <div
                                 className="absolute left-3 top-3 bottom-3 z-[1000] w-72 rounded-xl border flex flex-col overflow-hidden"
                                 style={{
@@ -493,7 +493,7 @@ export default function AdminPage() {
                                 }}
                             >
                                 <div className="px-3 py-2.5 text-[10px] tracking-widest text-zinc-500 border-b border-zinc-800/80">
-                                    ACTIVE DRONES — {telemSessions.length + fleetDrones.length}
+                                    ACTIVE DRONES - {telemSessions.length + fleetDrones.length}
                                 </div>
                                 <div className="flex-1 overflow-y-auto p-2 space-y-2">
                                     {telemSessions.length + fleetDrones.length === 0 && (
@@ -527,7 +527,7 @@ export default function AdminPage() {
                                             )}
                                             {s.live?.zone_class === 'red' && (
                                                 <div className="mt-0.5 text-[9px] text-red-400 animate-pulse">
-                                                    ● IN RED ZONE — ENFORCING
+                                                    ● IN RED ZONE - ENFORCING
                                                 </div>
                                             )}
                                             <div className="mt-1 flex items-center gap-3 text-[10px] text-zinc-500">
@@ -543,7 +543,7 @@ export default function AdminPage() {
                                             </div>
                                         </button>
                                     ))}
-                                    {/* Swarm SITL fleet — server-side connections, tagged SIM */}
+                                    {/* Swarm SITL fleet - server-side connections, tagged SIM */}
                                     {fleetDrones.map(f => {
                                         const fid = `fleet-${f.drone_id}`
                                         return (
@@ -620,7 +620,7 @@ export default function AdminPage() {
                                     onChange={e => selectDrone(e.target.value || null)}
                                     className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200"
                                 >
-                                    <option value="">— select drone —</option>
+                                    <option value="">- select drone -</option>
                                     {drones.map(d => (
                                         <option key={d.id} value={d.id}>
                                             {d.name} {onlineUids.has(d.hardware_uid) ? '● online' : ''}
@@ -641,7 +641,7 @@ export default function AdminPage() {
                                 {filteredDrones.length === 0 && (
                                     <div className="text-[10px] text-zinc-600 p-2">
                                         {drones.length === 0
-                                            ? 'No drones registered yet — connect telemetry once and the FC’s hardware UID gets stored here permanently.'
+                                            ? 'No drones registered yet - connect telemetry once and the FC’s hardware UID gets stored here permanently.'
                                             : 'No match.'}
                                     </div>
                                 )}
@@ -754,7 +754,7 @@ export default function AdminPage() {
                                     {/* Flight history */}
                                     <div className="border border-zinc-800 rounded">
                                         <div className="px-3 py-2 text-[10px] tracking-widest text-zinc-500 border-b border-zinc-800">
-                                            RECENT FLIGHTS — {flights.length}
+                                            RECENT FLIGHTS - {flights.length}
                                         </div>
                                         {flights.length === 0 ? (
                                             <div className="p-3 text-[10px] text-zinc-600">
@@ -819,7 +819,7 @@ export default function AdminPage() {
                                                                         <span className="text-zinc-300">
                                                                             {flightDetail.track.length > 0
                                                                                 ? Math.min(...flightDetail.track.map(s => s.battery)).toFixed(0)
-                                                                                : '—'}%
+                                                                                : '-'}%
                                                                         </span>
                                                                     </div>
                                                                 </div>
@@ -849,12 +849,12 @@ export default function AdminPage() {
                         <div className="max-w-3xl mx-auto space-y-6">
                             <section className="space-y-2">
                                 <h2 className="text-xs tracking-widest text-zinc-500">
-                                    PENDING REQUESTS — {permits.filter(p => p.status === 'pending').length}
+                                    PENDING REQUESTS - {permits.filter(p => p.status === 'pending').length}
                                 </h2>
                                 {permits.filter(p => p.status === 'pending').length === 0 && (
                                     <div className="text-xs text-zinc-600 border border-zinc-800 rounded p-4">
                                         No pending requests. When a pilot&apos;s mission is blocked by a
-                                        red zone they can submit it for approval — it appears here.
+                                        red zone they can submit it for approval - it appears here.
                                     </div>
                                 )}
                                 {permits.filter(p => p.status === 'pending').map(p => (
@@ -1002,7 +1002,7 @@ function DetailPanel({
     )
 }
 
-// Detail view for a swarm SITL drone — server-side connection, so no client
+// Detail view for a swarm SITL drone - server-side connection, so no client
 // video/session to mirror; shows live telemetry from the fleet poll instead.
 function FleetDetailPanel({
     drone, name, copiedUid, onCopyUid, onClose,
@@ -1055,14 +1055,14 @@ function FleetDetailPanel({
                     Simulated fleet drone · PX4 SITL instance {drone.drone_id}
                 </div>
                 <div className="text-zinc-600">
-                    Connected server-side (UDP) — no client session, no video feed.
+                    Connected server-side (UDP) - no client session, no video feed.
                 </div>
             </div>
         </section>
     )
 }
 
-// Permissions structure — populated once the geofencing phase lands.
+// Permissions structure - populated once the geofencing phase lands.
 function PermitsBlock() {
     return (
         <div className="border border-zinc-800 rounded p-3 space-y-2 text-[10px]">
@@ -1107,7 +1107,7 @@ function fmtDur(s: number): string {
 }
 
 function fmtDate(iso: string | null): string {
-    if (!iso) return '—'
+    if (!iso) return '-'
     const d = new Date(iso)
     return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
 }

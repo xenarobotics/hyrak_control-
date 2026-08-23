@@ -54,10 +54,10 @@ _TRACKER_CFG = make_bytetrack_cfg("verocore_pt_")
 # when video arrives slowly a name should still appear promptly, and "every 5th
 # frame" becomes every 2.5 seconds at 2 fps. Combined with the vote requirement
 # that turned into ~10s before a name showed up, while the analyzer itself
-# benchmarks at 124 fps — the delay was cadence, never compute.
+# benchmarks at 124 fps - the delay was cadence, never compute.
 #
 # 0.07s caps face checks at ~14/s. Each check crops up to 4 bodies at ~3.8ms,
-# so the worst case is ~15ms per check and ~21% of one core sustained — cheap
+# so the worst case is ~15ms per check and ~21% of one core sustained - cheap
 # against a measured 124fps analysis ceiling, and it buys the shortest
 # identification latency the pipeline can support.
 #
@@ -112,11 +112,11 @@ _FACE_CROP_MAX_BODIES = 4
 # built from a single pose matches that pose and little else, and the whole
 # failure mode of face recognition at drone standoff is the subject being
 # turned slightly differently than when they were enrolled. The gap is what
-# buys pose variety — five consecutive frames are five copies of one image.
+# buys pose variety - five consecutive frames are five copies of one image.
 _CAPTURE_SHOTS = 5
 _CAPTURE_INTERVAL_S = 0.45
 # Below this the crop has too few pixels to carry a usable embedding, and
-# enrolling it actively poisons the gallery — a blurry template matches
+# enrolling it actively poisons the gallery - a blurry template matches
 # everyone a little.
 _CAPTURE_MIN_BODY_PX = 90
 _CAPTURE_ROOT = os.path.join(str(ROOT_DIR), ".data", "enrol_captures")
@@ -127,10 +127,10 @@ _CAPTURE_ROOT = os.path.join(str(ROOT_DIR), ".data", "enrol_captures")
 # Lowered from 3.0s once face checks became time-paced: at one check per 0.12s
 # this is still ~12 independent looks confirming the person is really gone,
 # which is ample evidence. The old 3.0s was chosen when a check could take
-# 2.5s at a low frame rate, so it represented barely one look — and it added
+# 2.5s at a low frame rate, so it represented barely one look - and it added
 # most of the delay before the tracker would switch to somebody else.
 _LOCK_RELEASE_S = 1.5
-# An operator's explicit choice is held much longer — the system quietly
+# An operator's explicit choice is held much longer - the system quietly
 # overriding a deliberate human decision is not an improvement.
 _MANUAL_LOCK_HOLD_S = 20.0
 _SIMILARITY_THRESHOLD   = 0.45
@@ -149,7 +149,7 @@ _HEIGHT_EMA_ALPHA       = 0.12
 # two must stay in step.
 MAX_PURSUIT_SPEED_M_S = 2.5
 
-# Blind-flight policy is shared, and is expressed in seconds — see the BLIND
+# Blind-flight policy is shared, and is expressed in seconds - see the BLIND
 # FLIGHT section of pursuit.py for what the frame-counted pair that used to be
 # here actually did.
 
@@ -166,7 +166,7 @@ def _draw_pill(img, text, x1, y1, color_bgr, alpha: float = 0.82):
     bx1, bx2 = max(0, bx1), min(W, bx2)
     by1, by2 = max(0, by1), min(H, by2)
     # Blend only the pill's own rectangle. Copying the whole 1080p frame per
-    # label cost ~4ms each — see draw_tint_rect in vision/drawing.py for the
+    # label cost ~4ms each - see draw_tint_rect in vision/drawing.py for the
     # same fix and why it mattered (draw_overlay runs on EVERY camera frame,
     # not only analysed ones).
     roi = img[by1:by2, bx1:bx2]
@@ -191,7 +191,7 @@ def _draw_corner_status(img, text, color_bgr, alpha: float = 0.75):
     bx1 = bx2 - tw - px * 2
     by1 = by2 - th - py * 2 - baseline
     # Blend only the pill's own rectangle. Copying the whole 1080p frame per
-    # label cost ~4ms each — see draw_tint_rect in vision/drawing.py for the
+    # label cost ~4ms each - see draw_tint_rect in vision/drawing.py for the
     # same fix and why it mattered (draw_overlay runs on EVERY camera frame,
     # not only analysed ones).
     roi = img[by1:by2, bx1:bx2]
@@ -228,7 +228,7 @@ def _make_state() -> Dict[str, Any]:
         # without a target being picked first.
         "gallery_mode":        False,
         # Which enrolled person we committed to. Once set, a re-lock must
-        # match THIS person at the stricter relock bar — not merely whoever
+        # match THIS person at the stricter relock bar - not merely whoever
         # in the gallery scores best right now.
         "locked_person_id":    None,
         "locked_person_name":  "",
@@ -259,7 +259,7 @@ def _make_state() -> Dict[str, Any]:
         "last_seen_t":         0.0,
         "frame_counter":       0,
         "last_similarity":     0.0,
-        # PD controllers — no integral; see human_tracker.py for design rationale.
+        # PD controllers - no integral; see human_tracker.py for design rationale.
         # Caps match human_tracker.py: yaw stays under PX4's 60deg/s
         # MPC_YAWRAUTO_MAX, dist raised from 0.8 (below walking pace) to 2.5m/s.
         # Yaw: the primary axis. Gains come from the operator's saved follow
@@ -267,11 +267,11 @@ def _make_state() -> Dict[str, Any]:
         # from the same numbers instead of five copies of the same literals.
         "yaw_pd":  new_yaw_pd(),
         "alt_pd":  PDController(kp=1.5,  kd=0.3, max_output=1.0,  deadband=0.10),
-        # Units are FRACTION OF RANGE, not fill difference — see
+        # Units are FRACTION OF RANGE, not fill difference - see
         # controllers.range_error_ratio for why, and for the measured
         # dead zone this replaced (1.4m at 8.6m, 46m at 50m).
         "dist_pd": PDController(kp=4.0, kd=1.0, max_output=2.5, deadband=0.08),
-        # The Fixed-altitude distance axis — see pursuit.new_row_pd.
+        # The Fixed-altitude distance axis - see pursuit.new_row_pd.
         "row_pd":  new_row_pd(),
         # Smoothing
         "kalman":     KalmanXY(),
@@ -388,7 +388,7 @@ class PersonTracker(BaseAnalyzer):
         self._gallery = gallery
         if gallery is not None:
             logger.info(
-                f"PersonTracker: gallery installed — {gallery.size} face(s), "
+                f"PersonTracker: gallery installed - {gallery.size} face(s), "
                 f"{gallery.person_count} person(s)"
             )
 
@@ -439,7 +439,7 @@ class PersonTracker(BaseAnalyzer):
 
         REDUNDANCY comes from the name living on the TRACK, not on the frame.
         Once a track is named, ByteTrack carries that name through every frame
-        where the face is turned away, too small, or occluded — which at any
+        where the face is turned away, too small, or occluded - which at any
         realistic drone standoff is most of them. Without this the label
         flickers on and off several times a second.
         """
@@ -483,7 +483,7 @@ class PersonTracker(BaseAnalyzer):
                 if entry is None or entry["person_id"] != match.person_id:
                     if entry is not None and entry.get("votes", 0) >= _ID_MIN_VOTES:
                         # An established identity is not overwritten by one
-                        # dissenting frame — it is argued down. Otherwise a
+                        # dissenting frame - it is argued down. Otherwise a
                         # single bad match renames a confirmed person.
                         entry["votes"] -= 1
                         if entry["votes"] > 0:
@@ -508,7 +508,7 @@ class PersonTracker(BaseAnalyzer):
                         logger.info(
                             f"Identified track #{tid} as {match.name} "
                             f"(sim={match.similarity:.3f}, margin={marg}) "
-                            f"— confirmed immediately"
+                            f"- confirmed immediately"
                         )
                 else:
                     entry["votes"] = min(entry["votes"] + 1, _ID_MAX_VOTES)
@@ -554,7 +554,7 @@ class PersonTracker(BaseAnalyzer):
            so once one person was acquired the drone would follow nobody else
            for the rest of the session even after the original walked out of
            frame. A lock with no release is not a safety feature, it is a
-           dead end — the aircraft ends up committed to somebody who is not
+           dead end - the aircraft ends up committed to somebody who is not
            there. Released after _LOCK_RELEASE_S of absence, then whoever is
            actually present can be acquired.
 
@@ -586,14 +586,14 @@ class PersonTracker(BaseAnalyzer):
             gone_for = now - last_seen
             hold = _MANUAL_LOCK_HOLD_S if manual else _LOCK_RELEASE_S
             if gone_for < hold:
-                # Still within the hold window — wait for them rather than
+                # Still within the hold window - wait for them rather than
                 # grabbing whoever else happens to be visible. Prevents the
                 # lock flickering between people every time a face check misses.
                 return None, None
 
             logger.info(
                 f"Session {client_id[:8]}: releasing lock on "
-                f"{state.get('locked_person_name') or locked_pid} — not seen for "
+                f"{state.get('locked_person_name') or locked_pid} - not seen for "
                 f"{gone_for:.1f}s{' (manual)' if manual else ''}; "
                 f"free to acquire someone else"
             )
@@ -632,7 +632,7 @@ class PersonTracker(BaseAnalyzer):
 
         Enrolling from the live feed rather than uploaded photos is the point:
         the gallery then contains this camera, this lens, this angle and this
-        lighting — which is what the recogniser will actually be asked to match
+        lighting - which is what the recogniser will actually be asked to match
         against. An uploaded passport photo is a different imaging problem.
         """
         state = self._client_state.get(client_id)
@@ -647,7 +647,7 @@ class PersonTracker(BaseAnalyzer):
         }
         logger.info(
             f"Session {client_id[:8]}: enrolling track #{track_id} as "
-            f"{name!r} — capturing {_CAPTURE_SHOTS} shots"
+            f"{name!r} - capturing {_CAPTURE_SHOTS} shots"
         )
         return True
 
@@ -660,7 +660,7 @@ class PersonTracker(BaseAnalyzer):
         """
         Grab one shot per interval; returns the finished job when complete.
 
-        Nothing is written to the database from here — this runs in the worker
+        Nothing is written to the database from here - this runs in the worker
         thread. The finished job is handed up through meta for the event loop
         to enrol, the same way plate rows and crowd alerts already travel.
         """
@@ -678,7 +678,7 @@ class PersonTracker(BaseAnalyzer):
         if (y2 - y1) < _CAPTURE_MIN_BODY_PX:
             return None                      # too small to be worth enrolling
 
-        # Head and shoulders, padded — the face is what carries the embedding,
+        # Head and shoulders, padded - the face is what carries the embedding,
         # and a full-body crop spends most of its pixels on legs.
         h, w = frame_bgr.shape[:2]
         bw, bh = x2 - x1, y2 - y1
@@ -700,7 +700,7 @@ class PersonTracker(BaseAnalyzer):
         if len(cap["paths"]) >= _CAPTURE_SHOTS:
             state["capture"] = None
             logger.info(
-                f"Captured {len(cap['paths'])} shot(s) for {cap['name']!r} — "
+                f"Captured {len(cap['paths'])} shot(s) for {cap['name']!r} - "
                 f"handing to enrolment"
             )
             return {"name": cap["name"], "paths": cap["paths"]}
@@ -713,7 +713,7 @@ class PersonTracker(BaseAnalyzer):
         This module's normal lock is an enrolled IDENTITY, because that is what
         survives a track id changing when somebody leaves and returns. But an
         operator tapping an unrecognised person plainly means "follow them",
-        and doing nothing there is indistinguishable from a broken control —
+        and doing nothing there is indistinguishable from a broken control -
         which is how it behaved. So the track is locked directly, with the
         identity lock cleared so a later face match cannot silently steal the
         aircraft away from the person actually being pointed at.
@@ -750,7 +750,7 @@ class PersonTracker(BaseAnalyzer):
 
         Applied on the next face check rather than immediately, because the
         person has to actually be identified in frame before there is a body
-        track to follow — setting the lock here would commit to somebody who
+        track to follow - setting the lock here would commit to somebody who
         may not be visible.
         """
         state = self._client_state.get(client_id)
@@ -762,7 +762,7 @@ class PersonTracker(BaseAnalyzer):
             state["locked_person_name"] = ""
             state["lock_manual"] = False
             state["target_track_id"] = None
-            logger.info(f"Session {client_id[:8]}: lock released — auto-select resumed")
+            logger.info(f"Session {client_id[:8]}: lock released - auto-select resumed")
             return
         state["follow_request_person_id"] = person_id
         # Drop the current lock so the request is not blocked by rule 1.
@@ -773,7 +773,7 @@ class PersonTracker(BaseAnalyzer):
 
     def _queue_sighting(self, state, client_id, match, person, pending_db) -> None:
         """
-        Queue an audit row for a gallery match — the record behind "the drone
+        Queue an audit row for a gallery match - the record behind "the drone
         said this was Madhu at 14:32".
 
         Rate-limited to one row per _SIGHTING_COOLDOWN_S. The face check runs
@@ -881,10 +881,10 @@ class PersonTracker(BaseAnalyzer):
 
     def set_tracking_params(self, client_id: str, target_distance_ratio: float):
         """Adjust target follow distance.
-        0.15 → far (~8–10 m), 0.25 → default (~5–6 m), 0.40 → close (~2–3 m).
+        0.15 → far (~8-10 m), 0.25 → default (~5-6 m), 0.40 → close (~2-3 m).
 
         In Fixed altitude the forward axis reads the frame row, so the ratio
-        alone would not reach it — the DIRECTION of change is applied to the
+        alone would not reach it - the DIRECTION of change is applied to the
         target row as well, keeping CLOSER / FURTHER working in both modes."""
         if client_id not in self._client_state:
             return
@@ -938,7 +938,7 @@ class PersonTracker(BaseAnalyzer):
 
         RESOLUTION. Whole-frame detection resizes 1920 -> 960, halving every
         face. A crop keeps native pixels, so the same person yields ~2x the
-        face width — and recognition is resolution-starved at any real drone
+        face width - and recognition is resolution-starved at any real drone
         standoff (a 230mm face needs ~70px even for a 3-person gallery, which
         is only a few metres at 70deg HFOV). Doubling effective face size
         roughly doubles the range at which anyone can be recognised, and raises
@@ -952,7 +952,7 @@ class PersonTracker(BaseAnalyzer):
 
         Cost: 3.8ms per crop against 3.6ms for one whole-frame pass, so it is
         capped at _FACE_CROP_MAX_BODIES (~15ms worst case). Largest bodies
-        first — those are the nearest people, and the only ones whose faces
+        first - those are the nearest people, and the only ones whose faces
         carry enough pixels to recognise at all.
         """
         if not persons:
@@ -995,7 +995,7 @@ class PersonTracker(BaseAnalyzer):
         H, W = frame_bgr.shape[:2]
 
         # Pre-resizing with cv2 skips the Python-side cost of letterboxing at
-        # 1080p every frame. imgsz must be passed alongside it — see the note
+        # 1080p every frame. imgsz must be passed alongside it - see the note
         # in crowd_manager: without it ultralytics rescales back to 640 and
         # any width above 640 buys nothing.
         #
@@ -1045,7 +1045,7 @@ class PersonTracker(BaseAnalyzer):
         similarity     = 0.0
         state          = {}
         # Gallery sightings are queued here and written by stream_track's
-        # recv() — this method runs in a worker thread, not the event loop.
+        # recv() - this method runs in a worker thread, not the event loop.
         pending_db: list = []
 
         for client_id, state in self._client_state.items():
@@ -1055,7 +1055,7 @@ class PersonTracker(BaseAnalyzer):
             target_id      = state.get("target_track_id")
             yaw_pd         = state["yaw_pd"]
             alt_pd         = state["alt_pd"]
-            # dist_pd / row_pd are reached through state, in distance_axis —
+            # dist_pd / row_pd are reached through state, in distance_axis -
             # which of the two runs depends on the altitude mode.
             kalman         = state["kalman"]
             smoother       = state["smoother"]
@@ -1074,7 +1074,7 @@ class PersonTracker(BaseAnalyzer):
                 and not self._gallery.is_empty()
             )
             # Paced on elapsed TIME so identification latency does not scale
-            # with a slow source — see _FACE_CHECK_INTERVAL_S.
+            # with a slow source - see _FACE_CHECK_INTERVAL_S.
             _now_m = time.monotonic()
             due = (
                 (_now_m - state.get("last_face_check_t", 0.0)) >= _FACE_CHECK_INTERVAL_S
@@ -1116,7 +1116,7 @@ class PersonTracker(BaseAnalyzer):
                                         break
                 else:
                     # Identify EVERYONE, then decide who to follow. These are
-                    # separate steps on purpose — see _identify_all.
+                    # separate steps on purpose - see _identify_all.
                     identities = self._identify_all(faces, persons, state)
                     state["identities"] = identities
 
@@ -1128,7 +1128,7 @@ class PersonTracker(BaseAnalyzer):
                     # failure this module can produce: the drone silently
                     # switches which human it is chasing, and the operator has
                     # no reason to expect it. Naming everyone in frame and
-                    # choosing whom to follow are separate jobs — identify
+                    # choosing whom to follow are separate jobs - identify
                     # still runs, it just no longer steals the target.
                     manual_tid = state.get("target_track_id")
                     manual_held = (
@@ -1140,7 +1140,7 @@ class PersonTracker(BaseAnalyzer):
                         state["locked_last_seen_t"] = time.monotonic()
                         tid, ident = manual_tid, identities.get(manual_tid)
                         if ident is None:
-                            # Held, but not recognised — keep following them
+                            # Held, but not recognised - keep following them
                             # and skip the gallery-match bookkeeping below.
                             best_person = next(
                                 (pp for pp in persons if pp["id"] == manual_tid), None
@@ -1259,7 +1259,7 @@ class PersonTracker(BaseAnalyzer):
                 fx_n, fy_n = kalman.update(target["cx_n"], target["cy_n"])
                 state["last_known_center"] = (fx_n, fy_n)
 
-                # Bbox height EMA — smooths YOLO size fluctuations before distance PD
+                # Bbox height EMA - smooths YOLO size fluctuations before distance PD
                 prev_h = state["height_ema"]
                 h_raw  = target["height_ratio"]
                 h_ema  = h_raw if prev_h is None else (
@@ -1278,7 +1278,7 @@ class PersonTracker(BaseAnalyzer):
                     # ── Undo viewing-angle foreshortening ─────────────────
                     # A standing person is a VERTICAL extent, so its projection
                     # shrinks by cos(depression). Apparent size then goes as
-                    # sin(2*phi) and PEAKS at 45deg — meaning past that point a
+                    # sin(2*phi) and PEAKS at 45deg - meaning past that point a
                     # subject moving closer looks SMALLER, the controller reads
                     # "moving away" and drives forward, bringing them closer
                     # still. A feedback loop aimed at the subject. Measured at
@@ -1292,7 +1292,7 @@ class PersonTracker(BaseAnalyzer):
                     )
                     err_yaw  = fx_n - 0.5
                     err_alt  = fy_n - 0.5
-                    # Fraction-of-range — see controllers.range_error_ratio.
+                    # Fraction-of-range - see controllers.range_error_ratio.
                     err_dist = range_error_ratio(dist_target, h_eff)
 
                     yaw_deg_s = yaw_pd.compute(err_yaw)
@@ -1318,17 +1318,17 @@ class PersonTracker(BaseAnalyzer):
                         foot_row_n=foot_n, size_range_error=err_dist,
                     )
 
-                    # Floor, not a hard gate — see human_tracker.
+                    # Floor, not a hard gate - see human_tracker.
                     yaw_factor = max(_YAW_PRIORITY_FLOOR,
                                      1.0 - abs(err_yaw) / _YAW_PRIORITY_THRESHOLD)
-                    # A retreat is never throttled — see pursuit.scale_forward.
+                    # A retreat is never throttled - see pursuit.scale_forward.
                     forward_m_s = scale_forward(forward_raw, yaw_factor, alt_mode)
 
                     # ── Auto-elevate: the chase fallback ──────────────────
                     # Only when the target is genuinely pulling away, and only
                     # inside both ceilings. Overrides the altitude axis because
                     # holding the subject in frame at all outranks holding them
-                    # vertically centred — a perfectly framed empty sky is
+                    # vertically centred - a perfectly framed empty sky is
                     # worse than an off-centre target.
                     elevate = None
                     if forward_m_s > 0:
@@ -1356,7 +1356,7 @@ class PersonTracker(BaseAnalyzer):
                     if elevate is None:
                         state["elevate"] = None
 
-                    # THE ALTITUDE FLOOR AND CEILING — see pursuit.limit_descent
+                    # THE ALTITUDE FLOOR AND CEILING - see pursuit.limit_descent
                     # and limit_climb. Applied here, at the single point every
                     # vertical command converges on. The ceiling matters most
                     # for the operator's ▲ nudge, which reached down_m_s having
@@ -1478,7 +1478,7 @@ class PersonTracker(BaseAnalyzer):
         meta["seconds_lost"] = round(lost_s, 1)
         meta["elevate"] = state.get("elevate")
         # Enrolment shots are captured in this worker thread but written to
-        # the gallery from the event loop — same split as plate rows.
+        # the gallery from the event loop - same split as plate rows.
         finished = self._run_capture(frame_bgr, persons, state) if state else None
         if finished:
             meta["_pending_enrolment"] = finished
@@ -1498,7 +1498,7 @@ class PersonTracker(BaseAnalyzer):
         SIZE (de-foreshortened) is the primary and the only one that works
         without telemetry. POSITION (where the subject's feet meet the ground
         plane) is fused in as the view steepens, because that is exactly where
-        the size estimate degrades and the position one sharpens — see
+        the size estimate degrades and the position one sharpens - see
         geometry.blend_weight_for_position for the measured crossover.
 
         Returns h_ema unchanged when there is no pose, so every no-telemetry
@@ -1526,11 +1526,11 @@ class PersonTracker(BaseAnalyzer):
 
         # FEET, NOT CENTRE. The comment here said exactly this while the code
         # passed the box centre, and the centre floats half a subject's height
-        # off the ground — so its ray cleared the subject and struck the ground
+        # off the ground - so its ray cleared the subject and struck the ground
         # BEYOND them. The over-estimate is AGL/(AGL - h/2), independent of
         # viewing angle: +17% at 6 m AGL, +27% at 4 m, +40% at 3 m. Range too
         # long reads as "further than wanted", which commands FORWARD, and the
-        # position estimate is weighted in hardest at steep depression — i.e.
+        # position estimate is weighted in hardest at steep depression - i.e.
         # exactly when the subject is low in the frame and the drone should have
         # been backing off. Reported from flight as "person on the lower side of
         # frame and it moves forward instead of back".
@@ -1594,7 +1594,7 @@ class PersonTracker(BaseAnalyzer):
             px_cx = W // 2
             px_cy = H // 2
 
-            # A named gallery match replaces the generic label — the whole
+            # A named gallery match replaces the generic label - the whole
             # point of the demo is seeing WHO the drone thinks it has found,
             # not merely that it found somebody. Similarity travels with the
             # name so an operator can see a marginal identification as
@@ -1633,7 +1633,7 @@ class PersonTracker(BaseAnalyzer):
                 )
 
         if searching:
-            # Same ladder the aircraft is flying — see human_tracker's badge.
+            # Same ladder the aircraft is flying - see human_tracker's badge.
             blind_s = blind_elapsed_s(
                 meta.get("frames_lost", 0), meta.get("seconds_lost", 0.0)
             )

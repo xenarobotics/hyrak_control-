@@ -41,12 +41,12 @@ def create_app() -> socketio.ASGIApp:
     )
     fastapi_app.include_router(router)
 
-    # Desktop app installers + electron-updater manifests — plain static
+    # Desktop app installers + electron-updater manifests - plain static
     # files, no auth (same tier as a public download page). Directory is
     # created empty if missing so a fresh checkout doesn't fail to boot;
     # CI populates it with real builds (see desktop/README.md).
     # NOT StaticFiles: the pinned Starlette (0.38.6) ignores Range entirely,
-    # which deadlocks electron-updater on every client <=0.1.5 — see
+    # which deadlocks electron-updater on every client <=0.1.5 - see
     # app/api/releases.py for the full explanation.
     settings.releases_dir.mkdir(parents=True, exist_ok=True)
     register_releases_routes(fastapi_app, settings.releases_dir)
@@ -63,7 +63,7 @@ def create_app() -> socketio.ASGIApp:
     set_sio(sio)
 
     # ------------------------------------------------------------------ #
-    # Shared state — created once, passed everywhere                      #
+    # Shared state - created once, passed everywhere                      #
     # ------------------------------------------------------------------ #
     session_manager = SessionManager()
     peer_registry   = PeerRegistry()
@@ -85,7 +85,7 @@ def create_app() -> socketio.ASGIApp:
     @fastapi_app.on_event("startup")
     async def on_startup():
         from app.db import init_db
-        await init_db()  # non-fatal — flying never depends on the DB
+        await init_db()  # non-fatal - flying never depends on the DB
         from app.zones import engine as zone_engine
         await zone_engine.reload()
         logger.info("Loading vision modules...")
@@ -107,14 +107,14 @@ def create_app() -> socketio.ASGIApp:
     async def connect(sid, environ, auth):
         token = (auth or {}).get("token")
         if token != settings.secret_token:
-            logger.warning(f"Rejected {sid[:8]} — bad token")
+            logger.warning(f"Rejected {sid[:8]} - bad token")
             return False
 
         session = session_manager.create(socket_id=sid)
         logger.info(f"Connected {sid[:8]} → session {session.session_id[:8]}")
 
         # Approximate client location for the admin map. Through the tunnel
-        # the socket peer is localhost — the real IP is in CF-Connecting-IP.
+        # the socket peer is localhost - the real IP is in CF-Connecting-IP.
         ip = (
             environ.get("HTTP_CF_CONNECTING_IP")
             or (environ.get("HTTP_X_FORWARDED_FOR") or "").split(",")[0].strip()
@@ -162,14 +162,14 @@ def create_app() -> socketio.ASGIApp:
             from app.zones import monitor as zone_monitor
             zone_monitor.drop(session.session_id)
             # A relay listener holds a port AND its own ffmpeg, neither tied
-            # to the peer connection — a client that vanishes without the pc
+            # to the peer connection - a client that vanishes without the pc
             # ever changing state would leak both.
             from app.webrtc import relay_video_source
             relay_video_source.release(session.session_id)
             # Same reasoning for the DataChannel ingest: it holds a socket and a
             # loopback port owned by the DESKTOP's PeerConnection, not the
             # browser's. Session teardown is the only unambiguous place to free
-            # it — releasing it when the browser's pc changes state would kill a
+            # it - releasing it when the browser's pc changes state would kill a
             # feed the desktop is still pushing.
             from app.webrtc import datachannel_video_source
             datachannel_video_source.release(session.session_id)
@@ -200,7 +200,7 @@ def create_app() -> socketio.ASGIApp:
     )
 
     logger.info(
-        f"Server ready — device={settings.device} "
+        f"Server ready - device={settings.device} "
         f"gpus={settings.gpu_count} "
         f"origins={cors_origins}"
     )

@@ -5,7 +5,7 @@
 // Unlike every other mode, ONE process does both jobs: the pilot's local
 // preview and the SRT uplink that feeds the server's AI, split with a `tee`.
 // So this module starts a single bridge and the caller needs no separate
-// sender — which is the point. See the `air_unit_gst` comment in
+// sender - which is the point. See the `air_unit_gst` comment in
 // lib/videoSource.ts for why that matters.
 //
 // Ordering, same constraint as the other relay modes: the backend allocates a
@@ -25,7 +25,7 @@ export interface GstStatus {
     /** True when the preview URL serves framed access units (WebCodecs),
      *  false when it serves fragmented MP4 for a <video> element. */
     webcodecs?: boolean
-    /** 'hardware' or 'software' — what is ACTUALLY running, not what was asked
+    /** 'hardware' or 'software' - what is ACTUALLY running, not what was asked
      *  for. A silent demotion to software otherwise looks like "hardware
      *  acceleration didn't help". */
     accel?: string
@@ -59,7 +59,7 @@ if (typeof window !== 'undefined' && isDesktopApp()) {
         if (event.bridge !== 'gstreamer-preview' || event.id !== GST_BRIDGE_ID) return
         const meta = event.meta ?? {}
         // Only lifecycle events carry `connected`. Informational ones must not
-        // be mistaken for a shutdown — that exact bug wiped previewUrl one
+        // be mistaken for a shutdown - that exact bug wiped previewUrl one
         // second after every successful start in the ffmpeg preview, and made
         // the whole local-view feature silently inert in the field.
         if (!('connected' in meta)) return
@@ -88,7 +88,7 @@ if (typeof window !== 'undefined' && isDesktopApp()) {
  *  SRT destination; omit it for a preview-only run (no AI uplink). */
 export async function startGstPipeline(alloc?: RelayAllocation): Promise<string | null> {
     if (!isDesktopApp()) {
-        throw new Error('GStreamer video needs the HYRAK desktop app — a browser tab cannot run a pipeline.')
+        throw new Error('GStreamer video needs the HYRAK desktop app - a browser tab cannot run a pipeline.')
     }
     await stopGstPipeline()
     lastError = null
@@ -97,7 +97,7 @@ export async function startGstPipeline(alloc?: RelayAllocation): Promise<string 
         jitterMs: getGstJitterMs(),
         accel: getGstAccel(),
         maxHeight: getPreviewMaxHeight(),
-        // Framed access units for WebCodecs instead of fMP4 — removes the
+        // Framed access units for WebCodecs instead of fMP4 - removes the
         // browser's progressive-playback buffer entirely.
         webcodecs: true,
         ...(alloc
@@ -119,7 +119,7 @@ export async function startGstPipeline(alloc?: RelayAllocation): Promise<string 
         accel: result.meta?.accel ? String(result.meta.accel) : undefined,
         hardwareAvailable: !!result.meta?.hardwareAvailable,
         previewUrl: typeof url === 'string' && url ? url : null,
-        // From the bridge, not from what we asked for — an older desktop
+        // From the bridge, not from what we asked for - an older desktop
         // build ignores the flag and serves fMP4, and rendering that through
         // the WebCodecs parser produces a black pane with no error.
         webcodecs: !!result.meta?.webcodecs,
@@ -137,7 +137,7 @@ export async function stopGstPipeline(): Promise<void> {
 
 /** Reactive status for components. */
 export function useGstPreview(): GstStatus | null {
-    // Starts null to match server-rendered HTML, then syncs after mount —
+    // Starts null to match server-rendered HTML, then syncs after mount -
     // same hydration reasoning as the other video hooks.
     const [status, setStatus] = useState<GstStatus | null>(null)
     useEffect(() => {

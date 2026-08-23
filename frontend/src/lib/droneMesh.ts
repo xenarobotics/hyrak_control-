@@ -4,14 +4,14 @@
 // THE PREVIOUS ATTEMPT WAS FLAT AND THAT WAS THE PROBLEM. CSS transforms can
 // only stack and rotate rectangles: there is no light, so nothing has a lit
 // edge and a shaded one, and an operator looking at it cannot tell a body from
-// an arm or the top from the bottom — which is fatal for a control whose only
+// an arm or the top from the bottom - which is fatal for a control whose only
 // job is "hold the aircraft THIS way up". Real geometry under real lights
 // solves it for free, because that is how anyone reads a shape.
 //
 // PROCEDURAL, NOT AN ASSET, on purpose: it ships with no file to load, no
 // licence to track, and it takes the accent colour from the panel so it
 // matches the app in both themes. loadDroneModel() below is the door for a
-// supplied .glb when there is one — that path replaces the airframe and keeps
+// supplied .glb when there is one - that path replaces the airframe and keeps
 // everything else (lights, orientation, arrows) exactly as it is.
 
 import * as THREE from 'three'
@@ -54,18 +54,18 @@ function roundedRect(w: number, h: number, r: number): THREE.Shape {
 // Built rather than downloaded on purpose. A model off the internet arrives
 // with a licence to honour, a file to ship and an axis convention to fight,
 // and the shape wanted here is a lofted surface with four numbers in it. The
-// door for a supplied asset is loadDroneModel() at the bottom of this file —
+// door for a supplied asset is loadDroneModel() at the bottom of this file -
 // that path takes a whole airframe, propellers included.
 
 const BLADE_SEGMENTS = 22
 const BLADE_ROOT = 0.13
 const BLADE_TIP = 1.12
-/** Total washout from root to tip, radians. Real props twist a lot — a blade
+/** Total washout from root to tip, radians. Real props twist a lot - a blade
  *  with a constant angle is the flat plate the last version looked like. */
 const BLADE_TWIST = 0.62
 
 /** Chord at a fraction of the span. Narrow at the root, widest around 60%,
- *  rounded off at the tip — the planform that makes a propeller recognisable
+ *  rounded off at the tip - the planform that makes a propeller recognisable
  *  in silhouette, which is the only way it is seen edge-on. */
 function chordAt(t: number): number {
     return 0.1 + 0.24 * Math.sin(Math.PI * Math.min(1, t * 0.92 + 0.06))
@@ -118,7 +118,7 @@ function bladeGeometry(hand: number): THREE.BufferGeometry {
 /** Hub plus both blades as ONE geometry, built synchronously.
  *
  *  Merged by hand rather than through BufferGeometryUtils so buildDrone stays
- *  synchronous — an async model means a frame where the aircraft has no
+ *  synchronous - an async model means a frame where the aircraft has no
  *  propellers, and the panel's whole job is to be looked at.
  */
 export function mergeSync(sign: number): THREE.BufferGeometry {
@@ -149,7 +149,7 @@ export function mergeSync(sign: number): THREE.BufferGeometry {
 // body read as a student project for exactly the reason a moulded airframe
 // does not: a real fuselage is one continuous surface whose cross-section
 // swells and tapers along its length. This is the same loft technique as the
-// propeller blade — superellipse cross-sections (softly squared sides, the
+// propeller blade - superellipse cross-sections (softly squared sides, the
 // signature of injection-moulded shells) swept nose to tail under a width, a
 // height and a camber profile, with the canopy hump folded into the height
 // profile rather than glued on top.
@@ -198,7 +198,7 @@ function hullGeometry(): THREE.BufferGeometry {
             const c = i * HULL_COLS + j2
             const d = (i + 1) * HULL_COLS + j2
             // Wound OUTWARD. The first cut had these reversed, which
-            // culled the near wall and drew the inside of the far one — the
+            // culled the near wall and drew the inside of the far one - the
             // hull looked transparent and lit wrong everywhere at once.
             indices.push(a, c, b, b, c, d)
         }
@@ -220,7 +220,7 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     const mat = <T extends THREE.Material>(m: T) => { materials.push(m); return m }
 
     // The light warm-gray of a commercial airframe. On this app's dark
-    // stage it is also simply the most legible choice — the hull is the
+    // stage it is also simply the most legible choice - the hull is the
     // brightest thing in the scene, so the silhouette reads first.
     // MeshPhysicalMaterial for the shell: the clearcoat layer is the
     // glossy-over-matte finish of an injection-moulded product, which no
@@ -242,7 +242,7 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     const carbon = mat(new THREE.MeshStandardMaterial({
         color: 0x0f1319, metalness: 0.2, roughness: 0.6,
     }))
-    // Accent materials are held so the calibration state can recolour them —
+    // Accent materials are held so the calibration state can recolour them -
     // the aircraft itself turning amber then green is a stronger signal than
     // any badge next to it, and it is visible from across a flight line.
     const accents: THREE.MeshStandardMaterial[] = []
@@ -269,14 +269,14 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     hull.castShadow = true
     root.add(hull)
 
-    // Belly plate — the darker underside break line every moulded airframe
+    // Belly plate - the darker underside break line every moulded airframe
     // has, and a strong "this side is the bottom" cue.
     const belly = new THREE.Mesh(track(hullGeometry()), dark)
     belly.scale.set(0.78, 0.42, 0.8)
     belly.position.y = -0.08
     root.add(belly)
 
-    // Forward obstacle-sensor eyes, toed slightly outward — the detail that
+    // Forward obstacle-sensor eyes, toed slightly outward - the detail that
     // most says "commercial aircraft", and a second nose cue after the gimbal.
     const visor = new THREE.Mesh(
         track(new THREE.SphereGeometry(0.42, 24, 16)),
@@ -303,7 +303,7 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     // A yoke, a ball and a lens barrel rather than a sphere on a peg. It is
     // the only asymmetric thing hanging off the airframe, which makes it the
     // feature that tells an operator at a glance which way the aircraft is
-    // facing and which way up it is — worth more here than anywhere else on
+    // facing and which way up it is - worth more here than anywhere else on
     // the model.
     const yokeSide = track(new THREE.BoxGeometry(0.05, 0.3, 0.16))
     for (const x of [-0.2, 0.2]) {
@@ -344,7 +344,7 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     //
     // The equipment cluster every working multirotor carries and every
     // placeholder model lacks. All of it sits at the TAIL, which gives the
-    // silhouette a second orientation cue that survives any camera angle —
+    // silhouette a second orientation cue that survives any camera angle -
     // the gimbal says nose, this says tail.
     const mast = new THREE.Mesh(
         track(new THREE.CylinderGeometry(0.035, 0.05, 0.34, 10)), dark)
@@ -375,7 +375,7 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
 
     // ── Arms, motors, rotors ─────────────────────────────────────────────
     // A moulded slab, not a tube: wider than tall, with real corner
-    // rounding — the cross-section of every injection-moulded arm.
+    // rounding - the cross-section of every injection-moulded arm.
     const armGeo = track(new THREE.ExtrudeGeometry(roundedRect(0.22, 0.11, 0.045), {
         depth: 1.35, bevelEnabled: true, bevelSize: 0.02, bevelThickness: 0.02,
         bevelSegments: 2, curveSegments: 8,
@@ -421,7 +421,7 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
         bell.position.set(0, 0.35, -1.62)
         a.add(bell)
 
-        // Rotor: ONE mesh — hub and both blades in a single lofted geometry.
+        // Rotor: ONE mesh - hub and both blades in a single lofted geometry.
         // Real blades rather than a disc, because a disc at rest is a plate and
         // the model has to look right STANDING STILL, which during a
         // calibration is the only way it is ever seen.
@@ -435,14 +435,14 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
         a.add(rotor)
         rotors.push(rotor)
 
-        // Prop nut — a domed cap on the hub. Small, and the difference
+        // Prop nut - a domed cap on the hub. Small, and the difference
         // between a propeller that is FITTED and one that is resting there.
         const nut = new THREE.Mesh(nutGeo, dark)
         nut.position.set(0, 0.12, 0)
         rotor.add(nut)
 
         // Navigation LEDs, aviation convention: PORT (left) red, STARBOARD
-        // (right) green. Deliberately NOT the calibration accent — position
+        // (right) green. Deliberately NOT the calibration accent - position
         // lights that changed colour with the panel state would unteach the
         // one convention they exist to teach. ARM_ANGLES run clockwise from
         // the nose, so 45 and 135 are the starboard pair.
@@ -457,8 +457,8 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     // BUILT POINT-TO-POINT. The first cut placed one tilted leg per arm and
     // two skid rails at hand-guessed coordinates, and they met nothing: the
     // legs hung clear of the fuselage and the rails floated under them. A
-    // strut is a line between two points that both exist — where it leaves
-    // the belly and where it lands on the rail — so those are the inputs,
+    // strut is a line between two points that both exist - where it leaves
+    // the belly and where it lands on the rail - so those are the inputs,
     // and the cylinder is derived. There is no coordinate to guess wrong.
     const SKID_X = 0.98
     const SKID_Y = -0.9
@@ -506,7 +506,7 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
 /** Load a supplied .glb instead of the procedural airframe.
  *
  *  DROP A FILE AT public/models/drone.glb AND IT IS USED. Nothing else about
- *  the panel changes — orientation, arrows, lighting and the calibration logic
+ *  the panel changes - orientation, arrows, lighting and the calibration logic
  *  all act on the returned group, so a real model of the actual airframe is a
  *  file copy rather than a rewrite.
  *
@@ -539,7 +539,7 @@ export async function loadDroneModel(url: string): Promise<DroneParts | null> {
         return { root, rotors, accents, dispose: () => {} }
     } catch {
         // A missing or broken file falls back to the built-in airframe rather
-        // than leaving an empty panel — this path exists so a model can be
+        // than leaving an empty panel - this path exists so a model can be
         // dropped in, and a typo in the filename must not break calibration.
         return null
     }

@@ -31,17 +31,17 @@ class Settings(BaseSettings):
     # ceiling for small-object work, and it costs pixels quadratically.
     #
     # A 1.7m person at 25px (YOLO's practical detection floor) is ~31m slant
-    # range at 640px but ~62m at 1280px — so crowd counting anywhere near the
+    # range at 640px but ~62m at 1280px - so crowd counting anywhere near the
     # 40-50m operating band NEEDS 1280, while a tracker following one large
     # nearby subject gains nothing from it and would just pay 4x the compute.
     # Hence per-mode rather than one global value.
     #
     # Plate OCR deliberately bypasses this entirely and runs on the full
-    # frame (plate_tracker.py) — a 500mm plate needs ~120px across to read at
+    # frame (plate_tracker.py) - a 500mm plate needs ~120px across to read at
     # all, which no downscaled frame can provide.
     inference_width_by_mode: dict[str, int] = Field(
         default={
-            # Small targets at altitude — the binding constraint on the band.
+            # Small targets at altitude - the binding constraint on the band.
             "crowd-management": 1280,
             # 0 = NATIVE, no downscale. Plate reading is the one job where
             # every pixel is load-bearing: measured on real footage from this
@@ -60,7 +60,7 @@ class Settings(BaseSettings):
             # runs a person pass, a vehicle pass, colour, speed and OCR off one
             # frame, and in the air it measured 19.8 fps analysed at 40-47 ms
             # against 30 fps video. Overlay boxes then update on two frames out
-            # of three, which is visible as annotations jumping — the reported
+            # of three, which is visible as annotations jumping - the reported
             # symptom, and the reason clicking was landing in the gap between
             # where a box was drawn and where it actually was.
             #
@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     )
 
     # Per-frame millisecond budget for traffic-management's OPTIONAL analytics
-    # — plate OCR and face recognition — on top of detection and speed.
+    # - plate OCR and face recognition - on top of detection and speed.
     # vision/profiles.py spends it on whichever of the two the current optics
     # can actually resolve, so this is not a cap that binds at every altitude:
     # in the survey profile nothing is spent at all.
@@ -101,11 +101,11 @@ class Settings(BaseSettings):
     force_cpu: bool = Field(default=False)
 
     # ------------------------------------------------------------------ #
-    # Camera calibration — the fixed (non-gimbal) mount                    #
+    # Camera calibration - the fixed (non-gimbal) mount                    #
     # ------------------------------------------------------------------ #
     # Every metric vision output (speed, ground position, target distance)
     # is only as good as these numbers. HFOV in particular CANNOT be looked
-    # up from the sensor part number — it is a property of the lens fitted,
+    # up from the sensor part number - it is a property of the lens fitted,
     # so it must be measured on the bench:
     #
     #   place a target of known width W at known distance D, filling the
@@ -120,7 +120,7 @@ class Settings(BaseSettings):
     # correct for a rectilinear lens. Set explicitly only if measured, since a
     # fisheye's vertical FOV does not follow from its horizontal one.
     camera_vfov_deg: float = Field(default=0.0)
-    # Radial/tangential distortion (k1, k2, p1, p2, k3) — OpenCV order.
+    # Radial/tangential distortion (k1, k2, p1, p2, k3) - OpenCV order.
     # All zeros = treat the lens as ideal rectilinear, i.e. skip undistortion.
     camera_distortion: list[float] = Field(default=[0.0, 0.0, 0.0, 0.0, 0.0])
 
@@ -130,7 +130,7 @@ class Settings(BaseSettings):
     #
     # tilt is DEPRESSION below the horizon at frame centre. 40-47 deg is the
     # useful range for a 70 deg lens: VFOV is then 43 deg, so the frame spans
-    # ~25-68 deg of depression at once — shallow enough at the top of frame to
+    # ~25-68 deg of depression at once - shallow enough at the top of frame to
     # read a plate, steep enough at the bottom for robust ground projection.
     # Ground-range error per degree of pitch is h/sin^2(theta), which is 1.75 m
     # per degree at 45 deg and 50 m altitude but 7.5 m per degree at 20 deg,
@@ -161,10 +161,10 @@ class Settings(BaseSettings):
     # acceleration, and 0.5s is the point where jitter stops dominating.
     speed_fit_window_frames: int = Field(default=15)
     # Where metres-per-pixel comes from:
-    #   "altitude" — AGL + HFOV. Error shrinks with height (3% at 50m).
-    #   "object"   — a detected vehicle's known class width as a ruler.
+    #   "altitude" - AGL + HFOV. Error shrinks with height (3% at 50m).
+    #   "object"   - a detected vehicle's known class width as a ruler.
     #                Flat ~4%, and independent of altitude AND attitude.
-    #   "auto"     — use both, prefer the tighter, and flag disagreement.
+    #   "auto"     - use both, prefer the tighter, and flag disagreement.
     # "auto" is the point of having two: they fail for unrelated reasons, so
     # agreement is real evidence and disagreement is a reason to distrust the
     # reading rather than publish it.
@@ -174,13 +174,13 @@ class Settings(BaseSettings):
     speed_scale_max_disagreement_pct: float = Field(default=10.0)
     # Known widths in metres by vehicle class, for the "object" ruler. Width
     # (not length) because it is measured perpendicular to the direction of
-    # travel — which the tracker knows — and varies least across models.
+    # travel - which the tracker knows - and varies least across models.
     vehicle_widths_m: dict[str, float] = Field(
         default={"car": 1.80, "motorcycle": 0.80, "bus": 2.50, "truck": 2.45}
     )
 
     # ------------------------------------------------------------------ #
-    # Auto-elevate — the chase fallback, NOT normal operation              #
+    # Auto-elevate - the chase fallback, NOT normal operation              #
     # ------------------------------------------------------------------ #
     # Only fires when a locked target outpaces the airframe's top speed. Two
     # separate ceilings because they fail differently: hitting the altitude
@@ -188,8 +188,8 @@ class Settings(BaseSettings):
     # flying but with analytics that have gone worthless. The operator has to
     # be told which one was reached.
     max_altitude_agl_m: float = Field(default=120.0)   # DGCA ceiling
-    # THE FLOOR. Every tracking mode could command descent without bound —
-    # the ceiling above had no counterpart — and a SITL vehicle-follow flew
+    # THE FLOOR. Every tracking mode could command descent without bound -
+    # the ceiling above had no counterpart - and a SITL vehicle-follow flew
     # itself into the ground: a sustained +0.5 m/s descent from the altitude
     # controller took it 6.6m -> 0m, then "invalid setpoints / blind land".
     # Nothing below this altitude is worth any framing improvement.
@@ -197,7 +197,7 @@ class Settings(BaseSettings):
 
     # ── Crowd density thresholds ──────────────────────────────────────────
     # Server-side so they SURVIVE analyzer creation. They used to live only in
-    # the browser and be pushed over a socket when the crowd panel mounted —
+    # the browser and be pushed over a socket when the crowd panel mounted -
     # which lost a race it could not win: the panel mounts before the stream
     # negotiates, so the analyzer did not exist yet, the push no-op'd, and the
     # analyzer then came up on these defaults. The operator's custom numbers
@@ -207,8 +207,8 @@ class Settings(BaseSettings):
     max_depression_deg: float = Field(default=70.0)    # recognition-quality cap
 
     # ── Follow tuning: the YAW axis, shared by every tracking mode ────────
-    # Yaw is the primary axis on a fixed-mount airframe — it is the one that
-    # decides whether the subject stays in frame at all — and these four
+    # Yaw is the primary axis on a fixed-mount airframe - it is the one that
+    # decides whether the subject stays in frame at all - and these four
     # numbers are what an operator actually reaches for after a flight that
     # oscillated or lagged.
     #
@@ -223,18 +223,18 @@ class Settings(BaseSettings):
     follow_yaw_kd: float = Field(default=4.0)
     # Ceiling, not a target. PX4 stock MPC_YAWRAUTO_MAX is 60 deg/s, so 55
     # leaves margin rather than having setpoints silently rate-limited
-    # upstream — which looks exactly like a tuning problem from the ground.
+    # upstream - which looks exactly like a tuning problem from the ground.
     follow_yaw_max_deg_s: float = Field(default=55.0)
     follow_yaw_deadband: float = Field(default=0.05)
 
-    # WebRTC — Cloudflare TURN key (dashboard → Calls → TURN). The key ID +
+    # WebRTC - Cloudflare TURN key (dashboard → Calls → TURN). The key ID +
     # API token are NOT username/password: the backend mints short-lived
     # credentials from them (app/webrtc/turn.py). Empty = STUN-only.
     turn_key_id: str = Field(default="")
     turn_api_token: str = Field(default="")
 
     # Zero-transcode RTSP relay uplink (app/webrtc/relay_video_source.py).
-    # The desktop app pushes MPEG-TS over SRT straight to this host:port —
+    # The desktop app pushes MPEG-TS over SRT straight to this host:port -
     # NOT over the HTTP API, so it does NOT travel through the cloudflared
     # tunnel (which proxies HTTP only). This must be a directly reachable
     # address with UDP 9000-9100 forwarded to the server, otherwise the
@@ -251,16 +251,16 @@ class Settings(BaseSettings):
     # does not set CF-Connecting-IP or X-Forwarded-For, since remote clients
     # would then look local and be handed an address they cannot reach.
     relay_prefer_local_host: bool = Field(default=True)
-    # SRT receiver buffer, ms — the retransmit window, and a FLOOR on
+    # SRT receiver buffer, ms - the retransmit window, and a FLOOR on
     # glass-to-glass latency. SRT needs 2.5-4x RTT for a NAK plus resend to
     # complete; measured RTT to a CDN edge is ~35ms, so the old 60 was ~1.7x:
     # too tight to recover anything while still adding its full 60ms of delay.
     # Keep in step with DEFAULT_LATENCY_MS in webrtc/relay_video_source.py and
-    # DEFAULT_RELAY_LATENCY_MS in frontend/src/lib/videoSource.ts — this value
+    # DEFAULT_RELAY_LATENCY_MS in frontend/src/lib/videoSource.ts - this value
     # is the one that actually wins (see allocate_video_relay).
     relay_latency_ms: int = Field(default=150)
 
-    # Database — local Postgres for now; swapping to a managed provider
+    # Database - local Postgres for now; swapping to a managed provider
     # (Supabase/RDS are both Postgres) is just changing this URL.
     database_url: str = Field(
         default="postgresql+asyncpg://hyrak:hyrak_dev@127.0.0.1:5432/hyrak"
@@ -272,8 +272,8 @@ class Settings(BaseSettings):
     # Where the RF ground decoder's uplink listener (wfb_tx) runs.
     #
     # Not loopback: the decoder is its own board on the local network, not a
-    # process on this machine. Downlink needs no equivalent setting — the
-    # bridge binds 0.0.0.0 and receives from anywhere — but the uplink is a
+    # process on this machine. Downlink needs no equivalent setting - the
+    # bridge binds 0.0.0.0 and receives from anywhere - but the uplink is a
     # send to a fixed listener, so a wrong value here gives perfect telemetry
     # and silently drops every command. A setting rather than a constant so a
     # different rig can override it in .env without touching code.
@@ -285,12 +285,12 @@ class Settings(BaseSettings):
     # radio is half-duplex and shared with the uplink.
     #
     # Configurable rather than hard-coded because the right number depends on
-    # the radio in front of it — air data rate, ECC setting, and how far apart
+    # the radio in front of it - air data rate, ECC setting, and how far apart
     # the two ends are. The defaults are chosen against the observation that
     # QGroundControl over the same 3DR radio sustains comfortably more than
     # this; if a particular link cannot hold it the symptom is dropped
     # messages and "Socket closed" reconnects, and these are the knobs to turn
-    # down. Only the three that feed the tracking geometry are exposed — the
+    # down. Only the three that feed the tracking geometry are exposed - the
     # dashboard streams are not worth a setting.
     # POSITION AND VELOCITY ARE ONE MESSAGE, not two. Both MAVSDK setters
     # drive GLOBAL_POSITION_INT and it takes the higher of the two
@@ -304,7 +304,7 @@ class Settings(BaseSettings):
     # They were raised to 8/10 Hz on the reasoning that QGroundControl sustains
     # more than that over the same 3DR radio. That inference was wrong in an
     # important way: QGC is not also running this application's uplink, and a
-    # SiK radio is half-duplex — saturating the downlink starves the commands
+    # SiK radio is half-duplex - saturating the downlink starves the commands
     # going the other way. The code being edited already carried a warning
     # written from experience, that the higher rates "can saturate it and cause
     # exactly the kind of intermittent Socket closed disconnects that don't
@@ -317,7 +317,7 @@ class Settings(BaseSettings):
     # A number that has been measured on THIS radio is worth more than one
     # inferred from another ground station's behaviour.
     #
-    # ATTITUDE ON THE RADIO IS 6 Hz, NOT 4, as of 2026-08-09 — one step, on
+    # ATTITUDE ON THE RADIO IS 6 Hz, NOT 4, as of 2026-08-09 - one step, on
     # purpose, with the arithmetic done first rather than by analogy to QGC.
     # A MAVLink v2 ATTITUDE frame is 40 bytes, so 4 -> 6 Hz costs 80 B/s and
     # takes the whole downlink profile from ~440 to ~520 B/s. Against a
@@ -325,7 +325,7 @@ class Settings(BaseSettings):
     # overhead) of ~1600 B/s that is 28% -> 32% of budget.
     #
     # The same arithmetic explains the earlier failure far better than the
-    # guess that replaced it: 10/8 Hz came to ~920 B/s, 57% of that ceiling —
+    # guess that replaced it: 10/8 Hz came to ~920 B/s, 57% of that ceiling -
     # and 115%, i.e. over it, if AIR_SPEED is 32k rather than 64k. Nothing
     # here can read AIR_SPEED, which is why this moves one step at a time.
     telemetry_rate_position_radio: float = Field(default=2.0)
@@ -338,7 +338,7 @@ class Settings(BaseSettings):
 
     # Desktop app installers + electron-updater's manifest files
     # (latest.yml / latest-mac.yml / latest-linux.yml), served straight off
-    # disk at /releases — see desktop/package.json's "generic" publish
+    # disk at /releases - see desktop/package.json's "generic" publish
     # provider (no GitHub involved) and frontend/src/lib/desktopReleases.ts.
     # CI (.github/workflows/desktop-release.yml) uploads new builds here.
     releases_dir: Path = Field(default=ROOT_DIR / "releases")
@@ -346,7 +346,7 @@ class Settings(BaseSettings):
     @property
     def lan_origins(self) -> list[str]:
         """
-        Frontend origin for whatever LAN IP this machine currently has — the
+        Frontend origin for whatever LAN IP this machine currently has - the
         CORS allowlist below is an exact-string match (no wildcard/regex
         support in either FastAPI's CORSMiddleware or python-engineio), and
         DHCP can reassign the LAN IP across reboots, so this is computed at
@@ -355,7 +355,7 @@ class Settings(BaseSettings):
         import socket
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))  # doesn't actually send anything — just picks the outbound interface
+            s.connect(("8.8.8.8", 80))  # doesn't actually send anything - just picks the outbound interface
             ip = s.getsockname()[0]
             s.close()
             return [f"http://{ip}:3000"]

@@ -2,12 +2,12 @@
 wfb-ng (or any similar) RF link bridge.
 
 The ground-station side receives downlink telemetry on one fixed UDP port
-and separately expects uplink commands on a DIFFERENT fixed UDP port — see
+and separately expects uplink commands on a DIFFERENT fixed UDP port - see
 communiation/start-gs.sh: wfb_rx delivers drone->GS MAVLink to
 127.0.0.1:<downlink_port>, wfb_tx listens on 127.0.0.1:<uplink_port> for
 GS->drone MAVLink to transmit over RF. MAVSDK's normal udpin:// "reply to
 whoever last sent a packet" can't reach that fixed uplink listener, since
-wfb_rx sends from an unrelated ephemeral port — MAVSDK would reply to that,
+wfb_rx sends from an unrelated ephemeral port - MAVSDK would reply to that,
 which nothing is listening on.
 
 This bridge sits in between so MAVSDK only ever needs an ordinary udpin://
@@ -42,7 +42,7 @@ def _free_udp_port() -> int:
 
 
 class _DownlinkProtocol(asyncio.DatagramProtocol):
-    """Bound to the fixed downlink port — everything wfb_rx (and
+    """Bound to the fixed downlink port - everything wfb_rx (and
     wfb_rssi_inject's synthetic RADIO_STATUS packets) sends here gets
     relayed straight into mavsdk's loopback port."""
 
@@ -61,7 +61,7 @@ class RFBridge(asyncio.DatagramProtocol):
         self._transport: Optional[asyncio.DatagramTransport] = None
         self._downlink_transport: Optional[asyncio.DatagramTransport] = None
         # Set when the ground station is behind NAT and can't be reached by
-        # a raw UDP send to uplink_addr — see app/telemetry/gs_relay.py.
+        # a raw UDP send to uplink_addr - see app/telemetry/gs_relay.py.
         # None keeps the original co-located behaviour unchanged.
         self._uplink_sink: Optional[UplinkSink] = None
 
@@ -92,7 +92,7 @@ class RFBridge(asyncio.DatagramProtocol):
 
     def set_uplink_sink(self, sink: Optional[UplinkSink]) -> None:
         """Redirect mavsdk's outgoing packets through `sink` instead of a
-        raw UDP send to uplink_addr — used when wfb_tx isn't reachable
+        raw UDP send to uplink_addr - used when wfb_tx isn't reachable
         directly (a remote ground station behind NAT tunnels uplink bytes
         back over Socket.IO instead). Pass None to restore the default."""
         self._uplink_sink = sink
@@ -102,7 +102,7 @@ class RFBridge(asyncio.DatagramProtocol):
             self._transport.sendto(data, ("127.0.0.1", self.mavsdk_port))
 
     def datagram_received(self, data: bytes, addr) -> None:
-        """mavsdk's replies (commands, mission uploads, param requests) —
+        """mavsdk's replies (commands, mission uploads, param requests) -
         relay out to the RF uplink listener (wfb_tx), directly or via the
         uplink sink if one's set."""
         if self._uplink_sink:
@@ -121,7 +121,7 @@ async def ensure_started(
     downlink_port: int = 14550, uplink_port: int = 14551,
     uplink_host: Optional[str] = None,
 ) -> RFBridge:
-    """Idempotent for matching ports — returns the existing bridge if
+    """Idempotent for matching ports - returns the existing bridge if
     already running with the same config. Rebinds if the ports changed
     (e.g. edited in Settings), since the downlink port is bound once at
     creation and won't just start listening somewhere new on its own."""
@@ -142,7 +142,7 @@ async def ensure_started(
 
 
 def get() -> Optional[RFBridge]:
-    """The running bridge, if any — None if ensure_started() hasn't been called."""
+    """The running bridge, if any - None if ensure_started() hasn't been called."""
     return _bridge
 
 

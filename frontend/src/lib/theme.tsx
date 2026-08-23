@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 
 // 'dark' is the original palette, kept untouched as the classic default.
-// 'midnight' is the reworked dark — same shadcn variables (it stacks the
+// 'midnight' is the reworked dark - same shadcn variables (it stacks the
 // .dark class), higher-contrast app tokens. 'light' is the bright theme.
 type Theme = 'dark' | 'midnight' | 'light'
 
@@ -13,7 +13,7 @@ const ThemeContext = createContext<{ theme: Theme; setTheme: (t: Theme) => void 
 })
 
 // Replaces next-themes with the same behavior (class on <html>, dark default,
-// no system detection, localStorage key 'theme' — existing saved preferences
+// no system detection, localStorage key 'theme' - existing saved preferences
 // keep working) but WITHOUT rendering a <script> tag from a client component,
 // which React 19 warns about on every page load. The before-paint theme init
 // lives as a real inline script in app/layout.tsx <head>.

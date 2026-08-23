@@ -1,5 +1,5 @@
 """
-Traffic management — the composed vehicle module.
+Traffic management - the composed vehicle module.
 =================================================
 
 One mode covering everything the vehicle side of the brief asks for: how many
@@ -15,7 +15,7 @@ ALL FIVE ANALYTICS, PLUS AN HONEST STATEMENT OF WHAT IS IN RANGE
     Crowd counting wants high and near-nadir. Faces want closer still. A module
     that simply claimed all five at once would be lying about the geometry.
 
-    So the resolution is not to pick a subset and drop the rest — it is to run
+    So the resolution is not to pick a subset and drop the rest - it is to run
     everything and REPORT which subjects the current altitude can actually
     resolve (vision/viability.py). At 50m a plate is 14px across; the reader
     refuses it and the readout says "descend to about 7m". That turns what
@@ -37,7 +37,7 @@ THE OPTIMISATION THAT MAKES IT FIT IN ONE FRAME BUDGET
         fast-alpr                         14.7 ms   ONE crop per frame
 
     fast-alpr letterboxes its input to 384x384, so a call costs the same
-    whatever it is given — 14.7ms for a full 1920 frame or for one vehicle crop.
+    whatever it is given - 14.7ms for a full 1920 frame or for one vehicle crop.
     That single fact drives the whole design:
 
       * A plate on a 400px-wide vehicle is ~22px after a full-frame call
@@ -45,8 +45,8 @@ THE OPTIMISATION THAT MAKES IT FIT IN ONE FRAME BUDGET
         on the vehicle's crop letterboxes 400 to 384 and yields ~107px. Reading
         plates from a full frame is not slow, it is close to impossible.
       * Because the cost is fixed per call, the budget is a NUMBER OF CALLS.
-        One per frame, spent on the vehicle that most needs it — largest first
-        among those without a confident read — keeps the total near 30ms.
+        One per frame, spent on the vehicle that most needs it - largest first
+        among those without a confident read - keeps the total near 30ms.
 
     So the composition is not "run everything, hope it fits". It is a per-frame
     budget with an explicit priority, which is what the merge was for.
@@ -95,13 +95,13 @@ _VEHICLE_CLASSES = {"car", "truck", "bus", "motorcycle"}
 # Same prefix as vehicle-plate-tracking, so one id format reads across modes.
 _VEHICLE_ID_PREFIX = "VH"
 # COCO indices: 0 person, 2 car, 3 motorcycle, 5 bus, 7 truck. One call for
-# both subject types — see the module docstring.
+# both subject types - see the module docstring.
 _DETECT_CLASSES = [0, 2, 3, 5, 7]
 
 # ── Crowd density, borrowed from crowd_manager ───────────────────────────────
 # Same 3x3 grid and the same per-zone colouring, so an operator reads it the
 # same way in both modes. Thresholds are frame-relative headcounts and have no
-# universally correct value — they depend entirely on framing and altitude,
+# universally correct value - they depend entirely on framing and altitude,
 # which is why they live in the persisted calibration rather than here. These
 # two are only the fallback if calibration cannot be read.
 _GRID_ROWS, _GRID_COLS = 3, 3
@@ -133,7 +133,7 @@ _FACE_ID_MEMORY_S = 4.0
 # faces are out of range and none at all when plates are. This constant is only
 # the fallback for the frames before a profile exists.
 _OCR_CALLS_PER_FRAME = 1
-# Don't bother cropping a vehicle this small — after the detector letterboxes
+# Don't bother cropping a vehicle this small - after the detector letterboxes
 # the crop to 384 there would be nothing left of the plate to read.
 #
 # 110 -> 70 -> 40. The last step is the same operator call as _MIN_PLATE_AREA:
@@ -142,7 +142,7 @@ _OCR_CALLS_PER_FRAME = 1
 # 384 with nothing gained, but the detector is free to disagree and the photo
 # makes any result checkable.
 _OCR_MIN_VEHICLE_PX = 40
-# A read this confident AND this large is treated as final — the vehicle stops
+# A read this confident AND this large is treated as final - the vehicle stops
 # consuming budget because there is essentially nothing left to win.
 _OCR_GOOD_ENOUGH = 0.80
 # ...and the plate has to be genuinely big, not merely confidently guessed.
@@ -150,7 +150,7 @@ _OCR_GOOD_ENOUGH = 0.80
 # fabricated reads.
 _PLATE_GOOD_PX = 110
 _OCR_MIN_CONF = 0.35
-# Stop retrying a vehicle that has repeatedly failed — usually its plate simply
+# Stop retrying a vehicle that has repeatedly failed - usually its plate simply
 # is not facing us. Generous now that re-reading is the normal case rather than
 # the exception: the priority ordering, not this cap, is what stops one vehicle
 # starving the others.
@@ -167,7 +167,7 @@ _READ_ARCHIVE_MAX = 500
 # ── Guards against fabricated plates ────────────────────────────────────────
 #
 # THE HISTORY. Left ungated, this module logged WA01WMWH, WA02MM901, WA12MMSH
-# and WAL7MM991 — all for the SAME vehicle, on consecutive frames — plus
+# and WAL7MM991 - all for the SAME vehicle, on consecutive frames - plus
 # SUBSCRIBE and SUBSCR18 read off a video overlay. Every one of those crops was
 # 40-50px wide. OCR does not fail loudly at that size; it invents a plausible
 # string, and a plausible string is worse than no reading because it looks like
@@ -175,7 +175,7 @@ _READ_ARCHIVE_MAX = 500
 #
 # WHY THE GATES ARE NOW LOOSER THAN THAT HISTORY SUGGESTS. The original fix put
 # a hard 70px floor on the measured plate width. Checked against 25 real
-# captures off this rig, plates arrive 31-79px wide — so that floor rejected
+# captures off this rig, plates arrive 31-79px wide - so that floor rejected
 # nearly every genuine plate the aircraft will ever see. vehicle-plate-tracking
 # hit exactly this and went from 0 plates read to 19 of 25 by relaxing it.
 #
@@ -200,14 +200,14 @@ _READ_ARCHIVE_MAX = 500
 # pixel count is a threshold on a continuum, not a cliff, and reads a little
 # under it do sometimes come back correct. What makes accepting them safe is
 # that EVERY accepted read is saved as a photograph beside its text, so a wrong
-# one is visible and correctable rather than an unfalsifiable database row —
+# one is visible and correctable rather than an unfalsifiable database row -
 # whereas a refused read is a permanently lost record.
 #
 # It is not zero: below roughly 150px^2 the crop is a smear the detector should
 # not have proposed at all, and passing it on produces strings with no
 # relationship to any plate.
 _MIN_PLATE_AREA = 150
-# Kept as a QUALITY MARKER, not a filter — reads below it are still reported,
+# Kept as a QUALITY MARKER, not a filter - reads below it are still reported,
 # toned as weak. Nothing rejects on this.
 _PLATE_MIN_WIDTH_PX = 70
 # Plate aspect. Indian single-row plates are ~4:1, two-row ~2:1, so anything
@@ -218,7 +218,7 @@ _PLATE_ASPECT_MIN = 1.6
 _PLATE_ASPECT_MAX = 6.0
 # CROSS-FRAME AGREEMENT. One vehicle yielding five different strings is the
 # signature of guessing, so agreement is still counted and still drives how a
-# reading is presented — but it no longer suppresses one. Two independent
+# reading is presented - but it no longer suppresses one. Two independent
 # frames agreeing marks a plate STRONG; a single frame is shown and logged with
 # a marker. Same principle as plate_tracker's _PLATE_AGREEMENT_STRONG.
 _PLATE_MIN_AGREEING_READS = 2
@@ -254,7 +254,7 @@ _CAPTURE_ROOT = os.path.join(str(ROOT_DIR), ".data", "plate_captures")
 # Hence four independent conditions, all of which must hold:
 #
 #   1. The vehicle is actually MOVING. Below _FLOW_MIN_KMH a heading is atan2
-#      of box jitter — a uniformly random compass bearing.
+#      of box jitter - a uniformly random compass bearing.
 #   2. It is judged against NEARBY traffic only. A radius keeps the two
 #      carriageways of a divided road from being averaged into one meaningless
 #      mean heading, which is the single most likely source of a false alert.
@@ -272,7 +272,7 @@ _FLOW_MIN_NEIGHBOURS = 3
 #: they all point exactly the same way; below this there is no flow to oppose.
 _FLOW_COHERENCE = 0.75
 #: How far from the local flow counts as against it. Deliberately near
-#: opposite — 90 degrees is a turn, not a wrong way.
+#: opposite - 90 degrees is a turn, not a wrong way.
 _FLOW_OPPOSED_DEG = 120.0
 #: Frames of opposition before the flag is raised, and the ceiling on the
 #: counter so a long-flagged vehicle still clears within a second of rejoining
@@ -321,7 +321,7 @@ def _density_level(count: int, light_max: int = _DENSITY_LIGHT_MAX,
 
     They were constants here while crowd-management had already moved them to
     the persisted calibration, so the same crowd was graded differently
-    depending on which mode was watching it — and an operator's custom values
+    depending on which mode was watching it - and an operator's custom values
     silently reverted to 8/20 on entering this mode.
     """
     if count <= light_max:
@@ -379,13 +379,13 @@ class _Vehicle:
         # "has this vehicle grown enough to be worth re-reading?" is a
         # measurement rather than a guess.
         self.read_area = 0
-        # Score of the best reading so far — see _read_quality.
+        # Score of the best reading so far - see _read_quality.
         self.plate_quality = 0.0
         self.plate_box: Optional[list] = None
         # The same box as FRACTIONS OF THE VEHICLE BOX it was measured in.
         #
         # plate_box is absolute pixels frozen at the moment of the read, and
-        # OCR only runs on a couple of vehicles per frame — so a moving
+        # OCR only runs on a couple of vehicles per frame - so a moving
         # vehicle's bracket was drawn wherever its plate had been up to
         # several seconds earlier, and kept being drawn there while the
         # vehicle's own box was smoothed away across the frame. Storing it
@@ -401,13 +401,13 @@ class _Vehicle:
         self.plate_grammar_ok = False
         self.speed_kmh: Optional[float] = None
         self.speed_reliable = False
-        # Direction of travel — the velocity VECTOR the speed fit always
+        # Direction of travel - the velocity VECTOR the speed fit always
         # computed and never published. None until the vehicle is moving fast
         # enough for a heading to mean anything.
         self.heading_deg: Optional[float] = None
         self.closing_m_s: Optional[float] = None
         self.direction: Optional[str] = None
-        # Unit vector of travel in FRAME pixels — what an arrow drawn over the
+        # Unit vector of travel in FRAME pixels - what an arrow drawn over the
         # video can point along. A compass bearing cannot be drawn on a moving
         # picture without a compass rose to read it against.
         self.screen_dir: Optional[list] = None
@@ -446,7 +446,7 @@ class _Vehicle:
         WHY THIS IS NO LONGER "STOP AT THE FIRST CONFIRMED READ".
         A vehicle is usually first seen far away and small. The reading taken
         there is the WORST one it will ever offer, and stopping at it threw
-        away every better look the vehicle gave while it drove closer — a
+        away every better look the vehicle gave while it drove closer - a
         50px plate confirmed at the far edge of frame, kept in preference to
         the 200px plate available two seconds later.
 
@@ -462,7 +462,7 @@ class _Vehicle:
         taken. The honest estimate of what another call would buy: >1 means
         more pixels on the plate than last time, and 1.0 means none."""
         if not self.plate or self.read_area <= 0:
-            return float("inf")      # never read — nothing to compare, read it
+            return float("inf")      # never read - nothing to compare, read it
         return self.area / float(self.read_area)
 
     @property
@@ -481,14 +481,14 @@ class _Vehicle:
 
           * TWO AGREEING FRAMES. A vehicle crossing frame at speed often gives
             exactly one readable look at its plate. Requiring a second meant
-            the single read — the only one that would ever exist — was thrown
+            the single read - the only one that would ever exist - was thrown
             away, and the operator saw an empty log.
           * GRAMMAR. _INDIA_PLATE_RE does not match perfectly valid non-Indian
             plates; the real captured plate "719257C" fails it. Grammar is a
             useful signal about a reading, not a licence for it to exist.
 
-        Both are still recorded — as plate_votes, plate_strong, plate_px_w and
-        plate_grammar_ok — so the UI can tone a weak read and a report can be
+        Both are still recorded - as plate_votes, plate_strong, plate_px_w and
+        plate_grammar_ok - so the UI can tone a weak read and a report can be
         filtered on strength. What changed is that the reading is no longer
         silently destroyed. Fabrication is prevented upstream now, by
         profiles.py declining to spend the call at all when the geometry says
@@ -513,7 +513,7 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         # vehicle_id when a returning vehicle's plate matched; what it did not
         # restore was the READING, so a car that gave a 210px plate before an
         # occlusion came back holding whatever 60px guess the far side of the
-        # frame offered. Bounded — see _archive_read.
+        # frame offered. Bounded - see _archive_read.
         "read_archive": {},
         "type_counts": {},
         "color_counts": {},
@@ -527,7 +527,7 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         "peak_people": 0,
         # From the persisted calibration, so an operator's custom values apply
         # from the FIRST frame rather than whenever a socket push happens to
-        # land after the analyzer exists — a race the push cannot win, since
+        # land after the analyzer exists - a race the push cannot win, since
         # the panel mounts before the stream negotiates.
         "light_max": calibration.effective()["crowd_light_max"],
         "moderate_max": calibration.effective()["crowd_moderate_max"],
@@ -551,7 +551,7 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         "profile_overrides": {},
         # ── Follow ────────────────────────────────────────────────────────
         "locked_track_id": None,
-        # "vehicle" | "person" — which list the locked id was found in. Needed
+        # "vehicle" | "person" - which list the locked id was found in. Needed
         # because the hold distance and the labelling differ by kind.
         "locked_kind": None,
         "size_ratio": {
@@ -562,7 +562,7 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         "altitude_nudge_v": 0.0,
         "locked_plate": "",
         "follow_request_track_id": None,
-        # Multi-follow. members[0] IS locked_track_id — the primary — so every
+        # Multi-follow. members[0] IS locked_track_id - the primary - so every
         # single-subject path below (the plate identity, the hold-distance
         # control, the lock ladder) keeps working untouched and the group is
         # purely additive. See vision/group_follow.py.
@@ -592,13 +592,13 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         "alt_pd": PDController(kp=1.5, kd=0.3, max_output=1.0, deadband=0.10),
         "dist_pd": PDController(kp=3.0, kd=0.8, max_output=2.5, deadband=0.04),
         # The containment axis. Error is in FRAME FRACTIONS of overshoot past
-        # the group margin — a different unit from both dist_pd (apparent fill)
+        # the group margin - a different unit from both dist_pd (apparent fill)
         # and row_pd (frame rows), which is why it is a third instance rather
         # than a shared one: swapping units under a live derivative kicks.
         # deadband 0.02 is 2% of the frame, below which the group is simply
         # framed and the aircraft should be still.
         "group_pd": PDController(kp=6.0, kd=1.2, max_output=2.5, deadband=0.02),
-        # The Fixed-altitude distance axis — see pursuit.new_row_pd.
+        # The Fixed-altitude distance axis - see pursuit.new_row_pd.
         "row_pd": new_row_pd(),
         # Frame row Fixed mode holds the subject's ground contact on; None =
         # take it from the subject on the next frame.
@@ -610,7 +610,7 @@ def _make_state(session_id: str) -> Dict[str, Any]:
 
 class TrafficManager(BaseAnalyzer):
     """
-    Vehicle count, type, colour, plate, speed, and follow — in one pass.
+    Vehicle count, type, colour, plate, speed, and follow - in one pass.
     """
 
     MODE = "traffic-management"
@@ -641,11 +641,11 @@ class TrafficManager(BaseAnalyzer):
             self.alpr.predict(np.zeros((384, 384, 3), dtype=np.uint8))
         except Exception as e:
             logger.warning(
-                f"fast-alpr unavailable ({e}) — traffic mode will run without "
+                f"fast-alpr unavailable ({e}) - traffic mode will run without "
                 f"plate reading"
             )
 
-        # Face recognition is likewise optional — without it the other four
+        # Face recognition is likewise optional - without it the other four
         # analytics are unaffected, so a load failure degrades this mode rather
         # than refusing it.
         self.face_app = None
@@ -665,7 +665,7 @@ class TrafficManager(BaseAnalyzer):
             self.face_app.get(np.zeros((360, 640, 3), dtype=np.uint8))
         except Exception as e:
             logger.warning(
-                f"InsightFace unavailable ({e}) — traffic mode will run without "
+                f"InsightFace unavailable ({e}) - traffic mode will run without "
                 f"face recognition"
             )
 
@@ -690,8 +690,8 @@ class TrafficManager(BaseAnalyzer):
         if state is None:
             return
         # A vehicle still in frame when the operator stops never gets the
-        # chance to age out of the registry, so without this flush its row —
-        # plate included — is silently dropped. From the outside that is
+        # chance to age out of the registry, so without this flush its row -
+        # plate included - is silently dropped. From the outside that is
         # exactly "ran a session, saw plates, nothing in the history
         # afterward". vehicle-plate-tracking already did this; this module did
         # not, so the two modes lost different amounts of data from the same
@@ -702,7 +702,7 @@ class TrafficManager(BaseAnalyzer):
             return
         # Location has to be attached here too. The live path picks it up in
         # stream_track.recv(), which is not involved once the session is
-        # tearing down — so these rows would otherwise be the only ones
+        # tearing down - so these rows would otherwise be the only ones
         # missing lat/lng, which reads as the GPS dropping out at the end of
         # every flight rather than as a gap in the code.
         try:
@@ -728,7 +728,7 @@ class TrafficManager(BaseAnalyzer):
 
     def request_follow(self, client_id: str, track_id: Optional[int]) -> None:
         """
-        Follow a specific subject — vehicle OR person — or None to release.
+        Follow a specific subject - vehicle OR person - or None to release.
 
         One id space covers both because both come out of the SAME ByteTrack
         pass (one YOLO call over classes [0,2,3,5,7]), so a track id is unique
@@ -771,7 +771,7 @@ class TrafficManager(BaseAnalyzer):
             state["group"].reset()
             if state.get("locked_track_id") == tid:
                 # The primary carries the plate identity and the hold distance,
-                # so handing those to the next member is not bookkeeping — it
+                # so handing those to the next member is not bookkeeping - it
                 # is what stops the group losing its labelling when the
                 # first-clicked subject is dropped.
                 state["locked_track_id"] = members[0]
@@ -788,7 +788,7 @@ class TrafficManager(BaseAnalyzer):
             return                      # the last member; tapping it is a no-op
         if len(members) >= MAX_FOLLOW_MEMBERS:
             logger.info(
-                f"Session {client_id[:8]}: refused #{tid} — group is full at "
+                f"Session {client_id[:8]}: refused #{tid} - group is full at "
                 f"{MAX_FOLLOW_MEMBERS}"
             )
             return
@@ -801,7 +801,7 @@ class TrafficManager(BaseAnalyzer):
 
         Turning it OFF collapses the group back to the primary rather than
         releasing the lock. An operator switching the toggle off mid-flight is
-        saying "just this one", not "stop following" — dropping the lock there
+        saying "just this one", not "stop following" - dropping the lock there
         would stop the aircraft, which is a much larger action than the control
         appears to offer.
         """
@@ -832,8 +832,8 @@ class TrafficManager(BaseAnalyzer):
         Stored PER KIND, because the two are not interchangeable. A person is a
         stable ~1.7m of vertical extent whichever way they face, so a ratio maps
         to a rough range. A vehicle's apparent height depends on its heading as
-        much as its distance — broadside shows the long axis, head-on shows only
-        the narrow front — so the same range yields very different fills, and
+        much as its distance - broadside shows the long axis, head-on shows only
+        the narrow front - so the same range yields very different fills, and
         the only workable target is one the operator nudges while watching the
         actual fill. Sharing one value between them made a target tuned on a car
         drive the drone into the wrong hold distance the moment a person was
@@ -843,7 +843,7 @@ class TrafficManager(BaseAnalyzer):
         if state is None:
             return
         kind = state.get("locked_kind") or "vehicle"
-        # size_ratio always carries both kinds, so the default is unreachable —
+        # size_ratio always carries both kinds, so the default is unreachable -
         # it is only here so a missing key cannot raise mid-flight.
         previous = state["size_ratio"].get(kind, _DEFAULT_SIZE_RATIO)
         ratio = float(np.clip(target_distance_ratio, 0.05, 0.80))
@@ -851,7 +851,7 @@ class TrafficManager(BaseAnalyzer):
         state["dist_pd"].reset()
 
         # In Fixed altitude the forward axis reads the frame row, not apparent
-        # fill, so a ratio alone would not reach it — this control would go dead
+        # fill, so a ratio alone would not reach it - this control would go dead
         # in that mode. The DIRECTION of change is applied to the target row too.
         if state.get("altitude_mode") != "auto" and state.get("target_row") is not None:
             # Closer means the ground contact sits lower in frame: a larger row.
@@ -868,7 +868,7 @@ class TrafficManager(BaseAnalyzer):
         """'fixed' holds the altitude Offboard started at (nudge still applies);
         'auto' lets the altitude PD keep the subject vertically centred.
 
-        Auto-elevate overrides BOTH — holding a fleeing subject in frame at all
+        Auto-elevate overrides BOTH - holding a fleeing subject in frame at all
         outranks either altitude policy.
         """
         if client_id not in self._client_state or mode not in ("fixed", "auto"):
@@ -931,7 +931,7 @@ class TrafficManager(BaseAnalyzer):
         """
         Force an analytic on or off against the geometry, or hand it back to
         "auto". Kept as an override rather than a mode switch so the automatic
-        decision stays visible next to it — an operator who forces plate OCR on
+        decision stays visible next to it - an operator who forces plate OCR on
         at 40m should still be able to read that it is 34px short.
         """
         state = self._client_state.get(client_id)
@@ -942,7 +942,7 @@ class TrafficManager(BaseAnalyzer):
         if subject not in ("plate", "face") or mode not in ("auto", "on", "off"):
             logger.warning(
                 f"Session {client_id[:8]}: ignoring profile override "
-                f"{subject!r}={mode!r} — not a recognised subject/mode"
+                f"{subject!r}={mode!r} - not a recognised subject/mode"
             )
             return
         if mode == "auto":
@@ -978,7 +978,7 @@ class TrafficManager(BaseAnalyzer):
         """
         Build the DB row for one vehicle, or None if it is already written.
 
-        ONE ROW PER VEHICLE, PLATE OR NOT — the same policy as
+        ONE ROW PER VEHICLE, PLATE OR NOT - the same policy as
         vehicle-plate-tracking, which this module previously diverged from.
         Rows used to be restricted to confirmed, grammar-valid plates, which
         left the log silent about most of the traffic actually seen: most
@@ -1009,7 +1009,7 @@ class TrafficManager(BaseAnalyzer):
             # The other two halves of "how much should this reading be
             # trusted". Width was already recorded; agreement and grammar were
             # computed, shown live, and then dropped on the floor at the point
-            # the record became permanent — so a report could not be filtered
+            # the record became permanent - so a report could not be filtered
             # on the very thing that separates a settled plate from a guess.
             "plate_votes": v.plate_votes,
             "plate_grammar_ok": v.plate_grammar_ok,
@@ -1030,7 +1030,7 @@ class TrafficManager(BaseAnalyzer):
             "heading_deg": v.heading_deg,
             "against_flow": v.against_flow,
             # This module never wrote these, so every row's timestamps
-            # defaulted to the moment it was inserted — which is when the
+            # defaulted to the moment it was inserted - which is when the
             # vehicle LEFT, identical for the whole batch, and useless for
             # working out how long anything was in view.
             "first_seen": datetime.fromtimestamp(v.first_seen, tz=timezone.utc),
@@ -1048,7 +1048,7 @@ class TrafficManager(BaseAnalyzer):
         Attach the durable identity a plate reading implies.
 
         If this exact plate was already seen this session under a different
-        vehicle_id, that earlier sighting's track fragmented and came back —
+        vehicle_id, that earlier sighting's track fragmented and came back -
         re-attach the earlier identity rather than minting a new one. That is
         what stops one car being counted as three because it passed behind a
         bus twice.
@@ -1058,7 +1058,7 @@ class TrafficManager(BaseAnalyzer):
         if existing and existing != vehicle.vehicle_id:
             logger.info(
                 f"vehicle #{vehicle.track_id}: plate {vehicle.plate} matches "
-                f"{existing} — re-identified as the same vehicle "
+                f"{existing} - re-identified as the same vehicle "
                 f"(was {vehicle.vehicle_id})"
             )
             vehicle.vehicle_id = existing
@@ -1101,7 +1101,7 @@ class TrafficManager(BaseAnalyzer):
         Carry an earlier sighting's reading onto this one, if it was better.
 
         WHY THIS EXISTS. Re-identification already reattached the vehicle_id,
-        so a returning car was correctly recognised as the same car — and then
+        so a returning car was correctly recognised as the same car - and then
         kept whatever reading THIS sighting happened to produce. Entering frame
         means entering it small and far away, so that reading is systematically
         the worst of the two, and the good one taken before the occlusion was
@@ -1141,7 +1141,7 @@ class TrafficManager(BaseAnalyzer):
         logger.info(
             f"vehicle #{vehicle.track_id}: restored {prior['plate']} from "
             f"{vehicle.vehicle_id}'s earlier sighting "
-            f"({prior['px_w']}px conf={prior['conf']:.2f}) — better than this "
+            f"({prior['px_w']}px conf={prior['conf']:.2f}) - better than this "
             f"sighting's own read"
         )
 
@@ -1157,7 +1157,7 @@ class TrafficManager(BaseAnalyzer):
         needing a read. Rotated by a cursor so a permanently unreadable vehicle
         at the front cannot starve the rest.
 
-        `budget` is the number of calls the active profile allows this frame —
+        `budget` is the number of calls the active profile allows this frame -
         0 when the optics cannot resolve a plate at this range, in which case
         the whole cost is reclaimed rather than spent inventing readings.
         """
@@ -1182,8 +1182,8 @@ class TrafficManager(BaseAnalyzer):
         # re-read a plate that is already as good as it will get, while a
         # vehicle with no reading at all waits behind it.
         #
-        #   1. never read      — infinite gain, nothing to compare against
-        #   2. has grown most since its best read — more pixels than last time
+        #   1. never read      - infinite gain, nothing to compare against
+        #   2. has grown most since its best read - more pixels than last time
         #   3. size, to break ties
         #
         # reread_gain returns +inf for an unread vehicle, so those two rules
@@ -1206,7 +1206,7 @@ class TrafficManager(BaseAnalyzer):
 
         Written as a unit deliberately. The fields used to be updated with an
         independent max() each, which could report one frame's pixel width
-        beside another frame's confidence and a third frame's box — a record
+        beside another frame's confidence and a third frame's box - a record
         no single observation ever supported, and unfalsifiable against the
         photograph saved with it.
         """
@@ -1217,7 +1217,7 @@ class TrafficManager(BaseAnalyzer):
         # The vehicle's size AT THIS READ, so "has it grown enough to be worth
         # another look?" is a measurement rather than a guess.
         vehicle.read_area = vehicle.area
-        # Back to full-frame coordinates — the crop's origin has to be added
+        # Back to full-frame coordinates - the crop's origin has to be added
         # back or the overlay bracket lands in the wrong place.
         vx1, vy1, vx2, vy2 = vehicle.box
         vw, vh = max(1, vx2 - vx1), max(1, vy2 - vy1)
@@ -1237,7 +1237,7 @@ class TrafficManager(BaseAnalyzer):
         Run ALPR on this vehicle's crop and keep the reading if it beats what we
         already had.
 
-        The crop is why this works at all — see the module docstring. Padded
+        The crop is why this works at all - see the module docstring. Padded
         slightly because a vehicle box often clips the bumper the plate sits on.
         """
         if self.alpr is None:
@@ -1274,7 +1274,7 @@ class TrafficManager(BaseAnalyzer):
             if pw * ph < _MIN_PLATE_AREA:
                 logger.debug(
                     f"vehicle #{vehicle.track_id}: plate candidate {pw}x{ph}px "
-                    f"({pw * ph}px^2) below the {_MIN_PLATE_AREA}px^2 floor — ignored"
+                    f"({pw * ph}px^2) below the {_MIN_PLATE_AREA}px^2 floor - ignored"
                 )
                 continue
             aspect = pw / ph
@@ -1307,7 +1307,7 @@ class TrafficManager(BaseAnalyzer):
 
             if text == vehicle.plate:
                 vehicle.plate_votes += 1
-                # A repeat from a WORSE look still counts as agreement — it is
+                # A repeat from a WORSE look still counts as agreement - it is
                 # independent evidence for the same characters. It just must
                 # not overwrite the better look's numbers. Confirmation is
                 # therefore evaluated below for both branches; an earlier
@@ -1316,7 +1316,7 @@ class TrafficManager(BaseAnalyzer):
                 better = quality > vehicle.plate_quality
             elif quality > vehicle.plate_quality:
                 # A different string from a better look. Start it at one vote
-                # rather than inheriting the old one's — that inheritance is
+                # rather than inheriting the old one's - that inheritance is
                 # what let five different readings look like a settled answer.
                 vehicle.plate = text
                 vehicle.plate_votes = 1
@@ -1333,7 +1333,7 @@ class TrafficManager(BaseAnalyzer):
             # Confirmation is AGREEMENT ONLY. Requiring grammar here as well
             # made the relaxation half-done and left a real defect: the valid
             # plate "719257C" fails _INDIA_PLATE_RE, so however many frames
-            # agreed on it, it never confirmed — which meant it never stopped
+            # agreed on it, it never confirmed - which meant it never stopped
             # consuming OCR budget (starving other vehicles for 12 attempts)
             # and never re-attached its durable identity across an occlusion,
             # so one car became several vehicle_ids. Grammar is recorded and
@@ -1347,7 +1347,7 @@ class TrafficManager(BaseAnalyzer):
                 # Re-identification stays gated on AGREEMENT even though
                 # reporting no longer is. Merging two track ids is a claim
                 # about two sightings being one vehicle, and a single wrong
-                # read would silently fuse two different cars' histories —
+                # read would silently fuse two different cars' histories -
                 # a far worse outcome than a duplicate row.
                 self._register_plate(state, vehicle)
                 logger.info(
@@ -1359,13 +1359,13 @@ class TrafficManager(BaseAnalyzer):
             # Evidence is saved for the FIRST accepted read, not only on
             # confirmation. A vehicle crossing frame at speed frequently gives
             # exactly one readable look, and the previous rule logged that
-            # plate with no image to check it against — which is precisely the
+            # plate with no image to check it against - which is precisely the
             # "plates recorded but no captures" complaint. Re-saved on
             # confirmation because a confirming frame is usually the better
             # picture, and the second write overwrites the first.
             # The photo must be of the READING IT SITS BESIDE. Since the best
             # read can now be superseded mid-pass, the evidence is rewritten
-            # whenever a materially better look lands — otherwise the file on
+            # whenever a materially better look lands - otherwise the file on
             # disk shows a 50px plate while the record claims the 200px one.
             if just_confirmed or vehicle.crop_path is None or improved:
                 self._save_evidence(frame_bgr, crop, box, vehicle, state)
@@ -1379,7 +1379,7 @@ class TrafficManager(BaseAnalyzer):
         self._gallery = gallery
         if gallery is not None and not gallery.is_empty():
             logger.info(
-                f"TrafficManager: face gallery installed — {gallery.size} face(s), "
+                f"TrafficManager: face gallery installed - {gallery.size} face(s), "
                 f"{gallery.person_count} person(s)"
             )
 
@@ -1390,9 +1390,9 @@ class TrafficManager(BaseAnalyzer):
 
         Same three properties as person_tracker, for the same reasons:
 
-          * CROPS, not a downscaled whole frame — ~2x the face pixels, and
+          * CROPS, not a downscaled whole frame - ~2x the face pixels, and
             recognition is resolution-starved at any drone standoff.
-          * VOTES before publishing a name — one blurred frame produces a
+          * VOTES before publishing a name - one blurred frame produces a
             confident wrong name otherwise, and a wrong name looks exactly like
             a right one.
           * The name lives on the TRACK, so it survives the many frames where a
@@ -1406,7 +1406,7 @@ class TrafficManager(BaseAnalyzer):
         # `attempt` is the active profile's verdict: at any range where a face
         # is a handful of pixels the model cannot succeed, so running it is
         # pure cost. Names already earned are still reported for as long as
-        # their track lives — they were established when the face WAS
+        # their track lives - they were established when the face WAS
         # resolvable, and dropping them on a climb would erase a good
         # identification rather than decline to make a new one.
         if not attempt or (now - state.get("last_face_check_t", 0.0)) < _FACE_CHECK_INTERVAL_S:
@@ -1465,7 +1465,7 @@ class TrafficManager(BaseAnalyzer):
                     if instant:
                         logger.info(
                             f"Traffic: identified track #{tid} as {match.name} "
-                            f"(sim={match.similarity:.3f}) — confirmed immediately"
+                            f"(sim={match.similarity:.3f}) - confirmed immediately"
                         )
                 else:
                     entry["votes"] = min(entry["votes"] + 1, 6)
@@ -1495,11 +1495,11 @@ class TrafficManager(BaseAnalyzer):
         produced:
 
         * THE VEHICLE IMAGE IS SAVED TOO. A 45x13 plate crop on its own is
-          unreviewable — you cannot tell whether it is a plate, a badge, or a
+          unreviewable - you cannot tell whether it is a plate, a badge, or a
           "SUBSCRIBE" overlay. The vehicle shot is what makes a record
           checkable by a human afterwards.
         * FILENAMES USE THE TRACK ID, NOT THE OCR TEXT. Naming the file after
-          the reading meant a fabricated string became a fabricated filename —
+          the reading meant a fabricated string became a fabricated filename -
           which is precisely what "I only see made-up name codes" was looking
           at. The plate text belongs in the database row, where it sits next to
           its confidence.
@@ -1584,7 +1584,7 @@ class TrafficManager(BaseAnalyzer):
                 in_frame.append(v)
 
                 # Colour: re-read only while it is still unconvincing, then
-                # frozen — a vehicle entering frame is often half-occluded.
+                # frozen - a vehicle entering frame is often half-occluded.
                 if v.color_conf < _COLOUR_GOOD_ENOUGH:
                     col, cconf = classify_vehicle_color(frame_bgr, full)
                     if cconf > v.color_conf:
@@ -1664,7 +1664,7 @@ class TrafficManager(BaseAnalyzer):
             state["last_history_t"] = now
             state["count_history"].append({"t": round(now, 1), "n": len(people)})
         hist = list(state["count_history"])
-        # Rate of change over the last minute, people/min — the headline number
+        # Rate of change over the last minute, people/min - the headline number
         # for "is this building". A steady 200 and a 200 that was 120 a minute
         # ago read identically from a live count and are entirely different
         # situations.
@@ -1707,7 +1707,7 @@ class TrafficManager(BaseAnalyzer):
         # about whether the aircraft still knows what it is following, and a
         # group with two of three in frame plainly does. Keying it to the
         # primary alone would show SEARCHING while the drone was framing the
-        # rest perfectly — the same false-lost report a person lock used to
+        # rest perfectly - the same false-lost report a person lock used to
         # produce when only vehicles were checked.
         _watch = set(group_members) if group_members else (
             {locked_id} if locked_id is not None else set()
@@ -1747,7 +1747,7 @@ class TrafficManager(BaseAnalyzer):
                     "plate_grammar_ok": v.plate_grammar_ok,
                     "plate_strong": v.plate_strong,
                     "plate_box": v.plate_box,
-                    # Preferred by the overlay — see plate_box_rel above.
+                    # Preferred by the overlay - see plate_box_rel above.
                     "plate_box_rel": v.plate_box_rel,
                     "speed_kmh": v.speed_kmh,
                     "speed_reliable": v.speed_reliable,
@@ -1762,7 +1762,7 @@ class TrafficManager(BaseAnalyzer):
                     # Group membership is reported separately from the primary
                     # lock so the overlay can distinguish "this is the subject
                     # everything is labelled from" from "this is also being
-                    # kept in frame" — collapsing them would make dropping the
+                    # kept in frame" - collapsing them would make dropping the
                     # right member guesswork.
                     "in_group": v.track_id in group_members,
                 }
@@ -1785,7 +1785,7 @@ class TrafficManager(BaseAnalyzer):
                 for pr in people
             ],
             "person_count": len(people),
-            # Unique across the session vs in frame now — reported separately
+            # Unique across the session vs in frame now - reported separately
             # because they answer different questions, and conflating them is
             # how headcount figures become fiction.
             "person_count_unique": len(state["person_ids_seen"]),
@@ -1823,7 +1823,7 @@ class TrafficManager(BaseAnalyzer):
             # showing a framing readout is itself the evidence that group
             # control has the aircraft.
             "group_framing": state.get("group_framing"),
-            # Which kind was locked — the panel labels and the hold-distance
+            # Which kind was locked - the panel labels and the hold-distance
             # control both depend on it, and a person lock must not be
             # described as a vehicle.
             "locked_kind": state.get("locked_kind"),
@@ -1852,10 +1852,10 @@ class TrafficManager(BaseAnalyzer):
             "has_telemetry": pose is not None,
             "alpr_available": self.alpr is not None,
             # What this altitude can actually resolve. Without it a refused
-            # plate read is indistinguishable from a broken plate reader — see
+            # plate read is indistinguishable from a broken plate reader - see
             # vision/viability.py.
             **via,
-            # What was ATTEMPTED and why — the counterpart to viability, which
+            # What was ATTEMPTED and why - the counterpart to viability, which
             # says only what is resolvable. Without this a skipped plate read is
             # indistinguishable from a failed one.
             "profile": profile.to_dict(),
@@ -1871,7 +1871,7 @@ class TrafficManager(BaseAnalyzer):
 
         See the notes above _FLOW_MIN_KMH for why all four conditions are
         required. The one worth restating here is that a vehicle is NEVER part
-        of the flow it is judged against — including it would drag the mean
+        of the flow it is judged against - including it would drag the mean
         toward its own heading, so the more decisively wrong-way a vehicle is,
         the less wrong-way it would appear.
 
@@ -1886,7 +1886,7 @@ class TrafficManager(BaseAnalyzer):
         moving_ids = {v.track_id for v in movers}
         for v in in_frame:
             if v.track_id not in moving_ids:
-                # No usable heading this frame — decay rather than reset, so a
+                # No usable heading this frame - decay rather than reset, so a
                 # vehicle briefly occluded or slowed does not lose a flag it
                 # has genuinely earned.
                 v.flow_strikes = max(0, v.flow_strikes - 1)
@@ -1920,7 +1920,7 @@ class TrafficManager(BaseAnalyzer):
                 logger.warning(
                     f"vehicle #{v.track_id} ({v.vehicle_id}): heading "
                     f"{v.heading_deg:.0f}deg against local flow {flow:.0f}deg "
-                    f"over {len(near)} nearby vehicles — AGAINST TRAFFIC"
+                    f"over {len(near)} nearby vehicles - AGAINST TRAFFIC"
                 )
 
     def _viability(self, ctx, pose, W: int, H: int, det_w: int) -> dict:
@@ -1928,13 +1928,13 @@ class TrafficManager(BaseAnalyzer):
         Which subjects the current altitude can resolve.
 
         Uses the SLANT RANGE to frame centre rather than the altitude, because
-        that is the distance a subject in the middle of frame actually sits at —
+        that is the distance a subject in the middle of frame actually sits at -
         at a 45 degree mount they differ by a factor of 1.4.
 
         Effective widths differ per subject and matter: detection runs on a
         downscaled copy while plate OCR runs on a native-resolution crop, so
         using the frame width for everything would overstate detection and
-        understate plate reading — the two errors that mislead most here.
+        understate plate reading - the two errors that mislead most here.
         """
         cal = calibration.effective()
         slant = None
@@ -1952,7 +1952,7 @@ class TrafficManager(BaseAnalyzer):
             # it is 0 when the mode runs native, and it overstates the case
             # where a frame is already narrower than the target and gets passed
             # through unresized. Forwarding the 0 divided by zero in
-            # range_for_px — inside the worker thread, so the mode emitted no
+            # range_for_px - inside the worker thread, so the mode emitted no
             # metadata at all while video kept streaming.
             "vehicle": det_w,
             "person": det_w,
@@ -1975,7 +1975,7 @@ class TrafficManager(BaseAnalyzer):
 
     def _follow(self, state, in_frame, people, client_id, W, H, ctx, pose):
         """
-        Keep the locked subject — or the locked GROUP — framed.
+        Keep the locked subject - or the locked GROUP - framed.
 
         Same three-axis PD shape as human_tracker (yaw primary, distance via
         apparent size, altitude secondary) plus the auto-elevate fallback when
@@ -1987,8 +1987,8 @@ class TrafficManager(BaseAnalyzer):
 
         MULTI-FOLLOW BRANCHES ONLY THE THREE ERROR SIGNALS. Yaw, vertical and
         forward come from the group box instead of one subject's box; every
-        guard below them — the yaw-priority gate, auto-elevate, the altitude
-        floor and ceiling, the smoother — is shared, because a group follow
+        guard below them - the yaw-priority gate, auto-elevate, the altitude
+        floor and ceiling, the smoother - is shared, because a group follow
         that flew the aircraft into the ground would be no better than a single
         one that did. See vision/group_follow.py for the containment policy.
         """
@@ -2059,10 +2059,10 @@ class TrafficManager(BaseAnalyzer):
         # not just the primary: the aircraft must keep framing the subjects it
         # can still see even when the one that happened to be clicked first has
         # stepped behind something. Treating the primary's absence as a total
-        # loss — which the single-subject path does, correctly — would abandon
+        # loss - which the single-subject path does, correctly - would abandon
         # a group that is mostly still visible.
         # RE-BINDING IS SCOPED TO GROUP FOLLOW ON PURPOSE. The single-subject
-        # path has the same track-id fragility, but it degrades BOUNDEDLY —
+        # path has the same track-id fragility, but it degrades BOUNDEDLY -
         # blind ladder, then a hover at BLIND_GIVE_UP_S, and the operator taps
         # again. A group member's loss is permanent and silent: the group
         # reports N-1 for the rest of the session and, because closing in is
@@ -2087,12 +2087,12 @@ class TrafficManager(BaseAnalyzer):
             state["frames_lost"] = state.get("frames_lost", 0) + 1
             state["group_framing"] = None
             # The plate is the identity that survives a track id change, so it
-            # is kept rather than cleared — a re-read of the same characters is
+            # is kept rather than cleared - a re-read of the same characters is
             # the same vehicle, not a guess.
             if not state.get("tracking"):
                 return None
-            # Armed, but nothing is in this frame. Returning None here — which
-            # is what this did — GAPPED the Offboard setpoint stream, and PX4
+            # Armed, but nothing is in this frame. Returning None here - which
+            # is what this did - GAPPED the Offboard setpoint stream, and PX4
             # then flies on at the last velocity it was given until its
             # offboard-loss failsafe fires. That is the same "kept moving"
             # symptom the other four modules produced by replaying the last
@@ -2158,7 +2158,7 @@ class TrafficManager(BaseAnalyzer):
             err_yaw = fx_n - 0.5
             err_alt = fy_n - 0.5
             err_dist = target_ratio - h_ema
-            # Where the subject meets the road — the Fixed-mode distance axis.
+            # Where the subject meets the road - the Fixed-mode distance axis.
             foot_n = foot_row(fy_n, h_ema)
 
             # ── THE DISTANCE AXIS, PER ALTITUDE MODE ──────────────────────
@@ -2182,7 +2182,7 @@ class TrafficManager(BaseAnalyzer):
 
         yaw_factor = max(0.0, 1.0 - abs(err_yaw) / _YAW_PRIORITY_THRESHOLD)
         if yaw_factor > 0.0:
-            # A retreat is never throttled — see pursuit.scale_forward.
+            # A retreat is never throttled - see pursuit.scale_forward.
             forward_m_s = scale_forward(forward_raw, yaw_factor, alt_mode)
         elif forward_raw < 0.0:
             # This module gates forward to a HARD ZERO off boresight, unlike the
@@ -2225,8 +2225,8 @@ class TrafficManager(BaseAnalyzer):
         state["elevate"] = elevate.to_dict() if elevate else None
 
         # THE ALTITUDE FLOOR. Last thing before the command is emitted, so it
-        # catches every source of descent — the altitude PD, an operator nudge,
-        # anything added later — rather than each of them separately.
+        # catches every source of descent - the altitude PD, an operator nudge,
+        # anything added later - rather than each of them separately.
         #
         # This module was the ONLY follow-capable one without it: the other
         # five gained the guard after an unguarded descent flew a SITL aircraft
@@ -2259,7 +2259,7 @@ class TrafficManager(BaseAnalyzer):
         # RULE 1 IS ENFORCED ON THE EMITTED VALUE, NOT THE REQUESTED ONE.
         # Zeroing the controller's output is not enough: the smoother carries
         # the previous frames' momentum, so a group that was closing in when a
-        # member vanished still advances for several frames afterwards — during
+        # member vanished still advances for several frames afterwards - during
         # exactly the frames that decide whether that member is recoverable.
         # Same placement and same reasoning as the altitude floor below it.
         forward_out = cmd["forward_m_s"]
@@ -2287,7 +2287,7 @@ class TrafficManager(BaseAnalyzer):
         The identity that outlives a ByteTrack id, or None when there is none.
 
         Both branches already exist in this module and were simply not being
-        read by follow. A CONFIRMED face gives a person_id — unconfirmed is
+        read by follow. A CONFIRMED face gives a person_id - unconfirmed is
         refused, because re-binding the group to a single-vote guess would put
         the aircraft on the wrong subject, which is worse than losing the right
         one. A vehicle_id is restored by the plate registry when a returning
@@ -2314,7 +2314,7 @@ class TrafficManager(BaseAnalyzer):
         RE-BIND. A member whose track id died is looked for by durable identity
         among the live tracks, and the membership is rewritten to the new id.
         Without this a recognised person who steps behind a pole is lost for the
-        session while the overlay draws their name — the group says "1 of 2" and
+        session while the overlay draws their name - the group says "1 of 2" and
         the face registry says "Japesh", about the same human, at the same time.
 
         RETIRE. A member who is genuinely gone is dropped after MEMBER_RETIRE_S.
@@ -2383,7 +2383,7 @@ class TrafficManager(BaseAnalyzer):
             gone_for = now - seen_t.get(tid, now)
             if should_retire(gone_for, known is not None) and len(members) > 1:
                 logger.info(
-                    f"Session {client_id[:8]}: retiring group member #{tid} — "
+                    f"Session {client_id[:8]}: retiring group member #{tid} - "
                     f"missing {gone_for:.0f}s"
                 )
                 ident.pop(tid, None)
@@ -2429,11 +2429,11 @@ class TrafficManager(BaseAnalyzer):
            walking apart need a range that grows without bound; there is no
            manoeuvre that wins and continuing to fly backwards is just leaving
            the area. The budget is MEASURED GROUND TRACK where there is a fix
-           to measure it with and elapsed time where there is not — see
+           to measure it with and elapsed time where there is not - see
            group_follow.WidenBudget, and note that which of the two is in force
            is reported, not silently substituted. Yaw keeps working, so the
            group stays centred and visible, and the payload carries the range
-           that would have been needed — the operator drops a member or accepts
+           that would have been needed - the operator drops a member or accepts
            the loss rather than watching the aircraft do something
            inexplicable.
         """
@@ -2457,14 +2457,14 @@ class TrafficManager(BaseAnalyzer):
             # AND THE REASON MUST DESCRIBE WHAT IS BEING DONE, not what was
             # assessed. assess_framing writes its reason before the latch has
             # had a say, so during the dwell the payload read "closing in"
-            # while the action was "hold" — a readout contradicting itself in
+            # while the action was "hold" - a readout contradicting itself in
             # front of the operator, which is the failure this module spends
             # most of its length avoiding elsewhere.
             _wanted = {"close": "closing in", "widen": "backing off",
                        "hold": "holding"}.get(framing.action.value, "moving")
             framing.reason = (
                 f"group fills {framing.fill_w * 100:.0f}%x"
-                f"{framing.fill_h * 100:.0f}% — steady for now; {_wanted} "
+                f"{framing.fill_h * 100:.0f}% - steady for now; {_wanted} "
                 f"shortly if it holds, rather than reacting to one frame"
             )
 
@@ -2475,7 +2475,7 @@ class TrafficManager(BaseAnalyzer):
                 error = 0.0
                 action = GroupAction.HOLD
                 framing.reason = (
-                    f"{len(missing)} of {len(members)} not in frame — "
+                    f"{len(missing)} of {len(members)} not in frame - "
                     f"holding rather than closing in"
                 )
 
@@ -2489,8 +2489,8 @@ class TrafficManager(BaseAnalyzer):
                                     depression)
             framing.reason = (
                 "cannot frame all subjects"
-                + (f" — would need about {need:.0f} m of range" if need else "")
-                + f"; {budget.describe()}. Holding position — drop a member "
+                + (f" - would need about {need:.0f} m of range" if need else "")
+                + f"; {budget.describe()}. Holding position - drop a member "
                   f"or release"
             )
 
@@ -2511,7 +2511,7 @@ class TrafficManager(BaseAnalyzer):
         widen_down = None
         if forward_raw < 0.0:
             # Split the retreat between backing off and climbing so the look
-            # angle survives it — see group_follow.widen_velocity.
+            # angle survives it - see group_follow.widen_velocity.
             forward_raw, widen_down = widen_velocity(forward_raw, depression)
             if widen_down is not None and abs(widen_down) < 1e-6:
                 widen_down = None
@@ -2532,7 +2532,7 @@ class TrafficManager(BaseAnalyzer):
         # above. Traffic is watched moving, and there the tinted cells and
         # their per-cell numbers sit on top of the vehicles and people the
         # operator is trying to see, while the same counts are already on the
-        # panel — laid out properly and readable without squinting through
+        # panel - laid out properly and readable without squinting through
         # them.
         #
         # What earns space on the picture is only what is POSITIONAL: a box
@@ -2540,7 +2540,7 @@ class TrafficManager(BaseAnalyzer):
         # does not.
         #
         # Removed from the client canvas at the same time. Keeping the two
-        # renderers in step matters more than usual here — the server path had
+        # renderers in step matters more than usual here - the server path had
         # silently drifted anyway, grading cells with the module's default 8/20
         # while the client used the operator's calibrated thresholds, so the
         # same crowd could read green in one and orange in the other.

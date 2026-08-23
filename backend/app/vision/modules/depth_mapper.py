@@ -18,8 +18,8 @@ class DepthMapper(BaseAnalyzer):
         super().__init__(executor_workers=1, **kwargs)
         settings = get_settings()
         self.device      = settings.device
-        self.viz_min_depth = 0.3   # metres — clip below this
-        self.viz_max_depth = 5.0   # metres — clip above this
+        self.viz_min_depth = 0.3   # metres - clip below this
+        self.viz_max_depth = 5.0   # metres - clip above this
 
         # Downscale input before ZoeDepth to keep inference fast
         # 640x360 gives good quality at ~25ms on 4070
@@ -61,7 +61,7 @@ class DepthMapper(BaseAnalyzer):
         if depth.ndim != 2:
             depth = depth.squeeze()
 
-        # Fix NaN/inf before any arithmetic — this was the original crash
+        # Fix NaN/inf before any arithmetic - this was the original crash
         depth = np.nan_to_num(depth, nan=0.0, posinf=self.viz_max_depth, neginf=0.0)
         depth = np.clip(depth, self.viz_min_depth, self.viz_max_depth)
 
@@ -74,7 +74,7 @@ class DepthMapper(BaseAnalyzer):
         colormap   = cv2.applyColorMap(depth_full, cv2.COLORMAP_JET)
 
         # Metric stats from the same clipped depth the colormap uses, so UI
-        # values match the visualization. (No per-frame empty_cache here —
+        # values match the visualization. (No per-frame empty_cache here -
         # it forces a GPU sync/allocator flush every frame, which caused
         # visible stutter; the worker pool clears VRAM on mode switch.)
         meta: Dict[str, Any] = {

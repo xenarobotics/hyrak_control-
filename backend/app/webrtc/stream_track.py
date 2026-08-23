@@ -42,12 +42,12 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
         self._snapshot_cb    = snapshot_callback
         # False = client-overlay stream: the browser shows its own camera
         # and draws results itself, so we skip all output composition and
-        # no downlink video exists — only cv_results payloads go back.
+        # no downlink video exists - only cv_results payloads go back.
         self._return_video   = return_video
         self._frame_cache:   dict[str, np.ndarray] = {}
         self._meta_cache:    dict[str, dict] = {}
         # Pixel work (colour conversion, overlay drawing) runs here, off the
-        # event loop — ~6-10ms/frame at 1080p that would otherwise delay
+        # event loop - ~6-10ms/frame at 1080p that would otherwise delay
         # drone commands, telemetry and signaling for every session.
         # Single worker keeps frame order.
         self._px_executor    = ThreadPoolExecutor(max_workers=1)
@@ -63,7 +63,7 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
         # 5s accumulator owned by the warning log).
         self._skipped_window = 0
         # Per-stage accounting for the live-edge warning. Every stage of
-        # recv() is timed, plus `outside` — the wall time between returning a
+        # recv() is timed, plus `outside` - the wall time between returning a
         # frame and being called again, which is everything we do NOT control
         # (aiortc's outbound encode, RTP packetisation, and any event-loop
         # starvation). Without that term the warning can only ever blame the
@@ -109,7 +109,7 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
         it, monotonically.
 
         NOTE: this used to claim `_throttle_playback` "applies only to file
-        sources". That is false for our UDP paths — aiortc keys it off a
+        sources". That is false for our UDP paths - aiortc keys it off a
         container-format allow-list that contains `rtsp` but not `mpegts` or
         `sdp`, so both server-side UDP sources were being paced against PTS.
         Combined with the skip below it produced a feedback loop that pinned
@@ -119,12 +119,12 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
         AI modes are exactly that case. Manual control is a pure relay, but an
         analysis mode pays two round trips through a SINGLE-worker executor
         (`to_ndarray` then `_compose`), ~6-10ms each at 1080p plus overlay
-        drawing — against a 33ms budget at 30fps. Once the total crosses the
+        drawing - against a 33ms budget at 30fps. Once the total crosses the
         frame interval the stream never recovers on its own: the operator sees
         video that runs for a few seconds after starting analysis and then
         appears to freeze, because it is falling further behind every frame.
 
-        Dropping the backlog is the correct trade for a live pilot view — a
+        Dropping the backlog is the correct trade for a live pilot view - a
         stale frame has no value, and the alternative is unbounded latency. This
         is the server-side counterpart of the client's live-edge clamp
         (frontend/src/lib/liveEdge.ts).
@@ -158,12 +158,12 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
                 # "analysis is slower than the incoming frame rate", which is
                 # wrong whenever the session is in manual-control: there is no
                 # analyzer at all on that path, and the cost is the outbound
-                # H.264 encode (aiortc, libx264 at source resolution — measured
+                # H.264 encode (aiortc, libx264 at source resolution - measured
                 # ~0.79 core for one 1080p session). Blaming analysis there
                 # points at the wrong thing to fix.
                 session = self._session_mgr.get(self.session_id)
                 mode = session.mode.value if session and session.mode else "unknown"
-                # Name the actual consumer, MEASURED — not guessed. The
+                # Name the actual consumer, MEASURED - not guessed. The
                 # previous version of this line asserted "analysis + the
                 # outbound H.264 encode cannot keep up", and that assertion
                 # sent the investigation into optimising a pipeline which
@@ -172,7 +172,7 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
                 # measured is worse than one that just reports the numbers.
                 logger.warning(
                     f"Session {self.session_id[:8]}: dropped {self._skipped} stale frame(s) in 5s "
-                    f"to hold the live edge — {self._fps:.1f} fps delivered downstream "
+                    f"to hold the live edge - {self._fps:.1f} fps delivered downstream "
                     f"(mode={mode}). Per-frame inside recv(): {self._stage_report()}"
                 )
                 self._skipped = 0
@@ -214,7 +214,7 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
         mode = session.mode if session else None
 
         # Fast path: manual control (or no session yet) is a pure relay.
-        # Skip the BGR24 <-> native colour-space round trip entirely —
+        # Skip the BGR24 <-> native colour-space round trip entirely -
         # it was burning CPU on every frame for the most common mode.
         if mode is None or mode.value == "manual-control":
             self._maybe_snapshot(None, frame)
@@ -224,7 +224,7 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
         analyzer = self._vision_pool.get_for_session(self.session_id)
 
         # While a model is (re)loading there's no annotated frame to draw
-        # yet — relay the raw frame instead of paying for a wasted
+        # yet - relay the raw frame instead of paying for a wasted
         # conversion round trip.
         if analyzer is None and mode.value not in self._frame_cache:
             self._maybe_snapshot(None, frame)
@@ -240,8 +240,8 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
         if analyzer:
             try:
                 # Telemetry is snapshotted HERE, next to the frame it belongs
-                # to, and handed down with it. Reading it later — after
-                # inference, where the plate/lat-lng block below does — is
+                # to, and handed down with it. Reading it later - after
+                # inference, where the plate/lat-lng block below does - is
                 # fine for logging a position but useless for measuring
                 # motion: by then it describes a different moment, and frames
                 # get dropped in between.
@@ -269,7 +269,7 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
                 pending_db = meta.pop("_pending_db", None)
                 if pending_db:
                     # Vehicle/plate events get the drone's own live GPS at
-                    # capture time — more meaningful than a static camera-ID
+                    # capture time - more meaningful than a static camera-ID
                     # string, and this is the first point back in the event
                     # loop where session_manager/telemetry are reachable.
                     if any(ev.get("table") == "plate_event" for ev in pending_db):
@@ -321,7 +321,7 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
                 # Client-overlay streams draw boxes browser-side from these
                 # payloads, so every fresh result goes out with the frame
                 # size for coordinate scaling. Processed streams only feed
-                # the results panel — 10Hz is plenty there.
+                # the results panel - 10Hz is plenty there.
                 emit_now = time.time()
                 if self._emit_callback and (
                     not self._return_video
@@ -335,7 +335,7 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
                             "mode": mode.value, "session_id": self.session_id,
                             "frame_w": w, "frame_h": h,
                             # Server-side truth. The browser cannot derive any
-                            # of this in overlay mode — there is no inbound
+                            # of this in overlay mode - there is no inbound
                             # RTP to measure.
                             "delivered_fps": round(self._fps, 1),
                             "source_fps": round(self._source_fps, 1),
@@ -347,7 +347,7 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
                         pass
 
         if not self._return_video:
-            # Nobody watches this track's output — the signaling drive task
+            # Nobody watches this track's output - the signaling drive task
             # pulls frames just to keep the pipeline flowing.
             self._maybe_snapshot(img_bgr)
             self._lap("emit_and_persist", _t)
@@ -369,14 +369,14 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
 
     async def _enrol_captured(self, name: str, paths: list) -> None:
         """Write live-captured shots into the face gallery and tell the
-        operator how many actually held a usable face — a shot silently
+        operator how many actually held a usable face - a shot silently
         dropped for having no detectable face is the difference between a
         gallery that works and one that quietly does not."""
         try:
             from app.vision.persistence import enrol_person_images, load_face_gallery
             results = await enrol_person_images(name, paths)
             ok = sum(1 for r in results if r.ok)
-            logger.info(f"Live enrolment: {name!r} — {ok}/{len(results)} shots usable")
+            logger.info(f"Live enrolment: {name!r} - {ok}/{len(results)} shots usable")
             # Reload the in-RAM index so the person is recognisable NOW,
             # rather than only after the session is restarted.
             analyzer = self._vision_pool.get_for_session(self.session_id)
@@ -394,7 +394,7 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
             logger.warning(f"Live enrolment failed for {name!r}: {e}")
 
     # Overlay modes (detector/trackers) draw the latest results onto the
-    # CURRENT camera frame — every frame is displayed, so the video is as
+    # CURRENT camera frame - every frame is displayed, so the video is as
     # smooth as the fly-tab relay and only the annotations lag by one
     # inference. Transform modes (depth/enhancer) return None from
     # draw_overlay and fall back to the cached output frame.
@@ -409,8 +409,8 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
         return out_bgr, VideoFrame.from_ndarray(out_bgr, format="bgr24")
 
     # /admin observer mirror: ~4fps downscaled JPEGs of exactly what this
-    # session sees (annotated when a vision mode is active). All work —
-    # including the colour conversion on the manual fast path — is skipped
+    # session sees (annotated when a vision mode is active). All work -
+    # including the colour conversion on the manual fast path - is skipped
     # while nobody is watching.
     _SNAP_INTERVAL = 0.25
     _SNAP_WIDTH    = 640

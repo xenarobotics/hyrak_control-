@@ -1,4 +1,4 @@
-// Face gallery — the enrolled-identity side of face recognition.
+// Face gallery - the enrolled-identity side of face recognition.
 //
 // Distinct from the reference-photo flow in PersonTrackerPanel, which is
 // unchanged: upload a photo, follow that person. This is a persistent
@@ -22,7 +22,7 @@ export interface GalleryPerson {
 
 /** One image's outcome. Reported per file because a photo silently skipped
  *  for having no detectable face is the difference between recognition
- *  working and not — the operator needs to know which one to re-shoot. */
+ *  working and not - the operator needs to know which one to re-shoot. */
 export interface EnrolResult {
     filename: string
     ok: boolean
@@ -40,7 +40,7 @@ export async function fetchGallery(): Promise<GalleryPerson[]> {
         if (!r.ok) return []
         return (await r.json()).persons ?? []
     } catch {
-        // The gallery is an enhancement, never a prerequisite — a backend
+        // The gallery is an enhancement, never a prerequisite - a backend
         // that cannot answer must not break the tracking panel.
         return []
     }
@@ -62,7 +62,7 @@ export async function enrolPhotos(
     return r.json()
 }
 
-/** Enrol a server-side `<root>/<person name>/<images>` tree in one call —
+/** Enrol a server-side `<root>/<person name>/<images>` tree in one call -
  *  the layout of the provided sample set, so it needs no reshuffling. */
 export async function enrolFolder(path: string): Promise<{
     enrolled: number

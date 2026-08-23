@@ -1,6 +1,6 @@
 // Interface preferences that are not the colour theme: font family and UI
 // scale. Both are DOM-level (an attribute and a zoom style on <html>), so
-// they apply to every page without threading a context through the tree —
+// they apply to every page without threading a context through the tree -
 // and both are re-applied before first paint by the inline script in
 // app/layout.tsx, so a reload doesn't flash the defaults.
 
@@ -13,7 +13,7 @@ export const UI_FONTS: { value: UiFont; label: string }[] = [
     { value: 'nunito', label: 'Nunito' },
 ]
 
-/** Percent. 100 = as designed. The whole interface scales — the request
+/** Percent. 100 = as designed. The whole interface scales - the request
  *  behind this was "the text is too small", and scaling only the text
  *  breaks every panel that was sized around it. */
 export const UI_ZOOMS = [90, 100, 110, 120, 135] as const
@@ -59,7 +59,7 @@ export function setUiZoom(pct: number) {
 
 export function applyUiZoom(pct: number) {
     // CSS zoom on the root: standardised in 2024, supported by Chromium,
-    // Firefox 126+ and Safari — and unlike a font-size hack it scales the
+    // Firefox 126+ and Safari - and unlike a font-size hack it scales the
     // panels WITH the text, which is what "make everything bigger" means.
     document.documentElement.style.zoom = pct === 100 ? '' : String(pct / 100)
 }

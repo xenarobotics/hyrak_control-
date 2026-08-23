@@ -13,7 +13,7 @@ logger = logging.getLogger("verocore.events.telemetry")
 def _pursuit_analyzers():
     """
     Every analyzer that can chase a subject, and therefore answers the shared
-    follow controls — hold distance, fixed/auto altitude, altitude nudge.
+    follow controls - hold distance, fixed/auto altitude, altitude nudge.
 
     One list instead of the seven hand-copied import blocks and isinstance
     tuples this file used to carry. Those had already drifted: traffic
@@ -38,8 +38,8 @@ def _crowd_analyzers():
     Every analyzer that draws the 3x3 density grid, and so answers the zone
     naming and density threshold controls.
 
-    Traffic management borrows crowd-management's grid wholesale — same
-    layout, same colouring, same persisted thresholds — but was routed to
+    Traffic management borrows crowd-management's grid wholesale - same
+    layout, same colouring, same persisted thresholds - but was routed to
     neither control, so naming a zone or setting a custom density band did
     nothing there while the panel offered both.
     """
@@ -54,7 +54,7 @@ async def execute_drone_action(tel, action: str, data: dict) -> dict:
     # WHY A REFUSAL NEEDS WORDS. Every branch below returns a bare ok flag, so
     # a drone that answered "no, pre-arm checks failed" and a command that
     # never left the ground station produced the identical UI. The operator
-    # then goes and checks the radio — the one part that is demonstrably
+    # then goes and checks the radio - the one part that is demonstrably
     # working, since the refusal came back over it. TelemetryManager records
     # the autopilot's own STATUSTEXT for the failure; pass it through.
     if not result.get("ok") and not result.get("error"):
@@ -156,7 +156,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
     @sio.on("start_rc_monitor")
     async def on_start_rc_monitor(sid):
         """Ask for live RC channel data. Replies rc_monitor_status with
-        {listening, port, live} — `listening` false means the port could not
+        {listening, port, live} - `listening` false means the port could not
         be bound; `live` false means bound but nothing is arriving, which is
         what a serial-only link (USB FC) looks like and the page must say so
         rather than show dead bars."""
@@ -202,7 +202,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 other_session.drone = None
                 await sio.emit(
                     "telemetry_status",
-                    {"status": "disconnected", "message": "Disconnected — another client connected to this drone"},
+                    {"status": "disconnected", "message": "Disconnected - another client connected to this drone"},
                     to=other_session.socket_id,
                 )
 
@@ -213,7 +213,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 asyncio.create_task(
                     sio.emit("telemetry_update", snapshot_dict, to=sid)
                 )
-                # Flight recorder — no-op unless armed and identified
+                # Flight recorder - no-op unless armed and identified
                 from app.flights import recorder
                 asyncio.create_task(
                     recorder.on_snapshot(
@@ -242,7 +242,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 pass
 
         def on_fc_message(msg: dict):
-            # The autopilot's own words, streamed to the message log — the
+            # The autopilot's own words, streamed to the message log - the
             # same thing QGroundControl's vehicle messages panel shows.
             try:
                 asyncio.create_task(sio.emit("fc_message", msg, to=sid))
@@ -250,7 +250,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 logger.debug(f"Could not forward FC message: {e}")
 
         def on_pilot_override(mode: str):
-            """The aircraft left Offboard without us asking — a human has it.
+            """The aircraft left Offboard without us asking - a human has it.
 
             STOPPING THE TRACKER IS THE POINT, and it has to happen here rather
             than in the telemetry manager, which knows nothing about analyzers.
@@ -284,7 +284,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             Whole rather than as deltas: a calibration is a few dozen events
             over half a minute, so there is nothing to save by diffing, and a
             panel rebuilt from a full state cannot drift out of step with the
-            aircraft the way one accumulating patches can — which on this
+            aircraft the way one accumulating patches can - which on this
             screen would mean showing a side as done that the autopilot is
             still waiting for.
             """
@@ -301,7 +301,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         #
         # The address cannot say. In this product the radio is plugged into the
         # operator's machine and relayed here (serial_bridge / rf_bridge), so
-        # MAVSDK always sees a loopback udpin:// whatever is at the far end —
+        # MAVSDK always sees a loopback udpin:// whatever is at the far end -
         # which is why the manager's own startswith("serial://") test had never
         # once been true on a real-radio flight, and the conservative profile
         # it guards was never selected. `link_kind` is passed by whichever
@@ -314,11 +314,11 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             # SAY WHY, not just that. "Could not connect to udpin://127.0.0.1:59810"
             # names a loopback port the operator has never heard of and cannot
             # act on. When the link is a browser radio the bridge knows the one
-            # thing that matters — whether any bytes arrived from it at all.
+            # thing that matters - whether any bytes arrived from it at all.
             detail = ""
             own = serial_bridge.get_bridge(session.session_id)
             if own is not None and own.address == address:
-                detail = f" — {own.traffic()}"
+                detail = f" - {own.traffic()}"
                 logger.warning(
                     f"Session {session.session_id[:8]} radio connect failed{detail}"
                 )
@@ -345,7 +345,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             """Read the FC's hardware UID and map it to a persistent drone
             record, in the background so connect isn't delayed. A browser
             radio arrives over a loopback-UDP bridge, so 'udp address' alone
-            doesn't mean simulated — the presence of a serial bridge does."""
+            doesn't mean simulated - the presence of a serial bridge does."""
             from app.registry import drones as drone_registry
 
             uid = await manager.get_hardware_uid()
@@ -377,7 +377,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
     async def on_connect_rf_bridge(sid, data=None):
         """RF link where telemetry already arrives over UDP (e.g. wfb-ng)
         but on fixed split ports the normal udpin:// 'reply to sender'
-        trick can't reach — see app/telemetry/rf_bridge.py for why."""
+        trick can't reach - see app/telemetry/rf_bridge.py for why."""
         from app.telemetry import rf_bridge
         data = data or {}
         # THE UPLINK HOST IS NOT ALWAYS LOOPBACK, and it was hardcoded to be.
@@ -388,8 +388,8 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         # listener, and that listener is only on 127.0.0.1 while the RF decoder
         # runs on this same machine.
         #
-        # Move the decoder onto its own board — which is exactly what the
-        # Luckfox ground dongle is — and the uplink target moves with it, while
+        # Move the decoder onto its own board - which is exactly what the
+        # Luckfox ground dongle is - and the uplink target moves with it, while
         # the downlink looks completely unaffected. The failure is therefore
         # silent and one-directional: telemetry streams in perfectly, and every
         # command, mission upload and parameter write is sent into the local
@@ -398,7 +398,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         bridge = await rf_bridge.ensure_started(
             downlink_port=int(data.get("downlinkPort") or 14550),
             uplink_port=int(data.get("uplinkPort") or 14551),
-            # None, not a literal — ensure_started resolves the deployed
+            # None, not a literal - ensure_started resolves the deployed
             # default from settings, so the address lives in one place.
             uplink_host=(str(data.get("uplinkHost") or "").strip() or None),
         )
@@ -413,20 +413,20 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         # The client sets its UI to "connecting" the moment it asks, and ONLY a
         # telemetry_status event can move it off that. Any path out of here
         # that doesn't emit one leaves the operator staring at "connecting"
-        # forever — so every failure below reports as telemetry_status,
+        # forever - so every failure below reports as telemetry_status,
         # including an unexpected exception (which socket.io would otherwise
         # swallow silently).
         session = session_manager.get_by_socket(sid)
         if not session:
             await sio.emit(
                 "telemetry_status",
-                {"status": "error", "message": "No session found — reload the page and try again"},
+                {"status": "error", "message": "No session found - reload the page and try again"},
                 to=sid,
             )
             return
 
         # Which of the six relays this is. They all arrive on this one event,
-        # and every one of them used to log as "browser radio" — so when a
+        # and every one of them used to log as "browser radio" - so when a
         # link half-worked the log could not say what was carrying it.
         source = str((data or {}).get("source") or "").strip() or "radio"
         try:
@@ -499,7 +499,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             return
         if session.mode != AnalysisMode.MANUAL_CONTROL:
             return
-        # Red-zone pushback owns the drone — pilot input is dropped until
+        # Red-zone pushback owns the drone - pilot input is dropped until
         # the monitor releases the lock.
         if getattr(session, "zone_lock", False):
             return
@@ -525,7 +525,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             return
         action = data.get("action", "")
 
-        # No arming/takeoff inside a red zone (without a permit — future phase)
+        # No arming/takeoff inside a red zone (without a permit - future phase)
         if action in ("arm", "takeoff"):
             from app.zones import engine as zone_engine
             snap = tel.snapshot
@@ -536,7 +536,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 names = ", ".join(z["name"] for z in check["zones"])
                 await sio.emit("action_result", {
                     "action": action, "ok": False,
-                    "error": f"Blocked — inside NO-FLY (red) zone: {names}",
+                    "error": f"Blocked - inside NO-FLY (red) zone: {names}",
                 }, to=sid)
                 logger.warning(f"{action} blocked in red zone for {session.session_id[:8]}")
                 return
@@ -566,7 +566,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
             async def _do_switch():
                 # If we're leaving human-tracking, stop offboard cleanly BEFORE
-                # the analyzer is swapped — this gives the drone a proper HOLD
+                # the analyzer is swapped - this gives the drone a proper HOLD
                 # command instead of letting PX4 hit its setpoint-loss failsafe.
                 if old_mode == AnalysisMode.HUMAN_TRACKING:
                     tel = session_manager.get_telemetry(session.session_id)
@@ -595,7 +595,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         session = session_manager.get_by_socket(sid)
         if not session:
             return
-        # None is NOT "ignore" — it is Release, which is how every panel
+        # None is NOT "ignore" - it is Release, which is how every panel
         # clears a selection. Returning early here meant Release silently did
         # nothing, and the target stayed locked with no way to let it go.
         person_id = data.get("person_id")
@@ -622,7 +622,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 analyzer.follow_track(session.session_id, person_id)
             else:
                 logger.warning(
-                    f"select_person ignored — {type(analyzer).__name__} does "
+                    f"select_person ignored - {type(analyzer).__name__} does "
                     f"not support person selection"
                 )
                 return
@@ -707,7 +707,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         An override rather than a mode switch, so the automatic decision stays
         visible beside it: an operator forcing plate OCR on at 40m should still
         be able to read that the plate is 34px short of readable. The analyzer
-        validates subject and mode — this handler deliberately does not
+        validates subject and mode - this handler deliberately does not
         second-guess it, so there is one place the rules live.
         """
         session = session_manager.get_by_socket(sid)
@@ -728,7 +728,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
         Names, not coordinates: the grid is fixed at 3x3 in frame, so a label
         is only meaningful while the drone holds a position. That is exactly
-        how this gets used — park over a venue, name the cells once, and every
+        how this gets used - park over a venue, name the cells once, and every
         alert afterwards says "North Gate" instead of "cell 1".
         """
         session = session_manager.get_by_socket(sid)
@@ -741,7 +741,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
     @sio.on("set_crowd_thresholds")
     async def on_set_crowd_thresholds(sid, data):
         """Payload: { light_max: int, moderate_max: int }. Whole-frame
-        density is FOV-dependent — operator-calibrated from the Settings
+        density is FOV-dependent - operator-calibrated from the Settings
         page, no universal default is correct."""
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
@@ -781,20 +781,20 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         Terrain following:
         - terrain_follow=False → mission.MissionItem with frame=3 (relative to home)
         - terrain_follow=True  → mission_raw.MissionItem with frame=10
-          (MAV_FRAME_GLOBAL_TERRAIN_ALT) — requires TERRAIN_ENABLE=1 on the drone.
+          (MAV_FRAME_GLOBAL_TERRAIN_ALT) - requires TERRAIN_ENABLE=1 on the drone.
         """
         try:
             session = session_manager.get_by_socket(sid)
             if not session:
                 await sio.emit("mission_upload_result", {
-                    "ok": False, "msg": "No active session — reconnect to the backend"
+                    "ok": False, "msg": "No active session - reconnect to the backend"
                 }, to=sid)
                 return
 
             tel = session_manager.get_telemetry(session.session_id)
             if not tel or not tel.is_connected:
                 await sio.emit("mission_upload_result", {
-                    "ok": False, "msg": "Drone not connected — connect via Telemetry tab first"
+                    "ok": False, "msg": "Drone not connected - connect via Telemetry tab first"
                 }, to=sid)
                 return
 
@@ -824,7 +824,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                     await sio.emit("mission_upload_result", {
                         "ok": False, "blocked": "red", "zones": path_check["zones"],
                         "can_request": bool(session.drone),
-                        "msg": f"Mission crosses NO-FLY (red) zone: {names} — permission required",
+                        "msg": f"Mission crosses NO-FLY (red) zone: {names} - permission required",
                     }, to=sid)
                     logger.warning(
                         f"Mission blocked (red zones: {names}) for {session.session_id[:8]}"
@@ -834,7 +834,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                     f"Red-zone mission allowed under permit {permit['id'][:8]} "
                     f"for {session.session_id[:8]}"
                 )
-            # An approved permit covers the whole profile — no extra orange ack
+            # An approved permit covers the whole profile - no extra orange ack
             if (path_check["zone_class"] == "orange"
                     and not data.get("ack_orange") and permit is None):
                 names = ", ".join(z["name"] for z in path_check["zones"])
@@ -877,7 +877,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         cannot disturb a target the operator chose deliberately.
 
         Reloads the gallery on enable rather than reusing the snapshot taken
-        at session start — otherwise someone enrolled mid-session would be
+        at session start - otherwise someone enrolled mid-session would be
         invisible until the mode was switched away and back.
         """
         session = session_manager.get_by_socket(sid)
@@ -911,7 +911,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         mode, or null to release. Both modules expose the same
         request_follow(client_id, track_id) shape, so one handler routes to
         whichever is actually running this session. Takes effect as soon as
-        that vehicle is in frame — locking a track that is not visible would
+        that vehicle is in frame - locking a track that is not visible would
         commit the aircraft to nothing.
         """
         session = session_manager.get_by_socket(sid)
@@ -922,7 +922,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         from app.vision.modules.traffic_manager import TrafficManager
         if not isinstance(analyzer, (TrafficManager, PlateTracker)):
             logger.warning(
-                f"set_follow_vehicle ignored — analyzer is "
+                f"set_follow_vehicle ignored - analyzer is "
                 f"{type(analyzer).__name__}, not a vehicle module"
             )
             return
@@ -938,7 +938,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
     async def on_set_multi_follow(sid, data):
         """Payload: { enabled: bool }
 
-        Turn GROUP follow on or off — traffic-management only. With it on, a
+        Turn GROUP follow on or off - traffic-management only. With it on, a
         tap on the video adds or removes a subject from the group instead of
         replacing the lock, and the aircraft backs off and climbs to keep every
         member in frame rather than centring one.
@@ -956,7 +956,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         from app.vision.modules.traffic_manager import TrafficManager
         if not isinstance(analyzer, TrafficManager):
             logger.warning(
-                f"set_multi_follow ignored — analyzer is "
+                f"set_multi_follow ignored - analyzer is "
                 f"{type(analyzer).__name__}, not traffic-management"
             )
             return
@@ -966,13 +966,13 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
     @sio.on("set_vehicle_tracking")
     async def on_set_vehicle_tracking(sid, data):
-        """Payload: { active: bool } — start/stop flying after the locked
+        """Payload: { active: bool } - start/stop flying after the locked
         vehicle, in either traffic-management or vehicle-plate-tracking.
 
         ARMING OFFBOARD IS HALF THE JOB, AND IT WAS MISSING.
         Setting the analyzer's flag only makes it COMPUTE velocity setpoints.
         PX4 discards every one of them unless Offboard mode is running, so the
-        drone sat still while the module happily produced commands — no error
+        drone sat still while the module happily produced commands - no error
         anywhere, because nothing had failed. `set_tracking` (human/person
         tracking) has always done both halves; this handler did only the first,
         which is why vehicle follow looked implemented and did nothing.
@@ -994,7 +994,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                     # Do NOT arm the analyzer: it would report "following"
                     # while the aircraft ignores every setpoint.
                     await sio.emit("error", {
-                        "msg": "Failed to start Offboard mode — is the drone "
+                        "msg": "Failed to start Offboard mode - is the drone "
                                "armed and airborne?",
                     }, to=sid)
                     await sio.emit("vehicle_tracking_status",
@@ -1008,11 +1008,11 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
     @sio.on("enrol_person_live")
     async def on_enrol_person_live(sid, data):
-        """Payload: { track_id: int, name: str } — or { cancel: true }.
+        """Payload: { track_id: int, name: str } - or { cancel: true }.
 
         Enrols somebody the drone is looking at RIGHT NOW. The gallery then
         holds this camera, this lens, this angle and this lighting, which is
-        what the recogniser is actually asked to match later — an uploaded
+        what the recogniser is actually asked to match later - an uploaded
         photo is a different imaging problem and matches less well.
         """
         session = session_manager.get_by_socket(sid)
@@ -1040,7 +1040,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         started = analyzer.begin_capture(session.session_id, int(tid), name)
         await sio.emit("enrolment_started", {
             "ok": started, "name": name, "track_id": int(tid),
-            "msg": (f"Capturing shots of {name} — keep them in frame"
+            "msg": (f"Capturing shots of {name} - keep them in frame"
                     if started else "Could not start capture"),
         }, to=sid)
 
@@ -1091,7 +1091,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         if not tel or not tel.is_connected:
             await sio.emit(
                 "params_result",
-                {"ok": False, "error": "Drone not connected — connect via the Connection section first"},
+                {"ok": False, "error": "Drone not connected - connect via the Connection section first"},
                 to=sid,
             )
             return
@@ -1110,7 +1110,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         else:
             await sio.emit(
                 "params_result",
-                {"ok": False, "error": "Parameter download failed — check drone connection and try again"},
+                {"ok": False, "error": "Parameter download failed - check drone connection and try again"},
                 to=sid,
             )
 
@@ -1118,7 +1118,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
     async def on_get_param(sid, data):
         """Read a single parameter. Payload: {key, param_type?}.
         Emits param_get_ack: {key, ok, value}. One read, not the 30 s
-        everything-download fetch_params runs — the sensors page asks for
+        everything-download fetch_params runs - the sensors page asks for
         two mount rotations and must not pay that price."""
         session = session_manager.get_by_socket(sid)
         if not session:
@@ -1164,7 +1164,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 "key": key,
                 "ok": ok,
                 "value": value,
-                "error": None if ok else f"Failed to set {key} — check connection and try again",
+                "error": None if ok else f"Failed to set {key} - check connection and try again",
             },
             to=sid,
         )
@@ -1197,7 +1197,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 if not ok:
                     await sio.emit(
                         "error",
-                        {"msg": "Failed to start Offboard mode — is drone armed and airborne?"},
+                        {"msg": "Failed to start Offboard mode - is drone armed and airborne?"},
                         to=sid
                     )
                     return

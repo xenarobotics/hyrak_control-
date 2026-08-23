@@ -55,8 +55,8 @@ function buildSmoothCoords(
     const a2 = waypoints[Math.min(i + 1, waypoints.length - 1)].altitude
 
     // Altitude at arcStart/arcEnd must match how far along each adjacent
-    // segment those points actually sit (maxR / segment length) — not the
-    // waypoint's own altitude — otherwise altitude races ahead of position
+    // segment those points actually sit (maxR / segment length) - not the
+    // waypoint's own altitude - otherwise altitude races ahead of position
     // and the vertical profile kinks right where the horizontal curve is
     // smoothest. Then blend with the same quadratic Bezier weights as x/y
     // so the climb/descent follows the curve instead of a separate ramp.
@@ -162,7 +162,7 @@ function makeDroneCanvas(): HTMLCanvasElement {
   ctx.lineWidth = 1.5
   ctx.stroke()
 
-  // Heading arrow — always drawn pointing canvas-up; actual world-heading
+  // Heading arrow - always drawn pointing canvas-up; actual world-heading
   // rotation is applied via billboard.rotation in preUpdate every frame so
   // the arrow stays world-aligned even as the user orbits the globe.
   ctx.save()
@@ -210,10 +210,10 @@ export default function MissionMap3D() {
   const pathGenRef      = useRef(0)
   const pathSyncRef     = useRef<(() => void) | null>(null)
   const tileSettleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Chase-cam state — refs so the preUpdate listener always reads current values
+  // Chase-cam state - refs so the preUpdate listener always reads current values
   const followDroneRef  = useRef(false)
   const droneHeadingRef = useRef(0)
-  // dronePosRef: lat/lng/absAlt for the chase cam — uses absolute_altitude_m
+  // dronePosRef: lat/lng/absAlt for the chase cam - uses absolute_altitude_m
   // (WGS84/MSL from PX4, same datum as Cesium's Cartesian3.fromDegrees height)
   // so the camera is never placed underground at inland sites.
   const dronePosRef = useRef<{ lng: number; lat: number; relAlt: number; absAlt: number } | null>(null)
@@ -222,7 +222,7 @@ export default function MissionMap3D() {
   // activated so the user can pre-position the camera and then click Follow to
   // lock that exact perspective. Scroll adjusts range while following.
   const followOffsetRef = useRef({ behindM: 30, upM: 10 })
-  // Smooth camera state — EMA-interpolated values written every frame
+  // Smooth camera state - EMA-interpolated values written every frame
   const camModeRef       = useRef<'follow' | 'perspective'>('follow')
   const camSmoothPosRef  = useRef<any>(null)   // Cartesian3 camera ECEF pos, null = uninitialised
   const camSmoothLookRef = useRef<any>(null)   // Cartesian3 look-target ECEF, null = uninitialised
@@ -232,7 +232,7 @@ export default function MissionMap3D() {
 
   // Tracks whether the Cesium viewer has finished its async init. viewerRef
   // is a ref, so flipping it alone doesn't re-trigger effects that bailed
-  // out early because the viewer wasn't ready yet — this state does.
+  // out early because the viewer wasn't ready yet - this state does.
   const [viewerReady, setViewerReady] = useState(false)
 
   const cameraMode          = useMissionStore(s => s.cameraMode)
@@ -247,7 +247,7 @@ export default function MissionMap3D() {
   const setFollowDrone      = useMissionStore(s => s.setFollowDrone)
 
   // RTL is a separate, non-mission control now (see rtlPosition in the
-  // mission store) — never part of the flown/displayed path. Defensive
+  // mission store) - never part of the flown/displayed path. Defensive
   // filter in case older persisted data still has a legacy 'rtl' entry.
   const waypoints = useMemo(() => rawWaypoints.filter(w => w.type !== 'rtl'), [rawWaypoints])
   const telemetry           = useDroneStore(s => s.telemetry)
@@ -328,11 +328,11 @@ export default function MissionMap3D() {
       // ArcGIS World Imagery renders "Map data not yet available" as pixel
       // text directly onto tile images (HTTP 200, not 404) for zoom 18-19 in
       // data-sparse regions (India, rural areas globally). Because it's a
-      // valid tile response, Cesium has no fallback — it just displays the
+      // valid tile response, Cesium has no fallback - it just displays the
       // text. The only fix is to not use ArcGIS at those zoom levels, or to
       // use a different provider that has genuine global coverage.
       //
-      // With an Ion token: use Bing Maps Aerial via createWorldImageryAsync —
+      // With an Ion token: use Bing Maps Aerial via createWorldImageryAsync -
       // Bing has real high-resolution imagery globally including all of India
       // at zoom 18-19, with no placeholder tiles. ImageryLayer.fromProviderAsync
       // accepts the promise directly so the viewer starts up immediately and
@@ -393,11 +393,11 @@ export default function MissionMap3D() {
       viewerRef.current = viewer
 
       // ── Terrain ──────────────────────────────────────────────────────────
-      // When an Ion token is set, use Cesium World Terrain — it's calibrated
+      // When an Ion token is set, use Cesium World Terrain - it's calibrated
       // against the same dataset as Cesium Ion OSM Buildings, so building
       // extrusions actually sit on the ground everywhere. Mixing OSM
       // Buildings with a third-party terrain provider (e.g. ArcGIS) causes
-      // a height-datum mismatch that varies by region — buildings float or
+      // a height-datum mismatch that varies by region - buildings float or
       // sink relative to the terrain since the two were never calibrated
       // together. Falls back to free ArcGIS terrain when no token is set.
       try {
@@ -428,7 +428,7 @@ export default function MissionMap3D() {
 
       // ── 3D Buildings / Photorealistic tiles ────────────────────────────
       if (googleKey) {
-        // Google Photorealistic 3D Tiles — best quality
+        // Google Photorealistic 3D Tiles - best quality
         try {
           Cesium.GoogleMaps.defaultApiKey = googleKey
           const googleTileset = await Cesium.createGooglePhotorealistic3DTileset()
@@ -453,7 +453,7 @@ export default function MissionMap3D() {
       handlerRef.current = handler
 
       // Temporarily pause chase cam for 3 s then smoothly return to follow.
-      // The user's orbit/zoom is not interrupted — Cesium's own camera controller
+      // The user's orbit/zoom is not interrupted - Cesium's own camera controller
       // still handles input; we simply stop overriding it during this window.
       const startInactivityTimer = () => {
         userInteractingRef.current = true
@@ -509,7 +509,7 @@ export default function MissionMap3D() {
           return
         }
 
-        // Regular click — select or add waypoint
+        // Regular click - select or add waypoint
         const picked = viewer.scene.pick(up.position)
         if (picked?.id?._id?.startsWith?.('wp-')) {
           useMissionStore.getState().selectWaypoint(picked.id._id.replace('wp-', ''))
@@ -549,7 +549,7 @@ export default function MissionMap3D() {
       // to follow the drone's heading. Called every frame so the chase stays
       // smooth between telemetry ticks. Any mouse interaction releases it.
       // Reuse a single ConstantProperty for rotation instead of allocating
-      // a new one every frame — setValue updates it in-place with no GC churn.
+      // a new one every frame - setValue updates it in-place with no GC churn.
       let droneRotationProp: any = null
       const chaseCamHandler = () => {
         // Keep the heading arrow world-aligned every frame. billboard.rotation
@@ -569,7 +569,7 @@ export default function MissionMap3D() {
 
         const dp = dronePosRef.current
         // globe.getHeight() samples the same terrain dataset that
-        // HeightReference.RELATIVE_TO_GROUND uses for the drone billboard — both
+        // HeightReference.RELATIVE_TO_GROUND uses for the drone billboard - both
         // go through the same DEM. This guarantees the camera is placed at the
         // same absolute height as the rendered drone entity, regardless of whether
         // PX4 has sent home_alt yet (which caused the underground-camera bug at
@@ -580,7 +580,7 @@ export default function MissionMap3D() {
         const droneAbsPos = Cesium.Cartesian3.fromDegrees(dp.lng, dp.lat, surfaceAlt + dp.relAlt)
 
         if (camModeRef.current === 'follow') {
-          // ── Follow / Chase mode — body-frame camera ─────────────────────
+          // ── Follow / Chase mode - body-frame camera ─────────────────────
           //
           // All positioning is done in the drone's local ENU frame (East-North-Up)
           // at the drone's ECEF position, then transformed to world ECEF.
@@ -630,7 +630,7 @@ export default function MissionMap3D() {
             Cesium.Cartesian3.normalize(direction, direction)
 
             // Up vector: ENU +Z (radial outward from Earth center at drone position).
-            // Using ENU up — not body up — keeps the horizon level regardless of
+            // Using ENU up - not body up - keeps the horizon level regardless of
             // drone pitch/roll and prevents any camera inversion.
             const upECEF = Cesium.Matrix4.multiplyByPointAsVector(
               enuToEcef,
@@ -640,7 +640,7 @@ export default function MissionMap3D() {
             Cesium.Cartesian3.normalize(upECEF, upECEF)
 
             // setView with direction+up avoids all Euler-angle heading/pitch/roll
-            // ambiguity — Cesium computes right = cross(direction, up) internally.
+            // ambiguity - Cesium computes right = cross(direction, up) internally.
             viewer.camera.setView({
               destination: camSmoothPosRef.current,
               orientation: { direction, up: upECEF },
@@ -755,7 +755,7 @@ export default function MissionMap3D() {
       }
     }
 
-    // Add/update waypoint entities — single numbered-circle billboard per point,
+    // Add/update waypoint entities - single numbered-circle billboard per point,
     // no separate label entity and no floating black background box.
     waypoints.forEach((wp, i) => {
       const isCurrent  = i === missionCurrentIndex
@@ -764,7 +764,7 @@ export default function MissionMap3D() {
       // Larger circle for the active or selected waypoint so it stands out
       const size       = (isSelected || isCurrent) ? 36 : 28
       // Height above the LOCAL ground at this exact point (RELATIVE_TO_GROUND
-      // below samples terrain automatically) — always the configured altitude,
+      // below samples terrain automatically) - always the configured altitude,
       // never zeroed. Terrain-follow vs. not is a path-shape distinction
       // (flat baseline vs. contour-hugging), not a "drop markers to the floor" one.
       const alt        = wp.altitude
@@ -795,7 +795,7 @@ export default function MissionMap3D() {
     })
 
     // ── RTL marker ──────────────────────────────────────────────────────────
-    // Separate from the mission entities above — RTL is not part of the
+    // Separate from the mission entities above - RTL is not part of the
     // flown path, just the point the drone goes to when triggered.
     if (waypoints.length > 0) {
       const rtl = getRtlWaypoint()
@@ -837,21 +837,21 @@ export default function MissionMap3D() {
     // ── Mission path ───────────────────────────────────────────────────────
     // Waypoint markers use heightReference RELATIVE_TO_GROUND (Cesium samples
     // terrain under them automatically). A plain polyline has no such option,
-    // so its z must be baked in as an absolute height — every point here is
+    // so its z must be baked in as an absolute height - every point here is
     // its OWN sampled ground height + altitude, exactly matching how the
     // markers are positioned, so the line always passes through the dots
     // (the previous version anchored every point to waypoint[0]'s ground
-    // height alone, which is fine on flat ground but badly wrong on a slope —
+    // height alone, which is fine on flat ground but badly wrong on a slope -
     // points far from waypoint 0 floated at the wrong absolute height).
     //   - terrain-follow ON:  densified with extra sample points along each
     //     leg so the line actually hugs the ground between waypoints too,
     //     not just at the waypoints themselves.
     //   - terrain-follow OFF: only the real waypoints/curve points are
-    //     sampled — still exact at every waypoint, but no extra bump-chasing
+    //     sampled - still exact at every waypoint, but no extra bump-chasing
     //     in between, matching how MAV_FRAME_GLOBAL_RELATIVE_ALT actually
     //     flies (interpolated between waypoint altitudes, not terrain).
     // Mirrors the 2D map: remaining route in blue/cyan, flown legs solid green
-    // — same split, same colors, so switching views doesn't change the story.
+    // - same split, same colors, so switching views doesn't change the story.
     pathGenRef.current += 1
     const myGen = pathGenRef.current
 
@@ -910,12 +910,12 @@ export default function MissionMap3D() {
 
     const runPathSync = () => {
       const pathColor = terrainFollow
-        ? new Cesium.Color(0.13, 0.83, 0.93, 1.0)   // cyan — terrain-follow (adapts)
-        : new Cesium.Color(0.37, 0.64, 0.98, 1.0)   // blue — fixed altitude (doesn't adapt)
+        ? new Cesium.Color(0.13, 0.83, 0.93, 1.0)   // cyan - terrain-follow (adapts)
+        : new Cesium.Color(0.37, 0.64, 0.98, 1.0)   // blue - fixed altitude (doesn't adapt)
       const completedColor = new Cesium.Color(0.13, 0.77, 0.37, 1.0) // solid bold green
 
       if (missionCurrentIndex < 0) {
-        // No active mission — full planned path only
+        // No active mission - full planned path only
         commitSegment(pathEntityRef, waypoints, pathColor, true, terrainFollow)
         commitSegment(completedPathEntityRef, [], completedColor, false, false)
       } else {
@@ -927,7 +927,7 @@ export default function MissionMap3D() {
     }
 
     // Re-run with the latest closure once more detailed terrain tiles finish
-    // loading (see the tileLoadProgressEvent listener below) — fixes the line
+    // loading (see the tileLoadProgressEvent listener below) - fixes the line
     // looking detached from the waypoint dots right after a fresh fly-to,
     // before the higher-detail tiles for this exact view have arrived.
     pathSyncRef.current = runPathSync
@@ -1027,7 +1027,7 @@ export default function MissionMap3D() {
     }
 
     // Same height convention as waypoints/path: meters above local terrain
-    // (AGL), not absolute MSL — keeps the drone aligned with the rendered
+    // (AGL), not absolute MSL - keeps the drone aligned with the rendered
     // terrain mesh regardless of geoid/ellipsoid offset at this location.
     const position = Cesium.Cartesian3.fromDegrees(
       dronePos.longitude_deg,
@@ -1069,7 +1069,7 @@ export default function MissionMap3D() {
       })
 
       // Fly to drone if no waypoints yet.
-      // Height must be above terrain — use globe.getHeight so sites at elevated
+      // Height must be above terrain - use globe.getHeight so sites at elevated
       // altitude (e.g. Hyderabad ≈ 525 m) don't land the camera underground.
       if (!flewRef.current && useMissionStore.getState().waypoints.length === 0) {
         flewRef.current = true

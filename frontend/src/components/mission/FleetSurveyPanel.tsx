@@ -22,8 +22,8 @@ interface Assignment {
 type UploadState = 'idle' | 'uploading' | 'ok' | 'fail'
 
 // Shown inside the Survey planner when swarm mode is active. Splits the drawn
-// survey area's scan lines into contiguous strips — one per connected drone,
-// balanced by line length — banks each strip as that drone's mission plan,
+// survey area's scan lines into contiguous strips - one per connected drone,
+// balanced by line length - banks each strip as that drone's mission plan,
 // then bulk-uploads and group-starts the fleet.
 export default function FleetSurveyPanel() {
   const surveyPolygon = useMissionStore(s => s.surveyPolygon)
@@ -166,7 +166,7 @@ export default function FleetSurveyPanel() {
       <div className="flex items-center gap-2">
         <Users size={13} color="#22d3ee" />
         <span className="text-[11px] font-mono font-bold" style={{ color: '#a5f3fc' }}>
-          Fleet Survey — {connected.length} drones
+          Fleet Survey - {connected.length} drones
         </span>
       </div>
 

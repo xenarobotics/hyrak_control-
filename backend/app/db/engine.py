@@ -2,7 +2,7 @@
 Async database engine + session factory.
 
 The database is deliberately OPTIONAL at runtime: if Postgres is down or
-not yet provisioned, the platform still flies — persistent features
+not yet provisioned, the platform still flies - persistent features
 (drone registry, and later zones/permissions) just degrade to no-ops.
 A drone must never be unflyable because a database is unreachable.
 """
@@ -26,13 +26,13 @@ async def init_db() -> bool:
     try:
         _engine = create_async_engine(settings.database_url, pool_size=5, pool_pre_ping=True)
         async with _engine.connect():
-            pass  # connectivity check only — schema is managed by alembic
+            pass  # connectivity check only - schema is managed by alembic
         _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
         _available = True
         logger.info("✅ Database connected")
     except Exception as e:
         _available = False
-        logger.warning(f"Database unavailable — persistent features disabled: {e}")
+        logger.warning(f"Database unavailable - persistent features disabled: {e}")
     return _available
 
 

@@ -72,7 +72,7 @@ export async function allocateRelay(): Promise<RelayAllocation> {
 // The laptop's ffmpeg knows within ~a second that it can't reach the relay
 // host; the server only finds out when its 25s wait expires. Without this,
 // the operator is shown the slow, vague server-side timeout instead of the
-// fast, specific client-side cause ("can't reach 10.x.x.x:9000 — some
+// fast, specific client-side cause ("can't reach 10.x.x.x:9000 - some
 // networks block UDP"). Recorded at module scope because the failure arrives
 // on the bridge event channel, asynchronously, after start() has returned ok
 // (spawning ffmpeg succeeds long before connecting does).
@@ -118,7 +118,7 @@ export function useRtspRelayBridge() {
             const meta = event.meta ?? {}
             // Informational events ({codec, streamInfo}) carry no `connected`
             // field. Falling through to the else-branch on those wiped
-            // previewUrl and showed "Stopped" a second after every start —
+            // previewUrl and showed "Stopped" a second after every start -
             // same defect as lib/airUnitPreview.ts, fixed the same day.
             if (!('connected' in meta)) return
             if (meta.connected) {
@@ -126,11 +126,11 @@ export function useRtspRelayBridge() {
                 setPreviewUrl(meta.previewUrl ? String(meta.previewUrl) : null)
                 setStatus({ msg: `Relaying via ${String(meta.transport ?? 'srt').toUpperCase()}` })
             } else if (meta.reconnecting) {
-                // Still "running" from the operator's point of view — the
+                // Still "running" from the operator's point of view - the
                 // bridge is retrying on its own, and flipping the UI to
                 // stopped would invite them to restart something that is
                 // already recovering.
-                setStatus({ msg: 'Link dropped — reconnecting…', reconnecting: true, log: meta.log ? String(meta.log) : undefined })
+                setStatus({ msg: 'Link dropped - reconnecting…', reconnecting: true, log: meta.log ? String(meta.log) : undefined })
             } else {
                 setRunning(false)
                 setPreviewUrl(null)
@@ -150,7 +150,7 @@ export function useRtspRelayBridge() {
             const alloc = await allocateRelay()
             if (!alloc.hostConfigured) {
                 setStatus({
-                    msg: 'Server has no relay_public_host configured — the uplink address is a guess '
+                    msg: 'Server has no relay_public_host configured - the uplink address is a guess '
                         + 'and will fail behind a tunnel. Set it in the backend config.',
                     error: true,
                 })

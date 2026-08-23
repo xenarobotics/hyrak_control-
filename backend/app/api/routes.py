@@ -39,7 +39,7 @@ async def health():
 @router.get("/webrtc/ice-servers")
 async def ice_servers():
     """STUN + TURN list for RTCPeerConnection. TURN credentials are minted
-    short-lived from the Cloudflare key in .env — needed on networks that
+    short-lived from the Cloudflare key in .env - needed on networks that
     block UDP (campus WiFi), where STUN-only ICE can never connect."""
     from app.webrtc.turn import get_ice_servers
     return {"iceServers": await get_ice_servers()}
@@ -256,7 +256,7 @@ async def zones_check(
     lng: float = Query(...),
     alt: float = Query(None),
 ):
-    """Zone class at a point — used by clients and for quick testing."""
+    """Zone class at a point - used by clients and for quick testing."""
     from app.zones import engine as zone_engine
     return zone_engine.check_point(lat, lng, alt)
 
@@ -317,7 +317,7 @@ async def download_flight(flight_id: str):
 
 # ── Crowd management / vehicle-plate tracking ───────────────────────────────
 #
-# Data is retained by default (see app/vision/persistence.py) — no auto
+# Data is retained by default (see app/vision/persistence.py) - no auto
 # purge. The two /download endpoints below are read-only exports for a
 # single session (manual "Download report" button); the /history endpoints
 # back the "previous sessions" sidebar across ALL sessions; /clear wipes
@@ -357,8 +357,8 @@ def _plate_grade(ev: dict) -> str:
     """
     One sortable word for how much a plate reading is worth.
 
-    The three raw fields answer different questions — how many pixels were
-    there, how many independent frames agreed, does it match a plate pattern —
+    The three raw fields answer different questions - how many pixels were
+    there, how many independent frames agreed, does it match a plate pattern -
     and a reviewer with a few hundred rows needs one column to filter on, not
     three to cross-reference by eye.
 
@@ -376,8 +376,8 @@ def _plate_grade(ev: dict) -> str:
         return "strong"
     if px >= 70 and votes >= 2:
         return "good"
-    # Everything else is reported and kept — it is often the only look a
-    # passing vehicle ever gave — but it is one frame's opinion of a small
+    # Everything else is reported and kept - it is often the only look a
+    # passing vehicle ever gave - but it is one frame's opinion of a small
     # crop, and the column says so.
     return "weak"
 
@@ -394,7 +394,7 @@ async def download_plate_report(session_id: str):
         #
         # THE EVIDENCE TRAVELS WITH THE READING. A 40px single-frame guess and
         # a 300px plate three frames agreed on are both legitimate rows, and
-        # they are not equally trustworthy — so width, agreement count and
+        # they are not equally trustworthy - so width, agreement count and
         # grammar all come along, and `plate_grade` collapses them into the one
         # column a reviewer can actually sort and filter a session on. Deriving
         # the grade HERE rather than storing it keeps the raw numbers
@@ -479,7 +479,7 @@ async def clear_plate_history_route(x_auth_token: str = Header(None, alias="X-Au
 # The field TABLE is served alongside the values so the UI renders inputs from
 # it. Declaring "hfov is 1-179 degrees" in Python and again in TypeScript is
 # how the two drift apart and the form starts accepting values the backend then
-# rejects — see app/vision/calibration.py.
+# rejects - see app/vision/calibration.py.
 
 
 @router.get("/vision/calibration")
@@ -505,7 +505,7 @@ async def put_calibration(
 
       camera / limits   the next frame. They are read on the frame path.
       follow            the next time a tracking mode STARTS. The yaw PD is
-                        built once per session, deliberately — re-reading it
+                        built once per session, deliberately - re-reading it
                         per frame would put a settings lookup on the control
                         loop, and swapping gains under a live PD changes the
                         aircraft's behaviour mid-manoeuvre with nobody having
@@ -538,7 +538,7 @@ async def reset_calibration(x_auth_token: str = Header(None, alias="X-Auth-Token
 #
 # The enrolled-identity side of face recognition. The /reference-photo route
 # above is untouched and still works exactly as before: upload a photo, follow
-# that person. This adds the other way in — a persistent database of known
+# that person. This adds the other way in - a persistent database of known
 # people that the tracker can match against with nobody selecting a target.
 #
 # Every mutating route is token-gated. This is durable biometric data, and it
@@ -617,7 +617,7 @@ async def face_gallery_enrol_folder(
     x_auth_token: str = Header(None, alias="X-Auth-Token"),
 ):
     """
-    Enrol a whole `<root>/<person name>/<image>` tree in one call — the layout
+    Enrol a whole `<root>/<person name>/<image>` tree in one call - the layout
     of the provided sample set, so it needs no reshuffling.
 
     Server-side path, so it is token-gated like every other mutation here.
@@ -635,7 +635,7 @@ async def face_gallery_enrol_folder(
     if not results:
         raise HTTPException(
             status_code=400,
-            detail="No <name>/<image> subfolders found — expected "
+            detail="No <name>/<image> subfolders found - expected "
                    "photos/<person name>/*.jpg",
         )
     people: dict[str, dict] = {}
@@ -659,7 +659,7 @@ async def face_gallery_set_active(
     active: bool = Query(...),
     x_auth_token: str = Header(None, alias="X-Auth-Token"),
 ):
-    """Take someone out of matching without destroying the enrolment — for
+    """Take someone out of matching without destroying the enrolment - for
     investigating a match that keeps misfiring."""
     settings = get_settings()
     if x_auth_token != settings.secret_token:
@@ -688,7 +688,7 @@ async def face_gallery_delete_person(
 @router.delete("/vision/face-gallery")
 async def face_gallery_clear(x_auth_token: str = Header(None, alias="X-Auth-Token")):
     """
-    Erase the entire gallery — every identity and every stored photo.
+    Erase the entire gallery - every identity and every stored photo.
 
     The explicit deletion path this data category requires, since nothing here
     is ever purged automatically.
@@ -706,7 +706,7 @@ async def face_gallery_sightings(
     session_id: str | None = Query(None),
     limit: int = Query(200, le=1000),
 ):
-    """Gallery-match audit trail — what the system claimed, when."""
+    """Gallery-match audit trail - what the system claimed, when."""
     from app.vision.persistence import list_sightings
     return {"sightings": await list_sightings(session_id=session_id, limit=limit)}
 
@@ -824,7 +824,7 @@ async def upload_reference_photo(
     img_array = np.frombuffer(data, np.uint8)
     img_bgr   = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
     if img_bgr is None:
-        raise HTTPException(status_code=400, detail="Could not decode image — use JPEG or PNG")
+        raise HTTPException(status_code=400, detail="Could not decode image - use JPEG or PNG")
 
     # ── Get PersonTracker for this session ────────────────────────────────
     # The model may still be loading (switch_mode is async).
@@ -844,13 +844,13 @@ async def upload_reference_photo(
         if vision_pool.is_loading(session_id):
             raise HTTPException(
                 status_code=503,
-                detail="Model is still loading — please wait a moment and try again",
+                detail="Model is still loading - please wait a moment and try again",
             )
         raise HTTPException(
             status_code=400,
             detail=(
                 "Person-tracking model not loaded. "
-                "Select Person ID mode first, then upload — "
+                "Select Person ID mode first, then upload - "
                 "or check backend logs (insightface may not be installed: "
                 "pip install insightface onnxruntime)"
             ),
@@ -859,7 +859,7 @@ async def upload_reference_photo(
     if not isinstance(analyzer, PersonTracker):
         raise HTTPException(
             status_code=400,
-            detail="Session is not in person-tracking mode — select Person ID mode first",
+            detail="Session is not in person-tracking mode - select Person ID mode first",
         )
 
     # ── Extract face embedding (blocking, run in thread) ─────────────────
@@ -870,7 +870,7 @@ async def upload_reference_photo(
     if embedding is None:
         raise HTTPException(
             status_code=422,
-            detail="No face detected in the uploaded photo — use a clear front-facing photo",
+            detail="No face detected in the uploaded photo - use a clear front-facing photo",
         )
 
     # ── Store embedding ───────────────────────────────────────────────────
@@ -960,7 +960,7 @@ async def get_terrain_elevation(
                         results[idx]["elevation"] = elev
         except Exception as e:
             logger.warning(f"Terrain elevation fetch failed: {e}")
-            # Return 0 for failed lookups — drone should fallback to home altitude
+            # Return 0 for failed lookups - drone should fallback to home altitude
             for idx in uncached_indices:
                 if results[idx]["elevation"] is None:
                     results[idx]["elevation"] = 0

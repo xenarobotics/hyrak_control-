@@ -1,6 +1,6 @@
 /** Sensor calibration, as the backend sends it.
  *
- *  Sent WHOLE on every change rather than as deltas — a calibration is a few
+ *  Sent WHOLE on every change rather than as deltas - a calibration is a few
  *  dozen events over half a minute, so there is nothing to save by diffing,
  *  and a panel rebuilt from a full state cannot drift out of step with the
  *  aircraft the way one accumulating patches can. On this screen that drift
@@ -32,7 +32,7 @@ export interface CalibrationState {
 }
 
 /** The sensors the aircraft can be asked to calibrate, and what each one is
- *  for. Order is the order they are offered — gyro first because it is the
+ *  for. Order is the order they are offered - gyro first because it is the
  *  quickest and the most often needed, level last because it is a trim rather
  *  than a calibration. */
 export const CAL_SENSORS: {
@@ -40,7 +40,7 @@ export const CAL_SENSORS: {
 }[] = [
     {
         key: 'gyro', label: 'Gyroscope', oriented: false, mins: '~10 s',
-        blurb: 'Zeroes the rate sensors. Needs the aircraft completely still — nothing to rotate, and touching it during the count is what makes it fail.',
+        blurb: 'Zeroes the rate sensors. Needs the aircraft completely still - nothing to rotate, and touching it during the count is what makes it fail.',
     },
     {
         key: 'accel', label: 'Accelerometer', oriented: true, mins: '~2 min',
@@ -48,14 +48,14 @@ export const CAL_SENSORS: {
     },
     {
         key: 'mag', label: 'Compass', oriented: true, mins: '~2 min',
-        blurb: 'Rotate the aircraft about each axis PX4 asks for. Do it outdoors and away from metal, cars and reinforced concrete — indoors it will pass and then be wrong.',
+        blurb: 'Rotate the aircraft about each axis PX4 asks for. Do it outdoors and away from metal, cars and reinforced concrete - indoors it will pass and then be wrong.',
     },
     {
         key: 'level', label: 'Level Horizon', oriented: false, mins: '~5 s',
-        blurb: 'Sets what "level" means. Do it with the airframe genuinely level, not merely on a flat-looking surface — this is the one that fixes a drone that drifts in a stable hover.',
+        blurb: 'Sets what "level" means. Do it with the airframe genuinely level, not merely on a flat-looking surface - this is the one that fixes a drone that drifts in a stable hover.',
     },
     {
         key: 'gimbal', label: 'Gimbal Accelerometer', oriented: false, mins: '~15 s',
-        blurb: 'Only for a gimbal that reports its own IMU. Harmless to skip if none is fitted — the autopilot will simply refuse it.',
+        blurb: 'Only for a gimbal that reports its own IMU. Harmless to skip if none is fitted - the autopilot will simply refuse it.',
     },
 ]

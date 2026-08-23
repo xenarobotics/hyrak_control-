@@ -14,14 +14,14 @@ export interface MissionUploadResult {
     terrain_follow?: boolean
     msg: string
     // Zone validation results from the backend
-    needs_ack?: boolean          // crosses orange — pilot must confirm
-    blocked?: 'red'              // crosses red — hard rejection
+    needs_ack?: boolean          // crosses orange - pilot must confirm
+    blocked?: 'red'              // crosses red - hard rejection
     can_request?: boolean        // a permit can be requested for this mission
     zones?: { id: string; name: string; zone_class: string }[]
 }
 
 /** One line the autopilot said. PX4 emits these for preflight results, EKF
- *  and GPS transitions, failsafes, calibration — everything QGroundControl
+ *  and GPS transitions, failsafes, calibration - everything QGroundControl
  *  shows in its vehicle-messages panel. */
 export interface FcMessage {
     severity: string
@@ -39,12 +39,12 @@ export interface ActionResult {
     action: string
     ok: boolean
     msg?: string
-    /** The AUTOPILOT's reason for a refusal, when it gave one — its own
+    /** The AUTOPILOT's reason for a refusal, when it gave one - its own
      *  STATUSTEXT ("Arming denied: ...", "Preflight Fail: ..."), which is the
      *  only thing that distinguishes "the drone said no" from "the command
      *  never got there". Without it both look like a dead radio. */
     error?: string
-    /** rc_takeover_check only — the aircraft's own answer to "can the pilot
+    /** rc_takeover_check only - the aircraft's own answer to "can the pilot
      *  take this back?", read from its parameters. */
     report?: RcTakeoverReport
 }
@@ -62,7 +62,7 @@ interface DroneStore {
     // Connection
     connectionStatus: ConnectionStatus
     telemetryStatus: TelemetryStatus
-    // Why the last connect attempt failed — shown under the Connect button
+    // Why the last connect attempt failed - shown under the Connect button
     // so a failed connect never ends as a silent spinner-stop.
     telemetryError: string | null
     session: SessionInfo | null
@@ -80,12 +80,12 @@ interface DroneStore {
 
     /** The command that has been sent and not yet answered, so a button can
      *  say ARMING… the instant it is pressed. Without this the UI shows
-     *  nothing at all for the whole round trip — on a 3DR radio about a
-     *  second — which reads as a click that did not register, and the
+     *  nothing at all for the whole round trip - on a 3DR radio about a
+     *  second - which reads as a click that did not register, and the
      *  operator presses it again. */
     pendingAction: { action: string; at: number } | null
 
-    /** The autopilot's message log, newest last. Bounded — this is a live
+    /** The autopilot's message log, newest last. Bounded - this is a live
      *  console for the flight in progress, not a flight recorder. */
     fcMessages: FcMessage[]
     /** How many have arrived since the panel was last read, so the icon can
@@ -177,14 +177,14 @@ export const useDroneStore = create<DroneStore>((set) => ({
     //
     // Arming used to take two visible seconds: about one for the command to
     // reach the drone and be acknowledged, then up to another whole second
-    // before the button changed — because the button watched
+    // before the button changed - because the button watched
     // telemetry.flight_mode.is_armed, which is decoded from HEARTBEAT, and
     // PX4 sends HEARTBEAT at 1 Hz. So the UI sat on a stale `false` waiting
     // for a periodic message to repeat something it had already been told.
     //
     // A successful action_result for arm IS the vehicle's acknowledgement:
     // MAVSDK only resolves arm() on MAV_RESULT_ACCEPTED. Folding it into the
-    // snapshot is not optimism — it is using the earlier of two reports of
+    // snapshot is not optimism - it is using the earlier of two reports of
     // the same fact. The heartbeat still arrives and still overwrites this;
     // if the two ever disagreed, the stream wins within the second.
     setLastActionResult: (r) => set(state => {

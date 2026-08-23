@@ -72,7 +72,7 @@ function Metric({
 }
 
 /** Counts frames actually painted locally. This is the pilot's real frame
- *  rate in GStreamer mode and cannot be obtained any other way — the preview
+ *  rate in GStreamer mode and cannot be obtained any other way - the preview
  *  never touches WebRTC. */
 function useLocalPaintFps(active: boolean): number {
     const [fps, setFps] = useState(0)
@@ -145,12 +145,12 @@ export function ModulePerformance() {
         }}>
             <Metric
                 icon={<Cpu size={10} />} label="Inference"
-                value={inferenceMs > 0 ? inferenceMs.toFixed(0) : '—'} unit="ms"
+                value={inferenceMs > 0 ? inferenceMs.toFixed(0) : '-'} unit="ms"
                 title="Model time per frame on the server (median). Excludes transport and encode."
             />
             <Metric
                 icon={<Activity size={10} />} label="Analysed"
-                value={deliveredFps > 0 ? deliveredFps.toFixed(1) : '—'} unit="fps"
+                value={deliveredFps > 0 ? deliveredFps.toFixed(1) : '-'} unit="fps"
                 tone={keepingUp ? 'normal' : 'warn'}
                 title={sourceFps > 0
                     ? `Server is analysing ${deliveredFps.toFixed(1)} of ${sourceFps.toFixed(1)} fps arriving.`
@@ -158,21 +158,21 @@ export function ModulePerformance() {
             />
             <Metric
                 icon={<Gauge size={10} />} label="Source"
-                value={sourceFps > 0 ? sourceFps.toFixed(1) : '—'} unit="fps"
+                value={sourceFps > 0 ? sourceFps.toFixed(1) : '-'} unit="fps"
                 tone={keepingUp ? 'muted' : 'warn'}
                 title="Frames per second arriving at the server. A gap versus Analysed means backlog is being shed to hold the live edge."
             />
             <Metric
                 icon={<Timer size={10} />} label="Pipeline"
-                value={pipelineMs > 0 ? pipelineMs.toFixed(1) : '—'} unit="ms"
+                value={pipelineMs > 0 ? pipelineMs.toFixed(1) : '-'} unit="ms"
                 title="Server per-frame cost: colour conversion, overlay compose and snapshot. Excludes waiting for a frame."
             />
 
             {localPreview && (
                 <Metric
                     icon={<Activity size={10} />} label="Preview"
-                    value={paintFps > 0 ? paintFps : '—'} unit="fps"
-                    title={`Frames painted locally per second (${gst?.accel ?? 'local'} decode). This is the picture you are watching — it never round-trips to the server.`}
+                    value={paintFps > 0 ? paintFps : '-'} unit="fps"
+                    title={`Frames painted locally per second (${gst?.accel ?? 'local'} decode). This is the picture you are watching - it never round-trips to the server.`}
                 />
             )}
             {gst?.accel && (
@@ -182,7 +182,7 @@ export function ModulePerformance() {
                     tone={gst.accel === 'hardware' ? 'normal' : 'warn'}
                     title={gst.accel === 'hardware'
                         ? 'Hardware decode/encode via VAAPI.'
-                        : 'Software fallback — hardware was unavailable or failed twice, which costs roughly ten times the CPU.'}
+                        : 'Software fallback - hardware was unavailable or failed twice, which costs roughly ten times the CPU.'}
                 />
             )}
             {/* The receiver picks its path per machine and can step down
@@ -204,12 +204,12 @@ export function ModulePerformance() {
                 <>
                     <Metric
                         icon={<Wifi size={10} />} label="Link"
-                        value={stats?.roundTripTime ? stats.roundTripTime.toFixed(0) : '—'} unit="ms rtt"
+                        value={stats?.roundTripTime ? stats.roundTripTime.toFixed(0) : '-'} unit="ms rtt"
                         title="WebRTC round-trip time to the server."
                     />
                     <Metric
                         icon={<Gauge size={10} />} label="Bitrate"
-                        value={stats?.bitrate ? (stats.bitrate / 1e6).toFixed(1) : '—'} unit="Mbps"
+                        value={stats?.bitrate ? (stats.bitrate / 1e6).toFixed(1) : '-'} unit="Mbps"
                         title="Video bitrate on the WebRTC downlink."
                     />
                 </>
@@ -217,7 +217,7 @@ export function ModulePerformance() {
                 <Metric
                     icon={<Wifi size={10} />} label="Downlink"
                     value="none" tone="muted"
-                    title="Overlay mode: the video never crosses WebRTC. Your picture is decoded locally and only detection results come back from the server — so there is no downlink bitrate or RTT to report."
+                    title="Overlay mode: the video never crosses WebRTC. Your picture is decoded locally and only detection results come back from the server - so there is no downlink bitrate or RTT to report."
                 />
             )}
 

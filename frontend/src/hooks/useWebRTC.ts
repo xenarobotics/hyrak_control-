@@ -18,7 +18,7 @@ const STUN_ONLY: RTCIceServer[] = [
 ]
 
 // STUN + TURN from the backend. TURN relay (over TCP/TLS) is what makes
-// video work on UDP-blocking networks like campus WiFi — the backend mints
+// video work on UDP-blocking networks like campus WiFi - the backend mints
 // short-lived Cloudflare TURN credentials so none live in frontend code.
 async function fetchIceServers(): Promise<RTCIceServer[]> {
     try {
@@ -59,7 +59,7 @@ export function useWebRTC() {
     const [stats, setStats] = useState<WebRTCStats | null>(null)
     // Server-side failures (e.g. a server-sourced video open that never got
     // a real frame) arrive as a socket 'error' event, not a WebRTC/promise
-    // rejection — nothing was listening for it before, so a failed start
+    // rejection - nothing was listening for it before, so a failed start
     // just silently reverted to idle with zero feedback.
     const [lastError, setLastError] = useState<string | null>(null)
 
@@ -68,7 +68,7 @@ export function useWebRTC() {
     // `keepRelay` distinguishes "tearing down to immediately restart" from
     // "the operator stopped". Releasing the relay on a restart is actively
     // harmful: the server hands out a NEW port on the next allocate, so a
-    // laptop already pushing to the old one is left talking to nothing —
+    // laptop already pushing to the old one is left talking to nothing -
     // which is what produced the storm of moving ports in the logs.
     const cleanup = useCallback((keepRelay = false) => {
         if (statsIntervalRef.current) {
@@ -94,7 +94,7 @@ export function useWebRTC() {
         }
 
         // Relay mode leaves an ffmpeg running on this machine and a listener
-        // (plus its own ffmpeg) held on the server — neither is tied to the
+        // (plus its own ffmpeg) held on the server - neither is tied to the
         // peer connection, so closing the pc alone would leak both.
         // The sender owns its own PeerConnection and an ffmpeg (or a bound UDP
         // port), none of which the browser's pc teardown touches.
@@ -102,7 +102,7 @@ export function useWebRTC() {
             void stopDataChannelSender()
         }
         // air_unit_srt was MISSING here and only rtsp_relay was listed, even
-        // though both drive the same 'rtsp-relay' bridge — so stopping an
+        // though both drive the same 'rtsp-relay' bridge - so stopping an
         // air_unit_srt stream left its ffmpeg alive holding udp:5600 forever.
         // Nothing surfaced it until a second mode wanted that port: the
         // orphan keeps the socket, the newcomer binds with SO_REUSEADDR,
@@ -136,7 +136,7 @@ export function useWebRTC() {
     }, [])
 
     const startStream = useCallback(async (cameraStream: MediaStream | null) => {
-        // Clean up any existing connection first — but leave the relay alone,
+        // Clean up any existing connection first - but leave the relay alone,
         // it is reused rather than reallocated (see cleanup's keepRelay).
         cleanup(true)
         setLastError(null)
@@ -147,7 +147,7 @@ export function useWebRTC() {
         // Stop EVERY local video producer, not just this source's.
         //
         // cleanup() can only tidy up the source that is selected NOW, and the
-        // operator changes that in Settings between sessions — so switching
+        // operator changes that in Settings between sessions - so switching
         // from air_unit_srt to hyrak_receiver runs the receiver's cleanup and
         // never the relay's, leaving the previous mode's ffmpeg alive. These
         // producers compete for the SAME udp:5600, and the loser binds with
@@ -167,17 +167,17 @@ export function useWebRTC() {
         const serverSourced = isServerSourced(videoSource)
 
         // Relay mode: this machine pushes the camera's original bytes to a
-        // backend listener. Both steps must complete BEFORE the offer — the
+        // backend listener. Both steps must complete BEFORE the offer - the
         // server's offer handler attaches to an already-arriving stream and
         // gives up if no frame shows within its timeout.
         // air_unit_srt rides the SAME relay: allocate a listener, then push to
         // it with `-c copy`. Only ffmpeg's input differs (wfb_rx's RTP on
-        // udp:5600 vs an RTSP pull), which is a flag on the bridge — see
+        // udp:5600 vs an RTSP pull), which is a flag on the bridge - see
         // `source` in desktop/src/bridges/rtspRelayBridge.ts.
         // GStreamer mode: one pipeline owns udp:5600 and does BOTH the local
         // preview and the SRT uplink, so there is no separate sender to start.
         // It still needs the relay allocated first, for the same reason the
-        // others do — the server must be listening before we push, and pushing
+        // others do - the server must be listening before we push, and pushing
         // must precede the offer.
         if (videoSource === 'air_unit_gst') {
             try {
@@ -190,7 +190,7 @@ export function useWebRTC() {
                 }
                 await startGstPipeline(alloc)
                 // Let the pipeline actually put packets on the wire before the
-                // offer — the server opens the ingest with a blocking probe
+                // offer - the server opens the ingest with a blocking probe
                 // and fails outright on a silent port.
                 await new Promise((r) => setTimeout(r, 1500))
             } catch (e) {
@@ -202,8 +202,8 @@ export function useWebRTC() {
             }
         }
 
-        // The HYRAK Receiver is the same shape as air_unit_gst — one process
-        // owning both the pilot's picture and the server's uplink — but it
+        // The HYRAK Receiver is the same shape as air_unit_gst - one process
+        // owning both the pilot's picture and the server's uplink - but it
         // reads the ground DECODER over Ethernet rather than a local wfb_rx,
         // and it runs on any platform.
         if (videoSource === 'hyrak_receiver') {
@@ -218,7 +218,7 @@ export function useWebRTC() {
                 const status = await startReceiver(alloc)
                 // startReceiver already waited to SEE video before returning,
                 // so this only covers the SRT uplink's own handshake to the
-                // server — the offer handler probes that port and fails
+                // server - the offer handler probes that port and fails
                 // outright on a silent one.
                 if (!status.receiving) {
                     console.warn('[hyrak-receiver]', status.warning ?? 'no video yet')
@@ -237,7 +237,7 @@ export function useWebRTC() {
         if (isRelay) {
             const fromAirUnit = videoSource === 'air_unit_srt'
             if (!isDesktopApp()) {
-                const msg = 'Relay video needs the HYRAK desktop app — a browser tab can\'t run the relay.'
+                const msg = 'Relay video needs the HYRAK desktop app - a browser tab can\'t run the relay.'
                 setLastError(msg)
                 setConnectionStatus('error')
                 return
@@ -264,7 +264,7 @@ export function useWebRTC() {
                     // transcode it for Chromium (no software HEVC decoder). The
                     // operator already has a zero-cost local view via the
                     // fan-out port, so paying for a second encode here would be
-                    // waste — see getAirUnitFanoutPort.
+                    // waste - see getAirUnitFanoutPort.
                     preview: !fromAirUnit,
                 })
                 if (started && !started.ok) throw new Error(started.error ?? 'Relay failed to start')
@@ -282,7 +282,7 @@ export function useWebRTC() {
         // PeerConnection carrying raw RTP, so H.265 reaches the server bit-exact
         // (a DataChannel negotiates no codec; aiortc's media-track codecs are
         // VP8/H.264 only). Like the relay, all of it has to finish before the
-        // offer below — the server opens the loopback port with a synchronous
+        // offer below - the server opens the loopback port with a synchronous
         // probe and fails on a silent one. See hooks/useDataChannelSender.ts.
         if (usesDataChannelSender(videoSource)) {
             try {
@@ -304,7 +304,7 @@ export function useWebRTC() {
 
         // Feed choice is locked in per stream (modes can't change while
         // streaming): client-overlay sends camera up but receives no video
-        // back — the page shows the local stream + a results canvas.
+        // back - the page shows the local stream + a results canvas.
         //
         // Server-sourced feeds were excluded wholesale ("no local image to
         // draw on"), which was true until the air unit got an in-app local
@@ -313,7 +313,7 @@ export function useWebRTC() {
         // local (~10ms class instead of a 300-500ms round trip, and no
         // second-generation encode), the DataChannel still feeds the server,
         // and only detection JSON comes back. Gated on the preview actually
-        // running — overlay with no local picture would be boxes on black.
+        // running - overlay with no local picture would be boxes on black.
         const mode = useDroneStore.getState().mode
         const overlayableServerSourced =
             (videoSource === 'air_unit_datachannel' && !!getAirUnitPreviewUrl())
@@ -329,11 +329,11 @@ export function useWebRTC() {
         if (videoSource === 'air_unit_datachannel' && !clientOverlay) {
             // Loud on purpose (console.error reaches frontend.log via the
             // [browser] forwarder): without overlay this session falls back to
-            // the server round trip — exactly the 500ms+ path the local
-            // preview exists to avoid — and WHY must be diagnosable from the
+            // the server round trip - exactly the 500ms+ path the local
+            // preview exists to avoid - and WHY must be diagnosable from the
             // server side, because the client is typically remote.
             console.error(
-                '[air-unit-preview] client-overlay NOT engaged — falling back to the '
+                '[air-unit-preview] client-overlay NOT engaged - falling back to the '
                 + `server round-trip feed. preview=${getAirUnitPreviewUrl() ?? 'none'}, `
                 + `feedModeWantsOverlay=${wantsClientOverlay(mode)}, mode=${mode}`,
             )
@@ -345,7 +345,7 @@ export function useWebRTC() {
         pcRef.current = pc
 
         if (serverSourced) {
-            // No local media to send — just ask for video back. The backend
+            // No local media to send - just ask for video back. The backend
             // sources frames itself (air unit UDP stream, or an RTSP pull
             // from a SIYI-style camera) instead of waiting on an inbound
             // browser track.
@@ -360,7 +360,7 @@ export function useWebRTC() {
             }
             // Uplink quality: allow the bitrate the chosen resolution needs
             // and prefer dropping resolution over frame rate under congestion.
-            // Manual control may drop to thumbnail quality — the server just
+            // Manual control may drop to thumbnail quality - the server just
             // makes admin previews from it, and a full-res software encode
             // can starve a weak CPU that's also decoding the RF video (see
             // wantsEcoUplink for how that's decided).
@@ -370,7 +370,7 @@ export function useWebRTC() {
 
         // When we receive the processed video back from server
         pc.ontrack = (event) => {
-            // Play received frames out immediately — the browser otherwise
+            // Play received frames out immediately - the browser otherwise
             // grows a smoothing jitter buffer over time, which shows up as
             // slowly accumulating glass-to-glass latency.
             try {
@@ -387,7 +387,7 @@ export function useWebRTC() {
         }
 
         pc.oniceconnectionstatechange = () => {
-            // No return track in overlay mode, so ontrack never fires —
+            // No return track in overlay mode, so ontrack never fires -
             // the connection itself is the "streaming" signal.
             if (clientOverlay &&
                 (pc.iceConnectionState === 'connected' ||
@@ -417,7 +417,7 @@ export function useWebRTC() {
         }
         const handleError = (err: { msg?: string }) => {
             // The relay's own failure is both faster and more specific than
-            // the server noticing nothing arrived — prefer it when present.
+            // the server noticing nothing arrived - prefer it when present.
             const relayErr = videoSource === 'rtsp_relay' ? getLastRelayError()
                 : usesDataChannelSender(videoSource) ? getLastSenderError()
                 : null
@@ -460,7 +460,7 @@ export function useWebRTC() {
     }, [cleanup, setConnectionStatus])
 
     // Re-apply the saved video settings to a LIVE stream (called from the
-    // settings page) — reconfigures the camera track and sender in place,
+    // settings page) - reconfigures the camera track and sender in place,
     // no renegotiation needed.
     const applyVideoSettings = useCallback(async () => {
         const track = localStreamRef.current?.getVideoTracks()[0]
@@ -476,7 +476,7 @@ export function useWebRTC() {
         } catch (e) {
             console.warn('applyConstraints failed:', e)
         }
-        // Re-evaluate the standby throttle too — this is also how changing
+        // Re-evaluate the standby throttle too - this is also how changing
         // the Standby-uplink setting live-applies to a running stream.
         await tuneVideoSender(
             pcRef.current,
@@ -505,7 +505,7 @@ export function useWebRTC() {
                     if (r.type === 'outbound-rtp' && r.kind === 'video') outbound = r
                     if (r.type === 'remote-inbound-rtp' && r.kind === 'video') remoteIn = r
                 })
-                // Overlay streams have no inbound video — report the uplink
+                // Overlay streams have no inbound video - report the uplink
                 // instead (fps/bitrate sent, loss/jitter as the server sees it).
                 const src = inbound ?? outbound
                 if (src) {

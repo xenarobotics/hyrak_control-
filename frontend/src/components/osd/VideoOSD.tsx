@@ -20,7 +20,7 @@ interface Props {
     stats?: WebRTCStats | null
 }
 
-// Glass pill — all OSD elements use this
+// Glass pill - all OSD elements use this
 function GP({
     children, style
 }: {
@@ -132,7 +132,7 @@ export function VideoOSD({ stats }: Props) {
             pointerEvents: 'none', userSelect: 'none', overflow: 'hidden',
         }}>
 
-            {/* ── TOP LEFT — armed + mode + timer ── */}
+            {/* ── TOP LEFT - armed + mode + timer ── */}
             {config.armedMode && (
                 <div style={{ position: 'absolute', top: 10, left: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <div style={{ display: 'flex', gap: 6 }}>
@@ -150,7 +150,7 @@ export function VideoOSD({ stats }: Props) {
                     {config.flightTimer && (
                         <GP style={{ color: running ? '#4ade80' : 'rgba(255,255,255,0.35)' }}>
                             ⏱ {formatDuration(elapsed)}
-                            {estFlight !== '—' && bat > 0 && (
+                            {estFlight !== '-' && bat > 0 && (
                                 <span style={{ color: 'rgba(255,255,255,0.3)', marginLeft: 6, fontSize: 10 }}>
                                     ~{estFlight}
                                 </span>
@@ -160,12 +160,12 @@ export function VideoOSD({ stats }: Props) {
                 </div>
             )}
 
-            {/* ── TOP CENTER — roll arc ── */}
+            {/* ── TOP CENTER - roll arc ── */}
             <div style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', pointerEvents: 'none' }}>
                 <RollArc roll={roll} />
             </div>
 
-            {/* ── TOP RIGHT — OSD config + battery + GPS ── */}
+            {/* ── TOP RIGHT - OSD config + battery + GPS ── */}
             <div style={{
                 position: 'absolute', top: 10, right: 10,
                 display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6,
@@ -206,7 +206,7 @@ export function VideoOSD({ stats }: Props) {
                 )}
             </div>
 
-            {/* ── LEFT EDGE — altitude tape ── */}
+            {/* ── LEFT EDGE - altitude tape ── */}
             {config.altitudeTape && (
                 <div style={{
                     position: 'absolute', left: 10,
@@ -216,7 +216,7 @@ export function VideoOSD({ stats }: Props) {
                 </div>
             )}
 
-            {/* ── RIGHT EDGE — speed tape ── */}
+            {/* ── RIGHT EDGE - speed tape ── */}
             {config.speedTape && (
                 <div style={{
                     position: 'absolute', right: 10,
@@ -226,7 +226,7 @@ export function VideoOSD({ stats }: Props) {
                 </div>
             )}
 
-            {/* ── CENTER — artificial horizon ── */}
+            {/* ── CENTER - artificial horizon ── */}
             {config.artificialHorizon && (
                 <div style={{
                     position: 'absolute',
@@ -240,7 +240,7 @@ export function VideoOSD({ stats }: Props) {
                 </div>
             )}
 
-            {/* ── BOTTOM LEFT — home + climb + network ── */}
+            {/* ── BOTTOM LEFT - home + climb + network ── */}
             <div style={{ position: 'absolute', bottom: 56, left: 10, display: 'flex', flexDirection: 'column', gap: 5 }}>
                 {config.networkStats && stats && (
                     <GP>
@@ -274,7 +274,7 @@ export function VideoOSD({ stats }: Props) {
                 )}
             </div>
 
-            {/* ── BOTTOM CENTER — heading tape ── */}
+            {/* ── BOTTOM CENTER - heading tape ── */}
             {config.headingTape && (
                 <div style={{
                     position: 'absolute', bottom: 10,
@@ -297,7 +297,7 @@ export function VideoOSD({ stats }: Props) {
                     fontSize: 14, fontWeight: 'bold', textAlign: 'center',
                     animation: 'pulse 1s infinite',
                 }}>
-                    ⚠ CRITICAL BATTERY — {bat.toFixed(0)}%
+                    ⚠ CRITICAL BATTERY - {bat.toFixed(0)}%
                     <div style={{ fontSize: 11, fontWeight: 'normal', marginTop: 2, color: 'rgba(252,165,165,0.7)' }}>
                         LAND IMMEDIATELY
                     </div>

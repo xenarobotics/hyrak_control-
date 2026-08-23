@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
   subsets: ['latin'],
 })
 
-// Self-hosted at build time so the font preference works offline — a ground
+// Self-hosted at build time so the font preference works offline - a ground
 // station in a field must not depend on a fonts CDN.
 const ubuntu = Ubuntu({
   variable: '--font-ubuntu',

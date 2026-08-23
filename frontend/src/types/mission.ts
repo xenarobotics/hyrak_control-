@@ -1,6 +1,6 @@
 // ── MAVLink frame constants ──────────────────────────────────────────────────
-// Frame 3  = MAV_FRAME_GLOBAL_RELATIVE_ALT  (altitude relative to home — default)
-// Frame 10 = MAV_FRAME_GLOBAL_TERRAIN_ALT   (altitude AGL above terrain — terrain follow)
+// Frame 3  = MAV_FRAME_GLOBAL_RELATIVE_ALT  (altitude relative to home - default)
+// Frame 10 = MAV_FRAME_GLOBAL_TERRAIN_ALT   (altitude AGL above terrain - terrain follow)
 export const MAV_FRAME_GLOBAL_RELATIVE_ALT = 3
 export const MAV_FRAME_GLOBAL_TERRAIN_ALT  = 10
 
@@ -16,8 +16,8 @@ export interface Waypoint {
   speed: number      // cruise speed m/s
   holdTime: number   // seconds to hover at this point
   type: WaypointType
-  yaw: number | null // heading degrees — null = auto
-  turnRadius: number // metres — 0 = sharp turn, >0 = smooth curve
+  yaw: number | null // heading degrees - null = auto
+  turnRadius: number // metres - 0 = sharp turn, >0 = smooth curve
 }
 
 export interface MissionStats {
@@ -41,7 +41,7 @@ export interface SurveyConfig {
   angle: number        // grid rotation degrees (0 = north-south)
   overshoot: number    // metres past boundary
   overlap: number      // percent front overlap (for camera)
-  turnRadius: number   // metres — smooth turns at survey waypoints
+  turnRadius: number   // metres - smooth turns at survey waypoints
 }
 
 // ── Map layer options ───────────────────────────────────────────────────────
@@ -60,7 +60,7 @@ export interface MapLayerDef {
 }
 
 // Stadia Maps (alidade_satellite) requires an API key for all non-localhost
-// origins — the free-tier auth bypass only covers localhost:*.
+// origins - the free-tier auth bypass only covers localhost:*.
 // ArcGIS World Imagery is free, requires no API key from any domain, and has
 // good global coverage. The tile URL uses {z}/{y}/{x} (row before column) which
 // is the ArcGIS native format and maps directly to Leaflet's {z}/{y}/{x} tokens.
@@ -96,7 +96,7 @@ export const MAP_LAYERS: MapLayerDef[] = [
     attribution: '&copy; Esri, Maxar, Earthstar Geographics',
     maxNativeZoom: 18,
     maxZoom: 22,
-    // CartoDB light-only labels — reliable, renders roads/places/boundaries over satellite
+    // CartoDB light-only labels - reliable, renders roads/places/boundaries over satellite
     overlay: 'https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png',
     overlayAttribution: '&copy; CartoDB',
   },

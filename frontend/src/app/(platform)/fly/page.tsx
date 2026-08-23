@@ -16,7 +16,7 @@ import { Separator } from '@/components/ui/separator'
 import { ChevronRight, ChevronLeft, Radio, Video, Map as MapIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-// Leaflet touches `window` — no SSR
+// Leaflet touches `window` - no SSR
 const FleetMap = dynamic(() => import('@/components/swarm/FleetMap'), {
     ssr: false,
     loading: () => (
@@ -78,7 +78,7 @@ function FleetDeviceSummary() {
                 className="text-[9px] font-mono mb-0.5"
                 style={{ color: 'hsl(var(--app-text-muted))' }}
             >
-                {connected.length}/{droneList.length} connected — tap to control
+                {connected.length}/{droneList.length} connected - tap to control
             </div>
             {droneList.map(drone => {
                 const isActive = drone.id === activeDroneId
@@ -160,7 +160,7 @@ export default function FlyPage() {
 
                     {/* THE DRONE'S MESSAGES, ON THE ONE SURFACE THAT IS ALWAYS
                         THERE. This first went into the right-hand panel, which
-                        is collapsible AND scrolls — so on the Fly tab it was
+                        is collapsible AND scrolls - so on the Fly tab it was
                         either below the fold or hidden entirely, and the report
                         was simply "I can't see them". The video pane is the one
                         thing on this tab that cannot be collapsed away, and the
@@ -170,7 +170,7 @@ export default function FlyPage() {
                         <FcMessageLog variant="floating" />
                     </div>
 
-                    {/* VIDEO / MAP toggle — swarm mode only */}
+                    {/* VIDEO / MAP toggle - swarm mode only */}
                     {mounted && swarmEnabled && (
                         <div
                             className="absolute top-2 left-2 z-[1100] flex rounded-lg overflow-hidden border"

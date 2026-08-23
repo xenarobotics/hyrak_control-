@@ -1,7 +1,7 @@
 // SIYI ground-unit telemetry over UDP.
 //
 // The SIYI air unit carries MAVLink alongside video, and the ground unit
-// re-emits it as UDP on the hotspot — the same network the RTSP camera is on.
+// re-emits it as UDP on the hotspot - the same network the RTSP camera is on.
 // No browser API can read a raw UDP socket, so this uses the desktop app's
 // native UDP bridge (desktop/src/bridges/udpBridge.ts), exactly as
 // localSwarmRelay.ts does for a SITL fleet.
@@ -15,7 +15,7 @@
 //                          <--------- serial_downlink <---
 //
 // Addressed the way the same link is set up in QGroundControl: local port 0
-// (ephemeral) plus a TARGET of 192.168.144.20:19856. That direction matters —
+// (ephemeral) plus a TARGET of 192.168.144.20:19856. That direction matters -
 // the ground unit does not transmit unsolicited, and MAVSDK on the backend is
 // `udpin://` and also waits for a heartbeat, so without someone speaking first
 // the link deadlocks silently. udpBridge sends an opening datagram to the target
@@ -30,7 +30,7 @@ const LOCAL_PORT_KEY = 'hyrak-siyi-telemetry-local-port'
 
 // Mirrors how the same link is configured in QGroundControl: a UDP link with
 // "Listening Port: 0" and a target host of 192.168.144.20:19856. Port 0 means
-// "let the OS pick" — the ground unit does not transmit unsolicited, so it is
+// "let the OS pick" - the ground unit does not transmit unsolicited, so it is
 // the TARGET that matters, and the unit replies to whatever ephemeral source
 // port we send from.
 export const DEFAULT_SIYI_TELEMETRY_TARGET = '192.168.144.20:19856'
@@ -45,7 +45,7 @@ let sawTraffic = false
 let lastTelemetryError: string | null = null
 
 // Starting the relay and RECEIVING telemetry are different things, and the UI
-// conflated them: the socket connects, the port binds, the status goes green —
+// conflated them: the socket connects, the port binds, the status goes green -
 // and MAVSDK on the backend sits there logging "Connection timed out" because
 // not one MAVLink byte ever arrived. Reported here so the operator learns it
 // from the app instead of from a server log.
@@ -110,14 +110,14 @@ export async function startSiyiTelemetry(
 ): Promise<void> {
     if (!isDesktopApp()) {
         throw new Error(
-            'SIYI UDP telemetry needs the HYRAK desktop app — a browser tab cannot read a raw '
+            'SIYI UDP telemetry needs the HYRAK desktop app - a browser tab cannot read a raw '
             + 'UDP socket. Use a serial radio, or run the desktop app.',
         )
     }
     const dest = parseTarget(target)
     if (!dest) {
         throw new Error(
-            `"${target}" is not host:port — expected something like ${DEFAULT_SIYI_TELEMETRY_TARGET}.`,
+            `"${target}" is not host:port - expected something like ${DEFAULT_SIYI_TELEMETRY_TARGET}.`,
         )
     }
     if (active) await stopSiyiTelemetry()
@@ -135,7 +135,7 @@ export async function startSiyiTelemetry(
     if (result && !result.ok) {
         throw new Error(
             `${result.error}. If the port is taken, QGroundControl or the SIYI app may `
-            + 'still be holding it — only one process can own a UDP port.',
+            + 'still be holding it - only one process can own a UDP port.',
         )
     }
 
@@ -158,7 +158,7 @@ export async function startSiyiTelemetry(
         lastTelemetryError =
             `Bound the port and sent to ${dest.host}:${dest.port}, but no MAVLink came back in `
             + `${FIRST_TELEMETRY_TIMEOUT_MS / 1000}s. Either this machine cannot reach `
-            + `${dest.host} (check it is on the ground unit's network — the same one the RTSP `
+            + `${dest.host} (check it is on the ground unit's network - the same one the RTSP `
             + 'camera is on), or the target port is wrong, or another program (QGroundControl, '
             + 'the SIYI app) already owns the link.'
         console.warn('SIYI telemetry:', lastTelemetryError)

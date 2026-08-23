@@ -4,8 +4,8 @@
 //
 // Why this exists: a <video> playing a progressive fMP4 stream buffers on
 // Chromium's schedule and offers no way to say "don't". Every latency
-// mechanism we built downstream of it — the live-edge controller,
-// playbackRate draining, the adaptive drift target — existed to fight that
+// mechanism we built downstream of it - the live-edge controller,
+// playbackRate draining, the adaptive drift target - existed to fight that
 // buffer, and measurement showed the fight was unwinnable AND self-defeating:
 // the producer was provably smooth (p50 50ms, p99 58ms at 20fps) while the
 // browser's drift swung 128-444ms and periodically spiked past 3s, because a
@@ -39,7 +39,7 @@ export interface WebCodecsVideoProps {
     /** Reported once decoding starts, for diagnostics. */
     onStatus?: (s: { codec: string; hardware?: boolean }) => void
     /** The decoder FAILED, as opposed to never having been offered. Lets the
-     *  caller fall back to a codec this machine can actually handle — see
+     *  caller fall back to a codec this machine can actually handle - see
      *  fallbackFromHevc in lib/hyrakReceiver.ts for why a support query is not
      *  enough on its own. */
     onDecodeError?: (reason: string) => void
@@ -53,7 +53,7 @@ export function WebCodecsVideo({ src, codec: wireCodec = 'h264', className, styl
         const canvas = canvasRef.current
         if (!canvas) return
         if (typeof window === 'undefined' || !('VideoDecoder' in window)) {
-            setError('This build of Chromium has no WebCodecs — falling back is handled by the caller.')
+            setError('This build of Chromium has no WebCodecs - falling back is handled by the caller.')
             return
         }
 
@@ -62,7 +62,7 @@ export function WebCodecsVideo({ src, codec: wireCodec = 'h264', className, styl
         let cancelled = false
         const abort = new AbortController()
 
-        // Chromium can advertise a decoder it cannot actually run — measured
+        // Chromium can advertise a decoder it cannot actually run - measured
         // on the reference laptop, where enabling VA-API produced exactly one
         // decoded frame out of 180 and then "Decoding error". So a failure is
         // not necessarily fatal: rebuild once in software before giving up.
@@ -73,7 +73,7 @@ export function WebCodecsVideo({ src, codec: wireCodec = 'h264', className, styl
         let needsRebuild = false
 
         // Only ONE frame is ever held. If a frame is still being painted when
-        // the next decodes, the older is dropped — the newest picture is the
+        // the next decodes, the older is dropped - the newest picture is the
         // only one a pilot wants, and queueing is precisely the behaviour this
         // component exists to avoid.
         let pending: VideoFrame | null = null
@@ -89,7 +89,7 @@ export function WebCodecsVideo({ src, codec: wireCodec = 'h264', className, styl
             }
             ctx.drawImage(frame, 0, 0)
             // Painted-frame counter for ModulePerformance. This is the only
-            // way to know the pilot's real frame rate in GStreamer mode — the
+            // way to know the pilot's real frame rate in GStreamer mode - the
             // preview never crosses WebRTC, so pc.getStats() cannot see it.
             // A plain counter on window rather than state: incrementing React
             // state 30x/second would re-render the video pane for a number
@@ -128,7 +128,7 @@ export function WebCodecsVideo({ src, codec: wireCodec = 'h264', className, styl
                         buf = buf.slice(HEADER_BYTES + len)
 
                         // A decoder that errored is torn down and rebuilt at
-                        // the next keyframe — mid-GOP frames reference pictures
+                        // the next keyframe - mid-GOP frames reference pictures
                         // the new decoder never saw.
                         if (needsRebuild) {
                             needsRebuild = false
@@ -154,7 +154,7 @@ export function WebCodecsVideo({ src, codec: wireCodec = 'h264', className, styl
                                     if (!softwareRetried) {
                                         // Retry in software from the next
                                         // keyframe. Nothing is reported to the
-                                        // caller yet — a fallback that works is
+                                        // caller yet - a fallback that works is
                                         // not an error worth surfacing.
                                         softwareRetried = true
                                         accel = 'prefer-software'
@@ -185,7 +185,7 @@ export function WebCodecsVideo({ src, codec: wireCodec = 'h264', className, styl
                                 })
                             } catch (e) {
                                 // configure() throws synchronously on a codec
-                                // string the build cannot accept — a different
+                                // string the build cannot accept - a different
                                 // failure from the async `error` callback
                                 // above, and one that would otherwise leave
                                 // this loop spinning on an unconfigured
@@ -207,7 +207,7 @@ export function WebCodecsVideo({ src, codec: wireCodec = 'h264', className, styl
                         if (decoder.decodeQueueSize > 2 && !key) continue
                         decoder.decode(new EncodedVideoChunk({
                             type: key ? 'key' : 'delta',
-                            // Microseconds, and only required to be monotonic —
+                            // Microseconds, and only required to be monotonic -
                             // frames are painted on arrival, never scheduled.
                             timestamp: seq * 1000,
                             data: au,

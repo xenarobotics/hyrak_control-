@@ -1,4 +1,4 @@
-// Single-drone SITL bridge — desktop app ONLY. The native UDP bridge binds
+// Single-drone SITL bridge - desktop app ONLY. The native UDP bridge binds
 // PX4's classic default MAVLink port (14540) on the CLIENT's machine and
 // relays raw bytes to the backend's existing serial_uplink/serial_downlink
 // events, so the server needs no SITL-specific handling (same principle as
@@ -8,7 +8,7 @@
 // There is deliberately NO browser fallback here: SITL is a desktop-app
 // feature. A plain browser tab can't open UDP sockets, and the old
 // workaround (a separate sitl_relay/single_relay.py process the client had
-// to run) was removed from the UI as confusing — browser users are pointed
+// to run) was removed from the UI as confusing - browser users are pointed
 // at the desktop app download instead (see DeviceSelector.tsx).
 
 import { getSocket } from '@/lib/socket'
@@ -21,7 +21,7 @@ let silenceTimer: ReturnType<typeof setTimeout> | null = null
 const NATIVE_UDP_ID = 'remote-sitl'
 
 // Binding the port always succeeds whether or not SITL is actually sending
-// anything to it, so a misconfigured SITL produced no error at all — just
+// anything to it, so a misconfigured SITL produced no error at all - just
 // "connecting" until the backend's own 25s mavsdk timeout eventually fired
 // with a generic message that named none of the likely causes. Fail fast and
 // specifically instead.
@@ -48,7 +48,7 @@ export async function startRemoteSitlRelay(port = 14540): Promise<void> {
     if (!result.ok) {
         if (result.error?.includes('EADDRINUSE')) {
             throw new Error(
-                `Port ${port} is already in use on this computer — close QGroundControl, ` +
+                `Port ${port} is already in use on this computer - close QGroundControl, ` +
                 'a relay script, or any other ground station software, then try again.'
             )
         }
@@ -61,20 +61,20 @@ export async function startRemoteSitlRelay(port = 14540): Promise<void> {
             `Bound udp:${port} on this computer, but your SITL hasn't sent anything to it. ` +
             `PX4 SITL's API link sends to 127.0.0.1:${port} by default (see px4-rc.mavlink: ` +
             `mavlink start -u 14580 -m onboard -o ${port}). If SITL is running inside WSL, ` +
-            `Docker, or a VM, its packets never reach this machine — set PX4's target address ` +
+            `Docker, or a VM, its packets never reach this machine - set PX4's target address ` +
             `to this computer's IP and make sure your firewall allows inbound UDP ${port}.`
         )
     }, SILENCE_TIMEOUT_MS)
 
     nativeUnsubscribe = bridge.onEvent((event: BridgeEvent) => {
         if (event.bridge !== 'udp' || event.id !== NATIVE_UDP_ID) return
-        // First real packet — SITL is alive, so cancel the silence warning.
+        // First real packet - SITL is alive, so cancel the silence warning.
         if (event.type === 'status' && event.meta?.receiving && silenceTimer) {
             clearTimeout(silenceTimer)
             silenceTimer = null
         }
         if (event.type !== 'data' || !event.data) return
-        // Pass the Uint8Array itself, not .buffer — .buffer could include
+        // Pass the Uint8Array itself, not .buffer - .buffer could include
         // bytes outside this view if it's not exactly-sized (unlike
         // localSwarmRelay.ts's native path, which sends a freshly
         // allocated, exact-size buffer). socket.io-client serializes a

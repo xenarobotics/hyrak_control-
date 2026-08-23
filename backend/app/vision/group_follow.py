@@ -5,9 +5,9 @@ Group follow: keeping SEVERAL subjects in frame at once.
 A different controller from single-target follow, and the difference is the
 whole feature.
 
-    Single follow chases a SETPOINT — centre the subject, hold it at 30% of
-    frame height. Group follow enforces a CONTAINMENT CONSTRAINT — everyone
-    inside the frame with margin — and otherwise does nothing at all.
+    Single follow chases a SETPOINT - centre the subject, hold it at 30% of
+    frame height. Group follow enforces a CONTAINMENT CONSTRAINT - everyone
+    inside the frame with margin - and otherwise does nothing at all.
 
 That distinction is what keeps the aircraft calm. With two subjects moving
 independently there is no position that satisfies a setpoint for both, so any
@@ -16,7 +16,7 @@ step. Containment has a dead band by construction: while the group fits, the
 correct action is to hold, and holding is what it does.
 
 WHAT IS ACTUALLY BEING CONTROLLED
-    The union of the members' boxes — the GROUP BOX. Its centre drives yaw and
+    The union of the members' boxes - the GROUP BOX. Its centre drives yaw and
     (in Auto altitude) the vertical axis; its SIZE drives the forward axis.
     Nobody is centred, and that is deliberate: demanding two subjects be
     centred at once is a demand for the impossible, which the operator would
@@ -29,14 +29,14 @@ THE CONSTRAINT IS A BAND, NOT A LINE
 
 HEIGHT IS TIGHTER THAN WIDTH, BECAUSE THE CAMERA IS BOLTED DOWN
     With a fixed mount pitched down, the frame's vertical axis IS the range
-    axis — the bottom edge is near the aircraft and the top is far. A subject
+    axis - the bottom edge is near the aircraft and the top is far. A subject
     walking toward the drone exits the BOTTOM long before a side-by-side pair
     troubles the width. So the vertical margin is the one that gets breached
     first in practice, and it is set tighter to match.
 
 EDGE PROXIMITY TRIGGERS THE RETREAT; FILL TRIGGERS THE CLOSE-IN
     Group fill only correlates with losing someone. A member's box approaching
-    a frame EDGE is the thing that actually predicts it — a group box at 75%
+    a frame EDGE is the thing that actually predicts it - a group box at 75%
     fill sitting off-centre is closer to a loss than a centred one at 85%.
     Fill is still the right signal for closing back in, because that is a
     question about the group as a whole and there is no urgency in it.
@@ -53,7 +53,7 @@ WIDENING SPLITS BETWEEN RETREAT AND CLIMB, AT CONSTANT DEPRESSION
 WHEN IT CANNOT BE DONE, IT SAYS SO AND STOPS
     Two people walking opposite ways at 1.5 m/s separate at 3 m/s and the
     range needed to frame them grows without bound. There is no "keep both
-    framed" — only "keep both framed for the next N seconds". Past the
+    framed" - only "keep both framed for the next N seconds". Past the
     give-up window the group is declared UNFRAMEABLE: translation stops, yaw
     keeps the group centred, and the operator is told what range would be
     needed. Nothing is silently dropped, because a group that quietly became a
@@ -71,8 +71,8 @@ logger = logging.getLogger("verocore.vision.group_follow")
 
 
 #: Hard cap on group size. Past four subjects the range needed to frame them
-#: makes every analytic in this module worthless — plates need ~7 m slant
-#: range — and what the operator actually wants is crowd management, which
+#: makes every analytic in this module worthless - plates need ~7 m slant
+#: range - and what the operator actually wants is crowd management, which
 #: this same module already provides. A cap that refuses is better than a
 #: follow that technically works and reports nothing readable.
 MAX_FOLLOW_MEMBERS = 4
@@ -85,7 +85,7 @@ GROUP_MIN_FILL_W = 0.45
 GROUP_MIN_FILL_H = 0.40
 
 #: How close a member's box may come to a frame edge before the retreat is
-#: forced regardless of fill. 4% of the frame is ~43 px at 1080p — far enough
+#: forced regardless of fill. 4% of the frame is ~43 px at 1080p - far enough
 #: out to act before the box starts being truncated, which is the point at
 #: which the box stops describing the subject.
 GROUP_EDGE_MARGIN = 0.04
@@ -96,7 +96,7 @@ GROUP_EDGE_MARGIN = 0.04
 _EDGE_URGENT_ERROR = -0.06
 
 #: How long a NON-URGENT action must be wanted before it is adopted. Stops one
-#: noisy frame from commanding a manoeuvre. Widening is exempt — see settle().
+#: noisy frame from commanding a manoeuvre. Widening is exempt - see settle().
 GROUP_DWELL_S = 0.5
 
 # ── THE WIDEN BUDGET ────────────────────────────────────────────────────────
@@ -106,7 +106,7 @@ GROUP_DWELL_S = 0.5
 # what to bound it WITH, and the honest answer is metres, not seconds.
 #
 # WHAT ACTUALLY GOES WRONG IS DISPLACEMENT. The cost of an over-long widen is
-# that the aircraft ends up somewhere the operator did not put it — and,
+# that the aircraft ends up somewhere the operator did not put it - and,
 # because the retreat is backwards, somewhere its camera has not been looking.
 # Seconds are only a proxy for that, and a bad one: the widen speed is
 # proportional to how far past the margin the group is, so the same 15 seconds
@@ -116,7 +116,7 @@ GROUP_DWELL_S = 0.5
 #
 # MEASURED, NOT INTEGRATED. This differences two GPS fixes. Integrating the
 # COMMANDED velocity instead would be dead reckoning of a setpoint the aircraft
-# may not be achieving — wind, saturation, attitude limits — against the vision
+# may not be achieving - wind, saturation, attitude limits - against the vision
 # loop's dt, which is the exact clock the blind-flight work already established
 # cannot be trusted (frames are not seconds). That would produce a number with
 # a metre sign on it that is really a guess.
@@ -140,7 +140,7 @@ GROUP_GIVE_UP_S = 8.0
 # ── MEMBERSHIP OUTLIVES A TRACK ID ─────────────────────────────────────────
 #
 # A group member is stored as a ByteTrack id, and a ByteTrack id is not a
-# person. Walk behind a pole and come back and you are a NEW id — so a member
+# person. Walk behind a pole and come back and you are a NEW id - so a member
 # bound to the old one is gone forever, while standing in plain sight with
 # their name drawn over them by the face recogniser.
 #
@@ -150,9 +150,9 @@ GROUP_GIVE_UP_S = 8.0
 # reports "1 of 2" for the rest of the session, and because closing in is
 # blocked while anyone is missing, the aircraft can never approach again.
 #
-# So membership is resolved through the DURABLE identity where one exists — a
+# So membership is resolved through the DURABLE identity where one exists - a
 # confirmed face for a person, the vehicle_id the plate registry restores for a
-# vehicle — and a member who is genuinely gone is RETIRED rather than left to
+# vehicle - and a member who is genuinely gone is RETIRED rather than left to
 # cripple the group.
 
 #: How long a member may be missing before they are dropped from the group.
@@ -163,7 +163,7 @@ MEMBER_RETIRE_S = 15.0
 
 #: Minimum GPS quality to measure a 15 m displacement with. A 2D fix has no
 #: usable horizontal accuracy for this, and a thin constellation wanders by
-#: metres while the aircraft sits still — which would spend the budget without
+#: metres while the aircraft sits still - which would spend the budget without
 #: the aircraft moving.
 _MIN_FIX_TYPE = 3
 _MIN_SATS = 6
@@ -172,7 +172,7 @@ _MIN_SATS = 6
 class GroupAction(str, Enum):
     """
     What the forward axis should do. Named rather than implied by a sign,
-    because the operator has to be able to see WHY the aircraft is moving —
+    because the operator has to be able to see WHY the aircraft is moving -
     "backing off to keep 3 in frame" and "closing in, group has bunched up"
     look identical from the ground and mean opposite things.
     """
@@ -209,7 +209,7 @@ class GroupBox:
 
 def group_box(boxes: Sequence[Sequence[float]], W: int, H: int) -> Optional[GroupBox]:
     """
-    Union of pixel boxes, normalised. None for an empty sequence — an empty
+    Union of pixel boxes, normalised. None for an empty sequence - an empty
     group has no box, and returning a degenerate one at the origin would read
     as a subject in the top-left corner.
     """
@@ -227,7 +227,7 @@ def edge_breach(boxes: Sequence[Sequence[float]], W: int, H: int) -> Optional[st
     Which frame edge a member has come too close to, or None.
 
     Checked per MEMBER rather than on the group box, because the group box can
-    sit comfortably inside the margins while one member hugs an edge — the
+    sit comfortably inside the margins while one member hugs an edge - the
     union's extent says nothing about where the individual subjects are once
     there are more than two of them.
     """
@@ -301,23 +301,23 @@ def assess_framing(
     if overshoot > 0.0:
         axis = "width" if over_w >= over_h else "height"
         err = -overshoot
-        reason = (f"group fills {fw * 100:.0f}%x{fh * 100:.0f}% — over the "
+        reason = (f"group fills {fw * 100:.0f}%x{fh * 100:.0f}% - over the "
                   f"{axis} margin, widening")
         action = GroupAction.WIDEN
     elif edge is not None:
         err = _EDGE_URGENT_ERROR
-        reason = f"a subject is at the {edge} edge — widening"
+        reason = f"a subject is at the {edge} edge - widening"
         action = GroupAction.WIDEN
     else:
         under_w = GROUP_MIN_FILL_W - fw
         under_h = GROUP_MIN_FILL_H - fh
         # Closing in is governed by whichever axis is FURTHEST from its floor,
-        # i.e. the smaller undershoot — closing until the tighter axis reaches
+        # i.e. the smaller undershoot - closing until the tighter axis reaches
         # its minimum would overshoot the other one straight out of the band.
         undershoot = min(under_w, under_h)
         if undershoot > 0.0:
             err = undershoot
-            reason = (f"group fills only {fw * 100:.0f}%x{fh * 100:.0f}% — "
+            reason = (f"group fills only {fw * 100:.0f}%x{fh * 100:.0f}% - "
                       f"closing in")
             action = GroupAction.CLOSE
         else:
@@ -383,7 +383,7 @@ def widen_velocity(
     range R relates to altitude and ground distance as h = R*sin(theta) and
     d = R*cos(theta). To grow R at v m/s while holding theta constant, climb at
     v*sin(theta) and back off at v*cos(theta). Straight down (theta -> 90) the
-    split becomes all climb, which is correct — moving horizontally under a
+    split becomes all climb, which is correct - moving horizontally under a
     subject directly below changes the slant range by almost nothing. Level
     (theta -> 0) it becomes all retreat, equally correct.
 
@@ -419,8 +419,8 @@ def required_range_m(
     in metres of slant range. None when the geometry is unknown.
 
     Angular extent is proportional to 1/R for a group of fixed ground size, so
-    R_needed = R_now * (fill / max_fill). Approximate — it treats the group as
-    planar and ignores the members' own depth — but it is the difference
+    R_needed = R_now * (fill / max_fill). Approximate - it treats the group as
+    planar and ignores the members' own depth - but it is the difference
     between "cannot frame all" and "cannot frame all, needs about 45 m", and
     only the second one tells the operator whether to back off or give up.
     """
@@ -444,7 +444,7 @@ def fix_from_telemetry(
 
     This reads the RAW telemetry snapshot rather than the CameraPose the rest
     of the vision layer works from, because pose_from_telemetry keeps only
-    altitude and attitude — it has no reason to carry a position. So the fix
+    altitude and attitude - it has no reason to carry a position. So the fix
     was already arriving at every follow module every frame and being thrown
     away one layer above this one.
 
@@ -475,8 +475,8 @@ def fix_from_telemetry(
 @dataclass
 class WidenBudget:
     """
-    How much of the widen allowance has been spent, and — the part the operator
-    needs — WHICH bound is actually in force.
+    How much of the widen allowance has been spent, and - the part the operator
+    needs - WHICH bound is actually in force.
 
     Reported rather than kept internal for the same reason limit_climb reports
     that it cannot enforce the ceiling without an AGL reading: "we are bounding
@@ -494,7 +494,7 @@ class WidenBudget:
             return (f"widened {self.spent_m:.0f} m of the "
                     f"{GROUP_WIDEN_LIMIT_M:.0f} m allowed")
         return (f"widened for {self.spent_s:.0f}s of {GROUP_GIVE_UP_S:.0f}s "
-                f"— no usable GPS fix, so this is bounded by time, not distance")
+                f"- no usable GPS fix, so this is bounded by time, not distance")
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -536,7 +536,7 @@ class GroupState:
         elif self.widen_origin is None and fix is not None:
             # A fix that arrived mid-widen. The origin is stamped HERE rather
             # than backdated, so the distance measured is one the aircraft
-            # actually flew under observation — crediting it with the metres it
+            # actually flew under observation - crediting it with the metres it
             # covered while the fix was unusable would be inventing them.
             self.widen_origin = fix
 
@@ -551,7 +551,7 @@ class GroupState:
         """
         Distance when it can be measured, time when it cannot.
 
-        The fallback is not a lesser version of the same bound — it is a
+        The fallback is not a lesser version of the same bound - it is a
         different and looser one, which is exactly why it has to be named in
         the payload rather than substituted quietly.
         """
@@ -583,8 +583,8 @@ def should_retire(seconds_missing: float, has_durable_id: bool) -> bool:
     Drop a member who has been missing this long?
 
     A member WITHOUT a durable identity is retired on the same clock as one
-    with it, deliberately. It is tempting to keep the anonymous one longer —
-    there is no other way to find them again — but that has it backwards: an
+    with it, deliberately. It is tempting to keep the anonymous one longer -
+    there is no other way to find them again - but that has it backwards: an
     anonymous member is precisely the one that can never be re-bound, so
     waiting is not patience, it is a group that stays crippled forever. The one
     with a durable id is the one that can still come back, and it gets the same

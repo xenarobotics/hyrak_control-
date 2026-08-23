@@ -11,7 +11,7 @@ logger = logging.getLogger("verocore.events.permits")
 
 def register_permit_events(sio, session_manager):
     def _resolve_drone_rec_id(session, data) -> str | None:
-        """Permit owner: the session's identified drone, or — in swarm mode —
+        """Permit owner: the session's identified drone, or - in swarm mode -
         the fleet drone the client names via fleet_drone_id."""
         fleet_id = data.get("fleet_drone_id") if isinstance(data, dict) else None
         if fleet_id is not None:
@@ -28,7 +28,7 @@ def register_permit_events(sio, session_manager):
         if not drone_rec_id:
             await sio.emit("permit_result", {
                 "ok": False,
-                "msg": "Connect a drone first — permits are tied to the drone's identity",
+                "msg": "Connect a drone first - permits are tied to the drone's identity",
             }, to=sid)
             return
         waypoints = data.get("waypoints") or []
@@ -46,7 +46,7 @@ def register_permit_events(sio, session_manager):
         red_zones = [z for z in check["zones"] if z["zone_class"] == "red"]
         if not red_zones:
             await sio.emit("permit_result", {
-                "ok": False, "msg": "This mission doesn't cross any red zone — no permit needed",
+                "ok": False, "msg": "This mission doesn't cross any red zone - no permit needed",
             }, to=sid)
             return
 
@@ -56,12 +56,12 @@ def register_permit_events(sio, session_manager):
         )
         if permit is None:
             await sio.emit("permit_result", {
-                "ok": False, "msg": "Database offline — try again later",
+                "ok": False, "msg": "Database offline - try again later",
             }, to=sid)
             return
         await sio.emit("permit_result", {
             "ok": True, "permit": permit,
-            "msg": "Permit requested — awaiting admin approval. "
+            "msg": "Permit requested - awaiting admin approval. "
                    "Upload the SAME mission again once approved.",
         }, to=sid)
 

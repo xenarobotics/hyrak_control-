@@ -1,7 +1,7 @@
 """
 Automatic flight recording. A flight = armed → disarmed; while armed the
 telemetry stream is sampled at 1 Hz into flight_samples, and the summary
-row (duration, max altitude, distance) is finalised on disarm — or on
+row (duration, max altitude, distance) is finalised on disarm - or on
 disconnect, so a dropped link never leaves a flight dangling open.
 
 Everything degrades to a no-op when the DB is offline; recording must
@@ -116,7 +116,7 @@ async def end_flight(session_id: str) -> None:
             flight.crossed_red = state.get("crossed_red", False)
             await db.commit()
         logger.info(
-            f"Flight ended: {state['flight_id'][:8]} — "
+            f"Flight ended: {state['flight_id'][:8]} - "
             f"{flight.duration_s:.0f}s, {flight.max_alt_m:.0f}m max, "
             f"{flight.distance_m:.0f}m flown"
         )

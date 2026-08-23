@@ -1,5 +1,5 @@
 // Configurable ports for the "Custom RF air unit (wfb-ng)" telemetry
-// preset — see backend/app/telemetry/rf_bridge.py. Defaults match
+// preset - see backend/app/telemetry/rf_bridge.py. Defaults match
 // communication/start-gs.sh's fixed ports (video 5600 lives in
 // videoSource.ts, alongside the other video-source settings); editable
 // here in case a ground-station config uses different ports.
@@ -22,7 +22,7 @@ export const DEFAULT_RF_UPLINK_PORT = 14551
 // 0.0.0.0, so it keeps working from anywhere with no configuration at all. The
 // uplink is a send FROM us to a fixed listener. Point it at 127.0.0.1 with an
 // off-box decoder and telemetry reads perfectly while every command, mission
-// upload and parameter write is dropped into local loopback — a ground station
+// upload and parameter write is dropped into local loopback - a ground station
 // that looks connected and cannot fly the aircraft.
 export const DEFAULT_RF_UPLINK_HOST = '192.168.50.12'
 
@@ -67,12 +67,12 @@ export function setRfUplinkHost(host: string): void {
 // Optional verbatim copy of the MAVLink DOWNLINK to another local UDP port.
 //
 // Only one process can receive a unicast UDP port, so HYRAK binding 14550
-// takes it away from anything else pointed there — QGroundControl being the
+// takes it away from anything else pointed there - QGroundControl being the
 // case that came up (to load the full parameter set and upload missions).
 // Set this and point QGC at the fan-out port instead: HYRAK keeps the real
 // link, QGC gets its own copy of the same downlink.
 //
-// Read-only for QGC by design. The fan-out carries downlink only — the uplink
+// Read-only for QGC by design. The fan-out carries downlink only - the uplink
 // stays exclusively HYRAK's, because two ground stations commanding one
 // aircraft is a genuinely bad idea. QGC will show telemetry, parameters and the
 // mission it downloads, but its writes do not reach the aircraft through here.

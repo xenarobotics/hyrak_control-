@@ -5,14 +5,14 @@
 // This logic lived entirely inside DeviceSelector, which was right while the
 // Fly tab was the only place a link could be picked. The status bar now offers
 // the same choice from Mission and AI, and the alternative to a shared hook is
-// two components each keeping their own idea of which radio is selected — the
+// two components each keeping their own idea of which radio is selected - the
 // operator switches port in the bar, walks to Fly, and finds the old one still
 // showing. This codebase has already paid for that mistake once, in the seven
 // hand-copied copies of the pursuit-analyzer list that silently drifted apart.
 //
 // WHAT IS DELIBERATELY NOT HERE: the relay URL, the SIYI target, the RF fanout
 // port and the uplink host. Those are text fields with one editor each on the
-// Fly tab, and they are already persisted at the moment they are typed — so
+// Fly tab, and they are already persisted at the moment they are typed - so
 // connect() reads them back from storage rather than needing them passed in.
 // Putting them in the hook would mean the compact bar had to render four text
 // inputs it has no room for, or silently drop them.
@@ -91,7 +91,7 @@ export function useTelemetryLink() {
 
     useEffect(() => {
         if (desktop) {
-            // No plug/unplug event to subscribe to natively — the refresh
+            // No plug/unplug event to subscribe to natively - the refresh
             // button re-lists, which is all QGC does too.
             void refreshNativeRadios()
             return
@@ -153,7 +153,7 @@ export function useTelemetryLink() {
 
     /** Every link this shell can offer, in the order DeviceSelector shows
      *  them. One list so the bar and the Fly panel cannot offer different
-     *  sets — which is the failure mode of having written it out twice. */
+     *  sets - which is the failure mode of having written it out twice. */
     const options: LinkOption[] = [
         ...nativeRadios.map((r, i) => ({ value: `nradio-${i}`, label: r.label })),
         ...radios.map((r, i) => ({ value: `radio-${i}`, label: r.label })),
@@ -179,7 +179,7 @@ export function useTelemetryLink() {
         browserSerialSupported: browserSerialSupported(),
         // Named rather than merely absent. A flight controller on a USB cable
         // works in the desktop app and looks unsupported here, and the cause
-        // is usually the page's origin rather than the browser — see
+        // is usually the page's origin rather than the browser - see
         // serialUnavailableReason.
         serialUnavailable: serialUnavailableReason(),
         connect, disconnect, disconnecting,
@@ -187,7 +187,7 @@ export function useTelemetryLink() {
         isConnected: telemetryStatus === 'connected',
         isConnecting: telemetryStatus === 'connecting',
         // SITL bridges the CLIENT'S own SITL through the desktop app's native
-        // UDP bridge — a plain browser tab has no way to reach udp:14540.
+        // UDP bridge - a plain browser tab has no way to reach udp:14540.
         sitlNeedsDesktop: source === 'sitl' && !desktop,
     }
 }

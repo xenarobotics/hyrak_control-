@@ -1,6 +1,6 @@
 'use client'
 
-// Traffic management — the composed vehicle module's panel.
+// Traffic management - the composed vehicle module's panel.
 //
 // One list of vehicles carrying everything known about each: type, colour,
 // plate, speed. Clicking a row locks onto that vehicle (the same action as
@@ -25,7 +25,7 @@ const LABEL: React.CSSProperties = {
     color: 'hsl(var(--app-text-muted))',
 }
 
-/** One figure in the stat grid. Value first and large, label under it — the
+/** One figure in the stat grid. Value first and large, label under it - the
  *  number is what gets read at a glance and the label only disambiguates. */
 function Stat({ label, value, tone = 'muted' }: {
     label: string; value: number | string; tone?: 'muted' | 'cyan'
@@ -164,7 +164,7 @@ export function TrafficManagementPanel() {
 
     // Wrong-way vehicles float to the top of the list. The backend orders by
     // apparent size, which is right for "what is nearest" and wrong for "what
-    // needs attention" — a car driving into the traffic could otherwise sit
+    // needs attention" - a car driving into the traffic could otherwise sit
     // ninth in a list the operator has to scroll.
     const vehicles = [...(cvResults?.vehicles ?? [])].sort(
         (a, b) => Number(b.against_flow ?? false) - Number(a.against_flow ?? false)
@@ -206,7 +206,7 @@ export function TrafficManagementPanel() {
     useEffect(() => { loadHistory() }, [])
 
     // Refresh once a session stops so the last reads appear without the
-    // operator doing anything — the final DB writes are fire-and-forget.
+    // operator doing anything - the final DB writes are fire-and-forget.
     const wasStreaming = useRef(false)
     useEffect(() => {
         if (wasStreaming.current && !isStreaming) {
@@ -248,7 +248,7 @@ export function TrafficManagementPanel() {
 
             {/* ── Against the flow ────────────────────────────────────────
                 Pinned above the scrolling region, because it is the only thing
-                in this panel that is an ALERT rather than a reading — and an
+                in this panel that is an ALERT rather than a reading - and an
                 alert that has to be scrolled to has already failed.
 
                 The wording is deliberately "the traffic around it" and not
@@ -281,8 +281,8 @@ export function TrafficManagementPanel() {
 
             {/* ── Degraded-capability notices ─────────────────────────────
                 One line, not three stacked paragraphs. These are all the same
-                shape of statement — "X is unavailable, here is what still
-                works" — and three of them took more vertical space than the
+                shape of statement - "X is unavailable, here is what still
+                works" - and three of them took more vertical space than the
                 vehicle list they were pushing off screen. */}
             {(!hasTelemetry || !alprOk || !facesOk) && (
                 <div style={{
@@ -296,7 +296,7 @@ export function TrafficManagementPanel() {
                             !alprOk && 'plate reader not loaded',
                             !facesOk && 'face recognition not loaded',
                         ].filter(Boolean).join(' · ')}
-                        {' — everything else is unaffected.'}
+                        {' - everything else is unaffected.'}
                     </span>
                 </div>
             )}
@@ -327,8 +327,8 @@ export function TrafficManagementPanel() {
 
             {/* ── Everything below scrolls as ONE region ──────────────────
                 The panel had six stacked sections all competing for a fixed
-                height, so the vehicle list — the part actually worth looking
-                at — got squeezed to a few rows and the history was cut off
+                height, so the vehicle list - the part actually worth looking
+                at - got squeezed to a few rows and the history was cut off
                 entirely. Splitting it puts what you ACT on (counts, profile,
                 follow) permanently in view, and lets the detail scroll instead
                 of being clipped. */}
@@ -364,7 +364,7 @@ export function TrafficManagementPanel() {
 
             {/* ── Lock + follow ───────────────────────────────────────────
                 The SHARED control, so vehicles, people, crowds and person-ID
-                all behave the same way — the inconsistency between four
+                all behave the same way - the inconsistency between four
                 hand-rolled versions was itself the reliability problem.
                 `kind` comes from the backend rather than being assumed here:
                 one id space covers both, so what got clicked is only known
@@ -393,7 +393,7 @@ export function TrafficManagementPanel() {
 
             {/* The altitude floor is the reason a commanded descent stops. Left
                 unsaid, a drone that will not come down reads as a broken
-                controller — and its opposite, a descent nobody could see, is
+                controller - and its opposite, a descent nobody could see, is
                 what put an aircraft into the ground. */}
             {floorReason && (
                 <div style={{
@@ -411,7 +411,7 @@ export function TrafficManagementPanel() {
                     <span style={LABEL}>Vehicles</span>
                     {vehicles.length > 0 && (
                         <span style={{ fontSize: 9, color: 'hsl(var(--app-text-muted))' }}>
-                            click to lock — or click it on the video
+                            click to lock - or click it on the video
                         </span>
                     )}
                 </div>
@@ -438,7 +438,7 @@ export function TrafficManagementPanel() {
                                         // the track id resetting on occlusion.
                                         // Math.random() used to stand in here,
                                         // which gave every row a new key on
-                                        // every frame — React tore down and
+                                        // every frame - React tore down and
                                         // rebuilt the whole list ~15x a second.
                                         key={v.vehicle_id ?? v.track_id ?? `idx-${i}`}
                                         onClick={() => v.track_id != null
@@ -448,7 +448,7 @@ export function TrafficManagementPanel() {
                                             display: 'flex', alignItems: 'center', gap: 8,
                                             padding: '6px 9px', borderRadius: 7, cursor: 'pointer',
                                             // Against-flow outranks the lock
-                                            // highlight — it is the state the
+                                            // highlight - it is the state the
                                             // operator most needs to find.
                                             background: wrongWay ? 'rgba(230,0,0,0.13)'
                                                 : locked ? 'rgba(34,211,238,0.12)'
@@ -468,7 +468,7 @@ export function TrafficManagementPanel() {
                                                 // was allowed to exist. Green means two
                                                 // frames agreed; amber is a single-frame
                                                 // read, which at drone standoff is often
-                                                // the only read a passing vehicle gives —
+                                                // the only read a passing vehicle gives -
                                                 // shown, logged, and marked rather than
                                                 // discarded.
                                                 color: !v.plate ? 'hsl(var(--app-text-muted))'
@@ -507,7 +507,7 @@ export function TrafficManagementPanel() {
                                             </span>
                                             {/* Direction of travel. Absent rather
                                                 than zeroed below ~5km/h, where a
-                                                heading is atan2 of box jitter —
+                                                heading is atan2 of box jitter -
                                                 a blank is honest, "N 0°" is not. */}
                                             {heading && (
                                                 <span style={{
@@ -558,7 +558,7 @@ export function TrafficManagementPanel() {
                 Not part of the scrolling region. It is the one thing here that
                 is a running record rather than a live reading, so it should
                 stay put and be glanceable while the vehicle list above it
-                scrolls — rather than being pushed off the end by however many
+                scrolls - rather than being pushed off the end by however many
                 vehicles happen to be in frame. */}
             {history.length > 0 && (
                 <div style={{

@@ -50,7 +50,7 @@ export function OSDBar() {
     return (
         <div className="flex flex-col px-2.5 py-1.5 gap-1.5">
 
-            {/* Row 1 — status */}
+            {/* Row 1 - status */}
             <div className="flex items-center gap-2 flex-wrap">
                 {/* Connection */}
                 <Pill>
@@ -96,7 +96,7 @@ export function OSDBar() {
                 </Pill>
             </div>
 
-            {/* Row 2 — flight data */}
+            {/* Row 2 - flight data */}
             <div className="flex items-center gap-2 flex-wrap">
                 {/* Altitude */}
                 <Pill>

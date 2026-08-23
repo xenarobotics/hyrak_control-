@@ -2,7 +2,7 @@
 //
 // Unlike most of the Settings page, these do not live in localStorage. They are
 // properties of the airframe and of the mission, they must apply to any session
-// on any browser, and they must survive a restart — so the backend owns them
+// on any browser, and they must survive a restart - so the backend owns them
 // (backend/app/vision/calibration.py) and this is just a client.
 //
 // Field metadata (ranges, units, help) comes FROM the server rather than being
@@ -13,7 +13,7 @@ import { getServerUrl } from './server-url'
 
 export interface CalibrationField {
     key: string
-    /** 'follow' is the yaw tuning shared by every tracking mode — see
+    /** 'follow' is the yaw tuning shared by every tracking mode - see
      *  backend calibration.py for why it is a group of its own rather than
      *  more entries under 'limits'. */
     group: 'camera' | 'limits' | 'follow'
@@ -32,7 +32,7 @@ export interface CalibrationField {
 
 export interface CalibrationSchema {
     fields: CalibrationField[]
-    /** False until something has been measured — the UI warns while it is. */
+    /** False until something has been measured - the UI warns while it is. */
     calibrated: boolean
 }
 
@@ -71,7 +71,7 @@ export interface FollowTuning {
  * operator's saved numbers would silently revert those numbers the moment any
  * one slider moved. So the panel displays what is actually flying.
  *
- * Returns null if the backend is unreachable — callers keep their own literals
+ * Returns null if the backend is unreachable - callers keep their own literals
  * as the fallback, which is the same thing the backend falls back to.
  */
 export async function fetchFollowTuning(): Promise<FollowTuning | null> {
@@ -119,7 +119,7 @@ export async function resetCalibration(): Promise<CalibrationSchema> {
     return r.json()
 }
 
-/** Vertical FOV implied by a horizontal one at 16:9 — shown next to the HFOV
+/** Vertical FOV implied by a horizontal one at 16:9 - shown next to the HFOV
  *  input because the vertical span is what decides whether one fixed mount
  *  angle can cover both a shallow ID view and a steep ground-projection view. */
 export function derivedVfov(hfovDeg: number, aspect = 16 / 9): number {
@@ -127,7 +127,7 @@ export function derivedVfov(hfovDeg: number, aspect = 16 / 9): number {
     return (2 * Math.atan(Math.tan(h / 2) / aspect) * 180) / Math.PI
 }
 
-/** Ground sample distance at nadir, metres per pixel — the single number that
+/** Ground sample distance at nadir, metres per pixel - the single number that
  *  says whether a target will have enough pixels to analyse at a given height. */
 export function gsdAtNadir(hfovDeg: number, altitudeM: number, widthPx = 1920): number {
     return (2 * altitudeM * Math.tan((hfovDeg * Math.PI) / 360)) / widthPx

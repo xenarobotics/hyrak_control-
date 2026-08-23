@@ -30,7 +30,7 @@
   --font-sans: var(--font-geist-sans), sans-serif;
   --font-mono: var(--font-geist-mono), monospace;
 
-  /* App surface palette — lets components use bg-app-surface, text-app-text,
+  /* App surface palette - lets components use bg-app-surface, text-app-text,
      border-app-border, etc. instead of inline style={{ ... hsl(var(--app-*)) }} */
   --color-app-bg: hsl(var(--app-bg));
   --color-app-surface: hsl(var(--app-surface));
@@ -106,7 +106,7 @@
    adds both classes), so the shadcn block above still applies and only the
    app tokens change. What changed and why:
    - muted text 55% → 68% lightness: the single biggest "hard to read at
-     full brightness" contributor — every sub-line and unit label uses it.
+     full brightness" contributor - every sub-line and unit label uses it.
    - borders 16% → 24%: panel edges were nearly invisible, so dense pages
      read as one undifferentiated field.
    - a slate-blue cast instead of neutral gray: separates surfaces without
@@ -123,7 +123,7 @@
 
 /* Percentage height chain for the app shell. The shell used h-screen
    (100vh), and vh under CSS zoom means different things in different
-   engines — the standardized behaviour divides it by the zoom factor, older
+   engines - the standardized behaviour divides it by the zoom factor, older
    ones don't, so the Interface-scale preference made the layout overflow by
    exactly the zoom amount on some builds: the video panel swallowed the
    screen and pushed the performance box below the fold. Percentages resolve
@@ -138,14 +138,14 @@ body {
   font-family: var(--font-geist-sans, ui-sans-serif), sans-serif;
 }
 
-/* Font preference (Settings → General). Monospace runs — telemetry values,
-   coordinates, parameter names — keep their mono face on purpose: they are
+/* Font preference (Settings → General). Monospace runs - telemetry values,
+   coordinates, parameter names - keep their mono face on purpose: they are
    mono for column alignment, not for style.
 
    DECLARED ON body, NOT ON html: the next/font variables (--font-ubuntu,
    --font-inter, --font-geist-sans) are defined by classes on <body>, and a
    custom property declared on <html> that references them is invalid THERE
-   and silently computes to nothing — which is exactly how the first version
+   and silently computes to nothing - which is exactly how the first version
    of this feature managed to change no font at all. */
 html[data-font='system'] body { font-family: system-ui, 'Segoe UI', Roboto, sans-serif; }
 html[data-font='ubuntu'] body { font-family: var(--font-ubuntu, Ubuntu), system-ui, sans-serif; }
@@ -153,22 +153,28 @@ html[data-font='inter']  body { font-family: var(--font-inter, Inter), system-ui
 html[data-font='nunito'] body { font-family: var(--font-nunito, Nunito), system-ui, sans-serif; }
 
 /* Reach the monospace-styled text too. Most of this interface sets
-   fontFamily: 'monospace' inline, which no ordinary selector can beat — so
+   fontFamily: 'monospace' inline, which no ordinary selector can beat - so
    choosing a font changed the headings and left every description, status
    chip and task-bar label in the default mono, which read as the setting
    half-working. The [style*] attribute match with !important is blunt, but
    it is the only handle inline styles offer. True tabular data pays a
    price (digits stop aligning); that is the trade the preference states. */
-html[data-font='system'] [style*='monospace'] { font-family: system-ui, 'Segoe UI', Roboto, sans-serif !important; }
-html[data-font='ubuntu'] [style*='monospace'] { font-family: var(--font-ubuntu, Ubuntu), system-ui, sans-serif !important; }
-html[data-font='inter']  [style*='monospace'] { font-family: var(--font-inter, Inter), system-ui, sans-serif !important; }
-html[data-font='nunito'] [style*='monospace'] { font-family: var(--font-nunito, Nunito), system-ui, sans-serif !important; }
+html[data-font='system'] [style*='monospace'], html[data-font='system'] .font-mono { font-family: system-ui, 'Segoe UI', Roboto, sans-serif !important; }
+html[data-font='ubuntu'] [style*='monospace'], html[data-font='ubuntu'] .font-mono { font-family: var(--font-ubuntu, Ubuntu), system-ui, sans-serif !important; }
+html[data-font='inter']  [style*='monospace'], html[data-font='inter'] .font-mono { font-family: var(--font-inter, Inter), system-ui, sans-serif !important; }
+html[data-font='nunito'] [style*='monospace'], html[data-font='nunito'] .font-mono { font-family: var(--font-nunito, Nunito), system-ui, sans-serif !important; }
+/* The third spelling of "monospace" in this codebase: inline styles that
+   name the Geist Mono variable directly. */
+html[data-font='system'] [style*='geist-mono'] { font-family: system-ui, 'Segoe UI', Roboto, sans-serif !important; }
+html[data-font='ubuntu'] [style*='geist-mono'] { font-family: var(--font-ubuntu, Ubuntu), system-ui, sans-serif !important; }
+html[data-font='inter']  [style*='geist-mono'] { font-family: var(--font-inter, Inter), system-ui, sans-serif !important; }
+html[data-font='nunito'] [style*='geist-mono'] { font-family: var(--font-nunito, Nunito), system-ui, sans-serif !important; }
 
 /* ── Bright theme accent remap ─────────────────────────────────────────────
    The accent palette (#4ade80 green, #22d3ee cyan, #fbbf24 amber, #f87171
    red, ...) is tuned for dark surfaces; on white it washes out below
    readable contrast. Those colours are applied as INLINE styles in hundreds
-   of places, so no ordinary cascade can retint them — but the [style*]
+   of places, so no ordinary cascade can retint them - but the [style*]
    attribute match can, and doing it here keeps light-mode contrast a
    PALETTE decision instead of a thousand per-component edits. Only `color`
    is overridden: tinted backgrounds and borders keep their alpha washes,
@@ -187,7 +193,7 @@ html[data-font='nunito'] [style*='monospace'] { font-family: var(--font-nunito, 
 .light [style*="#f1f5f9"] { color: #0f172a !important; }
 /* The same colours in rgb() form. React-rendered inline styles are
    serialized by the browser as rgb(...), so a hex substring only matches
-   markup that came from SSR and was never re-rendered — half the interface.
+   markup that came from SSR and was never re-rendered - half the interface.
    The trailing ')' keeps rgba( washes from matching. */
 .light [style*="rgb(74, 222, 128)"] { color: #15803d !important; }
 .light [style*="rgb(34, 211, 238)"] { color: #0e7490 !important; }
@@ -204,7 +210,7 @@ html[data-font='nunito'] [style*='monospace'] { font-family: var(--font-nunito, 
 /* ── Text size preference ──────────────────────────────────────────────────
    Separate from Interface scale: this grows the TYPE and leaves the layout
    alone. Every text size in this interface is an inline style, which no
-   cascade can reach except by matching the style attribute itself — so the
+   cascade can reach except by matching the style attribute itself - so the
    sizes in use are enumerated (they are a closed set, checked by grep) and
    each is remapped. The px suffix keeps "10px" from matching "10.5px".
    Large is +15%, Extra large +30%, in half-pixel steps so text stays crisp. */
@@ -254,7 +260,7 @@ html[data-fontsize='xlarge'] [style*="font-size: 22px"] { font-size: 28.5px !imp
 html[data-fontsize='xlarge'] [style*="font-size: 24px"] { font-size: 31px !important; }
 html[data-fontsize='xlarge'] [style*="font-size: 28px"] { font-size: 36.5px !important; }
 
-/* The same scaling for Tailwind-classed text (text-xs, text-[10px], ...) —
+/* The same scaling for Tailwind-classed text (text-xs, text-[10px], ...) -
    the Fly sidebar and controls are classed, not inline-styled, and a text
    size that grew one page and not the next reads as broken. */
 html[data-fontsize='large'] .text-xs { font-size: 14px !important; }
@@ -301,3 +307,17 @@ html[data-fontsize='xlarge'] .text-\[13px\] { font-size: 17px !important; }
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--app-text-muted));
 }
+
+/* Radio & RC motion. Entrances are one short rise; anything continuous
+   (stick, bars, switch marker) animates by CSS transition on its transform
+   so a 10 Hz feed renders as motion instead of ticks. */
+@keyframes hyrak-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes hyrak-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.rc-rise { animation: hyrak-rise 340ms ease-out both; }
+.rc-pulse { animation: hyrak-pulse 1.6s ease-in-out infinite; }

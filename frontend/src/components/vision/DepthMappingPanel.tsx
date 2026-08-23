@@ -19,7 +19,7 @@ export function DepthMappingPanel() {
                             fontSize: 10, color: 'hsl(var(--app-text-muted))',
                             fontFamily: 'monospace', marginBottom: 6,
                         }}>
-                            DEPTH SCALE — 0.3m to 5m
+                            DEPTH SCALE - 0.3m to 5m
                         </div>
                         <div style={{
                             height: 18, borderRadius: 6,

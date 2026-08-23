@@ -84,7 +84,7 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
     // IS THE OPERATOR ALREADY HOLDING IT RIGHT? Answered from the IMU rather
     // than waited for from PX4, so the aircraft turns green the moment the
     // position is reached instead of a second later when the autopilot has
-    // finished agreeing. The autopilot still decides when the side is DONE —
+    // finished agreeing. The autopilot still decides when the side is DONE -
     // this only decides when to stop telling them to keep turning.
     const matched = useMemo(() => {
         if (!target || !live) return false
@@ -100,7 +100,7 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
     }, [target, live?.roll, live?.pitch, live?.yaw])
 
     // WHAT IS BEING ASKED FOR, decided once and used by every part of the
-    // panel — the words, the colour and the arrow cannot disagree.
+    // panel - the words, the colour and the arrow cannot disagree.
     //
     // A COMPASS IS NOT AN ACCELEROMETER. PX4 detects an orientation and then
     // wants the aircraft ROTATED about it; an accelerometer wants it held dead
@@ -121,30 +121,30 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
         : running ? ACTIVE_C : IDLE_C
 
     // ONE SENTENCE, and it is the position when there is one. PX4's own line
-    // is kept underneath rather than promoted — "hold vehicle still on a
+    // is kept underneath rather than promoted - "hold vehicle still on a
     // pending side" is true and useless next to "On its LEFT side".
     const headline = idle ? 'Pick a calibration on the left'
         : done ? 'Calibration complete'
         : failed ? 'Calibration failed'
         : cancelled ? 'Calibration cancelled'
-        : mode === 'rotate' ? 'Now ROTATE it — keep turning'
+        : mode === 'rotate' ? 'Now ROTATE it - keep turning'
         : mode === 'hold' ? 'HOLD IT STILL'
         : target ? `Turn it: ${SIDE_WORDS[target]}`
         : state.instruction || 'Waiting for the autopilot…'
 
-    // PX4 applies a new compass calibration at BOOT — QGC prompts for the
+    // PX4 applies a new compass calibration at BOOT - QGC prompts for the
     // reboot and so do we, or the operator flies on the old offsets while
     // the screen says calibrated.
     const wantsReboot = done && state.sensor === 'mag'
 
-    const subline = idle ? 'The aircraft above follows your live attitude — turn the real one and it turns with it'
-        : wantsReboot ? 'Saved — PX4 applies a compass calibration at boot, so reboot before flying'
+    const subline = idle ? 'The aircraft above follows your live attitude - turn the real one and it turns with it'
+        : wantsReboot ? 'Saved - PX4 applies a compass calibration at boot, so reboot before flying'
         : done ? 'The new offsets are saved on the aircraft'
         : failed ? (state.error || 'The autopilot did not accept the calibration')
         : cancelled ? 'Nothing was written to the aircraft'
         : mode === 'rotate' ? 'Turn it steadily about the axis the arrow circles, at about the speed shown'
         : mode === 'hold' ? 'Do not move it until this position is ticked off'
-        : mode === 'reorient' ? 'Match the position shown — the arrow is the way round'
+        : mode === 'reorient' ? 'Match the position shown - the arrow is the way round'
         : ''
 
     return (
@@ -168,7 +168,7 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
                     <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
                         {/* SIX POSITIONS, EACH NAMED. Bare dots said how far
                             along the queue was and nothing about WHICH
-                            positions were left — so an operator halfway
+                            positions were left - so an operator halfway
                             through could not tell whether they still owed it
                             nose-down or tail-down. Three letters is enough to
                             name it and short enough to fit. */}
@@ -202,7 +202,7 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
                         </span>
                     </span>
                 )}
-                {/* No number while nothing is running — an idle "0%" reads
+                {/* No number while nothing is running - an idle "0%" reads
                     as a stalled calibration. */}
                 {!oriented && !idle && (
                     <span style={{ marginLeft: 'auto', fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
@@ -211,7 +211,7 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
                 )}
             </div>
 
-            {/* Progress off a real number. No indefinite shimmer — a bar that
+            {/* Progress off a real number. No indefinite shimmer - a bar that
                 moves on its own is a bar that lies about a stalled run. */}
             <div style={{ height: 4, borderRadius: 2, background: 'hsl(var(--app-surface))', overflow: 'hidden', opacity: idle ? 0 : 1 }}>
                 <div style={{
@@ -235,7 +235,7 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
                         position: 'absolute', left: 12, bottom: 10,
                         fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))',
                     }}>
-                        No attitude telemetry — showing the requested position instead of the live one
+                        No attitude telemetry - showing the requested position instead of the live one
                     </span>
                 )}
                 <span style={{
@@ -283,7 +283,7 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
                             </>
                         )}
                         {pendingList.length === 0 && doneList.length > 0 && (
-                            <span style={{ color: DONE_C }}>   — that was the last one</span>
+                            <span style={{ color: DONE_C }}>   - that was the last one</span>
                         )}
                     </p>
                 )}
@@ -308,7 +308,7 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
                     <>
                         {wantsReboot && onReboot && (
                             <button onClick={() => { onReboot(); onDismiss() }} style={btn(ACTIVE_C)}
-                                title="Restarts the flight controller. Only works while disarmed — the link will drop and reconnect.">
+                                title="Restarts the flight controller. Only works while disarmed - the link will drop and reconnect.">
                                 <RotateCw size={12} /> REBOOT FC
                             </button>
                         )}

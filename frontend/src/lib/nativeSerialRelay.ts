@@ -1,4 +1,4 @@
-// Native serial telemetry — the desktop-app counterpart of browserSerial.ts.
+// Native serial telemetry - the desktop-app counterpart of browserSerial.ts.
 //
 // Both open the SAME physical radio (3DR/SiK on USB) and both end up emitting
 // raw MAVLink on the existing `serial_uplink` / `serial_downlink` events, so
@@ -10,7 +10,7 @@
 //
 // This exists because Web Serial does NOT work in the desktop app. Electron
 // ships navigator.serial, so browserSerialSupported() returns true and the "+"
-// button appeared — but Electron has no built-in port-chooser UI, and unless the
+// button appeared - but Electron has no built-in port-chooser UI, and unless the
 // main process handles session's 'select-serial-port' event, requestPort() never
 // resolves with a port. Result: clicking "+" did nothing at all, and
 // listGrantedPorts() stayed empty forever because no grant could ever happen.
@@ -20,7 +20,7 @@
 // and has always exposed list(). That is strictly better than the browser path:
 // no permission dance, all ports visible immediately, QGroundControl-style.
 //
-// Telemetry here is completely independent of the video source — video is picked
+// Telemetry here is completely independent of the video source - video is picked
 // in Settings (videoSource.ts), telemetry is picked in DeviceSelector. A 3DR
 // radio for telemetry alongside a SIYI or HYRAK air-unit feed for video is a
 // supported combination, not a special case.
@@ -37,7 +37,7 @@ let unsubscribe: (() => void) | null = null
 let silenceTimer: ReturnType<typeof setTimeout> | null = null
 let sawTraffic = false
 
-// Opening a serial port succeeds whether or not anything is on the other end —
+// Opening a serial port succeeds whether or not anything is on the other end -
 // a radio that is unpaired, on the wrong air-side baud, or whose netID doesn't
 // match the aircraft opens perfectly and delivers zero bytes. Say so instead of
 // waiting out the backend's generic mavsdk timeout. Same reasoning as
@@ -89,7 +89,7 @@ function labelFor(p: NativePortInfo): string {
     return `${name} (${p.path})`
 }
 
-/** Every serial port on this machine. Desktop only — returns [] in a browser
+/** Every serial port on this machine. Desktop only - returns [] in a browser
  *  tab, where the caller should be using browserSerial.ts instead. */
 export async function listNativeSerialPorts(): Promise<NativeRadio[]> {
     const bridge = nativeBridge()
@@ -119,7 +119,7 @@ export async function startNativeSerial(
 ): Promise<void> {
     if (!isDesktopApp()) {
         throw new Error(
-            'Native serial needs the HYRAK desktop app — in a browser tab use the "+" '
+            'Native serial needs the HYRAK desktop app - in a browser tab use the "+" '
             + 'button to grant a radio via Web Serial instead.',
         )
     }
@@ -129,7 +129,7 @@ export async function startNativeSerial(
     const result = await bridge?.start('serial', NATIVE_SERIAL_ID, { path, baudRate })
     if (result && !result.ok) {
         throw new Error(
-            `${result.error}. Only one program can hold a serial port — if QGroundControl, `
+            `${result.error}. Only one program can hold a serial port - if QGroundControl, `
             + 'Mission Planner or another HYRAK window has this radio open, close it first.'
             + (path.startsWith('/dev/')
                 ? ' On Linux you may also need to be in the "dialout" group.'
@@ -156,13 +156,13 @@ export async function startNativeSerial(
             `Opened ${path} at ${baudRate} baud, but no MAVLink arrived in `
             + `${SILENCE_TIMEOUT_MS / 1000}s. Usually the baud rate is wrong (SiK radios are `
             + '57600 by default, some are 115200), the two radios are not paired '
-            + '(NETID/frequency mismatch — the green link LED would be off), or the '
+            + '(NETID/frequency mismatch - the green link LED would be off), or the '
             + 'aircraft is powered down.',
         )
     }, SILENCE_TIMEOUT_MS)
 
     socket.on('serial_downlink', onDownlink)
-    // Same event a Web Serial radio sends — from here the paths are identical.
+    // Same event a Web Serial radio sends - from here the paths are identical.
     socket.emit('connect_browser_serial', { source: 'native-serial' })
     active = true
 }

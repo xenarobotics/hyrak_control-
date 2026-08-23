@@ -4,7 +4,7 @@
 // (desktop/src/bridges/webrtcSenderBridge.ts, mode: 'datachannel').
 //
 // This is the only transport that is both bit-exact AND NAT-traversing, which is
-// why it exists alongside the others — see docs/ARCHITECTURE.md and ADR-009.
+// why it exists alongside the others - see docs/ARCHITECTURE.md and ADR-009.
 // H.265 survives untouched because a DataChannel negotiates no codec at all;
 // aiortc's video codec table is VP8/H.264 only, so every other client-sourced
 // mode has to transcode an HEVC source.
@@ -53,7 +53,7 @@ export interface DataChannelSenderStatus {
 }
 
 // Recorded at module scope because the interesting failures arrive on the bridge
-// event channel asynchronously, well after start() has returned ok — spawning
+// event channel asynchronously, well after start() has returned ok - spawning
 // ffmpeg succeeds long before it manages to reach a camera.
 let lastSenderError: string | null = null
 
@@ -83,12 +83,12 @@ interface SenderIceServer {
 /** ICE servers for the DESKTOP's PeerConnection.
  *
  *  The real bug this fixes is that the sender previously got NO ice servers at
- *  all, so it gathered host candidates only — fine on a LAN, dead everywhere
+ *  all, so it gathered host candidates only - fine on a LAN, dead everywhere
  *  else, which is the exact NAT problem this transport exists to solve.
  *
  *  An earlier version flattened `urls` arrays to one entry each on the theory
  *  that werift ignores arrays; that was tested against the live endpoint and is
- *  FALSE — both forms gather an identical `{host: 1, relay: 1}`. The flattening
+ *  FALSE - both forms gather an identical `{host: 1, relay: 1}`. The flattening
  *  was removed rather than left in with a wrong justification.
  *
  *  The urls ARE reordered though, and must be. werift's parseIceServers() takes
@@ -101,14 +101,14 @@ interface SenderIceServer {
  *
  *  Cloudflare returns `turn:...:3478?transport=udp` first, so werift committed
  *  to UDP TURN. On a network that blocks outbound UDP that allocation cannot
- *  complete — verified with a raw STUN binding request to both
- *  stun.cloudflare.com:3478 and stun.l.google.com:19302, which TIMED OUT — and
+ *  complete - verified with a raw STUN binding request to both
+ *  stun.cloudflare.com:3478 and stun.l.google.com:19302, which TIMED OUT - and
  *  every DataChannel attempt died as "did not open within 10000ms (state:
  *  connecting)" with the server logging connecting -> failed and 0 packets.
  *
  *  werift does have a UDP->TCP fallback, but only when the UDP allocation
  *  REJECTS; a silently-dropped datagram just times out, and our 10s deadline
- *  fires first. `forceTurnTCP` does not help either — resolveTurnTransport()
+ *  fires first. `forceTurnTCP` does not help either - resolveTurnTransport()
  *  returns the url-parsed transport BEFORE consulting it. Ordering the urls is
  *  the only lever that actually decides this.
  *
@@ -118,12 +118,12 @@ interface SenderIceServer {
 function sortRelayUrls(urls: string | string[]): string[] {
     const list = Array.isArray(urls) ? [...urls] : [urls]
     const rank = (u: string): number => {
-        // turns: (TLS over TCP) first, :443 ahead of :5349 — 443 traverses
+        // turns: (TLS over TCP) first, :443 ahead of :5349 - 443 traverses
         // essentially any firewall, including ones that block 5349.
         if (u.startsWith('turns:')) return u.includes(':443') ? 0 : 1
         if (u.startsWith('turn:') && u.includes('transport=tcp')) return 2
         if (u.startsWith('turn:')) return 3
-        return 4   // stun — irrelevant to turn selection
+        return 4   // stun - irrelevant to turn selection
     }
     return list.sort((a, b) => rank(a) - rank(b))
 }
@@ -156,7 +156,7 @@ interface ServerAnswer {
 export async function startDataChannelSender(source: VideoSource): Promise<number> {
     if (!isDesktopApp()) {
         throw new Error(
-            'DataChannel video needs the HYRAK desktop app — a browser tab cannot open '
+            'DataChannel video needs the HYRAK desktop app - a browser tab cannot open '
             + 'a raw RTP source or an RTSP camera.',
         )
     }
@@ -170,14 +170,14 @@ export async function startDataChannelSender(source: VideoSource): Promise<numbe
     await stopDataChannelSender()
 
     // Without these the sender gathers HOST candidates only, which works on a
-    // LAN and silently fails everywhere else — the exact NAT problem this
+    // LAN and silently fails everywhere else - the exact NAT problem this
     // transport exists to solve. Same short-lived Cloudflare TURN credentials
     // the browser's own PeerConnection uses; the backend mints them so none live
     // in client code.
     const iceServers = await fetchIceServersForSender()
 
     const isAirUnit = source === 'air_unit_datachannel'
-    // The pilot's own picture, decoded locally — started BEFORE the sender so
+    // The pilot's own picture, decoded locally - started BEFORE the sender so
     // its ffmpeg is already listening when the first fan-out copy arrives.
     // Best-effort by design: if it fails, the stream falls back to the
     // server's return feed, which is worse (round-trip latency) but works.

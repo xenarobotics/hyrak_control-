@@ -6,15 +6,15 @@ Analyzer modules decide WHEN to persist (throttling snapshots, finalizing a
 plate track) inside their own blocking _analyze_frame_blocking, since
 that's where their per-session state already lives. They queue the
 decision onto meta["_pending_db"]; app/webrtc/stream_track.py's recv()
-(already running in the event loop — same precedent as its drone_command
+(already running in the event loop - same precedent as its drone_command
 dispatch) pops that key and hands it to persist_events() here.
 
 Data model: crowd/plate rows are retained by default (no auto-purge) so an
 operator can review a "previous session" from the sidebar without having
 downloaded anything first. Two ways data leaves the DB: an operator
-downloads a report (export_*_report — read-only, doesn't delete anything)
+downloads a report (export_*_report - read-only, doesn't delete anything)
 or explicitly clears history (clear_*_history). Nothing is ever purged
-silently — that's a deliberate reversal of this feature's first version,
+silently - that's a deliberate reversal of this feature's first version,
 which auto-purged on every stop; Japesh wanted a browsable history instead.
 """
 import contextlib
@@ -40,7 +40,7 @@ _WRITERS = {
 
 async def persist_events(session_id: str, events: list[dict]) -> None:
     """Live-write path, called per camera frame when an analyzer queues
-    something. Cheap no-op when the DB is offline — vision must never
+    something. Cheap no-op when the DB is offline - vision must never
     depend on persistence to keep working."""
     if not events or not db_available():
         return
@@ -65,7 +65,7 @@ def _delete_image_files(paths: list[str]) -> None:
                 os.remove(p)
 
 
-# ── Per-session report export (read-only — for the manual "Download        ──
+# ── Per-session report export (read-only - for the manual "Download        ──
 # ── report" button; never deletes anything)                                ──
 
 async def export_crowd_report(session_id: str) -> dict:
@@ -176,7 +176,7 @@ async def get_plate_image_path(event_id: str) -> str | None:
         return None
 
 
-# ── Manual cleanup (operator-triggered — "Clear history" in the sidebar)   ──
+# ── Manual cleanup (operator-triggered - "Clear history" in the sidebar)   ──
 
 async def clear_crowd_history() -> None:
     if not db_available():
@@ -197,7 +197,7 @@ async def clear_plate_history() -> None:
     try:
         async with get_session() as db:
             rows = (await db.execute(select(PlateEvent))).scalars().all()
-            # Both images per row — the plate crop AND the vehicle shot.
+            # Both images per row - the plate crop AND the vehicle shot.
             # Collecting only image_path would leave every _vehicle.jpg behind
             # as an orphan after a "clear history", growing without bound.
             image_paths = [
@@ -214,14 +214,14 @@ async def clear_plate_history() -> None:
 #
 # Unlike everything above, these rows are DURABLE BIOMETRIC IDENTITY and have
 # no auto-purge path. delete_person() and clear_face_gallery() are the only
-# ways they leave, and both unlink the image files as well — a bare SQL DELETE
+# ways they leave, and both unlink the image files as well - a bare SQL DELETE
 # orphans them, exactly as it does for plate_events.image_path.
 
 async def load_face_gallery():
     """
     Read every ACTIVE embedding into an in-memory FaceGallery.
 
-    Called once per session start, not per frame — see face_gallery.py on why
+    Called once per session start, not per frame - see face_gallery.py on why
     Postgres is the store and RAM is the index. Returns an empty gallery when
     the DB is offline so gallery mode degrades to "matches nobody" instead of
     breaking the tracker.
@@ -230,7 +230,7 @@ async def load_face_gallery():
 
     gallery = FaceGallery()
     if not db_available():
-        logger.info("Face gallery: DB offline — gallery mode will match nobody")
+        logger.info("Face gallery: DB offline - gallery mode will match nobody")
         return gallery
     try:
         async with get_session() as db:
@@ -284,7 +284,7 @@ async def get_person_by_name(name: str):
 
 
 async def set_person_active(person_id: str, active: bool) -> bool:
-    """Soft enable/disable — takes someone out of matching without destroying
+    """Soft enable/disable - takes someone out of matching without destroying
     the enrolment, so a misfiring match can be investigated."""
     if not db_available():
         return False
@@ -309,7 +309,7 @@ async def delete_person(person_id: str) -> bool:
 
     Faces CASCADE in the schema; the files do not, so their paths are
     collected before the delete and unlinked after. Sightings are SET NULL
-    rather than removed — deleting someone from the gallery must not rewrite
+    rather than removed - deleting someone from the gallery must not rewrite
     the record of what the system did while they were in it.
     """
     if not db_available():
@@ -413,7 +413,7 @@ async def enrol_person_images(
                 if emb is None:
                     results.append(EnrolmentResult(
                         name, fname, False,
-                        "no face detected — try a clearer, more frontal photo"))
+                        "no face detected - try a clearer, more frontal photo"))
                     continue
                 stored = copy_into_gallery(person_id, src, start_index + offset)
                 db.add(PersonFace(
@@ -435,7 +435,7 @@ async def enrol_person_images(
 
 async def enrol_from_folder(root: str) -> list:
     """
-    Enrol a whole `<root>/<person name>/<image>` tree — the layout of the
+    Enrol a whole `<root>/<person name>/<image>` tree - the layout of the
     provided sample set, so it needs no reshuffling.
     """
     from app.vision.face_gallery import discover_folder

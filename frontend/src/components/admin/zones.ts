@@ -1,4 +1,4 @@
-// Shared zone types/helpers — SSR-safe (no leaflet imports).
+// Shared zone types/helpers - SSR-safe (no leaflet imports).
 
 export type ZoneClass = 'green' | 'orange' | 'red'
 

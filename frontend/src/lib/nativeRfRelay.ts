@@ -6,12 +6,12 @@
 //   udp <local>:14550        wfb_rx  -> MAVLink downlink from the aircraft
 //   udp <uplink-host>:14551  wfb_tx  -> MAVLink uplink to the aircraft
 //
-// The uplink host is NOT loopback in general — see getRfUplinkHost(). It is
+// The uplink host is NOT loopback in general - see getRfUplinkHost(). It is
 // loopback only while the RF decoder runs on this machine.
 //
 // The difference is what sits in between. localRfRelay.ts needs a separate
 // telemetry_relay.py running alongside, purely because a browser tab cannot
-// open a raw UDP socket — the agent re-exposes 14550/14551 as a loopback
+// open a raw UDP socket - the agent re-exposes 14550/14551 as a loopback
 // WebSocket. The desktop app has no such limitation, so this binds the ports
 // directly through the native UDP bridge and the agent disappears: one fewer
 // process for the operator to start, one fewer thing to be "not running" when
@@ -25,12 +25,12 @@
 //   wfb_rx :14550 --> udpBridge --serial_uplink--> backend
 //   wfb_tx :14551 <--          <-- serial_downlink
 //
-// ADDRESSING — the one real difference from the SIYI path. A SIYI ground unit
+// ADDRESSING - the one real difference from the SIYI path. A SIYI ground unit
 // is a single endpoint that both sends and receives, so the bridge's usual
 // "learn the peer and reply to it" is correct there. A wfb-ng ground station is
 // two processes on two fixed ports: wfb_rx sends to us from an EPHEMERAL source
 // port, so replying to the learned peer would miss wfb_tx entirely. Hence
-// pinRemote — always send to 14551, never to whoever was last heard from.
+// pinRemote - always send to 14551, never to whoever was last heard from.
 
 import { getSocket } from '@/lib/socket'
 import { startHyrakRegistration, stopHyrakRegistration } from '@/lib/hyrakRegister'
@@ -44,7 +44,7 @@ let unsubscribe: (() => void) | null = null
 let silenceTimer: ReturnType<typeof setTimeout> | null = null
 let sawTraffic = false
 
-// Binding 14550 succeeds whether or not the ground station is running — an
+// Binding 14550 succeeds whether or not the ground station is running - an
 // unstarted start-gs.sh, a monitor-mode NIC that never came up, or an aircraft
 // that is powered down all bind perfectly and deliver nothing. Report that with
 // its actual causes instead of waiting out mavsdk's generic timeout. Same
@@ -71,7 +71,7 @@ export async function startNativeRfRelay(
 ): Promise<void> {
     if (!isDesktopApp()) {
         throw new Error(
-            'Native RF telemetry needs the HYRAK desktop app — a browser tab cannot read a raw '
+            'Native RF telemetry needs the HYRAK desktop app - a browser tab cannot read a raw '
             + 'UDP socket. Use the WebSocket relay agent option instead, or run the desktop app.',
         )
     }
@@ -79,11 +79,11 @@ export async function startNativeRfRelay(
 
     const bridge = nativeBridge()
     // One socket: bound to the downlink port, sending to the uplink port. Two
-    // ports, but only ONE local socket is needed — we never receive on 14551,
+    // ports, but only ONE local socket is needed - we never receive on 14551,
     // that is wfb_tx's own bind.
     // THE UPLINK HOST WAS THE ONE THING NOT CONFIGURABLE, AND IT IS THE ONE
     // THING THAT MOVED. The port has always been a setting; the host was a
-    // literal. That was correct only while wfb_tx ran on this same PC — which
+    // literal. That was correct only while wfb_tx ran on this same PC - which
     // it did, back when the RTL8812EU was plugged straight in. It now runs on
     // the Luckfox decoder at its own address, and 127.0.0.1:14551 on this PC
     // is a black hole with nothing bound to it.
@@ -91,7 +91,7 @@ export async function startNativeRfRelay(
     // The resulting failure is silent and one-directional, which is why it
     // cost a whole evening: UDP reports nothing when a datagram goes nowhere,
     // the downlink is a separate socket and keeps working perfectly, and every
-    // byte counter along the way — including the one I added on the server —
+    // byte counter along the way - including the one I added on the server -
     // faithfully reports the commands as SENT. They are sent. They are sent
     // into loopback. getRfUplinkHost() already existed, defaulted correctly,
     // and had a field on the telemetry page; this relay just never read it.
@@ -102,13 +102,13 @@ export async function startNativeRfRelay(
             remoteHost: uplinkHost,
             remotePort: uplinkPort,
             pinRemote: true,
-            // Lets QGroundControl watch the same downlink — see getRfFanoutPort.
+            // Lets QGroundControl watch the same downlink - see getRfFanoutPort.
             fanoutPort: getRfFanoutPort() || undefined,
         }],
     })
     if (result && !result.ok) {
         throw new Error(
-            `${result.error}. Only one program can receive a UDP port — if QGroundControl, `
+            `${result.error}. Only one program can receive a UDP port - if QGroundControl, `
             + 'MAVProxy or telemetry_relay.py is already reading '
             + `${downlinkPort}, close it first.`,
         )
@@ -140,13 +140,13 @@ export async function startNativeRfRelay(
         onSilence?.(
             `Bound udp:${downlinkPort}, but no MAVLink arrived in `
             + `${SILENCE_TIMEOUT_MS / 1000}s. Usually the ground station is not running `
-            + '(start-gs.sh — it needs the RTL8812EU dongle in monitor mode), the aircraft '
+            + '(start-gs.sh - it needs the RTL8812EU dongle in monitor mode), the aircraft '
             + 'is powered down, or the two ends are on different wfb-ng channels or keys.',
         )
     }, SILENCE_TIMEOUT_MS)
 
     socket.on('serial_downlink', onDownlink)
-    // Same event every other telemetry path sends — from here they are identical.
+    // Same event every other telemetry path sends - from here they are identical.
     socket.emit('connect_browser_serial', { source: 'native-rf' })
     active = true
 }
@@ -158,7 +158,7 @@ export async function stopNativeRfRelay(): Promise<void> {
     if (unsubscribe) { unsubscribe(); unsubscribe = null }
     try { getSocket().off('serial_downlink', onDownlink) } catch { /* socket gone */ }
     // Drop this link's claim. Note this does NOT un-register: the decoder
-    // never expires a client, so the feeds keep flowing — what stops is the
+    // never expires a client, so the feeds keep flowing - what stops is the
     // self-healing tick, and only once video has let go too.
     await stopHyrakRegistration('telemetry')
     if (isDesktopApp()) {

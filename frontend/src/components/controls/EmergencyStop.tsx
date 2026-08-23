@@ -23,7 +23,7 @@ export function EmergencyStop() {
                         className="flex-1 font-mono font-bold"
                         onClick={() => { emergencyStop(); setConfirm(false) }}
                     >
-                        YES — KILL
+                        YES - KILL
                     </Button>
                     <Button
                         size="sm"

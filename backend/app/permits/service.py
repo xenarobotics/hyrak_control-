@@ -4,7 +4,7 @@ Red-zone flight permits.
 A pilot whose mission is blocked by a red zone can submit that exact
 mission with a written justification. The waypoint list is frozen into the
 permit. Once an admin approves it, uploading a mission for that drone that
-matches the frozen waypoints (within GPS-noise tolerance — any deliberate
+matches the frozen waypoints (within GPS-noise tolerance - any deliberate
 edit invalidates it) passes red-zone validation.
 """
 import hashlib
@@ -20,7 +20,7 @@ from app.db.models import Permit
 logger = logging.getLogger("verocore.permits")
 
 # Numeric tolerance when matching an upload to an approved permit:
-# ~1e-5 deg ≈ 1.1 m — absorbs float noise, rejects real edits.
+# ~1e-5 deg ≈ 1.1 m - absorbs float noise, rejects real edits.
 _TOL_DEG = 1.1e-5
 _TOL_ALT = 0.5
 

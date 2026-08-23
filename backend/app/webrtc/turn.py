@@ -2,7 +2,7 @@
 Cloudflare TURN credential minting.
 
 STUN alone fails on networks that block UDP or use symmetric NAT (campus /
-corporate WiFi) — media then needs a TURN relay, ideally turns: over TCP/TLS
+corporate WiFi) - media then needs a TURN relay, ideally turns: over TCP/TLS
 which looks like ordinary HTTPS to the firewall. Cloudflare's TURN service
 doesn't use static passwords: we hold a key ID + API token in .env and ask
 their API for short-lived credentials, which both the browser and aiortc use.
@@ -20,7 +20,7 @@ _CF_URL = "https://rtc.live.cloudflare.com/v1/turn/keys/{key_id}/credentials/gen
 _TTL_SECONDS = 86400          # credentials valid 24h
 _REFRESH_MARGIN = 3600        # mint fresh ones when <1h of life remains
 
-# Served when no TURN key is configured or Cloudflare is unreachable —
+# Served when no TURN key is configured or Cloudflare is unreachable -
 # same as the previous hardcoded behaviour, direct paths only.
 STUN_FALLBACK = [{"urls": ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"]}]
 

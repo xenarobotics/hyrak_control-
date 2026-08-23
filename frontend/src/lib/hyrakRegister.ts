@@ -4,7 +4,7 @@
 //
 // The decoder pushes video and MAVLink to ONE direct-UDP client, and it has
 // to be told which machine that is. Left to itself it infers the answer from
-// its own DHCP lease file — a safety net for clients that cannot speak up
+// its own DHCP lease file - a safety net for clients that cannot speak up
 // (VLC, a plain UDP consumer, a customer who just plugs a laptop in). We are
 // not one of those, and inference has two failure modes we would inherit for
 // no reason:
@@ -13,7 +13,7 @@
 //     there is nothing to infer from.
 //   * A STALE LEASE outlives the machine that held it. dnsmasq keeps leases
 //     for 12 hours, so if this PC replaces another one the decoder keeps
-//     aiming at the departed machine's address until the lease ages out —
+//     aiming at the departed machine's address until the lease ages out -
 //     a dead feed with nothing visibly wrong at either end.
 //
 // A registration is also a STRONGER claim than a lease: once we register, a
@@ -21,7 +21,7 @@
 // That is the guarantee a primary ground station wants.
 //
 // The address is taken from the UDP source, so we never have to know or
-// guess our own IP — a PC that has been given the wrong address in a settings
+// guess our own IP - a PC that has been given the wrong address in a settings
 // box still gets the feeds. That is why the bare form is sent and never
 // "HYRAK REGISTER <ip>", which exists for deliberately pointing the feeds at
 // some other machine.
@@ -33,7 +33,7 @@
 import { isDesktopApp, nativeBridge, type BridgeEvent } from '@/lib/nativeBridge'
 
 /** The decoder's registration listener. Unauthenticated, and fine for the
- *  point-to-point cable it is designed for — anything that can reach this
+ *  point-to-point cable it is designed for - anything that can reach this
  *  port can redirect the feeds, so it should not be exposed to a shared
  *  network without revisiting. */
 export const HYRAK_REGISTER_PORT = 9000
@@ -49,7 +49,7 @@ export const HYRAK_REGISTER_INTERVAL_MS = 10_000
 
 export interface HyrakRegistration {
     state: 'ok' | 'idle' | 'error' | 'no-reply'
-    /** Where the decoder says it is sending each feed — worth surfacing,
+    /** Where the decoder says it is sending each feed - worth surfacing,
      *  because "registered fine, pointed somewhere else" is otherwise
      *  indistinguishable from "registered fine". */
     video?: string
@@ -89,7 +89,7 @@ export function parseRegistrationReply(line: string): HyrakRegistration {
 // WHO STILL WANTS THE DECODER POINTED HERE. Video and telemetry are started
 // and stopped independently, and both need this. Without counting owners,
 // releasing the telemetry link would stop the re-registration tick that video
-// is relying on — and the loss is invisible, because stopping does not
+// is relying on - and the loss is invisible, because stopping does not
 // un-register anything: the decoder never expires a client, so the feeds keep
 // flowing and only the self-healing goes away. It would be missed until the
 // PC's address changed weeks later.
@@ -129,7 +129,7 @@ function sendRegister() {
 
 /** Hands the feeds back to whoever should have them next.
  *
- *  A REGISTRATION OUTLIVES THE PROCESS THAT MADE IT, which is the point —
+ *  A REGISTRATION OUTLIVES THE PROCESS THAT MADE IT, which is the point -
  *  it is a strong claim, and a strong claim is what stops another machine's
  *  DHCP lease pulling the stream away mid-flight. The cost is symmetrical
  *  and only shows up after we are gone: nothing expires the claim (the
@@ -138,8 +138,8 @@ function sendRegister() {
  *  can never take over, because weak never overrides strong.
  *
  *  So the claim has to be released deliberately. This is best-effort by
- *  nature — a crash or a pulled cable releases nothing, and no amount of
- *  client code fixes that — but a clean shutdown is the common case and
+ *  nature - a crash or a pulled cable releases nothing, and no amount of
+ *  client code fixes that - but a clean shutdown is the common case and
  *  costs one datagram.
  */
 function sendUnregister() {
@@ -148,7 +148,7 @@ function sendUnregister() {
 
 /** Starts registering with the decoder at `host`, and keeps doing so.
  *
- *  Safe to call from more than one place — video and telemetry both want the
+ *  Safe to call from more than one place - video and telemetry both want the
  *  decoder pointed here, and registering twice is not different from
  *  registering once. Calling with a DIFFERENT host re-targets.
  */
@@ -159,7 +159,7 @@ export async function startHyrakRegistration(host: string, owner = 'default'): P
     owners.add(owner)
     if (active && currentHost === target) return
     // Re-targeting to a different host must tear the socket down FIRST, and
-    // must not go through stopHyrakRegistration() — that one honours the
+    // must not go through stopHyrakRegistration() - that one honours the
     // owner count, which we just incremented, so it would return early and
     // leave the old socket pointed at the old decoder.
     if (active) await teardown()
@@ -200,13 +200,13 @@ async function teardown(): Promise<void> {
     sendUnregister()
     // Let the datagram actually leave before the socket closes under it.
     // dgram.send is asynchronous, so closing in the same tick can discard a
-    // queued packet — and the packet whose whole job is to release the claim
+    // queued packet - and the packet whose whole job is to release the claim
     // is the worst one to lose.
     await new Promise(r => setTimeout(r, 50))
     try { await nativeBridge()?.stop('udp', BRIDGE_ID) } catch { /* already gone */ }
 }
 
-// THE CASE THAT ACTUALLY MATTERS is not a tidy stop() call — it is the app
+// THE CASE THAT ACTUALLY MATTERS is not a tidy stop() call - it is the app
 // being closed, which is exactly when the claim would otherwise be stranded.
 // pagehide fires on close and on navigation away, including the cases
 // beforeunload misses on some platforms; both are registered because neither

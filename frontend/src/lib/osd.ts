@@ -71,10 +71,10 @@ export function estimatedFlightTimeRemaining(
     remainingPct: number,
     elapsedSeconds: number
 ): string {
-    if (remainingPct <= 0 || elapsedSeconds < 30) return '—'
+    if (remainingPct <= 0 || elapsedSeconds < 30) return '-'
     // Simple linear extrapolation from consumption rate
     const pctUsed = 100 - remainingPct
-    if (pctUsed < 5) return '—'
+    if (pctUsed < 5) return '-'
     const secsPerPct = elapsedSeconds / pctUsed
     const remaining = Math.floor(remainingPct * secsPerPct)
     return formatDuration(remaining)

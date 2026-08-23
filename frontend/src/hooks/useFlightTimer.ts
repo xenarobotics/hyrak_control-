@@ -13,14 +13,14 @@ export function useFlightTimer() {
 
     useEffect(() => {
         if (armed && !running) {
-            // Drone just armed — start timer
+            // Drone just armed - start timer
             startTimeRef.current = Date.now() - elapsed * 1000
             setRunning(true)
             intervalRef.current = setInterval(() => {
                 setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000))
             }, 1000)
         } else if (!armed && running) {
-            // Drone disarmed — stop timer but keep elapsed
+            // Drone disarmed - stop timer but keep elapsed
             setRunning(false)
             if (intervalRef.current) {
                 clearInterval(intervalRef.current)

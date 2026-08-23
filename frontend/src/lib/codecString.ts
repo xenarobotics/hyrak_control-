@@ -3,7 +3,7 @@
 //
 // Hardcoding a codec string is tempting and wrong. VideoDecoder.configure()
 // rejects a mismatch outright, and the profile and level depend on the
-// encoder, the GPU and the resolution — so a hardcoded value fails on exactly
+// encoder, the GPU and the resolution - so a hardcoded value fails on exactly
 // the machines we cannot test, which for this app is most of them. Reading it
 // from the bitstream always matches whatever actually arrived.
 
@@ -108,17 +108,17 @@ export function codecString(au: Uint8Array, codec: 'h264' | 'hevc'): string | nu
  *  Asked at run time and never inferred from the platform. Chromium's HEVC
  *  support is gated on the OS, the GPU and the build, and the answer decides
  *  whether the receiver can pass H.265 straight through or has to transcode it
- *  to H.264 first — a difference of roughly a whole CPU core at 1080p30.
+ *  to H.264 first - a difference of roughly a whole CPU core at 1080p30.
  *
  *  Several candidate strings because a decoder may accept Main but not Main10,
  *  or advertise a level ceiling: one `false` proves nothing on its own. */
 export async function canDecodeHevc(): Promise<boolean> {
     if (typeof window === 'undefined' || !('VideoDecoder' in window)) return false
     const candidates = [
-        'hvc1.1.6.L93.B0',    // Main, level 3.1 — 1080p30 lives here
+        'hvc1.1.6.L93.B0',    // Main, level 3.1 - 1080p30 lives here
         'hvc1.1.6.L120.B0',   // Main, level 4.0
         'hev1.1.6.L93.B0',
-        'hvc1.1.6.L153.B0',   // Main, level 5.1 — 4K
+        'hvc1.1.6.L153.B0',   // Main, level 5.1 - 4K
     ]
     for (const codec of candidates) {
         // 'no-preference' as well as 'prefer-hardware', and that is not

@@ -1,7 +1,7 @@
 // Pre-flight fleet deconfliction: pairwise check of every drone's planned
 // lane against every other. Two lanes conflict when any pair of their path
 // segments comes within HORIZ_M horizontally while their altitude bands
-// (segment endpoints ± VERT_M) overlap. Advisory only — the operator decides
+// (segment endpoints ± VERT_M) overlap. Advisory only - the operator decides
 // whether to re-route or stagger altitudes.
 
 export interface Lane {
@@ -19,7 +19,7 @@ export interface LaneConflict {
 const HORIZ_M = 10
 const VERT_M = 3
 
-// Local flat-earth projection around a reference latitude — plenty accurate
+// Local flat-earth projection around a reference latitude - plenty accurate
 // at mission scale (< a few km).
 function toXY(lat: number, lng: number, refLat: number): [number, number] {
     const mPerDegLat = 111_320

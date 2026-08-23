@@ -33,7 +33,7 @@ export function FleetAside() {
     const [killConfirm, setKillConfirm] = useState(false)
     const [groupAlt, setGroupAlt]       = useState(GROUP_TAKEOFF_ALT)
 
-    // Local swarm relay — for a client's OWN SITL swarm running on THEIR
+    // Local swarm relay - for a client's OWN SITL swarm running on THEIR
     // own machine (see sitl_relay/swarm_relay.py), not this same machine.
     // Connecting it BEFORE scanning routes the scan through the browser
     // relay instead of trying literal server-local ports; leave it alone
@@ -217,7 +217,7 @@ export function FleetAside() {
                 </div>
             </div>
 
-            {/* Local swarm relay connect — only needed for a swarm running
+            {/* Local swarm relay connect - only needed for a swarm running
                 on someone else's machine; same-machine SITL testing never
                 needs this open. */}
             {showRelay && (
@@ -235,7 +235,7 @@ export function FleetAside() {
                     </div>
                     <p className="text-[9px] font-mono leading-relaxed" style={{ color: 'hsl(var(--app-text-muted))' }}>
                         {isDesktopApp()
-                            ? 'For a swarm running on your own machine. The desktop app bridges it directly — nothing else to run.'
+                            ? 'For a swarm running on your own machine. The desktop app bridges it directly - nothing else to run.'
                             : <>For a swarm running on your own machine, not this one. Run{' '}
                                 <code>sitl_relay/swarm_relay</code> there first.</>}
                     </p>
@@ -596,16 +596,16 @@ export function FleetAside() {
                                     className="flex gap-2 px-2 pb-1.5 text-[9px] font-mono"
                                     style={{ color: 'hsl(var(--app-text-muted))' }}
                                 >
-                                    <span>{tel.flight_mode?.mode ?? '—'}</span>
+                                    <span>{tel.flight_mode?.mode ?? '-'}</span>
                                     <span>
                                         {tel.battery?.remaining_percent != null
                                             ? `${tel.battery.remaining_percent.toFixed(0)}%`
-                                            : '—'}
+                                            : '-'}
                                     </span>
                                     <span>
                                         {tel.position?.relative_altitude_m != null
                                             ? `↑${tel.position.relative_altitude_m.toFixed(0)}m`
-                                            : '—'}
+                                            : '-'}
                                     </span>
                                 </div>
                             )}
@@ -627,19 +627,19 @@ export function FleetAside() {
                                     style={{ borderColor: 'hsl(var(--app-border))' }}
                                 >
                                     {([
-                                        ['Mode',    tel?.flight_mode?.mode ?? '—'],
+                                        ['Mode',    tel?.flight_mode?.mode ?? '-'],
                                         ['Battery', tel?.battery
                                             ? `${tel.battery.remaining_percent.toFixed(0)}% · ${tel.battery.voltage_v.toFixed(1)}v`
-                                            : '—'],
+                                            : '-'],
                                         ['Alt',     tel?.position
                                             ? `${tel.position.relative_altitude_m.toFixed(1)} m AGL`
-                                            : '—'],
+                                            : '-'],
                                         ['Speed',   tel?.groundspeed_m_s != null
                                             ? `${tel.groundspeed_m_s.toFixed(1)} m/s`
-                                            : '—'],
+                                            : '-'],
                                         ['GPS',     tel?.gps
                                             ? `${tel.gps.fix_type === 3 ? '3D' : tel.gps.fix_type === 2 ? '2D' : 'No'} Fix · ${tel.gps.satellites_visible} sat`
-                                            : '—'],
+                                            : '-'],
                                         ['Port',    `UDP ${portForDrone(drone.id)}`],
                                     ] as [string, string][]).map(([label, value]) => (
                                         <div key={label} className="flex justify-between text-[9px] font-mono">

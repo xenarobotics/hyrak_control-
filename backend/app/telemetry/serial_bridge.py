@@ -1,7 +1,7 @@
 """Browser-serial → mavsdk bridge for the cloud deployment.
 
 The operator's telemetry radio (3DR/SiK) is plugged into THEIR device, not
-this server — same model as camera sharing. The browser reads raw MAVLink
+this server - same model as camera sharing. The browser reads raw MAVLink
 bytes with the Web Serial API and relays them over socket.io; this bridge
 replays them into a loopback UDP socket that the session's mavsdk_server
 listens on, and forwards mavsdk's replies (commands, mission uploads, param
@@ -35,7 +35,7 @@ def _free_udp_port() -> int:
 # WHY SNIFF AT ALL. "Bytes arrived but no heartbeat" has two completely
 # different causes that send you to opposite ends of the system:
 #
-#   * the bytes are NOISE — wrong baud, so nothing frames at all. Fix on the
+#   * the bytes are NOISE - wrong baud, so nothing frames at all. Fix on the
 #     operator's machine.
 #   * the bytes are VALID MAVLINK but carry no autopilot heartbeat. A SiK
 #     radio emits RADIO_STATUS from the GROUND module itself whether or not
@@ -44,7 +44,7 @@ def _free_udp_port() -> int:
 #     at the airframe.
 #
 # Byte counts cannot tell those apart. Frame magic and message ids can, and it
-# needs no CRC tables and no mavlink library — only the header.
+# needs no CRC tables and no mavlink library - only the header.
 _V1_MAGIC = 0xFE
 _V2_MAGIC = 0xFD
 _MSG_NAMES = {
@@ -64,7 +64,7 @@ class _FrameSniffer:
     #: "frame" was a coincidence, not a message.
     _MAX_PLAUSIBLE_MSGID = 512
     #: Fraction of the stream that must actually lie inside frames before this
-    #: is called MAVLink. A real link is back-to-back frames — essentially
+    #: is called MAVLink. A real link is back-to-back frames - essentially
     #: every byte is inside one. Random bytes hit a 0xFD or 0xFE every ~128
     #: bytes by chance and "frame" a short run around it, which lands far
     #: below this. This single number is what separates the two diagnoses.
@@ -159,18 +159,18 @@ class SerialBridge(asyncio.DatagramProtocol):
     def __init__(self, sio, socket_id: str, source: str = "radio"):
         self._sio = sio
         self._socket_id = socket_id
-        #: Which relay is feeding this bridge. Six different frontend relays —
+        #: Which relay is feeding this bridge. Six different frontend relays -
         #: Web Serial, native serial, native RF, local RF agent, SIYI, remote
-        #: SITL — all connect through this one event, and every one of them
+        #: SITL - all connect through this one event, and every one of them
         #: logged as "browser radio". When a link half-works, the first
         #: question is which of the six is carrying it, and the log could not
         #: answer it.
         self.source = source
         self._transport: Optional[asyncio.DatagramTransport] = None
-        # mavsdk_server listens here — loopback only, never exposed.
+        # mavsdk_server listens here - loopback only, never exposed.
         self.mavsdk_port = _free_udp_port()
         # Counted so a failed connect can say whether the radio delivered
-        # anything — see traffic().
+        # anything - see traffic().
         self.bytes_in = 0
         self.packets_in = 0
         # AND THE OTHER DIRECTION, which was not counted at all.
@@ -214,25 +214,25 @@ class SerialBridge(asyncio.DatagramProtocol):
         the baud rate is wrong, the air side is off, or the aircraft is simply out
         of range: mavsdk_server says "Waiting to discover system" and then the
         connect times out with nothing else recorded anywhere. This is the one
-        fact that separates "no bytes reached us" — a radio, cable, permission or
-        baud problem on the operator's machine — from "bytes arrived but carried
+        fact that separates "no bytes reached us" - a radio, cable, permission or
+        baud problem on the operator's machine - from "bytes arrived but carried
         no heartbeat", which is a link or airframe problem.
         """
         if self.packets_in == 0:
-            return ("no bytes at all reached the bridge from the browser — check "
+            return ("no bytes at all reached the bridge from the browser - check "
                     "the radio is plugged in, the serial port permission was "
                     "granted, and the baud rate matches")
         seen = self._sniffer.summary()
         if not self._sniffer.looks_like_mavlink:
             detail = f" (only {seen})" if seen else ""
             return (f"{self.bytes_in} bytes arrived from the radio but they are "
-                    f"NOT MAVLink{detail} — that is a baud rate mismatch, not a "
+                    f"NOT MAVLink{detail} - that is a baud rate mismatch, not a "
                     f"drone problem. The radio is talking, just not MAVLink at "
                     f"this speed. Try 115200 instead of 57600 in Settings")
         if 0 in self._sniffer.by_msg:
-            return (f"{seen} — heartbeats WERE seen, so the link is up; the "
+            return (f"{seen} - heartbeats WERE seen, so the link is up; the "
                     f"connect timed out anyway, retry it")
-        return (f"{self.bytes_in} bytes arrived and framed correctly — {seen}. "
+        return (f"{self.bytes_in} bytes arrived and framed correctly - {seen}. "
                 f"No HEARTBEAT among them means the baud and the ground radio "
                 f"are RIGHT and the aircraft is not reaching them: check the "
                 f"air-side radio is powered, paired (same NETID and air speed) "
@@ -250,24 +250,24 @@ class SerialBridge(asyncio.DatagramProtocol):
         """Where a link that receives but cannot command is broken.
 
         THE FAILURE THIS NAMES: heartbeat arrives, the drone is discovered, and
-        then every single round trip times out — rate setters, mission
+        then every single round trip times out - rate setters, mission
         download, hardware UID, arm, geofence. Six timeouts in a row is not six
         problems. It is one: nothing we send is reaching the aircraft, and the
         aircraft is fine.
 
         The uplink and downlink fail differently and that is what hides it. The
-        downlink is a bind, so a wrong address means silence — obvious. The
+        downlink is a bind, so a wrong address means silence - obvious. The
         uplink is a send, so a wrong address means the bytes leave for an
         address with nothing on it. UDP reports nothing back. Telemetry keeps
         streaming the whole time.
 
         The one fact that splits it: did WE produce outbound bytes? If we did,
-        everything up to this process is working and the break is downstream —
+        everything up to this process is working and the break is downstream -
         the relay, its uplink host, or the air side. If we did not, mavsdk
         never sent anything and the fault is on this machine.
         """
         if self.packets_out == 0:
-            return ("nothing was sent toward the drone at all — mavsdk produced "
+            return ("nothing was sent toward the drone at all - mavsdk produced "
                     "no outbound packets, so the fault is on the server side of "
                     "the bridge, not on the radio")
         return (
@@ -278,7 +278,7 @@ class SerialBridge(asyncio.DatagramProtocol):
             f"your machine, the address it forwards to (a relay agent still "
             f"pointed at 127.0.0.1 while the RF decoder moved to its own board "
             f"sends every command into local loopback), or the air side not "
-            f"transmitting. Telemetry keeps working throughout — it travels the "
+            f"transmitting. Telemetry keeps working throughout - it travels the "
             f"other way"
         )
 

@@ -1,11 +1,11 @@
 """
-Zone enforcement monitor — the server-side supervisory layer.
+Zone enforcement monitor - the server-side supervisory layer.
 
 Fed every telemetry update. Per session it tracks which zone class the
 drone is in and reacts on transitions:
 
-  orange — warning to the pilot (`zone_status`) + alert to every admin.
-  red    — DANGER to both, and if airborne the pushback engages: the
+  orange - warning to the pilot (`zone_status`) + alert to every admin.
+  red    - DANGER to both, and if airborne the pushback engages: the
            session's manual-control lock drops all pilot stick input while
            the drone is commanded (Hold + goto) to the nearest point
            outside the zone, releasing only after it has been clear for a
@@ -14,7 +14,7 @@ drone is in and reacts on transitions:
 Entry into red is also *predicted* ~3 s ahead along the current velocity
 vector, so the pushback starts before the boundary is crossed, not after.
 
-This layer rides the cloud link — the PX4 geofence uploaded at connect
+This layer rides the cloud link - the PX4 geofence uploaded at connect
 (app/zones/fence.py) remains the hard backstop if the link drops.
 """
 import asyncio
@@ -41,7 +41,7 @@ def drop(session_id: str) -> None:
 
 
 def current_class(session_id: str) -> str:
-    """Last-known zone class for a session — for the sessions API."""
+    """Last-known zone class for a session - for the sessions API."""
     st = _states.get(session_id)
     return st["cls"] if st else "green"
 
@@ -55,7 +55,7 @@ def _predict(lat: float, lng: float, vel: dict) -> tuple[float, float]:
 
 
 async def _pushback(tel, exit_lat: float, exit_lng: float, abs_alt: float) -> None:
-    """Hold, then reposition to the exit point. Best-effort — the FC fence
+    """Hold, then reposition to the exit point. Best-effort - the FC fence
     is the guarantee; this is the fast path."""
     drone = getattr(tel, "_drone", None)
     if drone is None:
@@ -91,7 +91,7 @@ async def on_snapshot(sio, session_manager, session, tel, snap: dict) -> None:
     red_pred = False
     if cls != "red" and armed and in_air and not st["pushing"]:
         plat, plng = _predict(lat, lng, snap.get("velocity", {}))
-        # predict_red uses zones eroded by ~5 m — skimming along a red
+        # predict_red uses zones eroded by ~5 m - skimming along a red
         # boundary (edge-to-edge with orange) must not trip the pushback
         red_pred = engine.predict_red(plat, plng, alt)
 
@@ -105,11 +105,11 @@ async def on_snapshot(sio, session_manager, session, tel, snap: dict) -> None:
         st["last_status"] = now
         msg = None
         if cls == "orange":
-            msg = f"WARNING — inside restricted (orange) zone{f': {zone_names}' if zone_names else ''}"
+            msg = f"WARNING - inside restricted (orange) zone{f': {zone_names}' if zone_names else ''}"
         elif cls == "red":
-            msg = f"DANGER — inside NO-FLY (red) zone{f': {zone_names}' if zone_names else ''}"
+            msg = f"DANGER - inside NO-FLY (red) zone{f': {zone_names}' if zone_names else ''}"
         elif red_pred:
-            msg = "DANGER — approaching NO-FLY (red) zone"
+            msg = "DANGER - approaching NO-FLY (red) zone"
         elif changed:
             msg = "Clear of restricted zones"
         if msg:
@@ -149,16 +149,16 @@ async def on_snapshot(sio, session_manager, session, tel, snap: dict) -> None:
         session.zone_lock = True
         exit_pt = engine.nearest_exit(lat, lng, _PUSH_EXTRA_M)
         if exit_pt is None and red_pred:
-            # not inside yet — hold short of the boundary instead
+            # not inside yet - hold short of the boundary instead
             exit_pt = (lat, lng)
         await sio.emit("zone_status", {
             "zone_class": "red", "zones": res["zones"], "locked": True,
-            "message": "CONTROLS LOCKED — pushing back out of NO-FLY zone",
+            "message": "CONTROLS LOCKED - pushing back out of NO-FLY zone",
         }, to=session.socket_id)
         await emit_admin_alert(session_manager, {
             "level": "danger", "session_id": session.session_id,
             "drone": drone_name, "ts": now,
-            "message": f"{drone_name}: RED-zone pushback engaged — pilot controls locked",
+            "message": f"{drone_name}: RED-zone pushback engaged - pilot controls locked",
         })
         if exit_pt:
             abs_alt = pos.get("absolute_altitude_m", 0.0)
@@ -170,7 +170,7 @@ async def on_snapshot(sio, session_manager, session, tel, snap: dict) -> None:
         else:
             st["clear"] = 0
             if cls == "red":
-                # still inside (drift/wind) — refresh the goto occasionally
+                # still inside (drift/wind) - refresh the goto occasionally
                 if now - st.get("last_push", 0) > 5.0:
                     st["last_push"] = now
                     exit_pt = engine.nearest_exit(lat, lng, _PUSH_EXTRA_M)
@@ -183,10 +183,10 @@ async def on_snapshot(sio, session_manager, session, tel, snap: dict) -> None:
             session.zone_lock = False
             await sio.emit("zone_status", {
                 "zone_class": cls, "zones": res["zones"], "locked": False,
-                "message": "Clear of NO-FLY zone — controls returned",
+                "message": "Clear of NO-FLY zone - controls returned",
             }, to=session.socket_id)
             await emit_admin_alert(session_manager, {
                 "level": "info", "session_id": session.session_id,
                 "drone": drone_name, "ts": now,
-                "message": f"{drone_name}: pushback complete — controls returned to pilot",
+                "message": f"{drone_name}: pushback complete - controls returned to pilot",
             })

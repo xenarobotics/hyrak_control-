@@ -1,4 +1,4 @@
-// Local swarm relay bridge — the multi-drone counterpart of localRfRelay.ts.
+// Local swarm relay bridge - the multi-drone counterpart of localRfRelay.ts.
 // A client's own PX4 SITL swarm runs entirely on THEIR machine (see
 // simulation/swarm.sh); no browser API can read raw UDP sockets directly.
 //
@@ -6,14 +6,14 @@
 // events (swarm_relay_uplink / swarm_relay_downlink) so nothing else in the
 // app needs to know which one is active:
 //   - Inside the HYRAK desktop app (see desktop/): window.hyrakNative is
-//     present, so this talks to the app's native UDP bridge DIRECTLY — no
+//     present, so this talks to the app's native UDP bridge DIRECTLY - no
 //     separate process to run at all.
-//   - In a plain browser tab: falls back to the original design — a local
+//   - In a plain browser tab: falls back to the original design - a local
 //     relay agent (sitl_relay/swarm_relay.py, or its standalone .exe/binary
 //     build) binds each drone's local MAVLink port and multiplexes them
 //     over one ws://127.0.0.1 WebSocket, tagged [drone_id: 1 byte][bytes].
 // backend/app/telemetry/swarm_relay_bridge.py doesn't know or care which
-// path the browser used to get its bytes — same principle as
+// path the browser used to get its bytes - same principle as
 // serial_bridge.py already not caring how the browser got ITS bytes.
 
 import { getSocket } from '@/lib/socket'
@@ -112,19 +112,19 @@ async function startExternalSwarmRelay(url: string): Promise<void> {
             socket.onmessage = onExternalRelayMessage
             socket.onclose = () => { if (active) void stopSwarmRelay() }
             socket.onerror = () => { /* handled via onclose */ }
-            // Registers the bridge on the backend BEFORE any scan — the
+            // Registers the bridge on the backend BEFORE any scan - the
             // scan handler checks for this and routes through it instead
             // of trying literal server-local ports.
             io.emit('connect_swarm_relay')
             resolve()
         }
         socket.onerror = () => {
-            reject(new Error(`Couldn't reach the local swarm relay at ${url} — is swarm_relay running on this machine?`))
+            reject(new Error(`Couldn't reach the local swarm relay at ${url} - is swarm_relay running on this machine?`))
         }
     })
 }
 
-// Tagged frames from the relay agent — forward as-is, the backend bridge
+// Tagged frames from the relay agent - forward as-is, the backend bridge
 // reads the leading drone_id byte itself.
 function onExternalRelayMessage(event: MessageEvent) {
     if (event.data instanceof ArrayBuffer && event.data.byteLength > 0) {
@@ -133,7 +133,7 @@ function onExternalRelayMessage(event: MessageEvent) {
 }
 
 // mavsdk's outgoing replies (commands to a specific drone), already tagged
-// with that drone's id by the backend bridge — forward to the relay agent,
+// with that drone's id by the backend bridge - forward to the relay agent,
 // which strips the tag and sends the bytes out to that drone's real peer.
 function onExternalDownlink(data: ArrayBuffer) {
     if (ws && ws.readyState === WebSocket.OPEN) {

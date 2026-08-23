@@ -2,8 +2,8 @@
 
 // Video and telemetry pickers, inside the status bar.
 //
-// WHY THEY ARE HERE AND NOT ONLY ON FLY. Retasking a vehicle mid-session —
-// swap to the gimbal camera, move the radio to another port — meant leaving
+// WHY THEY ARE HERE AND NOT ONLY ON FLY. Retasking a vehicle mid-session -
+// swap to the gimbal camera, move the radio to another port - meant leaving
 // whatever you were doing on Mission or AI, walking to Fly, changing one
 // dropdown, and walking back. On a live job that is a page change in the
 // middle of the thing the page change interrupts.
@@ -85,7 +85,7 @@ export function StatusBarLinks() {
     useEffect(() => { setVideoSourceState(getVideoSource()) }, [])
 
     // CHANGING THE SOURCE OF A RUNNING STREAM MEANS RESTARTING IT. Nothing
-    // reads these values after a stream has started — the source decides what
+    // reads these values after a stream has started - the source decides what
     // goes in the WebRTC offer and the camera id decides which device is
     // opened, both at start time. Elsewhere in the app the control is simply
     // DISABLED while streaming, which is honest but useless here: changing the
@@ -93,7 +93,7 @@ export function StatusBarLinks() {
     // the restart is done explicitly, and the operator is told it will happen.
     // Held so a SECOND change cancels the first restart instead of racing it.
     // Without this, changing source and then camera within the delay fires two
-    // startStream calls at a backend that has torn the session down once — the
+    // startStream calls at a backend that has torn the session down once - the
     // second offer arrives against a half-built session and the feed wedges,
     // which is worse than the state the operator was trying to leave.
     const restartTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -140,7 +140,7 @@ export function StatusBarLinks() {
             >
                 {/* THE SAME CATALOGUE SETTINGS RENDERS, not a shortlist.
                     A hand-written subset here would omit whichever source is
-                    added next — and the operator would find it selectable in
+                    added next - and the operator would find it selectable in
                     Settings, working, and absent from the bar. That exact bug
                     has already been shipped once in this app, which is why the
                     catalogue is data (see lib/videoSource.ts). */}
@@ -213,7 +213,7 @@ export function StatusBarLinks() {
                 onClick={isConnected ? () => { void disconnect() } : connect}
                 disabled={isConnecting || disconnecting || (!isConnected && sitlNeedsDesktop)}
                 title={sitlNeedsDesktop && !isConnected
-                    ? 'SITL needs the desktop app — a browser tab cannot reach udp:14540'
+                    ? 'SITL needs the desktop app - a browser tab cannot reach udp:14540'
                     : isConnected ? 'Disconnect telemetry' : 'Connect telemetry'}
                 style={{
                     display: 'flex', alignItems: 'center', gap: 5,

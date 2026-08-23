@@ -2,13 +2,13 @@
 Server-side video ingestion from the air unit's UDP RTP/H.265 stream.
 
 communication/start-gs.sh's wfb_rx delivers this to 127.0.0.1:5600 (port is
-configurable, see below) — the same stream communication/gst-decode.sh
+configurable, see below) - the same stream communication/gst-decode.sh
 plays for local preview, with these exact
 caps: "application/x-rtp,media=video,encoding-name=H265,clock-rate=90000,
 payload=96". Lets a session skip browser camera capture entirely and have
 the backend read the drone's actual video feed straight off the network,
 decoding it with the same aiortc/PyAV machinery (MediaPlayer) used for
-prerecorded-file playback elsewhere in aiortc — the resulting track drops
+prerecorded-file playback elsewhere in aiortc - the resulting track drops
 into MultiModeVideoStreamTrack exactly like a browser-relayed camera track.
 """
 import logging
@@ -30,7 +30,7 @@ m=video {port} RTP/AVP 96
 a=rtpmap:96 H265/90000
 """
 
-# Keyed by port — the port is user-configurable (Settings), so a single
+# Keyed by port - the port is user-configurable (Settings), so a single
 # cached path would silently keep serving the old port's SDP after a change.
 _sdp_paths: dict[int, str] = {}
 
@@ -53,7 +53,7 @@ def open_air_unit_video(
 ):
     """Returns an aiortc-compatible video MediaStreamTrack reading the air
     unit's live RTP/H.265 UDP stream. Blocking (ffmpeg probes the stream
-    synchronously) — call via loop.run_in_executor, never directly from an
+    synchronously) - call via loop.run_in_executor, never directly from an
     async handler. Raises if the stream can't be opened within `timeout`
     seconds (e.g. nothing transmitting on that port yet)."""
     sdp_path = _sdp_file(port)
@@ -62,7 +62,7 @@ def open_air_unit_video(
         format="sdp",
         options={
             "protocol_whitelist": "file,udp,rtp",
-            # ffmpeg's defaults are tuned for smooth VOD/file playback —
+            # ffmpeg's defaults are tuned for smooth VOD/file playback -
             # buffer and reorder packets for robustness, which on a live
             # feed just adds fixed, permanent glass-to-glass delay (this
             # is what was producing ~1s of extra lag vs. gst-decode.sh's
@@ -75,7 +75,7 @@ def open_air_unit_video(
             # demuxer holds packets this long in case an earlier one is still in
             # flight. 100ms is right for the air unit's RF link, where reordering
             # is real. It is pure cost when the transport already guarantees
-            # order — the DataChannel path runs SCTP with ordered:true, so it
+            # order - the DataChannel path runs SCTP with ordered:true, so it
             # passes 0 and gets that 100ms back. Measured: rtsp_datachannel was
             # ~250ms behind siyi_rtsp, and siyi_rtsp's reader sets no max_delay
             # at all, which is what pointed here.
@@ -89,7 +89,7 @@ def open_air_unit_video(
     as_live(player, f"air-unit udp:{port}")
     if player.video is None:
         raise RuntimeError(
-            f"No video stream on udp:{port} — is the air unit transmitting? "
+            f"No video stream on udp:{port} - is the air unit transmitting? "
             f"(communication/start-gs.sh on the ground-station side)"
         )
     logger.info(f"Air-unit video opened from udp:{port}")

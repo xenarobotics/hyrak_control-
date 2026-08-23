@@ -1,7 +1,7 @@
 // Reachability pre-check for the drone hardware, surfaced in Settings.
 //
-// The question this answers — "can this machine actually reach the camera and
-// the ground unit right now?" — is the one that would have short-circuited most
+// The question this answers - "can this machine actually reach the camera and
+// the ground unit right now?" - is the one that would have short-circuited most
 // of an evening's debugging. A laptop roamed across seven WiFi networks in one
 // session, and each time it left the ground unit's network both video and
 // telemetry failed with errors describing the symptom rather than the cause.
@@ -54,7 +54,7 @@ export async function probeDroneNetwork(): Promise<ProbeReport> {
         return {
             addresses: [],
             results: [],
-            error: 'Reachability checks need the HYRAK desktop app — a browser tab cannot open a socket.',
+            error: 'Reachability checks need the HYRAK desktop app - a browser tab cannot open a socket.',
         }
     }
     const probe = nativeBridge()?.probeNetwork
@@ -86,8 +86,8 @@ export async function probeDroneNetwork(): Promise<ProbeReport> {
 export function explainResult(r: ProbeResult, addresses: ProbeReport['addresses']): string {
     if (r.ok) {
         return r.onLink
-            ? `reachable in ${r.ms}ms, on your subnet — this is the reliable case`
-            : `reachable in ${r.ms}ms, but ROUTED via a gateway — depends on another `
+            ? `reachable in ${r.ms}ms, on your subnet - this is the reliable case`
+            : `reachable in ${r.ms}ms, but ROUTED via a gateway - depends on another `
               + 'device forwarding, which is what breaks intermittently'
     }
     if (!r.onLink) {
@@ -95,7 +95,7 @@ export function explainResult(r: ProbeResult, addresses: ProbeReport['addresses'
         return `unreachable, and NOT on your subnet (you have ${mine}). Either join the `
             + `network ${r.host} is on, or add a route to it.`
     }
-    return `on your subnet but not answering (${r.error ?? 'no response'}) — powered off, `
+    return `on your subnet but not answering (${r.error ?? 'no response'}) - powered off, `
         + 'or a different address than configured.'
 }
 

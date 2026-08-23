@@ -3,7 +3,7 @@ Vehicle speed estimation from a moving drone.
 =============================================
 
 Geometry, not a learned model. That is a feature: the result can be explained,
-audited, and checked against a second independent measurement — which matters
+audited, and checked against a second independent measurement - which matters
 the moment anyone says the word "enforcement".
 
 THE PROBLEM
@@ -27,11 +27,11 @@ WHAT IS USED INSTEAD
     The background. Static ground features give the frame-to-frame image warp
     caused by drone motion directly, measured from the pixels at full frame
     rate, needing no telemetry and no timestamp alignment. Attitude and
-    altitude are then used only for slowly-varying quantities — the metric
-    scale and the ground plane — where 4 Hz is entirely adequate.
+    altitude are then used only for slowly-varying quantities - the metric
+    scale and the ground plane - where 4 Hz is entirely adequate.
 
 ERROR BUDGET (measured, HFOV 70 deg, 1080p, 15-frame window)
-    pixel jitter        <1 km/h     — a least-squares slope over 15 samples
+    pixel jitter        <1 km/h     - a least-squares slope over 15 samples
                                       averages 1.5 px of box noise down to
                                       almost nothing. Two-frame differencing
                                       would leave several km/h.
@@ -61,7 +61,7 @@ logger = logging.getLogger("verocore.vision.speed")
 _MAX_CORNERS = 400
 _CORNER_QUALITY = 0.01
 _MIN_CORNER_DISTANCE = 12
-# Below this many tracked correspondences the homography is not trustworthy —
+# Below this many tracked correspondences the homography is not trustworthy -
 # happens over water, fresh tarmac, or a featureless field.
 _MIN_INLIERS = 12
 _RANSAC_REPROJ_PX = 3.0
@@ -72,7 +72,7 @@ _MAX_PLAUSIBLE_KMH = 250.0
 
 # Below this the direction of travel is noise, not a heading. A stationary
 # vehicle still shows a couple of px/s of box jitter, and atan2 of jitter is a
-# uniformly random compass bearing — which would then be published as fact and
+# uniformly random compass bearing - which would then be published as fact and
 # would poison the flow consensus that wrong-way detection is built on.
 _MIN_HEADING_KMH = 5.0
 
@@ -97,7 +97,7 @@ class EgoMotionTracker:
 
     RUNS AT THE CAMERA'S NATIVE RESOLUTION.
         A downscaled path (960 wide, homography rescaled back) was measured
-        once as an optimisation — 25.4ms at 1080p vs 6.1ms at 960 — and then
+        once as an optimisation - 25.4ms at 1080p vs 6.1ms at 960 - and then
         deliberately reverted: the operator wants every stage running at the
         camera's actual resolution rather than trading accuracy headroom for
         frame budget. The 25.4ms/frame cost is the price of that and is
@@ -144,7 +144,7 @@ class EgoMotionTracker:
         mask = self._background_mask(gray.shape, exclude_boxes)
 
         # A resolution change (stream renegotiated, source swapped) invalidates
-        # the previous frame's points outright — optical flow between two
+        # the previous frame's points outright - optical flow between two
         # differently-sized pyramids is not a "few pixels off", it is a hard
         # OpenCV assertion failure, so the chain must restart rather than run.
         if self._prev_gray is not None and self._prev_gray.shape != gray.shape:
@@ -209,7 +209,7 @@ class SpeedReading:
     # is this vehicle going, and is it coming at us.
     #
     # None whenever the vehicle is too slow for its direction to mean
-    # anything (see _MIN_HEADING_KMH) or the ground projection failed — a
+    # anything (see _MIN_HEADING_KMH) or the ground projection failed - a
     # guessed heading is worse than no heading, because wrong-way detection
     # is built on top of it.
     #: Compass bearing of travel in degrees, 0=North, 90=East.
@@ -221,7 +221,7 @@ class SpeedReading:
     #:
     #: Carried separately from heading_deg because the two are for different
     #: consumers and neither substitutes for the other. heading_deg is a
-    #: compass bearing — right for a log, a report, and comparing two vehicles.
+    #: compass bearing - right for a log, a report, and comparing two vehicles.
     #: This is where the vehicle is going ON THE PICTURE, which is the only
     #: thing an arrow drawn over the video can honestly point along. Derived
     #: from the same ground projection, so it carries the perspective the raw
@@ -449,7 +449,7 @@ class SpeedEstimator:
             # vehicle. Reported as unreliable rather than silently dropped, so
             # the tracking problem stays visible.
             reliable = False
-            note = (f"{kmh:.0f} km/h exceeds the plausible ceiling — "
+            note = (f"{kmh:.0f} km/h exceeds the plausible ceiling - "
                     f"probably a track identity swap")
         if span < 0.3:
             reliable = False
@@ -487,7 +487,7 @@ class SpeedEstimator:
             Because image direction is not ground direction. Perspective
             compresses the far half of the frame, so the same ground heading
             produces a different pixel bearing depending on where in frame the
-            vehicle is — badly enough near the top of frame that two vehicles
+            vehicle is - badly enough near the top of frame that two vehicles
             in the same lane would be reported as travelling 30 degrees apart,
             which is exactly the error that would fabricate wrong-way alerts.
 
@@ -513,8 +513,8 @@ class SpeedEstimator:
             return (None, None, None)
         ux, uy = float(q[0] / q[2]), float(q[1] / q[2])
 
-        # (px, py) is the CURRENT frame's own bottom-centre pixel — the same
-        # point (sx, sy) is the stabilised image of — so it is used directly
+        # (px, py) is the CURRENT frame's own bottom-centre pixel - the same
+        # point (sx, sy) is the stabilised image of - so it is used directly
         # rather than mapped back through the homography and returned to where
         # it started.
         here = pose.project_to_ground(cam, px, py)

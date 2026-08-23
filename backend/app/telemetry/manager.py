@@ -4,9 +4,9 @@ Uses MAVSDK-Python to talk to PX4 over MAVLink.
 
 Key concepts:
 - MAVSDK connects via UDP to PX4 SITL (default port 14540)
-- All telemetry subscriptions are async generators — they yield forever
+- All telemetry subscriptions are async generators - they yield forever
 - We run each subscription as a separate asyncio Task
-- Commands go through a queue — this makes it thread-safe
+- Commands go through a queue - this makes it thread-safe
 - One TelemetryManager instance per drone session
 """
 import asyncio
@@ -92,7 +92,7 @@ class TelemetryManager:
 
     # Max rate at which we push snapshots to the frontend (Hz)
     _EMIT_RATE_HZ       = 10  # primary drone
-    _FLEET_EMIT_RATE_HZ = 3   # fleet drones — lower to avoid overwhelming mavsdk_server queue
+    _FLEET_EMIT_RATE_HZ = 3   # fleet drones - lower to avoid overwhelming mavsdk_server queue
 
     def __init__(self, on_update: Optional[Callable[[dict], None]] = None, fleet_mode: bool = False,
                  on_fc_message: Optional[Callable[[dict], None]] = None,
@@ -107,8 +107,8 @@ class TelemetryManager:
         self._on_pilot_override = on_pilot_override
         # Every line the autopilot says, pushed on as it arrives.
         #
-        # These were already being collected — the refusal-reason work needed
-        # the last few — but only ever read at the moment a command failed and
+        # These were already being collected - the refusal-reason work needed
+        # the last few - but only ever read at the moment a command failed and
         # then discarded. That is a fraction of what the aircraft tells you:
         # preflight results, EKF and GPS state changes, failsafe warnings,
         # calibration complaints. QGroundControl shows the lot, which is most
@@ -133,7 +133,7 @@ class TelemetryManager:
         self._on_calibration: Optional[Callable[[dict], None]] = None
         # Monotonic deadline before which a departure from Offboard is OURS.
         #
-        # The alternative — a boolean cleared once the mode has settled — races
+        # The alternative - a boolean cleared once the mode has settled - races
         # the flight-mode subscription, which is a separate task reading a 1 Hz
         # HEARTBEAT-derived stream. A window is honest about what is actually
         # being asserted: "we asked for a mode change just now, so the next one
@@ -141,19 +141,19 @@ class TelemetryManager:
         self._offboard_release_until: float = 0.0
         # Monotonic time of the last velocity setpoint from the commanding loop.
         # 0.0 = none yet, which the watchdog treats as "not commanding" rather
-        # than "stale" — an armed Offboard session that has never been given a
+        # than "stale" - an armed Offboard session that has never been given a
         # velocity is not one that stopped being given them.
         self._last_velocity_cmd_t: float = 0.0
         self._offboard_stale: bool = False
         self._address: str = ""
-        self._grpc_port: Optional[int] = None  # unique per drone — see connect()
+        self._grpc_port: Optional[int] = None  # unique per drone - see connect()
         self._last_emit: float = 0.0  # monotonic time of last _emit() push
         # The in-flight altitude verifier, if any. Held so a NEW altitude
         # command can cancel it: two verifiers running at once would race, and
         # the older one settling last would overwrite the newer verdict with a
         # judgement about an altitude nobody is flying to any more.
         self._alt_verify_task: Optional[asyncio.Task] = None
-        # What the link to the AIRCRAFT actually is — "radio" or "local".
+        # What the link to the AIRCRAFT actually is - "radio" or "local".
         # Declared by whoever built the connection, because the MAVSDK address
         # only describes the hop to mavsdk_server. See _set_rates.
         self._link_kind: str = "local"
@@ -172,7 +172,7 @@ class TelemetryManager:
         # THE AUTOPILOT ALREADY SAYS WHY IT REFUSED, AND WE THREW IT AWAY.
         #
         # A denied arm comes back through MAVSDK as COMMAND_DENIED and nothing
-        # else, which reaches the operator as "arm failed" — indistinguishable
+        # else, which reaches the operator as "arm failed" - indistinguishable
         # from the command never leaving the ground station. PX4 sends the
         # actual reason in the same breath as the refusal, as a STATUSTEXT
         # ("Arming denied: ...", "Preflight Fail: ..."). QGC shows exactly that
@@ -180,12 +180,12 @@ class TelemetryManager:
         # here subscribed to status_text at all.
         self._status_text: list[tuple[float, str, str]] = []   # (monotonic, severity, text)
         self._status_event: Optional[asyncio.Event] = None
-        #: Set whenever an action is refused — the FC's own words when it gave
+        #: Set whenever an action is refused - the FC's own words when it gave
         #: any, else the MAVSDK error. Read by execute_drone_action.
         self.last_action_error: Optional[str] = None
 
     #: Keep the tail only. This is for explaining the command you just sent,
-    #: not a flight log — boot spam from the FC must not push memory around.
+    #: not a flight log - boot spam from the FC must not push memory around.
     _STATUS_TEXT_KEEP = 20
     #: How long to wait after a refusal for the FC's explanation to arrive.
     #: The ACK and the STATUSTEXT are separate messages, and on a 3DR link the
@@ -203,7 +203,7 @@ class TelemetryManager:
         """Tally one arrival, and roll the window when it closes.
 
         Called from the subscription loops, which is the only place that knows
-        a message genuinely arrived — mavsdk_server's own rate request is a
+        a message genuinely arrived - mavsdk_server's own rate request is a
         statement of intent and says nothing about what the radio carried.
         """
         import time as _time
@@ -285,11 +285,11 @@ class TelemetryManager:
                 None, self._kill_stale_mavsdk_servers, endpoint
             )
 
-        # Create a fresh System() — reusing a stale one causes gRPC channel errors.
+        # Create a fresh System() - reusing a stale one causes gRPC channel errors.
         # CRITICAL: each System must own a UNIQUE gRPC port. MAVSDK-Python defaults
         # every instance to port 50051; with multiple drones, only the first
         # mavsdk_server binds it and every later System silently connects to that
-        # SAME server — so all drones mirror one vehicle and every command routes
+        # SAME server - so all drones mirror one vehicle and every command routes
         # to it (the "arm one drone, all show armed" bug).
         self._grpc_port = _find_free_port()
         self._drone = System(port=self._grpc_port)
@@ -305,12 +305,12 @@ class TelemetryManager:
 
         try:
             # This call itself (spawning/attaching to mavsdk_server and
-            # establishing its gRPC channel) had no timeout — only the
+            # establishing its gRPC channel) had no timeout - only the
             # heartbeat wait below did. If mavsdk_server fails to spawn or
             # the gRPC handshake stalls for any reason, this line alone
             # could hang forever with nothing ever timing out, leaving the
             # frontend stuck on "connecting" indefinitely with no error to
-            # show — a real infinite hang, not just a slow connect.
+            # show - a real infinite hang, not just a slow connect.
             await asyncio.wait_for(self._drone.connect(system_address=address), timeout=10.0)
             logger.info("Waiting for heartbeat...")
             # No timeout here previously meant a link with a listening socket
@@ -340,7 +340,7 @@ class TelemetryManager:
 
         A real telemetry radio over serial has a fraction of the effective
         throughput of UDP/SITL (a 57600 baud SiK-style radio is often far below
-        its nominal baud rate in practice, and half-duplex) — the UDP rates below
+        its nominal baud rate in practice, and half-duplex) - the UDP rates below
         can saturate it and cause exactly the kind of intermittent "Socket closed"
         disconnects that don't happen in QGroundControl, which is far more
         conservative over slow links. Use a lower profile for serial.
@@ -350,7 +350,7 @@ class TelemetryManager:
         and the aircraft. In this product the radio is plugged into the
         OPERATOR'S machine and relayed to the backend (serial_bridge.py,
         rf_bridge.py), so mavsdk always sees `udpin://127.0.0.1:<port>` no
-        matter what is at the far end — which meant a startswith("serial://")
+        matter what is at the far end - which meant a startswith("serial://")
         test was false on every real-radio flight this platform has ever
         made, and the "conservative over slow links" profile below was
         selected exactly never. The bridges now declare the physical link
@@ -372,7 +372,7 @@ class TelemetryManager:
             # WHAT DESERVES BANDWIDTH AND WHAT DOES NOT.
             #
             # These are not one dial. Position and attitude feed the tracking
-            # geometry — every metric a follow makes is computed against them,
+            # geometry - every metric a follow makes is computed against them,
             # and a stale attitude is worse than a slow one because it is
             # confidently wrong. Battery, GPS count and home position are
             # dashboard numbers that change over minutes and cost the same
@@ -382,7 +382,7 @@ class TelemetryManager:
             # on the reasoning that QGroundControl sustains more over the same
             # 3DR radio; that produced a link which would not hold and commands
             # that did not arrive, because QGC is not also running this
-            # application's uplink and a SiK radio is half-duplex — saturating
+            # application's uplink and a SiK radio is half-duplex - saturating
             # the downlink starves the commands going the other way.
             #
             # They are settings rather than constants now, which is the part
@@ -396,7 +396,7 @@ class TelemetryManager:
                 # GLOBAL_POSITION_INT message and it keeps the higher of the
                 # two (telemetry_impl.cpp: max(_position_rate_hz,
                 # _velocity_ned_rate_hz)), so setting velocity separately
-                # cannot buy a second stream — it can only push position up,
+                # cannot buy a second stream - it can only push position up,
                 # and setting it LOWER does nothing at all. It is deliberately
                 # not set here: one message, one rate, and the budget below
                 # counts it once.
@@ -412,15 +412,15 @@ class TelemetryManager:
                 ("gps_info",     self._drone.telemetry.set_rate_gps_info,       1.0 if is_serial else 2.0),
                 ("home",         self._drone.telemetry.set_rate_home,           0.5 if is_serial else 1.0),
                 # in_air is the one low-rate stream that IS load-bearing: the
-                # UI picks TAKEOFF vs SET ALT from it. Cheap — EXTENDED_SYS_STATE
-                # is a 2-byte payload — so there is no reason to starve it.
+                # UI picks TAKEOFF vs SET ALT from it. Cheap - EXTENDED_SYS_STATE
+                # is a 2-byte payload - so there is no reason to starve it.
                 ("in_air",       self._drone.telemetry.set_rate_in_air,         1.0 if is_serial else 2.0),
             ]
             budget = self._downlink_bytes_s(rates)
             logger.info(
                 f"Telemetry profile: {'RADIO' if is_serial else 'UDP/local'} "
-                f"— position {rates[0][2]:g} Hz, attitude {rates[1][2]:g} Hz "
-                f"— ~{budget:.0f} B/s downlink"
+                f"- position {rates[0][2]:g} Hz, attitude {rates[1][2]:g} Hz "
+                f"- ~{budget:.0f} B/s downlink"
                 + (f" ({budget / self._RADIO_CEILING_BYTES_S * 100:.0f}% of a "
                    f"conservative 3DR ceiling)" if is_serial else "")
             )
@@ -430,7 +430,7 @@ class TelemetryManager:
                     f"{self._RADIO_BUDGET_WARN * 100:.0f}% of what a 3DR link "
                     f"can be relied on to carry. A SiK radio is half-duplex, so "
                     f"the downlink takes its slots from the SAME budget the "
-                    f"commands go out on — this is how a link stays 'connected' "
+                    f"commands go out on - this is how a link stays 'connected' "
                     f"while arm and takeoff stop arriving. Check measured_rates: "
                     f"if they are below what was asked for, the radio is already "
                     f"dropping this."
@@ -443,7 +443,7 @@ class TelemetryManager:
         logger.info("Telemetry rates configured")
 
     #: MAVLink v2 wire size per stream, in bytes: 10 B header + payload + 2 B
-    #: CRC, payload lengths from common.xml. Upper bounds — v2 truncates
+    #: CRC, payload lengths from common.xml. Upper bounds - v2 truncates
     #: trailing zero bytes, so a real frame is usually a little smaller.
     _FRAME_BYTES = {
         "position": 40,    # GLOBAL_POSITION_INT, payload 28
@@ -454,13 +454,13 @@ class TelemetryManager:
         "in_air": 14,      # EXTENDED_SYS_STATE, payload 2
     }
     #: What PX4 sends on its own whatever we ask for, and therefore has to be
-    #: counted: HEARTBEAT (21 B, 1 Hz, fixed — PX4 calls it a constant-rate
+    #: counted: HEARTBEAT (21 B, 1 Hz, fixed - PX4 calls it a constant-rate
     #: stream whose rate is never adjusted) and SYS_STATUS (43 B, 1 Hz).
     _UNREQUESTED_BYTES_S = 21 + 43
 
     #: Conservative usable DOWNLINK on a stock 3DR: 64 kbit/s air rate, halved
     #: by ECC, halved again because SiK is half-duplex TDM, less ~20% framing
-    #: and preamble. Deliberately pessimistic — being wrong in this direction
+    #: and preamble. Deliberately pessimistic - being wrong in this direction
     #: costs a warning, being wrong the other way costs a flight.
     _RADIO_CEILING_BYTES_S = 1600.0
     #: SiK degrades well before nominal saturation, because the uplink shares
@@ -473,7 +473,7 @@ class TelemetryManager:
 
         Turns "is 6 Hz safe?" from a matter of opinion into arithmetic. The
         number that matters is not the rate of any one stream but the sum, and
-        the sum is what nobody was computing — including me, when I raised
+        the sum is what nobody was computing - including me, when I raised
         these to 10/8 Hz on the reasoning that QGroundControl sustains more.
         """
         total = float(cls._UNREQUESTED_BYTES_S)
@@ -484,7 +484,7 @@ class TelemetryManager:
     async def start(self):
         """Starts all telemetry subscription tasks."""
         if not self._connected:
-            logger.error("Cannot start — not connected")
+            logger.error("Cannot start - not connected")
             return
 
         self._running = True
@@ -494,13 +494,13 @@ class TelemetryManager:
 
         # Each subscription runs as an independent task.
         # If one crashes, the others keep running.
-        # NOTE: groundspeed is computed inside _subscribe_velocity — no separate task.
+        # NOTE: groundspeed is computed inside _subscribe_velocity - no separate task.
         if self._fleet_mode:
             # Fleet drones: 4 gRPC streams only.
             # - position: 1 Hz for map markers
             # - armed + flight_mode: derived from HEARTBEAT (1 Hz), no extra overhead
             # - battery: 0.2 Hz for HUD indicator
-            # Velocity and GPS are omitted — they add 2 more streams per drone
+            # Velocity and GPS are omitted - they add 2 more streams per drone
             # (6 total per drone × N drones) without adding essential fleet-control value.
             # This keeps N=3 drones at 12 total streams rather than 18.
             self._tasks = [
@@ -509,7 +509,7 @@ class TelemetryManager:
                 asyncio.create_task(self._subscribe_flight_mode(), name="fleet_mode"),
                 asyncio.create_task(self._subscribe_battery(),     name="fleet_battery"),
                 # Mission progress is event-driven (only fires on waypoint
-                # changes) — negligible cost, and fleet surveys need per-drone
+                # changes) - negligible cost, and fleet surveys need per-drone
                 # WP progress in the UI.
                 asyncio.create_task(self._subscribe_mission_progress(), name="fleet_mission"),
                 asyncio.create_task(self._command_loop(),          name="fleet_cmd"),
@@ -531,16 +531,16 @@ class TelemetryManager:
                 asyncio.create_task(self._subscribe_rc_status(),       name="tel_rc"),
                 asyncio.create_task(self._subscribe_mission_progress(),name="tel_mission"),
                 asyncio.create_task(self._poll_mission_finished(),     name="tel_mission_finished"),
-                # Event-driven, no rate, no cost until the FC speaks — and it
+                # Event-driven, no rate, no cost until the FC speaks - and it
                 # carries the only explanation there is for a refused command.
                 asyncio.create_task(self._subscribe_status_text(),      name="tel_statustext"),
                 asyncio.create_task(self._command_loop(),              name="cmd_loop"),
                 # The only stop for a runaway that does not depend on the vision
-                # loop still working — see _offboard_watchdog.
+                # loop still working - see _offboard_watchdog.
                 asyncio.create_task(self._offboard_watchdog(),          name="tel_ob_watchdog"),
             ]
 
-        logger.info(f"Telemetry started — {len(self._tasks)} tasks ({'fleet' if self._fleet_mode else 'primary'})")
+        logger.info(f"Telemetry started - {len(self._tasks)} tasks ({'fleet' if self._fleet_mode else 'primary'})")
 
     async def stop(self, kill_stale: bool = True):
         """Cleanly cancels all tasks and closes connection."""
@@ -550,7 +550,7 @@ class TelemetryManager:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
-        # Kill OUR OWN mavsdk_server, matched by its unique gRPC port — NOT by
+        # Kill OUR OWN mavsdk_server, matched by its unique gRPC port - NOT by
         # the shared UDP endpoint. During a page reload the old session's
         # destroy runs concurrently with the new session's scan on the SAME
         # ports; an endpoint-wide kill here would murder the new session's
@@ -578,7 +578,7 @@ class TelemetryManager:
                     pitch_deg=round(att.pitch_deg, 2),
                     yaw_deg=round(att.yaw_deg, 2),
                 )
-                # Compass heading is yaw remapped from -180..180 to 0..360 —
+                # Compass heading is yaw remapped from -180..180 to 0..360 -
                 # avoids a separate heading() gRPC streaming subscription
                 # (one less stream in mavsdk_server's shared callback queue).
                 self._snapshot.heading_deg = round(att.yaw_deg % 360, 1)
@@ -617,7 +617,7 @@ class TelemetryManager:
                     east_m_s=round(vel.east_m_s, 2),
                     down_m_s=round(vel.down_m_s, 2),
                 )
-                # Compute groundspeed here — avoids a duplicate velocity_ned() subscription
+                # Compute groundspeed here - avoids a duplicate velocity_ned() subscription
                 self._snapshot.groundspeed_m_s = round(
                     math.sqrt(vel.north_m_s**2 + vel.east_m_s**2), 2
                 )
@@ -707,7 +707,7 @@ class TelemetryManager:
             logger.error(f"In-air subscription error: {e}")
 
     async def _subscribe_status_text(self):
-        """The autopilot's own words. Event-driven — there is no rate to set,
+        """The autopilot's own words. Event-driven - there is no rate to set,
         and it costs nothing on the link until the FC has something to say."""
         try:
             async for st in self._drone.telemetry.status_text():
@@ -721,7 +721,7 @@ class TelemetryManager:
                 self._status_text.append((_time.monotonic(), sev, text))
                 del self._status_text[:-self._STATUS_TEXT_KEEP]
                 # THE CALIBRATION PICTURE COMES FROM HERE, not from the
-                # plugin's cooked progress — see telemetry/calibration.py for
+                # plugin's cooked progress - see telemetry/calibration.py for
                 # why.
                 #
                 # Guarded for the same reason the message listener below is:
@@ -761,7 +761,7 @@ class TelemetryManager:
     @staticmethod
     def _severity_rank(sev: str) -> int:
         """MAVSDK's StatusTextType ascends with severity, unlike MAVLink's own
-        SEVERITY enum which descends — worth naming, because reading it the
+        SEVERITY enum which descends - worth naming, because reading it the
         MAVLink way silently inverts the filter and keeps only the chatter."""
         order = ["DEBUG", "INFO", "NOTICE", "WARNING", "ERROR", "CRITICAL",
                  "ALERT", "EMERGENCY"]
@@ -806,7 +806,7 @@ class TelemetryManager:
     async def _subscribe_wind(self):
         """
         Wind velocity estimated by PX4 EKF2 from GPS + IMU.
-        No extra sensor needed — available on all PX4 multirotors.
+        No extra sensor needed - available on all PX4 multirotors.
         MAVLink: WIND_COV message. MAVSDK: telemetry.fixedwing_metrics()
         works for multirotors too (PX4 always runs EKF2 wind estimation).
         """
@@ -815,17 +815,17 @@ class TelemetryManager:
                 if not self._running:
                     break
                 # airspeed_m_s comes from EKF2 on multirotors when airspeed sensor absent
-                # Use velocity NED vs groundspeed to infer wind — or use raw if available
+                # Use velocity NED vs groundspeed to infer wind - or use raw if available
                 # MAVSDK doesn't expose WIND_COV directly; use best available
                 # We approximate: wind = GPS groundspeed direction vs airspeed
-                # For now store zeros — actual wind needs raw MAVLink WIND_COV
+                # For now store zeros - actual wind needs raw MAVLink WIND_COV
                 # This subscription keeps the slot open for future raw MAVLink support
                 self._snapshot.wind_north_m_s = 0.0
                 self._snapshot.wind_east_m_s = 0.0
         except asyncio.CancelledError:
             pass
         except Exception:
-            # Not all PX4 builds expose this — fail silently
+            # Not all PX4 builds expose this - fail silently
             pass
 
     async def _subscribe_home(self):
@@ -848,7 +848,7 @@ class TelemetryManager:
             logger.error(f"Home position subscription error: {e}")
 
     async def _subscribe_health(self):
-        """The autopilot's own per-sensor verdict — the same flags QGC shows.
+        """The autopilot's own per-sensor verdict - the same flags QGC shows.
 
         This is the ONLY honest source for "calibrated" vs "needs
         calibration" on the sensors page: PX4 keeps its calibration state in
@@ -883,7 +883,7 @@ class TelemetryManager:
             logger.error(f"Health subscription error: {e}")
 
     async def _subscribe_rc_status(self):
-        """RC receiver state, from the autopilot's side of the link — the
+        """RC receiver state, from the autopilot's side of the link - the
         Radio page's "is the transmitter actually reaching the aircraft"
         light. Event-driven on change, like health."""
         try:
@@ -929,7 +929,7 @@ class TelemetryManager:
 
     async def _poll_mission_finished(self):
         """
-        mission.is_mission_finished() is request/response, not a stream — MAVSDK
+        mission.is_mission_finished() is request/response, not a stream - MAVSDK
         has no push notification for mission completion, and MISSION_CURRENT
         freezes at the last index instead of signalling done. Poll it instead so
         the frontend can tell "still on last waypoint" apart from "actually done".
@@ -945,7 +945,7 @@ class TelemetryManager:
             except asyncio.CancelledError:
                 return
             except Exception:
-                pass  # transient gRPC hiccup — just retry next tick
+                pass  # transient gRPC hiccup - just retry next tick
             try:
                 await asyncio.sleep(1.0)
             except asyncio.CancelledError:
@@ -958,7 +958,7 @@ class TelemetryManager:
         def _num(v, default=0.0):
             # PX4 stores NaN for "use default" on several MissionItem fields
             # (e.g. speed_m_s on a takeoff item). json.dumps happily emits a
-            # bare NaN token, which is invalid JSON — the browser's
+            # bare NaN token, which is invalid JSON - the browser's
             # JSON.parse() throws on it and silently kills the websocket with
             # no error surfaced anywhere. Never let NaN reach the socket.
             return v if v == v else default
@@ -1000,13 +1000,13 @@ class TelemetryManager:
         return False
 
     async def _rewind_if_finished(self):
-        """A finished mission won't restart via MISSION_START — PX4 leaves the
+        """A finished mission won't restart via MISSION_START - PX4 leaves the
         current item parked at the end, so 'start' silently does nothing (the
         old 'must re-upload before every start' bug). Rewind to waypoint 0 so
         start always means 'fly the mission again'."""
         finished = self._snapshot.mission_finished
         if not finished and self._fleet_mode:
-            # Fleet mode doesn't run the finished-poll task — ask once at
+            # Fleet mode doesn't run the finished-poll task - ask once at
             # start time instead (single request/response, only when starting)
             try:
                 finished = await asyncio.wait_for(
@@ -1023,7 +1023,7 @@ class TelemetryManager:
             self._snapshot.mission_finished = False
             logger.info("Finished mission rewound to waypoint 0")
         except Exception as e:
-            logger.warning(f"Mission rewind failed: {e} — starting anyway")
+            logger.warning(f"Mission rewind failed: {e} - starting anyway")
 
     @_claims_mode_change
     async def start_mission(self) -> bool:
@@ -1031,7 +1031,7 @@ class TelemetryManager:
         Start the uploaded mission. Drone must be armed.
 
         PX4 occasionally needs a moment to finish digesting a just-completed
-        mission upload before it will honour MISSION_START — the command can
+        mission upload before it will honour MISSION_START - the command can
         be ACKed but not actually switch flight mode. Retry once if the mode
         doesn't confirm MISSION within 2s, instead of leaving the user stuck
         on a silent failure.
@@ -1074,14 +1074,14 @@ class TelemetryManager:
                 logger.warning(f"arm_and_start_mission attempt {attempt + 1} didn't confirm MISSION mode")
             return False, "Armed, but mission never switched to MISSION mode"
         except asyncio.TimeoutError:
-            return False, "Arm timed out — check safety switch and pre-arm checks"
+            return False, "Arm timed out - check safety switch and pre-arm checks"
         except Exception as e:
             logger.error(f"Arm+start failed: {e}")
             return False, str(e)
 
     async def _correct_altitude_after_takeoff(self, relative_altitude_m: float):
         """Wait until the drone actually leaves the ground, then goto the
-        requested altitude. Belt-and-braces for the MIS_TAKEOFF_ALT race —
+        requested altitude. Belt-and-braces for the MIS_TAKEOFF_ALT race -
         harmless when takeoff already targets the right altitude."""
         try:
             for _ in range(30):  # up to 15 s to get airborne
@@ -1089,7 +1089,7 @@ class TelemetryManager:
                 if self._snapshot.position.relative_altitude_m > 1.0:
                     break
             else:
-                return  # never left the ground — nothing to correct
+                return  # never left the ground - nothing to correct
             await asyncio.sleep(1.0)
             pos = self._snapshot.position
             ground_amsl = self._snapshot.home_alt or (
@@ -1118,7 +1118,7 @@ class TelemetryManager:
         """
         pos = self._snapshot.position
         if pos.latitude_deg == 0.0 and pos.longitude_deg == 0.0:
-            logger.warning("Goto altitude refused — no position yet")
+            logger.warning("Goto altitude refused - no position yet")
             return False
         in_air = self._snapshot.flight_mode.is_in_air or pos.relative_altitude_m > 1.0
         # A new command supersedes the last verdict. Leaving the old warning up
@@ -1131,7 +1131,7 @@ class TelemetryManager:
                     await asyncio.wait_for(self._drone.action.arm(), timeout=10.0)
                 ok = await self.takeoff(float(relative_altitude_m))
                 if ok:
-                    logger.info(f"✅ Goto altitude {relative_altitude_m} m — grounded, took off instead")
+                    logger.info(f"✅ Goto altitude {relative_altitude_m} m - grounded, took off instead")
                     # set_takeoff_altitude occasionally doesn't reach PX4 before
                     # the takeoff command and the drone levels at the default
                     # ~2.5 m. Once airborne, reposition to the exact target so
@@ -1163,7 +1163,7 @@ class TelemetryManager:
         Abort whatever the drone is doing and fly to a custom RTL point.
 
         Real PX4 RTL (MAV_CMD_NAV_RETURN_TO_LAUNCH, the 'return' action below)
-        only supports the EKF home position — there's no parameter for a custom
+        only supports the EKF home position - there's no parameter for a custom
         location. To honour a user-chosen RTL point we instead issue
         MAV_CMD_DO_REPOSITION via action.goto_location(), which PX4 accepts in
         any mode and which interrupts an active mission on its own.
@@ -1185,7 +1185,7 @@ class TelemetryManager:
         Fly to THIS drone's own home position (where it armed) and hover there.
 
         Group RTL uses this instead of goto_custom_rtl so one fleet command
-        doesn't send every drone to a single shared point — each vehicle
+        doesn't send every drone to a single shared point - each vehicle
         resolves its own home. Fleet mode doesn't subscribe to HOME_POSITION,
         so an unset snapshot home is fetched one-shot from the stream (and
         cached into the snapshot so the UI can track arrival).
@@ -1206,7 +1206,7 @@ class TelemetryManager:
                 self._snapshot.home_lng = home_lng
                 self._snapshot.home_alt = home_alt
             except Exception as e:
-                logger.error(f"RTL home failed — home position unavailable: {e}")
+                logger.error(f"RTL home failed - home position unavailable: {e}")
                 return False
         pos = self._snapshot.position
         # No altitude given → keep the current altitude (min 5 m) so the
@@ -1229,7 +1229,7 @@ class TelemetryManager:
     async def restart_mission(self) -> bool:
         """
         Reset to waypoint 0 then start the mission.
-        Use this for a fresh start — not for resume (which should call start_mission).
+        Use this for a fresh start - not for resume (which should call start_mission).
         """
         try:
             try:
@@ -1285,7 +1285,7 @@ class TelemetryManager:
                 logger.warning(f"arm_and_restart_mission attempt {attempt + 1} didn't confirm MISSION mode")
             return False, "Armed, but mission never switched to MISSION mode"
         except asyncio.TimeoutError:
-            return False, "Arm timed out — check safety switch and pre-arm checks"
+            return False, "Arm timed out - check safety switch and pre-arm checks"
         except Exception as e:
             logger.error(f"Arm+restart failed: {e}")
             return False, str(e)
@@ -1314,7 +1314,7 @@ class TelemetryManager:
         battery, GPS, home and in-air streams, it frequently is not.
 
         When it is not, PX4 takes off to whatever MIS_TAKEOFF_ALT ALREADY HELD
-        — its default 2.5 m, or the value some earlier takeoff left there. The
+        - its default 2.5 m, or the value some earlier takeoff left there. The
         commanded number is silently ignored and the aircraft levels somewhere
         else entirely. That is the exact shape of "works in SITL, goes to 3-5 m
         on the real drone when I ask for 2".
@@ -1326,7 +1326,7 @@ class TelemetryManager:
         # BOUNDED, because this sits between an operator pressing TAKEOFF and
         # the aircraft moving. Three attempts at two 5 s round trips is 30 s of
         # an armed drone sitting still with props spinning while the ground
-        # station says nothing — indistinguishable from a command that was
+        # station says nothing - indistinguishable from a command that was
         # never sent, and far more alarming than a takeoff that reports a
         # parameter it could not confirm.
         target = float(altitude_m)
@@ -1351,12 +1351,12 @@ class TelemetryManager:
                 if attempt:
                     logger.info(
                         f"Takeoff altitude confirmed at {last:.2f} m on attempt "
-                        f"{attempt + 1} — the first write had not landed"
+                        f"{attempt + 1} - the first write had not landed"
                     )
                 return True
             logger.warning(
                 f"Takeoff altitude read back as {last:.2f} m, asked for "
-                f"{target:.2f} m — retrying"
+                f"{target:.2f} m - retrying"
             )
         logger.error(
             f"❌ MIS_TAKEOFF_ALT would not accept {target:.2f} m "
@@ -1373,7 +1373,7 @@ class TelemetryManager:
         Send MAV_CMD_NAV_TAKEOFF the way QGroundControl does: with the altitude
         IN THE COMMAND.
 
-        WHY THIS EXISTS — verified in both codebases, not inferred.
+        WHY THIS EXISTS - verified in both codebases, not inferred.
 
         PX4 takes the takeoff altitude straight off the command
         (navigator_main.cpp):
@@ -1386,7 +1386,7 @@ class TelemetryManager:
             sendMavCommand(..., MAV_CMD_NAV_TAKEOFF, ..., takeoffAltAMSL);
 
         MAVSDK's PX4 path sends the SAME command with no params at all
-        (action_impl.cpp, takeoff_async_px4) — note that its generic
+        (action_impl.cpp, takeoff_async_px4) - note that its generic
         takeoff_async_standard DOES set param7, and the PX4 specialisation
         deliberately does not:
 
@@ -1406,7 +1406,7 @@ class TelemetryManager:
 
         NO NaN IS SENT. PX4 substitutes the current position when param5/param6
         are non-finite, so the drone's own latitude and longitude are passed
-        instead — identical behaviour, and every field stays a finite float
+        instead - identical behaviour, and every field stays a finite float
         that survives the JSON encoding this goes out through. param1 (pitch)
         is fixed-wing only and param4 (yaw) is overwritten by the navigator on
         the line above, so neither is read on a multirotor.
@@ -1427,10 +1427,10 @@ class TelemetryManager:
                 "target_component": 1,
                 "command": self._MAV_CMD_NAV_TAKEOFF,
                 "confirmation": 0,
-                "param1": 0.0,          # pitch — fixed-wing only
+                "param1": 0.0,          # pitch - fixed-wing only
                 "param2": 0.0,          # unused
                 "param3": 0.0,          # takeoff flags; QGC sends 0
-                "param4": 0.0,          # yaw — navigator overwrites with NaN
+                "param4": 0.0,          # yaw - navigator overwrites with NaN
                 "param5": float(pos.latitude_deg),
                 "param6": float(pos.longitude_deg),
                 "param7": target_amsl,
@@ -1461,11 +1461,11 @@ class TelemetryManager:
                     or self._snapshot.flight_mode.is_in_air):
                 logger.info(
                     f"✅ Takeoff to {relative_altitude_m:g} m commanded directly "
-                    f"(param7 = {target_amsl:.1f} m AMSL) — no parameter involved"
+                    f"(param7 = {target_amsl:.1f} m AMSL) - no parameter involved"
                 )
                 return True
         logger.warning(
-            "Direct takeoff command did not lift the aircraft — falling back "
+            "Direct takeoff command did not lift the aircraft - falling back "
             "to the MAVSDK takeoff path"
         )
         return False
@@ -1494,7 +1494,7 @@ class TelemetryManager:
                     # wrong altitude the operator has been told about and can
                     # correct with SET ALT.
                     self._snapshot.altitude_warning = (
-                        f"Takeoff altitude parameter did not take — the drone may "
+                        f"Takeoff altitude parameter did not take - the drone may "
                         f"climb to its own default rather than {altitude_m:g} m"
                     )
                 self._snapshot.commanded_altitude_m = float(altitude_m)
@@ -1511,13 +1511,13 @@ class TelemetryManager:
     #: How far the drone may settle from the commanded altitude before the
     #: operator is told. Generous: PX4's own acceptance radius is ~0.8 m and
     #: baro noise adds to it, so anything tighter would cry wolf on a healthy
-    #: aircraft. 1.5 m still catches every case reported from the field —
+    #: aircraft. 1.5 m still catches every case reported from the field -
     #: "asked for 2, got 5" and "asked for 5, got 10".
     _ALT_TOLERANCE_M = 1.5
 
     def _start_altitude_verify(self, target_m: float) -> None:
         """Begin verifying one altitude, cancelling any verifier already
-        running — the newest command is the only one worth a verdict."""
+        running - the newest command is the only one worth a verdict."""
         if self._alt_verify_task is not None and not self._alt_verify_task.done():
             self._alt_verify_task.cancel()
         self._alt_verify_task = asyncio.create_task(self._verify_altitude(target_m))
@@ -1529,7 +1529,7 @@ class TelemetryManager:
 
         A GROUND STATION CANNOT FIX THIS CLASS OF ERROR, so it must not pretend
         to. If the vehicle levels 3 m above the commanded height the cause is on
-        the aircraft — a parameter that did not take, a barometer pulled down by
+        the aircraft - a parameter that did not take, a barometer pulled down by
         its own prop wash in ground effect, an EKF height estimate diverging from
         the rangefinder it does not have. Issuing a correction on top would fight
         whatever is already wrong and hide the symptom rather than the cause.
@@ -1556,7 +1556,7 @@ class TelemetryManager:
                 if settled_for >= 3.0 and alt > 0.5:
                     break
             else:
-                return                                # never settled — say nothing
+                return                                # never settled - say nothing
 
             error = last - target_m
             if abs(error) <= self._ALT_TOLERANCE_M:
@@ -1569,7 +1569,7 @@ class TelemetryManager:
                 self._snapshot.altitude_warning = (
                     f"Commanded {target_m:.1f} m, holding {last:.1f} m "
                     f"({error:+.1f} m). Check MIS_TAKEOFF_ALT and the barometer "
-                    f"— nothing on the ground station can correct this."
+                    f"- nothing on the ground station can correct this."
                 )
                 logger.warning(f"⚠️  {self._snapshot.altitude_warning}")
             self._emit()
@@ -1584,7 +1584,7 @@ class TelemetryManager:
         """Push latest snapshot to frontend, throttled to _EMIT_RATE_HZ (or
         _FLEET_EMIT_RATE_HZ).
 
-        `force` bypasses the throttle for a DISCRETE STATE CHANGE — armed,
+        `force` bypasses the throttle for a DISCRETE STATE CHANGE - armed,
         flight mode, in-air. The throttle exists to stop a 10 Hz attitude
         stream flooding the socket, and for continuous values dropping a frame
         costs nothing: the next one carries a barely different number. A state
@@ -1612,7 +1612,7 @@ class TelemetryManager:
     async def _command_loop(self):
         """
         Drains the command queue and sends to drone.
-        The queue has maxsize=5 — if full, old commands are dropped.
+        The queue has maxsize=5 - if full, old commands are dropped.
         This prevents command buildup during network lag.
         """
         while self._running:
@@ -1674,7 +1674,7 @@ class TelemetryManager:
             return True
         except ActionError as e:
             # COMMAND_DENIED IS AN ANSWER FROM THE AIRCRAFT, NOT A LOST COMMAND.
-            # It means the command arrived, the FC understood it and said no —
+            # It means the command arrived, the FC understood it and said no -
             # so reporting a bare "arm failed" sends the operator to check the
             # radio, which is the one thing that is definitely working. Take
             # the FC's own line instead.
@@ -1688,7 +1688,7 @@ class TelemetryManager:
         A TIMEOUT and a DENIAL are opposite diagnoses and must not be handled
         alike. Denied means the aircraft answered: the link works end to end
         and the cause is a pre-arm condition, which PX4 states in a STATUSTEXT
-        worth waiting for. Timed out means nothing came back — so a STATUSTEXT
+        worth waiting for. Timed out means nothing came back - so a STATUSTEXT
         arriving now is UNRELATED routine chatter that happens to have landed
         in the window, and quoting it as the reason would be confidently
         wrong. Worse, STATUSTEXT travels the downlink, which in this exact
@@ -1703,7 +1703,7 @@ class TelemetryManager:
         """Appended to a TIMEOUT, and only to a TIMEOUT.
 
         A DENIED command and a TIMED-OUT command are opposite diagnoses and
-        were reported the same way. Denied means the aircraft answered — the
+        were reported the same way. Denied means the aircraft answered - the
         whole link works and the fault is a pre-arm condition. Timed out means
         nothing came back, and when telemetry is streaming in at the same
         moment that can only be the uplink. Six timeouts in a row (rates,
@@ -1714,7 +1714,7 @@ class TelemetryManager:
         bridge = self._bridge_for_diagnosis()
         if bridge is None:
             return ""
-        return f" — {bridge.round_trip_verdict()}"
+        return f" - {bridge.round_trip_verdict()}"
 
     def _bridge_for_diagnosis(self):
         """The relay bridge feeding this manager, if the link runs through
@@ -1731,15 +1731,15 @@ class TelemetryManager:
 
     @staticmethod
     def _plain(err: Exception, fallback: str) -> str:
-        """MAVSDK's exception text is a C++ call trace with the enum embedded —
+        """MAVSDK's exception text is a C++ call trace with the enum embedded -
         useless in a status bar. Keep the enum, drop the trace."""
         raw = str(err)
         for code, said in (
             ("COMMAND_DENIED", "the drone refused the command (pre-arm check failed)"),
             ("UNSUPPORTED", "the drone does not support that command"),
-            ("TIMEOUT", "no reply from the drone — the command may not have arrived"),
+            ("TIMEOUT", "no reply from the drone - the command may not have arrived"),
             ("FAILED", "the drone could not carry out the command"),
-            ("BUSY", "the drone is busy — try again"),
+            ("BUSY", "the drone is busy - try again"),
             ("NO_SYSTEM", "no drone connected"),
         ):
             if code in raw:
@@ -1764,7 +1764,7 @@ class TelemetryManager:
     async def emergency_stop(self) -> bool:
         """
         Kills motors immediately regardless of state.
-        Only use in genuine emergency — drone will fall.
+        Only use in genuine emergency - drone will fall.
         """
         try:
             await self._drone.action.kill()
@@ -1787,7 +1787,7 @@ class TelemetryManager:
     #
     # THE APP'S BELIEF THAT IT IS FLYING WAS NEVER CHECKED AGAINST THE
     # AIRCRAFT. `_offboard_active` was set by start_offboard, cleared by
-    # stop_offboard, and read by the watchdog — three places, all of them this
+    # stop_offboard, and read by the watchdog - three places, all of them this
     # process. PX4 can end Offboard on its own at any moment, and does, every
     # time a pilot takes over: on the mode switch, or on the sticks when
     # COM_RC_OVERRIDE allows it. Nothing here noticed.
@@ -1796,7 +1796,7 @@ class TelemetryManager:
     #
     #   1. THE TRACKER KEPT RUNNING. A follow that is mid-chase stayed armed,
     #      still computing setpoints, still calling set_velocity_body. PX4
-    #      discards those while a human is flying — but the app is then one
+    #      discards those while a human is flying - but the app is then one
     #      re-entry away from resuming a chase the pilot took over to stop.
     #   2. THE WATCHDOG KEPT THE STREAM ALIVE. It re-sends a zero setpoint
     #      every 200 ms, deliberately, so Offboard never goes stale. After a
@@ -1811,7 +1811,7 @@ class TelemetryManager:
     #: How long after WE ask for a mode change a departure from Offboard is
     #: still attributable to us. Generous against a 1 Hz HEARTBEAT: PX4 may
     #: take a beat to report, and the cost of being late is a false "the pilot
-    #: took over" — which stops the tracker and tells the operator something
+    #: took over" - which stops the tracker and tells the operator something
     #: that is not true. The cost of being early is nothing, because the pilot
     #: taking over inside our own two-second window still ends in the same
     #: place: the app is not flying and does not think it is.
@@ -1824,7 +1824,7 @@ class TelemetryManager:
         Offboard races the same way leaving it does: offboard.start() returns
         on PX4's ACK, but flight_mode is derived from a 1 Hz HEARTBEAT, so a
         heartbeat already in flight still carries the OLD mode. Arriving after
-        _offboard_active went true, that stale report reads as a departure —
+        _offboard_active went true, that stale report reads as a departure -
         the app would latch itself out of the Offboard session it had just
         successfully started, every time the previous mode's last heartbeat
         landed late.
@@ -1849,7 +1849,7 @@ class TelemetryManager:
         self._snapshot.offboard_active = False
         self._snapshot.pilot_override = mode_name
         logger.warning(
-            f"PILOT HAS CONTROL — the aircraft left Offboard for {mode_name} "
+            f"PILOT HAS CONTROL - the aircraft left Offboard for {mode_name} "
             f"without this app asking. Tracking stops; Offboard will not be "
             f"re-entered until control is taken back deliberately."
         )
@@ -1871,7 +1871,7 @@ class TelemetryManager:
         return self._pilot_override_mode is not None
 
     #: Modes to hand the aircraft to, in order of preference. POSITION is what
-    #: a pilot recovering an aircraft wants — it holds position when the sticks
+    #: a pilot recovering an aircraft wants - it holds position when the sticks
     #: are centred, so letting go is safe. ALTITUDE needs no position estimate,
     #: and STABILIZED needs nothing at all: if the reason the pilot is taking
     #: over is that the position estimate died, POSITION is exactly the mode
@@ -1888,7 +1888,7 @@ class TelemetryManager:
         aircraft parameters this app does not own (see rc_takeover_readiness).
         This route depends on nothing but the link: it stops Offboard and puts
         PX4 into a stick-flown mode, so the transmitter is live the moment the
-        operator presses it — including when the mode switch is already sitting
+        operator presses it - including when the mode switch is already sitting
         in the slot they want, which PX4 acts on only when it CHANGES and so
         would otherwise require them to toggle away and back.
         """
@@ -1900,17 +1900,17 @@ class TelemetryManager:
                 self._pilot_override_mode = mode
                 self._snapshot.pilot_override = mode
                 self._emit(force=True)
-                logger.warning(f"HANDED OVER TO PILOT — aircraft is in {mode}")
+                logger.warning(f"HANDED OVER TO PILOT - aircraft is in {mode}")
                 return True, mode
             tried.append(f"{mode} ({self.last_action_error or 'refused'})")
         # Every stick mode refused. Say so plainly rather than reporting a
-        # handover that did not happen — the operator is about to let go.
+        # handover that did not happen - the operator is about to let go.
         detail = "; ".join(tried)
-        logger.error(f"Handover failed — the aircraft refused every manual mode: {detail}")
+        logger.error(f"Handover failed - the aircraft refused every manual mode: {detail}")
         return False, detail
 
     async def resume_from_pilot(self) -> bool:
-        """Take control back, deliberately. Clears the latch only — it does not
+        """Take control back, deliberately. Clears the latch only - it does not
         re-enter Offboard, because Offboard is entered by arming a tracking
         mode and that is a separate decision the operator makes on purpose."""
         if self._pilot_override_mode is None:
@@ -1958,18 +1958,18 @@ class TelemetryManager:
         """One parameter, judged against one question: can the pilot take over?
 
         Deliberately narrow. These parameters mean other things too, and this
-        is not a general configuration audit — it is the answer to whether the
+        is not a general configuration audit - it is the answer to whether the
         transmitter is live, which is the question being asked.
         """
         v = int(value) if isinstance(value, (int, float)) and float(value).is_integer() else value
         if name == "COM_RC_IN_MODE":
             if v == 1:
-                return "blocked", ("Joystick only — PX4 ignores the transmitter "
+                return "blocked", ("Joystick only - PX4 ignores the transmitter "
                                    "entirely, including its mode switch")
             if v == 4:
-                return "blocked", "Stick input disabled — no stick or switch reaches PX4"
+                return "blocked", "Stick input disabled - no stick or switch reaches PX4"
             if v == 3:
-                return "warn", ("'RC and Joystick, keep first' — whichever manual "
+                return "warn", ("'RC and Joystick, keep first' - whichever manual "
                                 "source PX4 hears FIRST owns the aircraft for the "
                                 "rest of the session. If this ground station's "
                                 "virtual joystick sends before the transmitter is "
@@ -1979,12 +1979,12 @@ class TelemetryManager:
             bits = int(v) if isinstance(v, int) else 0
             if not bits & 2:
                 return "warn", ("Stick override is NOT enabled for Offboard (bit 1 "
-                                "clear) — moving the sticks while the app is flying "
+                                "clear) - moving the sticks while the app is flying "
                                 "does nothing. The mode switch still works; set 3 "
                                 "if you want the sticks alone to take the aircraft")
             if not bits & 1:
                 return "warn", ("Stick override is not enabled for auto modes "
-                                "(bit 0 clear) — sticks do nothing in HOLD/RTL, "
+                                "(bit 0 clear) - sticks do nothing in HOLD/RTL, "
                                 "which is where the aircraft sits after takeoff")
             return "ok", "Sticks take the aircraft in both auto and Offboard"
         if name == "COM_RC_STICK_OV":
@@ -1994,22 +1994,22 @@ class TelemetryManager:
                 return "warn", "Unreadable threshold"
             if pct >= 50:
                 return "warn", (f"{pct:g}% of full deflection needed to trigger "
-                                f"override — a large, deliberate movement")
+                                f"override - a large, deliberate movement")
             if pct <= 5:
-                return "warn", (f"{pct:g}% — low enough that stick noise or trim "
+                return "warn", (f"{pct:g}% - low enough that stick noise or trim "
                                 f"could take the aircraft off the app unasked")
             return "ok", f"{pct:g}% stick movement triggers override"
         if name == "COM_RCL_EXCEPT":
             bits = int(v) if isinstance(v, int) else 0
             if bits & 4:
                 return "ok", "RC loss is not a failsafe while in Offboard"
-            return "ok", ("RC loss triggers the failsafe in Offboard — correct "
+            return "ok", ("RC loss triggers the failsafe in Offboard - correct "
                           "for a manned-recovery setup, and worth knowing if the "
                           "transmitter is ever off during an AI flight")
         if name == "RC_MAP_FLTMODE":
             channel = int(v) if isinstance(v, (int, float)) else 0
             if channel == 0:
-                return "warn", ("No channel is mapped to the flight-mode switch — "
+                return "warn", ("No channel is mapped to the flight-mode switch - "
                                 "the switch on the transmitter changes nothing. "
                                 "Map it, and set COM_FLTMODE1..6")
             return "ok", f"Flight-mode switch is on RC channel {channel}"
@@ -2027,24 +2027,24 @@ class TelemetryManager:
             # still tappable, and one tap must not put an autonomous chase back
             # on an aircraft somebody is hand-flying out of trouble.
             logger.warning(
-                f"Offboard refused — the pilot has the aircraft "
+                f"Offboard refused - the pilot has the aircraft "
                 f"(took it in {self._pilot_override_mode})"
             )
             self.last_action_error = (
-                f"The pilot has the aircraft — it was taken over in "
+                f"The pilot has the aircraft - it was taken over in "
                 f"{self._pilot_override_mode}. Take control back before flying it "
                 f"from here."
             )
             return False
         try:
-            # Send neutral setpoint first — required by PX4
+            # Send neutral setpoint first - required by PX4
             await self._drone.offboard.set_velocity_body(
                 VelocityBodyYawspeed(0.0, 0.0, 0.0, 0.0)
             )
             await self._drone.offboard.start()
             self._offboard_active = True
             self._snapshot.offboard_active = True
-            # Lock the altitude AI tracking should hold — callers (human/person
+            # Lock the altitude AI tracking should hold - callers (human/person
             # tracker) only ever send forward/right/yaw, never a vertical
             # component, so without this the drone has no active altitude
             # correction in Offboard mode and can sag over time.
@@ -2072,7 +2072,7 @@ class TelemetryManager:
             # history rather than inheriting this one's last timestamp.
             self._last_velocity_cmd_t = 0.0
             self._offboard_stale = False
-            logger.info("Offboard stopped — returning to HOLD")
+            logger.info("Offboard stopped - returning to HOLD")
             return True
         except Exception as e:
             logger.error(f"Offboard stop failed: {e}")
@@ -2082,8 +2082,8 @@ class TelemetryManager:
     #
     # Every velocity setpoint reaching PX4 comes from a vision analysis result
     # (stream_track.recv -> send_velocity_command). So if the vision loop stops
-    # producing results — the video source drops, the model hangs, the analyzer
-    # thread dies, the session's WebRTC track ends — the last velocity that was
+    # producing results - the video source drops, the model hangs, the analyzer
+    # thread dies, the session's WebRTC track ends - the last velocity that was
     # sent is simply the last one PX4 ever hears, and the aircraft keeps flying
     # it. Nothing in the vision layer can fix that, because the thing that has
     # failed IS the vision layer.
@@ -2112,7 +2112,7 @@ class TelemetryManager:
                     self._offboard_stale = True
                     logger.warning(
                         f"No velocity setpoint for {idle:.1f}s while Offboard is "
-                        f"active — holding the aircraft at zero velocity"
+                        f"active - holding the aircraft at zero velocity"
                     )
                 # Re-sent every period, not once: PX4 needs the stream to
                 # continue, and a single zero would itself become a gap.
@@ -2122,7 +2122,7 @@ class TelemetryManager:
             except Exception as e:
                 logger.warning(f"Offboard watchdog: {e}")
 
-    # Altitude-hold gain for the offboard vertical correction below —
+    # Altitude-hold gain for the offboard vertical correction below -
     # tuned conservatively since it's fighting tracking-loop noise, not a setpoint.
     _ALT_HOLD_KP = 0.6
     _ALT_HOLD_MAX_MS = 1.0
@@ -2142,8 +2142,8 @@ class TelemetryManager:
         yaw_deg_s:   positive = clockwise yaw
 
         If a hold altitude is set (see start_offboard), a P correction is
-        added on top of the caller's down_m_s so AI tracking modes — which
-        never command a vertical component themselves — actively maintain
+        added on top of the caller's down_m_s so AI tracking modes - which
+        never command a vertical component themselves - actively maintain
         altitude instead of relying on it staying put by coincidence.
         """
         if not self._connected:
@@ -2171,7 +2171,7 @@ class TelemetryManager:
                 # snapping back to wherever it was when offboard started.
                 self._offboard_hold_alt = self._snapshot.position.relative_altitude_m
             else:
-                # Fixed mode, no explicit altitude command — apply P-hold correction
+                # Fixed mode, no explicit altitude command - apply P-hold correction
                 # to keep the drone at the altitude it was at when tracking started.
                 alt_error_m = self._snapshot.position.relative_altitude_m - self._offboard_hold_alt
                 correction = max(-self._ALT_HOLD_MAX_MS, min(self._ALT_HOLD_MAX_MS, self._ALT_HOLD_KP * alt_error_m))
@@ -2182,7 +2182,7 @@ class TelemetryManager:
 
     async def _send_velocity_body(self, forward, right, down, yaw):
         """The raw MAVSDK send, with no altitude-hold correction and no
-        watchdog bookkeeping — so the watchdog can use it without its own zero
+        watchdog bookkeeping - so the watchdog can use it without its own zero
         setpoints looking like a live commanding loop."""
         try:
             await self._drone.offboard.set_velocity_body(
@@ -2194,7 +2194,7 @@ class TelemetryManager:
             logger.warning(f"Velocity command failed: {e}")
             
     #: PX4 custom-mode numbers, from commander_state.h / px4_custom_mode.h.
-    #: (main, sub) — sub is 0 for everything outside AUTO.
+    #: (main, sub) - sub is 0 for everything outside AUTO.
     _PX4_MAIN = {"MANUAL": 1, "ALTITUDE": 2, "POSITION": 3, "AUTO": 4,
                  "ACRO": 5, "OFFBOARD": 6, "STABILIZED": 7}
     _PX4_AUTO_SUB = {"READY": 1, "TAKEOFF": 2, "HOLD": 3, "MISSION": 4,
@@ -2220,7 +2220,7 @@ class TelemetryManager:
 
         THIS USED TO OFFER SEVEN MODES AND IMPLEMENT FOUR. STABILIZED, MISSION
         and OFFBOARD fell through to an "Unknown flight mode" warning and
-        returned False — the dropdown listed them, selecting them did nothing,
+        returned False - the dropdown listed them, selecting them did nothing,
         and nothing said why.
 
         POSITION WAS WORSE, because it silently did something else. It was
@@ -2233,7 +2233,7 @@ class TelemetryManager:
         that, and they cannot decide what they are not told.
 
         So every offered mode is now sent properly. MAVSDK's action plugin
-        covers four of them and is kept for those — it is well proven and
+        covers four of them and is kept for those - it is well proven and
         returns a real ACK. The rest have no plugin equivalent and go out as
         MAV_CMD_DO_SET_MODE with PX4's custom mode numbers, which is exactly
         what QGroundControl sends.
@@ -2252,7 +2252,7 @@ class TelemetryManager:
         sent = _time.monotonic()
         self.last_action_error = None
         try:
-            # Proven plugin paths first — these ACK, so a refusal is reported
+            # Proven plugin paths first - these ACK, so a refusal is reported
             # by MAVSDK rather than having to be inferred from telemetry.
             if mode == "HOLD":
                 await self._drone.action.hold()
@@ -2271,10 +2271,10 @@ class TelemetryManager:
                 # so is more use than a refusal with no explanation.
                 self.last_action_error = (
                     "Offboard is entered automatically when an AI tracking mode "
-                    "starts flying the drone — it cannot be selected by hand, "
+                    "starts flying the drone - it cannot be selected by hand, "
                     "because PX4 rejects it unless setpoints are already streaming"
                 )
-                logger.warning("Offboard requested from the mode menu — refused")
+                logger.warning("Offboard requested from the mode menu - refused")
                 return False
             else:
                 if not await self._send_px4_mode(mode):
@@ -2293,14 +2293,14 @@ class TelemetryManager:
         self.last_action_error = await self._fc_reason(
             sent,
             f"the drone stayed in {actual or 'its previous mode'} instead of "
-            f"switching to {mode} — PX4 refuses a mode whose conditions are not "
+            f"switching to {mode} - PX4 refuses a mode whose conditions are not "
             f"met (no position estimate, no mission loaded, not armed)",
         )
-        logger.warning(f"Mode {mode} not confirmed — still {actual}")
+        logger.warning(f"Mode {mode} not confirmed - still {actual}")
         return False
 
     async def _send_px4_mode(self, mode: str) -> bool:
-        """MAV_CMD_DO_SET_MODE with PX4's custom mode numbers — the same
+        """MAV_CMD_DO_SET_MODE with PX4's custom mode numbers - the same
         command QGroundControl sends, for the modes MAVSDK has no plugin for."""
         if mode in self._PX4_AUTO_SUB:
             main, sub = self._PX4_MAIN["AUTO"], self._PX4_AUTO_SUB[mode]
@@ -2340,7 +2340,7 @@ class TelemetryManager:
     async def _mode_confirmed(self, mode: str) -> bool:
         """Wait for telemetry to report the mode we asked for.
 
-        Mode is decoded from HEARTBEAT at 1 Hz, so this cannot be quick — but
+        Mode is decoded from HEARTBEAT at 1 Hz, so this cannot be quick - but
         assuming success is how a silently refused mode came to look like a
         working one.
         """
@@ -2373,7 +2373,7 @@ class TelemetryManager:
 
         Telemetry tasks are intentionally left running during upload.
         Cancelling gRPC streaming tasks mid-flight stalls mavsdk_server's internal
-        dispatcher, which delays MISSION_ACK — causing the upload to time out.
+        dispatcher, which delays MISSION_ACK - causing the upload to time out.
         With our already-lowered telemetry rates (4-10 Hz) the callback queue
         stays clear and the MISSION_ACK gets through immediately.
         """
@@ -2393,7 +2393,7 @@ class TelemetryManager:
             return True, ""
 
         except asyncio.TimeoutError:
-            msg = "Upload timed out — check MAVLink link quality and drone connection"
+            msg = "Upload timed out - check MAVLink link quality and drone connection"
             logger.error(f"❌ {msg}")
             return False, msg
         except Exception as e:
@@ -2407,7 +2407,7 @@ class TelemetryManager:
 
         THE TRAP THIS CLOSES, and it is a trap this application built itself.
         When a mission is started from the ground, PX4 does not fly straight to
-        waypoint 1 — it inserts a takeoff to MIS_TAKEOFF_ALT first. That
+        waypoint 1 - it inserts a takeoff to MIS_TAKEOFF_ALT first. That
         parameter is persistent on the vehicle, and set_takeoff_altitude()
         WRITES IT. So the last manual takeoff silently sets the height every
         later mission begins at:
@@ -2439,7 +2439,7 @@ class TelemetryManager:
             logger.info(f"Mission auto-takeoff altitude aligned to {alt:g} m")
         else:
             logger.warning(
-                f"Could not align the auto-takeoff altitude to {alt:g} m — if "
+                f"Could not align the auto-takeoff altitude to {alt:g} m - if "
                 f"this mission is started from the ground the drone will climb "
                 f"to the vehicle's own MIS_TAKEOFF_ALT first"
             )
@@ -2494,7 +2494,7 @@ class TelemetryManager:
             timeout=30.0,
         )
 
-        # Best-effort: set RTL-after-mission. Any failure here is non-fatal —
+        # Best-effort: set RTL-after-mission. Any failure here is non-fatal -
         # the mission is already on the drone, we just won't auto-RTL at the end.
         try:
             await asyncio.wait_for(
@@ -2564,7 +2564,7 @@ class TelemetryManager:
         """
         The flight controller's factory-burned hardware UID (from MAVLink
         AUTOPILOT_VERSION via the MAVSDK Info plugin). Stable across reboots
-        and reconnects — this is the drone's persistent identity.
+        and reconnects - this is the drone's persistent identity.
 
         Info arrives shortly after the first heartbeat; retry briefly since
         we're called right after connect. Slow serial links get more slack.
@@ -2577,18 +2577,18 @@ class TelemetryManager:
                 ident = await asyncio.wait_for(
                     self._drone.info.get_identification(), timeout=3.0
                 )
-                # PX4 pads the UID with a trailing NUL byte — Postgres (and
+                # PX4 pads the UID with a trailing NUL byte - Postgres (and
                 # any sane consumer) rejects NULs, so keep printable chars only.
                 uid = "".join(c for c in (ident.hardware_uid or "") if c.isprintable()).strip()
                 if uid.strip("0"):
                     return uid
-                # All-zero UID (some SITL builds) — fall back to legacy uid
+                # All-zero UID (some SITL builds) - fall back to legacy uid
                 if ident.legacy_uid:
                     return f"legacy-{ident.legacy_uid:x}"
                 return None
             except Exception:
                 await asyncio.sleep(1.0 + i * 0.5)
-        logger.warning("Could not read hardware UID — drone will be anonymous this session")
+        logger.warning("Could not read hardware UID - drone will be anonymous this session")
         return None
 
     @property
@@ -2600,7 +2600,7 @@ class TelemetryManager:
     # ------------------------------------------------------------------ #
     #
     # The plugin drives it and delivers the verdict; PX4's own STATUSTEXT
-    # drives the picture. telemetry/calibration.py explains the split — the
+    # drives the picture. telemetry/calibration.py explains the split - the
     # short version is that a percentage does not tell an operator which way to
     # turn the aircraft, and the side-by-side state that does is only in the
     # raw lines.
@@ -2644,17 +2644,17 @@ class TelemetryManager:
         if not self._connected:
             return "No drone connected"
         # RUNNING, not merely present. The session OUTLIVES its calibration on
-        # purpose — the operator has to be able to read the verdict — so
+        # purpose - the operator has to be able to read the verdict - so
         # testing for existence refused every start after the first. Cancel one
         # and the next attempt came back "already running, cancel it first",
         # which is the app telling you to do the thing you just did.
         if self._calibration is not None and self._calibration.state.phase in ("starting", "running"):
             return (
                 f"A {SENSORS[self._calibration.state.sensor]['label']} calibration "
-                f"is already running — cancel it first"
+                f"is already running - cancel it first"
             )
         if self._snapshot.flight_mode.is_armed:
-            return "Disarm before calibrating — the autopilot refuses to calibrate an armed vehicle"
+            return "Disarm before calibrating - the autopilot refuses to calibrate an armed vehicle"
         if self._snapshot.flight_mode.is_in_air:
             return "The aircraft is airborne"
         if self._offboard_active:
@@ -2670,7 +2670,7 @@ class TelemetryManager:
                     f"The aircraft is sitting {tilt:.1f}° off level "
                     f"(roll {att.roll_deg:+.1f}°, pitch {att.pitch_deg:+.1f}°). "
                     f"Level Horizon sets what level MEANS, so it has to start "
-                    f"within {LEVEL_MAX_TILT_DEG:g}° — put it on something "
+                    f"within {LEVEL_MAX_TILT_DEG:g}° - put it on something "
                     f"genuinely flat first."
                 )
         return None
@@ -2685,7 +2685,7 @@ class TelemetryManager:
         # A LINGERING STREAM IS WHY THE NEXT CALIBRATION FAILED.
         #
         # Cancelling stopped the routine on the aircraft and marked the session
-        # cancelled, but the previous run's gRPC stream could still be open —
+        # cancelled, but the previous run's gRPC stream could still be open -
         # MAVSDK's calibration plugin is single-flight, so every subsequent
         # calibrate_* came straight back BUSY and presented as "started, then
         # instantly failed", for the rest of the session. Reaped here rather
@@ -2694,7 +2694,7 @@ class TelemetryManager:
         # poison the next attempt.
         await self._reap_calibration_task()
 
-        # A finished or cancelled session is simply replaced — starting is the
+        # A finished or cancelled session is simply replaced - starting is the
         # operator's way of dismissing the last verdict.
         self._calibration = CalibrationSession(sensor)
         self._emit_calibration()
@@ -2731,7 +2731,7 @@ class TelemetryManager:
                     # producing a verdict looks identical to one still working,
                     # and the operator holding the aircraft has no way to tell.
                     raise TimeoutError(
-                        f"the aircraft stopped reporting after {limit:.0f}s — "
+                        f"the aircraft stopped reporting after {limit:.0f}s - "
                         f"the calibration did not finish"
                     )
                 if session is not self._calibration:
@@ -2774,14 +2774,14 @@ class TelemetryManager:
 
         BOTH ENDS IS THE POINT. Cancelling only our task leaves PX4 still in
         its calibration routine, refusing arming and every subsequent
-        calibration, with nothing on screen to say why — the aircraft looks
+        calibration, with nothing on screen to say why - the aircraft looks
         bricked. The vehicle is told first, for that reason.
         """
         if self._calibration is None:
             return False
         # THE PANEL CHANGES FIRST. Cancelling used to wait on a 5 s ACK and then
         # on a gRPC read that may not wake up at all, so the button sat there
-        # doing nothing for seconds — which reads as a cancel that did not land,
+        # doing nothing for seconds - which reads as a cancel that did not land,
         # on the one control an operator presses because something is wrong.
         # The aircraft is still told, and told first among the awaits; the
         # operator is simply no longer made to watch.
@@ -2810,7 +2810,7 @@ class TelemetryManager:
         result = getattr(getattr(err, "_result", None), "result", None)
         name = getattr(result, "name", None) or str(result or "")
         explain = {
-            "BUSY": "the autopilot is already running a calibration — wait a moment and try again",
+            "BUSY": "the autopilot is already running a calibration - wait a moment and try again",
             "FAILED_ARMED": "the vehicle is armed",
             "COMMAND_DENIED": "the autopilot refused the command",
             "UNSUPPORTED": "this autopilot does not offer that calibration",
@@ -2845,7 +2845,7 @@ class TelemetryManager:
 
     async def get_all_params(self) -> dict:
         """Download every parameter from the flight controller.
-        Takes 5–30 s depending on link quality (UDP SITL ≈ 5 s, serial ≈ 20–30 s).
+        Takes 5-30 s depending on link quality (UDP SITL ≈ 5 s, serial ≈ 20-30 s).
         Returns {name: {value, type}} with 'type' being 'int' or 'float'.
         """
         if not self._drone or not self._connected:
@@ -2872,8 +2872,8 @@ class TelemetryManager:
     async def get_param(self, name: str, param_type: str = "int"):
         """Read ONE parameter from the flight controller.
 
-        Exists because the only alternative was fetch_params — a 5–30 s
-        download of every parameter on the aircraft — which is the wrong
+        Exists because the only alternative was fetch_params - a 5-30 s
+        download of every parameter on the aircraft - which is the wrong
         price for the sensors page asking "which way is the compass
         mounted". Returns the value, or None when it cannot be read.
         """

@@ -50,13 +50,13 @@ export function DroneControls() {
 
     // WHO IS FLYING is a different question from WHICH MODE, and only the
     // second was ever on screen. They agree right up until the moment they
-    // stop — a pilot taking the aircraft on their mode switch — which is the
+    // stop - a pilot taking the aircraft on their mode switch - which is the
     // one moment the operator needs to be told.
     const appIsFlying  = telemetry?.offboard_active ?? false
     const pilotHasIt   = telemetry?.pilot_override ?? null
     const handoverPending = pendingAction?.action === 'handover_to_pilot'
 
-    // CAN THE PILOT TAKE THIS BACK AT ALL — answered from the aircraft's own
+    // CAN THE PILOT TAKE THIS BACK AT ALL - answered from the aircraft's own
     // parameters on the ground, which is the only place the answer is cheap.
     // Runs on request, not automatically: it downloads the full parameter
     // table, which is seconds on SITL and half a minute on a 3DR radio.
@@ -72,9 +72,9 @@ export function DroneControls() {
     // and an unchanged button across it reads as a press that never landed.
     const armPending = pendingAction?.action === 'arm' || pendingAction?.action === 'disarm'
     const inAir = telemetry?.flight_mode?.is_in_air ?? false
-    const mode  = telemetry?.flight_mode?.mode ?? '—'
+    const mode  = telemetry?.flight_mode?.mode ?? '-'
     const connected = swarmEnabled ? isGroup : telemetryStatus === 'connected'
-    // Group targets are in mixed states (some armed, some flying) — the
+    // Group targets are in mixed states (some armed, some flying) - the
     // per-drone armed/in-air gates only make sense for the primary drone. The
     // backend reports per-drone failures for whichever can't comply.
     const canTakeoff = isGroup ? connected : (connected && armed && !inAir)
@@ -87,7 +87,7 @@ export function DroneControls() {
     return (
         <div className="space-y-3">
 
-            {/* Swarm command target — ticked drones only */}
+            {/* Swarm command target - ticked drones only */}
             {swarmEnabled && (
                 isGroup ? (
                     <div
@@ -142,7 +142,7 @@ export function DroneControls() {
             {/* Flight mode selector.
                 SHOWS THE LIVE MODE, not a permanent "Change flight mode...".
                 Without that, asking for Position and landing in Hold looked
-                exactly like asking for Position and getting it — the only clue
+                exactly like asking for Position and getting it - the only clue
                 was a separate chip, and only if you knew POSCTL and HOLD are
                 different things. The control that sets the mode is the one
                 place a refusal or a substitution has to be visible. */}
@@ -185,7 +185,7 @@ export function DroneControls() {
             )}
 
             {/* WHO IS FLYING.
-                Shown only when there is something to say — an aircraft nobody
+                Shown only when there is something to say - an aircraft nobody
                 is flying autonomously needs no band, and a control that is
                 always there stops being read.
 
@@ -194,7 +194,7 @@ export function DroneControls() {
                 does not own: COM_RC_IN_MODE decides whether the transmitter
                 reaches PX4 at all, COM_RC_OVERRIDE bit 1 decides whether the
                 sticks do anything during Offboard, and it is CLEAR by default.
-                The button below depends on none of that — it stops Offboard
+                The button below depends on none of that - it stops Offboard
                 and commands a stick-flown mode over the link. It also covers
                 the case the switch cannot: PX4 acts on the mode switch when it
                 CHANGES, so a switch already sitting in the slot the pilot
@@ -274,7 +274,7 @@ export function DroneControls() {
                                 <p key={f.param} className="text-[10px] font-mono leading-relaxed break-words"
                                     style={{ color: f.verdict === 'blocked' ? '#f87171' : '#fdba74' }}
                                 >
-                                    <span className="font-bold">{f.param}={f.value}</span> — {f.detail}
+                                    <span className="font-bold">{f.param}={f.value}</span> - {f.detail}
                                 </p>
                             ))}
                             {rcReport.unreadable.length > 0 && (
@@ -308,7 +308,7 @@ export function DroneControls() {
                 }
             </Button>
 
-            {/* Group disarm is its own button — group members can be in mixed
+            {/* Group disarm is its own button - group members can be in mixed
                 armed states, so arm/disarm can't share one toggle */}
             {isGroup && (
                 <Button

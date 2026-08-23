@@ -18,7 +18,7 @@ class AnalysisMode(str, Enum):
     VEHICLE_PLATE    = "vehicle-plate-tracking"
     # The composed vehicle module: count + type + colour + plate + speed +
     # follow in one pass. See vision/modules/traffic_manager.py on why this
-    # merges the vehicle analytics but deliberately not crowd or face —
+    # merges the vehicle analytics but deliberately not crowd or face -
     # those need incompatible altitudes.
     TRAFFIC          = "traffic-management"
 
@@ -27,7 +27,7 @@ class AnalysisMode(str, Enum):
 class DroneSession:
     """
     One session = one browser tab connected to one drone.
-    Everything scoped to this session — telemetry, vision, commands.
+    Everything scoped to this session - telemetry, vision, commands.
     """
     session_id: str           = field(default_factory=lambda: str(uuid.uuid4()))
     socket_id:  str           = ""
@@ -45,12 +45,12 @@ class DroneSession:
     hardware_uid: Optional[str] = None
     drone: Optional[dict]       = None
 
-    # Where the CLIENT roughly is (IP geolocation) — lets the admin map place
+    # Where the CLIENT roughly is (IP geolocation) - lets the admin map place
     # a drone with no GPS fix near its operator instead of nowhere.
     client_ip: Optional[str]        = None
     approx_location: Optional[dict] = None  # {lat, lng, city, country}
 
-    # True while the red-zone pushback owns the drone — manual-control
+    # True while the red-zone pushback owns the drone - manual-control
     # inputs are dropped until the zone monitor releases it.
     zone_lock: bool = False
 

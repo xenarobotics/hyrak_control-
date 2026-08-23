@@ -29,7 +29,7 @@ const NAV = [
     { href: '/settings',  label: 'Settings', icon: Settings },
 ]
 
-// Mount socket ONCE at layout level — persists across all tab navigation
+// Mount socket ONCE at layout level - persists across all tab navigation
 function DroneConnection() {
     useDrone()
     return null
@@ -178,7 +178,7 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
         return () => window.removeEventListener(STATUSBAR_CHANGE_EVENT, onChange)
     }, [])
 
-    // Fly tab already has its own OSD/DroneControls — the global bar would
+    // Fly tab already has its own OSD/DroneControls - the global bar would
     // just duplicate them there, so it's shown everywhere else instead.
     const onFlyTab = pathname === '/fly' || pathname.startsWith('/fly/')
     const showStatusBar = mounted && statusBarOn && !onFlyTab
@@ -192,7 +192,7 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
                     style={{ background: 'hsl(var(--app-bg))', color: 'hsl(var(--app-text))' }}
                 >
                     <PlatformNav />
-                    {/* Column to the right of the sidebar — status bar stays out of
+                    {/* Column to the right of the sidebar - status bar stays out of
                         the sidebar/logo area and persists across tab navigation
                         since this layout mounts once for the whole route group. */}
                     <div className="flex flex-col flex-1 overflow-hidden">

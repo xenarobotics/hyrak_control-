@@ -2,8 +2,8 @@
 Camera geometry for a FIXED-MOUNT (no gimbal) drone camera.
 ===========================================================
 
-Turns pixels into metres. Everything metric the vision modules report —
-vehicle speed, target ground position, distance-to-subject — comes through
+Turns pixels into metres. Everything metric the vision modules report -
+vehicle speed, target ground position, distance-to-subject - comes through
 here, so the conventions below are worth reading once.
 
 WHY A FIXED MOUNT IS THE EASY CASE
@@ -14,12 +14,12 @@ WHY A FIXED MOUNT IS THE EASY CASE
 WHAT THIS MODULE DELIBERATELY DOES NOT DO
     It does not derive frame-to-frame motion from attitude. Attitude arrives
     at 4 Hz over the RF link (telemetry/manager.py sets
-    set_rate_attitude_euler to 4.0 when serial) against 30 fps video — the
+    set_rate_attitude_euler to 4.0 when serial) against 30 fps video - the
     airframe oscillates faster than that, so per-frame camera orientation is
     aliased and cannot be reconstructed by interpolating harder. Attitude
     here is only ever used for slowly-varying quantities: the metric scale
     and the ground-plane geometry, where 4 Hz is plenty. Per-frame ego-motion
-    is measured from the pixels instead — see egomotion.py.
+    is measured from the pixels instead - see egomotion.py.
 
     A multirotor also has to tilt to translate, and ground range is
     h/tan(theta) so the error per degree of pitch is h/sin^2(theta): about
@@ -37,7 +37,7 @@ FRAME CONVENTIONS
     is what the standard right-handed Rz(yaw)Ry(pitch)Rx(roll) expects, so no
     sign flipping happens on the way in.
 
-    Mount tilt is DEPRESSION below the horizon — positive tilts the lens
+    Mount tilt is DEPRESSION below the horizon - positive tilts the lens
     down, which is a negative body pitch, hence the Ry(-tilt).
 """
 import logging
@@ -96,7 +96,7 @@ class CameraModel:
 
     vfov_deg=0 derives the vertical FOV from the aspect ratio, which is
     correct for a rectilinear lens (square pixels, fy == fx). Only set it
-    explicitly if measured — a fisheye's vertical FOV does not follow from
+    explicitly if measured - a fisheye's vertical FOV does not follow from
     its horizontal one, and assuming it does skews every ground projection.
     """
     width: int
@@ -114,7 +114,7 @@ class CameraModel:
         if self.vfov_deg and 1.0 < self.vfov_deg < 179.0:
             self.fy = (self.height / 2.0) / math.tan(math.radians(self.vfov_deg) / 2.0)
         else:
-            self.fy = self.fx  # square pixels — the rectilinear default
+            self.fy = self.fx  # square pixels - the rectilinear default
         self.cx = self.width / 2.0
         self.cy = self.height / 2.0
 
@@ -136,7 +136,7 @@ class CameraModel:
         """
         Same lens, different frame size. Modules run inference on a
         downscaled copy (see inference_resize_width) and must not mix a
-        640-wide detection box with 1920-wide intrinsics — the FOV is
+        640-wide detection box with 1920-wide intrinsics - the FOV is
         unchanged but every focal length and centre halves.
         """
         return CameraModel(width, height, self.hfov_deg, self.vfov_deg, self.distortion)
@@ -184,7 +184,7 @@ class CameraPose:
     agl_m is height above the plane the TARGET stands on, not above the
     launch point. Barometric and GPS altitude are both launch-relative, so a
     vehicle on a road at a different elevation carries that offset straight
-    into every speed estimate — which is what agl_offset_m exists to absorb.
+    into every speed estimate - which is what agl_offset_m exists to absorb.
     """
     agl_m: float
     roll_deg: float = 0.0
@@ -220,7 +220,7 @@ class CameraPose:
         nadir point on the ground plane.
 
         Returns None when the ray does not strike the ground: at or above the
-        horizon, or with a nonsensical altitude. Callers MUST handle None —
+        horizon, or with a nonsensical altitude. Callers MUST handle None -
         it happens routinely at shallow mount angles the moment the airframe
         pitches, and silently substituting a huge number puts a vehicle
         kilometres away and reports an absurd speed.
@@ -264,7 +264,7 @@ class ScaleEstimate:
     is genuine evidence and disagreement is a reason to withhold a number
     rather than publish it:
 
-      altitude  AGL + FOV. Relative error shrinks with height — +-1.5 m of
+      altitude  AGL + FOV. Relative error shrinks with height - +-1.5 m of
                 baro drift is 15% at 10 m but 3% at 50 m. Also needs the
                 attitude to be roughly right.
       object    a detected vehicle's known class width as a ruler. Flat ~4%
@@ -309,8 +309,8 @@ def scale_from_object_width(
     """
     The vehicle itself as a ruler.
 
-    Use the extent PERPENDICULAR to the direction of travel — which the
-    tracker knows — because width varies least across models (1.70-1.85 m for
+    Use the extent PERPENDICULAR to the direction of travel - which the
+    tracker knows - because width varies least across models (1.70-1.85 m for
     cars, about +-4%) while length varies far more. Measuring along an
     arbitrary axis mixes length into width and the ruler stops being one.
     """
@@ -348,7 +348,7 @@ def resolve_scale(
             best.m_per_px, best.source, max(best.error_pct, disagree),
             disagreement_pct=disagree, reliable=False,
             note=(f"altitude and object scale disagree by {disagree:.0f}% "
-                  f"(> {max_disagreement_pct:.0f}%) — check AGL and mount tilt"),
+                  f"(> {max_disagreement_pct:.0f}%) - check AGL and mount tilt"),
         )
     return ScaleEstimate(
         best.m_per_px, "agreed", min(best.error_pct, disagree if disagree > 0 else best.error_pct),
@@ -363,7 +363,7 @@ def resolve_scale(
 
 def camera_from_settings(width: int, height: int) -> CameraModel:
     """
-    Built from the EFFECTIVE calibration — .env defaults with the operator's
+    Built from the EFFECTIVE calibration - .env defaults with the operator's
     saved measurements layered on top (vision/calibration.py). Reading
     get_settings() directly here would silently ignore whatever was measured on
     the bench, which is the only source of these numbers that is ever right.
@@ -395,7 +395,7 @@ def pose_from_telemetry(telemetry: Optional[dict]) -> Optional[CameraPose]:
     """
     Build a pose from a telemetry snapshot dict (TelemetrySnapshot.to_dict()
     shape). Returns None when there is no usable altitude, which is the
-    honest answer with no telemetry connected — every metric output should
+    honest answer with no telemetry connected - every metric output should
     then be omitted rather than computed from a default.
     """
     from app.vision.calibration import effective
@@ -450,8 +450,8 @@ def deforeshorten_size(
         size  ~  cos(phi) / range
 
     which is NOT monotonic in range. Substituting range = h/sin(phi) gives
-    size ~ sin(2*phi), so apparent size PEAKS at 45 degrees of depression —
-    exactly where horizontal distance equals altitude — and falls away on
+    size ~ sin(2*phi), so apparent size PEAKS at 45 degrees of depression -
+    exactly where horizontal distance equals altitude - and falls away on
     both sides.
 
     WHY THAT IS DANGEROUS AND NOT MERELY INACCURATE
@@ -460,7 +460,7 @@ def deforeshorten_size(
         and commands forward, which brings them closer still, which shrinks
         them further. It is a positive feedback loop pointed directly at the
         subject. Measured at 6m AGL with a 70deg lens: a person at 6m ahead
-        fills 18.0% of frame, at 3m fills 14.4%, at 1m fills 5.8% — so the
+        fills 18.0% of frame, at 3m fills 14.4%, at 1m fills 5.8% - so the
         closer they get the harder the drone is told to chase.
 
     This rescales the measurement to what it WOULD have looked like at the
@@ -483,7 +483,7 @@ def deforeshorten_size(
 #: there and the blend is spread either side of it.
 _RANGE_BLEND_CENTRE_DEG = 45.0
 #: Half-width of the blend band. Wide enough that neither estimate ever
-#: switches in abruptly — a step change in the range estimate would show up as
+#: switches in abruptly - a step change in the range estimate would show up as
 #: a lurch in the distance controller.
 _RANGE_BLEND_HALF_WIDTH_DEG = 15.0
 
@@ -503,10 +503,10 @@ def blend_weight_for_position(depression_deg: float) -> float:
             70 deg         -1.2%                    -9.6%
 
     Shallow (subject far, high in frame) the ray is nearly parallel to the
-    ground, so a small attitude error sweeps the intersection a long way —
+    ground, so a small attitude error sweeps the intersection a long way -
     position is bad, apparent size is good. Steep (subject close, low in
     frame) the subject is foreshortened hard, so the cos() correction is
-    doing most of the work and its own angular error dominates — size is bad,
+    doing most of the work and its own angular error dominates - size is bad,
     position is good.
 
     Position-based additionally needs ALTITUDE, which on baro drifts +-1.5m;
@@ -535,8 +535,8 @@ def size_ratio_from_ground_range(
     Convert a range in METRES into the same de-foreshortened size-ratio units
     the distance controller already works in.
 
-    Expressing the position-based estimate in the controller's own units —
-    rather than converting the controller to metres — keeps the operator's
+    Expressing the position-based estimate in the controller's own units -
+    rather than converting the controller to metres - keeps the operator's
     target ratio meaning exactly what it meant before, and keeps this whole
     blend optional: when there is no telemetry the size path is used
     unchanged, as it always was.

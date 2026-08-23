@@ -1,6 +1,6 @@
 'use client'
 
-// The autopilot's message log — what QGroundControl's vehicle-messages panel
+// The autopilot's message log - what QGroundControl's vehicle-messages panel
 // shows, and the single biggest reason a problem is diagnosable there.
 //
 // PX4 narrates itself constantly: preflight check results, EKF and GPS state
@@ -8,13 +8,13 @@
 // refusals with their exact cause. All of it arrives on the telemetry link.
 //
 // WHY THIS IS A MODAL AND NOT A POPOVER. The first version anchored a panel to
-// its own button, which put it inside whatever container the button lived in —
+// its own button, which put it inside whatever container the button lived in -
 // a status bar with overflow-x: auto, and on the Fly tab a collapsible
 // right-hand column with overflow-y: auto. Both CLIP an absolutely positioned
 // child, so the panel either scrolled the bar sideways until nothing was
 // legible or simply never appeared. A log you open when something has gone
 // wrong cannot be at the mercy of the layout of whatever is around the button,
-// so it renders to document.body through a portal and owns the screen —
+// so it renders to document.body through a portal and owns the screen -
 // exactly like the mission pre-flight confirmation.
 
 import { useEffect, useRef, useState } from 'react'
@@ -22,7 +22,7 @@ import { createPortal } from 'react-dom'
 import { useDroneStore } from '@/store/drone'
 import { ScrollText, X, Trash2, ChevronDown, AlertTriangle } from 'lucide-react'
 
-/** MAVSDK's StatusTextType ascends with severity — 0 DEBUG … 7 EMERGENCY —
+/** MAVSDK's StatusTextType ascends with severity - 0 DEBUG … 7 EMERGENCY -
  *  unlike MAVLink's own SEVERITY enum, which descends. Reading it the wrong
  *  way round would paint every routine line red and every emergency grey. */
 const SEVERITY_COLOR = (rank: number): string =>
@@ -53,7 +53,7 @@ export function FcMessageLog({ variant = 'bar' }: { variant?: Variant }) {
     const trigger = variant === 'floating' ? (
         <button
             onClick={() => setOpen(true)}
-            title="Messages from the drone — preflight results, warnings, failsafes"
+            title="Messages from the drone - preflight results, warnings, failsafes"
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-mono font-bold transition-colors"
             style={{
                 background: 'rgba(0,0,0,.55)',
@@ -76,11 +76,11 @@ export function FcMessageLog({ variant = 'bar' }: { variant?: Variant }) {
     ) : (
         // ICON ONLY in the status bar. That bar scrolls horizontally once its
         // contents outgrow it, and a labelled button with a badge was enough to
-        // push the controls off the end — the log made the bar unreadable,
+        // push the controls off the end - the log made the bar unreadable,
         // which is the opposite of the point.
         <button
             onClick={() => setOpen(true)}
-            title={`Drone messages${fcUnread > 0 ? ` — ${fcUnread} new` : ''}`}
+            title={`Drone messages${fcUnread > 0 ? ` - ${fcUnread} new` : ''}`}
             style={{
                 position: 'relative', display: 'flex', alignItems: 'center',
                 padding: '5px 7px', borderRadius: 7, flexShrink: 0,
@@ -224,7 +224,7 @@ function MessageWindow({ onClose, onClear, onRead }: {
                             <AlertTriangle size={20} color="#52525b" />
                             <p className="text-[11px] font-mono leading-relaxed" style={{ color: '#71717a' }}>
                                 {fcMessages.length === 0
-                                    ? 'Nothing from the drone yet. Messages appear here as the autopilot sends them — preflight results, GPS and EKF changes, failsafes, and the exact reason behind any refused command.'
+                                    ? 'Nothing from the drone yet. Messages appear here as the autopilot sends them - preflight results, GPS and EKF changes, failsafes, and the exact reason behind any refused command.'
                                     : 'Nothing at this severity. Lower the filter to see the rest.'}
                             </p>
                         </div>

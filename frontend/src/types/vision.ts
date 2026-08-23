@@ -61,7 +61,7 @@ export interface CVResult {
         locked?: boolean
         /** traffic-management: this person is a member of the follow GROUP.
          *  Separate from `locked` so the overlay can show which subject the
-         *  labelling comes from and which are merely being kept in frame —
+         *  labelling comes from and which are merely being kept in frame -
          *  collapsing them makes dropping the right member guesswork. */
         in_group?: boolean
     }[]
@@ -80,7 +80,7 @@ export interface CVResult {
     trend_per_min?: number | null
     /** Operator labels for the grid cells, keyed by cell index as a string. */
     zone_names?: Record<string, string>
-    // Person tracking — face gallery.
+    // Person tracking - face gallery.
     // `identities` is EVERY enrolled person recognised in frame, independent of
     // who holds the lock: identifying and following are separate jobs, and
     // naming only the followed person was a real bug.
@@ -99,7 +99,7 @@ export interface CVResult {
     /** True when an operator picked the target rather than the tracker. */
     lock_manual?: boolean
     lock_hold_s?: number
-    // Pursuit state — named rather than a single "tracking" flag, because
+    // Pursuit state - named rather than a single "tracking" flag, because
     // COASTING (still believes it knows where the target is) and SEARCHING
     // (guessing) need to be told apart.
     lock_state?: 'idle' | 'locked' | 'coasting' | 'searching' | 'lost'
@@ -112,7 +112,7 @@ export interface CVResult {
         reason: string
     } | null
     // Vehicle / plate tracking. Plate/colour/type/speed are carried on the
-    // vehicle itself (VehicleResult) rather than a separate plate list —
+    // vehicle itself (VehicleResult) rather than a separate plate list -
     // both vehicle-plate-tracking and traffic-management share this shape.
     plate_count?: number
     vehicles?: VehicleResult[]
@@ -129,7 +129,7 @@ export interface CVResult {
     /** traffic-management only: group follow is on, so a tap on the video adds
      *  or removes a subject instead of replacing the lock. */
     multi_follow?: boolean
-    /** Track ids in the follow group. members[0] IS locked_track_id — the
+    /** Track ids in the follow group. members[0] IS locked_track_id - the
      *  primary, which carries the plate identity and the hold distance. */
     follow_members?: number[]
     max_follow_members?: number
@@ -138,7 +138,7 @@ export interface CVResult {
     group_framing?: GroupFraming | null
     /** vehicle-plate-tracking only: the locked vehicle's persistent id. */
     locked_vehicle_id?: string | null
-    /** The locked vehicle's plate — the identity that survives a track id
+    /** The locked vehicle's plate - the identity that survives a track id
      *  change, so it is what a re-acquisition can be checked against. */
     locked_plate?: string | null
     /** vehicle-plate-tracking follow: 'fixed' holds the altitude Offboard
@@ -147,7 +147,7 @@ export interface CVResult {
     altitude_mode?: 'fixed' | 'auto'
     /** vehicle-plate-tracking follow: the "hold here" distance target, as
      *  target vehicle height / frame height. Adjustable via
-     *  set_tracking_params — there is no fixed target that suits every
+     *  set_tracking_params - there is no fixed target that suits every
      *  vehicle, since apparent height depends on heading as much as range. */
     target_distance_ratio?: number
     /** What the locked vehicle is ACTUALLY filling right now, same units as
@@ -166,7 +166,7 @@ export interface CVResult {
     speed_note?: string | null
     speed_available?: number
     person_count_unique?: number
-    /** Slant range to frame centre — the distance a subject in the middle of
+    /** Slant range to frame centre - the distance a subject in the middle of
      *  frame actually sits at, which at a 45deg mount differs from altitude by
      *  a factor of 1.4. */
     slant_range_m?: number | null
@@ -175,7 +175,7 @@ export interface CVResult {
     viability?: SubjectViability[]
     viable_subjects?: string[]
     viability_headline?: string
-    /** traffic-management: what was ATTEMPTED this frame and why — the
+    /** traffic-management: what was ATTEMPTED this frame and why - the
      *  counterpart to `viability`, which says only what is resolvable.
      *  Without it a skipped plate read looks identical to a failed one. */
     profile?: CaptureProfile
@@ -236,7 +236,7 @@ export interface GalleryIdentity {
     name: string
     similarity: number
     best_similarity: number
-    /** Independent frames agreeing on this name — the redundancy made visible. */
+    /** Independent frames agreeing on this name - the redundancy made visible. */
     votes: number
     /** Gap to the runner-up. Thin means the gallery cannot really separate two
      *  enrolled people on this frame, however high the top score looks. */
@@ -246,7 +246,7 @@ export interface GalleryIdentity {
 export interface VehicleResult {
     track_id: number | null
     /** This module's own persistent identity for the vehicle (e.g.
-     *  "VH-000042"), distinct from track_id — a ByteTrack id resets on
+     *  "VH-000042"), distinct from track_id - a ByteTrack id resets on
      *  occlusion, this survives via a re-read plate. Only vehicle-plate-
      *  tracking sets this; traffic-management does not. */
     vehicle_id?: string | null
@@ -270,7 +270,7 @@ export interface VehicleResult {
      *  the ground projection, not the raw pixel velocity, so parallel motion
      *  draws as parallel arrows regardless of where in frame it happens. */
     screen_dir?: [number, number] | null
-    /** Sustained travel against the traffic AROUND IT — there is no map and no
+    /** Sustained travel against the traffic AROUND IT - there is no map and no
      *  declared road direction here, so this is relative to the observed local
      *  flow and nothing else. */
     against_flow?: boolean
@@ -279,7 +279,7 @@ export interface VehicleResult {
     plate?: string | null
     /** traffic-management only: a read that has not yet earned being reported.
      *  vehicle-plate-tracking reports every read via `plate` and expresses
-     *  strength through plate_strong/plate_votes instead — suppressing weak
+     *  strength through plate_strong/plate_votes instead - suppressing weak
      *  reads there discarded nearly every genuine plate this rig captures. */
     plate_provisional?: string | null
     plate_conf?: number
@@ -287,7 +287,7 @@ export interface VehicleResult {
     /** How many pixels across the plate actually was. The honest quality
      *  indicator: a 40px read and a 300px read are not equally trustworthy. */
     plate_px_w?: number
-    /** Whether the text matches a known plate grammar. A flag, not a filter —
+    /** Whether the text matches a known plate grammar. A flag, not a filter -
      *  real non-Indian plates (e.g. "719257C") do not match and are still
      *  perfectly valid readings. */
     plate_grammar_ok?: boolean
@@ -312,7 +312,7 @@ export interface VehicleResult {
  * Group follow enforces a CONTAINMENT constraint rather than chasing a
  * setpoint: everyone inside the frame with margin, and nothing commanded while
  * that holds. These are the numbers behind that decision, reported rather than
- * only their outcome — an operator who can see the margin they are flying on
+ * only their outcome - an operator who can see the margin they are flying on
  * can tell "framed comfortably" from "framed, barely", which the action alone
  * does not distinguish.
  */
@@ -322,7 +322,7 @@ export interface GroupFraming {
     max_fill_w_pct: number
     max_fill_h_pct: number
     /** hold: inside the band. widen: backing off and climbing. close: closing
-     *  in. unframeable: given up — translation stopped, yaw still centring. */
+     *  in. unframeable: given up - translation stopped, yaw still centring. */
     action: 'hold' | 'widen' | 'close' | 'unframeable'
     /** Which frame edge a member has come too close to, if any. */
     edge: 'left' | 'right' | 'top' | 'bottom' | null
@@ -334,7 +334,7 @@ export interface GroupFraming {
     missing: number[]
     widening_for_s: number
     /** How much of the widen allowance is spent, and WHICH bound is in force.
-     *  Distance is the real bound — what goes wrong with an over-long widen is
+     *  Distance is the real bound - what goes wrong with an over-long widen is
      *  displacement, not elapsed time. `by: 'time'` means there was no usable
      *  GPS fix to measure with, so a looser fallback is running; that is
      *  reported rather than substituted quietly. */
@@ -347,7 +347,7 @@ export interface GroupFraming {
         exhausted: boolean
     }
     /** Roughly the slant range that would be needed to fit the group, metres.
-     *  Null without telemetry — "cannot frame all" and "cannot frame all,
+     *  Null without telemetry - "cannot frame all" and "cannot frame all,
      *  needs about 45 m" are different messages and only one is actionable. */
     required_range_m: number | null
 }

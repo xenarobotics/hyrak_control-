@@ -3,8 +3,8 @@ Sensor calibration, driven by what the autopilot actually says.
 
 WHY THIS IS A PARSER AND NOT A PROGRESS BAR.
 
-MAVSDK's calibration plugin returns a stream of ProgressData — a percentage and
-a cooked status line — and stopping there gets you a bar that fills up while the
+MAVSDK's calibration plugin returns a stream of ProgressData - a percentage and
+a cooked status line - and stopping there gets you a bar that fills up while the
 operator has no idea which way to turn the aircraft. QGroundControl does not do
 that, and the reason is that the useful information is not the percentage. It is
 WHICH SIDE PX4 IS STILL WAITING FOR, which side it has just recognised, and
@@ -14,12 +14,12 @@ strings this ground station is already subscribed to for the message log.
 So the plugin DRIVES the calibration and delivers the verdict, and these raw
 lines drive the picture. That split matters: the verdict must come from the
 plugin because a STATUSTEXT can be dropped by a lossy radio and a calibration
-reported as finished when it was not is worse than no report at all — while a
+reported as finished when it was not is worse than no report at all - while a
 dropped side-transition only makes the animation late, and the next line
 re-states the whole pending set anyway.
 
 PX4 emits these from calibration_messages.h / calibration_routines.cpp. Matched
-loosely — lowercased, prefix-tested, tolerant of extra words — because the exact
+loosely - lowercased, prefix-tested, tolerant of extra words - because the exact
 wording has changed between PX4 releases more than once and a parser that only
 works on the version it was written against is a parser that will silently stop
 animating one firmware update from now. Anything unrecognised still reaches the
@@ -53,7 +53,7 @@ SIDE_INSTRUCTIONS = {
 #: MAVSDK plugin method per sensor, and whether the sensor has six sides to
 #: work through. One table, so the socket layer, the manager and the UI cannot
 #: disagree about which sensors exist.
-#: `timeout` is a CEILING, not an expectation — the whole point is that a
+#: `timeout` is a CEILING, not an expectation - the whole point is that a
 #: calibration which never ends is REPORTED rather than left spinning. PX4 can
 #: stop streaming without a verdict (a routine that aborted internally, a
 #: dropped final STATUSTEXT), and the operator has no way to tell that apart
@@ -165,7 +165,7 @@ class CalState:
     """Everything the operator's screen needs, in one object.
 
     Sent whole on every change rather than as deltas. A calibration is a
-    handful of events over half a minute — there is nothing to save by
+    handful of events over half a minute - there is nothing to save by
     diffing, and a UI rebuilt from a full state cannot drift out of step with
     the aircraft the way one accumulating patches can.
     """
@@ -204,7 +204,7 @@ class CalState:
 class CalibrationSession:
     """One calibration, from Start to a verdict.
 
-    Holds no aircraft handles and does no I/O — it is fed lines and asked for
+    Holds no aircraft handles and does no I/O - it is fed lines and asked for
     state, which is what makes the whole of PX4's calibration protocol testable
     without a vehicle.
     """
@@ -224,7 +224,7 @@ class CalibrationSession:
         if sensor == "gyro":
             return "Set the aircraft down and leave it completely still"
         if sensor == "level":
-            return "Place the aircraft exactly level — this sets what 'level' means to the autopilot"
+            return "Place the aircraft exactly level - this sets what 'level' means to the autopilot"
         if sensor == "accel":
             return "You will be asked for six positions in turn. Hold each one still until it is marked done"
         if sensor == "mag":
@@ -243,7 +243,7 @@ class CalibrationSession:
 
         if ev.kind == "started":
             s.phase = "running"
-            # A sensor name from PX4 supersedes ours only when we have none —
+            # A sensor name from PX4 supersedes ours only when we have none -
             # the operator pressed a specific button and the screen must not
             # start animating a different sensor because a message was
             # mis-parsed.
@@ -280,7 +280,7 @@ class CalibrationSession:
                     s.sides[side] = PENDING
             s.sides[ev.side] = ACTIVE
             s.instruction = (
-                f"Holding {ev.side.upper()} — keep it still"
+                f"Holding {ev.side.upper()} - keep it still"
                 if s.sensor != "mag"
                 else f"Rotate the aircraft around the {ev.side.upper()} axis"
             )
@@ -303,7 +303,7 @@ class CalibrationSession:
         if ev.kind == "failed":
             s.phase = "failed"
             s.error = ev.text
-            s.instruction = "Calibration failed — see the autopilot's reason below"
+            s.instruction = "Calibration failed - see the autopilot's reason below"
             return True
 
         if ev.kind == "cancelled":
@@ -327,7 +327,7 @@ class CalibrationSession:
         """The plugin's verdict, which is the one that counts.
 
         A calibration can end without a `calibration done` STATUSTEXT ever
-        arriving — the radio drops it, or the firmware simply does not send one
+        arriving - the radio drops it, or the firmware simply does not send one
         for that sensor. Left to the text alone the screen would sit at 90%
         forever on a calibration that had actually succeeded.
         """

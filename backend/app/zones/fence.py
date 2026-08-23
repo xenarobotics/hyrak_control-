@@ -2,7 +2,7 @@
 FC-level backstop: upload every red zone to the flight controller as a PX4
 exclusion geofence (MAVLink fence mission via the MAVSDK Geofence plugin).
 The server monitor is the fast supervisory layer, but it rides the cloud
-link — this fence still holds if that link dies mid-flight. PX4's reaction
+link - this fence still holds if that link dies mid-flight. PX4's reaction
 on breach is governed by its GF_ACTION parameter (default: Hold).
 Best-effort by design: a failed upload logs a warning, never blocks flight.
 """

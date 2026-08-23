@@ -106,8 +106,8 @@ export function EnhancePanel() {
     const cvResults = useDroneStore(s => s.cvResults) as any
     const [params, setParams] = useState<EnhanceParams>(DEFAULTS)
 
-    const inputRes = cvResults?.input_resolution ?? '—'
-    const outputRes = cvResults?.output_resolution ?? '—'
+    const inputRes = cvResults?.input_resolution ?? '-'
+    const outputRes = cvResults?.output_resolution ?? '-'
     const upscaled = cvResults?.upscaled ?? false
     const upscaleMethod = cvResults?.upscale_method ?? 'none'
     const reused = cvResults?.reused_frame ?? false
@@ -167,7 +167,7 @@ export function EnhancePanel() {
                 </div>
             )}
 
-            <Row label="DENOISE" tooltip="Removes speckle/snow-style noise from a glitchy analog (non-digital) FPV link, while keeping edges sharp. Off for a clean digital feed — denoising a feed that has no noise just softens detail for nothing.">
+            <Row label="DENOISE" tooltip="Removes speckle/snow-style noise from a glitchy analog (non-digital) FPV link, while keeping edges sharp. Off for a clean digital feed - denoising a feed that has no noise just softens detail for nothing.">
                 <StyledSelect
                     value={params.denoise}
                     onChange={(v: Denoise) => update({ denoise: v })}
@@ -175,16 +175,16 @@ export function EnhancePanel() {
                         { value: 'off', label: 'Off' },
                         { value: 'light', label: 'Light' },
                         { value: 'medium', label: 'Medium' },
-                        { value: 'strong', label: 'Strong — heavy interference' },
+                        { value: 'strong', label: 'Strong - heavy interference' },
                     ]}
                 />
             </Row>
 
-            <Row label="SHARPEN" tooltip="Unsharp mask — boosts edge contrast to make detail pop. Too much creates a harsh, over-processed look with visible halos around edges.">
+            <Row label="SHARPEN" tooltip="Unsharp mask - boosts edge contrast to make detail pop. Too much creates a harsh, over-processed look with visible halos around edges.">
                 <ParamSlider value={params.sharpen} min={0} max={1} step={0.05} format={v => v.toFixed(2)} onChange={v => update({ sharpen: v })} />
             </Row>
 
-            <Row label="LOOK" tooltip="Quick color-grade presets. Picking one sets Contrast/Saturation/Brightness/Gamma below — adjust any of them afterward and this switches to Custom.">
+            <Row label="LOOK" tooltip="Quick color-grade presets. Picking one sets Contrast/Saturation/Brightness/Gamma below - adjust any of them afterward and this switches to Custom.">
                 <StyledSelect
                     value={params.preset}
                     onChange={(v: Preset) => applyPreset(v)}
@@ -210,11 +210,11 @@ export function EnhancePanel() {
                 <ParamSlider value={params.brightness} min={-40} max={40} step={1} format={v => v.toFixed(0)} onChange={v => update({ brightness: v })} />
             </Row>
 
-            <Row label="GAMMA" tooltip="Reshapes the brightness curve — values below 1 brighten midtones/shadows without blowing out highlights, values above 1 darken them. Different from Brightness, which shifts everything equally.">
+            <Row label="GAMMA" tooltip="Reshapes the brightness curve - values below 1 brighten midtones/shadows without blowing out highlights, values above 1 darken them. Different from Brightness, which shifts everything equally.">
                 <ParamSlider value={params.gamma} min={0.5} max={1.8} step={0.05} format={v => v.toFixed(2)} onChange={v => update({ gamma: v })} />
             </Row>
 
-            <Row label="OUTPUT RESOLUTION" tooltip="Resizes the output with a sharp Lanczos resize. Not AI-generated detail — it cannot invent detail the source doesn't have, but it's a clean, sharp result at zero added latency, safe for live flying. Ignored when AI Upscale below is on.">
+            <Row label="OUTPUT RESOLUTION" tooltip="Resizes the output with a sharp Lanczos resize. Not AI-generated detail - it cannot invent detail the source doesn't have, but it's a clean, sharp result at zero added latency, safe for live flying. Ignored when AI Upscale below is on.">
                 <StyledSelect
                     value={params.resolution}
                     onChange={(v: Resolution) => update({ resolution: v })}
@@ -226,19 +226,19 @@ export function EnhancePanel() {
                 />
             </Row>
 
-            <Row label="AI UPSCALE" tooltip="Real learned super-resolution (FSRCNN) instead of a plain resize — genuinely reconstructs detail rather than just stretching pixels. Measured on this machine: ~6-13 fps, CPU-bound (this build of OpenCV has no GPU path for it). It updates at its own pace and FPS Limit's caching covers the gap, so the live feed itself never stalls — but the enhanced image only refreshes a few times a second, not every frame. Overrides Output Resolution above. For full 24-30fps smoothness, use Output Resolution's plain resize instead.">
+            <Row label="AI UPSCALE" tooltip="Real learned super-resolution (FSRCNN) instead of a plain resize - genuinely reconstructs detail rather than just stretching pixels. Measured on this machine: ~6-13 fps, CPU-bound (this build of OpenCV has no GPU path for it). It updates at its own pace and FPS Limit's caching covers the gap, so the live feed itself never stalls - but the enhanced image only refreshes a few times a second, not every frame. Overrides Output Resolution above. For full 24-30fps smoothness, use Output Resolution's plain resize instead.">
                 <StyledSelect
                     value={params.ai_upscale}
                     onChange={(v: AiUpscale) => update({ ai_upscale: v })}
                     options={[
                         { value: 'off', label: 'Off' },
-                        { value: '2x', label: '2x — sharper, ~13 fps' },
-                        { value: '4x', label: '4x — max detail, ~6 fps' },
+                        { value: '2x', label: '2x - sharper, ~13 fps' },
+                        { value: '4x', label: '4x - max detail, ~6 fps' },
                     ]}
                 />
             </Row>
 
-            <Row label="FPS LIMIT" tooltip="Caps how often this enhancement pipeline re-processes a frame, to save CPU/GPU load. It does NOT change your camera's actual frame rate — frames between updates just reuse the last enhanced result. Lower this (5-10) when AI Upscale is on, since each AI-upscaled frame is much more expensive to compute.">
+            <Row label="FPS LIMIT" tooltip="Caps how often this enhancement pipeline re-processes a frame, to save CPU/GPU load. It does NOT change your camera's actual frame rate - frames between updates just reuse the last enhanced result. Lower this (5-10) when AI Upscale is on, since each AI-upscaled frame is much more expensive to compute.">
                 <ParamSlider value={params.fps_cap} min={5} max={60} step={5} format={v => v.toFixed(0)} onChange={v => update({ fps_cap: v })} />
             </Row>
 

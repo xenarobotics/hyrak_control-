@@ -1,5 +1,5 @@
 """
-BaseAnalyzer — cleaned up from original project.
+BaseAnalyzer - cleaned up from original project.
 Every vision module inherits from this.
 Key design: submit_frame() is non-blocking.
 The latest frame is always processed, older ones are dropped.
@@ -21,7 +21,7 @@ logger = logging.getLogger("verocore.vision.base")
 class FrameContext:
     """
     What was true when a frame was CAPTURED, as opposed to when it finished
-    being analysed. Needed by anything that measures the world in metres —
+    being analysed. Needed by anything that measures the world in metres -
     see vision/geometry.py.
 
     Two reasons this travels bundled with its frame rather than being read
@@ -56,7 +56,7 @@ class FrameContext:
 
 class BaseAnalyzer(ABC):
     #: Mode name from AnalysisMode, set by each subclass. Used to look up
-    #: per-mode tuning (currently inference width) — a module that leaves it
+    #: per-mode tuning (currently inference width) - a module that leaves it
     #: blank silently gets the global default, which is why it is declared
     #: here rather than left implicit.
     MODE: str = ""
@@ -73,7 +73,7 @@ class BaseAnalyzer(ABC):
         # Context of the frame each client is CURRENTLY being analysed with.
         # Keyed by client rather than held as a single "current" attribute
         # because _process_loop runs one task per client concurrently over a
-        # shared executor — a scalar would race between sessions.
+        # shared executor - a scalar would race between sessions.
         self._contexts: Dict[str, FrameContext] = {}
         self._frame_counters: Dict[str, int] = {}
         self._rate_n = 0
@@ -121,7 +121,7 @@ class BaseAnalyzer(ABC):
         if not already running for this client.
 
         `telemetry` is a TelemetrySnapshot.to_dict() taken at capture time.
-        Pass it whenever it is available — it is what lets modules report
+        Pass it whenever it is available - it is what lets modules report
         metres instead of pixels. Omitting it is safe: metric outputs are
         then omitted too, rather than computed from a default altitude.
         """
@@ -141,21 +141,21 @@ class BaseAnalyzer(ABC):
 
         # THE ANALYZER GETS ITS OWN COPY OF THE PIXELS.
         #
-        # Not defensive style — the caller keeps using this array. In
+        # Not defensive style - the caller keeps using this array. In
         # stream_track.recv() the very same `img_bgr` handed in here is later
         # passed to draw_overlay(), and every cv2 drawing call mutates its
         # target in place. Stored by reference, the analyzer's frame therefore
         # grew brackets and labels underneath it, in a race with its own worker
         # thread, which showed up two ways:
         #
-        #   * saved evidence crops had the overlay baked into them — a plate
+        #   * saved evidence crops had the overlay baked into them - a plate
         #     crop wearing a green bracket, a vehicle shot wearing its own
         #     "VH-000001 blue car" label
         #   * detection, colour classification and OCR ran on a frame carrying
         #     the PREVIOUS inference's graphics, so the module was partly
         #     reading its own output
         #
-        # 0.17ms for a 1080p frame, measured — far too cheap to trade for
+        # 0.17ms for a 1080p frame, measured - far too cheap to trade for
         # pixels the analysis cannot trust. Copying here rather than inside
         # _compose puts the guarantee at the ownership boundary: once a frame is
         # submitted, nothing outside can change it under the worker thread.
@@ -203,7 +203,7 @@ class BaseAnalyzer(ABC):
         hardcoded, which meant the inference_resize_width setting silently did
         nothing for three of them and capped crowd counting at ~30m altitude.
 
-        Frames narrower than the target are passed through untouched — never
+        Frames narrower than the target are passed through untouched - never
         upscaled, which would cost time and invent no detail.
         """
         h, w = frame_bgr.shape[:2]
@@ -221,7 +221,7 @@ class BaseAnalyzer(ABC):
         passing `inference_width` straight through.
 
         `inference_width` is a width BUDGET in which 0 means "native, do not
-        downscale" — which resize_for_inference above honours correctly. But
+        downscale" - which resize_for_inference above honours correctly. But
         ultralytics needs a concrete letterbox size, and imgsz=0 does not mean
         native to it, it raises:
 
@@ -231,7 +231,7 @@ class BaseAnalyzer(ABC):
 
         That exception comes from inside the worker thread, so from the outside
         the module simply produces no detections, no metadata and no database
-        rows while the video keeps streaming — indistinguishable from a model
+        rows while the video keeps streaming - indistinguishable from a model
         that finds nothing. Native therefore has to resolve to the frame's own
         long side, rounded up to the multiple of 32 the network stride needs.
         """
@@ -245,7 +245,7 @@ class BaseAnalyzer(ABC):
         Context of the frame being analysed right now for this client.
 
         Modules read it from inside _analyze_frame_blocking, which receives
-        only the frame — they already iterate self._client_state.items(), so
+        only the frame - they already iterate self._client_state.items(), so
         the client_id is in hand there.
         """
         return self._contexts.get(client_id)
@@ -269,7 +269,7 @@ class BaseAnalyzer(ABC):
         """
         Optional: draw the latest results onto the CURRENT camera frame
         (in place) and return it. Modules that support this get fly-tab
-        smoothness — every camera frame is displayed, with annotations
+        smoothness - every camera frame is displayed, with annotations
         that lag by at most one inference. Modules whose OUTPUT is a
         transformed frame (depth colormap, enhancer) return None and the
         cached-frame path is used instead.
@@ -327,7 +327,7 @@ class BaseAnalyzer(ABC):
                         f"{self.__class__.__name__} {client_id[:8]}: "
                         f"{fps:.1f} fps analysed over {span:.0f}s "
                         f"(analysis {elapsed_ms:.1f}ms = {1000.0 / max(elapsed_ms, 0.1):.0f} fps "
-                        f"capable) — "
+                        f"capable) - "
                         + ("source-limited" if fps < (1000.0 / max(elapsed_ms, 0.1)) * 0.6
                            else "keeping up")
                     )

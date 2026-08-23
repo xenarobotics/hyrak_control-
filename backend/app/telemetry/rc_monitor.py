@@ -2,7 +2,7 @@
 Raw RC channel telemetry, for the Radio & RC page.
 
 WHY THIS EXISTS AT ALL: MAVSDK's telemetry plugin exposes rc_status
-(available + signal strength) and nothing else — the per-channel values that
+(available + signal strength) and nothing else - the per-channel values that
 a stick calibration needs are in the RC_CHANNELS MAVLink message, which
 mavsdk_server parses and drops. There is no forwarding option in the bundled
 server build, so the only way to see channels is to listen to the MAVLink
@@ -13,7 +13,7 @@ WHAT THAT MEANS PER LINK TYPE, honestly:
     14550; binding it with SO_REUSEADDR/SO_REUSEPORT means we coexist with a
     running QGC instead of fighting it for the socket.
   - Serial (USB FC): mavsdk_server owns the port exclusively and nothing can
-    tee it. No channel data — the page says so instead of showing bars that
+    tee it. No channel data - the page says so instead of showing bars that
     never move.
 
 The monitor is passive: it binds, parses, and reports. It never transmits,
@@ -31,7 +31,7 @@ from pymavlink.dialects.v20 import common as mavlink2
 logger = logging.getLogger("verocore.rc_monitor")
 
 RC_MONITOR_PORT = 14550
-#: Emit at most this often — RC_CHANNELS arrives at up to 50 Hz and the
+#: Emit at most this often - RC_CHANNELS arrives at up to 50 Hz and the
 #: browser needs 10 to animate a stick convincingly.
 _EMIT_INTERVAL_S = 0.1
 #: After this long with no RC_CHANNELS, report the feed as gone so the page
@@ -80,7 +80,7 @@ class RcChannelMonitor:
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             # Share the port with a running QGC rather than losing the race
-            # for it — both listeners receive the broadcast stream.
+            # for it - both listeners receive the broadcast stream.
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             if hasattr(socket, "SO_REUSEPORT"):
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)

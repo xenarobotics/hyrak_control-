@@ -7,8 +7,8 @@
 // as they appear and vanish between frames.
 //
 // None of that is information a person can read at that rate. It is the same
-// mistake as the overlay canvas — presenting a sampled signal at its sampling
-// rate — and it makes an otherwise-working system feel unstable.
+// mistake as the overlay canvas - presenting a sampled signal at its sampling
+// rate - and it makes an otherwise-working system feel unstable.
 //
 // The rule applied here: numbers that a human READS settle; numbers that a
 // human WATCHES stay live. So counts and timings ease and hold, while the
@@ -16,7 +16,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-/** Re-publishes `value` at most every `ms`. The final value always lands —
+/** Re-publishes `value` at most every `ms`. The final value always lands -
  *  a trailing edge, so the panel never settles on a stale reading. */
 export function useThrottled<T>(value: T, ms = 320): T {
     const [shown, setShown] = useState(value)
@@ -84,7 +84,7 @@ export interface StableRow { name: string; count: number }
  *  A row that disappears from the payload is kept (greyed by the caller via
  *  `stale`) for `holdMs` before being removed, so a detection blinking on the
  *  confidence threshold does not make the list jump. Ordering is by count, but
- *  a row only changes position once its count has actually settled — otherwise
+ *  a row only changes position once its count has actually settled - otherwise
  *  rows swap places several times a second and the list is unreadable. */
 export function useStableCounts(
     counts: Record<string, number> | undefined,
@@ -132,7 +132,7 @@ export function useStableCounts(
 
 /** Same idea as useStableCounts, for lists that carry their own identity
  *  (tracker persons, plates). A row survives `holdMs` past its last sighting
- *  so the list does not reflow every time the detector blinks — which on a
+ *  so the list does not reflow every time the detector blinks - which on a
  *  selectable list also means the row you are reaching for stays put. */
 export function useStableById<T extends { id: number | string }>(
     items: T[] | undefined,
@@ -157,7 +157,7 @@ export function useStableById<T extends { id: number | string }>(
     return rows
 }
 
-/** Rolling median — for timings, where the occasional 3x outlier is noise
+/** Rolling median - for timings, where the occasional 3x outlier is noise
  *  rather than signal and a mean would drag the display around with it. */
 export function useMedian(value: number, window = 12): number {
     const buf = useRef<number[]>([])

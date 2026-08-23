@@ -18,7 +18,7 @@ export function useCamera() {
     const scan = useCallback(async () => {
         setIsLoading(true)
         try {
-            // Request permission first — this populates device labels
+            // Request permission first - this populates device labels
             const tempStream = await navigator.mediaDevices.getUserMedia({ video: true })
             setPermission(true)
             tempStream.getTracks().forEach(t => t.stop())
@@ -55,7 +55,7 @@ export function useCamera() {
         }
         try {
             // Resolution and frame rate come from the user's video settings
-            // (settings page — 480/720/1080, 12–30 fps). The vision pipeline
+            // (settings page - 480/720/1080, 12-30 fps). The vision pipeline
             // still downscales to 640px wide for inference; capture size only
             // affects what the operator sees.
             const newStream = await navigator.mediaDevices.getUserMedia({

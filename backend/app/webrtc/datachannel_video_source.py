@@ -6,7 +6,7 @@ why it exists alongside the others (see docs/ARCHITECTURE.md "Secure transport
 comparison" and ADR-009).
 
 The problem it solves: aiortc cannot negotiate H.265 over WebRTC. Its entire
-video codec table is VP8 and H.264 — there is no HEVC anywhere in the library.
+video codec table is VP8 and H.264 - there is no HEVC anywhere in the library.
 So an H.265 air unit or camera cannot ride a WebRTC media *track* to this
 server without being transcoded, which costs a generation of quality and
 1.5-2x the bitrate for equal quality. On an RF link that is exactly backwards.
@@ -32,7 +32,7 @@ Measured (2026-07-27, werift -> aiortc, 1200-byte payloads, loopback):
     50 Mbit/s   49.34     0.0%    0.71ms   1.43ms   0.76 -> 0.69
 
 The trend column is what mattered: flat at every rate, so SCTP is not
-buffering. That was the concern that gated this design — SCTP's congestion
+buffering. That was the concern that gated this design - SCTP's congestion
 control is tuned for bulk data, not realtime media, and the fear was it would
 queue rather than shed. Note the test was on loopback, so it does NOT cover a
 lossy, rate-limited WAN link; the client-side mitigation for that is to watch
@@ -78,7 +78,7 @@ class DataChannelIngest:
         self.packets = 0
         self.bytes = 0
         self.closed = False
-        # SOCK_DGRAM to 127.0.0.1 — connect() once so every send skips route
+        # SOCK_DGRAM to 127.0.0.1 - connect() once so every send skips route
         # lookup, which matters at thousands of packets/second.
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.connect(("127.0.0.1", self.loopback_port))
@@ -104,7 +104,7 @@ class DataChannelIngest:
             # ECONNREFUSED is normal and expected before the decoder has bound
             # the port: the client starts pushing as soon as the channel opens,
             # which is necessarily before open_air_unit_video() has probed the
-            # stream. Dropping these is correct — there is no reader yet.
+            # stream. Dropping these is correct - there is no reader yet.
             if self.packets == 0:
                 return
             logger.debug(f"datagram forward failed for {self.session_id[:8]}: {e}")
@@ -136,7 +136,7 @@ _ingests: dict[str, DataChannelIngest] = {}
 def allocate(session_id: str) -> DataChannelIngest:
     """Idempotent: a re-offer on the same session reuses the live ingest.
 
-    Not a micro-optimisation — allocating a second port would leave the browser
+    Not a micro-optimisation - allocating a second port would leave the browser
     reading the old one while the client pushed to the new, which presents as
     "connected but permanently black". The relay source had exactly this bug.
     """

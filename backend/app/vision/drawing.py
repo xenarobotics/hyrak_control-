@@ -31,7 +31,7 @@ def draw_brackets(img, x1, y1, x2, y2, color, thickness=1, ratio=0.22, radius=5)
 
 
 def draw_ring(img, x1, y1, x2, y2, color, thickness=2, radius=10):
-    """Rounded-rect subject ring — the modern replacement for corner brackets
+    """Rounded-rect subject ring - the modern replacement for corner brackets
     on anything that is a subject rather than clutter. Mirrors the canvas
     drawSubjectRing so both render paths agree."""
     x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
@@ -51,8 +51,8 @@ def draw_badge(img, text, x, y, fg=(255, 255, 255), bg=(18, 14, 12)):
     Rounded, translucent label chip.
 
     Matches the client canvas (CvOverlayCanvas.drawBadge), because the same
-    scene is drawn by both — the browser in overlay mode, this in processed
-    mode — and two different label styles for one product reads as two
+    scene is drawn by both - the browser in overlay mode, this in processed
+    mode - and two different label styles for one product reads as two
     products. A hard black rectangle with white text was the old look; the
     chip sits ON the image rather than punching a hole in it.
     """
@@ -79,7 +79,7 @@ def draw_tint_rect(img, x1, y1, x2, y2, color, alpha=0.15, border=True):
     Translucent fill over a region + a solid border.
 
     Blends ONLY the region, never the whole frame. The previous version did
-    `img.copy()` and then an `addWeighted` across all 1080p for every call —
+    `img.copy()` and then an `addWeighted` across all 1080p for every call -
     4.1ms each. That is invisible for one box, but a 3x3 density grid makes nine
     calls and cost 37ms PER FRAME, on top of inference. And draw_overlay runs on
     every camera frame rather than only analysed ones, so it capped the whole
@@ -87,7 +87,7 @@ def draw_tint_rect(img, x1, y1, x2, y2, color, alpha=0.15, border=True):
     same nine cells in under 1ms.
 
     alpha <= 0 draws the border only and skips the blend entirely, which is what
-    an empty grid cell wants — previously it paid the full frame cost to change
+    an empty grid cell wants - previously it paid the full frame cost to change
     nothing.
     """
     h, w = img.shape[:2]

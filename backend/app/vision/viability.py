@@ -3,7 +3,7 @@ What can this altitude actually deliver?
 ========================================
 
 Every analytic needs a minimum number of pixels on its subject. Given the
-calibrated lens and the current height, that requirement becomes a range — and
+calibrated lens and the current height, that requirement becomes a range - and
 outside it the honest answer is "too far", not a guess.
 
 WHY THIS MODULE EXISTS
@@ -17,7 +17,7 @@ WHY THIS MODULE EXISTS
     turns an apparent malfunction into a flight decision.
 
     It is also the honest way to offer one mode covering every analytic. The
-    five requirements do not share an altitude — plates want low and oblique,
+    five requirements do not share an altitude - plates want low and oblique,
     crowd counting wants high and near-nadir, faces want close and frontal. A
     module claiming all five simultaneously would be lying. A module that runs
     all five and reports which are IN RANGE right now is telling the truth.
@@ -80,7 +80,7 @@ def range_for_px(hfov_deg: float, frame_width_px: int,
     """Slant range at which `physical_m` spans `px_needed` pixels."""
     # frame_width_px <= 0 is not a legal camera, but it IS what a caller
     # passes when it forwards an inference width of 0 meaning "native". That
-    # used to divide by zero here — inside the analyzer's worker thread, so
+    # used to divide by zero here - inside the analyzer's worker thread, so
     # the mode produced no metadata at all while the video kept streaming,
     # indistinguishable from a model that finds nothing. Callers resolve 0 to
     # the real frame width now; this refuses rather than crashes if one is
@@ -105,7 +105,7 @@ def assess(
     analysed at, which is not always the frame width: detection runs on a
     downscaled copy, while plate OCR runs on a per-vehicle crop at native
     resolution. Using the frame width for everything would overstate detection
-    and understate plate reading — the two errors that matter most here.
+    and understate plate reading - the two errors that matter most here.
     """
     out: List[SubjectViability] = []
     if not slant_range_m or slant_range_m <= 0:
@@ -117,7 +117,7 @@ def assess(
                 px_needed_good=good, px_needed_marginal=marginal,
                 status="unknown",
                 max_range_m=range_for_px(hfov_deg, w, phys, good),
-                advice="No altitude — connect telemetry to know what is in range",
+                advice="No altitude - connect telemetry to know what is in range",
             ))
         return out
 
@@ -130,11 +130,11 @@ def assess(
             status, advice = "good", ""
         elif px >= marginal:
             status = "marginal"
-            advice = (f"{px:.0f}px on target — workable but unreliable; "
+            advice = (f"{px:.0f}px on target - workable but unreliable; "
                       f"{good_range:.0f}m or closer for a solid read")
         else:
             status = "out_of_range"
-            advice = (f"{px:.0f}px on target, needs {good} — "
+            advice = (f"{px:.0f}px on target, needs {good} - "
                       f"descend to about {good_range:.0f}m")
         out.append(SubjectViability(
             subject=key, label=label, px_on_target=px,
@@ -155,7 +155,7 @@ def summarise(items: List[SubjectViability]) -> dict:
         nearest = max(blocked, key=lambda i: i.max_range_m)
         headline = (
             f"{', '.join(i.subject for i in blocked)} out of range at this "
-            f"altitude — {nearest.subject} needs ~{nearest.max_range_m:.0f}m"
+            f"altitude - {nearest.subject} needs ~{nearest.max_range_m:.0f}m"
         )
     return {
         "subjects": [i.to_dict() for i in items],

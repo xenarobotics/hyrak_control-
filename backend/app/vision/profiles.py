@@ -1,5 +1,5 @@
 """
-Capability profiles — spend the frame budget on what the optics can deliver.
+Capability profiles - spend the frame budget on what the optics can deliver.
 ============================================================================
 
 viability.py answers "is this subject resolvable right now?". This module acts
@@ -8,7 +8,7 @@ this frame, and hands back the freed budget so the ones that CAN work run
 harder.
 
 WHY THIS IS NOT AN ALTITUDE TABLE
-    The obvious implementation is a ladder of heights — plates below 8m, crowd
+    The obvious implementation is a ladder of heights - plates below 8m, crowd
     above 25m. It would work today and be wrong forever after, because the
     numbers in it are not properties of the job. They are properties of THIS
     lens on THIS sensor.
@@ -20,7 +20,7 @@ WHY THIS IS NOT AN ALTITUDE TABLE
 
     So the currency here is PIXELS ON TARGET, computed from the calibrated lens
     and the measured slant range. A resolution or lens change moves the ranges
-    on its own, with no constant to update and nothing to remember —
+    on its own, with no constant to update and nothing to remember -
 
         plate readable to   6.9 m  at 1080p / 70deg
         plate readable to  13.7 m  at 4K    / 70deg
@@ -33,13 +33,13 @@ WHAT IT ACTUALLY BUYS
     Face recognition needs a subject far closer than plate OCR does (a 230mm
     face vs a 500mm plate, for the same 100px), so from any real drone standoff
     faces are out of range essentially always. Detecting that and skipping the
-    model is not a small saving — it is most of the optional per-frame cost,
+    model is not a small saving - it is most of the optional per-frame cost,
     reclaimed on nearly every frame, and spent on the plate reads that are
     actually achievable.
 
 HYSTERESIS, BECAUSE ALTITUDE IS NOISY
     A drone holding station still breathes a metre or two, and barometric AGL
-    adds its own noise. A bare threshold on top of that flaps — OCR switching
+    adds its own noise. A bare threshold on top of that flaps - OCR switching
     on and off frame to frame, which both wastes the calls it does make and
     makes the readout untrustworthy to watch. A subject therefore has to clear
     the bar to switch ON and fall well below it to switch OFF.
@@ -67,7 +67,7 @@ _GATED = ("plate", "face")
 #   * every accepted read is SAVED AS A PHOTO alongside the text, so a wrong
 #     one is visible and correctable by a human rather than being an
 #     unfalsifiable claim in a database;
-#   * strength travels with the reading — pixel width, vote count, grammar —
+#   * strength travels with the reading - pixel width, vote count, grammar -
 #     so a weak read is presented as weak everywhere it appears;
 #   * an unread plate is a permanently lost record, while a doubtful one can
 #     be checked later against its own photograph.
@@ -78,7 +78,7 @@ _GATED = ("plate", "face")
 # standoff.
 _ALWAYS_ATTEMPT = ("plate",)
 
-# Measured on this hardware — see the traffic_manager docstring.
+# Measured on this hardware - see the traffic_manager docstring.
 # fast-alpr letterboxes to 384x384, so a call costs the same whatever it is
 # given: the budget is a COUNT OF CALLS, not an area.
 _COST_MS = {
@@ -87,12 +87,12 @@ _COST_MS = {
 }
 
 # Fallback per-frame budget for OPTIONAL analytics, on top of detection and
-# speed. Overridden by settings.traffic_optional_budget_ms — see the note
+# speed. Overridden by settings.traffic_optional_budget_ms - see the note
 # there for why it is deliberately generous rather than sized to hold 30fps.
 _DEFAULT_BUDGET_MS = 45.0
 
 # Hysteresis. A subject switches ON at its marginal requirement and OFF only
-# once it falls this far below it — wide enough to swallow altitude jitter,
+# once it falls this far below it - wide enough to swallow altitude jitter,
 # narrow enough that a genuine climb still turns it off promptly.
 _OFF_FRACTION = 0.85
 
@@ -151,13 +151,13 @@ class Profile:
 
 def _name_for(plate: bool, face: bool) -> tuple:
     """Profiles are NAMED so an operator can learn them, but the name is a
-    label on the decision rather than an input to it — nothing branches on
+    label on the decision rather than an input to it - nothing branches on
     these strings."""
     if face and plate:
-        return "forensic", "Forensic — plates + faces"
+        return "forensic", "Forensic - plates + faces"
     if plate:
-        return "identify", "Identify — plates"
-    return "survey", "Survey — count, track, speed"
+        return "identify", "Identify - plates"
+    return "survey", "Survey - count, track, speed"
 
 
 class ProfileSelector:
@@ -213,12 +213,12 @@ class ProfileSelector:
                 continue
 
             if item is None:
-                # No viability entry at all — attempt rather than silently
+                # No viability entry at all - attempt rather than silently
                 # disable an analytic for a reason nobody can see.
                 decisions[subject] = SubjectDecision(
                     subject=subject, attempt=True, status="unknown",
                     px_on_target=0.0, px_needed=0.0,
-                    reason="no viability reading — attempting anyway",
+                    reason="no viability reading - attempting anyway",
                 )
                 continue
 
@@ -244,7 +244,7 @@ class ProfileSelector:
                 continue
 
             if subject in _ALWAYS_ATTEMPT:
-                # Still REPORTS the geometry — an operator seeing "34px on
+                # Still REPORTS the geometry - an operator seeing "34px on
                 # target, needs 70" understands why reads are poor, and can
                 # switch it off to reclaim the budget. It simply no longer
                 # decides.
@@ -253,7 +253,7 @@ class ProfileSelector:
                 decisions[subject] = SubjectDecision(
                     subject=subject, attempt=True, status=status,
                     px_on_target=px, px_needed=needed,
-                    reason=(f"{px:.0f}px on target, below the {needed:.0f} guide — "
+                    reason=(f"{px:.0f}px on target, below the {needed:.0f} guide - "
                             f"reading anyway, marked weak"
                             if short else
                             f"{px:.0f}px on target, needs {needed:.0f}"),
@@ -268,7 +268,7 @@ class ProfileSelector:
                 decisions[subject] = SubjectDecision(
                     subject=subject, attempt=True, status=status,
                     px_on_target=px, px_needed=needed,
-                    reason="no altitude — attempting anyway",
+                    reason="no altitude - attempting anyway",
                 )
                 continue
 
@@ -276,7 +276,7 @@ class ProfileSelector:
             if on:
                 reason = f"{px:.0f}px on target, needs {needed:.0f}"
             else:
-                reason = (f"{px:.0f}px on target, needs {needed:.0f} — "
+                reason = (f"{px:.0f}px on target, needs {needed:.0f} - "
                           f"skipped, budget spent elsewhere")
             decisions[subject] = SubjectDecision(
                 subject=subject, attempt=on, status=status,
@@ -306,7 +306,7 @@ class ProfileSelector:
             # fraction of the requirement already met, not by the pixel gap.
             # A raw gap is not comparable across subjects of different physical
             # size: at 50m a plate sits 56px short and a face 54px short, which
-            # would nominate the face — yet the plate needs half the descent,
+            # would nominate the face - yet the plate needs half the descent,
             # because a 500mm plate and a 230mm face do not gain pixels at the
             # same rate. The fraction is scale-free and orders identically to
             # viability.summarise's max_range, so both readouts agree.
@@ -315,7 +315,7 @@ class ProfileSelector:
                 key=lambda d: (d.px_on_target / d.px_needed) if d.px_needed else 0.0,
             )
             headline = (
-                f"{', '.join(skipped)} out of range — "
+                f"{', '.join(skipped)} out of range - "
                 f"{nearest.subject} needs {nearest.px_needed:.0f}px, "
                 f"has {nearest.px_on_target:.0f}px"
             )

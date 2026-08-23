@@ -4,10 +4,10 @@
 // the single signal the rest of the frontend checks before preferring a
 // native bridge (raw UDP/TCP/serial/RTSP) over the browser-only fallback
 // (an externally-run relay script, or "unsupported" for RTSP). The UI
-// itself never branches on this — only the low-level data-source code does
+// itself never branches on this - only the low-level data-source code does
 // (see localSwarmRelay.ts for the first wired example).
 //
-// This is also the single place window.hyrakNative's shape is declared —
+// This is also the single place window.hyrakNative's shape is declared -
 // nativeUpdater.ts reuses isDesktopApp() from here rather than redeclaring
 // the global, to avoid two conflicting `declare global` blocks.
 
@@ -23,7 +23,7 @@ export interface UpdaterEvent {
     type: 'checking' | 'available' | 'not-available' | 'download-progress' | 'downloaded' | 'error'
     version?: string
     percent?: number
-    // Mirrors desktop/src/updater.ts — bytes and rate travel with percent so a
+    // Mirrors desktop/src/updater.ts - bytes and rate travel with percent so a
     // slow or Content-Length-less download can still be shown as moving.
     transferred?: number
     total?: number

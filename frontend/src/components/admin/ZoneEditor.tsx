@@ -166,7 +166,7 @@ export default function ZoneEditor({
                         }}
                     >
                         <Tooltip sticky>
-                            {z.properties.name} — {z.properties.zone_class.toUpperCase()}
+                            {z.properties.name} - {z.properties.zone_class.toUpperCase()}
                         </Tooltip>
                     </Polygon>
                 ))}
@@ -203,7 +203,7 @@ export default function ZoneEditor({
                 style={PANEL_STYLE}
             >
                 <div className="px-3 py-2.5 text-[10px] tracking-widest text-zinc-500 border-b border-zinc-800/80">
-                    FLIGHT ZONES — {zones.length}
+                    FLIGHT ZONES - {zones.length}
                 </div>
 
                 {!drawing ? (
@@ -220,7 +220,7 @@ export default function ZoneEditor({
                             {zones.length === 0 && (
                                 <div className="text-[10px] text-zinc-500 p-2">
                                     No zones yet. Draw your test field&apos;s green / orange / red
-                                    areas — the backend enforces them on every connected drone.
+                                    areas - the backend enforces them on every connected drone.
                                 </div>
                             )}
                             {zones.map(z => (
@@ -349,7 +349,7 @@ export default function ZoneEditor({
                         <input
                             value={ceiling}
                             onChange={e => setCeiling(e.target.value.replace(/[^0-9.]/g, ''))}
-                            placeholder="ceiling m AGL (optional — blank = all altitudes)"
+                            placeholder="ceiling m AGL (optional - blank = all altitudes)"
                             className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200 outline-none placeholder:text-zinc-600"
                         />
 

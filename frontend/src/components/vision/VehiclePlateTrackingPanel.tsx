@@ -1,6 +1,6 @@
 'use client'
 
-// Vehicle / number-plate tracking — identify, tag, and follow ONE vehicle.
+// Vehicle / number-plate tracking - identify, tag, and follow ONE vehicle.
 //
 // Every tracked vehicle carries a persistent vehicle_id (survives a
 // ByteTrack id change via a re-read plate) plus whatever has been captured
@@ -65,7 +65,7 @@ export function VehiclePlateTrackingPanel() {
     useEffect(() => { loadHistory() }, [])
 
     // Refresh the moment a session stops so the newest reads show up
-    // without the operator doing anything — give the last async DB writes
+    // without the operator doing anything - give the last async DB writes
     // (fire-and-forget from stream_track.py) a moment to land first.
     const wasStreaming = useRef(false)
     useEffect(() => {
@@ -83,7 +83,7 @@ export function VehiclePlateTrackingPanel() {
         getSocket().emit('set_vehicle_tracking', { active })
     }
 
-    // One download button per SESSION, not per plate — shown on the first
+    // One download button per SESSION, not per plate - shown on the first
     // (most recent) row belonging to that session, since `history` is
     // already ordered most-recent-first.
     const seenSessions = new Set<string>()
@@ -142,7 +142,7 @@ export function VehiclePlateTrackingPanel() {
                     lineHeight: 1.5, color: '#fbbf24',
                 }}>
                     <AlertCircle size={12} style={{ marginTop: 1, flexShrink: 0 }} />
-                    <span>Speed unavailable — {cvResults.speed_note}.</span>
+                    <span>Speed unavailable - {cvResults.speed_note}.</span>
                 </div>
             )}
             {!hasTelemetry && !cvResults?.speed_note && (
@@ -152,7 +152,7 @@ export function VehiclePlateTrackingPanel() {
                 }}>
                     <AlertCircle size={12} style={{ marginTop: 1, flexShrink: 0 }} />
                     <span>
-                        No telemetry — speed needs altitude to convert pixels to
+                        No telemetry - speed needs altitude to convert pixels to
                         metres, so it is omitted rather than guessed.
                     </span>
                 </div>
@@ -160,7 +160,7 @@ export function VehiclePlateTrackingPanel() {
             {!alprOk && (
                 <div style={{ display: 'flex', gap: 6, fontSize: 11, color: '#fbbf24' }}>
                     <AlertCircle size={12} style={{ marginTop: 1, flexShrink: 0 }} />
-                    <span>Plate reader unavailable — identification and tracking still work.</span>
+                    <span>Plate reader unavailable - identification and tracking still work.</span>
                 </div>
             )}
 
@@ -184,7 +184,7 @@ export function VehiclePlateTrackingPanel() {
                     <span style={LABEL}>Vehicles</span>
                     {vehicles.length > 0 && (
                         <span style={{ fontSize: 9, color: 'hsl(var(--app-text-muted))' }}>
-                            click to lock — or click it on the video
+                            click to lock - or click it on the video
                         </span>
                     )}
                 </div>
@@ -236,7 +236,7 @@ export function VehiclePlateTrackingPanel() {
                                                     letterSpacing: '0.04em',
                                                     // Green once independent frames agree, amber on
                                                     // a single-frame read. Both are shown and both
-                                                    // are logged — suppressing the amber ones
+                                                    // are logged - suppressing the amber ones
                                                     // discarded nearly every real plate this rig
                                                     // captures.
                                                     color: !v.plate ? 'hsl(var(--app-text-muted))'
@@ -298,7 +298,7 @@ export function VehiclePlateTrackingPanel() {
                 </div>
             )}
 
-            {/* ── Recent (bottom half) — always visible, no tab click ──── */}
+            {/* ── Recent (bottom half) - always visible, no tab click ──── */}
             <div style={{
                 flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 6,
                 borderTop: '1px solid hsl(var(--app-border))', paddingTop: 8,
@@ -344,7 +344,7 @@ export function VehiclePlateTrackingPanel() {
                                                     </span>
                                                 )}
                                                 {/* A row exists per VEHICLE now, so a blank plate is
-                                                    a normal outcome — most vehicles never turn a
+                                                    a normal outcome - most vehicles never turn a
                                                     readable plate toward the camera. */}
                                                 <span style={{
                                                     fontSize: 12.5, fontWeight: 700,

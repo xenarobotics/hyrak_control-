@@ -58,7 +58,7 @@ const AIRFRAME_LABELS: Record<string, string> = {
     'fixedwing': 'Fixed Wing', 'other': 'Custom',
 }
 const FLIGHT_MODES_LIST = ['Stabilize', 'Altitude Hold', 'Position', 'Mission', 'RTL', 'Loiter', 'Acro', 'Hold', 'Land']
-// Sentinel address for the wfb-ng air-unit preset — ConnectionWorkspace's
+// Sentinel address for the wfb-ng air-unit preset - ConnectionWorkspace's
 // connect() special-cases this to fire 'connect_rf_bridge' instead of a
 // plain 'connect_telemetry', since the RF link needs the split-port bridge
 // in app/telemetry/rf_bridge.py rather than a direct MAVSDK udpin:// connect.
@@ -79,7 +79,7 @@ const DOMAIN_META: { id: SectionId; label: string; icon: React.ElementType; desc
     { id: 'power',      label: 'Power',       icon: Battery,           desc: 'Battery pack configuration and failsafe thresholds' },
     { id: 'safety',     label: 'Safety',      icon: Shield,            desc: 'Failsafes, terrain following, and geofence limits' },
     { id: 'flight',     label: 'Flight',      icon: Navigation,        desc: 'Altitude defaults and return-to-home behaviour' },
-    { id: 'parameters', label: 'Advanced',     icon: Terminal,          desc: '50+ PX4 parameters across 8 subsystems — search, browse, and edit' },
+    { id: 'parameters', label: 'Advanced',     icon: Terminal,          desc: '50+ PX4 parameters across 8 subsystems - search, browse, and edit' },
 ]
 
 const PARAM_CATS = [
@@ -98,7 +98,7 @@ const PARAMS_DB: Param[] = [
     { key: 'SYS_AUTOSTART',    name: 'Airframe Preset ID',       desc: 'PX4 airframe preset loaded at boot. Changing this resets the entire mixer and output mapping to a new vehicle type.',  cat: 'system',    type: 'int',   val: 4302, def: 4001, min: 0,    max: 99999, step: 1,    expert: true,  danger: true },
     { key: 'MAV_SYS_ID',       name: 'MAVLink System ID',        desc: 'Unique identifier for this vehicle on the MAVLink network. Only change if running multiple drones on the same link.',     cat: 'system',    type: 'int',   val: 1,    def: 1,    min: 1,    max: 255,   step: 1 },
     { key: 'COM_ARM_EKF_POS',  name: 'EKF Position Arming Check',desc: 'Prevent arming if the EKF position estimate quality is below threshold. Strongly recommended to keep on.',              cat: 'system',    type: 'bool',  val: 1,    def: 1 },
-    { key: 'CBRK_IO_SAFETY',   name: 'Skip Safety Switch',       desc: 'Bypass the hardware safety button. Set to 22027 to skip it entirely — useful for bench testing without a physical switch.', cat: 'system', type: 'int',   val: 0,    def: 0,    min: 0,    max: 22027, step: 22027, expert: true, danger: true },
+    { key: 'CBRK_IO_SAFETY',   name: 'Skip Safety Switch',       desc: 'Bypass the hardware safety button. Set to 22027 to skip it entirely - useful for bench testing without a physical switch.', cat: 'system', type: 'int',   val: 0,    def: 0,    min: 0,    max: 22027, step: 22027, expert: true, danger: true },
     { key: 'SDLOG_MODE',        name: 'Log Recording Mode',       desc: 'When the flight log starts and stops recording to the SD card.',                                                           cat: 'system',    type: 'enum',  val: 1,    def: 1,    opts: [{ v: -1, l: 'Disabled' }, { v: 0, l: 'From boot' }, { v: 1, l: 'Arm → Disarm' }, { v: 2, l: 'Arm → Shutdown' }] },
     { key: 'SYS_MC_EST_GROUP', name: 'State Estimator',          desc: 'Which position and attitude estimator to use. EKF2 is recommended for all modern setups.',                                cat: 'system',    type: 'enum',  val: 2,    def: 2,    opts: [{ v: 1, l: 'Q-estimator (legacy)' }, { v: 2, l: 'EKF2 (recommended)' }], expert: true },
     { key: 'COM_RC_LOSS_T',    name: 'RC Signal Timeout',        desc: 'How many seconds after RC signal drops before the RC loss failsafe kicks in. Lower = faster response.',                   cat: 'system',    type: 'float', val: 0.5,  def: 0.5,  min: 0,    max: 35,    step: 0.1,  unit: 's' },
@@ -124,7 +124,7 @@ const PARAMS_DB: Param[] = [
     { key: 'MPC_MAN_TILT_MAX', name: 'Manual Max Tilt',          desc: 'Max lean angle allowed when flying manually in Stabilize or Altitude Hold mode.',                                          cat: 'attitude',  type: 'float', val: 35.0, def: 35.0, min: 5,    max: 70,    step: 1,    unit: '°' },
 
     // BATTERY
-    { key: 'BAT_N_CELLS',      name: 'Battery Cell Count (S)',   desc: 'Number of lithium cells wired in series. Critical — a wrong value causes incorrect voltage readings and false battery warnings.', cat: 'battery', type: 'int',  val: 4,    def: 4,    min: 1,    max: 14,    step: 1,    unit: 'S',   danger: true },
+    { key: 'BAT_N_CELLS',      name: 'Battery Cell Count (S)',   desc: 'Number of lithium cells wired in series. Critical - a wrong value causes incorrect voltage readings and false battery warnings.', cat: 'battery', type: 'int',  val: 4,    def: 4,    min: 1,    max: 14,    step: 1,    unit: 'S',   danger: true },
     { key: 'BAT_CAPACITY',     name: 'Pack Capacity',            desc: 'Total energy in the battery. Used to estimate remaining flight time and power consumed.',                                   cat: 'battery',   type: 'float', val: 5000, def: 5000, min: 100,  max: 100000,step: 100,  unit: 'mAh' },
     { key: 'BAT_LOW_THR',      name: 'Low Battery Warning',      desc: 'Percentage at which you get a low battery alert. Plan your return flight to land before this level.',                       cat: 'battery',   type: 'int',   val: 15,   def: 15,   min: 1,    max: 40,    step: 1,    unit: '%' },
     { key: 'BAT_CRIT_THR',    name: 'Critical Battery Level',   desc: 'Percentage at which the critical failsafe action triggers (usually auto-RTL).',                                            cat: 'battery',   type: 'int',   val: 7,    def: 7,    min: 1,    max: 30,    step: 1,    unit: '%' },
@@ -144,7 +144,7 @@ const PARAMS_DB: Param[] = [
     // NAVIGATION
     { key: 'NAV_ACC_RAD',     name: 'Waypoint Acceptance Radius',desc: 'How close the drone must get to a waypoint before it counts as reached and moves to the next one.',                        cat: 'nav',       type: 'float', val: 10.0, def: 10.0, min: 0.05, max: 200,   step: 0.5,  unit: 'm' },
     { key: 'NAV_LOITER_RAD',  name: 'Loiter Circle Radius',     desc: 'Radius of the holding pattern during loiter. Mainly relevant for fixed-wing. Multirotor loiters in place.',               cat: 'nav',       type: 'float', val: 50.0, def: 50.0, min: 10,   max: 1000,  step: 5,    unit: 'm' },
-    { key: 'MIS_DIST_1WP',    name: 'Max First Waypoint Dist',  desc: 'Safety check — prevents uploading a mission whose first waypoint is further than this from the home position.',            cat: 'nav',       type: 'float', val: 900.0,def: 900.0,min: 0,    max: 10000, step: 50,   unit: 'm' },
+    { key: 'MIS_DIST_1WP',    name: 'Max First Waypoint Dist',  desc: 'Safety check - prevents uploading a mission whose first waypoint is further than this from the home position.',            cat: 'nav',       type: 'float', val: 900.0,def: 900.0,min: 0,    max: 10000, step: 50,   unit: 'm' },
     { key: 'MIS_TAKEOFF_ALT', name: 'Mission Takeoff Altitude', desc: 'Default height the drone climbs to at mission start if no explicit takeoff waypoint is in the plan.',                      cat: 'nav',       type: 'float', val: 10.0, def: 10.0, min: 0,    max: 100,   step: 1,    unit: 'm' },
     { key: 'RTL_RETURN_ALT',  name: 'RTL Cruise Altitude',      desc: 'Altitude the drone flies at when returning home during RTL. Must clear all obstacles along the return path.',              cat: 'nav',       type: 'float', val: 60.0, def: 60.0, min: 0,    max: 150,   step: 5,    unit: 'm' },
     { key: 'RTL_LAND_DELAY',  name: 'RTL Hover Before Landing', desc: 'Seconds the drone hovers above home before beginning its final descent. -1 = no hover, land immediately.',                 cat: 'nav',       type: 'float', val: -1.0, def: -1.0, min: -1,   max: 300,   step: 1,    unit: 's' },
@@ -166,7 +166,7 @@ const PARAMS_DB: Param[] = [
     { key: 'MOT_SPIN_MIN',    name: 'Minimum Motor Spin',       desc: 'Lowest throttle level that keeps all motors spinning. Prevents unexpected motor stalls near zero throttle.',              cat: 'actuators', type: 'float', val: 0.12, def: 0.12, min: 0,    max: 0.4,   step: 0.01, expert: true },
     { key: 'THR_MDL_FAC',     name: 'Thrust Curve Factor',      desc: 'Linearises the throttle→thrust relationship. 0 = linear (default). Tune for your motor + propeller combination.',         cat: 'actuators', type: 'float', val: 0.0,  def: 0.0,  min: 0,    max: 1,     step: 0.01, expert: true },
     { key: 'MOT_ORDERING',    name: 'Motor Numbering Convention',desc: 'Motor numbering scheme. Must match what is printed or labeled on your flight controller board.',                           cat: 'actuators', type: 'enum',  val: 0,    def: 0,    opts: [{ v: 0, l: 'PX4 standard' }, { v: 1, l: 'Betaflight / CleanFlight' }], danger: true },
-    { key: 'CA_ROTOR_COUNT',  name: 'Number of Rotors',         desc: 'Physical rotor count on the vehicle. Must match the airframe geometry — a mismatch will prevent correct mixing.',          cat: 'actuators', type: 'int',   val: 4,    def: 4,    min: 1,    max: 12,    step: 1,     danger: true },
+    { key: 'CA_ROTOR_COUNT',  name: 'Number of Rotors',         desc: 'Physical rotor count on the vehicle. Must match the airframe geometry - a mismatch will prevent correct mixing.',          cat: 'actuators', type: 'int',   val: 4,    def: 4,    min: 1,    max: 12,    step: 1,     danger: true },
 ]
 
 // ── Base SVG ──────────────────────────────────────────────────────────────────
@@ -229,7 +229,7 @@ function StatusRing({ pct, color, size = 44 }: { pct: number; color: string; siz
 
 function NetworkTopology({ connected, address }: { connected: boolean; address: string }) {
     const proto = address.split('://')[0]?.toUpperCase() ?? 'UDP'
-    const host  = address.split('://')[1]?.split(':')[0] ?? '—'
+    const host  = address.split('://')[1]?.split(':')[0] ?? '-'
     const lc = connected ? '#22d3ee' : 'rgba(75,85,99,0.6)'
     const lc2 = connected ? '#4ade80' : 'rgba(75,85,99,0.6)'
     return (
@@ -435,7 +435,7 @@ function LockedNote({ text }: { text: string }) {
 
 // ── Layout shells ─────────────────────────────────────────────────────────────
 
-// A dark instrument panel block (no card border — feels embedded rather than floating)
+// A dark instrument panel block (no card border - feels embedded rather than floating)
 function Panel({ title, children, accent }: { title?: string; children: React.ReactNode; accent?: string }) {
     return (
         <div style={{ borderRadius: 10, background: 'hsl(var(--app-surface))', border: `1px solid ${accent ? `${accent}22` : 'hsl(var(--app-border))'}`, overflow: 'hidden' }}>
@@ -571,7 +571,7 @@ function SectionHead({ meta, pct }: { meta: typeof DOMAIN_META[0]; pct: number }
 //
 // WHAT A LINK CAN CARRY IS NOT KNOWABLE FROM HERE, SO IT IS MEASURED.
 //
-// A 3DR/SiK radio's ceiling is set by AIR_SPEED and ECC — parameters on the
+// A 3DR/SiK radio's ceiling is set by AIR_SPEED and ECC - parameters on the
 // RADIO, not on the autopilot, and invisible to this application. The serial
 // baud printed on the box (57600) is the wire between the computer and the
 // radio and says nothing about the air link, which is half-duplex and shared
@@ -585,7 +585,7 @@ function rateTone(measured: number, asked: number): string {
     if (!asked) return '#9ca3af'
     const ratio = measured / asked
     if (ratio >= 0.85) return '#4ade80'      // the link is keeping up
-    if (ratio >= 0.55) return '#fbbf24'      // partially — near the ceiling
+    if (ratio >= 0.55) return '#fbbf24'      // partially - near the ceiling
     return '#f87171'                          // asking for far more than arrives
 }
 
@@ -614,7 +614,7 @@ function LinkThroughput() {
             })}
             <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)', lineHeight: 1.6, margin: '4px 0 0' }}>
                 Green means the link is delivering what was asked. If it stays
-                amber or red, the radio is at its ceiling — raise AIR_SPEED or
+                amber or red, the radio is at its ceiling - raise AIR_SPEED or
                 turn ECC off on the radio, not here.
             </p>
         </Panel>
@@ -687,11 +687,11 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                     )}
                     {/* Shown while CONNECTED too, read-only. The uplink host
                         is the one setting whose wrong value is invisible in
-                        operation — telemetry looks perfect and commands vanish
-                        — so "what is it actually using?" has to be answerable
+                        operation - telemetry looks perfect and commands vanish
+                        - so "what is it actually using?" has to be answerable
                         without disconnecting first. */}
                     {address === RF_BRIDGE_ADDR && (
-                        <Field label="RF BRIDGE PORTS" tip="UDP ports the ground station's wfb_rx/wfb_tx use — see communication/start-gs.sh. The uplink HOST matters once the decoder is not on this machine: downlink arrives from anywhere (we bind 0.0.0.0), but the uplink is sent to a fixed listener, so leaving it on 127.0.0.1 with an off-box decoder gives perfect telemetry and no commands.">
+                        <Field label="RF BRIDGE PORTS" tip="UDP ports the ground station's wfb_rx/wfb_tx use - see communication/start-gs.sh. The uplink HOST matters once the decoder is not on this machine: downlink arrives from anywhere (we bind 0.0.0.0), but the uplink is sent to a fixed listener, so leaving it on 127.0.0.1 with an off-box decoder gives perfect telemetry and no commands.">
                             <div style={{ display: 'flex', gap: 6 }}>
                                 <div style={{ flex: 1 }}>
                                     <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>Downlink (video/mavlink dn)</span>
@@ -735,7 +735,7 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                                 <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', display: 'block', marginTop: 4, lineHeight: 1.5 }}>
                                     Commands go to <b>{uplinkHost}:{uplinkPort}</b>.
                                     Use 127.0.0.1 only if the RF decoder runs on
-                                    this machine — with the decoder on its own
+                                    this machine - with the decoder on its own
                                     board, telemetry still reads correctly while
                                     every command is dropped into local loopback.
                                 </span>
@@ -756,13 +756,13 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                         <Panel title="LIVE TELEMETRY" accent="#4ade80">
                             {[
-                                { k: 'Flight Mode', v: fm?.mode ?? '—', hi: !!fm?.is_armed },
+                                { k: 'Flight Mode', v: fm?.mode ?? '-', hi: !!fm?.is_armed },
                                 { k: 'Armed',       v: fm?.is_armed ? 'YES' : 'no' },
-                                { k: 'Battery',     v: bat ? `${bat.remaining_percent?.toFixed(0)}%  ·  ${bat.voltage_v?.toFixed(2)}V` : '—', hi: (bat?.remaining_percent ?? 100) < 20 },
-                                { k: 'Altitude AGL',v: pos ? `${pos.relative_altitude_m?.toFixed(2)} m` : '—' },
-                                { k: 'Lat / Lon',   v: pos ? `${pos.latitude_deg?.toFixed(5)}° / ${pos.longitude_deg?.toFixed(5)}°` : '—' },
-                                { k: 'Roll / Pitch',v: att ? `${att.roll_deg?.toFixed(1)}° / ${att.pitch_deg?.toFixed(1)}°` : '—' },
-                                { k: 'Heading',     v: telemetry?.heading_deg != null ? `${telemetry.heading_deg.toFixed(1)}°` : '—' },
+                                { k: 'Battery',     v: bat ? `${bat.remaining_percent?.toFixed(0)}%  ·  ${bat.voltage_v?.toFixed(2)}V` : '-', hi: (bat?.remaining_percent ?? 100) < 20 },
+                                { k: 'Altitude AGL',v: pos ? `${pos.relative_altitude_m?.toFixed(2)} m` : '-' },
+                                { k: 'Lat / Lon',   v: pos ? `${pos.latitude_deg?.toFixed(5)}° / ${pos.longitude_deg?.toFixed(5)}°` : '-' },
+                                { k: 'Roll / Pitch',v: att ? `${att.roll_deg?.toFixed(1)}° / ${att.pitch_deg?.toFixed(1)}°` : '-' },
+                                { k: 'Heading',     v: telemetry?.heading_deg != null ? `${telemetry.heading_deg.toFixed(1)}°` : '-' },
                             ].map(r => (
                                 <div key={r.k} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                                     <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)' }}>{r.k}</span>
@@ -845,8 +845,8 @@ function VehicleWorkspace({ v, onUpdate }: { v: VehicleProfile; onUpdate: (p: Pa
 //
 // This used to be five disabled buttons under "Status: not calibrated" and a
 // note saying a wizard needed parameter write access. The note was wrong about
-// the mechanism — calibration is a COMMAND (MAV_CMD_PREFLIGHT_CALIBRATION),
-// not a parameter write, and MAVSDK has had a plugin for it all along — and
+// the mechanism - calibration is a COMMAND (MAV_CMD_PREFLIGHT_CALIBRATION),
+// not a parameter write, and MAVSDK has had a plugin for it all along - and
 // the hardcoded status was worse than no status: an aircraft that had been
 // calibrated ten minutes earlier still read "not calibrated".
 //
@@ -864,7 +864,7 @@ function VehicleWorkspace({ v, onUpdate }: { v: VehicleProfile; onUpdate: (p: Pa
 // had to read each row to know whether it was a fact or a button.
 //
 // EVERY VERDICT COMES FROM THE AUTOPILOT. "Calibrated" is PX4's health flag
-// (the same bits QGC shows), never inferred from the data — the old page
+// (the same bits QGC shows), never inferred from the data - the old page
 // declared the compass broken whenever the aircraft happened to face magnetic
 // north, because heading !== 0 was the "check".
 
@@ -954,7 +954,7 @@ function SensorCard({ icon, title, status, statusText, value, sub }: {
 }
 
 /** Which PX4 health flag answers "is this one calibrated". Level and gimbal
- *  have no flag — PX4 does not report a verdict for them, and inventing one
+ *  have no flag - PX4 does not report a verdict for them, and inventing one
  *  is exactly the kind of guess this page no longer makes. */
 const CAL_HEALTH_FLAG: Record<string, 'gyro_cal_ok' | 'accel_cal_ok' | 'mag_cal_ok'> = {
     gyro: 'gyro_cal_ok', accel: 'accel_cal_ok', mag: 'mag_cal_ok',
@@ -965,7 +965,7 @@ const CAL_ICON: Record<string, React.ElementType> = {
     level: AlignCenterHorizontal, gimbal: Camera,
 }
 
-/** One calibration on offer. The whole row is compact — the what-and-why
+/** One calibration on offer. The whole row is compact - the what-and-why
  *  text lives behind the info dot, because five always-open paragraphs made
  *  the list taller than the screen and nobody re-reads them per flight. The
  *  border is the state: amber while running or owed, green once the
@@ -1051,13 +1051,13 @@ function CalCard({ sensor, verdict, connected, busy, isActive, phase, progress, 
 // wrong. Applied at BOOT, hence the reboot prompt on change.
 //
 // THREE AXES, THREE DROPDOWNS. PX4 stores one enum (MAV_SENSOR_ORIENTATION),
-// but nobody mounts a board in enum values — they mount it rolled, pitched
+// but nobody mounts a board in enum values - they mount it rolled, pitched
 // or yawed. So the operator picks Roll / Pitch / Yaw and the enum is looked
 // up; a combination PX4 has no value for says so instead of writing garbage.
 
 const MOUNT_PARAMS = [
     { key: 'SENS_BOARD_ROT', label: 'Autopilot board', tip: 'How the flight controller is physically rotated relative to the airframe. All zeros = its arrow points at the nose, component side up.' },
-    { key: 'CAL_MAG0_ROT', label: 'External compass', tip: 'How the compass module is rotated relative to the airframe. AUTO lets PX4 detect it during compass calibration — the right choice unless detection has failed.' },
+    { key: 'CAL_MAG0_ROT', label: 'External compass', tip: 'How the compass module is rotated relative to the airframe. AUTO lets PX4 detect it during compass calibration - the right choice unless detection has failed.' },
 ] as const
 
 /** Every rotation MAV_SENSOR_ORIENTATION defines (except #38, a device-
@@ -1103,11 +1103,11 @@ function rotationLabel(v: number | null): string {
 
 function MountOrientation({ connected }: { connected: boolean }) {
     // null = not read yet. Values are the aircraft's ACTUAL settings,
-    // fetched one param at a time — not the 30 s everything-download.
+    // fetched one param at a time - not the 30 s everything-download.
     const [values, setValues] = useState<Record<string, number | null>>({ SENS_BOARD_ROT: null, CAL_MAG0_ROT: null })
     // What the dropdowns show while a combination is being assembled. A
     // half-changed pick (roll set, yaw not yet) may be a combination PX4
-    // has no value for — that must sit visibly un-saved, not be written.
+    // has no value for - that must sit visibly un-saved, not be written.
     const [drafts, setDrafts] = useState<Record<string, Rpy | null>>({ SENS_BOARD_ROT: null, CAL_MAG0_ROT: null })
     const [rebootNeeded, setRebootNeeded] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -1152,7 +1152,7 @@ function MountOrientation({ connected }: { connected: boolean }) {
             // Shown but not written: the operator can finish assembling a
             // valid combination, or read why this one cannot exist.
             setDrafts(d => ({ ...d, [key]: next }))
-            setError(`PX4 defines no rotation for Roll ${next.r}° · Pitch ${next.p}° · Yaw ${next.y}° — adjust one axis`)
+            setError(`PX4 defines no rotation for Roll ${next.r}° · Pitch ${next.p}° · Yaw ${next.y}° - adjust one axis`)
         }
     }
 
@@ -1184,7 +1184,7 @@ function MountOrientation({ connected }: { connected: boolean }) {
         }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 11.5, fontWeight: 600, color: 'hsl(var(--app-text))' }}>Mount orientation</span>
-                <Tip text="Set these BEFORE calibrating: offsets computed with a wrong mount rotation pass the calibration and then fly wrong. Applied at boot — changing either needs a reboot." />
+                <Tip text="Set these BEFORE calibrating: offsets computed with a wrong mount rotation pass the calibration and then fly wrong. Applied at boot - changing either needs a reboot." />
             </div>
             {MOUNT_PARAMS.map(pm => {
                 const v = values[pm.key]
@@ -1199,7 +1199,7 @@ function MountOrientation({ connected }: { connected: boolean }) {
                         <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 9.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', letterSpacing: '0.06em' }}>
                             {pm.label.toUpperCase()} <Tip text={pm.tip} />
                             <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, color: known ? '#22d3ee' : 'hsl(var(--app-text-muted))' }}>
-                                {connected ? (known ? rotationLabel(v) : 'reading…') : '—'}
+                                {connected ? (known ? rotationLabel(v) : 'reading…') : '-'}
                             </span>
                         </span>
                         <div style={{ display: 'flex', gap: 7, alignItems: 'flex-end' }}>
@@ -1238,7 +1238,7 @@ function MountOrientation({ connected }: { connected: boolean }) {
             {rebootNeeded && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <p style={{ fontSize: 10, fontFamily: 'monospace', color: '#fbbf24', margin: 0, flex: 1, lineHeight: 1.5 }}>
-                        Saved — applied at boot. Reboot the FC, then recalibrate.
+                        Saved - applied at boot. Reboot the FC, then recalibrate.
                     </p>
                     <button
                         onClick={() => { getSocket().emit('drone_action', { action: 'reboot' }); setRebootNeeded(false) }}
@@ -1247,7 +1247,7 @@ function MountOrientation({ connected }: { connected: boolean }) {
                             border: '1px solid rgba(251,191,36,0.5)', color: '#fbbf24',
                             fontSize: 10.5, fontFamily: 'monospace', fontWeight: 700, cursor: 'pointer',
                         }}
-                        title="Restarts the flight controller. Only works while disarmed — the link will drop and reconnect."
+                        title="Restarts the flight controller. Only works while disarmed - the link will drop and reconnect."
                     >
                         REBOOT FC
                     </button>
@@ -1264,7 +1264,7 @@ function SensorsWorkspace() {
     const connected = telStatus === 'connected'
 
     // COMPLETED THIS SESSION. PX4 keeps no health flag for level horizon or
-    // the gimbal, so their cards had no way to ever turn green — a level
+    // the gimbal, so their cards had no way to ever turn green - a level
     // calibration finished successfully and the card sat there unchanged,
     // which reads as "it didn't work". The plugin's own success verdict is
     // just as authoritative as a health flag, so a run that finished OK
@@ -1278,7 +1278,7 @@ function SensorsWorkspace() {
     }, [cal.phase, cal.sensor])
     useEffect(() => { if (!connected) setDoneSession({}) }, [connected])
 
-    // PX4's own health flags, or null until the first health message — the
+    // PX4's own health flags, or null until the first health message - the
     // difference between "the autopilot says not calibrated" and "nobody has
     // said anything yet", which must not paint the same colour.
     const health = connected && telemetry?.health?.received ? telemetry.health : null
@@ -1289,7 +1289,7 @@ function SensorsWorkspace() {
 
     const gpsStatus: SensorStatus = !connected ? 'off' : fix >= 3 ? 'ok' : 'warn'
     // A run that just finished OK counts as calibrated even while the health
-    // flag is still the pre-calibration one — the flag catches up within a
+    // flag is still the pre-calibration one - the flag catches up within a
     // second, and the status card disagreeing with the freshly green
     // calibration card below it reads as a bug.
     const imuStatus: SensorStatus = !connected ? 'off'
@@ -1298,7 +1298,7 @@ function SensorsWorkspace() {
     const magStatus: SensorStatus = !connected ? 'off'
         : health ? (health.mag_cal_ok || doneSession.mag ? 'ok' : 'warn')
         : 'ok'
-    // PX4 keeps no baro verdict — it re-zeroes at boot. "Reporting" is the
+    // PX4 keeps no baro verdict - it re-zeroes at boot. "Reporting" is the
     // honest claim, and the live altitude beside it is the actual check.
     const baroStatus: SensorStatus = connected ? 'ok' : 'off'
 
@@ -1322,7 +1322,7 @@ function SensorsWorkspace() {
                         icon={<Satellite size={14} />} title="GPS"
                         status={gpsStatus}
                         statusText={!connected ? 'OFF' : GPS_FIX_LABEL[fix] ?? `Fix ${fix}`}
-                        value={connected ? `${sats} satellites` : '—'}
+                        value={connected ? `${sats} satellites` : '-'}
                         sub={connected && telemetry?.position && fix >= 2
                             ? `${telemetry.position.latitude_deg?.toFixed(5)}°, ${telemetry.position.longitude_deg?.toFixed(5)}°`
                             : 'Global position'}
@@ -1333,7 +1333,7 @@ function SensorsWorkspace() {
                         statusText={!connected ? 'OFF' : imuStatus === 'ok' ? 'OK' : health ? 'NEEDS CAL' : 'NO DATA'}
                         value={connected && att
                             ? `R ${att.roll_deg?.toFixed(1)}°  P ${att.pitch_deg?.toFixed(1)}°`
-                            : '—'}
+                            : '-'}
                         sub="Accelerometer + gyroscope"
                     />
                     <SensorCard
@@ -1342,7 +1342,7 @@ function SensorsWorkspace() {
                         statusText={!connected ? 'OFF' : magStatus === 'ok' ? 'OK' : 'NEEDS CAL'}
                         value={connected && telemetry?.heading_deg != null
                             ? `${telemetry.heading_deg.toFixed(0)}° heading`
-                            : '—'}
+                            : '-'}
                         sub="Magnetic heading"
                     />
                     <SensorCard
@@ -1351,7 +1351,7 @@ function SensorsWorkspace() {
                         statusText={connected ? 'REPORTING' : 'OFF'}
                         value={connected && telemetry?.position
                             ? `${(telemetry.position.relative_altitude_m ?? 0).toFixed(1)} m AGL`
-                            : '—'}
+                            : '-'}
                         sub="Pressure altitude, zeroed at boot"
                     />
                 </div>
@@ -1359,7 +1359,7 @@ function SensorsWorkspace() {
                 <SectionHeader
                     title="CALIBRATION"
                     hint={connected ? 'watch the model on the right' : 'connect to enable'}
-                    right={<Tip text="No barometer or GPS calibration exists in PX4: the barometer is zeroed at every boot and the GNSS receiver calibrates itself — the live readout above IS the check. Airspeed applies to fixed-wing only." />}
+                    right={<Tip text="No barometer or GPS calibration exists in PX4: the barometer is zeroed at every boot and the GNSS receiver calibrates itself - the live readout above IS the check. Airspeed applies to fixed-wing only." />}
                 />
                 <MountOrientation connected={connected} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1391,9 +1391,9 @@ function SensorsWorkspace() {
 
             {/* ONE VIEW, NOT TWO. Starting a calibration used to replace the
                 page, so the options vanished the moment one was chosen. The
-                aircraft sits here permanently — following live attitude even
+                aircraft sits here permanently - following live attitude even
                 when nothing is running, which is a useful instrument in its
-                own right — while the cards on the left carry the choices. */}
+                own right - while the cards on the left carry the choices. */}
             <CalibrationStage
                 state={cal}
                 onCancel={cancel}
@@ -1411,12 +1411,12 @@ function SensorsWorkspace() {
 //
 // QGC's Radio setup, in our shape: everything the transmitter does to the
 // aircraft is decided by PX4 parameters, and every control here reads and
-// writes THOSE — nothing on this page is app-local preference dressed up as
+// writes THOSE - nothing on this page is app-local preference dressed up as
 // configuration (the previous version stored a mode list in localStorage
 // that no aircraft ever saw).
 //
 // Live channel data comes from the backend's RC monitor, which listens to
-// the raw MAVLink stream — MAVSDK itself does not expose channels. That
+// the raw MAVLink stream - MAVSDK itself does not expose channels. That
 // feed exists on UDP links (SITL, the RF bridge); a USB-serial FC cannot
 // share its port, and the page SAYS so instead of showing dead bars.
 
@@ -1432,7 +1432,7 @@ const FLTMODE_OPTS: { v: number; l: string }[] = [
 
 const SWITCH_PARAMS = [
     { key: 'RC_MAP_ARM_SW', label: 'Arm switch', tip: 'Arms and disarms on a switch instead of the stick gesture. 0 = unassigned.' },
-    { key: 'RC_MAP_KILL_SW', label: 'Kill switch', tip: 'Immediately stops the motors. Assign this one — it is the hardware answer to a flyaway.' },
+    { key: 'RC_MAP_KILL_SW', label: 'Kill switch', tip: 'Immediately stops the motors. Assign this one - it is the hardware answer to a flyaway.' },
     { key: 'RC_MAP_RETURN_SW', label: 'Return switch', tip: 'Triggers Return-to-Launch.' },
     { key: 'RC_MAP_OFFB_SW', label: 'Offboard switch', tip: 'Hands control to the companion app (this one) and takes it back.' },
     { key: 'RC_MAP_LOITER_SW', label: 'Hold switch', tip: 'Parks the aircraft where it is.' },
@@ -1455,6 +1455,23 @@ const STICK_LAYOUT: Record<string, { left: { x: string; y: string }; right: { x:
 }
 
 const AXIS_SHORT: Record<string, string> = { roll: 'ROLL', pitch: 'PITCH', yaw: 'YAW', throttle: 'THR' }
+
+/** Which mode slots a physical switch can actually reach. PX4 splits the
+ *  channel into six equal bands; a 3-position switch lands in bands 1, 4
+ *  and 6, a 2-position in 1 and 6. Slots a switch cannot reach are shown
+ *  dimmed instead of silently accepting a mode that will never engage. */
+const SWITCH_REACH: Record<string, Record<number, string>> = {
+    '2': { 1: 'LOW', 6: 'HIGH' },
+    '3': { 1: 'LOW', 4: 'MID', 6: 'HIGH' },
+    '6': { 1: 'POS 1', 2: 'POS 2', 3: 'POS 3', 4: 'POS 4', 5: 'POS 5', 6: 'POS 6' },
+}
+
+/** Which slot a channel value selects: PX4's six-band split. */
+function slotForValue(v: number): number {
+    if (v <= 0) return 0
+    const frac = Math.max(0, Math.min(1, (v - 1000) / 1000))
+    return Math.min(Math.floor(frac * 6) + 1, 6)
+}
 
 type WizPhase = 'idle' | 'capturing' | 'review' | 'writing' | 'done'
 
@@ -1510,7 +1527,7 @@ function RadioWorkspace() {
         socket.on('rc_channels', onChans)
         socket.on('rc_monitor_status', onStatus)
         socket.emit('start_rc_monitor')
-        // The "live" light must go OUT when frames stop — poll the recency.
+        // The "live" light must go OUT when frames stop - poll the recency.
         const t = setInterval(() => forceTick(x => x + 1), 1000)
         return () => { socket.off('rc_channels', onChans); socket.off('rc_monitor_status', onStatus); clearInterval(t) }
     }, [])
@@ -1541,7 +1558,7 @@ function RadioWorkspace() {
         setWiz('capturing')
     }
     const finishCapture = () => {
-        // The position everything is LEFT in becomes the trim — which is why
+        // The position everything is LEFT in becomes the trim - which is why
         // the instruction ends "…finish centred, throttle down".
         setTrims([...channels])
         setWiz('review')
@@ -1572,6 +1589,7 @@ function RadioWorkspace() {
 
     // ── Stick positions for the transmitter drawing ──────────────────────
     const [visualMode, setVisualMode] = useState<string>(() => ls('hyrak-rc-visual-mode', '2'))
+    const [switchType, setSwitchType] = useState<string>(() => ls('hyrak-rc-switch-type', '3'))
     const layout = STICK_LAYOUT[visualMode] ?? STICK_LAYOUT['2']
     const axisChannel = (axis: string): number => {
         const key = axis === 'roll' ? 'RC_MAP_ROLL' : axis === 'pitch' ? 'RC_MAP_PITCH'
@@ -1587,11 +1605,14 @@ function RadioWorkspace() {
     }
 
     const modeChannel = params['RC_MAP_FLTMODE'] ?? null
+    const liveModeValue = live && (modeChannel ?? 0) >= 1 ? channels[(modeChannel ?? 1) - 1] ?? 0 : 0
+    const activeSlot = slotForValue(liveModeValue)
+    const reach = SWITCH_REACH[switchType] ?? SWITCH_REACH['3']
 
     return (
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 1fr) minmax(500px, 1.35fr)', gap: 14, alignItems: 'start' }}>
-            {/* LEFT — what the transmitter is WIRED to do */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {/* LEFT - what the transmitter is WIRED to do */}
+            <div className="rc-rise" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <SectionHeader
                     title="RC LINK"
                     hint="as the autopilot sees it"
@@ -1607,9 +1628,9 @@ function RadioWorkspace() {
                     background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
                 }}>
                     {live
-                        ? <>Live channel data is flowing — the transmitter drawing and the bars on the right are your real sticks.</>
+                        ? <>Live channel data is flowing - the transmitter drawing and the bars on the right are your real sticks.</>
                         : monitor?.listening
-                            ? <>Listening for raw RC channels on udp/{monitor.port} — nothing arriving. A USB-serial FC cannot share its port; connect via UDP (SITL or the RF air unit) for live sticks and calibration. Mode and switch assignment below work on any link.</>
+                            ? <>Listening for raw RC channels on udp/{monitor.port} - nothing arriving. A USB-serial FC cannot share its port; connect via UDP (SITL or the RF air unit) for live sticks and calibration. Mode and switch assignment below work on any link.</>
                             : <>The backend could not open the RC channel listener. Mode and switch assignment below still work.</>}
                 </div>
 
@@ -1624,38 +1645,71 @@ function RadioWorkspace() {
                 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ fontSize: 11, fontWeight: 600, color: 'hsl(var(--app-text))', flex: 1 }}>Mode switch channel</span>
-                        <Tip text="The transmitter channel your mode switch sends on (RC_MAP_FLTMODE). A 3-position switch reaches slots 1, 4 and 6; a 6-position reaches all." />
+                        <Tip text="The transmitter channel your mode switch sends on (RC_MAP_FLTMODE)." />
                         <select
                             value={modeChannel ?? ''}
                             disabled={!connected || modeChannel === null}
                             onChange={e => writeParam('RC_MAP_FLTMODE', Number(e.target.value))}
                             style={selStyle(connected && modeChannel !== null)}
                         >
-                            {modeChannel === null && <option value="">{connected ? '…' : '—'}</option>}
+                            {modeChannel === null && <option value="">{connected ? '…' : '-'}</option>}
                             <option value={0}>Unassigned</option>
                             {Array.from({ length: 18 }, (_, i) => <option key={i + 1} value={i + 1}>CH{i + 1}</option>)}
                         </select>
                     </div>
+                    {/* WHICH SLOTS YOUR SWITCH CAN REACH. PX4 has six slots
+                        but a 3-position switch only ever lands in 1, 4 and 6;
+                        assigning a mode to slot 2 on one is a setting that
+                        can never engage. Pick the switch type and the
+                        unreachable slots dim; with live data the slot your
+                        switch is on RIGHT NOW is ringed. */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontSize: 9.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', flex: 1, letterSpacing: '0.06em' }}>SWITCH TYPE</span>
+                        {['2', '3', '6'].map(t => (
+                            <button key={t} onClick={() => { setSwitchType(t); lsSet('hyrak-rc-switch-type', t) }} style={{
+                                padding: '3px 9px', borderRadius: 6,
+                                background: switchType === t ? 'rgba(34,211,238,0.14)' : 'transparent',
+                                border: `1px solid ${switchType === t ? 'rgba(34,211,238,0.6)' : 'hsl(var(--app-border))'}`,
+                                color: switchType === t ? '#22d3ee' : 'hsl(var(--app-text-muted))',
+                                fontSize: 9.5, fontFamily: 'monospace', fontWeight: 700, cursor: 'pointer',
+                                transition: 'border-color 150ms, background 150ms, color 150ms',
+                            }}>{t}-POS</button>
+                        ))}
+                    </div>
                     {Array.from({ length: 6 }, (_, i) => {
                         const key = `COM_FLTMODE${i + 1}`
                         const v = params[key]
-                        const enabled = connected && v !== null && v !== undefined && (modeChannel ?? 0) > 0
+                        const posLabel = reach[i + 1]
+                        const reachable = posLabel !== undefined
+                        const isActive = live && activeSlot === i + 1
+                        const enabled = connected && v !== null && v !== undefined && (modeChannel ?? 0) > 0 && reachable
                         return (
-                            <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <div key={key} style={{
+                                display: 'flex', alignItems: 'center', gap: 10,
+                                opacity: reachable ? 1 : 0.38,
+                                transition: 'opacity 250ms',
+                            }}>
                                 <span style={{
                                     width: 24, height: 24, borderRadius: 7, flexShrink: 0,
                                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                                     fontSize: 10, fontFamily: 'monospace', fontWeight: 700,
-                                    background: 'rgba(34,211,238,0.1)', color: '#22d3ee',
-                                    border: '1px solid rgba(34,211,238,0.3)',
+                                    background: isActive ? 'rgba(74,222,128,0.16)' : 'rgba(34,211,238,0.1)',
+                                    color: isActive ? '#4ade80' : '#22d3ee',
+                                    border: `1px solid ${isActive ? '#4ade80' : 'rgba(34,211,238,0.3)'}`,
+                                    boxShadow: isActive ? '0 0 0 3px rgba(74,222,128,0.15)' : 'none',
+                                    transition: 'all 200ms',
                                 }}>{i + 1}</span>
+                                <span style={{ width: 42, fontSize: 8.5, fontFamily: 'monospace', color: isActive ? '#4ade80' : 'hsl(var(--app-text-muted))', letterSpacing: '0.04em', transition: 'color 200ms' }}>
+                                    {reachable ? posLabel : ''}
+                                </span>
                                 <select
                                     value={v ?? ''}
                                     disabled={!enabled}
                                     onChange={e => writeParam(key, Number(e.target.value))}
                                     style={{ ...selStyle(enabled), flex: 1 }}
+                                    title={reachable ? undefined : `A ${switchType}-position switch never lands on this slot`}
                                 >
-                                    {(v === null || v === undefined) && <option value="">{connected ? '…' : '—'}</option>}
+                                    {(v === null || v === undefined) && <option value="">{connected ? '…' : '-'}</option>}
                                     {FLTMODE_OPTS.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
                                 </select>
                             </div>
@@ -1687,8 +1741,8 @@ function RadioWorkspace() {
                                     onChange={e => writeParam(sw.key, Number(e.target.value))}
                                     style={selStyle(enabled)}
                                 >
-                                    {(v === null || v === undefined) && <option value="">{connected ? '…' : '—'}</option>}
-                                    <option value={0}>—</option>
+                                    {(v === null || v === undefined) && <option value="">{connected ? '…' : '-'}</option>}
+                                    <option value={0}>-</option>
                                     {Array.from({ length: 18 }, (_, i) => <option key={i + 1} value={i + 1}>CH{i + 1}</option>)}
                                 </select>
                             </div>
@@ -1700,15 +1754,15 @@ function RadioWorkspace() {
                 )}
             </div>
 
-            {/* RIGHT — the transmitter, drawn */}
+            {/* RIGHT - the transmitter, drawn */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{
-                    padding: 14, borderRadius: 12,
+                <div className="rc-rise" style={{
+                    padding: 14, borderRadius: 12, animationDelay: '60ms',
                     background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
                 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                         <span style={{ fontSize: 11.5, fontWeight: 600, color: 'hsl(var(--app-text))', flex: 1 }}>
-                            Transmitter {live && <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#4ade80', marginLeft: 6 }}>● LIVE</span>}
+                            Transmitter {live && <span className="rc-pulse" style={{ fontSize: 9, fontFamily: 'monospace', color: '#4ade80', marginLeft: 6 }}>● LIVE</span>}
                         </span>
                         <span style={{ fontSize: 9.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>stick layout</span>
                         {['1', '2', '3', '4'].map(m => (
@@ -1726,9 +1780,11 @@ function RadioWorkspace() {
                         axisValue={axisValue}
                         live={live}
                         modeChannel={modeChannel ?? 0}
-                        modeValue={live && (modeChannel ?? 0) >= 1 ? channels[(modeChannel ?? 1) - 1] ?? 0 : 0}
+                        modeValue={liveModeValue}
+                        switchType={switchType}
+                        flightMode={telemetry?.flight_mode?.mode ?? 'NO LINK'}
                     />
-                    {/* Channel bars — only when the data is real. */}
+                    {/* Channel bars - only when the data is real. */}
                     {live && (
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(52px, 1fr))', gap: 6, marginTop: 10 }}>
                             {channels.slice(0, Math.max(chanCount, 8)).map((v, i) => {
@@ -1739,7 +1795,7 @@ function RadioWorkspace() {
                                             <div style={{ height: '100%', width: `${pct}%`, background: '#22d3ee', transition: 'width 80ms linear' }} />
                                         </div>
                                         <span style={{ fontSize: 8.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
-                                            {i + 1} · {v > 0 ? v : '—'}
+                                            {i + 1} · {v > 0 ? v : '-'}
                                         </span>
                                     </div>
                                 )
@@ -1749,20 +1805,29 @@ function RadioWorkspace() {
                 </div>
 
                 {/* Stick calibration */}
-                <div style={{
+                <div className="rc-rise" style={{
                     display: 'flex', flexDirection: 'column', gap: 8,
-                    padding: '12px 14px', borderRadius: 12,
+                    padding: '12px 14px', borderRadius: 12, animationDelay: '120ms',
                     background: wiz === 'capturing' ? 'rgba(251,191,36,0.05)' : 'hsl(var(--app-surface-2))',
-                    border: `1px solid ${wiz === 'capturing' ? 'rgba(251,191,36,0.45)' : 'hsl(var(--app-border))'}`,
+                    border: `1px solid ${wiz === 'capturing' ? 'rgba(251,191,36,0.45)' : 'rgba(34,211,238,0.35)'}`,
+                    boxShadow: wiz === 'capturing' ? 'none' : 'inset 3px 0 0 rgba(34,211,238,0.45)',
+                    transition: 'border-color 250ms',
                 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 11.5, fontWeight: 600, color: 'hsl(var(--app-text))', flex: 1 }}>Stick calibration</span>
+                        <span style={{
+                            width: 26, height: 26, borderRadius: 7,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            background: 'rgba(34,211,238,0.12)', color: '#22d3ee',
+                        }}>
+                            <SlidersHorizontal size={14} />
+                        </span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'hsl(var(--app-text))', flex: 1 }}>Stick calibration</span>
                         <Tip text="Teaches PX4 each channel's real endpoints and centre (RCn_MIN / TRIM / MAX). Channels that move less than 300µs during capture are left untouched, so an idle knob cannot be miscalibrated by accident." />
                     </div>
                     {wiz === 'idle' && (
                         <>
                             <p style={{ fontSize: 10.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: 0, lineHeight: 1.6 }}>
-                                {!live ? 'Needs live channel data — see the RC LINK note on the left.'
+                                {!live ? 'Needs live channel data - see the RC LINK note on the left.'
                                     : armed ? 'Refused while armed.'
                                     : 'Records your sticks\' real endpoints while you move them, then writes the result to the aircraft.'}
                             </p>
@@ -1774,13 +1839,13 @@ function RadioWorkspace() {
                     {wiz === 'capturing' && (
                         <>
                             <p style={{ fontSize: 11, color: 'hsl(var(--app-text))', margin: 0, lineHeight: 1.6, fontWeight: 600 }}>
-                                Move BOTH sticks through their full range — corners included — and flip every switch both ways.
+                                Move BOTH sticks through their full range - corners included - and flip every switch both ways.
                             </p>
                             <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: 0, lineHeight: 1.6 }}>
-                                Finish with everything centred and the throttle all the way DOWN — that final position becomes the trim — then press done.
+                                Finish with everything centred and the throttle all the way DOWN - that final position becomes the trim - then press done.
                             </p>
                             <div style={{ display: 'flex', gap: 8 }}>
-                                <button onClick={finishCapture} style={wizBtn(true, '#4ade80')}>DONE — REVIEW</button>
+                                <button onClick={finishCapture} style={wizBtn(true, '#4ade80')}>DONE - REVIEW</button>
                                 <button onClick={() => setWiz('idle')} style={wizBtn(true, '#f87171')}>CANCEL</button>
                             </div>
                         </>
@@ -1803,7 +1868,7 @@ function RadioWorkspace() {
                             </div>
                             {calRows().length === 0 && (
                                 <p style={{ fontSize: 10, fontFamily: 'monospace', color: '#fbbf24', margin: 0 }}>
-                                    Nothing moved more than 300µs — there is nothing to write.
+                                    Nothing moved more than 300µs - there is nothing to write.
                                 </p>
                             )}
                             {wiz === 'review' && (
@@ -1857,74 +1922,118 @@ function wizBtn(enabled: boolean, colour: string): React.CSSProperties {
     }
 }
 
-/** The transmitter, drawn — QGC shows photos of one; a drawing can move.
+/** The transmitter, drawn - QGC shows photos of one; a drawing can move.
  *  When live channel data flows the sticks ARE the operator's sticks;
- *  without it they rest centred (throttle down) as a wiring diagram. */
-function TransmitterSvg({ layout, axisValue, live, modeChannel, modeValue }: {
+ *  without it they rest centred (throttle down) as a wiring diagram.
+ *
+ *  MOTION IS CSS, NOT FRAMES. The feed arrives at 10 Hz; setting positions
+ *  raw renders as ticks. Each moving part sits in a group whose transform
+ *  transitions over ~one frame interval, so the browser interpolates the
+ *  gaps and the stick glides the way the real one does. */
+function TransmitterSvg({ layout, axisValue, live, modeChannel, modeValue, switchType, flightMode }: {
     layout: { left: { x: string; y: string }; right: { x: string; y: string } }
     axisValue: (axis: string) => number
     live: boolean
     modeChannel: number
     modeValue: number
+    switchType: string
+    flightMode: string
 }) {
-    const stick = (cx: number, cy: number, ax: { x: string; y: string }) => {
-        const R = 30
-        const dx = axisValue(ax.x) * R
-        // throttle: -1 (down) at bottom; others: +1 up
-        const dy = -axisValue(ax.y) * R
-        return { kx: cx + dx, ky: cy + dy }
-    }
-    const L = stick(118, 128, layout.left)
-    const Rk = stick(302, 128, layout.right)
-    const modePos = modeValue > 0 ? Math.max(0, Math.min(1, (modeValue - 1000) / 1000)) : 0
+    const R = 30
+    const stickOffset = (ax: { x: string; y: string }) => ({
+        dx: axisValue(ax.x) * R,
+        dy: -axisValue(ax.y) * R,
+    })
+    const L = stickOffset(layout.left)
+    const Rk = stickOffset(layout.right)
+    const stickCol = live ? '#22d3ee' : 'hsl(var(--app-text-muted))'
+    // The mode switch, drawn as what it is: a lever with 2/3/6 detents.
+    const positions = Number(switchType) === 2 ? 2 : Number(switchType) === 6 ? 6 : 3
+    const slot = slotForValue(modeValue)
+    const detent = slot === 0 ? 0
+        : Math.round(((slot - 1) / 5) * (positions - 1))
     return (
-        <svg viewBox="0 0 420 232" style={{ width: '100%', height: 'auto', display: 'block' }}>
+        <svg viewBox="0 0 420 240" style={{ width: '100%', height: 'auto', display: 'block' }}>
+            <defs>
+                <linearGradient id="tx-body" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stopColor="hsl(var(--app-surface))" />
+                    <stop offset="1" stopColor="hsl(var(--app-surface-2))" />
+                </linearGradient>
+                <radialGradient id="tx-well" cx="0.5" cy="0.42" r="0.75">
+                    <stop offset="0" stopColor="hsl(var(--app-bg))" />
+                    <stop offset="1" stopColor="hsl(var(--app-surface-2))" />
+                </radialGradient>
+                <filter id="tx-shadow" x="-20%" y="-20%" width="140%" height="140%">
+                    <feDropShadow dx="0" dy="3" stdDeviation="5" floodOpacity="0.25" />
+                </filter>
+            </defs>
             {/* body */}
-            <rect x={20} y={38} width={380} height={168} rx={26}
-                fill="hsl(var(--app-surface))" stroke="hsl(var(--app-border))" strokeWidth={1.5} />
+            <rect x={20} y={40} width={380} height={172} rx={28}
+                fill="url(#tx-body)" stroke="hsl(var(--app-border))" strokeWidth={1.5} filter="url(#tx-shadow)" />
+            {/* grip chamfers */}
+            <path d="M 20 96 Q 4 128 20 168" fill="none" stroke="hsl(var(--app-border))" strokeWidth={1.2} />
+            <path d="M 400 96 Q 416 128 400 168" fill="none" stroke="hsl(var(--app-border))" strokeWidth={1.2} />
             {/* antenna */}
-            <line x1={52} y1={44} x2={20} y2={8} stroke="hsl(var(--app-text-muted))" strokeWidth={3.5} strokeLinecap="round" />
-            <circle cx={18} cy={6} r={4} fill="hsl(var(--app-text-muted))" />
-            {/* shoulder switches; the mode switch is the marked one */}
-            {[100, 160, 260, 320].map((x, i) => {
-                const isMode = modeChannel > 0 && i === 3
-                return (
-                    <g key={x}>
-                        <rect x={x - 11} y={26} width={22} height={12} rx={4}
-                            fill={isMode ? 'rgba(34,211,238,0.18)' : 'hsl(var(--app-surface))'}
-                            stroke={isMode ? '#22d3ee' : 'hsl(var(--app-border))'} strokeWidth={1.2} />
-                        {isMode && (
-                            <>
-                                <circle cx={x - 6 + modePos * 12} cy={32} r={2.6} fill="#22d3ee" />
-                                <text x={x} y={20} textAnchor="middle" fontSize={7.5} fontFamily="monospace" fill="#22d3ee">
-                                    MODE{modeChannel > 0 ? ` CH${modeChannel}` : ''}
-                                </text>
-                            </>
-                        )}
-                    </g>
-                )
-            })}
-            {/* gimbal wells */}
-            {[{ cx: 118, k: L, ax: layout.left }, { cx: 302, k: Rk, ax: layout.right }].map(({ cx, k, ax }, i) => (
+            <line x1={54} y1={46} x2={24} y2={10} stroke="hsl(var(--app-text-muted))" strokeWidth={4} strokeLinecap="round" />
+            <circle cx={22} cy={8} r={4.5} fill="hsl(var(--app-text-muted))" />
+            {/* plain shoulder switches on the left */}
+            {[104, 158].map(x => (
+                <rect key={x} x={x - 11} y={28} width={22} height={12} rx={4}
+                    fill="hsl(var(--app-surface))" stroke="hsl(var(--app-border))" strokeWidth={1.2} />
+            ))}
+            {/* THE MODE SWITCH: a lever with real detents, one per position
+                of the selected switch type. The marker slides between them
+                (CSS transition), so flipping the real switch visibly clicks
+                through LOW / MID / HIGH on screen. */}
+            <g>
+                <text x={318} y={20} textAnchor="middle" fontSize={8} fontFamily="monospace"
+                    fill={modeChannel > 0 ? '#22d3ee' : 'hsl(var(--app-text-muted))'}>
+                    MODE{modeChannel > 0 ? ` CH${modeChannel}` : ' (unassigned)'}
+                </text>
+                <rect x={288} y={26} width={60} height={16} rx={6}
+                    fill={modeChannel > 0 ? 'rgba(34,211,238,0.1)' : 'hsl(var(--app-surface))'}
+                    stroke={modeChannel > 0 ? 'rgba(34,211,238,0.55)' : 'hsl(var(--app-border))'} strokeWidth={1.2} />
+                {Array.from({ length: positions }, (_, i) => (
+                    <circle key={i} cx={296 + (i / (positions - 1)) * 44} cy={34} r={1.6}
+                        fill="hsl(var(--app-text-muted))" opacity={0.6} />
+                ))}
+                <g style={{
+                    transform: `translate(${296 + (detent / Math.max(positions - 1, 1)) * 44}px, 34px)`,
+                    transition: 'transform 160ms ease-out',
+                }}>
+                    <circle r={5.5} fill={live && modeChannel > 0 ? '#22d3ee' : 'hsl(var(--app-text-muted))'} />
+                    <circle r={2.2} fill="hsl(var(--app-surface))" />
+                </g>
+            </g>
+            {/* gimbal wells + sticks */}
+            {[{ cx: 118, off: L, ax: layout.left }, { cx: 302, off: Rk, ax: layout.right }].map(({ cx, off, ax }, i) => (
                 <g key={i}>
-                    <circle cx={cx} cy={128} r={44} fill="hsl(var(--app-bg))" stroke="hsl(var(--app-border))" strokeWidth={1.5} />
-                    <line x1={cx - 34} y1={128} x2={cx + 34} y2={128} stroke="hsl(var(--app-border))" strokeWidth={0.8} />
-                    <line x1={cx} y1={94} x2={cx} y2={162} stroke="hsl(var(--app-border))" strokeWidth={0.8} />
-                    {/* stick */}
-                    <line x1={cx} y1={128} x2={k.kx} y2={k.ky} stroke={live ? '#22d3ee' : 'hsl(var(--app-text-muted))'} strokeWidth={4} strokeLinecap="round" opacity={0.8} />
-                    <circle cx={k.kx} cy={k.ky} r={11} fill={live ? '#22d3ee' : 'hsl(var(--app-text-muted))'} />
-                    <circle cx={k.kx} cy={k.ky} r={5.5} fill="hsl(var(--app-surface))" />
-                    {/* axis labels */}
-                    <text x={cx} y={186} textAnchor="middle" fontSize={9} fontFamily="monospace" fill="hsl(var(--app-text-muted))">
+                    <circle cx={cx} cy={130} r={46} fill="url(#tx-well)" stroke="hsl(var(--app-border))" strokeWidth={1.5} />
+                    <circle cx={cx} cy={130} r={34} fill="none" stroke="hsl(var(--app-border))" strokeWidth={0.7} opacity={0.7} />
+                    <line x1={cx - 36} y1={130} x2={cx + 36} y2={130} stroke="hsl(var(--app-border))" strokeWidth={0.7} opacity={0.7} />
+                    <line x1={cx} y1={94} x2={cx} y2={166} stroke="hsl(var(--app-border))" strokeWidth={0.7} opacity={0.7} />
+                    {/* the stick: root fixed, knob glides */}
+                    <g style={{ transform: `translate(${cx + off.dx}px, ${130 + off.dy}px)`, transition: 'transform 110ms linear' }}>
+                        <line x1={-off.dx} y1={-off.dy} x2={0} y2={0} stroke={stickCol} strokeWidth={4.5} strokeLinecap="round" opacity={0.75} />
+                        <circle r={12.5} fill={stickCol} />
+                        <circle r={6} fill="hsl(var(--app-surface))" />
+                        <circle cx={-3} cy={-3.5} r={2.2} fill="rgba(255,255,255,0.5)" />
+                    </g>
+                    <text x={cx} y={190} textAnchor="middle" fontSize={9} fontFamily="monospace" fill="hsl(var(--app-text-muted))">
                         {AXIS_SHORT[ax.y]} ↑↓ · {AXIS_SHORT[ax.x]} ←→
                     </text>
                 </g>
             ))}
-            {/* screen */}
-            <rect x={186} y={96} width={48} height={30} rx={5} fill="hsl(var(--app-bg))" stroke="hsl(var(--app-border))" strokeWidth={1.2} />
-            <text x={210} y={115} textAnchor="middle" fontSize={8.5} fontFamily="monospace"
+            {/* screen: the mode the AIRCRAFT reports, which is the whole
+                point of a mode switch */}
+            <rect x={178} y={96} width={64} height={34} rx={6} fill="hsl(var(--app-bg))" stroke="hsl(var(--app-border))" strokeWidth={1.2} />
+            <text x={210} y={110} textAnchor="middle" fontSize={7.5} fontFamily="monospace"
                 fill={live ? '#4ade80' : 'hsl(var(--app-text-muted))'}>
-                {live ? 'RC OK' : 'NO RX'}
+                {live ? 'RC LIVE' : 'NO RX'}
+            </text>
+            <text x={210} y={123} textAnchor="middle" fontSize={8.5} fontFamily="monospace" fontWeight="700"
+                fill={flightMode !== 'NO LINK' ? '#22d3ee' : 'hsl(var(--app-text-muted))'}>
+                {flightMode.slice(0, 9)}
             </text>
         </svg>
     )
@@ -1974,7 +2083,7 @@ function PowerWorkspace({ p, onUpdate }: { p: PowerProfile; onUpdate: (patch: Pa
                     </Field>
                     <Field label="CRITICAL ACTION" tip="What autopilot does at critical battery level.">
                         <AppSelect value={p.critAction as any} onChange={critAction => onUpdate({ critAction })} options={[
-                            { value: 'warn',   label: 'Warning only — pilot decides' },
+                            { value: 'warn',   label: 'Warning only - pilot decides' },
                             { value: 'land',   label: 'Land immediately' },
                             { value: 'rtl',    label: 'Return to Launch (RTL)' },
                             { value: 'disarm', label: 'Disarm (ground only)' },
@@ -1984,19 +2093,19 @@ function PowerWorkspace({ p, onUpdate }: { p: PowerProfile; onUpdate: (patch: Pa
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                     <Panel title="DISCHARGE CURVE" accent="#fbbf24">
                         <DischargeCurve warnPct={p.warnPct} critPct={p.critPct} />
-                        <p style={{ fontSize: 9, fontFamily: 'monospace', color: 'rgba(255,255,255,0.2)', margin: 0 }}>Typical LiPo curve — flat to ~20%, then rapid voltage drop</p>
+                        <p style={{ fontSize: 9, fontFamily: 'monospace', color: 'rgba(255,255,255,0.2)', margin: 0 }}>Typical LiPo curve - flat to ~20%, then rapid voltage drop</p>
                     </Panel>
                     <Card title="THRESHOLDS">
                         <div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                                <Label text={`WARNING — ${p.warnPct}%`} tip="Triggers a warning alert. Fly home well before this." />
+                                <Label text={`WARNING - ${p.warnPct}%`} tip="Triggers a warning alert. Fly home well before this." />
                                 <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#fbbf24' }}>{p.warnPct}%</span>
                             </div>
                             <input type="range" min={10} max={40} step={5} value={p.warnPct} onChange={e => onUpdate({ warnPct: +e.target.value })} style={{ width: '100%', accentColor: '#fbbf24' }} />
                         </div>
                         <div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                                <Label text={`CRITICAL — ${p.critPct}%`} tip="Triggers the action below." />
+                                <Label text={`CRITICAL - ${p.critPct}%`} tip="Triggers the action below." />
                                 <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#f87171' }}>{p.critPct}%</span>
                             </div>
                             <input type="range" min={5} max={20} step={1} value={p.critPct} onChange={e => onUpdate({ critPct: +e.target.value })} style={{ width: '100%', accentColor: '#f87171' }} />
@@ -2018,13 +2127,13 @@ function SafetyWorkspace({ s, onUpdate }: { s: SafetyProfile; onUpdate: (p: Part
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <G2>
                 {/* Left: geofence map */}
-                <Panel title="AIRSPACE — TOP DOWN VIEW" accent="#22d3ee">
+                <Panel title="AIRSPACE - TOP DOWN VIEW" accent="#22d3ee">
                     <GeofenceMap maxDist={s.maxDist} maxDistEnabled={s.maxDistEnabled} rthAlt={s.rthAlt} />
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         {[
-                            { color: '#f87171', label: `Max distance fence — ${s.maxDistEnabled ? s.maxDist + 'm' : 'disabled'}` },
+                            { color: '#f87171', label: `Max distance fence - ${s.maxDistEnabled ? s.maxDist + 'm' : 'disabled'}` },
                             { color: '#4ade80', label: 'Safe operating zone (estimated)' },
-                            { color: '#22d3ee', label: `RTH altitude — ${s.rthAlt}m` },
+                            { color: '#22d3ee', label: `RTH altitude - ${s.rthAlt}m` },
                         ].map(l => (
                             <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                                 <div style={{ width: 20, height: 1.5, background: l.color, flexShrink: 0 }} />
@@ -2036,14 +2145,14 @@ function SafetyWorkspace({ s, onUpdate }: { s: SafetyProfile; onUpdate: (p: Part
 
                 {/* Right: controls */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    {/* Terrain follow — functional, prominent */}
+                    {/* Terrain follow - functional, prominent */}
                     <div style={{ padding: '14px 16px', borderRadius: 10, background: terrainFollow ? 'rgba(34,211,238,0.07)' : '#090e14', border: `1.5px solid ${terrainFollow ? 'rgba(34,211,238,0.3)' : 'hsl(var(--app-border))'}`, transition: 'all 0.2s' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                             <span style={{ fontSize: 13, fontWeight: 600, color: terrainFollow ? '#22d3ee' : 'hsl(var(--app-text))' }}>Terrain Following</span>
                             <Toggle value={terrainFollow} onChange={() => setTerrainFollow(!terrainFollow)} />
                         </div>
                         <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)', margin: 0, lineHeight: 1.6 }}>
-                            {terrainFollow ? 'Active — missions export with TERRAIN_ALT frame. Drone holds constant AGL over hills.' : 'Off — mission altitudes are relative to home point.'}
+                            {terrainFollow ? 'Active - missions export with TERRAIN_ALT frame. Drone holds constant AGL over hills.' : 'Off - mission altitudes are relative to home point.'}
                         </p>
                     </div>
                     <Card title="FAILSAFE ACTIONS">
@@ -2059,26 +2168,26 @@ function SafetyWorkspace({ s, onUpdate }: { s: SafetyProfile; onUpdate: (p: Part
                     <Card title="LIMITS">
                         <div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                                <Label text={`RTH ALT — ${s.rthAlt}m`} tip="Drone climbs to this before flying home." />
+                                <Label text={`RTH ALT - ${s.rthAlt}m`} tip="Drone climbs to this before flying home." />
                             </div>
                             <input type="range" min={10} max={150} step={5} value={s.rthAlt} onChange={e => onUpdate({ rthAlt: +e.target.value })} style={{ width: '100%', accentColor: '#22d3ee' }} />
                         </div>
                         <div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                                <Label text={`MAX ALT — ${s.maxAltEnabled ? s.maxAlt + 'm' : 'unlimited'}`} />
+                                <Label text={`MAX ALT - ${s.maxAltEnabled ? s.maxAlt + 'm' : 'unlimited'}`} />
                                 <Toggle value={s.maxAltEnabled} onChange={() => onUpdate({ maxAltEnabled: !s.maxAltEnabled })} />
                             </div>
                             {s.maxAltEnabled && <input type="range" min={20} max={500} step={10} value={s.maxAlt} onChange={e => onUpdate({ maxAlt: +e.target.value })} style={{ width: '100%', accentColor: '#f87171' }} />}
                         </div>
                         <div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                                <Label text={`MAX DIST — ${s.maxDistEnabled ? s.maxDist + 'm' : 'unlimited'}`} />
+                                <Label text={`MAX DIST - ${s.maxDistEnabled ? s.maxDist + 'm' : 'unlimited'}`} />
                                 <Toggle value={s.maxDistEnabled} onChange={() => onUpdate({ maxDistEnabled: !s.maxDistEnabled })} />
                             </div>
                             {s.maxDistEnabled && <input type="range" min={50} max={5000} step={50} value={s.maxDist} onChange={e => onUpdate({ maxDist: +e.target.value })} style={{ width: '100%', accentColor: '#f87171' }} />}
                         </div>
                     </Card>
-                    <LockedNote text="Limit parameters saved locally — autopilot upload requires parameter write access" />
+                    <LockedNote text="Limit parameters saved locally - autopilot upload requires parameter write access" />
                 </div>
             </G2>
         </div>
@@ -2090,13 +2199,13 @@ function SafetyWorkspace({ s, onUpdate }: { s: SafetyProfile; onUpdate: (p: Part
 function FlightWorkspace({ f, onUpdate, rthAlt, maxAlt, maxAltEnabled }: { f: FlightProfile; onUpdate: (p: Partial<FlightProfile>) => void; rthAlt: number; maxAlt: number; maxAltEnabled: boolean }) {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <Panel title="ALTITUDE PROFILE — SIDE VIEW" accent="#4ade80">
+            <Panel title="ALTITUDE PROFILE - SIDE VIEW" accent="#4ade80">
                 <AltitudeProfile takeoffAlt={f.takeoffAlt} rthAlt={rthAlt} maxAlt={maxAlt} maxAltEnabled={maxAltEnabled} />
                 <div style={{ display: 'flex', gap: 16 }}>
                     {[
-                        { color: '#4ade80', label: `Takeoff — ${f.takeoffAlt}m` },
-                        { color: '#22d3ee', label: `RTH altitude — ${rthAlt}m` },
-                        ...(maxAltEnabled ? [{ color: '#f87171', label: `Max altitude — ${maxAlt}m` }] : []),
+                        { color: '#4ade80', label: `Takeoff - ${f.takeoffAlt}m` },
+                        { color: '#22d3ee', label: `RTH altitude - ${rthAlt}m` },
+                        ...(maxAltEnabled ? [{ color: '#f87171', label: `Max altitude - ${maxAlt}m` }] : []),
                     ].map(l => (
                         <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                             <div style={{ width: 16, height: 2, background: l.color }} />
@@ -2130,7 +2239,7 @@ function FlightWorkspace({ f, onUpdate, rthAlt, maxAlt, maxAltEnabled }: { f: Fl
                             { value: 'mission', label: 'Finish waypoint → return' },
                         ]} />
                     </Field>
-                    <LockedNote text="Flight parameters saved locally — autopilot upload in a future update" />
+                    <LockedNote text="Flight parameters saved locally - autopilot upload in a future update" />
                 </Card>
             </G2>
         </div>
@@ -2423,7 +2532,7 @@ function ParametersWorkspace() {
 
     // live param map: key → {value, type} from drone
     const [liveParams,       setLiveParams]       = useState<Record<string, LiveParam> | null>(null)
-    // snapshot of values at fetch time — used for "revert to original"
+    // snapshot of values at fetch time - used for "revert to original"
     const [originalSnapshot, setOriginalSnapshot] = useState<Record<string, number>>({})
     const [loading,          setLoading]          = useState(false)
     const [fetchError,       setFetchError]       = useState<string | null>(null)
@@ -2644,7 +2753,7 @@ function ParametersWorkspace() {
                             style={{ width: '100%', padding: '10px 12px 10px 36px', borderRadius: 9, background: '#0d1520', border: '1.5px solid #1e293b', color: '#f1f5f9', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
                             onFocus={e => { (e.target as HTMLInputElement).style.borderColor = '#334155' }}
                             onBlur={e =>  { (e.target as HTMLInputElement).style.borderColor = '#1e293b' }} />
-                        : <input value={demoQuery} onChange={e => setDemoQuery(e.target.value)} placeholder="Search demo parameters — connect drone to see live values…"
+                        : <input value={demoQuery} onChange={e => setDemoQuery(e.target.value)} placeholder="Search demo parameters - connect drone to see live values…"
                             style={{ width: '100%', padding: '10px 12px 10px 36px', borderRadius: 9, background: '#0d1520', border: '1.5px solid #1e293b', color: '#f1f5f9', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
                             onFocus={e => { (e.target as HTMLInputElement).style.borderColor = '#334155' }}
                             onBlur={e =>  { (e.target as HTMLInputElement).style.borderColor = '#1e293b' }} />
@@ -2683,7 +2792,7 @@ function ParametersWorkspace() {
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px', borderRadius: 8, background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.18)' }}>
                     <AlertTriangle size={13} style={{ color: '#f87171', flexShrink: 0, marginTop: 1 }} />
                     <p style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))', margin: 0, lineHeight: 1.55 }}>
-                        <span style={{ color: '#f87171', fontWeight: 600 }}>Expert mode — </span>
+                        <span style={{ color: '#f87171', fontWeight: 600 }}>Expert mode - </span>
                         parameters marked ⚠ can destabilise the drone. Change PIDs in steps of 0.01 max. Always hover-test after any change.
                     </p>
                 </div>
@@ -2695,7 +2804,7 @@ function ParametersWorkspace() {
                     <div style={{ width: 44, height: 44, borderRadius: '50%', border: '3px solid #1e293b', borderTop: '3px solid #22d3ee', animation: 'spin 0.8s linear infinite' }} />
                     <div style={{ textAlign: 'center' }}>
                         <p style={{ fontSize: 14, color: 'hsl(var(--app-text-muted))', margin: 0 }}>Downloading parameters from drone…</p>
-                        <p style={{ fontSize: 12, color: '#475569', margin: '5px 0 0' }}>This takes 5–30 s on a fresh MAVLink connection</p>
+                        <p style={{ fontSize: 12, color: '#475569', margin: '5px 0 0' }}>This takes 5-30 s on a fresh MAVLink connection</p>
                     </div>
                 </div>
             )}
@@ -2717,9 +2826,9 @@ function ParametersWorkspace() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 8, background: 'rgba(34,211,238,0.05)', border: '1px solid rgba(34,211,238,0.15)' }}>
                     <Info size={13} style={{ color: '#22d3ee', flexShrink: 0 }} />
                     <div>
-                        <p style={{ fontSize: 12, color: '#22d3ee', margin: 0, fontWeight: 600 }}>Demo mode — example parameters only</p>
+                        <p style={{ fontSize: 12, color: '#22d3ee', margin: 0, fontWeight: 600 }}>Demo mode - example parameters only</p>
                         <p style={{ fontSize: 11, color: '#64748b', margin: '2px 0 0' }}>
-                            {connected ? 'Drone is connected — click "Load from Drone" to read real values' : 'Connect your drone, then click "Load from Drone" to browse and edit live parameters'}
+                            {connected ? 'Drone is connected - click "Load from Drone" to read real values' : 'Connect your drone, then click "Load from Drone" to browse and edit live parameters'}
                         </p>
                     </div>
                 </div>
@@ -2789,7 +2898,7 @@ function ParametersWorkspace() {
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                                         <div style={{ width: 7, height: 7, borderRadius: '50%', background: GROUP_STYLE[activeGroup]?.color ?? '#22d3ee', flexShrink: 0 }} />
                                         <span style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))' }}>
-                                            {activeGroup} — {groupCounts[activeGroup] ?? 0} parameter{(groupCounts[activeGroup] ?? 0) !== 1 ? 's' : ''}
+                                            {activeGroup} - {groupCounts[activeGroup] ?? 0} parameter{(groupCounts[activeGroup] ?? 0) !== 1 ? 's' : ''}
                                         </span>
                                     </div>
                                     {!expert && displayParams.filter(d => d.group === activeGroup && d.meta?.expert).length > 0 && (
@@ -2801,7 +2910,7 @@ function ParametersWorkspace() {
                             ) : (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                                     <span style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))' }}>
-                                        {PARAM_CATS.find(c => c.id === demoActiveCat)?.label} — {demoFiltered.length} example parameters
+                                        {PARAM_CATS.find(c => c.id === demoActiveCat)?.label} - {demoFiltered.length} example parameters
                                     </span>
                                     {demoModCount > 0 && <span style={{ fontSize: 11, color: '#fbbf24', fontWeight: 600 }}>{demoModCount} modified</span>}
                                 </div>
@@ -2904,7 +3013,7 @@ export default function ConfigPage() {
     const upR = useCallback((p: Partial<RadioProfile>)   => setRadio(prev =>   { const n={...prev,...p}; lsSet('hyrak-radio',  n); return n }), [])
 
     const connected = telStatus === 'connected'
-    // Same verdicts as the Sensors workspace — PX4's health flags where they
+    // Same verdicts as the Sensors workspace - PX4's health flags where they
     // exist, never inferred from the data (heading !== 0 declared the compass
     // broken whenever the aircraft faced magnetic north).
     const hlth = connected && telemetry?.health?.received ? telemetry.health : null
@@ -2912,7 +3021,7 @@ export default function ConfigPage() {
         connected && (telemetry?.gps?.fix_type ?? 0) >= 3,
         connected && (hlth ? hlth.gyro_cal_ok && hlth.accel_cal_ok : telemetry?.attitude != null),
         connected && (hlth ? hlth.mag_cal_ok : true),
-        connected,  // baro: PX4 keeps no verdict — reporting is the claim
+        connected,  // baro: PX4 keeps no verdict - reporting is the claim
     ].filter(Boolean).length
 
     const domainPcts: Record<SectionId, number> = {
@@ -2970,7 +3079,7 @@ export default function ConfigPage() {
                             <DomainCard key={d.id} id={d.id} label={d.label} icon={d.icon}
                                 pct={domainPcts[d.id]} color={hColor(domainPcts[d.id], d.id === 'parameters')}
                                 metrics={
-                                    d.id === 'connection'  ? [{ k: 'status', v: connected ? 'Connected' : 'Disconnected' }, { k: 'link', v: address.split('//')[1]?.split(':')[0] ?? '—' }]
+                                    d.id === 'connection'  ? [{ k: 'status', v: connected ? 'Connected' : 'Disconnected' }, { k: 'link', v: address.split('//')[1]?.split(':')[0] ?? '-' }]
                                   : d.id === 'vehicle'     ? [{ k: 'name', v: vehicle.name }, { k: 'frame', v: AIRFRAME_LABELS[vehicle.airframe] ?? vehicle.airframe }]
                                   : d.id === 'sensors'     ? [{ k: 'health', v: connected ? `${sensorOK}/4 OK` : 'No data' }]
                                   : d.id === 'radio'       ? [{ k: 'mode', v: `Mode ${radio.rcMode}` }, { k: 'slots', v: `${radio.modes.length} configured` }]

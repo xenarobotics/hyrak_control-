@@ -1,17 +1,17 @@
 """
-Face gallery — enrolment and matching against a database of known people.
+Face gallery - enrolment and matching against a database of known people.
 =========================================================================
 
 Complements, and does not replace, the reference-photo flow in
 person_tracker.py. That one answers "follow THIS person, here is their
 photo". This one answers "watch for anyone on this list, and tell me who
-they are" — which is what makes an unattended spot-and-follow possible, with
+they are" - which is what makes an unattended spot-and-follow possible, with
 no operator selecting a target first.
 
 POSTGRES IS THE STORE; RAM IS THE INDEX
     Matching never queries the database. Every active embedding is loaded
     into one (N, 512) float32 matrix at session start, and a match is a
-    single matmul — microseconds for the hundreds-to-thousands of faces this
+    single matmul - microseconds for the hundreds-to-thousands of faces this
     is built for, against milliseconds per DB round trip at 30 fps. Same
     reasoning, and the same trade-off, as zones/engine.py's STRtree: a row
     edited directly in SQL is invisible until reload() runs.
@@ -20,14 +20,14 @@ POSTGRES IS THE STORE; RAM IS THE INDEX
     float32 vector is 2 KB, so 10,000 people is 20 MB of RAM.
 
 WHY MAX AND NOT MEAN ACROSS A PERSON'S PHOTOS
-    Several photos per person is the point — different angles, lighting,
+    Several photos per person is the point - different angles, lighting,
     years. Averaging their embeddings produces a centroid that can sit
     between two genuinely different appearances and match neither well. The
     score for a person is therefore the BEST of their faces, not the mean.
 
 CROSS-MODEL COMPARISON IS REFUSED, NOT SILENTLY WRONG
     buffalo_sc and buffalo_l are both 512-dim, so mixing them raises nothing
-    and looks fine — it just yields meaningless similarities and confident
+    and looks fine - it just yields meaningless similarities and confident
     misidentification. Embeddings carry their model name and anything from a
     different model is excluded from the index with a loud warning.
 """
@@ -60,7 +60,7 @@ EMBED_DIM = 512
 #
 # RELOCK is deliberately higher still. Re-acquiring after losing a target is
 # unsupervised, and the cost of getting it wrong is a drone autonomously
-# following the wrong human being — the worst failure this system has. A
+# following the wrong human being - the worst failure this system has. A
 # stricter bar means occasionally refusing a real re-acquisition, which is the
 # right way to be wrong.
 DEFAULT_MATCH_THRESHOLD = 0.50
@@ -84,7 +84,7 @@ def _build_face_app():
     PersonTracker owns.
 
     Enrolment happens outside any session (an operator uploading photos), so
-    it cannot borrow a tracker's model — there may not be a tracker running.
+    it cannot borrow a tracker's model - there may not be a tracker running.
     Providers mirror person_tracker.py, including the HEURISTIC conv search:
     ORT's default EXHAUSTIVE benchmarks every algorithm on first inference
     and stalls for seconds.
@@ -206,7 +206,7 @@ class FaceGallery:
         rows: (face_id, person_id, person_name, embedding_blob, model_name)
 
         Rows from a different embedding model are dropped rather than
-        included — see the module docstring. Dropping is the safe direction:
+        included - see the module docstring. Dropping is the safe direction:
         a smaller gallery misses people, a poisoned one names the wrong ones.
         """
         vecs, pids, names, fids = [], [], [], []
@@ -234,7 +234,7 @@ class FaceGallery:
         if skipped:
             logger.warning(
                 f"Face gallery: skipped {skipped} embedding(s) not from "
-                f"{self.model_name} — re-enrol those photos to include them "
+                f"{self.model_name} - re-enrol those photos to include them "
                 f"(cross-model similarity is meaningless, not merely noisy)"
             )
         self._matrix = np.vstack(vecs).astype(np.float32) if vecs else None
@@ -279,7 +279,7 @@ class FaceGallery:
 
         sims = self._matrix @ q            # rows are unit-norm, so this is cosine
 
-        # Collapse to the best face per person — never the mean.
+        # Collapse to the best face per person - never the mean.
         best_per_person: Dict[str, Tuple[float, int]] = {}
         for i, s in enumerate(sims):
             pid = self._person_ids[i]
@@ -300,7 +300,7 @@ class FaceGallery:
         Gap between the best and second-best PERSON.
 
         A high top score with a thin margin means the gallery cannot really
-        tell two enrolled people apart on this frame — worth surfacing rather
+        tell two enrolled people apart on this frame - worth surfacing rather
         than reporting a confident name. None when fewer than two people are
         above the floor.
         """

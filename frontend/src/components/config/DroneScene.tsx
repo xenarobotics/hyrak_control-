@@ -6,13 +6,13 @@
 // WHY THE LIVE ATTITUDE IS THE POINT. QGroundControl draws a picture of the
 // position it WANTS and leaves the operator to work out how their aircraft
 // relates to it. We already stream roll/pitch/yaw off the IMU at 10 Hz, so the
-// model can simply BE the aircraft — turn the real one and this one turns with
+// model can simply BE the aircraft - turn the real one and this one turns with
 // it. That converts "is this what it means by left side?" into a matching
 // game, which needs no interpretation and no knowledge of PX4's vocabulary.
 //
 // TARGET ORIENTATIONS ARE DERIVED, NEVER TABULATED. The first version of this
 // panel hand-wrote a rotation per side and got LEFT AND RIGHT THE WRONG WAY
-// ROUND — silently, because a quadcopter is nearly symmetric and a wrong sign
+// ROUND - silently, because a quadcopter is nearly symmetric and a wrong sign
 // throws nothing. Here each side names only WHICH WAY THAT FACE POINTS ON THE
 // AIRFRAME, which is a fact anyone can check by looking at a drone, and the
 // rotation is whatever takes that face to the ground. There is no sign to get
@@ -25,7 +25,7 @@ import { buildDrone, loadDroneModel, type DroneParts } from '@/lib/droneMesh'
 import type { CalSide } from '@/types/calibration'
 
 /** Which way each named face points on the airframe. Nose -Z, up +Y, right +X
- *  — the glTF convention, so a supplied model needs no adapter. */
+ *  - the glTF convention, so a supplied model needs no adapter. */
 export const FACE_DIRECTION: Record<CalSide, [number, number, number]> = {
     down:  [0, -1, 0],
     up:    [0, 1, 0],
@@ -53,7 +53,7 @@ export interface Attitude { roll: number; pitch: number; yaw: number }
  *
  *  Inferring this from "are we in position yet" was the reported confusion:
  *  during a compass calibration the arrow appeared while turning the aircraft,
- *  vanished the moment it arrived — and arriving is exactly when PX4 starts
+ *  vanished the moment it arrived - and arriving is exactly when PX4 starts
  *  wanting it ROTATED. So the two instructions are now separate states with
  *  separate arrows, and neither is guessed. */
 export type StageMode = 'reorient' | 'rotate' | 'hold' | 'idle'
@@ -75,7 +75,7 @@ export function DroneScene({
      *  hold = keep it still; idle = nothing being asked. */
     mode?: StageMode
     accent?: string
-    /** False freezes the props — a calibration happens with motors off. */
+    /** False freezes the props - a calibration happens with motors off. */
     live?: boolean
     height?: number
 }) {
@@ -100,7 +100,7 @@ export function DroneScene({
         const scene = new THREE.Scene()
         // Close enough that the airframe FILLS the viewport. The first pass
         // framed it from 8 units out and the aircraft came out the size of a
-        // thumbnail in a 310px panel — which is the same failure as the flat
+        // thumbnail in a 310px panel - which is the same failure as the flat
         // version by another route: an operator cannot read an orientation
         // they have to squint at.
         const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100)
@@ -108,8 +108,8 @@ export function DroneScene({
 
         // A generated room environment rather than an HDRI file: proper image-
         // based lighting, so metal reads as metal and every edge has a lit side
-        // and a shaded one — which is the whole reason the flat version was
-        // unreadable — and it ships as zero bytes of asset.
+        // and a shaded one - which is the whole reason the flat version was
+        // unreadable - and it ships as zero bytes of asset.
         let pmrem: THREE.PMREMGenerator | null = null
         let envRT: THREE.WebGLRenderTarget | null = null
         void (async () => {
@@ -124,8 +124,8 @@ export function DroneScene({
         // THREE-POINT, and each one is doing a job.
         //
         // The first pass was a hard white key plus a cyan rim, which blew the
-        // canopy to a mirror and left the underside — the skids, the gimbal,
-        // the whole half of the aircraft that says WHICH WAY UP — as an
+        // canopy to a mirror and left the underside - the skids, the gimbal,
+        // the whole half of the aircraft that says WHICH WAY UP - as an
         // unreadable black mass. That matters more here than it would on a
         // product shot: half the orientations this panel asks for put the
         // bottom of the aircraft towards the viewer.
@@ -143,7 +143,7 @@ export function DroneScene({
         bounce.position.set(0, -5, 2)
         scene.add(bounce)
 
-        // Contact shadow. A blurred blob on the ground, not a shadow map — it
+        // Contact shadow. A blurred blob on the ground, not a shadow map - it
         // costs nothing and it is what stops the aircraft looking like it is
         // floating in a void with no sense of which way is down.
         const shadow = new THREE.Mesh(
@@ -222,7 +222,7 @@ export function DroneScene({
         const wanted = new THREE.Quaternion()
         const euler = new THREE.Euler(0, 0, 0, 'YXZ')
         const accentColour = new THREE.Color()
-        // Reused every frame — allocating vectors inside a 60 Hz loop is how a
+        // Reused every frame - allocating vectors inside a 60 Hz loop is how a
         // smooth panel becomes a stuttering one after a minute of GC pressure.
         const up = new THREE.Vector3()
         const axisVec = new THREE.Vector3()
@@ -243,7 +243,7 @@ export function DroneScene({
             // down, pitch positive = nose up, yaw positive = nose swinging
             // right. The model is glTF-standard (nose -Z, up +Y), so pitch maps
             // straight across and the other two invert. Euler order YXZ applies
-            // them yaw, then pitch, then roll — the aerospace sequence.
+            // them yaw, then pitch, then roll - the aerospace sequence.
             if (inp.attitude) {
                 euler.set(
                     THREE.MathUtils.degToRad(inp.attitude.pitch),
@@ -262,8 +262,8 @@ export function DroneScene({
             }
             // REJECT ONE-FRAME TELEPORTS.
             //
-            // PX4 reports attitude as Euler angles, and near ±90° of pitch —
-            // which is exactly where a compass calibration spends its time —
+            // PX4 reports attitude as Euler angles, and near ±90° of pitch -
+            // which is exactly where a compass calibration spends its time -
             // roll and yaw are degenerate: two consecutive samples can differ
             // by 180° while describing almost the same attitude. Fed straight
             // in, the model snapped right over and back, which is the "for a
@@ -272,7 +272,7 @@ export function DroneScene({
             // Nothing physical moves 90° between two samples of a 10 Hz
             // stream, so a lone jump that large is discarded. If the NEXT
             // sample agrees with the rejected one it is real after all and is
-            // taken — so a genuinely fast movement costs one frame of lag
+            // taken - so a genuinely fast movement costs one frame of lag
             // rather than being filtered out.
             if (inp.attitude && shown.angleTo(wanted) > GLITCH_RAD) {
                 if (pending && pending.angleTo(wanted) < CONFIRM_RAD) {
@@ -305,7 +305,7 @@ export function DroneScene({
                 demoSpin = 0
             }
 
-            // Props idle slowly — enough to look alive, never fast enough to
+            // Props idle slowly - enough to look alive, never fast enough to
             // suggest the motors are armed during a calibration.
             spin += dt * (inp.live ? 1.6 : 0)
             parts.rotors.forEach((r, i) => { r.rotation.y = spin * (i % 2 ? -1 : 1) })
@@ -320,13 +320,13 @@ export function DroneScene({
 
             // TWO DIFFERENT INSTRUCTIONS, TWO DIFFERENT ARROWS.
             //
-            //  reorient — the shortest turn from where the aircraft is to where
+            //  reorient - the shortest turn from where the aircraft is to where
             //             it is wanted, drawn in the plane of that turn.
-            //  rotate   — a compass sweep about the axis it is ALREADY on, which
+            //  rotate   - a compass sweep about the axis it is ALREADY on, which
             //             is what PX4 asks for once an orientation is detected.
             //             This is the one that used to vanish at exactly the
             //             moment it became the instruction.
-            //  hold     — nothing. Any arrow at all reads as "keep moving it",
+            //  hold     - nothing. Any arrow at all reads as "keep moving it",
             //             and moving it is what fails an accelerometer side.
             if (inp.mode === 'reorient' && inp.targetSide) {
                 const cur = up.set(0, 1, 0).applyQuaternion(shown).clone()
@@ -348,7 +348,7 @@ export function DroneScene({
                 }
             } else if (inp.mode === 'rotate') {
                 // About the aircraft's own vertical, wherever that is pointing
-                // now — the axis PX4 detected, not a world axis.
+                // now - the axis PX4 detected, not a world axis.
                 axisVec.set(0, 1, 0).applyQuaternion(shown).normalize()
                 arrow.group.visible = true
                 arrow.group.quaternion.setFromUnitVectors(Y_UP, axisVec)
@@ -379,7 +379,7 @@ export function DroneScene({
             host.removeChild(renderer.domElement)
         }
         // Built once. Everything that changes per frame is read from the ref
-        // above — rebuilding a WebGL context on a telemetry tick would drop
+        // above - rebuilding a WebGL context on a telemetry tick would drop
         // the frame rate to nothing and reset the operator's camera angle
         // while they were using it.
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -391,7 +391,7 @@ export function DroneScene({
 /** The turn to make, as an arc with a head on the end.
  *
  *  DRAWN THROUGH THE AIRFRAME, not behind it. depthTest is off and it renders
- *  last, so the instruction is never hidden by the very object it is about —
+ *  last, so the instruction is never hidden by the very object it is about -
  *  which happens for roughly half of the six positions once the operator
  *  starts orbiting the camera.
  *
@@ -402,13 +402,13 @@ export function DroneScene({
  *  backwards.
  */
 // Outside the props (span ≈ 4.5) so the arc encircles the aircraft rather
-// than cutting through it, and inside the frame at the default camera — the
+// than cutting through it, and inside the frame at the default camera - the
 // turn is often about the nose axis, which puts the arc in a VERTICAL plane
 // where the viewport is shortest.
 const ARROW_R = 2.55
 //: A rotation arrow is ICONOGRAPHY, not a gauge. Drawn proportional to the
 //: angle still to go, a 90° turn came out as a quarter arc with most of a
-//: circle of empty space between the tail and the head — which reads as a
+//: circle of empty space between the tail and the head - which reads as a
 //: stray stroke rather than "turn it this way". Kept near-complete so the
 //: direction is unmistakable; how far is left to the colour and the words,
 //: which say it better than an arc length nobody measures.
@@ -437,7 +437,7 @@ function buildRotationArrow() {
     const tangent = new THREE.Vector3()
 
     const place = (sweep: number) => {
-        // d/dtheta of the arc position, normalised — the way the arc is
+        // d/dtheta of the arc position, normalised - the way the arc is
         // heading where it stops.
         tangent.set(-Math.sin(sweep), 0, -Math.cos(sweep)).normalize()
         head.quaternion.setFromUnitVectors(UP, tangent)

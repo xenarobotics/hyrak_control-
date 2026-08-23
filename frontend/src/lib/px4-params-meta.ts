@@ -1,7 +1,7 @@
-// PX4 parameter metadata — enriches raw param names/values from the drone
+// PX4 parameter metadata - enriches raw param names/values from the drone
 // with plain-English descriptions, units, min/max and grouping.
 // Source: PX4 firmware parameter metadata (public domain)
-// Params not in this file will still appear in the browser — just without
+// Params not in this file will still appear in the browser - just without
 // descriptions or unit labels.
 
 export type PX4Group =
@@ -48,7 +48,7 @@ export const PX4_META: Record<string, PX4Meta> = {
   COM_ARM_WO_GPS: {
     name: 'Arm Without GPS',
     group: 'Commander',
-    desc: 'Allow arming when no GPS fix is available. Only use indoors or if GPS is not needed — very dangerous outdoors.',
+    desc: 'Allow arming when no GPS fix is available. Only use indoors or if GPS is not needed - very dangerous outdoors.',
     opts: { 0: 'Require GPS fix', 1: 'Allow without GPS' },
     danger: true,
   },
@@ -127,7 +127,7 @@ export const PX4_META: Record<string, PX4Meta> = {
   COM_RC_STICK_OV: {
     name: 'RC Override Stick Threshold',
     group: 'Commander',
-    desc: 'How far you must push the sticks (as a fraction 0–1) to trigger an RC override.',
+    desc: 'How far you must push the sticks (as a fraction 0-1) to trigger an RC override.',
     min: 0.05, max: 0.5, step: 0.01,
   },
   COM_RCL_EXCEPT: {
@@ -230,7 +230,7 @@ export const PX4_META: Record<string, PX4Meta> = {
     name: 'Compass Fusion Mode',
     group: 'EKF2',
     desc: 'How the magnetometer is incorporated into the EKF attitude/heading estimate.',
-    opts: { 0: 'Automatic', 1: 'Full 3D', 2: 'Heading only', 3: 'None — disabled', 4: 'Indoor (no declination)' },
+    opts: { 0: 'Automatic', 1: 'Full 3D', 2: 'Heading only', 3: 'None - disabled', 4: 'Indoor (no declination)' },
     expert: true,
   },
   EKF2_BARO_NOISE: {
@@ -330,7 +330,7 @@ export const PX4_META: Record<string, PX4Meta> = {
   MC_YAW_P: {
     name: 'Yaw Angle P Gain',
     group: 'Multicopter Rate',
-    desc: 'Yaw heading correction strength. Lower than roll/pitch is normal — yaw authority is weaker.',
+    desc: 'Yaw heading correction strength. Lower than roll/pitch is normal - yaw authority is weaker.',
     min: 0.5, max: 5, step: 0.1, expert: true,
   },
   MC_ROLLRATE_P: {
@@ -366,19 +366,19 @@ export const PX4_META: Record<string, PX4Meta> = {
   MC_PITCHRATE_I: {
     name: 'Pitch Rate I',
     group: 'Multicopter Rate',
-    desc: 'Integral gain for pitch rate — eliminates steady-state pitch error.',
+    desc: 'Integral gain for pitch rate - eliminates steady-state pitch error.',
     min: 0, max: 0.5, step: 0.005, expert: true,
   },
   MC_PITCHRATE_D: {
     name: 'Pitch Rate D',
     group: 'Multicopter Rate',
-    desc: 'Derivative gain for pitch rate — damps oscillations.',
+    desc: 'Derivative gain for pitch rate - damps oscillations.',
     min: 0, max: 0.05, step: 0.001, expert: true, danger: true,
   },
   MC_PITCHRATE_FF: {
     name: 'Pitch Rate Feedforward',
     group: 'Multicopter Rate',
-    desc: 'Feedforward term for pitch rate — improves command tracking.',
+    desc: 'Feedforward term for pitch rate - improves command tracking.',
     min: 0, max: 0.5, step: 0.01, expert: true,
   },
   MC_YAWRATE_P: {
@@ -390,7 +390,7 @@ export const PX4_META: Record<string, PX4Meta> = {
   MC_YAWRATE_I: {
     name: 'Yaw Rate I',
     group: 'Multicopter Rate',
-    desc: 'Integral gain for yaw rate — corrects steady yaw drift.',
+    desc: 'Integral gain for yaw rate - corrects steady yaw drift.',
     min: 0, max: 0.5, step: 0.01, expert: true,
   },
   MC_YAWRATE_D: {
@@ -670,7 +670,7 @@ export const PX4_META: Record<string, PX4Meta> = {
   BAT_N_CELLS: {
     name: 'Cell Count (S)',
     group: 'Battery',
-    desc: 'Number of lithium cells in series. CRITICAL — wrong value causes completely incorrect battery readings.',
+    desc: 'Number of lithium cells in series. CRITICAL - wrong value causes completely incorrect battery readings.',
     unit: 'S', min: 1, max: 14, step: 1, danger: true,
   },
   BAT_CAPACITY: {
@@ -761,7 +761,7 @@ export const PX4_META: Record<string, PX4Meta> = {
   MIS_DIST_1WP: {
     name: 'Max First Waypoint Distance',
     group: 'Mission',
-    desc: 'Safety check — rejects a mission if the first waypoint is further than this from home.',
+    desc: 'Safety check - rejects a mission if the first waypoint is further than this from home.',
     unit: 'm', min: 0, max: 10000, step: 50,
   },
   MIS_DIST_WPS: {
@@ -780,7 +780,7 @@ export const PX4_META: Record<string, PX4Meta> = {
     name: 'Mission Yaw Mode',
     group: 'Mission',
     desc: 'How the drone orients its yaw heading during mission flight.',
-    opts: { 0: 'None — pilot controls yaw', 1: 'Face next waypoint', 2: 'Face next waypoint (ROI-only)', 3: 'Follow fixed heading' },
+    opts: { 0: 'None - pilot controls yaw', 1: 'Face next waypoint', 2: 'Face next waypoint (ROI-only)', 3: 'Follow fixed heading' },
   },
   MIS_ALTMODE: {
     name: 'Mission Altitude Reference',
@@ -883,19 +883,19 @@ export const PX4_META: Record<string, PX4Meta> = {
   PWM_MAIN_MIN: {
     name: 'Main PWM Minimum',
     group: 'PWM / ESC',
-    desc: 'Minimum PWM pulse sent to main ESCs — corresponds to lowest throttle. Must match ESC calibration.',
+    desc: 'Minimum PWM pulse sent to main ESCs - corresponds to lowest throttle. Must match ESC calibration.',
     unit: 'μs', min: 800, max: 1400, step: 10, danger: true,
   },
   PWM_MAIN_MAX: {
     name: 'Main PWM Maximum',
     group: 'PWM / ESC',
-    desc: 'Maximum PWM pulse — full throttle. Must match ESC calibration.',
+    desc: 'Maximum PWM pulse - full throttle. Must match ESC calibration.',
     unit: 'μs', min: 1600, max: 2200, step: 10, danger: true,
   },
   PWM_MAIN_DISARM: {
     name: 'Disarmed PWM',
     group: 'PWM / ESC',
-    desc: 'PWM sent while disarmed — must be below PWM_MAIN_MIN so ESCs stay stopped.',
+    desc: 'PWM sent while disarmed - must be below PWM_MAIN_MIN so ESCs stay stopped.',
     unit: 'μs', min: 0, max: 2200, step: 10, danger: true,
   },
   PWM_MAIN_RATE: {
@@ -945,7 +945,7 @@ export const PX4_META: Record<string, PX4Meta> = {
   MOT_ORDERING: {
     name: 'Motor Numbering Scheme',
     group: 'Motors',
-    desc: 'Which numbering convention the FC uses for motor 1–4 assignment.',
+    desc: 'Which numbering convention the FC uses for motor 1-4 assignment.',
     opts: { 0: 'PX4 standard', 1: 'Betaflight / CleanFlight' },
     danger: true,
   },
@@ -1330,7 +1330,7 @@ export const PX4_META: Record<string, PX4Meta> = {
   FD_EXT_ATS_EN: {
     name: 'External Failure Trigger Input',
     group: 'Failure Detector',
-    desc: 'Listen for a kill/failure signal from an external automatic termination system (ATS) — used in some competition and commercial setups.',
+    desc: 'Listen for a kill/failure signal from an external automatic termination system (ATS) - used in some competition and commercial setups.',
     opts: { 0: 'Disabled', 1: 'Enabled' },
     expert: true,
   },
@@ -1465,13 +1465,13 @@ export const PX4_META: Record<string, PX4Meta> = {
   MPC_Z_VEL_I_ACC: {
     name: 'Vertical Velocity I Gain',
     group: 'Position Control',
-    desc: 'I gain for altitude velocity — corrects steady hover height error.',
+    desc: 'I gain for altitude velocity - corrects steady hover height error.',
     min: 0, max: 3, step: 0.1, expert: true,
   },
   MPC_Z_VEL_D_ACC: {
     name: 'Vertical Velocity D Gain',
     group: 'Position Control',
-    desc: 'D gain for altitude velocity — damps vertical bouncing.',
+    desc: 'D gain for altitude velocity - damps vertical bouncing.',
     min: 0, max: 1.5, step: 0.01, expert: true,
   },
   MPC_LAND_VXMAX: {
@@ -1489,7 +1489,7 @@ export const PX4_META: Record<string, PX4Meta> = {
   MPC_SPOOLUP_TIME: {
     name: 'Motor Spool-Up Time',
     group: 'Position Control',
-    desc: 'Time from arming to beginning of takeoff sequence — gives motors time to spin up before lift commands.',
+    desc: 'Time from arming to beginning of takeoff sequence - gives motors time to spin up before lift commands.',
     unit: 's', min: 0, max: 30, step: 0.5,
   },
 

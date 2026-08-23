@@ -1,12 +1,12 @@
 'use client'
 
-// Local preview of the air unit INSIDE the app — the pilot's picture without
+// Local preview of the air unit INSIDE the app - the pilot's picture without
 // the round trip.
 //
 // With air_unit_datachannel, the video the operator used to watch had been to
 // the server and back: uplink + server H.265 decode + server H.264 re-encode +
 // downlink + two jitter buffers, ~300-500ms on a good network and worse
-// through TURN-over-TCP — while gst-decode.sh reading the SAME udp:5600 shows
+// through TURN-over-TCP - while gst-decode.sh reading the SAME udp:5600 shows
 // a 10ms picture. This module closes that gap in-app: the rtsp-relay bridge
 // runs in preview-only mode (uplink: false) against a private fan-out copy of
 // the RTP, decodes it one hop from the radio, and serves fMP4 over loopback
@@ -14,12 +14,12 @@
 // this is only about where the operator's EYES get their frames.
 //
 // The preview branch is transcoded to H.264 (transcodePreview) because the air
-// unit is H.265 and Chromium ships no software HEVC decoder — an H.265 preview
+// unit is H.265 and Chromium ships no software HEVC decoder - an H.265 preview
 // dies with MEDIA_ERR_SRC_NOT_SUPPORTED on any machine without hardware HEVC.
 // The DataChannel uplink is untouched by this: it still carries the original
 // H.265 bytes.
 //
-// Port: the sender bridge owns udp:5600 exclusively (bindExclusive — two
+// Port: the sender bridge owns udp:5600 exclusively (bindExclusive - two
 // listeners on one unicast port silently fight, measured 200/0). The
 // operator's EXTERNAL viewer (gst-decode, QGC video) gets the fan-out port;
 // this preview needs its own third copy, previewFanoutPort, because it is a
@@ -31,7 +31,7 @@ import { getAirUnitVideoPort, getAirUnitFanoutPort, getPreviewMaxHeight } from '
 
 // Distinct from RTSP_RELAY_BRIDGE_ID on purpose: the SIYI relay and this
 // preview are both rtsp-relay bridge instances (the bridge keeps a Map by id)
-// and must be able to coexist — and Settings' relay status display must not
+// and must be able to coexist - and Settings' relay status display must not
 // light up because a preview started.
 export const AIR_UNIT_PREVIEW_BRIDGE_ID = 'air-unit-preview'
 
@@ -79,8 +79,8 @@ if (typeof window !== 'undefined' && isDesktopApp()) {
         if (event.bridge !== 'rtsp-relay' || event.id !== AIR_UNIT_PREVIEW_BRIDGE_ID) return
         const meta = event.meta ?? {}
         // Only LIFECYCLE events carry a `connected` field. The bridge also
-        // emits informational ones — notably {codec, streamInfo} about a
-        // second after ffmpeg reads the stream — and treating those as a
+        // emits informational ones - notably {codec, streamInfo} about a
+        // second after ffmpeg reads the stream - and treating those as a
         // shutdown wiped previewUrl right after every successful start:
         // that was exactly the field failure ("preview=none" with the bridge
         // healthy), and it never appeared locally because the repro drove
@@ -94,7 +94,7 @@ if (typeof window !== 'undefined' && isDesktopApp()) {
             console.error('[air-unit-preview] ffmpeg exited, bridge is retrying:',
                 meta.log ? String(meta.log).slice(-300) : '(no output)')
         } else {
-            // Gave up (5 fast failures). Loud, with ffmpeg's own words —
+            // Gave up (5 fast failures). Loud, with ffmpeg's own words -
             // this is the only way the cause reaches server-side logs.
             console.error('[air-unit-preview] preview died:',
                 meta.error ? String(meta.error) : '(no error text)',
@@ -104,7 +104,7 @@ if (typeof window !== 'undefined' && isDesktopApp()) {
     })
 }
 
-/** Starts the preview-only relay. Failure is deliberately non-fatal — a
+/** Starts the preview-only relay. Failure is deliberately non-fatal - a
  *  missing preview must never take down the stream that IS working; the
  *  caller falls back to the server's return feed exactly as before. */
 export async function startAirUnitPreview(): Promise<string | null> {
@@ -124,7 +124,7 @@ export async function startAirUnitPreview(): Promise<string | null> {
             preview: true,
             transcodePreview: 'h264',
             // 0 = native. Explicit so it overrides the bridge's own default
-            // without a rebuild — see getPreviewMaxHeight().
+            // without a rebuild - see getPreviewMaxHeight().
             previewMaxHeight: getPreviewMaxHeight(),
         })
         if (!result?.ok) {

@@ -52,7 +52,7 @@ export default function FleetMissionPanel({ leftOffset }: { leftOffset: string }
     // confirm dialog re-uploads all of them with ack_orange
     const ackPendingRef = useRef<Set<number>>(new Set())
     const ackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-    // Uploads THIS panel initiated — the mission page runs its own ack/permit
+    // Uploads THIS panel initiated - the mission page runs its own ack/permit
     // dialogs for uploads made from its Upload button, so ignore those here.
     const panelUploadsRef = useRef<Set<number>>(new Set())
 
@@ -68,7 +68,7 @@ export default function FleetMissionPanel({ leftOffset }: { leftOffset: string }
         return plans[key]
     }
 
-    // Upload results — mark the store signature so ARM/START gates open and
+    // Upload results - mark the store signature so ARM/START gates open and
     // stay open for that drone regardless of selection changes. Orange-zone
     // needs_ack results are batched into one confirm dialog.
     useEffect(() => {
@@ -161,7 +161,7 @@ export default function FleetMissionPanel({ leftOffset }: { leftOffset: string }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [connected, plans, waypoints, activePlanKey])
 
-    // Expanded upload lengths per drone — mission_current_index refers to the
+    // Expanded upload lengths per drone - mission_current_index refers to the
     // EXPANDED (turn-radius) list, so remainder mapping needs the ratio.
     const connectedIds = connected.map(d => d.id).join(',')
     const expandedLens = useMemo(() => {
@@ -200,14 +200,14 @@ export default function FleetMissionPanel({ leftOffset }: { leftOffset: string }
             })
         }
         setUploadStates(states)
-        if (planned.length === 0) setFeedback('No drone has a plan yet — select a drone and add waypoints')
+        if (planned.length === 0) setFeedback('No drone has a plan yet - select a drone and add waypoints')
     }
 
     // Liftoff order: farthest first waypoint launches first, so early starters
     // clear the pad area while closer drones are still waiting their turn.
     const handleStartAll = () => {
         if (uploadedIds.length === 0) {
-            setFeedback('Upload missions first — no drone has its current plan on board')
+            setFeedback('Upload missions first - no drone has its current plan on board')
             return
         }
         const distToFirst = (id: number): number => {
@@ -262,7 +262,7 @@ export default function FleetMissionPanel({ leftOffset }: { leftOffset: string }
         setActiveDrone(to)
         setFeedback(
             `${rem.length} remaining wp of ${drones[from]?.name ?? from} → ` +
-            `${drones[to]?.name ?? to} — review, then UPLOAD ALL`
+            `${drones[to]?.name ?? to} - review, then UPLOAD ALL`
         )
     }
 
@@ -281,7 +281,7 @@ export default function FleetMissionPanel({ leftOffset }: { leftOffset: string }
         })
         if (Object.keys(updates).length === 0) return
         assignFleetPlans(updates)
-        setFeedback('Lanes layered: +2 m per drone — re-upload before starting')
+        setFeedback('Lanes layered: +2 m per drone - re-upload before starting')
     }
 
     return (
@@ -304,7 +304,7 @@ export default function FleetMissionPanel({ leftOffset }: { leftOffset: string }
                 >
                     <Users size={13} color="#22d3ee" />
                     <span className="text-[10px] font-bold tracking-widest" style={{ color: '#a5f3fc' }}>
-                        FLEET MISSION — {connected.length} DRONES
+                        FLEET MISSION - {connected.length} DRONES
                     </span>
                     <span className="ml-auto" style={{ color: '#6b7280' }}>
                         {open ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
@@ -360,7 +360,7 @@ export default function FleetMissionPanel({ leftOffset }: { leftOffset: string }
                                                     e.stopPropagation()
                                                     setReassignFrom(v => v === d.id ? null : d.id)
                                                 }}
-                                                title="Mission incomplete — hand the remaining waypoints to another drone"
+                                                title="Mission incomplete - hand the remaining waypoints to another drone"
                                                 className="px-1 rounded"
                                                 style={{
                                                     background: reassignFrom === d.id ? 'rgba(245,158,11,.25)' : 'rgba(255,255,255,.06)',
@@ -415,7 +415,7 @@ export default function FleetMissionPanel({ leftOffset }: { leftOffset: string }
                                     <AlertTriangle size={11} className="shrink-0 mt-px" />
                                     <span>
                                         {conflicts.map(c => `${c.a} × ${c.b} come within ${c.distanceM} m at overlapping altitude`).join('; ')}
-                                        {' '}— separate the lanes or their altitudes.
+                                        {' '}- separate the lanes or their altitudes.
                                     </span>
                                 </div>
                                 <button
@@ -429,7 +429,7 @@ export default function FleetMissionPanel({ leftOffset }: { leftOffset: string }
                             </div>
                         )}
 
-                        {/* Supervisor alert feed — latest 3 */}
+                        {/* Supervisor alert feed - latest 3 */}
                         {alerts.length > 0 && (
                             <div className="flex flex-col gap-1">
                                 {alerts.slice(0, 3).map((a, i) => (

@@ -1,12 +1,12 @@
 """
-In-memory zone engine — the single source of truth for "where can a drone
+In-memory zone engine - the single source of truth for "where can a drone
 fly". Zones load from Postgres into shapely geometries with a spatial
 index; checks are pure functions over lat/lng(/alt), deliberately free of
 any session or drone state so the same engine serves one drone, a swarm,
 mission validation, and (later) the enforcement monitor.
 
 At the current scale an STRtree over every active zone answers point and
-path queries in microseconds — no PostGIS needed until zone counts reach
+path queries in microseconds - no PostGIS needed until zone counts reach
 the tens of thousands.
 """
 import logging
@@ -54,13 +54,13 @@ async def reload() -> int:
             }
             if z.zone_class == "red":
                 # Eroded copy for breach *prediction*: skimming along the
-                # boundary must not trigger the pushback — only a track
+                # boundary must not trigger the pushback - only a track
                 # heading genuinely inside (≥ ~5 m deep) does.
                 entry["geom_eroded"] = geom.buffer(-_PREDICT_ERODE_M / 111_320)
             zones.append(entry)
             geoms.append(geom)
         except Exception as e:
-            logger.warning(f"Zone {z.id} has bad geometry — skipped: {e}")
+            logger.warning(f"Zone {z.id} has bad geometry - skipped: {e}")
 
     with _lock:
         _zones = zones
@@ -83,7 +83,7 @@ def _alt_applies(z: dict, alt_m: float | None) -> bool:
 def check_point(lat: float, lng: float, alt_m: float | None = None) -> dict:
     """
     Worst zone class at a position. GeoJSON is (lng, lat) order.
-    Returns {"zone_class": "green"|"orange"|"red", "zones": [...]} —
+    Returns {"zone_class": "green"|"orange"|"red", "zones": [...]} -
     outside every zone counts as green (unrestricted airspace).
     """
     with _lock:
@@ -110,7 +110,7 @@ def check_point(lat: float, lng: float, alt_m: float | None = None) -> dict:
 
 def predict_red(lat: float, lng: float, alt_m: float | None = None) -> bool:
     """True only if the point is meaningfully INSIDE a red zone (eroded by
-    ~5 m) — used for breach prediction so boundary-skimming doesn't trip."""
+    ~5 m) - used for breach prediction so boundary-skimming doesn't trip."""
     with _lock:
         zones = _zones
     p = Point(lng, lat)
@@ -152,7 +152,7 @@ def nearest_exit(lat: float, lng: float, extra_m: float = 20.0) -> tuple[float, 
     n = math.hypot(dx, dy) or 1e-9
     ux, uy = dx / n, dy / n
     # Extend until clear of every red zone (a boundary point can sit inside a
-    # second overlapping red zone) — give up after widening 5×.
+    # second overlapping red zone) - give up after widening 5×.
     for k in range(1, 6):
         ex, ey = bp.x + ux * deg_extra * k, bp.y + uy * deg_extra * k
         if not any(z["geom"].covers(Point(ex, ey)) for z in zones if z["zone_class"] == "red"):
@@ -161,7 +161,7 @@ def nearest_exit(lat: float, lng: float, extra_m: float = 20.0) -> tuple[float, 
 
 
 def red_polygon_rings() -> list[list[tuple[float, float]]]:
-    """Exterior rings of all red zones as (lat, lng) lists — for uploading
+    """Exterior rings of all red zones as (lat, lng) lists - for uploading
     PX4 exclusion geofences (the FC-level backstop)."""
     with _lock:
         zones = _zones
@@ -189,9 +189,9 @@ def check_path(
     Zones crossed by a path of (lat, lng) waypoints. Used for pre-arm
     mission validation. Two tolerances on purpose:
 
-      corridor_m   — wide safety corridor; touching it flags ORANGE zones
+      corridor_m   - wide safety corridor; touching it flags ORANGE zones
                      (a warning costs nothing).
-      red_margin_m — tight margin for RED rejection, so a legal path
+      red_margin_m - tight margin for RED rejection, so a legal path
                      hugging a red zone's boundary (zones drawn
                      edge-to-edge) isn't falsely blocked. In-flight, the
                      monitor + FC fence still guard the actual boundary.

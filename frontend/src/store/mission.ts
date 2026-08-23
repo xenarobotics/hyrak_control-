@@ -24,7 +24,7 @@ function haversine(lat1: number, lng1: number, lat2: number, lng2: number): numb
 
 // ── Store ───────────────────────────────────────────────────────────────────
 
-// Sentinel selectedId for the separate RTL entry — never a real waypoint id,
+// Sentinel selectedId for the separate RTL entry - never a real waypoint id,
 // so WaypointEditor/WaypointPanel can special-case it without touching `waypoints`.
 export const RTL_SENTINEL_ID = '__rtl__'
 
@@ -40,7 +40,7 @@ export interface DronePlan {
 export const PRIMARY_PLAN_KEY = 'primary'
 export const planKeyForDrone = (id: number) => `drone-${id}`
 
-// Content signature of a plan — ids excluded so an identical re-import still
+// Content signature of a plan - ids excluded so an identical re-import still
 // matches. uploadedSignatures remembers, per plan key, the signature that was
 // last successfully uploaded; "is this plan on the drone?" is then a pure
 // comparison, so switching between fleet drones can never forget upload state
@@ -281,7 +281,7 @@ export const useMissionStore = create<MissionStore>()(persist((set, get) => ({
   markPlanUploaded: (key, signature) =>
     set(s => ({ uploadedSignatures: { ...s.uploadedSignatures, [key]: signature } })),
 
-  // Strip any legacy 'rtl'-type entries out of imported lists — RTL now lives
+  // Strip any legacy 'rtl'-type entries out of imported lists - RTL now lives
   // in rtlPosition, never in the orderable waypoints array.
   importWaypoints: wps =>
     set(s => {

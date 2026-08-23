@@ -1,9 +1,9 @@
 """
-WebRTC package init — raises aiortc's hard-coded encoder bitrate ceilings
+WebRTC package init - raises aiortc's hard-coded encoder bitrate ceilings
 before any peer connection is created (signaling imports this package first).
 
 Stock aiortc caps the outgoing (processed) video at 1.5 Mbps VP8 / 3 Mbps
-H264 and *starts* at 0.5/1 Mbps. 1080p at those rates is heavily smeared —
+H264 and *starts* at 0.5/1 Mbps. 1080p at those rates is heavily smeared -
 the receiver's bandwidth estimate (REMB) can never push the encoder past
 the cap. The caps below let quality scale to what the link actually
 supports; the encoder still adapts downward on congestion.

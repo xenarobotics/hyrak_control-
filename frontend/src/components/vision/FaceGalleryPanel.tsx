@@ -3,7 +3,7 @@
 // Enrolled-face database UI.
 //
 // Sits inside PersonTrackerPanel rather than being its own mode, because it is
-// a second way to acquire a target for the SAME tracker — not a separate
+// a second way to acquire a target for the SAME tracker - not a separate
 // capability. The reference-photo upload above it is untouched.
 //
 // Two deliberate choices in this UI:
@@ -28,7 +28,7 @@ import {
 } from '@/lib/faceGallery'
 
 /** One person recognised in the current frame. Independent of who holds the
- *  lock — several people can be identified while at most one is followed. */
+ *  lock - several people can be identified while at most one is followed. */
 export interface LiveIdentity {
     track_id: number
     person_id: string
@@ -100,7 +100,7 @@ export function FaceGalleryPanel({
     }
 
     // Ask the backend to follow a specific person, or null to hand control
-    // back to automatic selection. Applied on the next face check — the person
+    // back to automatic selection. Applied on the next face check - the person
     // has to be identified in frame before there is a body track to follow.
     const follow = (personId: string | null) => {
         getSocket().emit('set_follow_person', { person_id: personId })
@@ -119,7 +119,7 @@ export function FaceGalleryPanel({
                     flat.push({ filename: `${name}/${f.filename}`, ok: false, reason: f.reason, det_score: 0 })
                 }
                 const ok = info.enrolled
-                if (ok) flat.push({ filename: `${name} — ${ok} photo(s)`, ok: true, reason: '', det_score: 0 })
+                if (ok) flat.push({ filename: `${name} - ${ok} photo(s)`, ok: true, reason: '', det_score: 0 })
             }
             setResults(flat)
             await reload()
@@ -147,7 +147,7 @@ export function FaceGalleryPanel({
     }
 
     const remove = async (p: GalleryPerson) => {
-        // Durable biometric data with no auto-purge — deletion is permanent
+        // Durable biometric data with no auto-purge - deletion is permanent
         // and takes the stored photos with it, so it is confirmed.
         if (!window.confirm(
             `Delete ${p.name} and all ${p.face_count} enrolled photo(s)?\n\n`
@@ -168,7 +168,7 @@ export function FaceGalleryPanel({
 
     const wipe = async () => {
         if (!window.confirm(
-            `Erase the entire gallery — ${people.length} person(s), ${totalFaces} photo(s)?\n\n`
+            `Erase the entire gallery - ${people.length} person(s), ${totalFaces} photo(s)?\n\n`
             + 'This cannot be undone.'
         )) return
         setBusy('all')
@@ -228,7 +228,7 @@ export function FaceGalleryPanel({
                             {people.length === 0
                                 ? 'Enrol at least one person first.'
                                 : <>Match every detected face against the database and lock on
-                                    automatically — no target selection needed. An uploaded
+                                    automatically - no target selection needed. An uploaded
                                     reference photo still takes priority.</>}
                         </TooltipContent>
                     </Tooltip>
@@ -417,7 +417,7 @@ export function FaceGalleryPanel({
                             {r.ok ? <CheckCircle2 size={11} style={{ marginTop: 1, flexShrink: 0 }} />
                                   : <AlertCircle size={11} style={{ marginTop: 1, flexShrink: 0 }} />}
                             <span style={{ wordBreak: 'break-word' }}>
-                                {r.filename}{r.reason ? ` — ${r.reason}` : ''}
+                                {r.filename}{r.reason ? ` - ${r.reason}` : ''}
                             </span>
                         </div>
                     ))}
@@ -457,7 +457,7 @@ export function FaceGalleryPanel({
                                     {p.face_count} photo{p.face_count === 1 ? '' : 's'}
                                 </span>
                                 {/* One distinct photo is thin coverage however many
-                                    files were uploaded — a person's score is the BEST
+                                    files were uploaded - a person's score is the BEST
                                     of their faces, so duplicates add nothing. */}
                                 {p.face_count < 2 && (
                                     <Tooltip>
@@ -468,8 +468,8 @@ export function FaceGalleryPanel({
                                             thin
                                         </TooltipTrigger>
                                         <TooltipContent style={{ maxWidth: 260, fontSize: 11, lineHeight: 1.5 }}>
-                                            Only one photo enrolled. Add 2–3 from different
-                                            angles and lighting — recognition from a drone is
+                                            Only one photo enrolled. Add 2-3 from different
+                                            angles and lighting - recognition from a drone is
                                             much harder than from a passport photo.
                                         </TooltipContent>
                                     </Tooltip>

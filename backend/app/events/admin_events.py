@@ -13,8 +13,8 @@ from app.sessions.manager import SessionManager
 logger = logging.getLogger("verocore.events.admin")
 
 # Cached at startup (set_sio, called once from server.py) so callers that
-# don't otherwise have a handle on the socket.io server — e.g. vision
-# analyzer modules, which only see session_id/meta — can still raise an
+# don't otherwise have a handle on the socket.io server - e.g. vision
+# analyzer modules, which only see session_id/meta - can still raise an
 # admin alert without threading `sio` through every layer down to them.
 _sio = None
 

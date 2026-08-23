@@ -3,8 +3,8 @@
 // The follow control, shared by every mode that can chase something.
 //
 // It exists because four panels had four different answers to the same three
-// questions — is a target selected, is the drone actually flying at it, and
-// how far / how high should it sit — and the inconsistency was itself the
+// questions - is a target selected, is the drone actually flying at it, and
+// how far / how high should it sit - and the inconsistency was itself the
 // reliability problem. An operator should not have to relearn the controls
 // when they switch from vehicles to crowds.
 //
@@ -44,7 +44,7 @@ export function FollowControls({
     /** What is selected, already formatted (e.g. "VH-000042  719257C"). */
     selectedLabel: string | null
     /**
-     * GROUP FOLLOW — traffic-management only, and absent everywhere else.
+     * GROUP FOLLOW - traffic-management only, and absent everywhere else.
      *
      * Passed in rather than read from the store here because it is the one
      * capability this shared control does NOT share: traffic-management is the
@@ -57,7 +57,7 @@ export function FollowControls({
         members: number[]
         max: number
         framing: GroupFraming | null
-        /** How to name a member in a chip — the panel knows the plates. */
+        /** How to name a member in a chip - the panel knows the plates. */
         labelFor: (id: number) => string
     }
     lockState?: string
@@ -74,7 +74,7 @@ export function FollowControls({
     // Each panel used to keep its own flag, fed by whichever status event it
     // remembered: set_vehicle_tracking replies with `vehicle_tracking_status`
     // and set_tracking with `tracking_status`, so a panel listening for one
-    // and arming through the other never updated. Traffic hit exactly that —
+    // and arming through the other never updated. Traffic hit exactly that -
     // following a PERSON arms via set_tracking, the panel listened only for
     // the vehicle event, and the button stayed on "Follow" while the aircraft
     // was already chasing. Crowd listened for neither.
@@ -86,8 +86,8 @@ export function FollowControls({
 
     // WHY ARMING FAILED, shown where the operator pressed the button.
     //
-    // The backend already explains itself — "Failed to start Offboard mode —
-    // is the drone armed and airborne?" — but the only listener for `error`
+    // The backend already explains itself - "Failed to start Offboard mode -
+    // is the drone armed and airborne?" - but the only listener for `error`
     // surfaced it while telemetry was CONNECTING and otherwise sent it to
     // console.error. So a Follow press against a disarmed or grounded aircraft
     // produced a perfectly good diagnosis that nobody could see, and the
@@ -106,12 +106,12 @@ export function FollowControls({
         // WHY THE FOLLOW STOPPED, in the place that was showing it running.
         // A pilot taking the aircraft on their mode switch disarms the tracker
         // from the backend, so this control flips back to "Follow" on its own
-        // — correctly, and with no explanation at all. "It just stopped" is
+        // - correctly, and with no explanation at all. "It just stopped" is
         // the report that costs a debugging round; it stopped because somebody
         // took the aircraft, and that is worth one line.
         const onPilot = (d: { mode?: string }) => {
             setArmError(
-                `Follow stopped — the pilot took the aircraft${d?.mode ? ` in ${d.mode}` : ''}. ` +
+                `Follow stopped - the pilot took the aircraft${d?.mode ? ` in ${d.mode}` : ''}. ` +
                 `Take control back in the flight controls before following again.`
             )
             window.setTimeout(() => setArmError(null), 12000)
@@ -180,7 +180,7 @@ export function FollowControls({
             )}
 
             {/* Selecting frames a target; flying at it is a second, explicit
-                decision — arming is what starts PX4 Offboard. */}
+                decision - arming is what starts PX4 Offboard. */}
             <div style={{ display: 'flex', gap: 6 }}>
                 <button
                     onClick={() => arm(!tracking)}
@@ -214,7 +214,7 @@ export function FollowControls({
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <Users size={11} style={{ color: 'hsl(var(--app-text-muted))' }} />
                         <span style={LABEL}>Multi-follow</span>
-                        <Hint text="Keep SEVERAL subjects in frame at once. Nobody is centred — that is impossible for two moving subjects — so instead the drone backs off and climbs enough to contain them all, and holds still while they fit. With this on, tapping a subject on the video adds them to the group; tapping a member again drops them." />
+                        <Hint text="Keep SEVERAL subjects in frame at once. Nobody is centred - that is impossible for two moving subjects - so instead the drone backs off and climbs enough to contain them all, and holds still while they fit. With this on, tapping a subject on the video adds them to the group; tapping a member again drops them." />
                         <button
                             onClick={() => getSocket().emit('set_multi_follow', { enabled: !multi.enabled })}
                             style={{
@@ -236,7 +236,7 @@ export function FollowControls({
                                     <span
                                         key={id}
                                         title={i === 0
-                                            ? 'Primary — the plate, name and hold distance are read from this one'
+                                            ? 'Primary - the plate, name and hold distance are read from this one'
                                             : 'Tap to drop from the group'}
                                         style={{
                                             display: 'flex', alignItems: 'center', gap: 4,
@@ -270,7 +270,7 @@ export function FollowControls({
                             <div style={{ ...LABEL, fontSize: 9.5, lineHeight: 1.4 }}>
                                 {multi.members.length < multi.max
                                     ? 'Tap another subject on the video to add them.'
-                                    : 'Group is full — drop one to add another.'}
+                                    : 'Group is full - drop one to add another.'}
                             </div>
                             {multi.framing && <GroupFramingReadout f={multi.framing} />}
                         </>
@@ -280,8 +280,8 @@ export function FollowControls({
 
             {/* ── Distance ─────────────────────────────────────────────── */}
             {/* HIDDEN IN GROUP MODE, because it does nothing there. The
-                forward axis is driven by containment — fit everyone with
-                margin — not by any one subject's apparent size, so leaving the
+                forward axis is driven by containment - fit everyone with
+                margin - not by any one subject's apparent size, so leaving the
                 slider on screen would offer a control the aircraft ignores.
                 That is worse than no control: it makes the operator think they
                 have tried something when they have not. */}
@@ -290,7 +290,7 @@ export function FollowControls({
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <MoveVertical size={11} style={{ color: 'hsl(var(--app-text-muted))', transform: 'rotate(90deg)' }} />
                     <span style={LABEL}>Distance</span>
-                    <Hint text="Frame height = 100%. The drone moves forward/backward to keep the target filling this much of the frame. There is no single right value — apparent size depends on viewing angle as well as range — so watch 'actual' and nudge until they agree." />
+                    <Hint text="Frame height = 100%. The drone moves forward/backward to keep the target filling this much of the frame. There is no single right value - apparent size depends on viewing angle as well as range - so watch 'actual' and nudge until they agree." />
                     <span style={{ marginLeft: 'auto', fontSize: 10, fontFamily: 'monospace', color: '#38a0ff' }}>
                         target {targetPct}%
                         {actualFillPct != null && (
@@ -314,7 +314,7 @@ export function FollowControls({
                 </div>
                 {wayOff && (
                     <div style={{ fontSize: 9.5, color: '#f87171', lineHeight: 1.4 }}>
-                        Actual is well {actualFillPct! > targetPct ? 'above' : 'below'} target — the drone
+                        Actual is well {actualFillPct! > targetPct ? 'above' : 'below'} target - the drone
                         will keep moving {actualFillPct! > targetPct ? 'back' : 'in'} until they meet.
                     </div>
                 )}
@@ -365,7 +365,7 @@ export function FollowControls({
                     lineHeight: 1.5, color: elevate.elevating ? '#38a0ff' : '#f87171',
                 }}>
                     <MoveVertical size={11} style={{ marginTop: 1, flexShrink: 0 }} />
-                    <span><b>{elevate.elevating ? 'Auto-elevating' : 'Cannot climb'}</b>{' — '}{elevate.reason}</span>
+                    <span><b>{elevate.elevating ? 'Auto-elevating' : 'Cannot climb'}</b>{' - '}{elevate.reason}</span>
                 </div>
             )}
         </div>
@@ -410,7 +410,7 @@ function GroupFramingReadout({ f }: { f: GroupFraming }) {
                 operation. */}
             {f.members_visible < f.members_total && (
                 <div style={{ fontSize: 9.5, color: '#fbbf24', lineHeight: 1.4 }}>
-                    {f.members_visible} of {f.members_total} in frame — holding rather than
+                    {f.members_visible} of {f.members_total} in frame - holding rather than
                     closing in, so the missing one stays recoverable.
                 </div>
             )}
@@ -423,13 +423,13 @@ function GroupFramingReadout({ f }: { f: GroupFraming }) {
                               color: f.widen_budget.by === 'time' ? '#fbbf24' : 'hsl(var(--app-text-muted))' }}>
                     {f.widen_budget.by === 'distance'
                         ? `widened ${(f.widen_budget.spent_m ?? 0).toFixed(0)} / ${f.widen_budget.limit_m.toFixed(0)} m`
-                        : `widened ${f.widen_budget.spent_s.toFixed(0)} / ${f.widen_budget.limit_s.toFixed(0)}s — no GPS fix, bounded by time not distance`}
+                        : `widened ${f.widen_budget.spent_s.toFixed(0)} / ${f.widen_budget.limit_s.toFixed(0)}s - no GPS fix, bounded by time not distance`}
                 </div>
             )}
             <div style={{ fontSize: 9.5, color, lineHeight: 1.4 }}>{f.reason}</div>
             {bad && f.required_range_m != null && (
                 <div style={{ fontSize: 9.5, color: '#f87171', lineHeight: 1.4 }}>
-                    Would need about {f.required_range_m.toFixed(0)} m of range — at which
+                    Would need about {f.required_range_m.toFixed(0)} m of range - at which
                     plates and faces stop being readable. Drop a member or release.
                 </div>
             )}

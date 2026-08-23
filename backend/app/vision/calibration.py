@@ -7,12 +7,12 @@ overrides, and it exists because those two things have different lifetimes:
 
   * A default belongs in .env, next to secrets, changed by whoever deploys.
   * A calibration belongs to the AIRFRAME. It is measured once on a bench,
-    it must survive a restart, and it must be editable by the person flying —
+    it must survive a restart, and it must be editable by the person flying -
     who should not have to edit a file that also contains the TURN credentials.
 
 So overrides live in a JSON file under .data/, layered on top of Settings.
 Postgres would work too, but this is a handful of scalars read at session start
-and the DB is already optional everywhere else in the vision path — a
+and the DB is already optional everywhere else in the vision path - a
 calibration that vanished when the database was down would be worse.
 
 WHY THE FIELD TABLE IS SERVED TO THE UI
@@ -22,7 +22,7 @@ WHY THE FIELD TABLE IS SERVED TO THE UI
     the UI cheerfully accepts a value the backend then rejects.
 
 WHY THE SPLIT INTO TWO GROUPS
-    `camera` is a property of the rig — measured once, changed when the lens or
+    `camera` is a property of the rig - measured once, changed when the lens or
     mount changes. `limits` are per-mission operator decisions. They are
     separated because they are edited by different people at different times,
     and mixing them invites someone to "fix" a flight ceiling by editing
@@ -41,7 +41,7 @@ logger = logging.getLogger("verocore.vision.calibration")
 CALIBRATION_PATH = os.path.join(str(ROOT_DIR), ".data", "camera_calibration.json")
 
 # Serialised to the UI, which renders inputs from it. Keep `help` short enough
-# to sit in a tooltip and specific enough to be actionable — "how to measure
+# to sit in a tooltip and specific enough to be actionable - "how to measure
 # this" beats "the horizontal field of view".
 FIELDS: List[Dict[str, Any]] = [
     # ── Camera rig ────────────────────────────────────────────────────────
@@ -50,14 +50,14 @@ FIELDS: List[Dict[str, Any]] = [
         "label": "Horizontal FOV", "unit": "deg", "min": 1.0, "max": 179.0, "step": 0.5,
         "help": "Measure it: fill the frame edge-to-edge with a target of known "
                 "width W at distance D, then HFOV = 2*atan(W / (2*D)). It cannot "
-                "be looked up from the sensor part number — it is a property of "
+                "be looked up from the sensor part number - it is a property of "
                 "the lens. Every speed and distance reading scales off this.",
     },
     {
         "key": "camera_vfov_deg", "group": "camera", "type": "float",
         "label": "Vertical FOV", "unit": "deg", "min": 0.0, "max": 179.0, "step": 0.5,
         "help": "Leave at 0 to derive it from the frame's aspect ratio, which is "
-                "correct for a normal rectilinear lens. Set it only if measured — "
+                "correct for a normal rectilinear lens. Set it only if measured - "
                 "a fisheye's vertical FOV does not follow from its horizontal one.",
     },
     {
@@ -76,7 +76,7 @@ FIELDS: List[Dict[str, Any]] = [
     {
         "key": "camera_mount_roll_deg", "group": "camera", "type": "float",
         "label": "Mount roll offset", "unit": "deg", "min": -180.0, "max": 180.0, "step": 0.5,
-        "help": "Camera rotation about its own optical axis — a tilted horizon "
+        "help": "Camera rotation about its own optical axis - a tilted horizon "
                 "with the airframe level. Normally 0.",
     },
     {
@@ -100,7 +100,7 @@ FIELDS: List[Dict[str, Any]] = [
     {
         "key": "max_altitude_agl_m", "group": "limits", "type": "float",
         "label": "Altitude ceiling", "unit": "m", "min": 5.0, "max": 500.0, "step": 1.0,
-        "help": "Hard cap on auto-elevate during a chase. A legal limit — DGCA "
+        "help": "Hard cap on auto-elevate during a chase. A legal limit - DGCA "
                 "is 120m. The drone refuses to climb past it even if that means "
                 "losing the target.",
     },
@@ -119,7 +119,7 @@ FIELDS: List[Dict[str, Any]] = [
         "label": "Max look-down angle", "unit": "deg", "min": 10.0, "max": 90.0, "step": 1.0,
         "help": "A RECOGNITION limit, separate from the altitude cap. Past this "
                 "the camera is looking too steeply down for a face to be a face "
-                "or a plate to be readable — still flying, but the analytics have "
+                "or a plate to be readable - still flying, but the analytics have "
                 "stopped being useful.",
     },
     {
@@ -127,7 +127,7 @@ FIELDS: List[Dict[str, Any]] = [
         "label": "Crowd: light up to", "unit": "people", "min": 1, "max": 500, "step": 1,
         "help": "People in frame at or below this read GREEN. Whole-frame "
                 "headcount depends entirely on lens, altitude and framing, so "
-                "there is no universally correct value — a venue that has "
+                "there is no universally correct value - a venue that has "
                 "counted its own safe occupancy has better numbers than any "
                 "default here.",
     },
@@ -151,7 +151,7 @@ FIELDS: List[Dict[str, Any]] = [
         "help": "How metres-per-pixel is derived. 'altitude' uses AGL + FOV and "
                 "improves with height; 'object' uses a vehicle's known width and "
                 "is flat ~4% at any altitude. 'auto' uses both and flags a "
-                "reading when they disagree — which is the point of having two.",
+                "reading when they disagree - which is the point of having two.",
     },
     {
         "key": "speed_scale_max_disagreement_pct", "group": "limits", "type": "float",
@@ -162,7 +162,7 @@ FIELDS: List[Dict[str, Any]] = [
 
     # ── Follow tuning (yaw axis) ──────────────────────────────────────────
     # A THIRD group, not a third pile in `limits`, because these are neither a
-    # property of the rig nor a mission decision — they are how the aircraft
+    # property of the rig nor a mission decision - they are how the aircraft
     # BEHAVES while chasing, and they are the one thing an operator changes in
     # response to how the last flight felt.
     #
@@ -175,7 +175,7 @@ FIELDS: List[Dict[str, Any]] = [
         "label": "Responsiveness", "unit": "", "min": 10.0, "max": 50.0, "step": 1.0,
         "help": "How hard the drone turns when the subject drifts off-centre "
                 "(proportional gain). Higher is snappier. Too high and it "
-                "overshoots and hunts back and forth — if the aircraft wags "
+                "overshoots and hunts back and forth - if the aircraft wags "
                 "left-right around a walking subject, this is the number to "
                 "lower first.",
     },
@@ -184,7 +184,7 @@ FIELDS: List[Dict[str, Any]] = [
         "label": "Smoothing", "unit": "", "min": 0.0, "max": 10.0, "step": 0.2,
         "help": "Damps sudden corrections (derivative gain). Higher is smoother "
                 "but slower to catch up. Roughly a seventh of Responsiveness is "
-                "a sane starting ratio — raise it together with Responsiveness, "
+                "a sane starting ratio - raise it together with Responsiveness, "
                 "not instead of it.",
     },
     {
@@ -224,9 +224,9 @@ def _read_file() -> Dict[str, Any]:
     except FileNotFoundError:
         return {}
     except (OSError, ValueError) as e:
-        # A corrupt file must not take the vision pipeline down with it —
+        # A corrupt file must not take the vision pipeline down with it -
         # fall back to defaults and say so loudly.
-        logger.warning(f"Calibration file unreadable ({e}) — using defaults")
+        logger.warning(f"Calibration file unreadable ({e}) - using defaults")
         return {}
 
 
@@ -272,7 +272,7 @@ def effective() -> Dict[str, Any]:
             values = _defaults()
             for k, v in _read_file().items():
                 if k not in _BY_KEY:
-                    continue          # a key from an older build — ignore it
+                    continue          # a key from an older build - ignore it
                 try:
                     values[k] = coerce(k, v)
                 except ValueError as e:
@@ -326,7 +326,7 @@ def reset() -> Dict[str, Any]:
 
 
 def schema() -> Dict[str, Any]:
-    """Field table plus current values — everything the UI needs to render."""
+    """Field table plus current values - everything the UI needs to render."""
     values = effective()
     saved = set(_read_file())
     return {

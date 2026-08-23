@@ -1,4 +1,4 @@
-# ByteTrack config — extended track buffer so a person temporarily out of
+# ByteTrack config - extended track buffer so a person temporarily out of
 # frame keeps their ID for up to ~3 seconds at 30 fps.
 tracker_type: bytetrack
 track_high_thresh: 0.5

@@ -42,7 +42,7 @@ export default function WaypointPanel() {
   const [dragOver, setDragOver] = useState<number | null>(null)
   const [listOpen, setListOpen] = useState(true)
 
-  // RTL is never part of the orderable/draggable list — defensive filter in
+  // RTL is never part of the orderable/draggable list - defensive filter in
   // case older persisted/imported data still has a legacy 'rtl' type entry.
   const orderable = waypoints.filter(w => w.type !== 'rtl')
   const rtlActive = selectedId === RTL_SENTINEL_ID
@@ -50,7 +50,7 @@ export default function WaypointPanel() {
 
   return (
     <div className="flex flex-col gap-1 pr-1">
-      {/* Waypoint list header — collapses just the orderable list, independent
+      {/* Waypoint list header - collapses just the orderable list, independent
           of the Mission Plan panel's own collapse arrow */}
       <button
         onClick={() => setListOpen(o => !o)}
@@ -130,7 +130,7 @@ export default function WaypointPanel() {
                   transform: isOver ? 'translateY(-1px)' : 'translateY(0)',
                 }}
               >
-                {/* Drag grip — stops click propagation so it doesn't select the WP */}
+                {/* Drag grip - stops click propagation so it doesn't select the WP */}
                 <span
                   title="Drag to reorder"
                   className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing"
@@ -172,7 +172,7 @@ export default function WaypointPanel() {
                   )}
                 </div>
 
-                {/* Reorder arrows + delete — appear on hover / when active */}
+                {/* Reorder arrows + delete - appear on hover / when active */}
                 <div
                   className="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
                   style={active ? { opacity: 1 } : undefined}
@@ -215,7 +215,7 @@ export default function WaypointPanel() {
         </div>
       ))}
 
-      {/* ── RTL — separate, non-reorderable, always visible ──────────────── */}
+      {/* ── RTL - separate, non-reorderable, always visible ──────────────── */}
       <div className="mt-1 pt-2 border-t" style={{ borderColor: 'rgba(255,255,255,.08)' }}>
         <div
           onClick={() => selectWaypoint(rtlActive ? null : RTL_SENTINEL_ID)}

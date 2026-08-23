@@ -4,8 +4,8 @@ Vehicle colour classification.
 
 Deliberately not a neural network. Colour is one of the few attributes that
 is genuinely a property of the pixels, so a hand-built HSV classifier is
-faster, needs no weights, no training set, and — the part that matters
-operationally — can explain itself. A CNN that says "silver" gives you
+faster, needs no weights, no training set, and - the part that matters
+operationally - can explain itself. A CNN that says "silver" gives you
 nothing to debug when it says "silver" about a white car.
 
 Kept separate from plate_tracker because the traffic-management module will
@@ -25,7 +25,7 @@ THE THREE THINGS THAT MAKE THIS HARD FROM A DRONE
   3. Lighting moves value far more than saturation. The same car in sun and
      in shade differs hugely in V and only mildly in S, so the
      chromatic/achromatic decision leans on saturation, and the
-     white/grey/black split — which unavoidably needs V — is reported with
+     white/grey/black split - which unavoidably needs V - is reported with
      lower confidence.
 """
 import logging
@@ -48,7 +48,7 @@ _HUE_BANDS = [
     ("red",    156, 179),
 ]
 
-# Below this saturation a pixel carries no usable hue — it is white, grey or
+# Below this saturation a pixel carries no usable hue - it is white, grey or
 # black, and its hue value is numerically unstable noise.
 _ACHROMATIC_S_MAX = 55
 # Value splits for achromatic pixels. Wide middle band because "silver" and
@@ -58,8 +58,8 @@ _WHITE_V_MIN = 175
 
 # HSV saturation is (max-min)/max, so it is UNRELIABLE AT THE EXTREMES OF
 # VALUE and this is not a subtle effect. On a black car at V=40, a few levels
-# of sensor noise between channels computes as saturation ~95 — well past
-# _ACHROMATIC_S_MAX — and the resulting hue is pure noise. Without this gate
+# of sensor noise between channels computes as saturation ~95 - well past
+# _ACHROMATIC_S_MAX - and the resulting hue is pure noise. Without this gate
 # every dark vehicle gets a confident random colour.
 #
 # The same applies at the top: a specular highlight is white whatever the
@@ -67,7 +67,7 @@ _WHITE_V_MIN = 175
 _HUE_VALID_V_MIN = 60
 _HUE_VALID_V_MAX = 248
 
-# Fraction of the box kept, centred. 0.5 keeps the middle half in each axis —
+# Fraction of the box kept, centred. 0.5 keeps the middle half in each axis -
 # enough pixels to be statistically meaningful, tight enough to exclude the
 # road that a vehicle box always includes.
 _INSET = 0.5
@@ -76,7 +76,7 @@ _MIN_PIXELS = 40
 
 
 def _body_roi(frame_bgr: np.ndarray, box) -> Optional[np.ndarray]:
-    """Central inset of the box — the part most likely to be bodywork."""
+    """Central inset of the box - the part most likely to be bodywork."""
     h, w = frame_bgr.shape[:2]
     x1, y1, x2, y2 = [int(v) for v in box]
     x1, y1 = max(0, x1), max(0, y1)
@@ -99,7 +99,7 @@ def classify_vehicle_color(
 
     Returns (name, confidence) where confidence is the fraction of sampled
     pixels agreeing with the verdict. ("unknown", 0.0) when the box is too
-    small or too mixed to call — which is the honest answer for a distant
+    small or too mixed to call - which is the honest answer for a distant
     vehicle, and better than a coin-flip colour attached to a plate record.
     """
     roi = _body_roi(frame_bgr, box)
@@ -113,7 +113,7 @@ def classify_vehicle_color(
     total = hue.size
 
     # A pixel votes on hue only if it is saturated AND its value is in the
-    # range where saturation means anything at all — see _HUE_VALID_V_MIN.
+    # range where saturation means anything at all - see _HUE_VALID_V_MIN.
     chromatic = (
         (sat > _ACHROMATIC_S_MAX)
         & (val >= _HUE_VALID_V_MIN)

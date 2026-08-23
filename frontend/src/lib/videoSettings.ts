@@ -24,7 +24,7 @@ const RES_MAX_BITRATE: Record<VideoRes, number> = {
 
 // Detail profile ceilings. Roughly 2.5x, because the thing being preserved is
 // exactly what a normal encoder throws away first: high-frequency detail in a
-// small region — which is all a number plate is.
+// small region - which is all a number plate is.
 const RES_MAX_BITRATE_DETAIL: Record<VideoRes, number> = {
     '480':  6_000_000,
     '720':  12_000_000,
@@ -33,9 +33,9 @@ const RES_MAX_BITRATE_DETAIL: Record<VideoRes, number> = {
 
 // How the browser's encoder should spend its bitrate.
 //
-//   'smooth' — prioritise motion. Under congestion the resolution drops and
+//   'smooth' - prioritise motion. Under congestion the resolution drops and
 //              the frame rate holds. Right for flying and for watching.
-//   'detail' — prioritise fine detail. Under congestion the FRAME RATE drops
+//   'detail' - prioritise fine detail. Under congestion the FRAME RATE drops
 //              and the resolution holds, and the encoder is told the content
 //              is detail rather than motion.
 //
@@ -43,7 +43,7 @@ const RES_MAX_BITRATE_DETAIL: Record<VideoRes, number> = {
 // defaults were actively working against plate OCR: contentHint 'motion' asks
 // the encoder to smear high-frequency detail (a plate is nothing BUT
 // high-frequency detail in a few hundred pixels), and
-// degradationPreference 'maintain-framerate' throws resolution away first —
+// degradationPreference 'maintain-framerate' throws resolution away first -
 // resolution being the one thing a 64px plate cannot spare. A dropped frame
 // costs nothing here: the plate is still there on the next one.
 export type CaptureProfile = 'smooth' | 'detail'
@@ -58,25 +58,25 @@ export function getCaptureProfile(): CaptureProfile {
 }
 
 // How AI-mode video reaches the screen:
-//   'overlay'   — show the LOCAL camera directly and draw AI results on a
+//   'overlay'   - show the LOCAL camera directly and draw AI results on a
 //                 canvas from cv_results. Sharpest video, lowest latency,
 //                 ~half the bandwidth (no return video stream); the boxes
 //                 lag the video by one inference (~100 ms).
-//   'processed' — show the server-rendered feed. Video and annotations are
+//   'processed' - show the server-rendered feed. Video and annotations are
 //                 perfectly in sync, but quality is capped by the server
 //                 re-encode and everything lags together.
 // Depth and enhance transform the frame itself, so they always use the
 // processed feed regardless of this setting.
 export type FeedMode = 'overlay' | 'processed'
 
-// MUST list every mode CvOverlayCanvas can draw — its `switch (mode)` is the
+// MUST list every mode CvOverlayCanvas can draw - its `switch (mode)` is the
 // other half of this list, and the two silently disagreeing is expensive.
 //
 // traffic-management was missing here while having a full draw function, a
 // click handler and an entry in CLICK_TO_SELECT. Nothing errored. The mode
 // simply fell through to the PROCESSED feed, so:
 //
-//   * CvOverlayCanvas was never mounted — no hover highlight and no
+//   * CvOverlayCanvas was never mounted - no hover highlight and no
 //     click-to-follow were possible at all, in any circumstance;
 //   * the picture on screen was the server's re-encoded round trip, which is
 //     what made it look soft and blocky next to the other modes;
@@ -132,7 +132,7 @@ export function videoConstraints(deviceId: string): MediaTrackConstraints {
     }
 }
 
-// Crowd-management density thresholds — whole-frame headcount is entirely
+// Crowd-management density thresholds - whole-frame headcount is entirely
 // FOV-dependent (how tight the drone is framed, altitude, lens), so there's
 // no universally correct default. Presets, not raw numbers, keep this
 // approachable for non-technical operators (Settings page).
@@ -191,13 +191,13 @@ export function maxUplinkBitrate(): number {
         : RES_MAX_BITRATE[res]
 }
 
-// Standby uplink — what the browser sends the server while NO AI mode is
+// Standby uplink - what the browser sends the server while NO AI mode is
 // active (manual control). The server only makes admin-dashboard previews
-// from it, so full quality is pure waste on a weak machine — but a strong
+// from it, so full quality is pure waste on a weak machine - but a strong
 // ground station may still want crisp admin previews. 'auto' picks eco
 // exactly when the extra load actually exists: when the camera is the
 // air-unit virtual webcam (the same laptop is then also software-decoding
-// the RF H.265 feed — see air_unit_relay/video_webcam.sh, which names the
+// the RF H.265 feed - see air_unit_relay/video_webcam.sh, which names the
 // device "HyrakAirUnit"). AI modes are never affected; they always uplink
 // at full quality because the server genuinely consumes those frames.
 export type StandbyUplink = 'auto' | 'full' | 'eco'
@@ -222,7 +222,7 @@ export function wantsEcoUplink(cameraLabel: string): boolean {
 // keep the frame rate and lower resolution instead of stuttering.
 //
 // thumbnailOnly: preview-quality uplink for manual control (see the
-// StandbyUplink note above — callers gate it on the mode AND on
+// StandbyUplink note above - callers gate it on the mode AND on
 // wantsEcoUplink). The mode can't change while streaming, so it's safe to
 // hold for the whole stream; a settings change live-applies via
 // applyVideoSettings, which re-evaluates it.
@@ -232,7 +232,7 @@ export async function tuneVideoSender(pc: RTCPeerConnection, thumbnailOnly = fal
     try {
         // See CaptureProfile above: for anything the SERVER has to read rather
         // than a human watch, resolution outranks smoothness and detail
-        // outranks motion — the opposite of the right choice for flying.
+        // outranks motion - the opposite of the right choice for flying.
         const detail = getCaptureProfile() === 'detail'
         sender.track!.contentHint = detail ? 'detail' : 'motion'
         const params = sender.getParameters()
@@ -247,7 +247,7 @@ export async function tuneVideoSender(pc: RTCPeerConnection, thumbnailOnly = fal
             params.encodings[0].maxFramerate = 8
             params.encodings[0].scaleResolutionDownBy = 2
         } else {
-            // Explicitly undo a previous eco pass — live-applying a settings
+            // Explicitly undo a previous eco pass - live-applying a settings
             // change reuses the same sender, so stale caps would stick.
             params.encodings[0].maxBitrate = maxUplinkBitrate()
             params.encodings[0].maxFramerate = undefined
@@ -262,12 +262,12 @@ export async function tuneVideoSender(pc: RTCPeerConnection, thumbnailOnly = fal
 
 // How the video is fitted into its container.
 //
-//   'fill' — object-fit: cover. Fills the panel, CROPS whatever does not fit.
-//   'fit'  — object-fit: contain. Whole frame visible, letterboxed.
+//   'fill' - object-fit: cover. Fills the panel, CROPS whatever does not fit.
+//   'fit'  - object-fit: contain. Whole frame visible, letterboxed.
 //
 // 'fit' matters more than it sounds for a surveillance tool: with a 4:3 or
 // 16:10 camera in a 16:9 panel, 'fill' silently hides a strip of frame that
-// the AI is still analysing — so a detection can sit in a part of the image
+// the AI is still analysing - so a detection can sit in a part of the image
 // the operator cannot see. The overlay canvas MUST use the same value, or
 // boxes and clicks land in the wrong place.
 export type VideoFit = 'fill' | 'fit'

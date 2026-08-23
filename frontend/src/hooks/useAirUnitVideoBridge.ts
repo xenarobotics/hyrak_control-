@@ -1,11 +1,11 @@
 'use client'
 
 // Shared start/stop/status logic for the native air-unit video bridge
-// (desktop/src/bridges/airUnitVideoBridge.ts) — used from both the Fly
+// (desktop/src/bridges/airUnitVideoBridge.ts) - used from both the Fly
 // tab's device panel (the natural place to flip it on before flying) and
 // Settings → Video (where port/device can be changed). Both use the SAME
 // bridge id, so starting it from one place is immediately reflected in
-// the other — there's only ever one such bridge running at a time.
+// the other - there's only ever one such bridge running at a time.
 
 import { useEffect, useState } from 'react'
 import { isDesktopApp, nativeBridge, type BridgeEvent } from '@/lib/nativeBridge'

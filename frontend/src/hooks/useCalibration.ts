@@ -26,7 +26,7 @@ export function useCalibration() {
             if (r.ok) { setRefusal(null); return }
             // BACK TO IDLE, not just "show the reason". The optimistic start
             // switched the panel to the stage view, and the reason is rendered
-            // on the picker — so a refusal left the operator watching "asking
+            // on the picker - so a refusal left the operator watching "asking
             // the autopilot…" forever with the explanation on a screen they
             // could no longer see.
             setRefusal(r.error || 'The drone refused to start the calibration')
@@ -43,7 +43,7 @@ export function useCalibration() {
     const start = useCallback((sensor: string) => {
         setRefusal(null)
         // Optimistic ONLY as far as "asked". The phase stays 'starting' until
-        // the aircraft says otherwise, and every side stays pending — nothing
+        // the aircraft says otherwise, and every side stays pending - nothing
         // here is allowed to show progress the autopilot has not reported.
         setState({ sensor, phase: 'starting', sides: {}, instruction: 'Asking the autopilot…' })
         sendAction('start_calibration', { sensor })

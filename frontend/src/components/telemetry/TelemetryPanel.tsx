@@ -23,9 +23,9 @@ interface TelemetryGroup {
 }
 
 function fmt(v: unknown, decimals = 2): string {
-    if (v === null || v === undefined) return '—'
+    if (v === null || v === undefined) return '-'
     if (typeof v === 'boolean') return v ? 'YES' : 'NO'
-    if (typeof v === 'number') return isNaN(v) ? '—' : v.toFixed(decimals)
+    if (typeof v === 'number') return isNaN(v) ? '-' : v.toFixed(decimals)
     return String(v)
 }
 

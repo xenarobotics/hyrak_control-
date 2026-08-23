@@ -61,15 +61,15 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
     // Signaling finishing is NOT the stream starting.
     //
     // `isLoading` covers only the offer/answer exchange, which resolves in a
-    // few hundred ms. `isStreaming` is set much later, from an EVENT —
+    // few hundred ms. `isStreaming` is set much later, from an EVENT -
     // pc.ontrack for a processed feed, oniceconnectionstatechange for an
     // overlay one. Between the two, both flags were false and the button
     // reverted to "Start Analysis": the operator had clicked, something was
     // clearly happening, and the control said nothing was. Then seconds later
     // it jumped to "Stop". It read as a dropped click on a broken app.
     //
-    // `pending` spans the whole operation — click until the stream is
-    // genuinely live — so the control is never idle while work is in flight.
+    // `pending` spans the whole operation - click until the stream is
+    // genuinely live - so the control is never idle while work is in flight.
     const [pending, setPending] = useState(false)
 
     useEffect(() => {
@@ -81,7 +81,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
     }, [lastError])
 
     // Backstop. The server gives up on an absent uplink after 25s, and a
-    // control stuck spinning forever is worse than one that admits defeat —
+    // control stuck spinning forever is worse than one that admits defeat -
     // it leaves no way back without a reload.
     useEffect(() => {
         if (!pending) return
@@ -103,14 +103,14 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
     // A server-sourced feed waits up to 25 s for the desktop app to push
     // video, and for that whole time the only thing on screen was the word
     // "Connecting". Twenty-five seconds of that, followed by a failure, reads
-    // as the selected ANALYSIS MODE being broken — the mode is simply what the
+    // as the selected ANALYSIS MODE being broken - the mode is simply what the
     // operator was changing when they hit it. The wait is identical for every
     // mode, and the backend knows within a second whether anything is arriving.
     const [progress, setProgress] = useState<string | null>(null)
     useEffect(() => {
         const socket = getSocket()
         const handle = (d: { phase?: string; seconds?: number; detail?: string }) => {
-            setProgress(`waiting for video from the relay — ${d.seconds ?? 0}s · ${d.detail ?? ''}`)
+            setProgress(`waiting for video from the relay - ${d.seconds ?? 0}s · ${d.detail ?? ''}`)
         }
         socket.on('stream_progress', handle)
         return () => { socket.off('stream_progress', handle) }
@@ -123,7 +123,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
         if (isLoading || pending) return
         setPending(true)
         // Server-sourced feeds (air-unit UDP, SIYI RTSP): no browser camera
-        // involved at all — the backend pulls frames directly.
+        // involved at all - the backend pulls frames directly.
         const src = getVideoSource()
         if (isServerSourced(src)) {
             setIsLoading(true)
