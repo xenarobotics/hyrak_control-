@@ -4,12 +4,13 @@
 // and both are re-applied before first paint by the inline script in
 // app/layout.tsx, so a reload doesn't flash the defaults.
 
-export type UiFont = 'default' | 'system' | 'ubuntu' | 'inter'
+export type UiFont = 'default' | 'system' | 'ubuntu' | 'inter' | 'nunito'
 export const UI_FONTS: { value: UiFont; label: string }[] = [
     { value: 'default', label: 'Geist (default)' },
     { value: 'system', label: 'System sans' },
     { value: 'ubuntu', label: 'Ubuntu' },
     { value: 'inter', label: 'Inter' },
+    { value: 'nunito', label: 'Nunito' },
 ]
 
 /** Percent. 100 = as designed. The whole interface scales — the request

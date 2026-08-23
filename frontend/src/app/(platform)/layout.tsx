@@ -188,7 +188,7 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
             <DroneConnection />
             <WebRTCProvider>
                 <div
-                    className="flex h-screen overflow-hidden"
+                    className="flex h-full overflow-hidden"
                     style={{ background: 'hsl(var(--app-bg))', color: 'hsl(var(--app-text))' }}
                 >
                     <PlatformNav />

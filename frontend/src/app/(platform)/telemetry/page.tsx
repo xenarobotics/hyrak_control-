@@ -438,8 +438,8 @@ function LockedNote({ text }: { text: string }) {
 // A dark instrument panel block (no card border — feels embedded rather than floating)
 function Panel({ title, children, accent }: { title?: string; children: React.ReactNode; accent?: string }) {
     return (
-        <div style={{ borderRadius: 10, background: '#0b1019', border: `1px solid ${accent ? `${accent}22` : 'rgba(255,255,255,0.06)'}`, overflow: 'hidden' }}>
-            {title && <div style={{ padding: '7px 14px', fontSize: 9, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.12em', color: accent ?? 'rgba(255,255,255,0.25)', borderBottom: `1px solid ${accent ? `${accent}18` : 'rgba(255,255,255,0.05)'}` }}>{title}</div>}
+        <div style={{ borderRadius: 10, background: 'hsl(var(--app-surface))', border: `1px solid ${accent ? `${accent}22` : 'hsl(var(--app-border))'}`, overflow: 'hidden' }}>
+            {title && <div style={{ padding: '7px 14px', fontSize: 9, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.12em', color: accent ?? 'rgba(255,255,255,0.25)', borderBottom: `1px solid ${accent ? `${accent}18` : 'hsl(var(--app-border))'}` }}>{title}</div>}
             <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>{children}</div>
         </div>
     )
@@ -766,7 +766,7 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                             ].map(r => (
                                 <div key={r.k} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                                     <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)' }}>{r.k}</span>
-                                    <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 600, color: r.hi ? '#f87171' : '#e2e8f0' }}>{r.v}</span>
+                                    <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 600, color: r.hi ? '#f87171' : 'hsl(var(--app-text))' }}>{r.v}</span>
                                 </div>
                             ))}
                         </Panel>
@@ -811,7 +811,7 @@ function VehicleWorkspace({ v, onUpdate }: { v: VehicleProfile; onUpdate: (p: Pa
             <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: '20px 24px', borderRadius: 14, background: '#090e14', border: '1px solid rgba(34,211,238,0.12)' }}>
                 <DroneSVG airframe={v.airframe} size={96} />
                 <div>
-                    <h2 style={{ fontSize: 24, fontWeight: 700, color: '#e2e8f0', margin: 0 }}>{v.name}</h2>
+                    <h2 style={{ fontSize: 24, fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>{v.name}</h2>
                     <p style={{ fontSize: 12, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)', margin: '4px 0 0' }}>
                         {AIRFRAME_LABELS[v.airframe] ?? v.airframe} · {v.firmware.toUpperCase()}{v.frameId ? ` · Frame #${v.frameId}` : ''}
                     </p>
@@ -1420,8 +1420,8 @@ function RadioWorkspace({ r, onUpdate }: { r: RadioProfile; onUpdate: (p: Partia
         return (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
                 <div style={{ width: 80, height: 80, borderRadius: 14, background: '#060b10', border: '1px solid rgba(255,255,255,0.08)', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <div style={{ position: 'absolute', top: 0, bottom: 0, left: '50%', width: 1, background: 'rgba(255,255,255,0.05)' }} />
-                    <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', height: 1, background: 'rgba(255,255,255,0.05)' }} />
+                    <div style={{ position: 'absolute', top: 0, bottom: 0, left: '50%', width: 1, background: 'hsl(var(--app-border))' }} />
+                    <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', height: 1, background: 'hsl(var(--app-border))' }} />
                     <div style={{ position: 'absolute', top: 6, left: 0, right: 0, textAlign: 'center', fontSize: 8, fontFamily: 'monospace', color: '#22d3ee', opacity: 0.7 }}>{axes[0].split(' ')[0]}</div>
                     <div style={{ position: 'absolute', bottom: 6, left: 0, right: 0, textAlign: 'center', fontSize: 8, fontFamily: 'monospace', color: '#22d3ee', opacity: 0.7 }}>{axes[1].split(' ')[0]}</div>
                     <div style={{ width: 16, height: 16, borderRadius: '50%', background: '#22d3ee', opacity: 0.85, boxShadow: '0 0 10px rgba(34,211,238,0.4)', zIndex: 1 }} />
@@ -1509,7 +1509,7 @@ function PowerWorkspace({ p, onUpdate }: { p: PowerProfile; onUpdate: (patch: Pa
                         ].map(r => (
                             <div key={r.label} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
                                 <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.25)', width: 80 }}>{r.label}</span>
-                                <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: r.label === 'Live voltage' ? '#4ade80' : '#e2e8f0' }}>{r.val}</span>
+                                <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: r.label === 'Live voltage' ? '#4ade80' : 'hsl(var(--app-text))' }}>{r.val}</span>
                             </div>
                         ))}
                     </div>
@@ -1589,9 +1589,9 @@ function SafetyWorkspace({ s, onUpdate }: { s: SafetyProfile; onUpdate: (p: Part
                 {/* Right: controls */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                     {/* Terrain follow — functional, prominent */}
-                    <div style={{ padding: '14px 16px', borderRadius: 10, background: terrainFollow ? 'rgba(34,211,238,0.07)' : '#090e14', border: `1.5px solid ${terrainFollow ? 'rgba(34,211,238,0.3)' : 'rgba(255,255,255,0.06)'}`, transition: 'all 0.2s' }}>
+                    <div style={{ padding: '14px 16px', borderRadius: 10, background: terrainFollow ? 'rgba(34,211,238,0.07)' : '#090e14', border: `1.5px solid ${terrainFollow ? 'rgba(34,211,238,0.3)' : 'hsl(var(--app-border))'}`, transition: 'all 0.2s' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                            <span style={{ fontSize: 13, fontWeight: 600, color: terrainFollow ? '#22d3ee' : '#e2e8f0' }}>Terrain Following</span>
+                            <span style={{ fontSize: 13, fontWeight: 600, color: terrainFollow ? '#22d3ee' : 'hsl(var(--app-text))' }}>Terrain Following</span>
                             <Toggle value={terrainFollow} onChange={() => setTerrainFollow(!terrainFollow)} />
                         </div>
                         <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)', margin: 0, lineHeight: 1.6 }}>
@@ -1719,8 +1719,8 @@ const GROUP_STYLE: Record<PX4Group, { color: string; icon: React.ElementType }> 
     'MAVLink':           { color: '#22d3ee', icon: Radio },
     'PWM / ESC':         { color: '#fb923c', icon: Zap },
     'Motors':            { color: '#fb923c', icon: SlidersHorizontal },
-    'Control Allocator': { color: '#94a3b8', icon: SlidersHorizontal },
-    'Logging':           { color: '#94a3b8', icon: Terminal },
+    'Control Allocator': { color: 'hsl(var(--app-text-muted))', icon: SlidersHorizontal },
+    'Logging':           { color: 'hsl(var(--app-text-muted))', icon: Terminal },
     'Circuit Breakers':  { color: '#f87171', icon: AlertTriangle },
     'Sensors':           { color: '#60a5fa', icon: Gauge },
     'RC Channels':       { color: '#a78bfa', icon: Radio },
@@ -1753,13 +1753,13 @@ function ParamCard({ p, currentVal, catColor, isSearching, onSet, onRevert }: {
     const leftBorder   = p.danger ? '#f87171' : modified ? '#fbbf24' : catColor
 
     return (
-        <div style={{ borderRadius: 10, background: '#0b1019', border: `1px solid ${borderAccent}`, borderLeft: `3px solid ${leftBorder}`, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ borderRadius: 10, background: 'hsl(var(--app-surface))', border: `1px solid ${borderAccent}`, borderLeft: `3px solid ${leftBorder}`, display: 'flex', flexDirection: 'column' }}>
             {/* Header */}
             <div style={{ padding: '11px 13px 0' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                            <span style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0', lineHeight: 1.3 }}>{p.name}</span>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: 'hsl(var(--app-text))', lineHeight: 1.3 }}>{p.name}</span>
                             {p.danger   && <AlertTriangle size={9} style={{ color: '#f87171', flexShrink: 0 }} />}
                             {modified   && <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#fbbf24', flexShrink: 0 }} />}
                         </div>
@@ -1776,7 +1776,7 @@ function ParamCard({ p, currentVal, catColor, isSearching, onSet, onRevert }: {
                         </span>
                     </div>
                 </div>
-                <p style={{ fontSize: 11, color: '#94a3b8', margin: '5px 0 0', lineHeight: 1.5 }}>{p.desc}</p>
+                <p style={{ fontSize: 11, color: 'hsl(var(--app-text-muted))', margin: '5px 0 0', lineHeight: 1.5 }}>{p.desc}</p>
             </div>
 
             {/* Control */}
@@ -1788,7 +1788,7 @@ function ParamCard({ p, currentVal, catColor, isSearching, onSet, onRevert }: {
                     </div>
                 )}
                 {p.type === 'enum' && p.opts && (
-                    <select value={currentVal} onChange={e => onSet(p.key, +e.target.value)} style={{ width: '100%', padding: '8px 10px', borderRadius: 7, background: 'rgba(0,0,0,0.35)', border: `1px solid ${catColor}28`, color: '#e2e8f0', fontSize: 11, fontFamily: 'monospace', cursor: 'pointer', outline: 'none' }}>
+                    <select value={currentVal} onChange={e => onSet(p.key, +e.target.value)} style={{ width: '100%', padding: '8px 10px', borderRadius: 7, background: 'rgba(0,0,0,0.35)', border: `1px solid ${catColor}28`, color: 'hsl(var(--app-text))', fontSize: 11, fontFamily: 'monospace', cursor: 'pointer', outline: 'none' }}>
                         {p.opts.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
                     </select>
                 )}
@@ -1828,7 +1828,7 @@ function ParamSidebarItem({ label, count, color, Icon, active, onClick }: {
         <button onClick={onClick}
             style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px 8px 10px', borderRadius: 7, border: 'none', borderLeft: `3px solid ${active ? color : 'transparent'}`, background: active ? `${color}12` : 'transparent', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
             <Icon size={13} style={{ color: active ? color : '#64748b', flexShrink: 0 }} />
-            <span style={{ flex: 1, fontSize: 12, color: active ? '#f1f5f9' : '#94a3b8', fontWeight: active ? 600 : 400, lineHeight: 1.2 }}>{label}</span>
+            <span style={{ flex: 1, fontSize: 12, color: active ? '#f1f5f9' : 'hsl(var(--app-text-muted))', fontWeight: active ? 600 : 400, lineHeight: 1.2 }}>{label}</span>
             <span style={{ fontSize: 10, fontFamily: 'monospace', color: active ? color : '#475569', minWidth: 18, textAlign: 'right' }}>{count}</span>
         </button>
     )
@@ -1890,7 +1890,7 @@ function LiveParamCard({ dp, localVal, pending, lastOk, expert, originalVal, onS
                     </div>
                 </div>
                 {meta?.desc && (
-                    <p style={{ fontSize: 11, color: '#94a3b8', margin: 0, lineHeight: 1.5 }}>{meta.desc}</p>
+                    <p style={{ fontSize: 11, color: 'hsl(var(--app-text-muted))', margin: 0, lineHeight: 1.5 }}>{meta.desc}</p>
                 )}
             </div>
 
@@ -2234,7 +2234,7 @@ function ParametersWorkspace() {
             {isExpertOn && (
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px', borderRadius: 8, background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.18)' }}>
                     <AlertTriangle size={13} style={{ color: '#f87171', flexShrink: 0, marginTop: 1 }} />
-                    <p style={{ fontSize: 12, color: '#94a3b8', margin: 0, lineHeight: 1.55 }}>
+                    <p style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))', margin: 0, lineHeight: 1.55 }}>
                         <span style={{ color: '#f87171', fontWeight: 600 }}>Expert mode — </span>
                         parameters marked ⚠ can destabilise the drone. Change PIDs in steps of 0.01 max. Always hover-test after any change.
                     </p>
@@ -2246,7 +2246,7 @@ function ParametersWorkspace() {
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '64px 0' }}>
                     <div style={{ width: 44, height: 44, borderRadius: '50%', border: '3px solid #1e293b', borderTop: '3px solid #22d3ee', animation: 'spin 0.8s linear infinite' }} />
                     <div style={{ textAlign: 'center' }}>
-                        <p style={{ fontSize: 14, color: '#94a3b8', margin: 0 }}>Downloading parameters from drone…</p>
+                        <p style={{ fontSize: 14, color: 'hsl(var(--app-text-muted))', margin: 0 }}>Downloading parameters from drone…</p>
                         <p style={{ fontSize: 12, color: '#475569', margin: '5px 0 0' }}>This takes 5–30 s on a fresh MAVLink connection</p>
                     </div>
                 </div>
@@ -2330,7 +2330,7 @@ function ParametersWorkspace() {
                                     {filteredLive.length} modified parameter{filteredLive.length !== 1 ? 's' : ''} across all groups
                                 </span>
                             ) : isSearching_combined ? (
-                                <span style={{ fontSize: 12, color: '#94a3b8' }}>
+                                <span style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))' }}>
                                     {liveParams
                                         ? `${filteredLive.length} result${filteredLive.length !== 1 ? 's' : ''} for "${query}" across all groups`
                                         : `${demoFiltered.length} result${demoFiltered.length !== 1 ? 's' : ''} for "${demoQuery}"`
@@ -2340,7 +2340,7 @@ function ParametersWorkspace() {
                                 <>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                                         <div style={{ width: 7, height: 7, borderRadius: '50%', background: GROUP_STYLE[activeGroup]?.color ?? '#22d3ee', flexShrink: 0 }} />
-                                        <span style={{ fontSize: 12, color: '#94a3b8' }}>
+                                        <span style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))' }}>
                                             {activeGroup} — {groupCounts[activeGroup] ?? 0} parameter{(groupCounts[activeGroup] ?? 0) !== 1 ? 's' : ''}
                                         </span>
                                     </div>
@@ -2352,7 +2352,7 @@ function ParametersWorkspace() {
                                 </>
                             ) : (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                    <span style={{ fontSize: 12, color: '#94a3b8' }}>
+                                    <span style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))' }}>
                                         {PARAM_CATS.find(c => c.id === demoActiveCat)?.label} — {demoFiltered.length} example parameters
                                     </span>
                                     {demoModCount > 0 && <span style={{ fontSize: 11, color: '#fbbf24', fontWeight: 600 }}>{demoModCount} modified</span>}

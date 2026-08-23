@@ -169,7 +169,7 @@ function DisplayGroup() {
             />
             <PrefRow
                 label="Font"
-                sub="Interface typeface. Telemetry values and coordinates stay monospaced regardless — they are mono for column alignment, not style."
+                sub="Interface typeface, applied everywhere — headings, descriptions, status chips and the task bar. The default keeps telemetry monospaced for column alignment; any other choice restyles those too."
                 right={
                     <ChipGroup
                         value={font}

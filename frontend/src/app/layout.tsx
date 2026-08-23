@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { Geist, Geist_Mono, Ubuntu, Inter } from 'next/font/google'
+import { Geist, Geist_Mono, Ubuntu, Inter, Nunito } from 'next/font/google'
 import { ThemeProvider } from '@/lib/theme'
 import './globals.css'
 
@@ -23,6 +23,11 @@ const ubuntu = Ubuntu({
 
 const inter = Inter({
   variable: '--font-inter',
+  subsets: ['latin'],
+})
+
+const nunito = Nunito({
+  variable: '--font-nunito',
   subsets: ['latin'],
 })
 
@@ -51,7 +56,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={`${geistSans.variable} ${geistMono.variable} ${ubuntu.variable} ${inter.variable} antialiased`} suppressHydrationWarning>
+      <body className={`${geistSans.variable} ${geistMono.variable} ${ubuntu.variable} ${inter.variable} ${nunito.variable} antialiased`} suppressHydrationWarning>
         <ThemeProvider>
           {children}
         </ThemeProvider>

@@ -121,6 +121,17 @@
   --app-sidebar: 219 24% 11%;
 }
 
+/* Percentage height chain for the app shell. The shell used h-screen
+   (100vh), and vh under CSS zoom means different things in different
+   engines — the standardized behaviour divides it by the zoom factor, older
+   ones don't, so the Interface-scale preference made the layout overflow by
+   exactly the zoom amount on some builds: the video panel swallowed the
+   screen and pushed the performance box below the fold. Percentages resolve
+   against the parent and cannot disagree about zoom. */
+html, body {
+  height: 100%;
+}
+
 body {
   background: hsl(var(--app-bg));
   color: hsl(var(--app-text));
@@ -139,6 +150,56 @@ body {
 html[data-font='system'] body { font-family: system-ui, 'Segoe UI', Roboto, sans-serif; }
 html[data-font='ubuntu'] body { font-family: var(--font-ubuntu, Ubuntu), system-ui, sans-serif; }
 html[data-font='inter']  body { font-family: var(--font-inter, Inter), system-ui, sans-serif; }
+html[data-font='nunito'] body { font-family: var(--font-nunito, Nunito), system-ui, sans-serif; }
+
+/* Reach the monospace-styled text too. Most of this interface sets
+   fontFamily: 'monospace' inline, which no ordinary selector can beat — so
+   choosing a font changed the headings and left every description, status
+   chip and task-bar label in the default mono, which read as the setting
+   half-working. The [style*] attribute match with !important is blunt, but
+   it is the only handle inline styles offer. True tabular data pays a
+   price (digits stop aligning); that is the trade the preference states. */
+html[data-font='system'] [style*='monospace'] { font-family: system-ui, 'Segoe UI', Roboto, sans-serif !important; }
+html[data-font='ubuntu'] [style*='monospace'] { font-family: var(--font-ubuntu, Ubuntu), system-ui, sans-serif !important; }
+html[data-font='inter']  [style*='monospace'] { font-family: var(--font-inter, Inter), system-ui, sans-serif !important; }
+html[data-font='nunito'] [style*='monospace'] { font-family: var(--font-nunito, Nunito), system-ui, sans-serif !important; }
+
+/* ── Bright theme accent remap ─────────────────────────────────────────────
+   The accent palette (#4ade80 green, #22d3ee cyan, #fbbf24 amber, #f87171
+   red, ...) is tuned for dark surfaces; on white it washes out below
+   readable contrast. Those colours are applied as INLINE styles in hundreds
+   of places, so no ordinary cascade can retint them — but the [style*]
+   attribute match can, and doing it here keeps light-mode contrast a
+   PALETTE decision instead of a thousand per-component edits. Only `color`
+   is overridden: tinted backgrounds and borders keep their alpha washes,
+   which read fine on white. Canvas drawing (map, video overlays) is pixels,
+   not styles, and is untouched. */
+.light [style*="#4ade80"] { color: #15803d !important; }
+.light [style*="#22d3ee"] { color: #0e7490 !important; }
+.light [style*="#fbbf24"] { color: #b45309 !important; }
+.light [style*="#f87171"] { color: #dc2626 !important; }
+.light [style*="#60a5fa"] { color: #2563eb !important; }
+.light [style*="#38bdf8"] { color: #0284c7 !important; }
+.light [style*="#fb923c"] { color: #ea580c !important; }
+.light [style*="#c084fc"] { color: #9333ea !important; }
+.light [style*="#4b5563"] { color: #6b7280 !important; }
+.light [style*="#cbd5e1"] { color: #334155 !important; }
+.light [style*="#f1f5f9"] { color: #0f172a !important; }
+/* The same colours in rgb() form. React-rendered inline styles are
+   serialized by the browser as rgb(...), so a hex substring only matches
+   markup that came from SSR and was never re-rendered — half the interface.
+   The trailing ')' keeps rgba( washes from matching. */
+.light [style*="rgb(74, 222, 128)"] { color: #15803d !important; }
+.light [style*="rgb(34, 211, 238)"] { color: #0e7490 !important; }
+.light [style*="rgb(251, 191, 36)"] { color: #b45309 !important; }
+.light [style*="rgb(248, 113, 113)"] { color: #dc2626 !important; }
+.light [style*="rgb(96, 165, 250)"] { color: #2563eb !important; }
+.light [style*="rgb(56, 189, 248)"] { color: #0284c7 !important; }
+.light [style*="rgb(251, 146, 60)"] { color: #ea580c !important; }
+.light [style*="rgb(192, 132, 252)"] { color: #9333ea !important; }
+.light [style*="rgb(75, 85, 99)"] { color: #6b7280 !important; }
+.light [style*="rgb(203, 213, 225)"] { color: #334155 !important; }
+.light [style*="rgb(241, 245, 249)"] { color: #0f172a !important; }
 
 ::-webkit-scrollbar {
   width: 4px;

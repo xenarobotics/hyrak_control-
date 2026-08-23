@@ -278,7 +278,7 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
                         )}
                         {pendingList.length > 0 && (
                             <>
-                                <span style={{ color: '#94a3b8' }}>Still to do</span>
+                                <span style={{ color: 'hsl(var(--app-text-muted))' }}>Still to do</span>
                                 <span style={{ color: 'hsl(var(--app-text-muted))' }}> {pendingList.join(' · ')}</span>
                             </>
                         )}
