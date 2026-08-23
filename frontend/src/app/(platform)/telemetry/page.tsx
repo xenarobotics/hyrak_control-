@@ -13,6 +13,8 @@ import {
     Terminal, Lock, Info, ChevronLeft,
     Search, AlertTriangle, Cpu, Move, Zap,
     Download, Upload, Power,
+    Satellite, Compass as CompassIcon, Activity, Mountain,
+    Move3d, Camera, AlignCenterHorizontal, RotateCw, Loader,
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { PX4_META, getGroupFromKey, humanizeParamKey, type PX4Group, type PX4Meta } from '@/lib/px4-params-meta'
@@ -257,45 +259,6 @@ function NetworkTopology({ connected, address }: { connected: boolean; address: 
     )
 }
 
-function CompassGauge({ heading, size = 96 }: { heading: number | null; size?: number }) {
-    const c = size / 2, r = c - 6
-    return (
-        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-            <circle cx={c} cy={c} r={r} fill="rgba(0,0,0,0.35)" stroke="rgba(255,255,255,0.1)" strokeWidth={1} />
-            {Array.from({ length: 36 }, (_, i) => {
-                const deg = i * 10, rad = (deg - 90) * Math.PI / 180
-                const isMaj = deg % 90 === 0, len = isMaj ? 8 : 4
-                return <line key={deg} x1={c+(r-len)*Math.cos(rad)} y1={c+(r-len)*Math.sin(rad)} x2={c+r*Math.cos(rad)} y2={c+r*Math.sin(rad)} stroke={isMaj ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.1)'} strokeWidth={isMaj ? 1.5 : 0.8} />
-            })}
-            {([['N',0,'#f87171'],['E',90,'rgba(255,255,255,0.35)'],['S',180,'rgba(255,255,255,0.35)'],['W',270,'rgba(255,255,255,0.35)']] as const).map(([l,d,col]) => {
-                const rad = (d-90)*Math.PI/180
-                return <text key={l} x={c+(r-13)*Math.cos(rad)} y={c+(r-13)*Math.sin(rad)+3} textAnchor="middle" fontSize={7} fontFamily="monospace" fontWeight="700" fill={col}>{l}</text>
-            })}
-            {heading !== null ? (
-                <g transform={`rotate(${heading} ${c} ${c})`}>
-                    <polygon points={`${c},${c-r+12} ${c-4},${c+10} ${c},${c+6} ${c+4},${c+10}`} fill="#f87171" opacity={0.9} />
-                    <polygon points={`${c},${c+r-12} ${c-4},${c-10} ${c},${c-6} ${c+4},${c-10}`} fill="rgba(255,255,255,0.15)" />
-                </g>
-            ) : null}
-            <circle cx={c} cy={c} r={3} fill="hsl(var(--app-surface))" stroke="rgba(255,255,255,0.3)" strokeWidth={1.2} />
-            <text x={c} y={size-4} textAnchor="middle" fontSize={8} fontFamily="monospace" fill={heading !== null ? '#22d3ee' : 'rgba(255,255,255,0.2)'}>{heading !== null ? `${heading.toFixed(0)}°` : '—'}</text>
-        </svg>
-    )
-}
-
-function AltBar({ alt, label }: { alt: number | null; label: string }) {
-    const pct = alt !== null ? Math.min(Math.max((alt / 150) * 100, 0), 100) : 0
-    return (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
-            <div style={{ position: 'relative', width: 18, height: 72, borderRadius: 5, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden' }}>
-                <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${pct}%`, background: 'linear-gradient(to top, #22d3ee, rgba(34,211,238,0.3))', transition: 'height 0.5s ease' }} />
-                {[25,50,75].map(p => <div key={p} style={{ position: 'absolute', left: 0, right: 0, bottom: `${p}%`, height: 1, background: 'rgba(255,255,255,0.06)' }} />)}
-            </div>
-            <span style={{ fontSize: 9, fontFamily: 'monospace', color: alt !== null ? '#22d3ee' : '#4b5563', fontWeight: 600 }}>{alt !== null ? `${alt.toFixed(0)}m` : '—'}</span>
-            <span style={{ fontSize: 8, fontFamily: 'monospace', color: 'rgba(255,255,255,0.25)', letterSpacing: '0.05em' }}>{label}</span>
-        </div>
-    )
-}
 
 function BatteryCellsViz({ cells, totalV }: { cells: string; totalV?: number }) {
     const n = Math.min(parseInt(cells) || 4, 12)
@@ -893,227 +856,329 @@ function VehicleWorkspace({ v, onUpdate }: { v: VehicleProfile; onUpdate: (p: Pa
 // already in the message log and on the arming refusal. Inventing a green tick
 // here would be inventing a fact.
 
-function CalibrationPanel({ connected, refusal, busy, start, active, phase }: {
-    connected: boolean
-    refusal: string | null
-    busy: boolean
-    start: (sensor: string) => void
-    active: string
-    phase: string
+// ── SENSORS ──────────────────────────────────────────────────────────────────
+//
+// TWO KINDS OF CARD, DELIBERATELY DIFFERENT SHAPES. The status cards say what
+// each sensor is REPORTING right now; the calibration cards say what you can
+// DO about it. The first version mixed the two in one column and the operator
+// had to read each row to know whether it was a fact or a button.
+//
+// EVERY VERDICT COMES FROM THE AUTOPILOT. "Calibrated" is PX4's health flag
+// (the same bits QGC shows), never inferred from the data — the old page
+// declared the compass broken whenever the aircraft happened to face magnetic
+// north, because heading !== 0 was the "check".
+
+type SensorStatus = 'ok' | 'warn' | 'off'
+const STATUS_COLOUR: Record<SensorStatus, string> = {
+    ok: '#4ade80', warn: '#fbbf24', off: '#4b5563',
+}
+
+const GPS_FIX_LABEL: Record<number, string> = {
+    0: 'No fix', 1: 'No fix', 2: '2D fix', 3: '3D fix',
+    4: 'DGPS', 5: 'RTK float', 6: 'RTK fixed',
+}
+
+function SectionHeader({ title, hint, right }: {
+    title: string; hint?: string; right?: React.ReactNode
 }) {
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-            {CAL_SENSORS.map((sensor, i) => {
-                const isActive = active === sensor.key && phase !== 'idle'
-                const state = isActive ? phase : null
-                return (
-                <div key={sensor.key} style={{
-                    display: 'flex', alignItems: 'flex-start', gap: 12,
-                    padding: '11px 12px', borderRadius: 9,
-                    background: isActive ? 'rgba(251,191,36,0.06)' : 'transparent',
-                    border: `1px solid ${isActive ? 'rgba(251,191,36,0.28)' : 'transparent'}`,
-                    borderBottom: i < CAL_SENSORS.length - 1 && !isActive
-                        ? '1px solid hsl(var(--app-border))' : undefined,
-                }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ fontSize: 12, fontWeight: 600, color: 'hsl(var(--app-text))', margin: 0 }}>
-                            {sensor.label}
-                            <span style={{ fontSize: 10, fontFamily: 'monospace', fontWeight: 400, color: 'hsl(var(--app-text-muted))', marginLeft: 8 }}>
-                                {sensor.mins}
-                            </span>
-                        </p>
-                        {/* WHAT IT IS FOR AND WHAT RUINS IT, at the moment of
-                            choosing. A compass calibrated indoors passes and is
-                            then wrong, which is not something an operator can
-                            discover from the result. */}
-                        <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '3px 0 0', lineHeight: 1.6 }}>
-                            {sensor.blurb}
-                        </p>
-                    </div>
-                    <button
-                        onClick={() => start(sensor.key)}
-                        disabled={!connected || busy}
-                        title={connected ? `Start ${sensor.label} calibration` : 'Connect to the drone first'}
-                        style={{
-                            padding: '5px 13px', borderRadius: 7, flexShrink: 0,
-                            background: 'transparent',
-                            border: `1px solid ${connected && !busy ? 'rgba(34,211,238,0.45)' : 'hsl(var(--app-border))'}`,
-                            color: connected && !busy ? '#22d3ee' : 'hsl(var(--app-text-muted))',
-                            fontSize: 11, fontFamily: 'monospace', fontWeight: 600,
-                            cursor: connected && !busy ? 'pointer' : 'not-allowed',
-                            opacity: connected && !busy ? 1 : 0.45,
-                        }}
-                    >
-                        {state === 'running' || state === 'starting' ? 'Running'
-                            : state === 'done' ? 'Done'
-                            : state === 'failed' ? 'Retry'
-                            : 'Start'}
-                    </button>
-                </div>
-                )
-            })}
-            {/* The refusal belongs where the button was pressed. The autopilot
-                answers "no, the vehicle is armed" in a sentence, and dropping
-                it would leave a button that looks broken. */}
-            {refusal && (
-                <p style={{ fontSize: 11, fontFamily: 'monospace', color: '#f87171', margin: '12px 0 0', lineHeight: 1.6 }}>
-                    {refusal}
-                </p>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '2px 2px 0' }}>
+            <span style={{ fontSize: 10, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.14em', color: 'hsl(var(--app-text))' }}>
+                {title}
+            </span>
+            {hint && (
+                <span style={{ fontSize: 10, color: 'hsl(var(--app-text-muted))' }}>{hint}</span>
             )}
-            {/* Named rather than silently absent. "Where is the barometer
-                calibration" is a question that costs a support round, and the
-                answer — there is no such command — is short. */}
-            <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '12px 0 0', lineHeight: 1.6 }}>
-                No barometer or GPS calibration is offered because PX4 has none:
-                the barometer is zeroed at every boot and the GNSS receiver
-                calibrates itself. Both are shown live on the left — that health
-                readout IS the check. Airspeed applies to fixed-wing only and is
-                not exposed by the flight-control library this uses.
-            </p>
+            {right && <span style={{ marginLeft: 'auto' }}>{right}</span>}
+        </div>
+    )
+}
+
+function StatusChip({ status, text }: { status: SensorStatus; text: string }) {
+    const c = STATUS_COLOUR[status]
+    return (
+        <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            padding: '2px 8px', borderRadius: 20, flexShrink: 0,
+            background: `${c}14`, border: `1px solid ${c}3a`,
+            fontSize: 9, fontFamily: 'monospace', fontWeight: 700, color: c,
+            letterSpacing: '0.06em', whiteSpace: 'nowrap',
+        }}>
+            <span style={{ width: 5, height: 5, borderRadius: '50%', background: c }} />
+            {text}
+        </span>
+    )
+}
+
+/** One live reading. The border carries the state so the grid can be read
+ *  as four coloured edges before any text is. */
+function SensorCard({ icon, title, status, statusText, value, sub }: {
+    icon: React.ReactNode; title: string
+    status: SensorStatus; statusText: string
+    value: string; sub?: string
+}) {
+    const c = STATUS_COLOUR[status]
+    return (
+        <div style={{
+            display: 'flex', flexDirection: 'column', gap: 8,
+            padding: '11px 12px', borderRadius: 10,
+            background: 'hsl(var(--app-surface-2))',
+            border: `1px solid ${status === 'off' ? 'hsl(var(--app-border))' : `${c}42`}`,
+            boxShadow: status === 'warn' ? `inset 3px 0 0 ${c}` : status === 'ok' ? `inset 3px 0 0 ${c}55` : undefined,
+        }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{
+                    width: 26, height: 26, borderRadius: 7, flexShrink: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: `${c}14`, color: c,
+                }}>
+                    {icon}
+                </span>
+                <span style={{ fontSize: 11.5, fontWeight: 600, color: 'hsl(var(--app-text))', flex: 1, minWidth: 0 }}>
+                    {title}
+                </span>
+                <StatusChip status={status} text={statusText} />
+            </div>
+            <div>
+                <p style={{ fontSize: 13, fontFamily: 'monospace', fontWeight: 600, color: status === 'off' ? 'hsl(var(--app-text-muted))' : 'hsl(var(--app-text))', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {value}
+                </p>
+                {sub && (
+                    <p style={{ fontSize: 9.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '2px 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {sub}
+                    </p>
+                )}
+            </div>
+        </div>
+    )
+}
+
+/** Which PX4 health flag answers "is this one calibrated". Level and gimbal
+ *  have no flag — PX4 does not report a verdict for them, and inventing one
+ *  is exactly the kind of guess this page no longer makes. */
+const CAL_HEALTH_FLAG: Record<string, 'gyro_cal_ok' | 'accel_cal_ok' | 'mag_cal_ok'> = {
+    gyro: 'gyro_cal_ok', accel: 'accel_cal_ok', mag: 'mag_cal_ok',
+}
+
+const CAL_ICON: Record<string, React.ElementType> = {
+    gyro: RotateCw, accel: Move3d, mag: CompassIcon,
+    level: AlignCenterHorizontal, gimbal: Camera,
+}
+
+/** One calibration on offer. The whole card is the control; its border is
+ *  the state — amber while running, green once the autopilot says the
+ *  offsets are good, amber-edged "needs calibration" when it says they are
+ *  not, and neutral where PX4 keeps no verdict (level, gimbal). */
+function CalCard({ sensor, verdict, connected, busy, isActive, phase, progress, onStart }: {
+    sensor: (typeof CAL_SENSORS)[number]
+    verdict: boolean | null
+    connected: boolean
+    busy: boolean
+    isActive: boolean
+    phase: string
+    progress: number
+    onStart: () => void
+}) {
+    const Icon = CAL_ICON[sensor.key] ?? Gauge
+    const running = isActive && (phase === 'running' || phase === 'starting')
+    const border = running ? '#fbbf24'
+        : verdict === false ? '#fbbf24'
+        : verdict === true ? '#4ade80'
+        : null
+    const chip = running ? <StatusChip status="warn" text={`RUNNING · ${progress}%`} />
+        : verdict === false ? <StatusChip status="warn" text="NEEDS CAL" />
+        : verdict === true ? <StatusChip status="ok" text="CALIBRATED" />
+        : null
+    const clickable = connected && !busy
+    return (
+        <div style={{
+            display: 'flex', alignItems: 'flex-start', gap: 11,
+            padding: '11px 12px', borderRadius: 10,
+            background: running ? 'rgba(251,191,36,0.05)' : 'hsl(var(--app-surface-2))',
+            border: `1px solid ${border ? `${border}4a` : 'hsl(var(--app-border))'}`,
+            boxShadow: border ? `inset 3px 0 0 ${border}${verdict === true && !running ? '55' : ''}` : undefined,
+            transition: 'border-color 250ms, background 250ms',
+        }}>
+            <span style={{
+                width: 30, height: 30, borderRadius: 8, flexShrink: 0, marginTop: 1,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: border ? `${border}14` : 'hsl(var(--app-surface))',
+                color: border ?? 'hsl(var(--app-text-muted))',
+            }}>
+                {running ? <Loader size={15} className="animate-spin" /> : <Icon size={15} />}
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: 'hsl(var(--app-text))' }}>
+                        {sensor.label}
+                    </span>
+                    <span style={{ fontSize: 9.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
+                        {sensor.mins}
+                    </span>
+                    {chip}
+                </div>
+                {/* WHAT IT IS FOR AND WHAT RUINS IT, at the moment of choosing.
+                    A compass calibrated indoors passes and is then wrong, which
+                    is not something an operator can discover from the result. */}
+                <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '3px 0 0', lineHeight: 1.55 }}>
+                    {sensor.blurb}
+                </p>
+            </div>
+            <button
+                onClick={onStart}
+                disabled={!clickable}
+                title={connected ? `Start ${sensor.label} calibration` : 'Connect to the drone first'}
+                style={{
+                    padding: '5px 13px', borderRadius: 7, flexShrink: 0, marginTop: 1,
+                    background: 'transparent',
+                    border: `1px solid ${clickable ? 'rgba(34,211,238,0.45)' : 'hsl(var(--app-border))'}`,
+                    color: clickable ? '#22d3ee' : 'hsl(var(--app-text-muted))',
+                    fontSize: 11, fontFamily: 'monospace', fontWeight: 600,
+                    cursor: clickable ? 'pointer' : 'not-allowed',
+                    opacity: clickable || running ? 1 : 0.45,
+                }}
+            >
+                {running ? 'Running'
+                    : isActive && phase === 'done' ? 'Done'
+                    : isActive && phase === 'failed' ? 'Retry'
+                    : verdict === false ? 'Calibrate'
+                    : 'Start'}
+            </button>
         </div>
     )
 }
 
 function SensorsWorkspace() {
-    // Held here rather than inside the panel because a RUNNING calibration
-    // takes the whole workspace. Squeezed into the right-hand column under a
-    // full-height EKF diagram, the aircraft was below the fold at the exact
-    // moment the operator is holding a drone in both hands and cannot scroll.
     const { state: cal, refusal, busy, start, cancel, dismiss } = useCalibration()
     const telemetry = useDroneStore(s => s.telemetry)
     const telStatus = useDroneStore(s => s.telemetryStatus)
     const connected = telStatus === 'connected'
-    const gpsOk  = connected && (telemetry?.position?.latitude_deg ?? 0) !== 0
-    const imuOk  = connected && telemetry?.attitude != null
-    const magOk  = connected && (telemetry?.heading_deg ?? 0) !== 0
-    const baroOk = connected && (telemetry?.position?.relative_altitude_m ?? 0) !== 0
-    const states = { gps: connected ? gpsOk : null, imu: connected ? imuOk : null, mag: connected ? magOk : null, baro: connected ? baroOk : null }
-    const healthy = Object.values(states).filter(v => v === true).length
 
-    // TWO COLUMNS: what the sensors are DOING on the left, what you can DO to
-    // them on the right.
-    //
-    // The EKF fusion diagram is gone. It occupied the full width and most of
-    // the height to say one thing — that four sensors feed one filter — which
-    // is true on every PX4 aircraft ever built, never changes, and is not
-    // something an operator acts on. It pushed the live health readings and
-    // the calibration controls, which are the two reasons to open this page,
-    // below the fold.
+    // PX4's own health flags, or null until the first health message — the
+    // difference between "the autopilot says not calibrated" and "nobody has
+    // said anything yet", which must not paint the same colour.
+    const health = connected && telemetry?.health?.received ? telemetry.health : null
+
+    const fix = telemetry?.gps?.fix_type ?? 0
+    const sats = telemetry?.gps?.satellites_visible ?? 0
+    const att = telemetry?.attitude
+
+    const gpsStatus: SensorStatus = !connected ? 'off' : fix >= 3 ? 'ok' : 'warn'
+    const imuStatus: SensorStatus = !connected ? 'off'
+        : health ? (health.gyro_cal_ok && health.accel_cal_ok ? 'ok' : 'warn')
+        : att ? 'ok' : 'warn'
+    const magStatus: SensorStatus = !connected ? 'off'
+        : health ? (health.mag_cal_ok ? 'ok' : 'warn')
+        : 'ok'
+    // PX4 keeps no baro verdict — it re-zeroes at boot. "Reporting" is the
+    // honest claim, and the live altitude beside it is the actual check.
+    const baroStatus: SensorStatus = connected ? 'ok' : 'off'
+
+    const statuses = [gpsStatus, imuStatus, magStatus, baroStatus]
+    const healthyCount = statuses.filter(v => v === 'ok').length
+
     return (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 0.72fr) minmax(560px, 1.6fr)', gap: 14, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(360px, 1fr) minmax(540px, 1.45fr)', gap: 14, alignItems: 'start' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{
-                    padding: '10px 13px', borderRadius: 10,
-                    background: connected ? 'rgba(74,222,128,0.06)' : 'rgba(75,85,99,0.08)',
-                    border: `1px solid ${connected ? 'rgba(74,222,128,0.2)' : 'rgba(75,85,99,0.2)'}`,
-                }}>
-                    <p style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: connected ? '#4ade80' : '#6b7280', margin: 0 }}>
-                        {connected ? `${healthy}/4 sensors reporting` : 'No drone connected'}
-                    </p>
-                    <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>
-                        {connected
-                            ? (healthy === 4 ? 'All four are producing data' : 'Something is not reporting — check wiring and the message log')
-                            : 'Connect in the Connection section to see live sensor health'}
-                    </p>
+                <SectionHeader
+                    title="SENSOR STATUS"
+                    hint="live from the autopilot"
+                    right={
+                        <span style={{ fontSize: 10, fontFamily: 'monospace', fontWeight: 700, color: connected ? (healthyCount === 4 ? '#4ade80' : '#fbbf24') : '#6b7280' }}>
+                            {connected ? `${healthyCount}/4 healthy` : 'not connected'}
+                        </span>
+                    }
+                />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <SensorCard
+                        icon={<Satellite size={14} />} title="GPS"
+                        status={gpsStatus}
+                        statusText={!connected ? 'OFF' : GPS_FIX_LABEL[fix] ?? `Fix ${fix}`}
+                        value={connected ? `${sats} satellites` : '—'}
+                        sub={connected && telemetry?.position && fix >= 2
+                            ? `${telemetry.position.latitude_deg?.toFixed(5)}°, ${telemetry.position.longitude_deg?.toFixed(5)}°`
+                            : 'Global position'}
+                    />
+                    <SensorCard
+                        icon={<Activity size={14} />} title="IMU"
+                        status={imuStatus}
+                        statusText={!connected ? 'OFF' : imuStatus === 'ok' ? 'OK' : health ? 'NEEDS CAL' : 'NO DATA'}
+                        value={connected && att
+                            ? `R ${att.roll_deg?.toFixed(1)}°  P ${att.pitch_deg?.toFixed(1)}°`
+                            : '—'}
+                        sub="Accelerometer + gyroscope"
+                    />
+                    <SensorCard
+                        icon={<CompassIcon size={14} />} title="Compass"
+                        status={magStatus}
+                        statusText={!connected ? 'OFF' : magStatus === 'ok' ? 'OK' : 'NEEDS CAL'}
+                        value={connected && telemetry?.heading_deg != null
+                            ? `${telemetry.heading_deg.toFixed(0)}° heading`
+                            : '—'}
+                        sub="Magnetic heading"
+                    />
+                    <SensorCard
+                        icon={<Mountain size={14} />} title="Barometer"
+                        status={baroStatus}
+                        statusText={connected ? 'REPORTING' : 'OFF'}
+                        value={connected && telemetry?.position
+                            ? `${(telemetry.position.relative_altitude_m ?? 0).toFixed(1)} m AGL`
+                            : '—'}
+                        sub="Pressure altitude, zeroed at boot"
+                    />
                 </div>
 
-                <SensorRow
-                    ok={states.gps} title="GPS / GNSS"
-                    detail={connected && telemetry?.position
-                        ? `${telemetry.position.latitude_deg?.toFixed(6)}° / ${telemetry.position.longitude_deg?.toFixed(6)}°`
-                        : 'Global position fix'}
-                    extra={connected ? `${telemetry?.gps?.satellites_visible ?? 0} sats · fix ${telemetry?.gps?.fix_type ?? 0}` : undefined}
-                    badge={states.gps === null ? 'N/A' : states.gps ? 'FIX' : 'NO FIX'}
-                    icon={<span style={{ width: 13, height: 13, borderRadius: '50%', background: states.gps ? '#4ade80' : '#4b5563' }} />}
+                <SectionHeader
+                    title="CALIBRATION"
+                    hint={connected ? 'runs on the aircraft — watch the model on the right' : 'connect to enable'}
                 />
-                <SensorRow
-                    ok={states.imu} title="IMU — accelerometer + gyro"
-                    detail={connected && telemetry?.attitude
-                        ? `R ${telemetry.attitude.roll_deg?.toFixed(1)}°  P ${telemetry.attitude.pitch_deg?.toFixed(1)}°  Y ${telemetry.attitude.yaw_deg?.toFixed(1)}°`
-                        : 'Roll, pitch and yaw'}
-                    badge={states.imu === null ? 'N/A' : states.imu ? 'OK' : 'ERR'}
-                    icon={<span style={{ width: 13, height: 13, borderRadius: 3, background: states.imu ? '#4ade80' : '#4b5563' }} />}
-                />
-                <Panel accent={states.mag === null ? undefined : states.mag ? '#4ade80' : '#f87171'}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <CompassGauge heading={telemetry?.heading_deg ?? null} size={64} />
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                            <p style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0', margin: 0 }}>Compass</p>
-                            <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>
-                                {connected && telemetry?.heading_deg != null
-                                    ? `heading ${telemetry.heading_deg.toFixed(0)}°`
-                                    : 'Magnetic heading reference'}
-                            </p>
-                        </div>
-                        <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 700, color: states.mag === null ? '#4b5563' : states.mag ? '#4ade80' : '#f87171' }}>
-                            {states.mag === null ? 'N/A' : states.mag ? 'OK' : 'ERR'}
-                        </span>
-                    </div>
-                </Panel>
-                <Panel accent={states.baro === null ? undefined : states.baro ? '#4ade80' : '#f87171'}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <AltBar alt={connected && telemetry?.position ? telemetry.position.relative_altitude_m ?? null : null} label="ALT AGL" />
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                            <p style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0', margin: 0 }}>Barometer</p>
-                            <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>
-                                Pressure altimeter — height above launch
-                            </p>
-                        </div>
-                        <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 700, color: states.baro === null ? '#4b5563' : states.baro ? '#4ade80' : '#f87171' }}>
-                            {states.baro === null ? 'N/A' : states.baro ? 'OK' : 'ERR'}
-                        </span>
-                    </div>
-                </Panel>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {CAL_SENSORS.map(sensor => (
+                        <CalCard
+                            key={sensor.key}
+                            sensor={sensor}
+                            verdict={health ? (CAL_HEALTH_FLAG[sensor.key] ? health[CAL_HEALTH_FLAG[sensor.key]] : null) : null}
+                            connected={connected}
+                            busy={busy}
+                            isActive={cal.sensor === sensor.key && cal.phase !== 'idle'}
+                            phase={cal.phase}
+                            progress={Math.max(0, Math.min(100, cal.progress ?? 0))}
+                            onStart={() => start(sensor.key)}
+                        />
+                    ))}
+                </div>
+                {/* The refusal belongs where the button was pressed. The
+                    autopilot answers "no, the vehicle is armed" in a sentence,
+                    and dropping it would leave a button that looks broken. */}
+                {refusal && (
+                    <p style={{ fontSize: 11, fontFamily: 'monospace', color: '#f87171', margin: 0, lineHeight: 1.6 }}>
+                        {refusal}
+                    </p>
+                )}
+                {/* Named rather than silently absent. "Where is the barometer
+                    calibration" costs a support round, and the answer — there
+                    is no such command — is short. */}
+                <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: 0, lineHeight: 1.6 }}>
+                    No barometer or GPS calibration is offered because PX4 has none:
+                    the barometer is zeroed at every boot and the GNSS receiver
+                    calibrates itself. Both are shown live above — that readout IS
+                    the check. Airspeed applies to fixed-wing only and is not
+                    exposed by the flight-control library this uses.
+                </p>
             </div>
 
             {/* ONE VIEW, NOT TWO. Starting a calibration used to replace the
-                page, so the options vanished the moment one was chosen and the
-                operator lost the map of what else there was to do. The
-                aircraft sits at the top permanently — following live attitude
-                even when nothing is running, which is a useful instrument in
-                its own right — and the options stay underneath it throughout. */}
+                page, so the options vanished the moment one was chosen. The
+                aircraft sits here permanently — following live attitude even
+                when nothing is running, which is a useful instrument in its
+                own right — while the cards on the left carry the choices. */}
             <CalibrationStage
                 state={cal}
                 onCancel={cancel}
                 onDismiss={dismiss}
                 onRetry={() => start(cal.sensor)}
-            >
-                <CalibrationPanel
-                    connected={connected} refusal={refusal} busy={busy}
-                    start={start} active={cal.sensor} phase={cal.phase}
-                />
-            </CalibrationStage>
+            />
         </div>
-    )
-}
-
-/** One live sensor reading. Same shape for all of them, so the eye can scan
- *  the column instead of re-reading four different layouts. */
-function SensorRow({ ok, title, detail, extra, badge, icon }: {
-    ok: boolean | null; title: string; detail: string; extra?: string
-    badge: string; icon: React.ReactNode
-}) {
-    const colour = ok === null ? '#4b5563' : ok ? '#4ade80' : '#f87171'
-    return (
-        <Panel accent={ok === null ? undefined : colour}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{
-                    width: 38, height: 38, borderRadius: 10, flexShrink: 0,
-                    background: ok ? 'rgba(74,222,128,0.12)' : 'rgba(75,85,99,0.12)',
-                    border: `1.5px solid ${colour}`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                    {icon}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0', margin: 0 }}>{title}</p>
-                    <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '2px 0 0', wordBreak: 'break-word' }}>
-                        {detail}{extra ? `  ·  ${extra}` : ''}
-                    </p>
-                </div>
-                <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 700, color: colour }}>{badge}</span>
-            </div>
-        </Panel>
     )
 }
 
@@ -2168,11 +2233,15 @@ export default function ConfigPage() {
     const upR = useCallback((p: Partial<RadioProfile>)   => setRadio(prev =>   { const n={...prev,...p}; lsSet('hyrak-radio',  n); return n }), [])
 
     const connected = telStatus === 'connected'
+    // Same verdicts as the Sensors workspace — PX4's health flags where they
+    // exist, never inferred from the data (heading !== 0 declared the compass
+    // broken whenever the aircraft faced magnetic north).
+    const hlth = connected && telemetry?.health?.received ? telemetry.health : null
     const sensorOK = [
-        connected && (telemetry?.position?.latitude_deg ?? 0) !== 0,
-        connected && telemetry?.attitude != null,
-        connected && (telemetry?.heading_deg ?? 0) !== 0,
-        connected && (telemetry?.position?.relative_altitude_m ?? 0) !== 0,
+        connected && (telemetry?.gps?.fix_type ?? 0) >= 3,
+        connected && (hlth ? hlth.gyro_cal_ok && hlth.accel_cal_ok : telemetry?.attitude != null),
+        connected && (hlth ? hlth.mag_cal_ok : true),
+        connected,  // baro: PX4 keeps no verdict — reporting is the claim
     ].filter(Boolean).length
 
     const domainPcts: Record<SectionId, number> = {

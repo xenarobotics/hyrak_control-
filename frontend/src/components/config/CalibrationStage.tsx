@@ -55,13 +55,11 @@ const SIDE_ABBR: Record<CalSide, string> = {
  *  adjusting while the calibration was already counting. */
 const MATCH_DEGREES = 22
 
-export function CalibrationStage({ state, onCancel, onDismiss, onRetry, children }: {
+export function CalibrationStage({ state, onCancel, onDismiss, onRetry }: {
     state: CalibrationState
     onCancel: () => void
     onDismiss: () => void
     onRetry: () => void
-    /** The calibration options, rendered underneath the aircraft. */
-    children?: React.ReactNode
 }) {
     const attitude = useDroneStore(s => s.telemetry?.attitude)
     const idle = state.phase === 'idle'
@@ -123,7 +121,7 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, children
     // ONE SENTENCE, and it is the position when there is one. PX4's own line
     // is kept underneath rather than promoted — "hold vehicle still on a
     // pending side" is true and useless next to "On its LEFT side".
-    const headline = idle ? 'Pick a calibration below'
+    const headline = idle ? 'Pick a calibration on the left'
         : done ? 'Calibration complete'
         : failed ? 'Calibration failed'
         : cancelled ? 'Calibration cancelled'
@@ -196,7 +194,9 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, children
                         </span>
                     </span>
                 )}
-                {!oriented && (
+                {/* No number while nothing is running — an idle "0%" reads
+                    as a stalled calibration. */}
+                {!oriented && !idle && (
                     <span style={{ marginLeft: 'auto', fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
                         {state.progress ?? 0}%
                     </span>
@@ -310,7 +310,6 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, children
                 )}
             </div>
 
-            {children}
         </div>
     )
 }

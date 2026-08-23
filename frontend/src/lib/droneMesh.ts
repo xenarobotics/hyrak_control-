@@ -153,7 +153,12 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     const mat = <T extends THREE.Material>(m: T) => { materials.push(m); return m }
 
     const shell = mat(new THREE.MeshStandardMaterial({
-        color: 0x323b48, metalness: 0.3, roughness: 0.5,
+        color: 0x46505e, metalness: 0.28, roughness: 0.48,
+    }))
+    // Lighter top surfaces — the two-tone break is what makes a moulded
+    // airframe read as designed rather than extruded.
+    const shellLight = mat(new THREE.MeshStandardMaterial({
+        color: 0x5c6673, metalness: 0.25, roughness: 0.42,
     }))
     const dark = mat(new THREE.MeshStandardMaterial({
         color: 0x171b22, metalness: 0.5, roughness: 0.35,
@@ -192,9 +197,7 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     // Canopy — a clipped sphere. The single biggest cue that the top is the
     // top, which is the whole question this control asks.
     const canopyGeo = track(new THREE.SphereGeometry(0.78, 32, 20, 0, Math.PI * 2, 0, Math.PI / 2))
-    const canopy = new THREE.Mesh(canopyGeo, mat(new THREE.MeshStandardMaterial({
-        color: 0x3c4653, metalness: 0.32, roughness: 0.34,
-    })))
+    const canopy = new THREE.Mesh(canopyGeo, shellLight)
     canopy.scale.set(0.95, 0.72, 1.3)
     canopy.position.y = 0.21
     canopy.castShadow = true
@@ -245,6 +248,39 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     glass.position.set(0, -0.47, -0.97)
     root.add(glass)
 
+    // ── Antennas & GNSS mast, aft ────────────────────────────────────────
+    //
+    // The equipment cluster every working multirotor carries and every
+    // placeholder model lacks. All of it sits at the TAIL, which gives the
+    // silhouette a second orientation cue that survives any camera angle —
+    // the gimbal says nose, this says tail.
+    const mast = new THREE.Mesh(
+        track(new THREE.CylinderGeometry(0.035, 0.045, 0.5, 10)), dark)
+    mast.position.set(0, 0.62, 0.72)
+    root.add(mast)
+    const puck = new THREE.Mesh(
+        track(new THREE.CylinderGeometry(0.24, 0.26, 0.09, 24)), shellLight)
+    puck.position.set(0, 0.9, 0.72)
+    puck.castShadow = true
+    root.add(puck)
+    const puckTop = new THREE.Mesh(
+        track(new THREE.CylinderGeometry(0.09, 0.11, 0.03, 16)), accentBody)
+    puckTop.position.set(0, 0.96, 0.72)
+    root.add(puckTop)
+
+    const antGeo = track(new THREE.CylinderGeometry(0.028, 0.034, 0.62, 8))
+    const antTipGeo = track(new THREE.SphereGeometry(0.045, 10, 8))
+    for (const x of [-0.42, 0.42]) {
+        const ant = new THREE.Mesh(antGeo, dark)
+        ant.position.set(x, 0.5, 1.0)
+        ant.rotation.z = x > 0 ? -0.28 : 0.28
+        ant.rotation.x = 0.34
+        root.add(ant)
+        const tip = new THREE.Mesh(antTipGeo, carbon)
+        tip.position.set(x + (x > 0 ? 0.115 : -0.115), 0.78, 1.1)
+        root.add(tip)
+    }
+
     // ── Arms, motors, rotors ─────────────────────────────────────────────
     const armGeo = track(new THREE.CylinderGeometry(0.085, 0.13, 1.55, 14))
     const canGeo = track(new THREE.CylinderGeometry(0.19, 0.225, 0.26, 24))
@@ -253,6 +289,7 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
     const skidGeo = track(new THREE.CapsuleGeometry(0.052, 1.5, 6, 12))
     const skidPadGeo = track(new THREE.CylinderGeometry(0.075, 0.085, 0.05, 12))
     const ledGeo = track(new THREE.SphereGeometry(0.115, 14, 12))
+    const nutGeo = track(new THREE.SphereGeometry(0.09, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2))
 
     // Two handednesses, shared by four rotors. Built synchronously from the
     // hub so the model is never briefly propeller-less; the merged version
@@ -300,6 +337,12 @@ export function buildDrone(accentHex = 0x22d3ee): DroneParts {
         rotor.castShadow = true
         a.add(rotor)
         rotors.push(rotor)
+
+        // Prop nut — a domed cap on the hub. Small, and the difference
+        // between a propeller that is FITTED and one that is resting there.
+        const nut = new THREE.Mesh(nutGeo, dark)
+        nut.position.set(0, 0.12, 0)
+        rotor.add(nut)
 
         // Landing leg under each arm, splayed outward. Two struts per side
         // meeting a skid rail below, which is what an aircraft carrying a

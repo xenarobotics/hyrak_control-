@@ -41,6 +41,31 @@ class GPSData:
 
 
 @dataclass
+class SensorHealthData:
+    """The autopilot's own verdict on each sensor, from the MAVSDK health
+    stream (SYS_STATUS / heartbeat health bits on the wire).
+
+    THIS IS WHAT "CALIBRATED" MEANS ON THE SENSORS PAGE. The UI used to infer
+    sensor health from the data itself — heading != 0 meant the compass was
+    fine — which reports a healthy compass as broken whenever the aircraft
+    happens to face magnetic north. PX4 already computes the real answer and
+    QGC displays exactly these flags; now so do we.
+
+    `received` separates "the autopilot says not calibrated" from "no health
+    message has arrived yet" — without it a freshly connected aircraft would
+    flash every sensor red for the first second.
+    """
+    received: bool = False
+    gyro_cal_ok: bool = False
+    accel_cal_ok: bool = False
+    mag_cal_ok: bool = False
+    local_position_ok: bool = False
+    global_position_ok: bool = False
+    home_position_ok: bool = False
+    armable: bool = False
+
+
+@dataclass
 class FlightModeData:
     mode: str = "UNKNOWN"
     is_armed: bool = False
@@ -68,6 +93,7 @@ class TelemetrySnapshot:
     battery: BatteryData = field(default_factory=BatteryData)
     gps: GPSData = field(default_factory=GPSData)
     flight_mode: FlightModeData = field(default_factory=FlightModeData)
+    health: SensorHealthData = field(default_factory=SensorHealthData)
     groundspeed_m_s: float = 0.0
     heading_deg: float = 0.0
     home_distance_m: float = 0.0
@@ -128,6 +154,7 @@ class TelemetrySnapshot:
             "battery": self.battery.__dict__,
             "gps": self.gps.__dict__,
             "flight_mode": self.flight_mode.__dict__,
+            "health": self.health.__dict__,
             "groundspeed_m_s": self.groundspeed_m_s,
             "heading_deg": self.heading_deg,
             "home_distance_m": self.home_distance_m,

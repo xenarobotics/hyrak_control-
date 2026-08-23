@@ -30,6 +30,20 @@ export interface GPSData {
     satellites_visible: number
 }
 
+/** The autopilot's own per-sensor verdict — the same flags QGC shows.
+ *  `received` separates "PX4 says not calibrated" from "no health message
+ *  yet", so a freshly connected aircraft doesn't flash every sensor red. */
+export interface SensorHealthData {
+    received: boolean
+    gyro_cal_ok: boolean
+    accel_cal_ok: boolean
+    mag_cal_ok: boolean
+    local_position_ok: boolean
+    global_position_ok: boolean
+    home_position_ok: boolean
+    armable: boolean
+}
+
 export interface FlightModeData {
     mode: string
     is_armed: boolean
@@ -43,6 +57,8 @@ export interface TelemetrySnapshot {
     battery: BatteryData
     gps: GPSData
     flight_mode: FlightModeData
+    /** Optional so an older backend that doesn't send it can't crash the UI. */
+    health?: SensorHealthData
     groundspeed_m_s: number
     heading_deg: number
     home_distance_m: number

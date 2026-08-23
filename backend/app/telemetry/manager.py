@@ -38,6 +38,7 @@ from app.telemetry.schemas import (
     BatteryData,
     GPSData,
     FlightModeData,
+    SensorHealthData,
     DroneCommand,
 )
 
@@ -525,6 +526,7 @@ class TelemetryManager:
                 asyncio.create_task(self._subscribe_in_air(),          name="tel_inair"),
                 asyncio.create_task(self._subscribe_wind(),            name="tel_wind"),
                 asyncio.create_task(self._subscribe_home(),            name="tel_home"),
+                asyncio.create_task(self._subscribe_health(),          name="tel_health"),
                 asyncio.create_task(self._subscribe_mission_progress(),name="tel_mission"),
                 asyncio.create_task(self._poll_mission_finished(),     name="tel_mission_finished"),
                 # Event-driven, no rate, no cost until the FC speaks — and it
@@ -842,6 +844,41 @@ class TelemetryManager:
             pass
         except Exception as e:
             logger.error(f"Home position subscription error: {e}")
+
+    async def _subscribe_health(self):
+        """The autopilot's own per-sensor verdict — the same flags QGC shows.
+
+        This is the ONLY honest source for "calibrated" vs "needs
+        calibration" on the sensors page: PX4 keeps its calibration state in
+        CAL_* parameters and reports the verdict here, so it survives
+        reboots and does not depend on what the data happens to read.
+        Event-driven on change, like flight mode.
+        """
+        try:
+            async for h in self._drone.telemetry.health():
+                if not self._running:
+                    break
+                new = SensorHealthData(
+                    received=True,
+                    gyro_cal_ok=h.is_gyrometer_calibration_ok,
+                    accel_cal_ok=h.is_accelerometer_calibration_ok,
+                    mag_cal_ok=h.is_magnetometer_calibration_ok,
+                    local_position_ok=h.is_local_position_ok,
+                    global_position_ok=h.is_global_position_ok,
+                    home_position_ok=h.is_home_position_ok,
+                    armable=h.is_armable,
+                )
+                changed = new != self._snapshot.health
+                self._snapshot.health = new
+                # Force on change: a calibration flag flipping is exactly the
+                # moment the sensors page must repaint, and health messages
+                # are rare enough that rate-limiting them away could delay
+                # that repaint by seconds.
+                self._emit(force=changed)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Health subscription error: {e}")
 
     async def _subscribe_mission_progress(self):
         """
