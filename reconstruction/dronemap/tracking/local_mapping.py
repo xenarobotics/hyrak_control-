@@ -164,7 +164,9 @@ class LocalMapper:
             self._record_observations(kf, kf.keypoints_tracked, kf.point_ids)
             self.stats.keyframes += 1
 
-            if self.cfg.tracking.local_ba_enabled and self.map.n_keyframes >= 3:
+            every_n = max(1, int(self.cfg.tracking.local_ba_every_n_kf))
+            if (self.cfg.tracking.local_ba_enabled and self.map.n_keyframes >= 3
+                    and self.stats.keyframes % every_n == 0):
                 self._run_local_ba()
 
             # Record the odometry constraint *after* BA, so the edge carries the

@@ -93,6 +93,11 @@ class TrackingConfig(BaseModel):
 
     #: Sliding-window bundle adjustment.
     local_ba_window: int = 8
+    #: Run the sliding-window BA on every Nth keyframe (1 = every keyframe).
+    #: The window still covers the same keyframes, so skipped keyframes are
+    #: refined by the next run; raising this trades a little pose accuracy
+    #: for mapper throughput on high-keyframe-rate sessions.
+    local_ba_every_n_kf: int = 1
     local_ba_max_points: int = 600
     local_ba_iterations: int = 12
     local_ba_enabled: bool = True
