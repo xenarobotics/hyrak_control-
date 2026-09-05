@@ -341,3 +341,37 @@ def test_save_keyframes_prefers_full_resolution(tmp_path):
     save_keyframes(tmp_path, [kf2])
     img2 = cv2.imread(str(kf_dir / "images" / "kf_00001.png"))
     assert img2.shape[:2] == (720, 1280)
+
+
+def test_initialization_rejects_degenerate_depth():
+    """A near-constant depth map (dark/low-contrast input) must not seed the
+    map: init is the only moment raw network depth is trusted unaligned, and
+    seeding a room at 0.3 m dies LOST on the first real motion."""
+    import numpy as np
+
+    from dronemap.tracking.frontend import TrackState, VisualOdometry
+    from dronemap.tracking.mapdb import SceneMap
+    from dronemap.types import CameraIntrinsics, Frame
+
+    rng = np.random.default_rng(0)
+    img = rng.integers(0, 255, (120, 160, 3), dtype=np.uint8)  # textured
+    K = CameraIntrinsics.from_fov(160, 120, 60.0)
+
+    flat = {"v": True}
+    def depth_fn(image, intr, idx=None):
+        h, w = image.shape[:2]
+        if flat["v"]:
+            return np.full((h, w), 0.28, np.float32)  # degenerate
+        yy = np.linspace(1.5, 4.0, h, dtype=np.float32)
+        return np.repeat(yy[:, None], w, axis=1)      # real structure
+
+    cfg = Config()
+    vo = VisualOdometry(cfg, K, SceneMap(), depth_fn)
+
+    r = vo.process(Frame(index=0, timestamp=0.0, image=img, intrinsics=K))
+    assert r.state is TrackState.INITIALIZING, "degenerate depth must not seed"
+
+    flat["v"] = False
+    r = vo.process(Frame(index=1, timestamp=0.1, image=img, intrinsics=K))
+    assert r.state is not TrackState.INITIALIZING, \
+        "healthy depth should initialize"
