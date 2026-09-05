@@ -570,7 +570,21 @@ class VisualOdometry:
         c = self.cfg.tracking
         if len(self._pts) >= c.redetect_ratio * max(self._n_at_redetect, 1):
             return
+        # max_features is the cap on the LIVE track set, not a per-detect
+        # budget. Without this, every redetect adds new corners while old
+        # tracks survive, and the set ratchets up for the whole session --
+        # measured on a real scan: mapper time climbed 138 -> 648 ms/kf as
+        # tracks (and with them KLT, landmark seeding and BA observations)
+        # grew without bound.
+        budget = int(c.max_features) - len(self._pts)
+        if budget <= 0:
+            self._n_at_redetect = len(self._pts)
+            return
         new_pts = self.tracker.detect(gray, existing=self._pts)
+        if len(new_pts) > budget:
+            # detect() spreads corners across a grid; truncation keeps a
+            # roughly uniform subset.
+            new_pts = new_pts[:budget]
         if len(new_pts):
             self._pts = np.vstack([self._pts, new_pts]).astype(np.float32)
             # -1 marks "tracked but not yet a landmark"; the next keyframe gives
