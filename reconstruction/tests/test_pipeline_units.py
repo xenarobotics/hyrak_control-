@@ -308,3 +308,36 @@ def test_track_aspect_is_corrected_to_camera_aspect():
     cfg2.source.track_width, cfg2.source.track_height = 960, 540
     ensure_track_aspect(cfg2)
     assert cfg2.source.track_height == 540
+
+
+def test_save_keyframes_prefers_full_resolution(tmp_path):
+    """REFINE reprocesses the saved keyframes; writing the downscaled track
+    image threw away the resolution the camera actually delivered."""
+    import cv2
+    import numpy as np
+
+    from dronemap.export.session import save_keyframes
+    from dronemap.types import CameraIntrinsics, Keyframe
+
+    K = CameraIntrinsics.from_fov(1280, 720, 60.0)
+    rng = np.random.default_rng(0)
+    kf = Keyframe(
+        kf_id=0, frame_index=0, timestamp=0.0,
+        image=rng.integers(0, 255, (720, 1280, 3), dtype=np.uint8),
+        image_full=rng.integers(0, 255, (1080, 1920, 3), dtype=np.uint8),
+        intrinsics=K, T_wc=np.eye(4))
+    kf_dir = save_keyframes(tmp_path, [kf])
+    img = cv2.imread(str(kf_dir / "images" / "kf_00000.png"))
+    assert img.shape[:2] == (1080, 1920)
+    import json
+    meta = json.loads((kf_dir / "keyframes.json").read_text())
+    assert meta[0]["intrinsics"]["width"] == 1920
+    assert meta[0]["intrinsics"]["fx"] == pytest.approx(K.fx * 1.5)
+
+    # Without a full-res frame the track image is saved, as before.
+    kf2 = Keyframe(kf_id=1, frame_index=1, timestamp=1.0,
+                   image=rng.integers(0, 255, (720, 1280, 3), dtype=np.uint8),
+                   intrinsics=K, T_wc=np.eye(4))
+    save_keyframes(tmp_path, [kf2])
+    img2 = cv2.imread(str(kf_dir / "images" / "kf_00001.png"))
+    assert img2.shape[:2] == (720, 1280)
