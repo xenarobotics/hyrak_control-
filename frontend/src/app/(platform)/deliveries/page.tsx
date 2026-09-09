@@ -18,6 +18,7 @@ import {
     ChevronsRight, ChevronsLeft, Map as MapIcon, SlidersHorizontal,
 } from 'lucide-react'
 import { getServerUrl } from '@/lib/server-url'
+import { visibleInterval } from '@/lib/poll'
 import { getSocket } from '@/lib/socket'
 import { claimSocket, releaseSocket, socketOwner } from '@/lib/socketClaim'
 import { useDroneStore } from '@/store/drone'
@@ -233,6 +234,7 @@ type StartState = {
 
 function OrdersTab() {
     const [tasks, setTasks] = useState<TaskT[]>([])
+    const [loaded, setLoaded] = useState(false)   // gates the empty-state flash
     const [drones, setDrones] = useState<DroneT[]>([])
     const [pads, setPads] = useState<PadT[]>([])
     const [profiles, setProfiles] = useState<ProfileT[]>([])
@@ -259,6 +261,7 @@ function OrdersTab() {
             const j = await jsonOf(r)
             setTasks(j.tasks ?? [])
         } catch { /* backend away - keep the last board */ }
+        finally { setLoaded(true) }
     }, [])
 
     useEffect(() => { refresh() }, [showArchived, refresh])
@@ -344,22 +347,21 @@ function OrdersTab() {
     useEffect(() => {
         refresh()
         pollSessions()
-        const t = setInterval(refresh, 8000)
-        const s = setInterval(pollSessions, 3000)
+        const stopRefresh = visibleInterval(refresh, 8000)
+        const stopSessions = visibleInterval(pollSessions, 3000)
         fetch(api('/drones')).then(r => r.json())
             .then(j => setDrones(j.drones ?? [])).catch(() => {})
         fetch(api('/pads')).then(r => r.json())
             .then(j => setPads((j.pads ?? []).filter((p: PadT) => p.active))).catch(() => {})
         fetch(api('/planner/meta')).then(r => r.json())
             .then(j => setProfiles(j.profiles ?? [])).catch(() => {})
-        return () => { clearInterval(t); clearInterval(s) }
+        return () => { stopRefresh(); stopSessions() }
     }, [refresh, pollSessions])
 
     useEffect(() => {
         if (!openId) { setDetail(null); return }
         loadDetail(openId)
-        const t = setInterval(() => loadDetail(openId), 8000)
-        return () => clearInterval(t)
+        return visibleInterval(() => loadDetail(openId), 8000)
     }, [openId, loadDetail])
 
     async function act(taskId: string, body: Record<string, unknown>) {
@@ -668,8 +670,9 @@ function OrdersTab() {
                 {tasks.length === 0 ? (
                     <p className="text-sm py-6 text-center"
                         style={{ color: 'hsl(var(--app-text-muted))' }}>
-                        No orders yet. Create one here, or through the client API
-                        (POST /v1/tasks).
+                        {loaded
+                            ? 'No orders yet. Create one here, or through the client API (POST /v1/tasks).'
+                            : 'Loading orders...'}
                     </p>
                 ) : (
                     <div className="overflow-x-auto">
@@ -1157,8 +1160,7 @@ function DronesPanel() {
 
     useEffect(() => {
         refresh()
-        const t = setInterval(refresh, 5000)
-        return () => clearInterval(t)
+        return visibleInterval(refresh, 5000)
     }, [refresh])
 
     // Return-to-station: plan (REST) -> upload + arm/start (socket).

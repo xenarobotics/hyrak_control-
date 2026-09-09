@@ -101,12 +101,24 @@ async def v1_create_task(
 @router.get("/tasks")
 async def v1_list_tasks(
     status: str = Query(None),
+    limit: int = Query(50, ge=1, le=200,
+                       description="Page size (max 200)"),
+    offset: int = Query(0, ge=0, description="Rows to skip for paging"),
     x_api_key: str = Header(None, alias="X-API-Key"),
 ):
+    """A client's orders, newest first. Paged: the list was unbounded before,
+    so a busy key eventually returned its entire history in one response. Page
+    with limit + offset; `has_more` says whether another page exists."""
     key = await _require_key(x_api_key)
     from app.tasks import service as task_service
-    tasks = await task_service.list_tasks(status=status, api_key_id=key["id"], include_archived=True)
-    return {"tasks": [_client_view(t) for t in tasks]}
+    # Fetch one extra to know if there is a next page without a second query.
+    tasks = await task_service.list_tasks(
+        status=status, api_key_id=key["id"], limit=limit + 1, offset=offset,
+        include_archived=True)
+    has_more = len(tasks) > limit
+    tasks = tasks[:limit]
+    return {"tasks": [_client_view(t) for t in tasks],
+            "limit": limit, "offset": offset, "has_more": has_more}
 
 
 @router.get("/tasks/{ref}")

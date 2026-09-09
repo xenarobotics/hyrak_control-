@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useDroneStore } from '@/store/drone'
 import { getServerUrl } from '@/lib/server-url'
+import { visibleInterval } from '@/lib/poll'
 import { Download, RefreshCw, Satellite, Sparkles, Loader } from 'lucide-react'
 
 const TOKEN = process.env.NEXT_PUBLIC_SECRET_TOKEN || ''
@@ -66,9 +67,9 @@ export function Reconstruction3DPanel() {
 
     useEffect(() => {
         refreshEngine(); refreshResults()
-        const a = setInterval(refreshEngine, 5000)
-        const b = setInterval(refreshResults, 8000)
-        return () => { clearInterval(a); clearInterval(b) }
+        const stopEngine = visibleInterval(refreshEngine, 5000)
+        const stopResults = visibleInterval(refreshResults, 8000)
+        return () => { stopEngine(); stopResults() }
     }, [refreshEngine, refreshResults])
 
     // The instant a scan ends (live state disappears when Stop Analysis is

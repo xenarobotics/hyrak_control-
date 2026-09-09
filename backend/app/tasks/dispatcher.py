@@ -44,56 +44,63 @@ def _dist_m(lat1, lng1, lat2, lng2) -> float:
     return 111_320 * math.hypot(lat1 - lat2, (lng1 - lng2) * m_lng)
 
 
-async def _online_drones() -> list[dict]:
-    """Every drone with a live position right now: [{id, name, lat, lng}]."""
-    sm = _session_manager
-    if sm is None:
-        return []
-    out = []
-    for s in sm.all_sessions():
-        if getattr(s, "is_admin", False) or not s.drone:
-            continue
-        tel = sm.get_telemetry(s.session_id)
-        if not (tel and tel.is_connected):
-            continue
-        snap = tel.snapshot
-        lat = snap.position.latitude_deg
-        lng = snap.position.longitude_deg
-        if not (lat or lng):
-            continue
-        # Same battery floor as fleet drones - a session drone is no more
-        # able to fly a delivery on 12% than a station drone is.
-        batt = getattr(snap.battery, "remaining_percent", 100.0) or 0.0
-        if batt and batt < MIN_DISPATCH_BATTERY_PCT:
-            continue
-        out.append({"id": s.drone["id"], "name": s.drone.get("name") or "",
-                    "lat": lat, "lng": lng})
-    # The server-owned delivery fleet (station drones).
+def _drone_snapshot() -> dict[str, dict]:
+    """One pass over the fleet AND live sessions per cycle, keyed by drone id:
+    {id: {id, name, lat, lng, in_air, battery}}. Every visible drone is here
+    regardless of battery - the dispatch battery floor is applied later by
+    _eligible_drones; auto-advance and requeue need a position even for a
+    low-battery aircraft. A drone seen as both a fleet drone and a browser
+    session (a SITL station with a dashboard open) is the SAME aircraft, so
+    it appears once, fleet taking precedence.
+
+    Built once and threaded through the whole cycle. It used to be recomputed
+    inside a per-drone helper called once per task, making each 10 s cycle
+    O(tasks x drones) over fleet status and every session snapshot."""
+    by_id: dict[str, dict] = {}
     try:
         from app.fleet import service as fleet_service
         for d in fleet_service.status():
             lv = d.get("live")
             if d["connected"] and d.get("db_id") and lv:
-                # Battery reserve: never dispatch a drone that could not
-                # abort, loiter, and still fly home - it must land with
-                # at least MIN_RESERVE_PCT left, so it needs comfortably
-                # more than that to accept new work.
-                if lv["battery"] < MIN_DISPATCH_BATTERY_PCT:
-                    continue
-                out.append({"id": d["db_id"], "name": d["name"],
-                            "lat": lv["lat"], "lng": lv["lng"]})
+                by_id[d["db_id"]] = {
+                    "id": d["db_id"], "name": d["name"],
+                    "lat": lv["lat"], "lng": lv["lng"],
+                    "in_air": bool(lv["in_air"]),
+                    "battery": lv.get("battery", 0.0) or 0.0,
+                }
     except Exception:
         pass
-    # One entry per drone id: a SITL drone can be visible as BOTH a fleet
-    # drone and a browser session, and a duplicate entry let one aircraft
-    # be booked onto two orders in a single cycle.
-    seen: set[str] = set()
-    unique = []
-    for d in out:
-        if d["id"] not in seen:
-            seen.add(d["id"])
-            unique.append(d)
-    return unique
+    sm = _session_manager
+    if sm is not None:
+        for s in sm.all_sessions():
+            if getattr(s, "is_admin", False) or not s.drone:
+                continue
+            did = s.drone["id"]
+            if did in by_id:
+                continue  # same aircraft, already recorded from the fleet
+            tel = sm.get_telemetry(s.session_id)
+            if not (tel and tel.is_connected):
+                continue
+            snap = tel.snapshot
+            lat = snap.position.latitude_deg
+            lng = snap.position.longitude_deg
+            if not (lat or lng):
+                continue
+            by_id[did] = {
+                "id": did, "name": s.drone.get("name") or "",
+                "lat": lat, "lng": lng,
+                "in_air": bool(snap.flight_mode.is_in_air),
+                "battery": getattr(snap.battery, "remaining_percent", 0.0) or 0.0,
+            }
+    return by_id
+
+
+def _eligible_drones(snapshot: dict[str, dict]) -> list[dict]:
+    """Drones that may accept a new order: enough battery to abort, loiter,
+    and still land with MIN_RESERVE_PCT left. A reported 0 is treated as
+    'unknown' and allowed (SITL sometimes reports no pack)."""
+    return [d for d in snapshot.values()
+            if not (d["battery"] and d["battery"] < MIN_DISPATCH_BATTERY_PCT)]
 
 
 # Wider than plan_pickup_leg's 30 m leg-skip so a skipped hop still counts
@@ -107,31 +114,7 @@ OFFLINE_REQUEUE_S = 120.0
 _offline_since: dict[str, float] = {}   # task_id -> first-seen-missing (monotonic)
 
 
-def _drone_state(drone_id: str) -> tuple[float, float, bool] | None:
-    """(lat, lng, in_air) for a drone - fleet first, then live sessions."""
-    try:
-        from app.fleet import service as fleet_service
-        for d in fleet_service.status():
-            lv = d.get("live")
-            if d.get("db_id") == drone_id and lv:
-                return (lv["lat"], lv["lng"], bool(lv["in_air"]))
-    except Exception:
-        pass
-    sm = _session_manager
-    if sm is None:
-        return None
-    for sess in sm.all_sessions():
-        if (sess.drone or {}).get("id") != drone_id:
-            continue
-        tel = sm.get_telemetry(sess.session_id)
-        if tel and tel.is_connected:
-            snap = tel.snapshot
-            return (snap.position.latitude_deg, snap.position.longitude_deg,
-                    bool(snap.flight_mode.is_in_air))
-    return None
-
-
-async def _auto_advance() -> None:
+async def _auto_advance(snapshot: dict[str, dict]) -> None:
     """Advance orders from what the aircraft actually did: landed at the
     pickup pad -> loading (awaiting payload); landed at the dropoff pad ->
     delivered. The gates that need a human stay human - loading only ends
@@ -144,10 +127,10 @@ async def _auto_advance() -> None:
             )
         ).scalars().all()
     for t in flying:
-        state = _drone_state(t.drone_id)
+        state = snapshot.get(t.drone_id)
         if state is None:
             continue
-        lat, lng, in_air = state
+        lat, lng, in_air = state["lat"], state["lng"], state["in_air"]
         if in_air:
             continue
         if t.status == "to_pickup":
@@ -165,7 +148,7 @@ async def _auto_advance() -> None:
                 logger.info(f"Auto-advance: {t.order_no} -> {nxt}")
 
 
-async def _requeue_stuck() -> None:
+async def _requeue_stuck(snapshot: dict[str, dict]) -> None:
     """Free orders whose booked drone vanished. A drone that goes offline
     after 'assigned' used to hold both the order and its busy slot forever
     - nothing ever timed out. Now: invisible for OFFLINE_REQUEUE_S ->
@@ -183,7 +166,7 @@ async def _requeue_stuck() -> None:
         if tid not in live_ids:
             _offline_since.pop(tid, None)
     for t in booked:
-        if _drone_state(t.drone_id) is not None:
+        if snapshot.get(t.drone_id) is not None:
             _offline_since.pop(t.id, None)
             continue
         first = _offline_since.setdefault(t.id, time.monotonic())
@@ -202,8 +185,11 @@ async def _requeue_stuck() -> None:
 async def _cycle() -> None:
     if not (enabled and db_available()):
         return
-    await _auto_advance()
-    await _requeue_stuck()
+    # One drone snapshot for the whole cycle - auto-advance, requeue, and
+    # dispatch all read the same live view instead of each recomputing it.
+    snapshot = _drone_snapshot()
+    await _auto_advance(snapshot)
+    await _requeue_stuck(snapshot)
     async with get_session() as db:
         waiting = (
             await db.execute(
@@ -223,7 +209,7 @@ async def _cycle() -> None:
     if not waiting:
         return
 
-    drones = [d for d in await _online_drones() if d["id"] not in busy_ids]
+    drones = [d for d in _eligible_drones(snapshot) if d["id"] not in busy_ids]
 
     for task in waiting:
         if not drones:

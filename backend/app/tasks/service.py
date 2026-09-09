@@ -398,16 +398,20 @@ async def mark_returned_for_drone(drone_id: str, *, note: str) -> None:
 
 
 async def list_tasks(status: str | None = None, api_key_id: str | None = None,
-                     limit: int = 200, include_archived: bool = False) -> list[dict]:
+                     limit: int = 200, offset: int = 0,
+                     include_archived: bool = False) -> list[dict]:
     if not db_available():
         return []
-    stmt = select(Task).order_by(Task.created_at.desc()).limit(limit)
+    stmt = select(Task).order_by(Task.created_at.desc())
     if not include_archived:
         stmt = stmt.where(Task.archived == False)  # noqa: E712
     if status:
         stmt = stmt.where(Task.status == status)
     if api_key_id:
         stmt = stmt.where(Task.api_key_id == api_key_id)
+    # offset before limit: a client paging its whole history must not have the
+    # window silently truncated (the public /v1 list was unbounded before).
+    stmt = stmt.offset(max(0, offset)).limit(limit)
     async with get_session() as db:
         rows = (await db.execute(stmt)).scalars().all()
     return [t.to_dict() for t in rows]

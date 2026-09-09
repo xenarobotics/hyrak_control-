@@ -12,6 +12,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { getServerUrl } from '@/lib/server-url'
+import { visibleInterval } from '@/lib/poll'
 import { useDroneStore } from '@/store/drone'
 import { RotateCcw, Video } from 'lucide-react'
 
@@ -143,9 +144,9 @@ export function Recon3DView() {
             } catch { /* engine warming up */ }
         }
         pollCloud(); pollTraj()
-        const a = setInterval(pollCloud, 2000)
-        const b = setInterval(pollTraj, 1000)
-        return () => { alive = false; clearInterval(a); clearInterval(b) }
+        const stopCloud = visibleInterval(pollCloud, 2000)
+        const stopTraj = visibleInterval(pollTraj, 1000)
+        return () => { alive = false; stopCloud(); stopTraj() }
     }, [])
 
     // -- WebGL render loop ---------------------------------------------------
