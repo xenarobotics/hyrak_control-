@@ -11,6 +11,7 @@ from app.vision.modules.enhancer import Enhancer
 from app.vision.modules.crowd_manager import CrowdManager
 from app.vision.modules.plate_tracker import PlateTracker
 from app.vision.modules.traffic_manager import TrafficManager
+from app.vision.modules.reconstruction3d import Reconstruction3D
 
 # Lazy import - only load heavy models when actually needed
 ANALYZER_REGISTRY = {
@@ -22,4 +23,5 @@ ANALYZER_REGISTRY = {
     AnalysisMode.CROWD_MANAGEMENT: CrowdManager,
     AnalysisMode.VEHICLE_PLATE:    PlateTracker,
     AnalysisMode.TRAFFIC:          TrafficManager,
+    AnalysisMode.RECONSTRUCTION_3D: Reconstruction3D,
 }

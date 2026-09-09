@@ -34,7 +34,11 @@ def mission_hash(waypoints: list[dict]) -> str:
     return hashlib.sha256(json.dumps(canon).encode()).hexdigest()
 
 
-def _matches(permit_wps: list[dict], wps: list[dict]) -> bool:
+def _matches(permit_wps: list[dict], wps: list[dict],
+             alt_slack: float = 0.0) -> bool:
+    """alt_slack: extra altitude tolerance for the fleet's per-drone
+    separation bands - the permit froze the PLANNED altitudes, but the
+    aircraft flies plan + band. Horizontal tolerance never widens."""
     if len(permit_wps) != len(wps):
         return False
     for a, b in zip(permit_wps, wps):
@@ -42,7 +46,8 @@ def _matches(permit_wps: list[dict], wps: list[dict]) -> bool:
             return False
         if abs(float(a["lng"]) - float(b["lng"])) > _TOL_DEG:
             return False
-        if abs(float(a.get("altitude", 0)) - float(b.get("altitude", 0))) > _TOL_ALT:
+        if (abs(float(a.get("altitude", 0)) - float(b.get("altitude", 0)))
+                > _TOL_ALT + alt_slack):
             return False
     return True
 
@@ -66,7 +71,8 @@ async def create(drone_id: str, description: str, waypoints: list[dict],
     return d
 
 
-async def find_approved(drone_id: str, waypoints: list[dict]) -> dict | None:
+async def find_approved(drone_id: str, waypoints: list[dict],
+                        alt_slack: float = 0.0) -> dict | None:
     """Approved permit for this drone matching these exact waypoints."""
     if not db_available():
         return None
@@ -79,7 +85,7 @@ async def find_approved(drone_id: str, waypoints: list[dict]) -> dict | None:
             )
         ).scalars().all()
     for p in rows:
-        if p.mission_hash == h or _matches(p.waypoints, waypoints):
+        if p.mission_hash == h or _matches(p.waypoints, waypoints, alt_slack):
             return p.to_dict()
     return None
 

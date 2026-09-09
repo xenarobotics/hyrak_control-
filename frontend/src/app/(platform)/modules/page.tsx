@@ -3,6 +3,7 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
 import { useDroneStore } from '@/store/drone'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
+import { useScreenWakeLock } from '@/hooks/useScreenWakeLock'
 import { getSocket } from '@/lib/socket'
 import { ModeSelector } from '@/components/vision/ModeSelector'
 import { ObjectDetectionPanel } from '@/components/vision/ObjectDetectionPanel'
@@ -29,6 +30,8 @@ import { useGstPreview } from '@/lib/gstPreview'
 import { useReceiver, fallbackFromHevc } from '@/lib/hyrakReceiver'
 import { clampToLiveEdge } from '@/lib/liveEdge'
 import { WebCodecsVideo } from '@/components/video/WebCodecsVideo'
+import { Reconstruction3DPanel } from '@/components/vision/Reconstruction3DPanel'
+import { Recon3DView } from '@/components/vision/Recon3DView'
 
 const SOURCE_LABELS: Record<string, string> = {
     air_unit_udp: 'Air unit (UDP) - set in Settings',
@@ -53,6 +56,7 @@ function ResultsPanel() {
         case 'crowd-management': return <CrowdManagementPanel />
         case 'vehicle-plate-tracking': return <VehiclePlateTrackingPanel />
         case 'traffic-management': return <TrafficManagementPanel />
+        case '3d-reconstruction': return <Reconstruction3DPanel />
         default:
             return (
                 <div style={{
@@ -97,6 +101,11 @@ export default function ModulesPage() {
     const mode = useDroneStore(s => s.mode)
     const setMode = useDroneStore(s => s.setMode)
     const setCvResults = useDroneStore(s => s.setCvResults)
+
+    // Keep the screen awake while capturing - a slow scan means nobody is
+    // touching the display, and its auto-lock stops the camera mid-scan
+    // (the ~75 s freeze). Especially load-bearing for 3D reconstruction.
+    useScreenWakeLock(isStreaming)
 
     // Safety net: if user navigates away via browser back/URL while streaming,
     // stop the analysis and reset mode so fly tab shows clean raw feed.
@@ -349,7 +358,12 @@ export default function ModulesPage() {
                     )}
 
                     {/* Client-side AI overlay on the raw local feed */}
-                    {isStreaming && overlayActive && <CvOverlayCanvas fit={videoFit} />}
+                    {isStreaming && overlayActive && mode !== '3d-reconstruction' &&
+                        <CvOverlayCanvas fit={videoFit} />}
+
+                    {/* 3D SCAN: the map IS the main view - the live point
+                        cloud growing over the camera pane, camera in PiP. */}
+                    {isStreaming && mode === '3d-reconstruction' && <Recon3DView />}
 
                     {!isStreaming && !isLoading && (
                         <div style={{

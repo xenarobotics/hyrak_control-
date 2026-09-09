@@ -1,0 +1,54 @@
+Metadata-Version: 2.4
+Name: dronemap
+Version: 0.1.0
+Summary: Real-time streaming 3D reconstruction (VO + metric depth + CUDA TSDF fusion) for drone/robot video
+License: Apache-2.0
+Requires-Python: >=3.10
+Requires-Dist: numpy>=1.26
+Requires-Dist: scipy>=1.11
+Requires-Dist: opencv-contrib-python-headless>=4.9
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: pydantic>=2.6
+Requires-Dist: trimesh>=4.0
+Requires-Dist: scikit-image>=0.22
+Requires-Dist: nvidia-ml-py>=12.535
+Requires-Dist: pillow>=10.0
+Provides-Extra: cuda
+Requires-Dist: cupy-cuda12x>=13.0; extra == "cuda"
+Provides-Extra: depth
+Requires-Dist: transformers>=4.44; extra == "depth"
+Requires-Dist: huggingface-hub>=0.24; extra == "depth"
+Requires-Dist: safetensors>=0.4; extra == "depth"
+Provides-Extra: viz
+Requires-Dist: rerun-sdk>=0.20; extra == "viz"
+Requires-Dist: open3d>=0.18; extra == "viz"
+Provides-Extra: net
+Requires-Dist: pyzmq>=25.0; extra == "net"
+Requires-Dist: av>=12.0; extra == "net"
+Provides-Extra: webrtc
+Requires-Dist: aiortc>=1.9; extra == "webrtc"
+Provides-Extra: serve
+Requires-Dist: fastapi>=0.110; extra == "serve"
+Requires-Dist: uvicorn[standard]>=0.29; extra == "serve"
+Provides-Extra: mavlink
+Requires-Dist: pymavlink>=2.4; extra == "mavlink"
+Provides-Extra: texture
+Requires-Dist: xatlas>=0.0.9; extra == "texture"
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: pytest-timeout>=2.2; extra == "dev"
+Provides-Extra: all
+Requires-Dist: cupy-cuda12x>=13.0; extra == "all"
+Requires-Dist: transformers>=4.44; extra == "all"
+Requires-Dist: huggingface-hub>=0.24; extra == "all"
+Requires-Dist: safetensors>=0.4; extra == "all"
+Requires-Dist: rerun-sdk>=0.20; extra == "all"
+Requires-Dist: open3d>=0.18; extra == "all"
+Requires-Dist: pyzmq>=25.0; extra == "all"
+Requires-Dist: av>=12.0; extra == "all"
+Requires-Dist: fastapi>=0.110; extra == "all"
+Requires-Dist: uvicorn[standard]>=0.29; extra == "all"
+Requires-Dist: pymavlink>=2.4; extra == "all"
+Requires-Dist: xatlas>=0.0.9; extra == "all"
+Requires-Dist: pytest>=8.0; extra == "all"
+Requires-Dist: pytest-timeout>=2.2; extra == "all"

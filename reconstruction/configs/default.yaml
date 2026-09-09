@@ -1,0 +1,67 @@
+# dronemap baseline configuration.
+# Every field has a documented default in dronemap/config.py; this file records
+# the ones worth seeing at a glance. Other presets extend this one.
+
+session_name: session
+log_level: INFO
+seed: 0
+
+source:
+  kind: file
+  uri: ""
+  hwaccel: true          # NVDEC (h264_cuvid / hevc_cuvid / av1_cuvid)
+  track_width: 960       # resolution used for tracking; full res kept for texture
+  track_height: 540
+  target_fps: 30.0
+  stall_timeout_s: 5.0
+
+camera:
+  # Replace with a real calibration for metric work. Without fx/fy, intrinsics
+  # are derived from hfov_deg, which is a starting point, not a calibration.
+  width: 1920
+  height: 1080
+  hfov_deg: 82.0
+
+tracking:
+  max_features: 1200
+  local_ba_window: 8
+  local_ba_max_points: 600
+
+keyframe:
+  trans_ratio: 0.15      # of median scene depth
+  rot_deg: 8.0
+  track_ratio: 0.65
+  max_interval_s: 1.0
+
+depth:
+  backend: depth_anything
+  model: depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf
+  input_size: 518
+  fp16: true
+  max_depth_m: 60.0
+  align_to_map: true
+
+fusion:
+  backend: auto          # cuda when CuPy/NVRTC is available, else open3d
+  voxel_size_m: 0.04
+  trunc_voxels: 4.0
+  max_vram_gb: 3.0
+  max_integration_depth_m: 30.0
+  min_extract_weight: 0.25
+
+loop:
+  enabled: true
+  min_kf_gap: 30
+
+viz:
+  backend: rerun
+  spawn_viewer: true
+
+export:
+  formats: [ply, obj, glb]
+  export_pointcloud: true
+
+control:
+  enabled: true
+  host: 127.0.0.1
+  port: 8088

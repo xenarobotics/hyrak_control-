@@ -46,7 +46,7 @@ export interface SurveyConfig {
 
 // ── Map layer options ───────────────────────────────────────────────────────
 
-export type MapLayer = 'street' | 'satellite' | 'terrain' | 'hybrid'
+export type MapLayer = 'nav' | 'street' | 'satellite' | 'terrain' | 'hybrid'
 
 export interface MapLayerDef {
   key: MapLayer
@@ -65,6 +65,16 @@ export interface MapLayerDef {
 // good global coverage. The tile URL uses {z}/{y}/{x} (row before column) which
 // is the ArcGIS native format and maps directly to Leaflet's {z}/{y}/{x} tokens.
 export const MAP_LAYERS: MapLayerDef[] = [
+  {
+    // CARTO Voyager - the "navigation app" look: soft land tones, clear
+    // road hierarchy, readable labels. Free for light use, no API key.
+    key: 'nav',
+    label: 'Nav',
+    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+    attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+    maxNativeZoom: 20,
+    maxZoom: 22,
+  },
   {
     key: 'street',
     label: 'Street',

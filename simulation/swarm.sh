@@ -21,10 +21,11 @@ PX4_BIN="$PX4_DIR/build/px4_sitl_default/bin/px4"
 LOG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.logs"
 MODEL="${PX4_SWARM_MODEL:-gz_x500}"
 
-# Home position — IIT Hyderabad
-HOME_LAT=17.596569
-HOME_LON=78.125203
-HOME_ALT=500
+# Home position — IIT Hyderabad (env-overridable so the fleet can spawn
+# at a delivery station: HOME_LAT=... HOME_LON=... ./swarm.sh start 5)
+HOME_LAT="${HOME_LAT:-17.596569}"
+HOME_LON="${HOME_LON:-78.125203}"
+HOME_ALT="${HOME_ALT:-500}"
 
 # Spawn grid: 5 drones per row
 GRID_COLS=5
@@ -160,7 +161,10 @@ cmd_stop() {
     pkill -9 -f "$PX4_BIN" 2>/dev/null
     pkill -9 -f "gz sim" 2>/dev/null
     pkill -9 -f "gz-sim" 2>/dev/null
-    pkill -9 -f mavsdk_server 2>/dev/null
+    # Do NOT pkill mavsdk_server here: those processes belong to the
+    # platform backend's fleet links. Killing them leaves the backend with
+    # zombie children and a 25 s dead window until its watchdog rebuilds
+    # every link ("Uploaded, but start failed: UNAVAILABLE").
     # Wait until Gazebo is truly gone — a half-dead gz server confuses the
     # next instance 1 into attaching to a world that vanishes mid-handshake.
     local tries=0
@@ -177,6 +181,27 @@ cmd_status() {
     pgrep -af "$PX4_BIN" | sed 's/^/  /' || echo "  none"
     echo "Gazebo:"
     pgrep -af "gz sim" | head -3 | sed 's/^/  /' || echo "  none"
+    cmd_rtf
+}
+
+cmd_rtf() {
+    # Real-time factor: 1.0 = simulation runs at wall-clock speed. Below
+    # ~0.3 everything LOOKS broken - EKF takes minutes to converge (drones
+    # seem missing), heartbeats stretch past MAVSDK's 3 s timeout (endless
+    # "heartbeats timed out" in the backend log), drones crawl. The usual
+    # fix is the headless launcher: the GUI window costs a full core.
+    local rtf
+    rtf=$(timeout 5 gz topic -e -t /world/default/stats -n 1 2>/dev/null \
+        | grep -oP 'real_time_factor: \K[0-9.]+' | head -1)
+    if [ -z "$rtf" ]; then
+        echo "RTF: world not answering (is the swarm running?)"
+        return 1
+    fi
+    echo "RTF: $rtf (1.0 = real time)"
+    if awk "BEGIN{exit !($rtf < 0.5)}"; then
+        echo "  WARNING: simulation is running at ${rtf}x - drones boot and fly"
+        echo "  that many times slower. Try: ./swarm_headless.sh N (no GUI)"
+    fi
 }
 
 wait_for_gz_transport() {
@@ -251,12 +276,19 @@ cmd_start() {
     echo "Swarm up: $n drones on UDP ports $(port_for 1)–$(port_for "$n")"
     echo "Open the platform, enable Swarm mode, and hit re-scan."
     echo "Stop with: ./swarm.sh stop"
+    echo ""
+    cmd_rtf || true
+    if [ "${HEADLESS:-0}" != "1" ]; then
+        echo "Tip: the Gazebo GUI costs a full CPU core. For faster, more"
+        echo "reliable sims use: ./swarm_headless.sh $n"
+    fi
 }
 
 case "${1:-start}" in
     start)  cmd_start "${2:-10}" ;;
     stop)   cmd_stop ;;
     status) cmd_status ;;
+    rtf)    cmd_rtf ;;
     heal)   cd "$PX4_DIR"; health_pass "${2:-10}" restart ;;
-    *) echo "Usage: $0 {start [N]|stop|status|heal [N]}"; exit 1 ;;
+    *) echo "Usage: $0 {start [N]|stop|status|rtf|heal [N]}"; exit 1 ;;
 esac

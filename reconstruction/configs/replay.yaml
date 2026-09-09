@@ -1,0 +1,34 @@
+# Offline replay of a recorded file or image folder: no live constraints, so
+# quality settings are turned up and visualisation is off by default.
+extends: default.yaml
+
+session_name: replay
+
+pipeline:
+  # Offline: run every stage inline. Reproducible, and more accurate than the
+  # threaded path because corrections land before the next frame is tracked.
+  mode: sequential
+
+source:
+  kind: file
+  realtime_replay: false   # process as fast as the machine allows
+  retain_full_res: true
+
+tracking:
+  max_features: 1600
+  local_ba_window: 10
+  local_ba_iterations: 15
+  local_ba_max_points: 900
+
+fusion:
+  voxel_size_m: 0.03
+  min_extract_weight: 0.25
+
+viz:
+  backend: none
+
+export:
+  formats: [ply, obj, glb]
+  export_pointcloud: true
+  export_splat: true
+  save_keyframes: true

@@ -37,6 +37,7 @@ dependencies = [
     "alembic>=1.13",
     "shapely>=2.0",
     "fast-alpr>=0.2.3",
+    "pyzmq>=27.2.0",
 ]
 
 [dependency-groups]

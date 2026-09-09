@@ -300,4 +300,10 @@ def close_bridge(session_id: str) -> None:
     bridge = _bridges.pop(session_id, None)
     if bridge:
         bridge.close()
-        logger.info(f"Serial bridge closed for session {session_id[:8]}")
+        # Traffic at close is the one fact that separates "the link was idle"
+        # from "the link died under its own downlink burst".
+        logger.info(
+            f"Serial bridge closed for session {session_id[:8]} - "
+            f"in {bridge.packets_in} pkt / {bridge.bytes_in} B, "
+            f"out {bridge.packets_out} pkt / {bridge.bytes_out} B"
+        )

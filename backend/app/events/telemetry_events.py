@@ -850,6 +850,14 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             )
 
             ok, err_msg = await tel.upload_mission(waypoints, terrain_follow=terrain_follow)
+            if ok:
+                # A planned mission whose waypoints match advances to
+                # 'uploaded' - hand-drawn missions simply match nothing.
+                from app.planner import service as mission_service
+                await mission_service.mark_uploaded_by_hash(
+                    waypoints,
+                    drone_id=session.drone["id"] if session.drone else None,
+                )
             await sio.emit("mission_upload_result", {
                 "ok": ok,
                 "count": len(waypoints) if ok else 0,

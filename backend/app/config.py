@@ -75,6 +75,16 @@ class Settings(BaseSettings):
             "human-tracking": 640,
             "person-tracking": 640,
             "object-detection": 640,
+            # 0 = NATIVE, like plate reading, and for the same reason: every
+            # pixel is load-bearing. The reconstruction analyzer bridges the
+            # frame as received and never calls resize_for_inference, so this
+            # entry is a guard against any future refactor applying the
+            # default 640 uniformly - the engine does its own sensible
+            # downscaling for tracking, and REFINE works from the full-res
+            # keyframes. (The 640x360 corridor scan came from WebRTC's
+            # maintain-framerate degradation, fixed sender-side in
+            # videoSettings.ts, not from this table.)
+            "3d-reconstruction": 0,
         }
     )
 

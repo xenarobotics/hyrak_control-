@@ -1,0 +1,48 @@
+# Live drone downlink: 1080p30 over RTSP, tuned for an 8 GB laptop GPU.
+extends: default.yaml
+
+session_name: flight
+
+source:
+  kind: rtsp
+  uri: rtsp://192.168.1.10:8554/live
+  hwaccel: true
+  track_width: 960
+  track_height: 540
+  target_fps: 30.0
+  # A drone link drops out; give it longer before declaring the flight over.
+  stall_timeout_s: 8.0
+
+camera:
+  width: 1920
+  height: 1080
+  hfov_deg: 82.0
+
+keyframe:
+  # Outdoor flight covers ground fast. A scale-relative translation threshold
+  # already adapts to altitude; this trims it slightly for better overlap.
+  trans_ratio: 0.12
+  rot_deg: 7.0
+  max_interval_s: 1.5
+
+depth:
+  model: depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf
+  max_depth_m: 80.0
+
+fusion:
+  # Coarser voxels: outdoor scenes are large, and 6 cm keeps the block budget
+  # comfortable for a long flight.
+  voxel_size_m: 0.06
+  max_integration_depth_m: 50.0
+  max_vram_gb: 3.0
+
+scale:
+  # Uncomment to lock absolute scale to the flight controller's altitude.
+  # mode: mavlink
+  # mavlink_url: udp:0.0.0.0:14550
+  mode: depth_net
+
+export:
+  formats: [ply, glb]
+  export_pointcloud: true
+  save_keyframes: true   # keeps the inputs for an offline 3DGS pass

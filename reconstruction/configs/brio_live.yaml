@@ -1,0 +1,47 @@
+# The one config for live reconstruction with the Brio 100 webcam.
+# Launch:   .venv/bin/python -m dronemap.cli run --serve -c configs/brio_live.yaml
+# Control:  http://localhost:8088  (Start / Stop & export, live health)
+# 3D view:  optional — press Start, then run `.venv/bin/rerun` and connect,
+#           or set viz.spawn_viewer: true to open it automatically.
+extends: default.yaml
+
+session_name: brio
+
+source:
+  kind: v4l2
+  uri: /dev/video5
+  track_width: 960
+  track_height: 540
+  stall_timeout_s: 30
+
+camera:
+  width: 1920
+  height: 1080
+  hfov_deg: 52          # Brio 100: 58° diagonal ≈ 52° horizontal
+
+depth:
+  backend: da3
+  model: depth-anything/DA3METRIC-LARGE
+  input_size: 504
+  max_depth_m: 10.0
+
+fusion:
+  voxel_size_m: 0.02
+  max_integration_depth_m: 6.0
+  max_vram_gb: 2.5
+
+keyframe:
+  track_ratio: 0.5
+
+pipeline:
+  queue_keyframes: 16
+
+viz:
+  backend: rerun
+  spawn_viewer: false   # panel is the primary UI; 3D viewer is opt-in
+  serve: true           # lets a viewer attach any time without restarting
+
+export:
+  output_dir: data/sessions
+  formats: [ply, obj, glb, stl]
+  save_keyframes: true  # keeps frames for the offline photogrammetry path

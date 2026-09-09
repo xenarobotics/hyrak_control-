@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dronemap"
+version = "0.1.0"
+description = "Real-time streaming 3D reconstruction (VO + metric depth + CUDA TSDF fusion) for drone/robot video"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+
+dependencies = [
+  "numpy>=1.26",
+  "scipy>=1.11",
+  "opencv-contrib-python-headless>=4.9",
+  "pyyaml>=6.0",
+  "pydantic>=2.6",
+  "trimesh>=4.0",
+  "scikit-image>=0.22",
+  "nvidia-ml-py>=12.535",
+  "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+# CUDA TSDF fusion. cu12x wheels run fine on the CUDA 13 driver.
+cuda   = ["cupy-cuda12x>=13.0"]
+depth  = ["transformers>=4.44", "huggingface-hub>=0.24", "safetensors>=0.4"]
+viz    = ["rerun-sdk>=0.20", "open3d>=0.18"]
+net    = ["pyzmq>=25.0", "av>=12.0"]
+webrtc = ["aiortc>=1.9"]
+serve  = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
+mavlink= ["pymavlink>=2.4"]
+texture= ["xatlas>=0.0.9"]
+dev    = ["pytest>=8.0", "pytest-timeout>=2.2"]
+all = [
+  "cupy-cuda12x>=13.0",
+  "transformers>=4.44", "huggingface-hub>=0.24", "safetensors>=0.4",
+  "rerun-sdk>=0.20", "open3d>=0.18",
+  "pyzmq>=25.0", "av>=12.0",
+  "fastapi>=0.110", "uvicorn[standard]>=0.29",
+  "pymavlink>=2.4", "xatlas>=0.0.9",
+  "pytest>=8.0", "pytest-timeout>=2.2",
+]
+
+[project.scripts]
+dronemap = "dronemap.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["dronemap*"]
+
+[tool.setuptools.package-data]
+dronemap = ["fusion/*.cu"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+timeout = 300

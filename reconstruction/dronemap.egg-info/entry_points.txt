@@ -1,0 +1,2 @@
+[console_scripts]
+dronemap = dronemap.cli:main

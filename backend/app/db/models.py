@@ -9,9 +9,17 @@ from typing import Optional
 import uuid
 
 from sqlalchemy import (
-    JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String,
+    JSON, BigInteger, Boolean, CheckConstraint, DateTime, Float, ForeignKey,
+    Index, Integer, LargeBinary, Sequence, String,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+# Every JSON column is JSONB on Postgres (the only production dialect): binary
+# storage, real containment/indexing, no reparse on read. The generic JSON
+# fallback keeps the models portable for the mock-engine schema generator and
+# any SQLite-backed tooling. Defined once, shared by every column below.
+JSONB_COL = JSON().with_variant(JSONB, "postgresql")
 
 
 def _utcnow() -> datetime:
@@ -67,7 +75,7 @@ class Zone(Base):
     )
     name: Mapped[str] = mapped_column(String(120))
     zone_class: Mapped[str] = mapped_column(String(10))  # green | orange | red
-    geometry: Mapped[dict] = mapped_column(JSON)          # GeoJSON geometry
+    geometry: Mapped[dict] = mapped_column(JSONB_COL)          # GeoJSON geometry
     floor_m: Mapped[float] = mapped_column(Float, default=0.0)
     ceiling_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -85,6 +93,398 @@ class Zone(Base):
                 "ceiling_m": self.ceiling_m,
                 "active": self.active,
             },
+        }
+
+
+class MapFeature(Base):
+    """
+    Land-use overlay for the mission planner: what is UNDER the drone.
+
+    Deliberately separate from Zone. Zones answer "is flying here legal"
+    (green/orange/red, enforced); map features answer "what would the drone
+    be over" (a road, a forest, a hostel) - pure preference data that route
+    profiles weight. A feature never overrides a zone: red stays blocked no
+    matter what category sits beneath it.
+    """
+    __tablename__ = "map_features"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(120))
+    # One of planner.CATEGORIES (road, forest, water, open_field, farmland,
+    # residential, hostel, school, campus, industrial).
+    category: Mapped[str] = mapped_column(String(30), index=True)
+    geometry: Mapped[dict] = mapped_column(JSONB_COL)  # GeoJSON (Multi)Polygon
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    def to_feature(self) -> dict:
+        return {
+            "type": "Feature",
+            "geometry": self.geometry,
+            "properties": {
+                "id": self.id,
+                "name": self.name,
+                "category": self.category,
+                "active": self.active,
+            },
+        }
+
+
+class RouteProfile(Base):
+    """
+    A named preference set for the mission planner - "over roads",
+    "unmanned areas", "hybrid". The rules JSON holds per-category behavior:
+
+        {"categories": {"road":       {"mode": "prefer", "weight": 0.45},
+                        "residential":{"mode": "avoid",  "weight": 6.0},
+                        "hostel":     {"mode": "block"}},
+         "orange": {"policy": "penalize", "weight": 4.0},
+         "turn_radius_m": 8.0}
+
+    Weights are cost-per-metre multipliers over a base of 1.0, so "prefer"
+    (< 1) makes flying extra metres to stay over that category worth it and
+    "avoid" (> 1) makes crossing it expensive; "block" is impassable to the
+    planner (softer than a red zone: it only shapes the route, nothing
+    enforces it in flight). Built-in profiles are seeded at startup and can
+    be tuned by an admin but not deleted.
+    """
+    __tablename__ = "route_profiles"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    description: Mapped[str] = mapped_column(String(500), default="")
+    rules: Mapped[dict] = mapped_column(JSONB_COL, default=dict)
+    default_alt_m: Mapped[float] = mapped_column(Float, default=60.0)
+    default_speed_m_s: Mapped[float] = mapped_column(Float, default=8.0)
+    builtin: Mapped[bool] = mapped_column(Boolean, default=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "rules": self.rules or {},
+            "default_alt_m": self.default_alt_m,
+            "default_speed_m_s": self.default_speed_m_s,
+            "builtin": self.builtin,
+            "active": self.active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class Mission(Base):
+    """
+    One generated mission path - the planner's persistent output, answering
+    who asked, when, for which drone, under which profile, and exactly what
+    the path was. mission_hash uses the SAME canonicalisation as permits, so
+    a planned mission, its permit (if it needs one), and the eventual upload
+    all tie together through one hash.
+
+    Status is a lifecycle, not a flag: planned -> uploaded -> flying ->
+    completed, with aborted/failed as exits. scheduled_at is the future
+    dispatch hook ("time of launch") - null means fly whenever the operator
+    uploads it.
+    """
+    __tablename__ = "missions"
+    __table_args__ = (
+        # Status validity is enforced in app code (planner/service.ALLOWED_NEXT);
+        # this makes a bad write from anywhere - a stray script, a manual psql -
+        # impossible at the storage layer too.
+        CheckConstraint(
+            "status IN ('planned','uploaded','flying','completed',"
+            "'aborted','failed')",
+            name="ck_missions_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    # Nullable on purpose: a path can be planned before a drone is assigned.
+    drone_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("drones.id"), nullable=True, index=True
+    )
+    # Session id / operator label today; becomes a users FK in the identity
+    # phase without changing this table's shape.
+    requested_by: Mapped[str] = mapped_column(String(120), default="")
+    profile_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("route_profiles.id"), nullable=True
+    )
+    # Denormalised so the record still reads correctly if the profile is
+    # later renamed or deleted (same pattern as person_sightings.person_name).
+    profile_name: Mapped[str] = mapped_column(String(120), default="")
+    status: Mapped[str] = mapped_column(String(12), default="planned", index=True)
+    # A takeoff deferred for overhead traffic sets this so the hold survives a
+    # server restart: the fleet monitor re-arms it when the column is clear
+    # instead of leaving the aircraft with an uploaded mission nothing starts.
+    # Cleared the moment the mission is released, abandoned, or returned.
+    held_takeoff: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    start_lat: Mapped[float] = mapped_column(Float)
+    start_lng: Mapped[float] = mapped_column(Float)
+    goal_lat: Mapped[float] = mapped_column(Float)
+    goal_lng: Mapped[float] = mapped_column(Float)
+    cruise_alt_m: Mapped[float] = mapped_column(Float, default=60.0)
+    speed_m_s: Mapped[float] = mapped_column(Float, default=8.0)
+    waypoints: Mapped[list] = mapped_column(JSONB_COL)
+    mission_hash: Mapped[str] = mapped_column(String(64), index=True)
+    distance_m: Mapped[float] = mapped_column(Float, default=0.0)
+    est_duration_s: Mapped[float] = mapped_column(Float, default=0.0)
+    zones: Mapped[list] = mapped_column(JSONB_COL, default=list)      # zones crossed
+    coverage: Mapped[dict] = mapped_column(JSONB_COL, default=dict)   # metres per category
+    report: Mapped[dict] = mapped_column(JSONB_COL, default=dict)     # planner diagnostics
+    scheduled_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+    def to_dict(self, include_waypoints: bool = True) -> dict:
+        d = {
+            "id": self.id,
+            "drone_id": self.drone_id,
+            "requested_by": self.requested_by,
+            "profile_id": self.profile_id,
+            "profile_name": self.profile_name,
+            "status": self.status,
+            "start": {"lat": self.start_lat, "lng": self.start_lng},
+            "goal": {"lat": self.goal_lat, "lng": self.goal_lng},
+            "cruise_alt_m": self.cruise_alt_m,
+            "speed_m_s": self.speed_m_s,
+            "waypoint_count": len(self.waypoints or []),
+            "mission_hash": self.mission_hash,
+            "distance_m": self.distance_m,
+            "est_duration_s": self.est_duration_s,
+            "zones": self.zones or [],
+            "coverage": self.coverage or {},
+            "report": self.report or {},
+            "scheduled_at": self.scheduled_at.isoformat() if self.scheduled_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+        if include_waypoints:
+            d["waypoints"] = self.waypoints
+        return d
+
+
+class Pad(Base):
+    """
+    A named take-off / landing location - the vocabulary a delivery client
+    speaks in. A client app never sends coordinates; it says "pickup at
+    Mess-A pad", and the pad row is where that name becomes a lat/lng the
+    planner can use.
+    """
+    __tablename__ = "pads"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    # 'pad': a client-facing pickup/drop location. 'station': a home base
+    # drones return to between missions - clients can't order to a station.
+    kind: Mapped[str] = mapped_column(String(16), default="pad", server_default="pad")
+    lat: Mapped[float] = mapped_column(Float)
+    lng: Mapped[float] = mapped_column(Float)
+    notes: Mapped[str] = mapped_column(String(500), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "kind": self.kind,
+            "lat": self.lat,
+            "lng": self.lng,
+            "notes": self.notes,
+            "active": self.active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class ApiKey(Base):
+    """
+    One client application's credential for the public /v1 API - the thin
+    end of the tenancy wedge (organizations arrive with the identity phase;
+    for the pilot, the key IS the tenant).
+
+    Only the SHA-256 of the key is stored. The plaintext is shown exactly
+    once at creation; a leaked database dump therefore leaks no credentials.
+    The prefix (first characters of the plaintext) is kept so an operator
+    can tell keys apart without ever seeing them whole.
+    """
+    __tablename__ = "api_keys"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(120))
+    prefix: Mapped[str] = mapped_column(String(12))
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "prefix": self.prefix,
+            "active": self.active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
+        }
+
+
+# Order numbers (HYK-00042) come from this sequence - registered on the
+# metadata so schema.sql generation and create_all both know it exists,
+# not just the migration that first added it.
+task_order_seq = Sequence("task_order_seq", metadata=Base.metadata, start=1)
+
+
+class Task(Base):
+    """
+    One delivery order - the unit a client application creates and tracks.
+    The order number is the public identity (what a customer sees); the
+    uuid id stays internal. Pad names and coordinates are denormalised into
+    the row so the order still reads correctly after a pad is renamed or
+    retired.
+
+    Lifecycle (see app/tasks/service.py for the transition map):
+        received -> planned -> assigned -> to_pickup -> loading
+                 -> to_dropoff -> delivered
+    with returned / failed / cancelled as exits.
+    """
+    __tablename__ = "tasks"
+    __table_args__ = (
+        # The dispatcher's hot query is "planned orders" and "this drone's
+        # active order"; the composite serves both prefixes where the two
+        # single-column indexes could not. archived is filtered on every
+        # board list. permits.status has its own index below.
+        Index("ix_tasks_status_drone_id", "status", "drone_id"),
+        Index("ix_tasks_archived", "archived"),
+        # Storage-layer guard on the lifecycle - see tasks/service.ALLOWED_NEXT.
+        CheckConstraint(
+            "status IN ('received','planned','assigned','to_pickup','loading',"
+            "'to_dropoff','delivered','returned','failed','cancelled')",
+            name="ck_tasks_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    order_no: Mapped[str] = mapped_column(String(20), unique=True, index=True)
+    api_key_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("api_keys.id"), nullable=True, index=True
+    )
+    # Denormalised key name, "operator" for board-created orders.
+    client_name: Mapped[str] = mapped_column(String(120), default="operator")
+    status: Mapped[str] = mapped_column(String(12), default="received", index=True)
+    pickup_pad_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("pads.id"), nullable=True
+    )
+    dropoff_pad_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("pads.id"), nullable=True
+    )
+    pickup_name: Mapped[str] = mapped_column(String(120), default="")
+    pickup_lat: Mapped[float] = mapped_column(Float, default=0.0)
+    pickup_lng: Mapped[float] = mapped_column(Float, default=0.0)
+    dropoff_name: Mapped[str] = mapped_column(String(120), default="")
+    dropoff_lat: Mapped[float] = mapped_column(Float, default=0.0)
+    dropoff_lng: Mapped[float] = mapped_column(Float, default=0.0)
+    payload_desc: Mapped[str] = mapped_column(String(300), default="")
+    payload_kg: Mapped[float] = mapped_column(Float, default=0.0)
+    window_start: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    window_end: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    profile_name: Mapped[str] = mapped_column(String(120), default="")
+    # The delivery leg (pickup -> dropoff), planned at order time - this is
+    # the "quote" a client's distance/ETA comes from.
+    mission_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("missions.id"), nullable=True
+    )
+    # The positioning leg (drone's location -> pickup), planned at assign
+    # time once we know WHICH drone is coming.
+    mission_to_pickup_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("missions.id"), nullable=True
+    )
+    drone_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("drones.id"), nullable=True, index=True
+    )
+    fail_reason: Mapped[str] = mapped_column(String(500), default="")
+    # Operator-side shelving: an archived order leaves the board but stays
+    # in the database (and in the client's /v1 history) forever.
+    archived: Mapped[bool] = mapped_column(Boolean, default=False,
+                                           server_default="false")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "order_no": self.order_no,
+            "client_name": self.client_name,
+            "status": self.status,
+            "pickup": {"pad_id": self.pickup_pad_id, "name": self.pickup_name,
+                       "lat": self.pickup_lat, "lng": self.pickup_lng},
+            "dropoff": {"pad_id": self.dropoff_pad_id, "name": self.dropoff_name,
+                        "lat": self.dropoff_lat, "lng": self.dropoff_lng},
+            "payload": {"description": self.payload_desc, "kg": self.payload_kg},
+            "window_start": self.window_start.isoformat() if self.window_start else None,
+            "window_end": self.window_end.isoformat() if self.window_end else None,
+            "profile_name": self.profile_name,
+            "mission_id": self.mission_id,
+            "mission_to_pickup_id": self.mission_to_pickup_id,
+            "drone_id": self.drone_id,
+            "fail_reason": self.fail_reason,
+            "archived": self.archived,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class TaskEvent(Base):
+    """Append-only history of a task - every status change with who caused
+    it. The task row says where the order IS; this table says how it got
+    there, and it is what a client's status timeline renders."""
+    __tablename__ = "task_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="CASCADE"), index=True
+    )
+    t: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    status: Mapped[str] = mapped_column(String(12))
+    note: Mapped[str] = mapped_column(String(500), default="")
+    actor: Mapped[str] = mapped_column(String(20), default="system")  # client|operator|system
+
+    def to_dict(self) -> dict:
+        return {
+            "t": self.t.isoformat() if self.t else None,
+            "status": self.status,
+            "note": self.note,
+            "actor": self.actor,
         }
 
 
@@ -140,10 +540,12 @@ class Permit(Base):
     )
     drone_id: Mapped[str] = mapped_column(String(36), ForeignKey("drones.id"), index=True)
     description: Mapped[str] = mapped_column(String(500))
-    waypoints: Mapped[list] = mapped_column(JSON)
+    waypoints: Mapped[list] = mapped_column(JSONB_COL)
     mission_hash: Mapped[str] = mapped_column(String(64), index=True)
-    zones: Mapped[list] = mapped_column(JSON)  # red zones the mission crosses
-    status: Mapped[str] = mapped_column(String(12), default="pending")
+    zones: Mapped[list] = mapped_column(JSONB_COL)  # red zones the mission crosses
+    # Indexed: the approval queue and the fleet gate both filter permits by
+    # status (pending for the admin list, approved for find_approved).
+    status: Mapped[str] = mapped_column(String(12), default="pending", index=True)
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -196,7 +598,7 @@ class CrowdSnapshot(Base):
     current_count: Mapped[int] = mapped_column(Integer, default=0)
     peak_count: Mapped[int] = mapped_column(Integer, default=0)
     density_level: Mapped[str] = mapped_column(String(10), default="green")
-    section_counts: Mapped[dict] = mapped_column(JSON, default=dict)
+    section_counts: Mapped[dict] = mapped_column(JSONB_COL, default=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -259,8 +661,8 @@ class PlateEvent(Base):
     # coloured reliably, and a bare "red" hides that.
     vehicle_color: Mapped[str] = mapped_column(String(20), default="")
     vehicle_color_conf: Mapped[float] = mapped_column(Float, default=0.0)
-    vehicle_box: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
-    plate_box: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    vehicle_box: Mapped[Optional[list]] = mapped_column(JSONB_COL, nullable=True)
+    plate_box: Mapped[Optional[list]] = mapped_column(JSONB_COL, nullable=True)
     # How many pixels across the plate actually was. The single most useful
     # quality indicator for a reading, and the reason it is stored rather than
     # used as a hard reject filter: on real footage from this rig plates arrive

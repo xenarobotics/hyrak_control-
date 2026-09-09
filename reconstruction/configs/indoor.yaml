@@ -1,0 +1,27 @@
+# Indoor / close-range mapping: small voxels, tighter keyframes, short range.
+extends: default.yaml
+
+session_name: indoor
+
+source:
+  track_width: 960
+  track_height: 540
+
+keyframe:
+  trans_ratio: 0.10
+  rot_deg: 6.0
+  min_trans_m: 0.03
+
+depth:
+  model: depth-anything/Depth-Anything-V2-Metric-Indoor-Small-hf
+  max_depth_m: 12.0
+
+fusion:
+  voxel_size_m: 0.02      # 2 cm: 8x the memory per volume of 4 cm
+  trunc_voxels: 5.0
+  max_integration_depth_m: 8.0
+  max_vram_gb: 3.5
+
+export:
+  formats: [ply, obj, glb]
+  textured: true

@@ -890,10 +890,15 @@ class TelemetryManager:
             async for rc in self._drone.telemetry.rc_status():
                 if not self._running:
                     break
+                # No receiver (every SITL run) reports signal strength as
+                # NaN. Python json will happily serialise that as a literal
+                # NaN - which no browser can parse, and a socket.io client
+                # that cannot parse a packet closes the whole connection.
+                pct = rc.signal_strength_percent
                 new = RcStatusData(
                     was_available=rc.was_available_once,
                     available=rc.is_available,
-                    signal_pct=round(rc.signal_strength_percent, 1),
+                    signal_pct=round(pct, 1) if pct == pct else 0.0,
                 )
                 changed = new != self._snapshot.rc
                 self._snapshot.rc = new

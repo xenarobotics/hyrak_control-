@@ -21,6 +21,10 @@ class AnalysisMode(str, Enum):
     # merges the vehicle analytics but deliberately not crowd or face -
     # those need incompatible altitudes.
     TRAFFIC          = "traffic-management"
+    # Bridges session frames into the reconstruction sidecar (dronemap) -
+    # the frames come from whatever video source the session uses, exactly
+    # like every other mode; the 3D map is the output.
+    RECONSTRUCTION_3D = "3d-reconstruction"
 
 
 @dataclass

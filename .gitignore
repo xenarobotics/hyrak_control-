@@ -68,3 +68,5 @@ frontend/home/
 .vscode/
 .claude/settings.local.json
 .DS_Store
+reconstruction/.venv/
+reconstruction/data/

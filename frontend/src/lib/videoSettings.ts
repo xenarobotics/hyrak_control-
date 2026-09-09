@@ -184,9 +184,9 @@ export function getCrowdThresholds(): { lightMax: number; moderateMax: number } 
     return p === 'custom' ? getCrowdCustom() : CROWD_PRESETS[p]
 }
 
-export function maxUplinkBitrate(): number {
+export function maxUplinkBitrate(forceDetail = false): number {
     const { res } = getVideoSettings()
-    return getCaptureProfile() === 'detail'
+    return (forceDetail || getCaptureProfile() === 'detail')
         ? RES_MAX_BITRATE_DETAIL[res]
         : RES_MAX_BITRATE[res]
 }
@@ -226,19 +226,38 @@ export function wantsEcoUplink(cameraLabel: string): boolean {
 // wantsEcoUplink). The mode can't change while streaming, so it's safe to
 // hold for the whole stream; a settings change live-applies via
 // applyVideoSettings, which re-evaluates it.
-export async function tuneVideoSender(pc: RTCPeerConnection, thumbnailOnly = false) {
+export async function tuneVideoSender(pc: RTCPeerConnection, thumbnailOnly = false,
+                                      forceDetail = false) {
     const sender = pc.getSenders().find(s => s.track?.kind === 'video')
     if (!sender) return
     try {
         // See CaptureProfile above: for anything the SERVER has to read rather
         // than a human watch, resolution outranks smoothness and detail
         // outranks motion - the opposite of the right choice for flying.
-        const detail = getCaptureProfile() === 'detail'
+        // forceDetail: some modes NEED that regardless of the saved profile.
+        // 3D reconstruction is one - 'smooth' let WebRTC crush an iPad's feed
+        // to 640x360 under congestion (maintain-framerate sheds resolution
+        // first), and a corridor scanned through that pipe reconstructed
+        // doors as mush and erased drone-sized objects entirely.
+        const detail = forceDetail || getCaptureProfile() === 'detail'
         sender.track!.contentHint = detail ? 'detail' : 'motion'
         const params = sender.getParameters()
-        params.degradationPreference = detail
-            ? 'maintain-resolution'
-            : 'maintain-framerate'
+        // Degradation under network stress:
+        //  - forceDetail (3D reconstruction): 'balanced'. 'maintain-resolution'
+        //    clings to 1080p on a lossy link and the H.264 stream CORRUPTS -
+        //    the decoder gets invalid data, can't recover without a keyframe,
+        //    and the scan freezes (confirmed in the logs: "H264Decoder failed
+        //    to decode, Invalid data" right before every ~75 s freeze).
+        //    'balanced' sheds resolution gracefully instead, so a weak-WiFi
+        //    scan drops to 720p and KEEPS RUNNING rather than dying at 1080p.
+        //  - detail profile (plate OCR etc.): still maintain-resolution -
+        //    those are short, framed, and usually on a better link.
+        //  - motion (flying): maintain-framerate.
+        params.degradationPreference = forceDetail
+            ? 'balanced'
+            : detail
+                ? 'maintain-resolution'
+                : 'maintain-framerate'
         if (!params.encodings || params.encodings.length === 0) {
             params.encodings = [{}]
         }
@@ -249,7 +268,7 @@ export async function tuneVideoSender(pc: RTCPeerConnection, thumbnailOnly = fal
         } else {
             // Explicitly undo a previous eco pass - live-applying a settings
             // change reuses the same sender, so stale caps would stick.
-            params.encodings[0].maxBitrate = maxUplinkBitrate()
+            params.encodings[0].maxBitrate = maxUplinkBitrate(detail)
             params.encodings[0].maxFramerate = undefined
             params.encodings[0].scaleResolutionDownBy = 1
         }

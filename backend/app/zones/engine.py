@@ -70,6 +70,13 @@ async def reload() -> int:
     return len(zones)
 
 
+def snapshot() -> list[dict]:
+    """Current zone list ({id, name, zone_class, floor_m, ceiling_m, geom}) -
+    read-only view for the mission planner's cost rasteriser."""
+    with _lock:
+        return list(_zones)
+
+
 def _alt_applies(z: dict, alt_m: float | None) -> bool:
     if alt_m is None:
         return True

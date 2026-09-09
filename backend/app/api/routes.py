@@ -84,38 +84,21 @@ async def get_sessions(request: Request):
             "approx_location": s.approx_location,
         })
 
-    # Swarm fleet drones connect server-side (UDP SITL) rather than through a
-    # client session, so they're reported separately with the same live shape.
+    # The server-owned delivery fleet (station drones) - lives independent
+    # of any browser session.
     fleet = []
     try:
-        from app.events.swarm_events import _fleet_state, _fleet_db_ids
-        from app.zones import engine as zone_engine
-        for did, mgr in sorted(sm.get_fleet("").items()):
-            if not mgr.is_connected:
+        from app.fleet import service as fleet_service
+        for d in fleet_service.status():
+            if not d["connected"]:
                 continue
-            snap = _fleet_state.get(did) or {}
-            pos = snap.get("position", {})
-            fm = snap.get("flight_mode", {})
-            lat = pos.get("latitude_deg", 0.0)
-            lng = pos.get("longitude_deg", 0.0)
-            alt = pos.get("relative_altitude_m", 0.0)
             fleet.append({
-                "drone_id": did,
-                "db_id": _fleet_db_ids.get(did),
-                "hardware_uid": f"sitl-instance-{did}",
+                "drone_id": d["instance"],
+                "db_id": d["db_id"],
+                "name": d["name"],
+                "hardware_uid": f"sitl-station-fleet-{d['instance']}",
                 "is_simulated": True,
-                "live": {
-                    "zone_class": (zone_engine.check_point(lat, lng, alt)["zone_class"]
-                                   if (lat or lng) else "green"),
-                    "lat": lat,
-                    "lng": lng,
-                    "alt": alt,
-                    "heading": snap.get("heading_deg", 0.0),
-                    "armed": bool(fm.get("is_armed")),
-                    "in_air": bool(fm.get("is_in_air")),
-                    "mode": fm.get("mode", "UNKNOWN"),
-                    "battery": snap.get("battery", {}).get("remaining_percent", 0.0),
-                } if snap else None,
+                "live": d["live"],
             })
     except Exception:
         pass
@@ -259,6 +242,816 @@ async def zones_check(
     """Zone class at a point - used by clients and for quick testing."""
     from app.zones import engine as zone_engine
     return zone_engine.check_point(lat, lng, alt)
+
+
+# ── Mission planner ──────────────────────────────────────────────────────
+
+
+def _parse_geometry(body: dict):
+    """Shared GeoJSON (Multi)Polygon validation for zones-like tables."""
+    geometry = body.get("geometry")
+    if not geometry or geometry.get("type") not in ("Polygon", "MultiPolygon"):
+        raise HTTPException(status_code=400, detail="geometry must be a GeoJSON (Multi)Polygon")
+    from shapely.geometry import shape
+    try:
+        geom = shape(geometry)
+        if not geom.is_valid or geom.is_empty:
+            raise ValueError("invalid polygon")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Bad geometry: {e}")
+    return geometry
+
+
+@router.get("/planner/meta")
+async def planner_meta():
+    """The vocabulary a planner UI needs: feature categories and the
+    profile list."""
+    from app.planner import profiles as profile_mod
+    from sqlalchemy import select
+    from app.db import db_available, get_session
+    from app.db.models import RouteProfile
+    profiles = []
+    if db_available():
+        async with get_session() as db:
+            rows = (
+                await db.execute(
+                    select(RouteProfile).where(RouteProfile.active == True)  # noqa: E712
+                    .order_by(RouteProfile.builtin.desc(), RouteProfile.name)
+                )
+            ).scalars().all()
+        profiles = [p.to_dict() for p in rows]
+    return {"categories": list(profile_mod.CATEGORIES), "profiles": profiles}
+
+
+@router.get("/map-features")
+async def get_map_features():
+    """All land-use features as a GeoJSON FeatureCollection."""
+    from sqlalchemy import select
+    from app.db import db_available, get_session
+    from app.db.models import MapFeature
+    if not db_available():
+        return {"type": "FeatureCollection", "features": []}
+    async with get_session() as db:
+        rows = (
+            await db.execute(select(MapFeature).order_by(MapFeature.created_at))
+        ).scalars().all()
+    return {"type": "FeatureCollection", "features": [f.to_feature() for f in rows]}
+
+
+@router.post("/map-features")
+async def create_map_feature(
+    body: dict,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """Create a land-use feature. body: {name, category, geometry}"""
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.planner import CATEGORIES
+    from app.planner import features as feature_engine
+    category = body.get("category")
+    if category not in CATEGORIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"category must be one of: {', '.join(CATEGORIES)}",
+        )
+    geometry = _parse_geometry(body)
+    from app.db import db_available, get_session
+    from app.db.models import MapFeature
+    if not db_available():
+        raise HTTPException(status_code=503, detail="Database offline")
+    feat = MapFeature(
+        name=(body.get("name") or category).strip()[:120],
+        category=category,
+        geometry=geometry,
+    )
+    async with get_session() as db:
+        db.add(feat)
+        await db.commit()
+        feature = feat.to_feature()
+    await feature_engine.reload()
+    logger.info(f"Map feature created: {feat.name} ({category})")
+    return {"feature": feature}
+
+
+@router.patch("/map-features/{feature_id}")
+async def patch_map_feature(
+    feature_id: str,
+    body: dict,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """Edit name/category/active. (Geometry changes = delete + redraw.)"""
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from sqlalchemy import select
+    from app.planner import CATEGORIES
+    from app.planner import features as feature_engine
+    from app.db import db_available, get_session
+    from app.db.models import MapFeature
+    if not db_available():
+        raise HTTPException(status_code=503, detail="Database offline")
+    async with get_session() as db:
+        feat = (
+            await db.execute(select(MapFeature).where(MapFeature.id == feature_id))
+        ).scalar_one_or_none()
+        if feat is None:
+            raise HTTPException(status_code=404, detail="Feature not found")
+        if "name" in body and str(body["name"]).strip():
+            feat.name = str(body["name"]).strip()[:120]
+        if "category" in body:
+            if body["category"] not in CATEGORIES:
+                raise HTTPException(status_code=400, detail="bad category")
+            feat.category = body["category"]
+        if "active" in body:
+            feat.active = bool(body["active"])
+        await db.commit()
+        feature = feat.to_feature()
+    await feature_engine.reload()
+    return {"feature": feature}
+
+
+@router.delete("/map-features/{feature_id}")
+async def delete_map_feature(
+    feature_id: str,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from sqlalchemy import delete as sa_delete
+    from app.planner import features as feature_engine
+    from app.db import db_available, get_session
+    from app.db.models import MapFeature
+    if not db_available():
+        raise HTTPException(status_code=503, detail="Database offline")
+    async with get_session() as db:
+        await db.execute(sa_delete(MapFeature).where(MapFeature.id == feature_id))
+        await db.commit()
+    await feature_engine.reload()
+    return {"ok": True}
+
+
+@router.post("/route-profiles")
+async def create_route_profile(
+    body: dict,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """Create a custom route profile. body: {name, description?, rules,
+    default_alt_m?, default_speed_m_s?}"""
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.planner import profiles as profile_mod
+    from app.db import db_available, get_session
+    from app.db.models import RouteProfile
+    name = str(body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name required")
+    rules = body.get("rules") or {}
+    ok, err = profile_mod.validate_rules(rules)
+    if not ok:
+        raise HTTPException(status_code=400, detail=err)
+    if not db_available():
+        raise HTTPException(status_code=503, detail="Database offline")
+    profile = RouteProfile(
+        name=name[:120],
+        description=str(body.get("description") or "")[:500],
+        rules=rules,
+        default_alt_m=float(body.get("default_alt_m") or 60.0),
+        default_speed_m_s=float(body.get("default_speed_m_s") or 8.0),
+    )
+    async with get_session() as db:
+        db.add(profile)
+        try:
+            await db.commit()
+        except Exception:
+            raise HTTPException(status_code=409, detail="A profile with that name exists")
+        d = profile.to_dict()
+    return {"profile": d}
+
+
+@router.patch("/route-profiles/{profile_id}")
+async def patch_route_profile(
+    profile_id: str,
+    body: dict,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """Tune a profile (builtin ones included - tuning is the point)."""
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from sqlalchemy import select
+    from app.planner import profiles as profile_mod
+    from app.db import db_available, get_session
+    from app.db.models import RouteProfile
+    if not db_available():
+        raise HTTPException(status_code=503, detail="Database offline")
+    async with get_session() as db:
+        profile = (
+            await db.execute(select(RouteProfile).where(RouteProfile.id == profile_id))
+        ).scalar_one_or_none()
+        if profile is None:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        if "name" in body and str(body["name"]).strip() and not profile.builtin:
+            profile.name = str(body["name"]).strip()[:120]
+        if "description" in body:
+            profile.description = str(body["description"] or "")[:500]
+        if "rules" in body:
+            ok, err = profile_mod.validate_rules(body["rules"] or {})
+            if not ok:
+                raise HTTPException(status_code=400, detail=err)
+            profile.rules = body["rules"]
+        if "default_alt_m" in body:
+            profile.default_alt_m = float(body["default_alt_m"] or 60.0)
+        if "default_speed_m_s" in body:
+            profile.default_speed_m_s = float(body["default_speed_m_s"] or 8.0)
+        if "active" in body and not profile.builtin:
+            profile.active = bool(body["active"])
+        await db.commit()
+        d = profile.to_dict()
+    return {"profile": d}
+
+
+@router.delete("/route-profiles/{profile_id}")
+async def delete_route_profile(
+    profile_id: str,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from sqlalchemy import select
+    from app.db import db_available, get_session
+    from app.db.models import RouteProfile
+    if not db_available():
+        raise HTTPException(status_code=503, detail="Database offline")
+    async with get_session() as db:
+        profile = (
+            await db.execute(select(RouteProfile).where(RouteProfile.id == profile_id))
+        ).scalar_one_or_none()
+        if profile is None:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        if profile.builtin:
+            raise HTTPException(status_code=400, detail="Builtin profiles cannot be deleted - deactivate instead")
+        await db.delete(profile)
+        await db.commit()
+    return {"ok": True}
+
+
+@router.post("/missions/plan")
+async def plan_mission(
+    body: dict,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """
+    Generate (and record) a mission path.
+
+    body: {
+      start: {lat, lng}, goal: {lat, lng},
+      profile?: "<id or name>",          # default: builtin "Direct"
+      rules?: {categories: {...}, ...},  # inline overrides on the profile
+      altitude_m?, speed_m_s?, land?: bool,
+      drone_id?, requested_by?, scheduled_at?: ISO8601,
+      save?: bool                        # default true - persist the mission
+    }
+
+    Returns {ok, plan, mission}. `plan` is the generated route (or a reason
+    on failure); `mission` is the DB record, null when save=false or the DB
+    is offline - the plan itself never depends on the database.
+    """
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    import asyncio as _asyncio
+    from datetime import datetime as _dt
+    from app.planner import engine as planner_engine
+    from app.planner import profiles as profile_mod
+    from app.planner import service as mission_service
+
+    import math as _math
+
+    def _coord(pt: dict, label: str) -> tuple[float, float]:
+        try:
+            lat, lng = float(pt["lat"]), float(pt["lng"])
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(status_code=400,
+                                detail=f"{label} must be {{lat, lng}}")
+        # float() happily parses "nan"/"inf"; a non-finite or out-of-range
+        # coordinate would sail into the planner and produce garbage waypoints.
+        if not (_math.isfinite(lat) and _math.isfinite(lng)):
+            raise HTTPException(status_code=400,
+                                detail=f"{label} coordinates must be finite")
+        if not (-90.0 <= lat <= 90.0 and -180.0 <= lng <= 180.0):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{label} out of range (lat -90..90, lng -180..180)")
+        return lat, lng
+
+    start = _coord(body.get("start") or {}, "start")
+    goal = _coord(body.get("goal") or {}, "goal")
+
+    profile = await profile_mod.get_profile(body.get("profile"))
+    if body.get("profile") and profile is None:
+        raise HTTPException(status_code=404, detail=f"Profile '{body['profile']}' not found")
+    base_rules = (profile or {}).get("rules") or {}
+
+    overrides = body.get("rules")
+    if overrides:
+        ok, err = profile_mod.validate_rules(overrides)
+        if not ok:
+            raise HTTPException(status_code=400, detail=err)
+    rules = profile_mod.resolved_rules(base_rules, overrides)
+
+    # 10 m is the platform's intended cruise; the old 60 m silent default was
+    # a six-fold overshoot. Guard against NaN/inf and nonsensical magnitudes.
+    alt = float(body.get("altitude_m") or (profile or {}).get("default_alt_m") or 10.0)
+    speed = float(body.get("speed_m_s") or (profile or {}).get("default_speed_m_s") or 8.0)
+    if not (_math.isfinite(alt) and 0.0 < alt <= 500.0):
+        raise HTTPException(status_code=400, detail="altitude_m must be within 0-500 m")
+    if not (_math.isfinite(speed) and 0.0 < speed <= 50.0):
+        raise HTTPException(status_code=400, detail="speed_m_s must be within 0-50 m/s")
+    land = bool(body.get("land", True))
+
+    scheduled_at = None
+    if body.get("scheduled_at"):
+        try:
+            scheduled_at = _dt.fromisoformat(str(body["scheduled_at"]))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="scheduled_at must be ISO8601")
+
+    # The planner is CPU-bound pure Python/numpy - keep the event loop free.
+    result = await _asyncio.to_thread(
+        planner_engine.plan, start, goal,
+        rules=rules, cruise_alt_m=alt, speed_m_s=speed, land=land,
+    )
+    if not result["ok"]:
+        return {"ok": False, "plan": result, "mission": None}
+
+    mission = None
+    if body.get("save", True):
+        mission = await mission_service.create(
+            result, start=start, goal=goal, cruise_alt_m=alt, speed_m_s=speed,
+            drone_id=body.get("drone_id"),
+            requested_by=str(body.get("requested_by") or "")[:120],
+            profile_id=(profile or {}).get("id"),
+            profile_name=(profile or {}).get("name") or "Direct",
+            scheduled_at=scheduled_at,
+        )
+    return {"ok": True, "plan": result, "mission": mission}
+
+
+@router.get("/missions")
+async def get_missions(
+    status: str = Query(None),
+    drone_id: str = Query(None),
+):
+    from app.planner import service as mission_service
+    return {"missions": await mission_service.list_missions(status=status, drone_id=drone_id)}
+
+
+@router.get("/missions/{mission_id}")
+async def get_mission(mission_id: str):
+    from app.planner import service as mission_service
+    mission = await mission_service.get(mission_id)
+    if mission is None:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    return {"mission": mission}
+
+
+@router.patch("/missions/{mission_id}")
+async def patch_mission(
+    mission_id: str,
+    body: dict,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """Advance the mission lifecycle: {status: uploaded|flying|completed|
+    aborted|failed, drone_id?}. Illegal transitions are refused."""
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.planner import service as mission_service
+    status = body.get("status")
+    if status not in mission_service.STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"status must be one of: {', '.join(mission_service.STATUSES)}",
+        )
+    mission = await mission_service.set_status(
+        mission_id, status, drone_id=body.get("drone_id")
+    )
+    if mission is None:
+        raise HTTPException(status_code=409, detail="Mission not found or transition not allowed")
+    return {"mission": mission}
+
+
+# ── Delivery tasks (operator surface; clients use /v1) ───────────────────
+
+
+@router.get("/pads")
+async def get_pads():
+    from sqlalchemy import select
+    from app.db import db_available, get_session
+    from app.db.models import Pad
+    if not db_available():
+        return {"pads": []}
+    async with get_session() as db:
+        rows = (await db.execute(select(Pad).order_by(Pad.name))).scalars().all()
+    return {"pads": [p.to_dict() for p in rows]}
+
+
+@router.post("/pads")
+async def create_pad(
+    body: dict,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """body: {name, lat, lng, notes?}"""
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.db import db_available, get_session
+    from app.db.models import Pad
+    name = str(body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name required")
+    try:
+        lat, lng = float(body["lat"]), float(body["lng"])
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="lat and lng required")
+    if not db_available():
+        raise HTTPException(status_code=503, detail="Database offline")
+    kind = str(body.get("kind") or "pad")
+    if kind not in ("pad", "station"):
+        raise HTTPException(status_code=400, detail="kind must be 'pad' or 'station'")
+    pad = Pad(name=name[:120], kind=kind, lat=lat, lng=lng,
+              notes=str(body.get("notes") or "")[:500])
+    async with get_session() as db:
+        db.add(pad)
+        try:
+            await db.commit()
+        except Exception:
+            raise HTTPException(status_code=409, detail="A pad with that name exists")
+        d = pad.to_dict()
+    return {"pad": d}
+
+
+@router.patch("/pads/{pad_id}")
+async def patch_pad(
+    pad_id: str,
+    body: dict,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from sqlalchemy import select
+    from app.db import db_available, get_session
+    from app.db.models import Pad
+    if not db_available():
+        raise HTTPException(status_code=503, detail="Database offline")
+    async with get_session() as db:
+        pad = (
+            await db.execute(select(Pad).where(Pad.id == pad_id))
+        ).scalar_one_or_none()
+        if pad is None:
+            raise HTTPException(status_code=404, detail="Pad not found")
+        if "name" in body and str(body["name"]).strip():
+            pad.name = str(body["name"]).strip()[:120]
+        if "lat" in body:
+            pad.lat = float(body["lat"])
+        if "lng" in body:
+            pad.lng = float(body["lng"])
+        if "notes" in body:
+            pad.notes = str(body["notes"] or "")[:500]
+        if "active" in body:
+            pad.active = bool(body["active"])
+        await db.commit()
+        d = pad.to_dict()
+    return {"pad": d}
+
+
+@router.delete("/pads/{pad_id}")
+async def delete_pad(
+    pad_id: str,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """Retire, don't destroy: tasks reference pads, so a pad with history
+    is deactivated instead of deleted."""
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from sqlalchemy import delete as sa_delete, select
+    from app.db import db_available, get_session
+    from app.db.models import Pad, Task
+    if not db_available():
+        raise HTTPException(status_code=503, detail="Database offline")
+    async with get_session() as db:
+        used = (
+            await db.execute(
+                select(Task.id).where(
+                    (Task.pickup_pad_id == pad_id) | (Task.dropoff_pad_id == pad_id)
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+        if used:
+            pad = (
+                await db.execute(select(Pad).where(Pad.id == pad_id))
+            ).scalar_one_or_none()
+            if pad is None:
+                raise HTTPException(status_code=404, detail="Pad not found")
+            pad.active = False
+            await db.commit()
+            return {"ok": True, "retired": True}
+        await db.execute(sa_delete(Pad).where(Pad.id == pad_id))
+        await db.commit()
+    return {"ok": True, "retired": False}
+
+
+@router.get("/api-keys")
+async def get_api_keys(
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.tasks import auth as key_auth
+    return {"keys": await key_auth.list_keys()}
+
+
+@router.post("/api-keys")
+async def create_api_key(
+    body: dict,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """Mint a client key. The plaintext appears in THIS response only."""
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.tasks import auth as key_auth
+    minted = await key_auth.mint(str(body.get("name") or ""))
+    if minted is None:
+        raise HTTPException(status_code=503, detail="Database offline")
+    return minted
+
+
+@router.patch("/api-keys/{key_id}")
+async def patch_api_key(
+    key_id: str,
+    body: dict,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """{active: bool} - revoke or restore a client key."""
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.tasks import auth as key_auth
+    record = await key_auth.set_active(key_id, bool(body.get("active", False)))
+    if record is None:
+        raise HTTPException(status_code=404, detail="Key not found")
+    return {"key": record}
+
+
+@router.get("/tasks")
+async def get_tasks(status: str = Query(None), archived: int = Query(0)):
+    from app.tasks import service as task_service
+    return {"tasks": await task_service.list_tasks(
+        status=status, include_archived=bool(archived))}
+
+
+@router.get("/tasks/{ref}")
+async def get_task(ref: str):
+    from app.tasks import service as task_service
+    task = await task_service.get_task(ref)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"task": task}
+
+
+@router.post("/tasks")
+async def create_task_operator(
+    body: dict,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """Board-created order (no client key). Same body as POST /v1/tasks."""
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from datetime import datetime as _dt
+    from app.tasks import service as task_service
+    payload = body.get("payload") or {}
+    window = body.get("window") or {}
+
+    def _dt_of(v):
+        if not v:
+            return None
+        try:
+            return _dt.fromisoformat(str(v))
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Bad timestamp: {v}")
+
+    task, err = await task_service.create_task(
+        pickup_ref=str(body.get("pickup") or "").strip(),
+        dropoff_ref=str(body.get("dropoff") or "").strip(),
+        payload_desc=str(payload.get("description") or ""),
+        payload_kg=float(payload.get("kg") or 0.0),
+        window_start=_dt_of(window.get("start")),
+        window_end=_dt_of(window.get("end")),
+        profile=str(body.get("profile") or "") or None,
+        api_key=None, actor="operator",
+    )
+    if task is None:
+        raise HTTPException(status_code=400, detail=err)
+    return {"task": task}
+
+
+def _live_drone_position(sm, drone_id: str) -> tuple[float, float] | None:
+    """Where a drone is RIGHT NOW, from its live session or the SITL fleet."""
+    for sess in sm.all_sessions():
+        if (sess.drone or {}).get("id") != drone_id:
+            continue
+        tel = sm.get_telemetry(sess.session_id)
+        if tel and tel.is_connected:
+            snap = tel.snapshot
+            lat = snap.position.latitude_deg
+            lng = snap.position.longitude_deg
+            if lat or lng:
+                return (lat, lng)
+    try:
+        from app.fleet import service as fleet_service
+        return fleet_service.position_of(drone_id)
+    except Exception:
+        return None
+
+
+@router.post("/drones/{drone_id}/return-mission")
+async def plan_return_mission(
+    drone_id: str,
+    request: Request,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """Plan the drone's flight home: live position -> nearest active
+    station. Returns the mission (with waypoints) for the operator to
+    upload - nothing is flown from here."""
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.tasks import service as task_service
+    pos = _live_drone_position(request.app.state.session_manager, drone_id)
+    if pos is None:
+        raise HTTPException(status_code=409,
+                            detail="Drone has no live position (not connected)")
+    station = await task_service.nearest_station(pos[0], pos[1])
+    if station is None:
+        raise HTTPException(status_code=409,
+                            detail="No active station defined - add one on the PADS tab")
+    # Each fleet drone gets its own 4 m parking slot at the station - five
+    # drones sent home must not be told to land on the same square metre.
+    from app.fleet import service as fleet_service
+    goal = fleet_service.parking_slot(drone_id, station["lat"], station["lng"])
+    mission, err = await task_service.plan_leg(
+        pos, goal, None,
+        requested_by=f"return:{drone_id[:8]}",
+    )
+    if mission is None:
+        raise HTTPException(status_code=409, detail=err)
+    return {"mission": mission, "station": station}
+
+
+@router.get("/fleet")
+async def get_fleet_status():
+    """The server-owned delivery fleet - live status per station drone."""
+    from app.fleet import service as fleet_service
+    return {"fleet": fleet_service.status()}
+
+
+@router.post("/fleet/connect")
+async def connect_fleet(
+    body: dict,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """Connect SITL fleet instances 1..count to the SERVER (not a browser
+    session) - they stay online for the dispatcher regardless of who has
+    the dashboard open. body: {count}"""
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.fleet import service as fleet_service
+    try:
+        count = max(1, min(int(body.get("count") or 5), 20))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="count must be an integer")
+    results = await fleet_service.connect(count)
+    return {"results": {str(k): v for k, v in results.items()}}
+
+
+@router.post("/fleet/disconnect")
+async def disconnect_fleet(
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.fleet import service as fleet_service
+    n = await fleet_service.disconnect_all()
+    return {"disconnected": n}
+
+
+@router.post("/fleet/adopt")
+async def fleet_adopt(
+    body: dict,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """Manually adopt one drone into the server fleet by MAVLink UDP port
+    (e.g. a new SITL instance, or a real air unit's telemetry ingress).
+    body: {port} or {instance}. The watchdog keeps it alive afterwards."""
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.fleet import service as fleet_service
+    try:
+        if body.get("instance"):
+            i = int(body["instance"])
+        elif body.get("port"):
+            port = int(body["port"])
+            i = port - 14541 if port > 14550 else port - 14540
+        else:
+            raise HTTPException(status_code=400, detail="port or instance required")
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="port and instance must be integers")
+    if not (1 <= i <= 20):
+        raise HTTPException(status_code=400, detail=f"Instance {i} out of range 1-20")
+    result = await fleet_service.connect_one(i, manual=True)
+    if result != "connected" and "already" not in result:
+        raise HTTPException(status_code=409, detail=result)
+    return {"instance": i, "result": result}
+
+
+@router.post("/fleet/{drone_db_id}/fly")
+async def fleet_fly_mission(
+    drone_db_id: str,
+    body: dict,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """Upload + arm + start a mission on a server-fleet drone. Same zone
+    gate as the socket path: red blocks (permit-aware), orange requires
+    ack_orange:true. body: {waypoints, ack_orange?}"""
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.fleet import service as fleet_service
+    ok, detail = await fleet_service.fly_mission(
+        drone_db_id, body.get("waypoints") or [],
+        ack_orange=bool(body.get("ack_orange")),
+    )
+    return {"ok": ok, **detail}
+
+
+@router.patch("/tasks/{task_id}")
+async def patch_task(
+    task_id: str,
+    body: dict,
+    request: Request,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """Advance the order lifecycle ({status, note?, drone_id?}) or shelve
+    it ({archived: bool} - closed orders only)."""
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.tasks import service as task_service
+    if "archived" in body and not body.get("status"):
+        task, err = await task_service.set_archived(task_id, bool(body["archived"]))
+        if task is None:
+            raise HTTPException(status_code=409, detail=err)
+        return {"task": task}
+    status = str(body.get("status") or "")
+    task, err = await task_service.set_status(
+        task_id, status,
+        note=str(body.get("note") or ""),
+        actor="operator",
+        drone_id=body.get("drone_id"),
+    )
+    if task is None:
+        raise HTTPException(status_code=409, detail=err)
+    # A manual assign gets its positioning leg exactly like a dispatcher
+    # assign: from wherever the drone actually is right now.
+    if status == "assigned" and task.get("drone_id"):
+        pos = _live_drone_position(request.app.state.session_manager,
+                                   task["drone_id"])
+        if pos:
+            await task_service.plan_pickup_leg(task_id, pos[0], pos[1],
+                                               actor="operator")
+    return {"task": task}
+
+
+@router.delete("/tasks/{task_id}")
+async def delete_task(
+    task_id: str,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    """Permanently delete a CLOSED order (its flights stay in history)."""
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.tasks import service as task_service
+    ok, err = await task_service.delete_task(task_id)
+    if not ok:
+        raise HTTPException(status_code=409, detail=err)
+    return {"ok": True}
+
+
+@router.post("/tasks/{task_id}/replan")
+async def replan_task(
+    task_id: str,
+    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+):
+    if x_auth_token != settings.secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    from app.tasks import service as task_service
+    task, err = await task_service.replan(task_id)
+    if task is None:
+        raise HTTPException(status_code=409, detail=err)
+    if err:
+        return {"task": task, "ok": False, "msg": err}
+    return {"task": task, "ok": True}
 
 
 # ── Flights ──────────────────────────────────────────────────────────────

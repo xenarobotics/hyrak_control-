@@ -365,7 +365,8 @@ export function useWebRTC() {
             // can starve a weak CPU that's also decoding the RF video (see
             // wantsEcoUplink for how that's decided).
             const camLabel = cameraStream.getVideoTracks()[0]?.label ?? ''
-            tuneVideoSender(pc, mode === 'manual-control' && wantsEcoUplink(camLabel))
+            tuneVideoSender(pc, mode === 'manual-control' && wantsEcoUplink(camLabel),
+                            mode === '3d-reconstruction')
         }
 
         // When we receive the processed video back from server
@@ -481,6 +482,7 @@ export function useWebRTC() {
         await tuneVideoSender(
             pcRef.current,
             useDroneStore.getState().mode === 'manual-control' && wantsEcoUplink(track.label),
+            useDroneStore.getState().mode === '3d-reconstruction',
         )
     }, [])
 

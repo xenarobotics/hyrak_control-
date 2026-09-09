@@ -14,6 +14,9 @@ export type AnalysisMode =
     // follow in one pass. Merges the analytics that share an altitude band;
     // crowd and face stay separate because they do not.
     | 'traffic-management'
+    // Frontend-only mode: drives the reconstruction sidecar via /api/recon,
+    // never sent to the session's vision pipeline as an analysis mode.
+    | '3d-reconstruction'
 
 export type ConnectionStatus =
     | 'disconnected'

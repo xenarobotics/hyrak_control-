@@ -40,6 +40,10 @@ def create_app() -> socketio.ASGIApp:
         allow_headers=["*"],
     )
     fastapi_app.include_router(router)
+    from app.api.public import router as public_router
+    fastapi_app.include_router(public_router)
+    from app.reconstruction.routes import router as recon_router
+    fastapi_app.include_router(recon_router)
 
     # Desktop app installers + electron-updater manifests - plain static
     # files, no auth (same tier as a public download page). Directory is
@@ -54,11 +58,15 @@ def create_app() -> socketio.ASGIApp:
     # ------------------------------------------------------------------ #
     # Socket.IO                                                            #
     # ------------------------------------------------------------------ #
+    from app.utils import safe_json
     sio = socketio.AsyncServer(
         async_mode="asgi",
         cors_allowed_origins=cors_origins,
         ping_timeout=20,
         ping_interval=10,
+        # NaN/inf anywhere in a payload is invalid JSON; a browser client
+        # that receives it closes the connection (see utils/safe_json.py).
+        json=safe_json,
     )
     set_sio(sio)
 
@@ -88,12 +96,28 @@ def create_app() -> socketio.ASGIApp:
         await init_db()  # non-fatal - flying never depends on the DB
         from app.zones import engine as zone_engine
         await zone_engine.reload()
+        from app.planner import features as feature_engine
+        from app.planner import profiles as route_profiles
+        await feature_engine.reload()
+        await route_profiles.ensure_builtins()
         logger.info("Loading vision modules...")
         await asyncio.to_thread(vision_pool.load)
         logger.info("✅ Vision modules ready")
+        from app.tasks import dispatcher
+        dispatcher.start(session_manager)
+        from app.fleet import service as fleet_service
+        fleet_service.start_background()
 
     @fastapi_app.on_event("shutdown")
     async def on_shutdown():
+        from app.tasks import dispatcher
+        dispatcher.stop()
+        from app.fleet import service as fleet_service
+        fleet_service.stop_background()
+        await fleet_service.disconnect_all()
+        import asyncio as _aio
+        from app.reconstruction import service as recon_service
+        await _aio.to_thread(recon_service.shutdown_engine)
         from app.db import close_db
         await close_db()
         await vision_pool.stop_all()

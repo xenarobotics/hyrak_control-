@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
 import {
     ScanSearch, Users, Layers,
     ShieldAlert, Brain, Target, ScanFace, Sparkles,
-    UsersRound, ScanLine, TrafficCone,
+    UsersRound, ScanLine, TrafficCone, Box,
 } from 'lucide-react'
 
 const MODES = [
@@ -69,6 +69,13 @@ const MODES = [
         desc: 'Count + plate + colour + speed + follow'
     },
     {
+        value: '3d-reconstruction',
+        label: '3D Scan',
+        icon: Box,
+        color: '#34d399',
+        desc: 'Live 3D reconstruction'
+    },
+    {
         value: 'obstacle-avoidance',
         label: 'Avoid',
         icon: ShieldAlert,
@@ -94,7 +101,7 @@ export function ModeSelector() {
             {MODES.map(m => {
                 const active = currentMode === m.value
                 const Icon = m.icon
-                const available = ['manual-control', 'object-detection', 'human-tracking', 'depth-mapping', 'person-tracking', 'enhance', 'crowd-management', 'vehicle-plate-tracking', 'traffic-management'].includes(m.value)
+                const available = ['manual-control', 'object-detection', 'human-tracking', 'depth-mapping', 'person-tracking', 'enhance', 'crowd-management', 'vehicle-plate-tracking', 'traffic-management', '3d-reconstruction'].includes(m.value)
 
                 return (
                     <button

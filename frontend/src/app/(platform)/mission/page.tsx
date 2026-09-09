@@ -72,6 +72,7 @@ function Panel({ children, className, style }: {
 // ── Map layer icons ─────────────────────────────────────────────────────────
 
 const LAYER_ICONS: Record<MapLayer, React.ReactNode> = {
+  nav:       <Navigation size={12} />,
   street:    <MapIcon size={12} />,
   satellite: <Satellite size={12} />,
   terrain:   <Mountain size={12} />,
