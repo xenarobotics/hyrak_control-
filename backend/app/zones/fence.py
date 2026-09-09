@@ -12,12 +12,18 @@ from app.zones import engine
 
 logger = logging.getLogger("verocore.zones.fence")
 
+# PX4 accepts a bounded number of geofence vertices; past it the whole upload
+# is rejected (TOO_MANY_GEOFENCE_ITEMS) and the aircraft flies with NO FC
+# backstop. Keep the combined red-zone vertex count under this - conservative
+# headroom below PX4's typical ~100-point ceiling.
+MAX_FENCE_VERTICES = 90
+
 
 async def upload_red_fence(tel) -> bool:
     drone = getattr(tel, "_drone", None)
     if drone is None:
         return False
-    rings = engine.red_polygon_rings()
+    rings = engine.red_polygon_rings(max_total_vertices=MAX_FENCE_VERTICES)
     if not rings:
         return False
     try:

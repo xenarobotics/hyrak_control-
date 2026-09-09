@@ -167,24 +167,65 @@ def nearest_exit(lat: float, lng: float, extra_m: float = 20.0) -> tuple[float, 
     return (bp.y + uy * deg_extra, bp.x + ux * deg_extra)
 
 
-def red_polygon_rings() -> list[list[tuple[float, float]]]:
+def _ring_latlng(poly) -> list[tuple[float, float]]:
+    """A polygon's exterior as an unclosed (lat, lng) list. Stored coords are
+    (lng, lat), so they are flipped here."""
+    coords = list(poly.exterior.coords)
+    if coords and coords[0] == coords[-1]:
+        coords = coords[:-1]
+    return [(lat, lng) for lng, lat in coords]
+
+
+def red_polygon_rings(max_total_vertices: int | None = None
+                      ) -> list[list[tuple[float, float]]]:
     """Exterior rings of all red zones as (lat, lng) lists - for uploading
-    PX4 exclusion geofences (the FC-level backstop)."""
+    PX4 exclusion geofences (the FC-level backstop).
+
+    max_total_vertices caps the combined vertex count: PX4 rejects a geofence
+    with too many points (TOO_MANY_GEOFENCE_ITEMS) and then NO fence uploads
+    at all - four detailed red zones at ~49 vertices each blew past the limit
+    and left the aircraft with no FC backstop. When the raw rings exceed the
+    cap they are simplified (Douglas-Peucker) with an escalating tolerance
+    until they fit. Each polygon is buffered OUTWARD by the tolerance before
+    simplifying, so the result strictly CONTAINS the real zone: a safety fence
+    may over-cover, never expose a real no-fly corner."""
     with _lock:
         zones = _zones
-    rings = []
+    polys = []
     for z in zones:
         if z["zone_class"] != "red":
             continue
         geom = z["geom"]
-        polys = [geom] if geom.geom_type == "Polygon" else list(getattr(geom, "geoms", []))
-        for poly in polys:
-            coords = list(poly.exterior.coords)
-            if coords and coords[0] == coords[-1]:
-                coords = coords[:-1]
-            if len(coords) >= 3:
-                rings.append([(lat, lng) for lng, lat in coords])
-    return rings
+        parts = [geom] if geom.geom_type == "Polygon" \
+            else list(getattr(geom, "geoms", []))
+        polys.extend(p for p in parts if p is not None and not p.is_empty)
+
+    def rings_of(ps):
+        out = [_ring_latlng(p) for p in ps if p is not None and not p.is_empty]
+        return [r for r in out if len(r) >= 3]
+
+    rings = rings_of(polys)
+    total = sum(len(r) for r in rings)
+    if max_total_vertices is None or total <= max_total_vertices:
+        return rings
+
+    tol = 1e-5  # ~1.1 m at the equator
+    for _ in range(24):
+        # mitre join keeps corners sharp (round buffering would re-inflate the
+        # vertex count we are trying to shed).
+        simplified = [p.buffer(tol, join_style=2).simplify(tol,
+                      preserve_topology=True) for p in polys]
+        srings = rings_of(simplified)
+        stotal = sum(len(r) for r in srings)
+        if stotal <= max_total_vertices:
+            logger.info("Red geofence simplified %d -> %d vertices "
+                        "(tol %.1f m) to fit the FC limit",
+                        total, stotal, tol * 111_320)
+            return srings
+        tol *= 1.6
+    logger.warning("Red geofence still %d vertices after simplification - "
+                   "uploading best effort (FC may reject)", stotal)
+    return srings
 
 
 def check_path(
