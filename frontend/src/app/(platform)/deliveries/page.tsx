@@ -508,9 +508,6 @@ function OrdersTab() {
         }
         setError('')
         const nextStatus = leg === 'pickup' ? 'to_pickup' : 'to_dropoff'
-        const note = leg === 'pickup'
-            ? 'Pickup flight started from dispatch board'
-            : 'Delivery flight started from dispatch board'
 
         // Station-fleet drones fly through the server (no browser radio in
         // the loop) - the board is fully self-contained for them.
@@ -519,12 +516,19 @@ function OrdersTab() {
             try {
                 const r = await fetch(api(`/fleet/${task.drone_id}/fly`), {
                     method: 'POST', headers: AUTH,
-                    body: JSON.stringify({ waypoints, ack_orange: ackOrange }),
+                    // Couple the order advance to the flight start: the server
+                    // moves the order to nextStatus in the same request, so a
+                    // dropped follow-up PATCH can no longer desync flight and
+                    // order. No separate act() call on success.
+                    body: JSON.stringify({
+                        waypoints, ack_orange: ackOrange,
+                        task_id: task.id, target_status: nextStatus,
+                    }),
                 })
                 const j = await jsonOf(r)
                 if (j.ok) {
                     setStarting(null)
-                    void act(task.id, { status: nextStatus, note })
+                    refresh()
                 } else if (j.needs_ack) {
                     setStarting({ taskId: task.id, leg, phase: 'need_ack', msg: j.msg })
                 } else {
@@ -551,7 +555,7 @@ function OrdersTab() {
             ...(ackOrange ? { ack_orange: true } : {}),
         })
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [detail, routeCache, fleetIds, telemetryStatus])
+    }, [detail, routeCache, fleetIds, telemetryStatus, refresh])
 
     // What the map highlights: the open order's planned route, if loaded.
     const selection: MapSelection =

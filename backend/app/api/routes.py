@@ -975,7 +975,14 @@ async def fleet_fly_mission(
 ):
     """Upload + arm + start a mission on a server-fleet drone. Same zone
     gate as the socket path: red blocks (permit-aware), orange requires
-    ack_orange:true. body: {waypoints, ack_orange?}"""
+    ack_orange:true. body: {waypoints, ack_orange?, task_id?, target_status?}
+
+    task_id + target_status couple the flight to its order: when the start
+    succeeds the order is advanced server-side, in the same request, so the
+    two can never disagree. Before this the board fired the flight and a
+    separate status PATCH, and a lost or reordered second call left the order
+    saying one thing while the aircraft did another. Both are optional - a
+    return-to-station fly carries no order."""
     if x_auth_token != settings.secret_token:
         raise HTTPException(status_code=403, detail="Invalid token")
     from app.fleet import service as fleet_service
@@ -983,6 +990,19 @@ async def fleet_fly_mission(
         drone_db_id, body.get("waypoints") or [],
         ack_orange=bool(body.get("ack_orange")),
     )
+    # Advance the order only once the flight actually committed (ok covers a
+    # held takeoff too - the leg is under way even if takeoff waits briefly
+    # for overhead traffic). set_status re-checks the transition, so a stale
+    # or illegal target is refused rather than corrupting the lifecycle.
+    task_id = body.get("task_id")
+    target_status = body.get("target_status")
+    if ok and task_id and target_status:
+        from app.tasks import service as task_service
+        _t, terr = await task_service.set_status(
+            str(task_id), str(target_status),
+            actor="operator", note="Leg started from the delivery board")
+        if terr:
+            detail = {**detail, "order_warning": terr}
     return {"ok": ok, **detail}
 
 
@@ -1716,10 +1736,11 @@ async def get_terrain_elevation(
         lat_list = [float(v) for v in lats.split(",")]
         lng_list = [float(v) for v in lngs.split(",")]
     except ValueError:
-        return JSONResponse({"error": "Invalid lat/lng values"}, status_code=400)
+        raise HTTPException(status_code=400, detail="Invalid lat/lng values")
 
     if len(lat_list) != len(lng_list):
-        return JSONResponse({"error": "lat and lng lists must have equal length"}, status_code=400)
+        raise HTTPException(status_code=400,
+                            detail="lat and lng lists must have equal length")
 
     results: list[dict] = []
     uncached_indices: list[int] = []
