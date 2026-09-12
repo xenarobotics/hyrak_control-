@@ -109,11 +109,15 @@ def create_app() -> socketio.ASGIApp:
         dispatcher.start(session_manager)
         from app.fleet import service as fleet_service
         fleet_service.start_background()
+        from app.avoidance import loop as avoidance_loop
+        avoidance_loop.start(session_manager)
 
     @fastapi_app.on_event("shutdown")
     async def on_shutdown():
         from app.tasks import dispatcher
         dispatcher.stop()
+        from app.avoidance import loop as avoidance_loop
+        avoidance_loop.stop()
         from app.fleet import service as fleet_service
         fleet_service.stop_background()
         await fleet_service.disconnect_all()

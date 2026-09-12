@@ -583,6 +583,48 @@ class FlightSample(Base):
     mode: Mapped[str] = mapped_column(String(24), default="")
 
 
+class AvoidanceEvent(Base):
+    """One obstacle-avoidance state change - what the layer saw and did, for
+    the Mission-tab timeline and post-flight review. drone_id is a plain
+    indexed string (not a FK): the log must never fail to write because a
+    session drone is not yet persisted."""
+    __tablename__ = "avoidance_events"
+    __table_args__ = (
+        Index("ix_avoidance_events_drone_t", "drone_id", "t"),
+        CheckConstraint(
+            "action IN ('clear','hold','reroute','return')",
+            name="ck_avoidance_events_action"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    drone_id: Mapped[str] = mapped_column(String(36), default="")
+    t: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    action: Mapped[str] = mapped_column(String(12))
+    state: Mapped[str] = mapped_column(String(12), default="")
+    reason: Mapped[str] = mapped_column(String(500), default="")
+    armed: Mapped[bool] = mapped_column(Boolean, default=False)
+    obstacle_lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    obstacle_lng: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    obstacle_radius_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    fused_distance_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "drone_id": self.drone_id,
+            "t": self.t.isoformat() if self.t else None,
+            "action": self.action,
+            "state": self.state,
+            "reason": self.reason,
+            "armed": self.armed,
+            "obstacle": (
+                {"lat": self.obstacle_lat, "lng": self.obstacle_lng,
+                 "radius_m": self.obstacle_radius_m}
+                if self.obstacle_lat is not None else None),
+            "fused_distance_m": self.fused_distance_m,
+        }
+
+
 class CrowdSnapshot(Base):
     """
     A sampled crowd-density reading (~every 2s while crowd-management mode

@@ -4,9 +4,9 @@
 -- GENERATED from app/db/models.py by scripts/generate_schema_sql.py
 -- Do not edit by hand: regenerate after changing the models.
 --
--- Generated: 2026-09-09 15:43 UTC
--- Alembic head at generation time: d8e4f1a2b3c4
--- Tables: api_keys, crowd_alerts, crowd_snapshots, drones, flight_samples, flights, map_features, missions, pads, permits, person_faces, person_sightings, persons, plate_events, route_profiles, task_events, tasks, zones
+-- Generated: 2026-09-12 10:47 UTC
+-- Alembic head at generation time: f1a9c3e7b2d4
+-- Tables: api_keys, avoidance_events, crowd_alerts, crowd_snapshots, drones, flight_samples, flights, map_features, missions, pads, permits, person_faces, person_sightings, persons, plate_events, route_profiles, task_events, tasks, zones
 --
 -- Establishing a fresh cloud database:
 --   psql "$DATABASE_URL" -f db/provision.sql   (role + database, run as admin)
@@ -100,6 +100,24 @@ CREATE TABLE api_keys (
 
 CREATE UNIQUE INDEX ix_api_keys_key_hash ON api_keys (key_hash);
 
+CREATE TABLE avoidance_events (
+	id BIGSERIAL NOT NULL, 
+	drone_id VARCHAR(36) NOT NULL, 
+	t TIMESTAMP WITH TIME ZONE NOT NULL, 
+	action VARCHAR(12) NOT NULL, 
+	state VARCHAR(12) NOT NULL, 
+	reason VARCHAR(500) NOT NULL, 
+	armed BOOLEAN NOT NULL, 
+	obstacle_lat FLOAT, 
+	obstacle_lng FLOAT, 
+	obstacle_radius_m FLOAT, 
+	fused_distance_m FLOAT, 
+	PRIMARY KEY (id), 
+	CONSTRAINT ck_avoidance_events_action CHECK (action IN ('clear','hold','reroute','return'))
+);
+
+CREATE INDEX ix_avoidance_events_drone_t ON avoidance_events (drone_id, t);
+
 CREATE TABLE crowd_snapshots (
 	id BIGSERIAL NOT NULL, 
 	session_id VARCHAR(36) NOT NULL, 
@@ -157,9 +175,9 @@ CREATE TABLE plate_events (
 
 CREATE INDEX ix_plate_events_vehicle_id ON plate_events (vehicle_id);
 
-CREATE INDEX ix_plate_events_session_id ON plate_events (session_id);
-
 CREATE INDEX ix_plate_events_plate_text ON plate_events (plate_text);
+
+CREATE INDEX ix_plate_events_session_id ON plate_events (session_id);
 
 CREATE TABLE persons (
 	id VARCHAR(36) NOT NULL, 
@@ -205,9 +223,9 @@ CREATE TABLE missions (
 	FOREIGN KEY(profile_id) REFERENCES route_profiles (id)
 );
 
-CREATE INDEX ix_missions_drone_id ON missions (drone_id);
-
 CREATE INDEX ix_missions_status ON missions (status);
+
+CREATE INDEX ix_missions_drone_id ON missions (drone_id);
 
 CREATE INDEX ix_missions_mission_hash ON missions (mission_hash);
 
@@ -243,9 +261,9 @@ CREATE TABLE permits (
 	FOREIGN KEY(drone_id) REFERENCES drones (id)
 );
 
-CREATE INDEX ix_permits_status ON permits (status);
-
 CREATE INDEX ix_permits_drone_id ON permits (drone_id);
+
+CREATE INDEX ix_permits_status ON permits (status);
 
 CREATE INDEX ix_permits_mission_hash ON permits (mission_hash);
 
@@ -323,15 +341,15 @@ CREATE TABLE tasks (
 
 CREATE INDEX ix_tasks_status_drone_id ON tasks (status, drone_id);
 
-CREATE INDEX ix_tasks_status ON tasks (status);
-
 CREATE INDEX ix_tasks_drone_id ON tasks (drone_id);
 
-CREATE INDEX ix_tasks_api_key_id ON tasks (api_key_id);
+CREATE UNIQUE INDEX ix_tasks_order_no ON tasks (order_no);
 
 CREATE INDEX ix_tasks_archived ON tasks (archived);
 
-CREATE UNIQUE INDEX ix_tasks_order_no ON tasks (order_no);
+CREATE INDEX ix_tasks_status ON tasks (status);
+
+CREATE INDEX ix_tasks_api_key_id ON tasks (api_key_id);
 
 CREATE TABLE flight_samples (
 	id BIGSERIAL NOT NULL, 

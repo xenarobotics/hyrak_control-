@@ -51,6 +51,24 @@ async def set_enabled(drone_id: str, body: dict,
     return c.status()
 
 
+@router.post("/{drone_id}/arm")
+async def set_armed(drone_id: str, body: dict,
+                    x_auth_token: str = Header(None, alias="X-Auth-Token")):
+    """Allow (or forbid) avoidance to COMMAND this drone. Arming requires
+    detection already enabled - the deliberate second step of the trust
+    ladder, separate from turning detection on."""
+    _auth(x_auth_token)
+    c = avoidance.controller(drone_id)
+    c.set_armed(bool(body.get("armed")))
+    return c.status()
+
+
+@router.get("/{drone_id}/events")
+async def drone_events(drone_id: str, limit: int = 100):
+    from app.avoidance import events
+    return {"events": await events.list_for(drone_id, limit=min(limit, 500))}
+
+
 @router.post("/{drone_id}/observe")
 async def observe(drone_id: str, body: dict,
                   x_auth_token: str = Header(None, alias="X-Auth-Token")):

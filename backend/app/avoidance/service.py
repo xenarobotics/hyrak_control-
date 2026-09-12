@@ -64,6 +64,11 @@ class AvoidanceController:
         self.drone_id = drone_id
         self.params = params or AvoidanceParams()
         self.enabled = False
+        # armed = allowed to COMMAND the aircraft. Detection (enabled) and
+        # control (armed) are separate so the trust ladder can run detection
+        # advisory-only for as long as needed before it ever flies the drone.
+        self.armed = False
+        self.intervened = False   # did WE take control (so clear hands it back)
         self.bus = ObservationBus()
         self.state = AvoidanceState.DISABLED
         self._hold_since: float | None = None
@@ -77,11 +82,18 @@ class AvoidanceController:
     def set_enabled(self, on: bool) -> None:
         self.enabled = on
         if not on:
+            self.armed = False
             self.state = AvoidanceState.DISABLED
             self._hold_since = None
+            self.intervened = False
             self.bus.clear()
         elif self.state == AvoidanceState.DISABLED:
             self.state = AvoidanceState.NOMINAL
+
+    def set_armed(self, on: bool) -> None:
+        """Allow (or forbid) commanding the aircraft. Arming requires
+        detection already enabled; disarming never disables detection."""
+        self.armed = bool(on) and self.enabled
 
     # -- decide -----------------------------------------------------------
     async def decide(self, pose: Pose | None, goal: tuple[float, float] | None,
@@ -152,6 +164,7 @@ class AvoidanceController:
         return {
             "drone_id": self.drone_id,
             "enabled": self.enabled,
+            "armed": self.armed,
             "state": self.state.value,
             "reason": self._last_reason,
             "params": self.params.__dict__,

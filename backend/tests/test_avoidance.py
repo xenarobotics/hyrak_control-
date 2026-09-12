@@ -144,3 +144,80 @@ async def test_manual_hover_brakes_with_no_goal():
     c.observe(ObstacleObservation(bearing_deg=0, distance_m=5, confidence=0.9))
     d = await c.decide(Pose(17.6, 78.12, 0), None)   # no mission goal
     assert d.action == "hold" and d.state == AvoidanceState.HOLDING
+
+
+def test_arm_requires_enabled():
+    c = AvoidanceController("d1")
+    c.set_armed(True)
+    assert c.armed is False           # cannot arm while detection is off
+    c.set_enabled(True); c.set_armed(True)
+    assert c.armed is True
+    c.set_enabled(False)
+    assert c.armed is False           # disabling detection disarms control
+
+
+# -- executor -------------------------------------------------------------
+class _FakeManager:
+    def __init__(self, connected=True, upload_ok=True):
+        self.is_connected = connected
+        self._upload_ok = upload_ok
+        self.calls = []
+
+    async def set_flight_mode(self, mode):
+        self.calls.append(("mode", mode)); return True
+
+    async def upload_mission(self, waypoints, terrain_follow=False):
+        self.calls.append(("upload", len(waypoints)))
+        return self._upload_ok, "" if self._upload_ok else "boom"
+
+    async def start_mission(self):
+        self.calls.append(("start", None)); return True
+
+
+@pytest.mark.asyncio
+async def test_executor_hold_and_return_use_flight_modes():
+    from app.avoidance import executor
+    m = _FakeManager()
+    did, _ = await executor.apply(m, "hold", None, intervened=False)
+    assert did and ("mode", "HOLD") in m.calls
+    await executor.apply(m, "return", None, intervened=True)
+    assert ("mode", "RETURN") in m.calls
+
+
+@pytest.mark.asyncio
+async def test_executor_reroute_uploads_then_starts():
+    from app.avoidance import executor
+    m = _FakeManager()
+    did, _ = await executor.apply(m, "reroute", [{"lat": 1, "lng": 2}], False)
+    assert did
+    assert ("upload", 1) in m.calls and ("start", None) in m.calls
+
+
+@pytest.mark.asyncio
+async def test_executor_clear_resumes_only_if_intervened():
+    from app.avoidance import executor
+    m = _FakeManager()
+    did, _ = await executor.apply(m, "clear", None, intervened=False)
+    assert did is False and m.calls == []          # never touched an untouched drone
+    did, _ = await executor.apply(m, "clear", None, intervened=True)
+    assert did and ("start", None) in m.calls      # hands control back
+
+
+@pytest.mark.asyncio
+async def test_executor_no_link_commands_nothing():
+    from app.avoidance import executor
+    did, note = await executor.apply(_FakeManager(connected=False), "hold",
+                                     None, False)
+    assert did is False and note == "no link"
+
+
+@pytest.mark.asyncio
+async def test_reroute_appends_goal_when_windowed():
+    # Goal well beyond the local window -> the returned mission must END at the
+    # real goal, not the rejoin point (a complete mission, no dead end).
+    from app.avoidance import reroute as rr
+    start, goal = (17.600, 78.120), (17.650, 78.120)   # ~5.5 km, >> window
+    wps, err = await rr.reroute_around(start, goal, obstacles=[], cruise_alt_m=10)
+    assert wps
+    last = wps[-1]
+    assert abs(last["lat"] - goal[0]) < 1e-6 and abs(last["lng"] - goal[1]) < 1e-6

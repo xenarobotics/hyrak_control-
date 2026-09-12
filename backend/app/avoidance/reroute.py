@@ -59,6 +59,17 @@ async def reroute_around(start: tuple[float, float],
         rules=profile_rules, cruise_alt_m=cruise_alt_m,
         speed_m_s=speed_m_s, land=False, obstacles=obstacles,
     )
-    if result.get("ok"):
-        return result.get("waypoints") or [], ""
-    return None, result.get("reason", "no legal path around the obstacle")
+    if not result.get("ok"):
+        return None, result.get("reason", "no legal path around the obstacle")
+
+    wps = result.get("waypoints") or []
+    # When the detour stopped at a local rejoin point (goal was beyond the
+    # window), append the real goal so the uploaded mission is COMPLETE - the
+    # drone flies the detour and then straight on to the destination, not to a
+    # dead end. The straight rejoin->goal leg is clear of the obstacle we just
+    # routed around (it lies past it on the original bearing).
+    if rejoin is not goal and wps:
+        tail = dict(wps[-1])
+        tail.update({"lat": goal[0], "lng": goal[1], "type": "waypoint"})
+        wps = wps + [tail]
+    return wps, ""
