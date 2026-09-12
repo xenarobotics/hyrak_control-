@@ -116,8 +116,16 @@ class _Field:
         self.mult[r0:r1 + 1, c0:c1 + 1] = sub
 
 
-def _build_field(start, goal, rules, cruise_alt_m) -> tuple[_Field | None, str]:
-    """Rasterise zones + features into a cost field. Returns (field, error)."""
+def _build_field(start, goal, rules, cruise_alt_m,
+                 obstacles=None) -> tuple[_Field | None, str]:
+    """Rasterise zones + features into a cost field. Returns (field, error).
+
+    `obstacles` (optional) are dynamic keep-outs the avoidance layer injects -
+    each `{lat, lng, radius_m}`. They paint as HARD blocks exactly like a red
+    zone, so a reroute around a detected obstacle automatically also respects
+    every airspace rule already in the field, and "no way around within the
+    rules" falls out as plan() returning ok:False (the caller then holds or
+    returns). A dynamic obstacle is never relaxed near start/goal."""
     lat0, lat1 = sorted((start[0], goal[0]))
     lng0, lng1 = sorted((start[1], goal[1]))
     m_lng = M_PER_DEG_LAT * max(0.2, math.cos(math.radians((lat0 + lat1) / 2)))
@@ -175,6 +183,21 @@ def _build_field(start, goal, rules, cruise_alt_m) -> tuple[_Field | None, str]:
                 field.paint(geom.buffer(inflate_deg), block=True)
             else:
                 field.paint(geom, factor=float(rule["weight"]))
+
+    # Dynamic obstacles last: hard blocks, radius in metres converted to a
+    # degree buffer using the LOCAL lng scaling so the keep-out is at least
+    # radius_m in every direction (N-S ends up slightly larger - safe). Plus
+    # the same cell-inflation red zones get, so a smoothed path cannot clip it.
+    for ob in (obstacles or []):
+        try:
+            lat, lng = float(ob["lat"]), float(ob["lng"])
+            radius_m = max(0.5, float(ob.get("radius_m", 2.0)))
+        except (KeyError, TypeError, ValueError):
+            continue
+        m_lng_local = M_PER_DEG_LAT * max(0.2, math.cos(math.radians(lat)))
+        radius_deg = radius_m / m_lng_local + inflate_deg
+        field.paint(shapely.Point(lng, lat).buffer(radius_deg),
+                    block=True, hard=True)
 
     return field, ""
 
@@ -333,9 +356,14 @@ def _coverage(pts: list[tuple[float, float]], step_m: float) -> dict:
 
 def plan(start: tuple[float, float], goal: tuple[float, float],
          rules: dict | None = None, cruise_alt_m: float = 60.0,
-         speed_m_s: float = 8.0, land: bool = True) -> dict:
+         speed_m_s: float = 8.0, land: bool = True,
+         obstacles: list[dict] | None = None) -> dict:
     """
     Generate a route from start to goal (both (lat, lng)).
+
+    `obstacles` are optional dynamic keep-outs (`{lat, lng, radius_m}`) the
+    avoidance layer injects to reroute around a detected obstacle while still
+    honouring every airspace rule; ok:False means no legal way around.
 
     Returns on success:
         {ok: True, waypoints: [...], distance_m, est_duration_s,
@@ -345,7 +373,7 @@ def plan(start: tuple[float, float], goal: tuple[float, float],
         the start/goal themselves sit inside a red zone)
     """
     rules = profile_mod.resolved_rules(rules)
-    field, err = _build_field(start, goal, rules, cruise_alt_m)
+    field, err = _build_field(start, goal, rules, cruise_alt_m, obstacles)
     if field is None:
         return {"ok": False, "reason": err, "blocking_zones": []}
 
