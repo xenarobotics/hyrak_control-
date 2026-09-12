@@ -28,16 +28,29 @@ _session_manager = None
 
 
 def _resolve_link(drone_id: str):
-    """(manager, in_air) for a drone - fleet first, then live sessions - or
-    (None, False) if it has no live link right now."""
+    """(manager, pose, in_air) for a drone - fleet first, then live sessions -
+    or (None, None, False) if it has no live link right now.
+
+    Fleet managers push telemetry to a callback (fleet_service._state), NOT to
+    manager.snapshot(), so a fleet drone's pose is read from fleet status, not
+    the manager. Session managers keep their own snapshot(). in_air is trusted
+    from the flag OR inferred from altitude (a drone at height IS flying even
+    when the landed-state flag lags)."""
     try:
         from app.fleet import service as fleet_service
         i = fleet_service.instance_for(drone_id)
         if i is not None:
             mgr = fleet_service._managers.get(i)
             if mgr is not None and mgr.is_connected:
-                snap = mgr.snapshot()
-                return mgr, bool(snap.flight_mode.is_in_air)
+                entry = next((d for d in fleet_service.status()
+                              if d.get("db_id") == drone_id), None)
+                lv = (entry or {}).get("live")
+                if lv and (lv["lat"] or lv["lng"]):
+                    pose = Pose(lat=lv["lat"], lng=lv["lng"],
+                                heading_deg=lv.get("heading", 0.0),
+                                alt_m=lv.get("alt", 0.0))
+                    in_air = bool(lv.get("in_air")) or lv.get("alt", 0.0) > 1.5
+                    return mgr, pose, in_air
     except Exception:
         pass
     sm = _session_manager
@@ -47,24 +60,33 @@ def _resolve_link(drone_id: str):
                 continue
             mgr = sm.get_telemetry(s.session_id)
             if mgr is not None and mgr.is_connected:
-                return mgr, bool(mgr.snapshot().flight_mode.is_in_air)
-    return None, False
-
-
-def _pose_of(manager) -> Pose | None:
-    snap = manager.snapshot()
-    lat = snap.position.latitude_deg
-    lng = snap.position.longitude_deg
-    if not (lat or lng):
-        return None
-    return Pose(lat=lat, lng=lng, heading_deg=snap.heading_deg,
-                alt_m=snap.position.relative_altitude_m)
+                snap = mgr.snapshot()
+                lat, lng = snap.position.latitude_deg, snap.position.longitude_deg
+                if not (lat or lng):
+                    return None, None, False
+                pose = Pose(lat=lat, lng=lng, heading_deg=snap.heading_deg,
+                            alt_m=snap.position.relative_altitude_m)
+                in_air = (bool(snap.flight_mode.is_in_air)
+                          or snap.position.relative_altitude_m > 1.5)
+                return mgr, pose, in_air
+    return None, None, False
 
 
 async def _goal_for(drone_id: str) -> tuple[float, float] | None:
-    """The destination the drone is flying toward: the last waypoint of its
-    latest uploaded/flying mission. None for manual flight (no mission) ->
-    the drone brakes/holds on an obstacle instead of rerouting."""
+    """The destination the drone is flying toward. For a fleet drone this is
+    the fleet's own tracked land target (authoritative, no DB/hash lookup -
+    the fleet sets it the moment a mission is flown). Otherwise the last
+    waypoint of the drone's latest mission. None for manual flight, in which
+    case an obstacle makes the drone brake/hold instead of rerouting."""
+    try:
+        from app.fleet import service as fleet_service
+        i = fleet_service.instance_for(drone_id)
+        if i is not None:
+            tgt = fleet_service._land_target.get(i)
+            if tgt:
+                return (float(tgt[0]), float(tgt[1]))
+    except Exception:
+        pass
     from app.db import db_available, get_session
     from app.db.models import Mission
     from sqlalchemy import select
@@ -92,8 +114,7 @@ async def _tick() -> None:
     for c in list(avoidance._controllers.values()):
         if not c.enabled:
             continue
-        manager, in_air = _resolve_link(c.drone_id)
-        pose = _pose_of(manager) if manager is not None else None
+        manager, pose, in_air = _resolve_link(c.drone_id)
         goal = await _goal_for(c.drone_id) if in_air else None
 
         prev_state = c.state
