@@ -138,6 +138,45 @@ async def test_no_path_holds_then_returns(monkeypatch):
     assert d2.action == "return" and d2.state == AvoidanceState.RETURNING
 
 
+# -- v3: receding horizon, speed governor, dynamic prediction ------------
+@pytest.mark.asyncio
+async def test_receding_horizon_commits_then_tracks():
+    c = AvoidanceController("d1"); c.set_enabled(True)
+    c.params.reaction_distance_m = 60.0
+    pose = Pose(17.600, 78.120, heading_deg=0)
+    goal = (17.610, 78.120)
+    c.observe(ObstacleObservation(bearing_deg=0, distance_m=40, confidence=0.9))
+    d1 = await c.decide(pose, goal, cruise_alt_m=6, speed_m_s=5)
+    assert d1.action == "reroute" and c._committed_path is not None
+    # Same situation next tick: the committed path is still clear, so TRACK it
+    # rather than derive a fresh path from the (drifted) position.
+    c.observe(ObstacleObservation(bearing_deg=0, distance_m=40, confidence=0.9))
+    d2 = await c.decide(pose, goal, cruise_alt_m=6, speed_m_s=5)
+    assert d2.action == "track"
+
+
+def test_speed_governor_slows_in_clutter():
+    c = AvoidanceController("d1")
+    c.params.min_speed_m_s = 1.0; c.params.speed_cap_m_s = 5.0
+    c.params.clearance_m = 4.0; c.params.reaction_distance_m = 20.0
+    assert c._safe_speed(5.0) == 1.0     # inside the clearance ring -> min
+    assert c._safe_speed(20.0) == 5.0    # clear to reaction range -> cap
+    assert 1.0 < c._safe_speed(13.0) < 5.0   # graded in between
+
+
+def test_dynamic_obstacle_velocity_is_estimated_and_predicted():
+    from app.avoidance.obstacle_map import ObstacleMap
+    m = ObstacleMap()
+    m.add({"lat": 17.600, "lng": 78.120, "radius_m": 3}, now=100.0)
+    # ~2.1 m east in 0.4 s (within the 5 m merge radius) = a ~5 m/s mover
+    m.add({"lat": 17.600, "lng": 78.12002, "radius_m": 3}, now=100.4)
+    o = m.active(now=100.4)[0]
+    assert o.hits == 2 and o.ve_mps > 1.5   # merged, moving east
+    pk = o.predicted_keepout(1.5)
+    assert pk["lng"] > o.lng              # keep-out leads where it is going
+    assert pk["radius_m"] > o.radius_m    # grown to cover the swept path
+
+
 # -- v2: obstacle map, multi-obstacle, climb-over ------------------------
 def test_obstacle_map_merges_nearby_keeps_distinct_and_expires():
     from app.avoidance.obstacle_map import ObstacleMap

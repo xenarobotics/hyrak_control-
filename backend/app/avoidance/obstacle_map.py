@@ -37,9 +37,33 @@ class MappedObstacle:
     confidence: float
     last_seen: float
     hits: int = 1
+    # Estimated ground velocity (metres/s, north & east), for dynamic
+    # obstacles - a person or vehicle in a park. 0,0 = static / not yet known.
+    vn_mps: float = 0.0
+    ve_mps: float = 0.0
+
+    def speed_mps(self) -> float:
+        return (self.vn_mps ** 2 + self.ve_mps ** 2) ** 0.5
 
     def as_keepout(self) -> dict:
         return {"lat": self.lat, "lng": self.lng, "radius_m": self.radius_m}
+
+    def predicted_keepout(self, horizon_s: float) -> dict:
+        """Where this obstacle will be `horizon_s` from now, with the keep-out
+        grown to cover the swept path - so the drone plans around where a
+        moving obstacle is GOING, not where it was."""
+        import math
+        speed = self.speed_mps()
+        if speed < 0.3:                      # effectively static
+            return self.as_keepout()
+        m_lat = M_PER_DEG_LAT
+        m_lng = M_PER_DEG_LAT * max(0.2, math.cos(math.radians(self.lat)))
+        return {
+            "lat": self.lat + self.vn_mps * horizon_s / m_lat,
+            "lng": self.lng + self.ve_mps * horizon_s / m_lng,
+            # grow by half the swept distance so the whole path is covered
+            "radius_m": self.radius_m + speed * horizon_s * 0.5,
+        }
 
 
 @dataclass
@@ -53,8 +77,20 @@ class ObstacleMap:
         now = now if now is not None else time.monotonic()
         lat, lng = float(keepout["lat"]), float(keepout["lng"])
         radius = float(keepout.get("radius_m", 2.0))
+        import math
         for o in self._obs:
             if _dist_m(o.lat, o.lng, lat, lng) <= self.merge_dist_m:
+                # Estimate velocity from the position shift since last seen
+                # (low-pass filtered) - a moving obstacle's detections merge
+                # into one entry that carries its motion.
+                dt = now - o.last_seen
+                if 0.05 < dt < 2.0:
+                    m_lng = M_PER_DEG_LAT * max(0.2, math.cos(math.radians(o.lat)))
+                    vn = (lat - o.lat) * M_PER_DEG_LAT / dt
+                    ve = (lng - o.lng) * m_lng / dt
+                    a = 0.4   # smoothing
+                    o.vn_mps = (1 - a) * o.vn_mps + a * max(-25.0, min(25.0, vn))
+                    o.ve_mps = (1 - a) * o.ve_mps + a * max(-25.0, min(25.0, ve))
                 # Confidence-weighted position update, keep the largest extent.
                 w = confidence / (o.confidence + confidence + 1e-6)
                 o.lat += (lat - o.lat) * w

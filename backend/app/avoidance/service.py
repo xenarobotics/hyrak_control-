@@ -51,11 +51,16 @@ class AvoidanceParams:
     vertical_enabled: bool = True
     max_climb_alt_m: float = 40.0       # never auto-climb above this
     climb_step_m: float = 4.0           # clearance to add above an obstacle top
+    # Speed governor: slow down in clutter. Commanded speed scales from
+    # min_speed_m_s (obstacle at the clearance ring) up to speed_cap_m_s (clear
+    # to the reaction distance). Predict dynamic obstacles this far ahead.
+    min_speed_m_s: float = 1.0
+    prediction_horizon_s: float = 1.5
 
 
 @dataclass
 class Decision:
-    action: str                 # clear | hold | reroute | climb | return
+    action: str          # clear | track | hold | reroute | climb | return
     state: AvoidanceState
     reason: str = ""
     obstacle: dict | None = None      # nearest world keep-out {lat,lng,radius_m}
@@ -63,6 +68,7 @@ class Decision:
     fused_distance_m: float | None = None
     target_alt_m: float | None = None  # for a climb-over
     obstacle_count: int = 0            # obstacles the map is tracking
+    recommended_speed_m_s: float = 0.0  # speed-governor output
 
 
 class AvoidanceController:
@@ -83,6 +89,13 @@ class AvoidanceController:
         self.state = AvoidanceState.DISABLED
         self._hold_since: float | None = None
         self._last_reason = ""
+        # Receding horizon: the path we have COMMITTED to and are flying. We
+        # track it rather than greedily re-deriving a new one from the drifted
+        # current position each tick (which is what corners the drone in a
+        # multi-obstacle field). Re-planned only when it is actually invalid.
+        self._committed_path: list | None = None
+        self._committed_goal: tuple[float, float] | None = None
+        self._recommended_speed = 0.0
 
     # -- ingest -----------------------------------------------------------
     def observe(self, obs: ObstacleObservation) -> None:
@@ -98,6 +111,8 @@ class AvoidanceController:
             self.intervened = False
             self.bus.clear()
             self.omap.clear()
+            self._committed_path = None
+            self._committed_goal = None
         elif self.state == AvoidanceState.DISABLED:
             self.state = AvoidanceState.NOMINAL
 
@@ -132,6 +147,7 @@ class AvoidanceController:
         threat = self._nearest_threat(pose, goal, mapped)
         if threat is None:
             self._hold_since = None
+            self._committed_path = None   # back to the operator's own route
             return self._settle(Decision(
                 "clear", AvoidanceState.NOMINAL, "path ahead clear",
                 obstacle_count=len(mapped)))
@@ -139,40 +155,99 @@ class AvoidanceController:
         near_ko = threat.as_keepout()
         near_d = distance_m(pose.lat, pose.lng, threat.lat, threat.lng)
         rules = profile_rules if profile_rules is not None else {"categories": {}}
-        speed = min(speed_m_s, self.params.speed_cap_m_s)
+        # Speed governor: slow down as the nearest obstacle closes in.
+        rec_speed = self._safe_speed(near_d)
+        self._recommended_speed = rec_speed
+        plan_speed = min(speed_m_s, rec_speed)
 
         if goal is not None:
-            # 3. LATERAL: reroute around ALL known obstacles at once (avoids the
-            #    cornering that one-at-a-time avoidance falls into), respecting
-            #    legal red zones but not soft route preferences. Obstacles the
-            #    drone would already overfly at this altitude are excluded.
-            keepouts = [o.as_keepout() for o in mapped
+            # Plan against PREDICTED positions so a moving obstacle is dodged
+            # where it is going, and around obstacles tall enough to matter.
+            h = self.params.prediction_horizon_s
+            keepouts = [o.predicted_keepout(h) for o in mapped
                         if o.top_m == 0 or o.top_m >= cruise_alt_m]
+
+            # 3a. RECEDING HORIZON: keep flying the path we already committed to
+            #     if it is still clear of every current obstacle and still heads
+            #     to this goal - do NOT re-derive from the drifted position each
+            #     tick. That greedy loop is exactly what corners a drone in a
+            #     cluttered, multi-obstacle field.
+            if (self._committed_path and self._committed_goal == goal
+                    and self._path_clear(self._committed_path, keepouts)
+                    and self._on_path(pose, self._committed_path)):
+                self._hold_since = None
+                return self._settle(Decision(
+                    "track", AvoidanceState.REROUTED, "tracking committed detour",
+                    obstacle=near_ko, fused_distance_m=near_d,
+                    obstacle_count=len(mapped), recommended_speed_m_s=rec_speed))
+
+            # 3b. LATERAL: commit a fresh path around ALL obstacles at once.
             wps, _ = await reroute_mod.reroute_around(
                 (pose.lat, pose.lng), goal, keepouts,
-                profile_rules=rules, cruise_alt_m=cruise_alt_m, speed_m_s=speed)
+                profile_rules=rules, cruise_alt_m=cruise_alt_m, speed_m_s=plan_speed)
             if wps:
+                self._committed_path = wps
+                self._committed_goal = goal
                 self._hold_since = None
                 return self._settle(Decision(
                     "reroute", AvoidanceState.REROUTED,
                     f"rerouting around {len(keepouts)} obstacle(s)",
-                    obstacle=near_ko, waypoints=wps,
-                    fused_distance_m=near_d, obstacle_count=len(mapped)))
+                    obstacle=near_ko, waypoints=wps, fused_distance_m=near_d,
+                    obstacle_count=len(mapped), recommended_speed_m_s=rec_speed))
 
-            # 4. VERTICAL: no lateral path -> climb OVER, but only when the
-            #    blocker's height is actually known (never climb blind).
+            # 4. VERTICAL: no lateral path -> climb over (known heights only).
             if self.params.vertical_enabled:
                 climb = await self._try_climb_over(
-                    pose, goal, mapped, rules, speed)
+                    pose, goal, mapped, rules, plan_speed)
                 if climb is not None:
+                    self._committed_path = climb.waypoints
+                    self._committed_goal = goal
                     self._hold_since = None
+                    climb.recommended_speed_m_s = rec_speed
                     return self._settle(climb)
 
         # 5. No lateral or vertical path (or no goal) -> hold, then return.
+        self._committed_path = None
         return self._settle(self._hold_or_return(
             now, near_d, near_ko,
             "holding - no lateral or vertical path" if goal
             else "holding - manual flight, no route to replan"))
+
+    def _safe_speed(self, clearance_m: float) -> float:
+        """Speed-governor: scale commanded speed from min_speed (obstacle at the
+        clearance ring) up to speed_cap (clear out to the reaction distance).
+        Slowing in clutter is what makes dense-environment flight reliable."""
+        p = self.params
+        lo, hi = p.clearance_m * 1.5, p.reaction_distance_m
+        if clearance_m <= lo:
+            return p.min_speed_m_s
+        if clearance_m >= hi:
+            return p.speed_cap_m_s
+        f = (clearance_m - lo) / max(1e-6, hi - lo)
+        return p.min_speed_m_s + f * (p.speed_cap_m_s - p.min_speed_m_s)
+
+    @staticmethod
+    def _path_clear(path: list, keepouts: list[dict]) -> bool:
+        """No point on the committed path (waypoints + segment midpoints) sits
+        inside any current keep-out."""
+        pts = [(float(w["lat"]), float(w["lng"])) for w in path]
+        mids = [((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+                for a, b in zip(pts, pts[1:])]
+        for plat, plng in pts + mids:
+            for k in keepouts:
+                if distance_m(plat, plng, k["lat"], k["lng"]) < k["radius_m"]:
+                    return False
+        return True
+
+    @staticmethod
+    def _on_path(pose: Pose, path: list, corridor_m: float = 30.0) -> bool:
+        """Is the drone still within a corridor of the committed path? A gross
+        deviation (GPS jump, gust) forces a re-plan."""
+        best = 1e12
+        for w in path:
+            best = min(best, distance_m(pose.lat, pose.lng,
+                                        float(w["lat"]), float(w["lng"])))
+        return best < corridor_m
 
     def _nearest_threat(self, pose: Pose, goal, mapped):
         """The nearest mapped obstacle within reaction range whose bearing is
@@ -256,6 +331,8 @@ class AvoidanceController:
             "params": self.params.__dict__,
             "sensors": sensor_registry.inventory(self.drone_id, now),
             "obstacle_count": len(self.omap.active(now)),
+            "recommended_speed_m_s": round(self._recommended_speed, 2),
+            "committed_path": self._committed_path is not None,
             "obstacle_distance_cm": self.bus.obstacle_distance_cm(
                 now, self.params.min_confidence),
         }

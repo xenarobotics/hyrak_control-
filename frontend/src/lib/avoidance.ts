@@ -35,6 +35,8 @@ export interface AvoidanceStatus {
     params: AvoidanceParams
     sensors: SensorInfo[]
     obstacle_count?: number
+    recommended_speed_m_s?: number
+    committed_path?: boolean
     obstacle_distance_cm: number[]
 }
 

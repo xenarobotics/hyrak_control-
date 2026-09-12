@@ -46,6 +46,10 @@ async def apply(manager, action: str, waypoints: list | None,
                 return False, f"upload failed: {err}"
             await manager.start_mission()
             return True, action
+        if action == "track":
+            # Receding horizon: the committed detour is already uploaded and
+            # flying - nothing to send, just let it continue.
+            return False, "tracking"
         if action == "clear":
             if intervened:
                 # Hand control back: resume the mission the drone was flying.

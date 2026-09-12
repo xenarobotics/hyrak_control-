@@ -107,6 +107,11 @@ export function AvoidancePanel() {
                             {status.obstacle_count} tracked
                         </span>
                     )}
+                    {status?.state === 'rerouted' && !!status?.recommended_speed_m_s && (
+                        <span style={{ color: 'hsl(var(--app-text-muted))' }}>
+                            {status.recommended_speed_m_s.toFixed(1)} m/s
+                        </span>
+                    )}
                     <span style={{ color: nearest !== null && nearest < 8 ? '#fbbf24' : 'hsl(var(--app-text))' }}>
                         {nearest !== null ? `${nearest.toFixed(1)} m` : 'clear'}
                     </span>
