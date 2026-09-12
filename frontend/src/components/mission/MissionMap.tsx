@@ -7,6 +7,7 @@ import {
   Marker,
   Polyline,
   Polygon,
+  Circle,
   useMapEvents,
   useMap,
 } from 'react-leaflet'
@@ -19,6 +20,8 @@ import { useSwarmStore } from '@/store/swarm'
 import { MAP_LAYERS, WP_META } from '@/types/mission'
 import type { Waypoint } from '@/types/mission'
 import { getServerUrl } from '@/lib/server-url'
+import { visibleInterval } from '@/lib/poll'
+import { getHazards, getObstacles, type KnownHazard, type LiveObstacle } from '@/lib/avoidance'
 import { ZONE_COLORS, zoneRings, type ZoneFeature } from '@/components/admin/zones'
 
 // ── Flight zones (green/orange/red) - pilots plan around these ─────────────
@@ -51,6 +54,43 @@ function FlightZonesOverlay() {
             interactive: false,
           }}
         />
+      ))}
+    </>
+  )
+}
+
+// ── Obstacle avoidance overlay ──────────────────────────────────────────────
+// Known hazards (persistent shared map, blue) + every avoidance drone's LIVE
+// obstacle map (grey = confirmed static, amber = moving). Pure read-only.
+function AvoidanceOverlay() {
+  const [hazards, setHazards] = useState<KnownHazard[]>([])
+  const [obstacles, setObstacles] = useState<LiveObstacle[]>([])
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      try {
+        const hz = await getHazards()
+        const st = await fetch(`${getServerUrl()}/api/avoidance/status`).then(r => r.json())
+        const ids: string[] = (st.drones ?? []).map((d: { drone_id: string }) => d.drone_id)
+        const live = (await Promise.all(ids.map(id => getObstacles(id).catch(() => [])))).flat()
+        if (alive) { setHazards(hz); setObstacles(live) }
+      } catch { /* overlay stays empty if backend unreachable */ }
+    }
+    void load()
+    return visibleInterval(load, 4000)
+  }, [])
+  return (
+    <>
+      {hazards.map(h => (
+        <Circle key={h.id} center={[h.lat, h.lng]} radius={h.radius_m}
+          pathOptions={{ color: '#38bdf8', weight: 1.5, fillColor: '#38bdf8',
+            fillOpacity: 0.12, interactive: false }} />
+      ))}
+      {obstacles.map((o, i) => (
+        <Circle key={`obs-${i}`} center={[o.lat, o.lng]} radius={o.radius_m}
+          pathOptions={{ color: o.is_static ? '#9aa3b5' : '#fbbf24', weight: 1.5,
+            fillColor: o.is_static ? '#9aa3b5' : '#fbbf24', fillOpacity: 0.2,
+            interactive: false }} />
       ))}
     </>
   )
@@ -386,6 +426,7 @@ export default function MissionMap() {
       <ClickHandler />
       <DronePositionTracker />
       <FlightZonesOverlay />
+      <AvoidanceOverlay />
 
       {/* Planned flight path (no active mission) - cyan when terrain-follow is on
           (path adapts to terrain), blue when off (fixed altitude relative to home) */}
