@@ -195,7 +195,12 @@ def _build_field(start, goal, rules, cruise_alt_m,
         except (KeyError, TypeError, ValueError):
             continue
         m_lng_local = M_PER_DEG_LAT * max(0.2, math.cos(math.radians(lat)))
-        radius_deg = radius_m / m_lng_local + inflate_deg
+        # A dynamic obstacle already carries its safety clearance in radius_m,
+        # so it needs only a HALF-CELL rasterisation margin - NOT the full
+        # zone-grade inflation (cell*1.7+2). At coarse cell sizes that big
+        # inflation balloons a close obstacle's keep-out until it swallows the
+        # drone's own position, leaving A* with a blocked start and no path.
+        radius_deg = (radius_m + field.cell_m * 0.5) / m_lng_local
         field.paint(shapely.Point(lng, lat).buffer(radius_deg),
                     block=True, hard=True)
 
