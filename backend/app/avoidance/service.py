@@ -121,9 +121,16 @@ class AvoidanceController:
 
         # Mission leg present -> try to reroute around it, airspace-legal.
         if goal is not None:
+            # Avoidance is about NOT HITTING the obstacle, not route
+            # preference: the detour must still respect legal no-fly (red)
+            # zones, but it may cut across soft map features (roads, land-use)
+            # that the original route politely avoided - a building-preference
+            # rule must never be the reason a drone cannot dodge an obstacle.
+            # Empty categories = the "Direct" ruleset (red zones only).
+            rules = profile_rules if profile_rules is not None else {"categories": {}}
             wps, err = await reroute_mod.reroute_around(
                 (pose.lat, pose.lng), goal, [keepout],
-                profile_rules=profile_rules,
+                profile_rules=rules,
                 cruise_alt_m=cruise_alt_m,
                 speed_m_s=min(speed_m_s, self.params.speed_cap_m_s))
             if wps:
