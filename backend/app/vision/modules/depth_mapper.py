@@ -63,6 +63,28 @@ class DepthMapper(BaseAnalyzer):
 
         # Fix NaN/inf before any arithmetic - this was the original crash
         depth = np.nan_to_num(depth, nan=0.0, posinf=self.viz_max_depth, neginf=0.0)
+
+        # Obstacle avoidance tap: the raw ZoeDepth output is metric (metres),
+        # so - only when some drone actually has avoidance enabled, to add zero
+        # cost otherwise - extract the nearest obstacle ahead. It rides out in
+        # meta (per-frame, so no cross-session race) and the base loop forwards
+        # it to that session's avoidance bus. This is the live monocular
+        # sensing path; real hardware feeds the same detector.
+        obstacle_obs = None
+        try:
+            from app.avoidance import service as _av
+            if _av.any_enabled():
+                from app.avoidance.detector import observation_from_depth
+                ob = observation_from_depth(depth, hfov_deg=70.0)
+                if ob is not None:
+                    obstacle_obs = {
+                        "bearing_deg": ob.bearing_deg, "distance_m": ob.distance_m,
+                        "half_width_deg": ob.half_width_deg,
+                        "confidence": ob.confidence, "source": ob.source,
+                    }
+        except Exception:
+            obstacle_obs = None
+
         depth = np.clip(depth, self.viz_min_depth, self.viz_max_depth)
 
         # Normalize to 0-255 for colormap
@@ -82,4 +104,6 @@ class DepthMapper(BaseAnalyzer):
             "max_depth_m":  round(float(depth.max()), 2),
             "mean_depth_m": round(float(depth.mean()), 2),
         }
+        if obstacle_obs is not None:
+            meta["obstacle_observation"] = obstacle_obs
         return colormap, meta

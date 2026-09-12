@@ -189,6 +189,17 @@ def all_status(now: float | None = None) -> list[dict]:
     return [c.status(now) for c in _controllers.values()]
 
 
+def any_enabled() -> bool:
+    """True if any drone has avoidance detection on - lets the vision modules
+    skip the obstacle extraction entirely (zero added cost) when nobody is
+    using avoidance."""
+    return any(c.enabled for c in _controllers.values())
+
+
+def has_controller(drone_id: str) -> bool:
+    return drone_id in _controllers
+
+
 def reset(drone_id: str | None = None) -> None:
     if drone_id is None:
         _controllers.clear()

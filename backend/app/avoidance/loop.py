@@ -157,6 +157,34 @@ async def _run() -> None:
         await asyncio.sleep(INTERVAL_S)
 
 
+def observe_from_session(session_id: str, obs: dict) -> None:
+    """Bridge a vision-derived obstacle observation (from the depth analyzer)
+    to the avoidance bus, resolving which drone this browser session is flying.
+    Only feeds a drone that already has avoidance enabled - the vision module
+    gates on any_enabled() before calling, so this is cheap and safe."""
+    sm = _session_manager
+    if sm is None:
+        return
+    try:
+        sess = sm.get(session_id)
+        drone = getattr(sess, "drone", None) if sess else None
+        did = (drone or {}).get("id") if isinstance(drone, dict) else getattr(drone, "id", None)
+        if not did or not avoidance.has_controller(did):
+            return
+        c = avoidance.controller(did)
+        if not c.enabled:
+            return
+        from app.avoidance.observations import ObstacleObservation
+        c.observe(ObstacleObservation(
+            bearing_deg=float(obs["bearing_deg"]),
+            distance_m=float(obs["distance_m"]),
+            half_width_deg=float(obs.get("half_width_deg", 8.0)),
+            confidence=float(obs.get("confidence", 0.4)),
+            source=str(obs.get("source", "monocular"))))
+    except Exception as e:
+        logger.debug(f"observe_from_session failed: {e}")
+
+
 def start(session_manager) -> None:
     global _task, _session_manager
     _session_manager = session_manager

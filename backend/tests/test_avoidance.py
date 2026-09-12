@@ -241,6 +241,42 @@ def test_detector_center_blob_is_straight_ahead():
     assert obs is not None and abs(obs.bearing_deg) < 6
 
 
+# -- vision -> avoidance bridge -------------------------------------------
+def test_observe_from_session_feeds_enabled_drone():
+    import types
+    from app.avoidance import loop, service
+    c = service.controller("droneX"); c.set_enabled(True)
+    sess = types.SimpleNamespace(drone={"id": "droneX"})
+    loop._session_manager = types.SimpleNamespace(get=lambda sid: sess)
+    try:
+        loop.observe_from_session("sess1", {"bearing_deg": 0, "distance_m": 6,
+                                            "confidence": 0.5, "source": "monocular"})
+        near = c.bus.nearest_ahead(cone_deg=60, min_confidence=0.3)
+        assert near is not None and abs(near.distance_m - 6) < 0.01
+    finally:
+        loop._session_manager = None
+
+
+def test_observe_from_session_ignores_disabled_drone():
+    import types
+    from app.avoidance import loop, service
+    c = service.controller("droneY")   # NOT enabled
+    sess = types.SimpleNamespace(drone={"id": "droneY"})
+    loop._session_manager = types.SimpleNamespace(get=lambda sid: sess)
+    try:
+        loop.observe_from_session("s", {"bearing_deg": 0, "distance_m": 5})
+        assert c.bus.nearest_ahead() is None   # nothing fed to a disabled drone
+    finally:
+        loop._session_manager = None
+
+
+def test_any_enabled():
+    from app.avoidance import service
+    assert service.any_enabled() is False
+    service.controller("d").set_enabled(True)
+    assert service.any_enabled() is True
+
+
 @pytest.mark.asyncio
 async def test_reroute_appends_goal_when_windowed():
     # Goal well beyond the local window -> the returned mission must END at the

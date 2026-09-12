@@ -337,6 +337,18 @@ class BaseAnalyzer(ABC):
                 meta = meta or {}
                 meta["analysis_time_ms"] = elapsed_ms
                 meta["timestamp"] = time.time()
+
+                # Obstacle-avoidance sensing bridge: a depth-producing module
+                # may attach an obstacle observation; forward it to THIS
+                # session's drone (client_id = session_id). Only fires when a
+                # module set it (avoidance enabled), so no cost otherwise.
+                if meta.get("obstacle_observation"):
+                    try:
+                        from app.avoidance import loop as _av_loop
+                        _av_loop.observe_from_session(
+                            client_id, meta["obstacle_observation"])
+                    except Exception:
+                        pass
                 if context is not None:
                     meta["frame_index"] = context.frame_index
                     # How stale the annotation is by the time anyone sees it.
