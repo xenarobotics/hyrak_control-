@@ -91,6 +91,44 @@ export async function getEvents(droneId: string, limit = 50): Promise<AvoidanceE
     return d.events
 }
 
+// --- obstacle / hazard-map overlay data ---
+export interface LiveObstacle {
+    lat: number; lng: number; radius_m: number; top_m: number
+    speed_mps: number; is_static: boolean; hits: number
+}
+export interface KnownHazard {
+    id: string; lat: number; lng: number; radius_m: number
+    top_m: number; confidence: number; hits: number; source: string
+    last_seen: string | null
+}
+
+// The drone's LIVE obstacle map (what it's sensing/planning around now).
+export async function getObstacles(droneId: string): Promise<LiveObstacle[]> {
+    const d = await j<{ obstacles: LiveObstacle[] }>(await fetch(api(`/${droneId}/obstacles`)))
+    return d.obstacles
+}
+
+// The persistent SHARED hazard map (known static obstacles across all flights).
+export async function getHazards(): Promise<KnownHazard[]> {
+    const d = await j<{ hazards: KnownHazard[] }>(await fetch(api('/hazards')))
+    return d.hazards
+}
+
+export async function addHazard(lat: number, lng: number, radius_m = 5,
+                                top_m = 0): Promise<void> {
+    await fetch(api('/hazards'), {
+        method: 'POST', headers: AUTH,
+        body: JSON.stringify({ lat, lng, radius_m, top_m }),
+    })
+}
+
+export async function clearHazards(): Promise<number> {
+    const d = await j<{ removed: number }>(await fetch(api('/hazards/clear'), {
+        method: 'POST', headers: AUTH,
+    }))
+    return d.removed
+}
+
 // The nearest obstacle straight ahead (sectors around 0 deg), in metres, or
 // null if the forward arc is clear. obstacle_distance_cm is the 72-sector
 // MAVLink-shaped array (65535 = no reading).
