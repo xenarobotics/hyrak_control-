@@ -122,6 +122,43 @@ async def decide(drone_id: str, body: dict,
     }
 
 
+@router.get("/{drone_id}/obstacles")
+async def drone_obstacles(drone_id: str):
+    """The drone's live obstacle map - for the Mission-tab overlay."""
+    return {"obstacles": avoidance.controller(drone_id).obstacles()}
+
+
+@router.get("/hazards")
+async def known_hazards():
+    """The persistent shared hazard map (all known static obstacles)."""
+    from app.avoidance import hazard_db
+    return {"hazards": await hazard_db.all_hazards()}
+
+
+@router.post("/hazards")
+async def add_hazard(body: dict,
+                     x_auth_token: str = Header(None, alias="X-Auth-Token")):
+    """Operator-marked hazard - manually pin a known obstacle on the map."""
+    _auth(x_auth_token)
+    from app.avoidance import hazard_db
+    try:
+        lat, lng = float(body["lat"]), float(body["lng"])
+        radius_m = max(1.0, float(body.get("radius_m", 5.0)))
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="need lat, lng")
+    await hazard_db.save(lat, lng, radius_m,
+                         top_m=float(body.get("top_m", 0.0)),
+                         confidence=1.0, source="operator")
+    return {"ok": True}
+
+
+@router.post("/hazards/clear")
+async def clear_hazards(x_auth_token: str = Header(None, alias="X-Auth-Token")):
+    _auth(x_auth_token)
+    from app.avoidance import hazard_db
+    return {"removed": await hazard_db.clear()}
+
+
 @router.get("/{drone_id}/sensors")
 async def get_sensors(drone_id: str):
     return {"sensors": sensor_registry.inventory(drone_id)}

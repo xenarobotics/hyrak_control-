@@ -177,6 +177,30 @@ def test_dynamic_obstacle_velocity_is_estimated_and_predicted():
     assert pk["radius_m"] > o.radius_m    # grown to cover the swept path
 
 
+# -- persistent hazard map -----------------------------------------------
+def test_static_obstacle_is_confirmed_but_mover_is_not():
+    from app.avoidance.obstacle_map import ObstacleMap
+    m = ObstacleMap()
+    for k in range(4):                       # stationary, seen 4x
+        m.add({"lat": 17.60, "lng": 78.12, "radius_m": 3}, now=100.0 + k * 0.3)
+    assert m.active(now=101.2)[0].is_static()   # -> written to the hazard map
+
+    m2 = ObstacleMap()
+    m2.add({"lat": 17.60, "lng": 78.12, "radius_m": 3}, now=200.0)
+    m2.add({"lat": 17.60, "lng": 78.12003, "radius_m": 3}, now=200.4)  # ~8 m/s
+    m2.add({"lat": 17.60, "lng": 78.12006, "radius_m": 3}, now=200.8)
+    assert not m2.active(now=200.8)[0].is_static()   # a mover is never a hazard
+
+
+@pytest.mark.asyncio
+async def test_controller_exposes_live_obstacles():
+    c = AvoidanceController("d1"); c.set_enabled(True)
+    c.observe(ObstacleObservation(bearing_deg=0, distance_m=8, confidence=0.9))
+    await c.decide(Pose(17.6, 78.12, 0), None)   # ingests into the map
+    obs = c.obstacles()
+    assert obs and {"lat", "lng", "radius_m", "is_static"} <= set(obs[0])
+
+
 # -- v2: obstacle map, multi-obstacle, climb-over ------------------------
 def test_obstacle_map_merges_nearby_keeps_distinct_and_expires():
     from app.avoidance.obstacle_map import ObstacleMap

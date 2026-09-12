@@ -625,6 +625,42 @@ class AvoidanceEvent(Base):
         }
 
 
+class KnownObstacle(Base):
+    """The persistent, shared hazard map: static obstacles (trees, poles,
+    buildings, wires) confirmed by any drone, remembered across flights and
+    seeded back into a drone's live map before it re-encounters them. Only
+    obstacles observed as STATIONARY are written here - a moving person is
+    never a permanent hazard. Position is a plain lat/lng with an index so a
+    bounding-box 'what's near me' query is cheap."""
+    __tablename__ = "known_obstacles"
+    __table_args__ = (
+        Index("ix_known_obstacles_lat_lng", "lat", "lng"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    lat: Mapped[float] = mapped_column(Float)
+    lng: Mapped[float] = mapped_column(Float)
+    radius_m: Mapped[float] = mapped_column(Float, default=2.0)
+    top_m: Mapped[float] = mapped_column(Float, default=0.0)  # AGL, 0 = unknown
+    confidence: Mapped[float] = mapped_column(Float, default=0.5)
+    hits: Mapped[int] = mapped_column(Integer, default=1)
+    source: Mapped[str] = mapped_column(String(20), default="")  # sensor kind
+    first_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow)
+    last_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id, "lat": self.lat, "lng": self.lng,
+            "radius_m": self.radius_m, "top_m": self.top_m,
+            "confidence": self.confidence, "hits": self.hits,
+            "source": self.source,
+            "last_seen": self.last_seen.isoformat() if self.last_seen else None,
+        }
+
+
 class CrowdSnapshot(Base):
     """
     A sampled crowd-density reading (~every 2s while crowd-management mode

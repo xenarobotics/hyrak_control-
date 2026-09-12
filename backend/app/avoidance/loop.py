@@ -110,11 +110,44 @@ async def _goal_for(drone_id: str) -> tuple[float, float] | None:
     return None
 
 
+_last_seed: dict[str, float] = {}
+_last_persist: dict[str, float] = {}
+
+
+async def _sync_hazards(c, pose, now: float) -> None:
+    """Link the live map to the persistent hazard DB: seed known static
+    hazards near the drone (re-loaded as it flies, so they stay fresh in the
+    short-ttl map), and write confirmed-static obstacles back to the shared
+    map for the next flight / other drones."""
+    from app.avoidance import hazard_db
+    if now - _last_seed.get(c.drone_id, 0.0) > 3.0:
+        _last_seed[c.drone_id] = now
+        for h in await hazard_db.load_near(pose.lat, pose.lng, 250.0):
+            c.omap.add({"lat": h["lat"], "lng": h["lng"],
+                        "radius_m": h["radius_m"]},
+                       top_m=h.get("top_m", 0.0),
+                       confidence=h.get("confidence", 0.5), now=now)
+    if now - _last_persist.get(c.drone_id, 0.0) > 10.0:
+        _last_persist[c.drone_id] = now
+        for o in c.omap.active(now):
+            if o.is_static():
+                await hazard_db.save(o.lat, o.lng, o.radius_m,
+                                     top_m=o.top_m, confidence=o.confidence,
+                                     source="avoidance")
+
+
 async def _tick() -> None:
+    import time as _t
+    now = _t.monotonic()
     for c in list(avoidance._controllers.values()):
         if not c.enabled:
             continue
         manager, pose, in_air = _resolve_link(c.drone_id)
+        if pose is not None:
+            try:
+                await _sync_hazards(c, pose, now)
+            except Exception as e:
+                logger.debug(f"hazard sync failed: {e}")
         goal = await _goal_for(c.drone_id) if in_air else None
 
         prev_state = c.state

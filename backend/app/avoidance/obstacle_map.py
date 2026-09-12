@@ -45,6 +45,12 @@ class MappedObstacle:
     def speed_mps(self) -> float:
         return (self.vn_mps ** 2 + self.ve_mps ** 2) ** 0.5
 
+    def is_static(self) -> bool:
+        """A confirmed, stationary obstacle worth remembering across flights -
+        seen enough times and not moving. A fast-moving detection is a person
+        or vehicle and must NEVER be written to the shared hazard map."""
+        return self.hits >= 3 and self.speed_mps() < 0.5
+
     def as_keepout(self) -> dict:
         return {"lat": self.lat, "lng": self.lng, "radius_m": self.radius_m}
 

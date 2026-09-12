@@ -319,6 +319,14 @@ class AvoidanceController:
         self._last_reason = d.reason
         return d
 
+    def obstacles(self, now: float | None = None) -> list[dict]:
+        """The live map obstacles - for the Mission-tab overlay."""
+        now = now if now is not None else time.monotonic()
+        return [{"lat": o.lat, "lng": o.lng, "radius_m": round(o.radius_m, 1),
+                 "top_m": round(o.top_m, 1), "speed_mps": round(o.speed_mps(), 1),
+                 "is_static": o.is_static(), "hits": o.hits}
+                for o in self.omap.active(now)]
+
     # -- status -----------------------------------------------------------
     def status(self, now: float | None = None) -> dict:
         now = now if now is not None else time.monotonic()
