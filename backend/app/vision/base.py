@@ -339,14 +339,15 @@ class BaseAnalyzer(ABC):
                 meta["timestamp"] = time.time()
 
                 # Obstacle-avoidance sensing bridge: a depth-producing module
-                # may attach an obstacle observation; forward it to THIS
-                # session's drone (client_id = session_id). Only fires when a
-                # module set it (avoidance enabled), so no cost otherwise.
-                if meta.get("obstacle_observation"):
+                # may attach a DENSE list of obstacle observations; forward
+                # them to THIS session's drone (client_id = session_id). Only
+                # fires when a module set it (avoidance enabled), so no cost
+                # otherwise.
+                obs_list = meta.get("obstacle_observations")
+                if obs_list:
                     try:
                         from app.avoidance import loop as _av_loop
-                        _av_loop.observe_from_session(
-                            client_id, meta["obstacle_observation"])
+                        _av_loop.observe_from_session(client_id, obs_list)
                     except Exception:
                         pass
                 if context is not None:

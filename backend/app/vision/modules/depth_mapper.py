@@ -74,14 +74,17 @@ class DepthMapper(BaseAnalyzer):
         try:
             from app.avoidance import service as _av
             if _av.any_enabled():
-                from app.avoidance.detector import observation_from_depth
-                ob = observation_from_depth(depth, hfov_deg=70.0)
-                if ob is not None:
-                    obstacle_obs = {
-                        "bearing_deg": ob.bearing_deg, "distance_m": ob.distance_m,
-                        "half_width_deg": ob.half_width_deg,
-                        "confidence": ob.confidence, "source": ob.source,
-                    }
+                # DENSE: one obstacle per angular bin (gaps preserved), so the
+                # planner can thread between obstacles, not just dodge the
+                # single nearest one.
+                from app.avoidance.detector import observations_from_depth
+                obstacle_obs = [
+                    {"bearing_deg": ob.bearing_deg, "distance_m": ob.distance_m,
+                     "half_width_deg": ob.half_width_deg,
+                     "confidence": ob.confidence, "source": ob.source,
+                     "top_m": ob.top_m}
+                    for ob in observations_from_depth(depth, hfov_deg=70.0)
+                ] or None
         except Exception:
             obstacle_obs = None
 
@@ -105,5 +108,5 @@ class DepthMapper(BaseAnalyzer):
             "mean_depth_m": round(float(depth.mean()), 2),
         }
         if obstacle_obs is not None:
-            meta["obstacle_observation"] = obstacle_obs
+            meta["obstacle_observations"] = obstacle_obs
         return colormap, meta

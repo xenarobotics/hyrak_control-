@@ -335,6 +335,22 @@ def test_detector_finds_near_blob_and_its_bearing():
     assert obs.confidence <= 0.55                    # capped assist-grade
 
 
+def test_dense_depth_extraction_preserves_gaps():
+    import numpy as np
+    from app.avoidance.detector import observations_from_depth
+    depth = np.full((100, 200), 25.0)
+    depth[30:70, 20:45] = 3.0     # near obstacle on the LEFT
+    depth[30:70, 150:175] = 3.0   # near obstacle on the RIGHT
+    # the middle columns stay far = a GAP the drone can fly through
+    obs = observations_from_depth(depth, hfov_deg=70, bin_deg=8)
+    assert len(obs) >= 2
+    near = [o for o in obs if o.distance_m < 10]
+    bearings = sorted(o.bearing_deg for o in near)
+    assert bearings[0] < -5 and bearings[-1] > 5    # one left, one right
+    # the gap straight ahead is NOT reported as a near obstacle
+    assert not any(abs(o.bearing_deg) < 4 and o.distance_m < 10 for o in obs)
+
+
 def test_detector_center_blob_is_straight_ahead():
     import numpy as np
     from app.avoidance.detector import observation_from_depth

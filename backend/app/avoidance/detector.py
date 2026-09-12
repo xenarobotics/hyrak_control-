@@ -81,3 +81,61 @@ def observation_from_depth(depth_m: np.ndarray, hfov_deg: float = 70.0,
     return ObstacleObservation(
         bearing_deg=bearing, distance_m=nearest,
         half_width_deg=half_width, confidence=confidence, source="monocular")
+
+
+def observations_from_depth(depth_m: np.ndarray, hfov_deg: float = 70.0,
+                            bin_deg: float = 8.0, min_distance_m: float = 0.4,
+                            max_distance_m: float = 30.0,
+                            min_col_frac: float = 0.02) -> list[ObstacleObservation]:
+    """DENSE extraction: the nearest obstacle in EACH angular bin across the
+    field of view, not just the single closest. This is what lets the planner
+    thread gaps - an empty bin is free space between two obstacles, so a stand
+    of trees becomes 'obstacle, GAP, obstacle' instead of one blob. The same
+    per-sector representation a LiDAR or a recon point-cloud would give.
+
+    Returns one ObstacleObservation per occupied bin (body frame). Heights are
+    left unknown (top_m=0) - monocular cannot judge height reliably, so these
+    obstacles are never climbed over blind.
+    """
+    if depth_m is None or depth_m.ndim != 2:
+        return []
+    h, w = depth_m.shape
+    if h < 4 or w < 4:
+        return []
+
+    band = depth_m[int(h * 0.25):int(h * 0.75), :]
+    valid = np.isfinite(band) & (band > min_distance_m) & (band < max_distance_m)
+    cx, half = (w - 1) / 2.0, w / 2.0
+    col_bearing = (np.arange(w) - cx) / half * (hfov_deg / 2.0)
+
+    # Nearest valid depth per column.
+    col_depth = np.full(w, np.inf)
+    col_valid = valid.any(axis=0)
+    for c in np.nonzero(col_valid)[0]:
+        col_depth[c] = band[:, c][valid[:, c]].min()
+
+    out: list[ObstacleObservation] = []
+    n_bins = max(1, int(round(hfov_deg / bin_deg)))
+    edges = np.linspace(-hfov_deg / 2.0, hfov_deg / 2.0, n_bins + 1)
+    min_cols = max(1, int(min_col_frac * w))
+    for i in range(n_bins):
+        lo, hi = edges[i], edges[i + 1]
+        cols = np.where((col_bearing >= lo) & (col_bearing < hi)
+                        & np.isfinite(col_depth))[0]
+        if cols.size < min_cols:
+            continue
+        d = float(col_depth[cols].min())
+        # The bin's obstacle is the columns at ~the near range (within 1.3x);
+        # its angular centre and spread define the keep-out.
+        near = cols[col_depth[cols] <= d * 1.3]
+        if near.size < min_cols:
+            near = cols
+        bearing = float(col_bearing[near].mean())
+        span = float(col_bearing[near.max()] - col_bearing[near.min()])
+        out.append(ObstacleObservation(
+            bearing_deg=bearing, distance_m=d,
+            half_width_deg=max(2.0, span / 2.0 + bin_deg / 2.0),
+            confidence=min(MONO_MAX_CONFIDENCE,
+                           MONO_BASE_CONFIDENCE + min(0.15, near.size / w)),
+            source="monocular"))
+    return out

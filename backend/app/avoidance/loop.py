@@ -157,11 +157,12 @@ async def _run() -> None:
         await asyncio.sleep(INTERVAL_S)
 
 
-def observe_from_session(session_id: str, obs: dict) -> None:
-    """Bridge a vision-derived obstacle observation (from the depth analyzer)
+def observe_from_session(session_id: str, obs: dict | list) -> None:
+    """Bridge vision-derived obstacle observation(s) (from the depth analyzer)
     to the avoidance bus, resolving which drone this browser session is flying.
-    Only feeds a drone that already has avoidance enabled - the vision module
-    gates on any_enabled() before calling, so this is cheap and safe."""
+    Accepts one observation or a dense list. Only feeds a drone that already
+    has avoidance enabled - the vision module gates on any_enabled() first, so
+    this is cheap and safe."""
     sm = _session_manager
     if sm is None:
         return
@@ -175,12 +176,14 @@ def observe_from_session(session_id: str, obs: dict) -> None:
         if not c.enabled:
             return
         from app.avoidance.observations import ObstacleObservation
-        c.observe(ObstacleObservation(
-            bearing_deg=float(obs["bearing_deg"]),
-            distance_m=float(obs["distance_m"]),
-            half_width_deg=float(obs.get("half_width_deg", 8.0)),
-            confidence=float(obs.get("confidence", 0.4)),
-            source=str(obs.get("source", "monocular"))))
+        for one in (obs if isinstance(obs, list) else [obs]):
+            c.observe(ObstacleObservation(
+                bearing_deg=float(one["bearing_deg"]),
+                distance_m=float(one["distance_m"]),
+                half_width_deg=float(one.get("half_width_deg", 8.0)),
+                confidence=float(one.get("confidence", 0.4)),
+                top_m=float(one.get("top_m", 0.0)),
+                source=str(one.get("source", "monocular"))))
     except Exception as e:
         logger.debug(f"observe_from_session failed: {e}")
 
