@@ -9,6 +9,7 @@ import { OSDBar } from '@/components/osd/OSDBar'
 import { EmergencyStop } from '@/components/controls/EmergencyStop'
 import { DeviceSelector } from '@/components/controls/DeviceSelector'
 import { DroneControls } from '@/components/controls/DroneControls'
+import { AvoidancePanel } from '@/components/avoidance/AvoidancePanel'
 import { FcMessageLog } from '@/components/layout/FcMessageLog'
 import { TelemetryPanel } from '@/components/telemetry/TelemetryPanel'
 import { VideoStream } from '@/components/video/VideoStream'
@@ -249,6 +250,12 @@ export default function FlyPage() {
                         <SurfaceCard title="FLIGHT CONTROLS">
                             <DroneControls />
                         </SurfaceCard>
+
+                        {!swarmEnabled && (
+                            <SurfaceCard title="AVOIDANCE">
+                                <AvoidancePanel />
+                            </SurfaceCard>
+                        )}
 
                         <div className="rounded-xl border flex flex-col flex-1 min-h-0"
                             style={{

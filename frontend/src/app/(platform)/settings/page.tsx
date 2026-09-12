@@ -6,6 +6,7 @@ import { getUiFont, setUiFont, getUiZoom, setUiZoom, getUiTextSize, setUiTextSiz
 import {
     Sun, Moon, MoonStar, Info, Zap,
     SlidersHorizontal, Video, Bot, Map, Route, Bell, Database, Keyboard, AlertTriangle, Radio,
+    Radar,
     type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -41,6 +42,8 @@ const USES_RELAY: VideoSource[] = ['rtsp_relay', 'air_unit_srt', 'air_unit_gst',
 
 
 import { getActiveRung, getRungFailures, getReportedCodec } from '@/lib/rtspCameraStream'
+import { getServerUrl } from '@/lib/server-url'
+import { getStatus as avGetStatus, getSensors as avGetSensors, setSensors as avSetSensors, setEnabled as avSetEnabled, type SensorInfo, type AvoidanceParams } from '@/lib/avoidance'
 import { getLiveEdgeDriftMs } from '@/lib/liveEdge'
 import { probeDroneNetwork, explainResult, type ProbeReport } from '@/lib/netProbe'
 import { isDesktopApp, nativeUpdater } from '@/lib/nativeBridge'
@@ -1788,6 +1791,98 @@ function LinkGroup() {
     )
 }
 
+function SensorsGroup() {
+    const sessionId = useDroneStore(s => s.session?.session_id)
+    const [droneId, setDroneId] = useState<string | null>(null)
+    const [sensors, setSensors] = useState<SensorInfo[]>([])
+    const [params, setParams] = useState<AvoidanceParams | null>(null)
+    const [enabled, setEnabledState] = useState(false)
+
+    useEffect(() => {
+        let alive = true
+        fetch(`${getServerUrl()}/api/sessions`).then(r => r.json()).then(j => {
+            if (!alive) return
+            const mine = (j.sessions ?? []).find((s: { session_id?: string }) => s.session_id === sessionId)
+            setDroneId(mine?.drone?.id ?? null)
+        }).catch(() => {})
+        return () => { alive = false }
+    }, [sessionId])
+
+    useEffect(() => {
+        if (!droneId) return
+        let alive = true
+        const run = async () => {
+            try {
+                const [st, sn] = await Promise.all([avGetStatus(droneId), avGetSensors(droneId)])
+                if (!alive) return
+                setParams(st.params); setEnabledState(st.enabled)
+                setSensors(sn.length ? sn : st.sensors)
+            } catch { /* backend away */ }
+        }
+        run()
+        const t = setInterval(run, 3000)
+        return () => { alive = false; clearInterval(t) }
+    }, [droneId])
+
+    const KINDS: SensorInfo['kind'][] = ['monocular', 'tof', 'rangefinder', 'lidar']
+    const has = (k: string) => sensors.find(s => s.kind === k)
+
+    const toggleKind = async (kind: SensorInfo['kind']) => {
+        if (!droneId) return
+        // Monocular is implicit and always present; the rest are declared here.
+        const next = KINDS.filter(k => k === 'monocular' || (k === kind ? !has(kind) : !!has(k)))
+            .map(k => ({ kind: k, mount: 'forward', enabled: true }))
+        try { setSensors(await avSetSensors(droneId, next)) } catch { /* */ }
+    }
+
+    const setParam = async (k: keyof AvoidanceParams, v: number) => {
+        if (!droneId || !params) return
+        const np = { ...params, [k]: v }
+        setParams(np)
+        try { await avSetEnabled(droneId, enabled, { [k]: v }) } catch { /* */ }
+    }
+
+    if (!droneId) {
+        return <p style={{ fontSize: 12, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', padding: '10px 0' }}>
+            Connect a drone to configure its obstacle sensors.
+        </p>
+    }
+
+    return (
+        <>
+            <PrefRow label="Monocular camera" sub="The video feed - always available. Assist-grade: scale-ambiguous, so it never outvotes a real range sensor."
+                right={<span style={{ fontSize: 10, fontFamily: 'monospace', color: '#4ade80' }}>ALWAYS ON</span>} />
+            {(['tof', 'rangefinder', 'lidar'] as const).map(kind => {
+                const s = has(kind)
+                return (
+                    <PrefRow key={kind}
+                        label={kind === 'tof' ? 'Time-of-flight (ToF)' : kind === 'rangefinder' ? 'Rangefinder' : 'LiDAR'}
+                        sub={s ? `Status: ${s.status === 'ok' ? 'receiving data' : 'no data - fitted but not publishing'}` : 'Fit and stream this sensor to the cloud'}
+                        right={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            {s && <span style={{ fontSize: 10, fontFamily: 'monospace', color: s.status === 'ok' ? '#4ade80' : '#fbbf24' }}>{s.status === 'ok' ? 'OK' : 'NO DATA'}</span>}
+                            <Toggle value={!!s} onChange={() => toggleKind(kind)} />
+                        </div>} />
+                )
+            })}
+            {params && (<>
+                <GroupLabel text="AVOIDANCE TUNING" />
+                {([
+                    ['reaction_distance_m', 'Reaction distance', 'm', 'Start avoiding within this range'],
+                    ['clearance_m', 'Clearance', 'm', 'Keep at least this far from an obstacle'],
+                    ['speed_cap_m_s', 'Speed cap', 'm/s', 'Max speed while avoidance is enabled'],
+                    ['hold_to_return_s', 'Hold before return', 's', 'Boxed-in this long, then return home'],
+                ] as const).map(([key, label, unit, sub]) => (
+                    <PrefRow key={key} label={label} sub={sub}
+                        right={<input type="number" value={params[key]}
+                            onChange={e => setParam(key, Number(e.target.value))}
+                            style={{ width: 76, padding: '5px 8px', borderRadius: 6, fontFamily: 'monospace', fontSize: 12,
+                                background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))' }} />} />
+                ))}
+            </>)}
+        </>
+    )
+}
+
 const CATEGORIES: Category[] = [
     {
         id: 'general', label: 'General', icon: SlidersHorizontal,
@@ -1829,6 +1924,11 @@ const CATEGORIES: Category[] = [
         id: 'mission', label: 'Mission', icon: Route,
         blurb: 'Behaviour when a mission starts',
         sections: [{ label: 'MISSION', Body: MissionGroup }],
+    },
+    {
+        id: 'avoidance', label: 'Avoidance', icon: Radar,
+        blurb: 'Obstacle sensors and how the drone avoids them',
+        sections: [{ label: 'SENSORS & AVOIDANCE', Body: SensorsGroup }],
     },
     {
         id: 'alerts', label: 'Alerts', icon: Bell,

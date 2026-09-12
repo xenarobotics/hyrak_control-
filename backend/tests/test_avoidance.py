@@ -211,6 +211,36 @@ async def test_executor_no_link_commands_nothing():
     assert did is False and note == "no link"
 
 
+# -- monocular detector ---------------------------------------------------
+def test_detector_clear_view_returns_none():
+    import numpy as np
+    from app.avoidance.detector import observation_from_depth
+    depth = np.full((100, 200), 50.0)              # everything beyond range
+    assert observation_from_depth(depth, max_distance_m=30) is None
+
+
+def test_detector_finds_near_blob_and_its_bearing():
+    import numpy as np
+    from app.avoidance.detector import observation_from_depth
+    depth = np.full((100, 200), 25.0)
+    depth[30:70, 20:45] = 3.0                       # near blob, left of centre
+    obs = observation_from_depth(depth, hfov_deg=70)
+    assert obs is not None
+    assert obs.source == "monocular"
+    assert 2.5 < obs.distance_m < 3.5
+    assert obs.bearing_deg < 0                       # left = negative bearing
+    assert obs.confidence <= 0.55                    # capped assist-grade
+
+
+def test_detector_center_blob_is_straight_ahead():
+    import numpy as np
+    from app.avoidance.detector import observation_from_depth
+    depth = np.full((100, 200), 25.0)
+    depth[30:70, 90:110] = 4.0
+    obs = observation_from_depth(depth)
+    assert obs is not None and abs(obs.bearing_deg) < 6
+
+
 @pytest.mark.asyncio
 async def test_reroute_appends_goal_when_windowed():
     # Goal well beyond the local window -> the returned mission must END at the
