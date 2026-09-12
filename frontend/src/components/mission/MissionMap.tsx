@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   MapContainer,
   TileLayer,
@@ -21,7 +21,7 @@ import { MAP_LAYERS, WP_META } from '@/types/mission'
 import type { Waypoint } from '@/types/mission'
 import { getServerUrl } from '@/lib/server-url'
 import { visibleInterval } from '@/lib/poll'
-import { getHazards, getObstacles, type KnownHazard, type LiveObstacle } from '@/lib/avoidance'
+import { getHazards, getObstacles, addHazard, type KnownHazard, type LiveObstacle } from '@/lib/avoidance'
 import { ZONE_COLORS, zoneRings, type ZoneFeature } from '@/components/admin/zones'
 
 // ── Flight zones (green/orange/red) - pilots plan around these ─────────────
@@ -62,10 +62,11 @@ function FlightZonesOverlay() {
 // ── Obstacle avoidance overlay ──────────────────────────────────────────────
 // Known hazards (persistent shared map, blue) + every avoidance drone's LIVE
 // obstacle map (grey = confirmed static, amber = moving). Pure read-only.
-function AvoidanceOverlay() {
+function AvoidanceOverlay({ show, reload }: { show: boolean; reload: number }) {
   const [hazards, setHazards] = useState<KnownHazard[]>([])
   const [obstacles, setObstacles] = useState<LiveObstacle[]>([])
   useEffect(() => {
+    if (!show) return
     let alive = true
     const load = async () => {
       try {
@@ -78,7 +79,8 @@ function AvoidanceOverlay() {
     }
     void load()
     return visibleInterval(load, 4000)
-  }, [])
+  }, [show, reload])
+  if (!show) return null
   return (
     <>
       {hazards.map(h => (
@@ -267,14 +269,16 @@ function buildSmoothPath2D(waypoints: Waypoint[]): [number, number][] {
 
 // ── Map click handler ───────────────────────────────────────────────────────
 
-function ClickHandler() {
+function ClickHandler({ pinMode, onPin }: { pinMode: boolean; onPin: (lat: number, lng: number) => void }) {
   const addWaypoint    = useMissionStore(s => s.addWaypoint)
   const surveyMode     = useMissionStore(s => s.surveyMode)
   const addSurveyPoint = useMissionStore(s => s.addSurveyPoint)
 
   useMapEvents({
     click(e) {
-      if (surveyMode) {
+      if (pinMode) {
+        onPin(e.latlng.lat, e.latlng.lng)
+      } else if (surveyMode) {
         addSurveyPoint(e.latlng.lat, e.latlng.lng)
       } else {
         addWaypoint(e.latlng.lat, e.latlng.lng)
@@ -386,6 +390,17 @@ export default function MissionMap() {
   // Drone position trail - last 60 positions for a flight path ghost
   const [droneTrail, setDroneTrail] = useState<[number, number][]>([])
   const lastTrailPos = useRef<{ lat: number; lng: number } | null>(null)
+  const [showAvoid, setShowAvoid] = useState(true)   // obstacle-avoidance overlay
+  const [pinMode, setPinMode] = useState(false)      // click-to-pin a known hazard
+  const [hazardNonce, setHazardNonce] = useState(0)  // bump to force overlay reload
+
+  const pinHazard = useCallback(async (lat: number, lng: number) => {
+    try {
+      await addHazard(lat, lng, 8, 0)
+      setHazardNonce(n => n + 1)   // reload the overlay so the new circle shows
+    } catch { /* backend unreachable - nothing pinned */ }
+    setPinMode(false)             // one pin per activation
+  }, [])
 
   useEffect(() => {
     if (!dronePos || dronePos.latitude_deg === 0) return
@@ -398,6 +413,7 @@ export default function MissionMap() {
   }, [dronePos])
 
   return (
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
     <MapContainer
       center={[20, 0]}
       zoom={3}
@@ -423,10 +439,10 @@ export default function MissionMap() {
         />
       )}
 
-      <ClickHandler />
+      <ClickHandler pinMode={pinMode} onPin={pinHazard} />
       <DronePositionTracker />
       <FlightZonesOverlay />
-      <AvoidanceOverlay />
+      <AvoidanceOverlay show={showAvoid} reload={hazardNonce} />
 
       {/* Planned flight path (no active mission) - cyan when terrain-follow is on
           (path adapts to terrain), blue when off (fixed altitude relative to home) */}
@@ -569,5 +585,53 @@ export default function MissionMap() {
         )
       })}
     </MapContainer>
+
+      {/* Avoidance overlay control - toggle visibility, legend, click-to-pin */}
+      <div style={{
+        position: 'absolute', bottom: 12, left: 12, zIndex: 1000,
+        background: 'rgba(10,12,18,0.82)', backdropFilter: 'blur(6px)',
+        border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8,
+        padding: '8px 10px', fontSize: 11, color: '#e5e7eb',
+        fontFamily: 'var(--font-geist-mono,monospace)', minWidth: 148,
+        boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+      }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontWeight: 700 }}>
+          <input type="checkbox" checked={showAvoid}
+            onChange={e => setShowAvoid(e.target.checked)}
+            style={{ accentColor: '#38bdf8', cursor: 'pointer' }} />
+          Avoidance
+        </label>
+        {showAvoid && (
+          <div style={{ marginTop: 7, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <LegendRow color="#38bdf8" label="Known hazard" />
+            <LegendRow color="#9aa3b5" label="Static obstacle" />
+            <LegendRow color="#fbbf24" label="Moving obstacle" />
+            <button
+              onClick={() => setPinMode(p => !p)}
+              style={{
+                marginTop: 4, width: '100%', padding: '4px 6px', borderRadius: 5,
+                border: `1px solid ${pinMode ? '#38bdf8' : 'rgba(255,255,255,0.12)'}`,
+                background: pinMode ? 'rgba(56,189,248,0.18)' : 'rgba(255,255,255,0.04)',
+                color: pinMode ? '#7dd3fc' : '#cbd5e1', cursor: 'pointer',
+                fontFamily: 'inherit', fontSize: 10.5, fontWeight: 600,
+              }}>
+              {pinMode ? 'Click map to pin...' : '+ Pin hazard'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function LegendRow({ color, label }: { color: string; label: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span style={{
+        width: 11, height: 11, borderRadius: '50%', flexShrink: 0,
+        background: `${color}44`, border: `1.5px solid ${color}`,
+      }} />
+      <span style={{ color: '#cbd5e1' }}>{label}</span>
+    </div>
   )
 }
