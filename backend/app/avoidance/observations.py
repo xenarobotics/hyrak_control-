@@ -35,6 +35,11 @@ class ObstacleObservation:
     half_width_deg: float = 5.0
     confidence: float = 0.5
     source: str = "unknown"
+    #: Estimated top height of the obstacle in metres, when the sensor can
+    #: judge it (a depth/3D sensor, a lidar). 0 = unknown - a bearing-only
+    #: sensor cannot see height, so the obstacle is treated as blocking at
+    #: every altitude and climb-over is never risked over it.
+    top_m: float = 0.0
     t: float = 0.0
 
     def __post_init__(self):
@@ -97,6 +102,15 @@ class ObservationBus:
                 if sectors[s] is None or o.distance_m < sectors[s]:
                     sectors[s] = o.distance_m
         return sectors
+
+    def recent(self, min_confidence: float = 0.0,
+               now: float | None = None) -> list[ObstacleObservation]:
+        """All fresh, credible observations - for the world map, which fuses
+        every bearing (not just the forward cone) into persistent obstacles."""
+        now = now if now is not None else time.monotonic()
+        self._prune(now)
+        return [o for o in self._obs
+                if o.confidence >= min_confidence and o.distance_m > 0]
 
     def nearest_ahead(self, cone_deg: float = 60.0,
                       min_confidence: float = 0.0,

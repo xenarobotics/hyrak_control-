@@ -30,10 +30,11 @@ export interface AvoidanceStatus {
     drone_id: string
     enabled: boolean
     armed: boolean
-    state: 'nominal' | 'holding' | 'rerouted' | 'returning' | 'disabled'
+    state: 'nominal' | 'holding' | 'rerouted' | 'climbing' | 'returning' | 'disabled'
     reason: string
     params: AvoidanceParams
     sensors: SensorInfo[]
+    obstacle_count?: number
     obstacle_distance_cm: number[]
 }
 

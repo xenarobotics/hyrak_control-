@@ -16,7 +16,7 @@ import {
 
 const STATE_COLOR: Record<string, string> = {
     nominal: '#4ade80', holding: '#fbbf24', rerouted: '#22d3ee',
-    returning: '#f87171', disabled: '#8a94a8',
+    climbing: '#a78bfa', returning: '#f87171', disabled: '#8a94a8',
 }
 
 export function AvoidancePanel() {
@@ -101,9 +101,16 @@ export function AvoidancePanel() {
             <div className="flex items-center justify-between text-[11px] font-mono px-2 py-1.5 rounded"
                 style={{ background: 'hsl(var(--app-surface-2))' }}>
                 <span style={{ color: 'hsl(var(--app-text-muted))' }}>NEAREST AHEAD</span>
-                <span style={{ color: nearest !== null && nearest < 8 ? '#fbbf24' : 'hsl(var(--app-text))' }}>
-                    {nearest !== null ? `${nearest.toFixed(1)} m` : 'clear'}
-                </span>
+                <div className="flex items-center gap-3">
+                    {!!status?.obstacle_count && (
+                        <span style={{ color: 'hsl(var(--app-text-muted))' }}>
+                            {status.obstacle_count} tracked
+                        </span>
+                    )}
+                    <span style={{ color: nearest !== null && nearest < 8 ? '#fbbf24' : 'hsl(var(--app-text))' }}>
+                        {nearest !== null ? `${nearest.toFixed(1)} m` : 'clear'}
+                    </span>
+                </div>
             </div>
 
             {/* detection toggle + arm */}

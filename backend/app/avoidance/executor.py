@@ -35,14 +35,17 @@ async def apply(manager, action: str, waypoints: list | None,
         if action == "return":
             ok = await manager.set_flight_mode("RETURN")
             return bool(ok), "return"
-        if action == "reroute":
+        if action in ("reroute", "climb"):
+            # A climb-over is a reroute whose waypoints carry a raised
+            # altitude - same upload+start path, the aircraft climbs as it
+            # flies the new leg.
             if not waypoints:
-                return False, "no reroute waypoints"
+                return False, f"no {action} waypoints"
             ok, err = await manager.upload_mission(waypoints)
             if not ok:
                 return False, f"upload failed: {err}"
             await manager.start_mission()
-            return True, "reroute"
+            return True, action
         if action == "clear":
             if intervened:
                 # Hand control back: resume the mission the drone was flying.

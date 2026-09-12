@@ -125,7 +125,7 @@ async def _tick() -> None:
         if c.armed and in_air and manager is not None:
             did, note = await executor.apply(
                 manager, decision.action, decision.waypoints, c.intervened)
-            if decision.action in ("hold", "reroute", "return") and did:
+            if decision.action in ("hold", "reroute", "climb", "return") and did:
                 c.intervened = True
             elif decision.action == "clear" and c.intervened and did:
                 c.intervened = False

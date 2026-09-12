@@ -138,6 +138,70 @@ async def test_no_path_holds_then_returns(monkeypatch):
     assert d2.action == "return" and d2.state == AvoidanceState.RETURNING
 
 
+# -- v2: obstacle map, multi-obstacle, climb-over ------------------------
+def test_obstacle_map_merges_nearby_keeps_distinct_and_expires():
+    from app.avoidance.obstacle_map import ObstacleMap
+    m = ObstacleMap(ttl_s=5.0, merge_dist_m=5.0)
+    m.add({"lat": 17.60, "lng": 78.12, "radius_m": 4}, top_m=6, confidence=0.5, now=100)
+    m.add({"lat": 17.600005, "lng": 78.12, "radius_m": 7}, confidence=0.9, now=101)  # ~0.5m -> merge
+    m.add({"lat": 17.602, "lng": 78.12, "radius_m": 3}, now=101)                     # ~220m -> distinct
+    act = m.active(now=101)
+    assert len(act) == 2
+    merged = min(act, key=lambda o: abs(o.lat - 17.60))
+    assert merged.radius_m == 7 and merged.top_m == 6 and merged.hits == 2
+    assert m.active(now=200) == []   # both expired past ttl
+
+
+@pytest.mark.asyncio
+async def test_two_obstacles_are_rerouted_together():
+    c = AvoidanceController("d1"); c.set_enabled(True)
+    c.params.reaction_distance_m = 60.0
+    pose = Pose(17.600, 78.120, heading_deg=0)
+    goal = (17.610, 78.120)
+    # two obstacles ahead at different bearings - both must be remembered
+    c.observe(ObstacleObservation(bearing_deg=-6, distance_m=35, confidence=0.9))
+    c.observe(ObstacleObservation(bearing_deg=8, distance_m=45, confidence=0.9))
+    d = await c.decide(pose, goal, cruise_alt_m=6, speed_m_s=3)
+    assert d.action == "reroute"
+    assert d.obstacle_count == 2          # planned around BOTH, not one at a time
+
+
+@pytest.mark.asyncio
+async def test_climb_over_when_lateral_blocked_and_height_known(monkeypatch):
+    # Lateral reroute (any keep-out) fails; the climb re-plan, with the short
+    # obstacle overflown and excluded, gets a clear path -> CLIMB.
+    async def fake(start, goal, obstacles, **k):
+        if obstacles:
+            return None, "boxed in"
+        return [{"lat": goal[0], "lng": goal[1], "type": "waypoint",
+                 "altitude": k.get("cruise_alt_m", 10)}], ""
+    monkeypatch.setattr(reroute_mod, "reroute_around", fake)
+
+    c = AvoidanceController("d1"); c.set_enabled(True)
+    c.params.reaction_distance_m = 40.0
+    pose = Pose(17.600, 78.120, heading_deg=0, alt_m=4.0)
+    goal = (17.610, 78.120)
+    c.observe(ObstacleObservation(bearing_deg=0, distance_m=20, confidence=0.9, top_m=6))
+    d = await c.decide(pose, goal, cruise_alt_m=4, speed_m_s=2)
+    assert d.action == "climb"
+    assert d.state == AvoidanceState.CLIMBING
+    assert d.target_alt_m and d.target_alt_m >= 6      # above the 6 m obstacle
+
+
+@pytest.mark.asyncio
+async def test_no_climb_when_height_unknown(monkeypatch):
+    async def fake(start, goal, obstacles, **k):
+        return (None, "boxed in") if obstacles else ([], "")
+    monkeypatch.setattr(reroute_mod, "reroute_around", fake)
+    c = AvoidanceController("d1"); c.set_enabled(True)
+    c.params.reaction_distance_m = 40.0
+    pose = Pose(17.600, 78.120, 0, alt_m=4.0)
+    goal = (17.610, 78.120)
+    c.observe(ObstacleObservation(bearing_deg=0, distance_m=20, confidence=0.9))  # top_m=0
+    d = await c.decide(pose, goal, cruise_alt_m=4)
+    assert d.action in ("hold", "return")   # never climb over an unknown height
+
+
 @pytest.mark.asyncio
 async def test_manual_hover_brakes_with_no_goal():
     c = AvoidanceController("d1"); c.set_enabled(True)
