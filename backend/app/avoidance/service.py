@@ -96,6 +96,7 @@ class AvoidanceController:
         self._committed_path: list | None = None
         self._committed_goal: tuple[float, float] | None = None
         self._recommended_speed = 0.0
+        self._path_invalid = 0   # consecutive ticks the committed path looked blocked
 
     # -- ingest -----------------------------------------------------------
     def observe(self, obs: ObstacleObservation) -> None:
@@ -113,6 +114,7 @@ class AvoidanceController:
             self.omap.clear()
             self._committed_path = None
             self._committed_goal = None
+            self._path_invalid = 0
         elif self.state == AvoidanceState.DISABLED:
             self.state = AvoidanceState.NOMINAL
 
@@ -168,18 +170,27 @@ class AvoidanceController:
                         if o.top_m == 0 or o.top_m >= cruise_alt_m]
 
             # 3a. RECEDING HORIZON: keep flying the path we already committed to
-            #     if it is still clear of every current obstacle and still heads
-            #     to this goal - do NOT re-derive from the drifted position each
-            #     tick. That greedy loop is exactly what corners a drone in a
-            #     cluttered, multi-obstacle field.
+            #     rather than re-deriving from the drifted position each tick
+            #     (the greedy loop that corners a drone in clutter). With
+            #     HYSTERESIS: a single "blocked" tick is a sensor blip - tolerate
+            #     it and keep tracking; only re-plan after it stays blocked, or
+            #     the drone grossly strays from its corridor.
             if (self._committed_path and self._committed_goal == goal
-                    and self._path_clear(self._committed_path, keepouts)
                     and self._on_path(pose, self._committed_path)):
-                self._hold_since = None
-                return self._settle(Decision(
-                    "track", AvoidanceState.REROUTED, "tracking committed detour",
-                    obstacle=near_ko, fused_distance_m=near_d,
-                    obstacle_count=len(mapped), recommended_speed_m_s=rec_speed))
+                if self._path_clear(self._committed_path, keepouts):
+                    self._path_invalid = 0
+                    self._hold_since = None
+                    return self._settle(Decision(
+                        "track", AvoidanceState.REROUTED, "tracking committed detour",
+                        obstacle=near_ko, fused_distance_m=near_d,
+                        obstacle_count=len(mapped), recommended_speed_m_s=rec_speed))
+                self._path_invalid += 1
+                if self._path_invalid < 2:      # transient blip - hold the path
+                    return self._settle(Decision(
+                        "track", AvoidanceState.REROUTED, "confirming obstacle",
+                        obstacle=near_ko, fused_distance_m=near_d,
+                        obstacle_count=len(mapped), recommended_speed_m_s=rec_speed))
+            self._path_invalid = 0
 
             # 3b. LATERAL: commit a fresh path around ALL obstacles at once.
             wps, _ = await reroute_mod.reroute_around(

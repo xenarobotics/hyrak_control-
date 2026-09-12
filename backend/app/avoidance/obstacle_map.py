@@ -97,11 +97,18 @@ class ObstacleMap:
                     a = 0.4   # smoothing
                     o.vn_mps = (1 - a) * o.vn_mps + a * max(-25.0, min(25.0, vn))
                     o.ve_mps = (1 - a) * o.ve_mps + a * max(-25.0, min(25.0, ve))
-                # Confidence-weighted position update, keep the largest extent.
+                # Confidence-weighted position update.
                 w = confidence / (o.confidence + confidence + 1e-6)
                 o.lat += (lat - o.lat) * w
                 o.lng += (lng - o.lng) * w
-                o.radius_m = max(o.radius_m, radius)
+                # Radius CONVERGES toward newer estimates instead of keeping the
+                # largest ever seen. A far reading has a big angular->linear
+                # extent (over-large); as the drone closes in the estimate
+                # tightens, and keeping the max kept an inflated keep-out that
+                # cornered the planner. A confidence-weighted EMA lets it shrink
+                # to the accurate value, with the clearance already inside it.
+                a = 0.2 + 0.5 * min(1.0, confidence)
+                o.radius_m = (1 - a) * o.radius_m + a * radius
                 o.top_m = max(o.top_m, top_m)
                 o.confidence = max(o.confidence, confidence)
                 o.last_seen = now

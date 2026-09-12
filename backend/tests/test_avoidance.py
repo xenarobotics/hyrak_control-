@@ -177,6 +177,49 @@ def test_dynamic_obstacle_velocity_is_estimated_and_predicted():
     assert pk["radius_m"] > o.radius_m    # grown to cover the swept path
 
 
+# -- refinements: point cloud, radius convergence, hysteresis ------------
+def test_pointcloud_extraction_gaps_and_real_heights():
+    from app.avoidance.pointcloud import observations_from_pointcloud
+    pts = []
+    for z in range(1, 6):                       # vertical columns, up rel -3..1
+        pts += [(10.0, -4.0, z - 4.0), (10.0, 4.0, z - 4.0)]  # left & right
+    obs = observations_from_pointcloud(pts, sensor_alt_m=4.0,
+                                       hfov_deg=120, bin_deg=10)
+    assert len(obs) >= 2
+    bearings = sorted(o.bearing_deg for o in obs)
+    assert bearings[0] < -10 and bearings[-1] > 10       # left + right
+    assert not any(abs(o.bearing_deg) < 5 for o in obs)  # GAP straight ahead
+    assert all(o.top_m > 4 for o in obs)                 # real absolute heights
+
+
+def test_keepout_radius_converges_to_recent_estimate():
+    from app.avoidance.obstacle_map import ObstacleMap
+    m = ObstacleMap()
+    m.add({"lat": 17.60, "lng": 78.12, "radius_m": 15}, confidence=0.5, now=100.0)
+    for k in range(1, 6):   # closer, tighter, higher-confidence estimates
+        m.add({"lat": 17.60, "lng": 78.12, "radius_m": 5},
+              confidence=0.9, now=100.0 + k * 0.3)
+    r = m.active(now=101.5)[0].radius_m
+    assert r < 8.0   # converged down from 15 toward 5, not stuck at the max
+
+
+@pytest.mark.asyncio
+async def test_hysteresis_tolerates_a_transient_block(monkeypatch):
+    c = AvoidanceController("d1"); c.set_enabled(True)
+    c.params.reaction_distance_m = 60.0
+    pose = Pose(17.600, 78.120, heading_deg=0)
+    goal = (17.610, 78.120)
+    c.observe(ObstacleObservation(bearing_deg=0, distance_m=40, confidence=0.9))
+    d1 = await c.decide(pose, goal, cruise_alt_m=6, speed_m_s=5)
+    assert d1.action == "reroute"                       # commits a path
+    # A single blip that makes the path look blocked must NOT drop it.
+    monkeypatch.setattr(AvoidanceController, "_path_clear",
+                        staticmethod(lambda p, k: False))
+    c.observe(ObstacleObservation(bearing_deg=0, distance_m=40, confidence=0.9))
+    d2 = await c.decide(pose, goal, cruise_alt_m=6, speed_m_s=5)
+    assert d2.action == "track"                         # tolerated, still tracking
+
+
 # -- persistent hazard map -----------------------------------------------
 def test_static_obstacle_is_confirmed_but_mover_is_not():
     from app.avoidance.obstacle_map import ObstacleMap
@@ -211,7 +254,8 @@ def test_obstacle_map_merges_nearby_keeps_distinct_and_expires():
     act = m.active(now=101)
     assert len(act) == 2
     merged = min(act, key=lambda o: abs(o.lat - 17.60))
-    assert merged.radius_m == 7 and merged.top_m == 6 and merged.hits == 2
+    # radius now converges (confidence-weighted EMA) toward the newer estimate
+    assert 4 < merged.radius_m <= 7 and merged.top_m == 6 and merged.hits == 2
     assert m.active(now=200) == []   # both expired past ttl
 
 
