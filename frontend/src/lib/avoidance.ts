@@ -102,10 +102,22 @@ export interface KnownHazard {
     last_seen: string | null
 }
 
+export interface LatLng { lat: number; lng: number }
+
 // The drone's LIVE obstacle map (what it's sensing/planning around now).
 export async function getObstacles(droneId: string): Promise<LiveObstacle[]> {
     const d = await j<{ obstacles: LiveObstacle[] }>(await fetch(api(`/${droneId}/obstacles`)))
     return d.obstacles
+}
+
+// Live obstacles PLUS the active reroute path and the mission goal, so the
+// Mission map can show the planned route, the destination, and the plan
+// updating in real time.
+export async function getObstaclesAndPath(
+    droneId: string): Promise<{ obstacles: LiveObstacle[]; reroutePath: LatLng[] | null; goal: LatLng | null }> {
+    const d = await j<{ obstacles: LiveObstacle[]; reroute_path: LatLng[] | null; goal: LatLng | null }>(
+        await fetch(api(`/${droneId}/obstacles`)))
+    return { obstacles: d.obstacles, reroutePath: d.reroute_path ?? null, goal: d.goal ?? null }
 }
 
 // The persistent SHARED hazard map (known static obstacles across all flights).

@@ -116,24 +116,41 @@ async def connect_one(i: int, manual: bool = False) -> str:
     from app.telemetry.manager import TelemetryManager
     if manual:
         _disabled = False
+    address = f"udpin://0.0.0.0:{_port_for(i)}"
     async with _lock:
         if i in _managers and _managers[i].is_connected:
             return "already connected"
-        address = f"udpin://0.0.0.0:{_port_for(i)}"
-        manager = TelemetryManager(on_update=_snapshot_cb(i), fleet_mode=True)
-        ok = await manager.connect(address, kill_stale=True)
-        if not ok:
-            return f"no drone on {address}"
-        await manager.start()
+    # Do the slow part (spawn mavsdk_server + up to a 10 s heartbeat wait)
+    # OUTSIDE the lock. Holding _lock across that await serialized every probe
+    # and blocked the whole fleet for ~10 s per empty port, which starved the
+    # event loop until the HTTP server stopped responding.
+    manager = TelemetryManager(on_update=_snapshot_cb(i), fleet_mode=True)
+    ok = await manager.connect(address, kill_stale=True)
+    if not ok:
+        try:
+            await manager.stop(kill_stale=True)   # reap its throwaway server
+        except Exception:
+            pass
+        return f"no drone on {address}"
+    await manager.start()
+    async with _lock:
+        if i in _managers and _managers[i].is_connected:
+            # Another task adopted this instance while we were connecting -
+            # drop the duplicate rather than leak a second live link.
+            try:
+                await manager.stop(kill_stale=False)
+            except Exception:
+                pass
+            return "already connected"
         _managers[i] = manager
         _names[i] = f"Station Drone {i}"
         _adopted.add(i)   # watchdog heals it from now on, whatever its index
-        rec = await drone_registry.upsert_seen(
-            f"sitl-station-fleet-{i}", is_simulated=True)
-        if rec:
-            _db_ids[i] = rec["id"]
-        logger.info(f"Delivery fleet drone {i} connected ({address})")
-        return "connected"
+    rec = await drone_registry.upsert_seen(
+        f"sitl-station-fleet-{i}", is_simulated=True)
+    if rec:
+        _db_ids[i] = rec["id"]
+    logger.info(f"Delivery fleet drone {i} connected ({address})")
+    return "connected"
 
 
 async def connect(count: int) -> dict:
@@ -308,6 +325,19 @@ async def fly_mission(db_id: str, waypoints: list[dict],
         return False, {"msg": f"Uploaded, but start failed: {msg2}"}
     logger.info(f"Fleet drone {i} flying a {len(flown)}-wp mission (+{band:.0f} m band)")
     return True, {"msg": "Mission started"}
+
+
+def live_manager(i: int):
+    """The CURRENT connected manager for fleet instance i, or None.
+
+    The watchdog replaces `_managers[i]` with a brand-new manager (new
+    mavsdk_server, new gRPC port) whenever a link goes stale. Anything that
+    cached the old manager object - the per-session fleet map in particular -
+    would keep dialing the dead server and get gRPC UNAVAILABLE / connection
+    refused on upload. Callers that hold their own reference should resolve
+    through here instead so they always hit the live link."""
+    m = _managers.get(i)
+    return m if (m is not None and m.is_connected) else None
 
 
 async def _rebuild(i: int):
@@ -571,6 +601,16 @@ async def _watchdog_loop() -> None:
                 # link is rebuilt instead of silently staying dead.
                 scan = sorted(set(range(1, MAX_SCAN + 1)) | _adopted)
                 await asyncio.gather(*[try_adopt(i) for i in scan])
+                # Safety-net reap: any mavsdk_server whose System was discarded
+                # (a failed probe the library never wait()ed on) is our zombie
+                # child - sweep them so they can't pile up and starve the box.
+                try:
+                    from app.telemetry.manager import TelemetryManager
+                    n = TelemetryManager._reap_children()
+                    if n:
+                        logger.debug(f"Reaped {n} zombie child process(es)")
+                except Exception:
+                    pass
         except asyncio.CancelledError:
             raise
         except Exception as e:

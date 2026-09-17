@@ -50,7 +50,7 @@ def _resolve_link(drone_id: str):
                                 heading_deg=lv.get("heading", 0.0),
                                 alt_m=lv.get("alt", 0.0))
                     in_air = bool(lv.get("in_air")) or lv.get("alt", 0.0) > 1.5
-                    return mgr, pose, in_air
+                    return mgr, pose, in_air, str(lv.get("mode") or "")
     except Exception:
         pass
     sm = _session_manager
@@ -63,13 +63,22 @@ def _resolve_link(drone_id: str):
                 snap = mgr.snapshot()
                 lat, lng = snap.position.latitude_deg, snap.position.longitude_deg
                 if not (lat or lng):
-                    return None, None, False
+                    return None, None, False, ""
                 pose = Pose(lat=lat, lng=lng, heading_deg=snap.heading_deg,
                             alt_m=snap.position.relative_altitude_m)
                 in_air = (bool(snap.flight_mode.is_in_air)
                           or snap.position.relative_altitude_m > 1.5)
-                return mgr, pose, in_air
-    return None, None, False
+                return mgr, pose, in_air, str(snap.flight_mode.mode or "")
+    return None, None, False, ""
+
+
+# Modes in which the aircraft is DONE with its route (returning home or
+# landing). Handing decide() a goal here is the bug that ping-ponged the
+# drone: after the mission finished and PX4 began RTL, the loop still held
+# the mission's last waypoint as the goal, judged the returning drone
+# "off-path", and rerouted it straight back to that waypoint - upload +
+# start, over and over, so it never landed. No goal => no reroute.
+_NO_GOAL_MODES = {"RETURN_TO_LAUNCH", "RTL", "LAND", "LANDING"}
 
 
 async def _goal_for(drone_id: str) -> tuple[float, float] | None:
@@ -142,16 +151,23 @@ async def _tick() -> None:
     for c in list(avoidance._controllers.values()):
         if not c.enabled:
             continue
-        manager, pose, in_air = _resolve_link(c.drone_id)
+        manager, pose, in_air, mode = _resolve_link(c.drone_id)
         if pose is not None:
             try:
                 await _sync_hazards(c, pose, now)
             except Exception as e:
                 logger.debug(f"hazard sync failed: {e}")
-        goal = await _goal_for(c.drone_id) if in_air else None
+        # Only pursue a goal while the aircraft is actually flying its route.
+        # Returning home / landing means the route is finished - see
+        # _NO_GOAL_MODES for the ping-pong this prevents.
+        pursuing = in_air and mode.upper() not in _NO_GOAL_MODES
+        goal = await _goal_for(c.drone_id) if pursuing else None
 
         prev_state = c.state
-        decision = await c.decide(pose, goal)
+        # Reroute at the drone's CURRENT altitude so a lateral dodge stays level
+        # (a constant-altitude mission must not climb just to go around).
+        cruise = pose.alt_m if (pose is not None and pose.alt_m > 1.0) else 10.0
+        decision = await c.decide(pose, goal, cruise_alt_m=cruise)
 
         # Command the aircraft only when armed AND airborne. Advisory (unarmed)
         # detects and logs but never touches control.
@@ -190,6 +206,16 @@ async def _run() -> None:
         await asyncio.sleep(INTERVAL_S)
 
 
+_eyes_logged: set[str] = set()
+
+
+def _sole_enabled_controller():
+    """The one controller with detection enabled, or None if zero or several
+    (ambiguous - never guess which drone a camera belongs to)."""
+    live = [c for c in avoidance._controllers.values() if c.enabled]
+    return live[0] if len(live) == 1 else None
+
+
 def observe_from_session(session_id: str, obs: dict | list) -> None:
     """Bridge vision-derived obstacle observation(s) (from the depth analyzer)
     to the avoidance bus, resolving which drone this browser session is flying.
@@ -203,10 +229,28 @@ def observe_from_session(session_id: str, obs: dict | list) -> None:
         sess = sm.get(session_id)
         drone = getattr(sess, "drone", None) if sess else None
         did = (drone or {}).get("id") if isinstance(drone, dict) else getattr(drone, "id", None)
-        if not did or not avoidance.has_controller(did):
-            return
-        c = avoidance.controller(did)
-        if not c.enabled:
+        c = avoidance.controller(did) if (did and avoidance.has_controller(did)) else None
+        if c is None or not c.enabled:
+            # A Swarm-mode session never binds a drone: the fleet owns the
+            # link, and a session's registry record is only ever resolved
+            # from ITS OWN telemetry. Without this the camera's detections
+            # were dropped right here while the fleet drone flew blind. If
+            # exactly one drone has avoidance enabled, this camera is its eyes.
+            c = _sole_enabled_controller()
+            if c is None:
+                return
+            if session_id not in _eyes_logged:
+                _eyes_logged.add(session_id)
+                logger.info(f"Session {session_id[:8]} camera feeds avoidance "
+                            f"for drone {c.drone_id[:8]} (session has no bound drone)")
+        # On the ground the camera stares at the pad and the ground plane -
+        # feeding that in would seed phantom obstacles for the first seconds
+        # of the flight. Obstacles only exist to a drone that is flying.
+        try:
+            link, _, in_air, _ = _resolve_link(c.drone_id)
+        except Exception:
+            link, in_air = None, True
+        if link is not None and not in_air:
             return
         from app.avoidance.observations import ObstacleObservation
         for one in (obs if isinstance(obs, list) else [obs]):
@@ -224,6 +268,9 @@ def observe_from_session(session_id: str, obs: dict | list) -> None:
 def start(session_manager) -> None:
     global _task, _session_manager
     _session_manager = session_manager
+    n = avoidance.restore_state()
+    if n:
+        logger.info(f"Restored avoidance enabled/armed state for {n} drone(s)")
     if _task is None or _task.done():
         _task = asyncio.create_task(_run(), name="avoidance_loop")
         logger.info("Avoidance loop started (advisory unless a drone is armed)")

@@ -19,7 +19,10 @@ class DepthMapper(BaseAnalyzer):
         settings = get_settings()
         self.device      = settings.device
         self.viz_min_depth = 0.3   # metres - clip below this
-        self.viz_max_depth = 5.0   # metres - clip above this
+        self.viz_max_depth = float(settings.depth_viz_max_m)   # clip above this
+        self.hfov_deg = float(settings.camera_hfov_deg)
+        self.obstacle_max_m = float(settings.depth_obstacle_max_m)
+        self.model_name = settings.depth_model
 
         # Downscale input before ZoeDepth to keep inference fast
         # 640x360 gives good quality at ~25ms on 4070
@@ -27,19 +30,19 @@ class DepthMapper(BaseAnalyzer):
         self.infer_h = 360
 
         try:
-            logger.info(f"Loading ZoeDepth on {self.device}...")
+            logger.info(f"Loading depth model {self.model_name} on {self.device}...")
             from transformers import pipeline
             dtype = torch.float16 if self.device == "cuda" else torch.float32
             self.estimator = pipeline(
                 "depth-estimation",
-                model="Intel/zoedepth-nyu-kitti",
+                model=self.model_name,
                 device=self.device,
                 torch_dtype=dtype,
             )
             # Warm-up: first CUDA inference pays kernel/alloc init (~1s);
             # do it here so it doesn't stall the first live frames.
             self.estimator(Image.new("RGB", (self.infer_w, self.infer_h)))
-            logger.info(f"✅ DepthMapper using ZoeDepth on {self.device.upper()}")
+            logger.info(f"✅ DepthMapper using {self.model_name.split('/')[-1]} on {self.device.upper()}")
         except Exception as e:
             logger.error(f"DepthMapper load failed: {e}")
             raise
@@ -64,7 +67,7 @@ class DepthMapper(BaseAnalyzer):
         # Fix NaN/inf before any arithmetic - this was the original crash
         depth = np.nan_to_num(depth, nan=0.0, posinf=self.viz_max_depth, neginf=0.0)
 
-        # Obstacle avoidance tap: the raw ZoeDepth output is metric (metres),
+        # Obstacle avoidance tap: the raw model output is metric (metres),
         # so - only when some drone actually has avoidance enabled, to add zero
         # cost otherwise - extract the nearest obstacle ahead. It rides out in
         # meta (per-frame, so no cross-session race) and the base loop forwards
@@ -83,7 +86,8 @@ class DepthMapper(BaseAnalyzer):
                      "half_width_deg": ob.half_width_deg,
                      "confidence": ob.confidence, "source": ob.source,
                      "top_m": ob.top_m}
-                    for ob in observations_from_depth(depth, hfov_deg=70.0)
+                    for ob in observations_from_depth(depth, hfov_deg=self.hfov_deg,
+                                                      max_distance_m=self.obstacle_max_m)
                 ] or None
         except Exception:
             obstacle_obs = None

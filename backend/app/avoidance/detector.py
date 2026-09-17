@@ -83,15 +83,52 @@ def observation_from_depth(depth_m: np.ndarray, hfov_deg: float = 70.0,
         half_width_deg=half_width, confidence=confidence, source="monocular")
 
 
+def _nearest_flat_segment(col: np.ndarray, ok: np.ndarray, min_run: int,
+                          tol: float) -> float:
+    """Depth of the nearest vertical run of >= min_run consecutive valid rows
+    whose depths all lie within `tol` of each other, or inf if the column has
+    no such structure."""
+    best = np.inf
+    i, n = 0, col.shape[0]
+    while i < n:
+        if not ok[i]:
+            i += 1
+            continue
+        lo = hi = float(col[i])
+        j = i + 1
+        while j < n and ok[j]:
+            v = float(col[j])
+            lo2, hi2 = min(lo, v), max(hi, v)
+            if hi2 > lo2 * (1.0 + tol):
+                break
+            lo, hi, j = lo2, hi2, j + 1
+        if j - i >= min_run and lo < best:
+            best = lo
+        i = j
+    return best
+
+
 def observations_from_depth(depth_m: np.ndarray, hfov_deg: float = 70.0,
                             bin_deg: float = 8.0, min_distance_m: float = 0.4,
                             max_distance_m: float = 30.0,
-                            min_col_frac: float = 0.02) -> list[ObstacleObservation]:
+                            min_col_frac: float = 0.02,
+                            min_run_frac: float = 0.08, flat_tol: float = 0.15,
+                            col_stride: int = 4) -> list[ObstacleObservation]:
     """DENSE extraction: the nearest obstacle in EACH angular bin across the
     field of view, not just the single closest. This is what lets the planner
     thread gaps - an empty bin is free space between two obstacles, so a stand
     of trees becomes 'obstacle, GAP, obstacle' instead of one blob. The same
     per-sector representation a LiDAR or a recon point-cloud would give.
+
+    GROUND REJECTION: a level camera on a flying drone has the ground across
+    the lower half of the frame, and taking each column's nearest pixel turned
+    that into a solid wall 20-30 m ahead in every bin. What separates an
+    obstacle from the ground is vertical structure: a post, tree or wall keeps
+    (nearly) the same depth over many consecutive rows, while ground depth
+    grows steadily row by row. So per column the obstacle is the nearest FLAT
+    vertical segment (>= min_run_frac of the band's rows within flat_tol of
+    each other), never the nearest pixel. Columns are sampled every
+    col_stride px - a bin is ~50 columns wide, so that loses nothing.
 
     Returns one ObstacleObservation per occupied bin (body frame). Heights are
     left unknown (top_m=0) - monocular cannot judge height reliably, so these
@@ -108,16 +145,20 @@ def observations_from_depth(depth_m: np.ndarray, hfov_deg: float = 70.0,
     cx, half = (w - 1) / 2.0, w / 2.0
     col_bearing = (np.arange(w) - cx) / half * (hfov_deg / 2.0)
 
-    # Nearest valid depth per column.
+    # Nearest flat vertical segment per (sampled) column.
+    stride = max(1, int(col_stride))
+    min_run = max(3, int(min_run_frac * band.shape[0]))
     col_depth = np.full(w, np.inf)
     col_valid = valid.any(axis=0)
-    for c in np.nonzero(col_valid)[0]:
-        col_depth[c] = band[:, c][valid[:, c]].min()
+    for c in range(0, w, stride):
+        if col_valid[c]:
+            col_depth[c] = _nearest_flat_segment(band[:, c], valid[:, c],
+                                                 min_run, flat_tol)
 
     out: list[ObstacleObservation] = []
     n_bins = max(1, int(round(hfov_deg / bin_deg)))
     edges = np.linspace(-hfov_deg / 2.0, hfov_deg / 2.0, n_bins + 1)
-    min_cols = max(1, int(min_col_frac * w))
+    min_cols = max(1, int(min_col_frac * w / stride))
     for i in range(n_bins):
         lo, hi = edges[i], edges[i + 1]
         cols = np.where((col_bearing >= lo) & (col_bearing < hi)
@@ -136,6 +177,6 @@ def observations_from_depth(depth_m: np.ndarray, hfov_deg: float = 70.0,
             bearing_deg=bearing, distance_m=d,
             half_width_deg=max(2.0, span / 2.0 + bin_deg / 2.0),
             confidence=min(MONO_MAX_CONFIDENCE,
-                           MONO_BASE_CONFIDENCE + min(0.15, near.size / w)),
+                           MONO_BASE_CONFIDENCE + min(0.15, near.size * stride / w)),
             source="monocular"))
     return out

@@ -24,6 +24,22 @@ class Settings(BaseSettings):
 
     # Vision
     default_yolo_model: str = Field(default="yolov8m.pt")
+    # Metric depth (depth-mapping mode + obstacle-avoidance sensing). Weights
+    # must match the setting: ZoeDepth's NYU (indoor) weights read a post 30 m
+    # away as 1.7 m on outdoor footage - every obstacle looked one step ahead.
+    # The outdoor Depth-Anything-V2 metric model (40 ms on a 4070) reads 5-60 m.
+    depth_model: str = Field(default="depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf")
+    depth_viz_max_m: float = Field(default=60.0)   # colormap clip, metres
+    # Farthest depth reading treated as an obstacle. Monocular metric depth
+    # compresses with range (measured on the sim: 31 m reads 22.6, 58 m reads
+    # 26, 100 m reads 23), so past this everything reads the same and a
+    # tower 80 m away would look like a wall 25 m ahead. 20 here is ~25 m
+    # true - the range a mono camera can honestly judge.
+    depth_obstacle_max_m: float = Field(default=20.0)
+    # Horizontal FOV of the drone's forward camera. Obstacle bearings come
+    # straight from it, so a wrong value puts every obstacle at the wrong
+    # angle (SIYI A8 ~81, gz x500 mono_cam 99.7). Set CAMERA_HFOV_DEG in .env.
+    camera_hfov_deg: float = Field(default=70.0)
     # Fallback inference width for any mode not listed in
     # inference_width_by_mode below.
     inference_resize_width: int = Field(default=640)

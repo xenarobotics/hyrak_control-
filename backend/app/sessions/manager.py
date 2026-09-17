@@ -136,6 +136,20 @@ class SessionManager:
         return True
 
     def get_fleet_drone(self, session_id: str, drone_id: int) -> Optional[TelemetryManager]:
+        # The session stores a manager OBJECT captured at attach time. When the
+        # fleet watchdog rebuilds a stale link it swaps in a new manager (new
+        # mavsdk_server / gRPC port) - the stored copy then points at a dead
+        # server whose is_connected flag still reads True, so an upload dials
+        # it and fails with gRPC UNAVAILABLE / connection refused. Prefer the
+        # fleet service's live manager for this instance; fall back to the
+        # session's own copy for fleets the server does not own.
+        try:
+            from app.fleet import service as fleet_service
+            live = fleet_service.live_manager(drone_id)
+            if live is not None:
+                return live
+        except Exception:
+            pass
         return self._fleets.get(session_id, {}).get(drone_id)
 
     def pop_fleet_drone(self, session_id: str, drone_id: int) -> Optional[TelemetryManager]:

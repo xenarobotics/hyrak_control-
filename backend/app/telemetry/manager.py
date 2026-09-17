@@ -249,7 +249,7 @@ class TelemetryManager:
 
     @staticmethod
     def _kill_mavsdk_by_pattern(pattern: str) -> None:
-        import subprocess, signal
+        import subprocess, signal, os, time
         try:
             result = subprocess.run(
                 ["pgrep", "-f", pattern],
@@ -258,16 +258,52 @@ class TelemetryManager:
             pids = [int(p) for p in result.stdout.strip().split() if p]
             for pid in pids:
                 try:
-                    import os
                     os.kill(pid, signal.SIGTERM)
                     logger.info(f"Killed stale mavsdk_server (PID {pid})")
                 except ProcessLookupError:
                     pass
             if pids:
-                import time
-                time.sleep(0.5)  # allow OS to release the UDP port
+                time.sleep(0.5)  # allow OS to release the UDP port + die
+                # REAP them. mavsdk-python spawns each mavsdk_server as OUR child
+                # but never wait()s on one we force-kill, so it lingers as a
+                # zombie - and the fleet scan makes dozens per cycle, eventually
+                # starving the process table / event loop. waitpid clears them.
+                TelemetryManager._reap_children(pids)
         except Exception as e:
             logger.debug(f"mavsdk_server cleanup skipped: {e}")
+
+    @staticmethod
+    def _reap_children(pids: list[int] | None = None) -> int:
+        """Reap zombie children. With `pids`, target those (mavsdk_servers we
+        just killed); SIGKILL any still alive after the grace period, then
+        waitpid. With no pids, sweep every dead child (os.waitpid(-1)). Only
+        reaps OUR children - ChildProcessError just means it was not ours."""
+        import os, signal
+        reaped = 0
+        if pids:
+            for pid in pids:
+                try:
+                    wpid, _ = os.waitpid(pid, os.WNOHANG)
+                    if wpid == 0:                 # still alive - force it
+                        try:
+                            os.kill(pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        wpid, _ = os.waitpid(pid, 0)
+                    if wpid:
+                        reaped += 1
+                except (ChildProcessError, ProcessLookupError):
+                    pass
+            return reaped
+        while True:                               # generic sweep
+            try:
+                wpid, _ = os.waitpid(-1, os.WNOHANG)
+            except ChildProcessError:
+                break
+            if wpid == 0:
+                break
+            reaped += 1
+        return reaped
 
     async def connect(self, address: str = "udpin://0.0.0.0:14540", kill_stale: bool = True) -> bool:
         # Fix deprecated udp:// format automatically

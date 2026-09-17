@@ -52,9 +52,18 @@ async def apply(manager, action: str, waypoints: list | None,
             return False, "tracking"
         if action == "clear":
             if intervened:
-                # Hand control back: resume the mission the drone was flying.
-                await manager.start_mission()
-                return True, "resumed"
+                # Only resume if WE parked it in HOLD. If avoidance rerouted, the
+                # detour mission already ends at the goal and the aircraft is
+                # flying it - calling start_mission() here restarts from waypoint
+                # 0, sending it back to the start over and over (the forward-back
+                # oscillation that never reaches the destination). Let it run.
+                snap = getattr(manager, "_snapshot", None)
+                fm = getattr(snap, "flight_mode", None)
+                cur = getattr(fm, "mode", "") if fm else ""
+                if cur == "HOLD":
+                    await manager.start_mission()
+                    return True, "resumed"
+                return False, "detour continuing to goal"
             return False, "nominal"
     except Exception as e:
         logger.warning(f"Avoidance executor {action} failed: {e}")

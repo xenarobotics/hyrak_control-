@@ -48,6 +48,7 @@ async def set_enabled(drone_id: str, body: dict,
                 raise HTTPException(status_code=400, detail=f"Bad param {k}")
     if "enabled" in body:
         c.set_enabled(bool(body["enabled"]))
+    avoidance.persist_state()
     return c.status()
 
 
@@ -60,6 +61,7 @@ async def set_armed(drone_id: str, body: dict,
     _auth(x_auth_token)
     c = avoidance.controller(drone_id)
     c.set_armed(bool(body.get("armed")))
+    avoidance.persist_state()
     return c.status()
 
 
@@ -124,8 +126,17 @@ async def decide(drone_id: str, body: dict,
 
 @router.get("/{drone_id}/obstacles")
 async def drone_obstacles(drone_id: str):
-    """The drone's live obstacle map - for the Mission-tab overlay."""
-    return {"obstacles": avoidance.controller(drone_id).obstacles()}
+    """The drone's live obstacle map + the active reroute path - for the
+    Mission-tab overlay, so the operator watches the plan update in real time."""
+    c = avoidance.controller(drone_id)
+    path = None
+    if c._committed_path:
+        path = [{"lat": float(w["lat"]), "lng": float(w["lng"])}
+                for w in c._committed_path]
+    goal = None
+    if c._last_goal:
+        goal = {"lat": c._last_goal[0], "lng": c._last_goal[1]}
+    return {"obstacles": c.obstacles(), "reroute_path": path, "goal": goal}
 
 
 @router.get("/hazards")

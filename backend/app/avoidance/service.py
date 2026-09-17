@@ -97,6 +97,7 @@ class AvoidanceController:
         self._committed_goal: tuple[float, float] | None = None
         self._recommended_speed = 0.0
         self._path_invalid = 0   # consecutive ticks the committed path looked blocked
+        self._last_goal: tuple[float, float] | None = None  # for the map overlay
 
     # -- ingest -----------------------------------------------------------
     def observe(self, obs: ObstacleObservation) -> None:
@@ -129,6 +130,8 @@ class AvoidanceController:
                      cruise_alt_m: float = 10.0, speed_m_s: float = 4.0,
                      now: float | None = None) -> Decision:
         now = now if now is not None else time.monotonic()
+        if goal is not None:
+            self._last_goal = goal
         if not self.enabled:
             return self._settle(Decision("clear", AvoidanceState.DISABLED,
                                           "avoidance off"))
@@ -388,3 +391,40 @@ def reset(drone_id: str | None = None) -> None:
         _controllers.clear()
     else:
         _controllers.pop(drone_id, None)
+
+
+# -- persistence ----------------------------------------------------------
+# enabled/armed lived only in memory, so every backend restart or code reload
+# silently turned avoidance OFF - the drone then flew its mission blind while
+# the operator believed it was covered. The file sits OUTSIDE app/ because a
+# write inside it would itself trigger uvicorn's reload.
+import json as _json
+from app.config import ROOT_DIR as _ROOT_DIR
+
+_STATE_FILE = _ROOT_DIR / ".avoidance_state.json"
+
+
+def persist_state() -> None:
+    try:
+        _STATE_FILE.write_text(_json.dumps(
+            {i: {"enabled": c.enabled, "armed": c.armed}
+             for i, c in _controllers.items()}, indent=1))
+    except Exception:
+        pass
+
+
+def restore_state() -> int:
+    """Re-create every controller that was enabled when the state was last
+    saved. Returns how many were restored."""
+    try:
+        data = _json.loads(_STATE_FILE.read_text())
+    except Exception:
+        return 0
+    n = 0
+    for i, st in data.items():
+        if st.get("enabled"):
+            c = controller(i)
+            c.set_enabled(True)
+            c.set_armed(bool(st.get("armed")))
+            n += 1
+    return n

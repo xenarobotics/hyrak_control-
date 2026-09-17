@@ -21,7 +21,7 @@ import { MAP_LAYERS, WP_META } from '@/types/mission'
 import type { Waypoint } from '@/types/mission'
 import { getServerUrl } from '@/lib/server-url'
 import { visibleInterval } from '@/lib/poll'
-import { getHazards, getObstacles, addHazard, type KnownHazard, type LiveObstacle } from '@/lib/avoidance'
+import { getHazards, getObstaclesAndPath, addHazard, type KnownHazard, type LiveObstacle, type LatLng } from '@/lib/avoidance'
 import { ZONE_COLORS, zoneRings, type ZoneFeature } from '@/components/admin/zones'
 
 // ── Flight zones (green/orange/red) - pilots plan around these ─────────────
@@ -62,9 +62,13 @@ function FlightZonesOverlay() {
 // ── Obstacle avoidance overlay ──────────────────────────────────────────────
 // Known hazards (persistent shared map, blue) + every avoidance drone's LIVE
 // obstacle map (grey = confirmed static, amber = moving). Pure read-only.
-function AvoidanceOverlay({ show, reload }: { show: boolean; reload: number }) {
+function AvoidanceOverlay({ show, reload, home, drone }: {
+  show: boolean; reload: number; home: LatLng | null; drone: LatLng | null
+}) {
   const [hazards, setHazards] = useState<KnownHazard[]>([])
   const [obstacles, setObstacles] = useState<LiveObstacle[]>([])
+  const [reroutes, setReroutes] = useState<LatLng[][]>([])
+  const [goals, setGoals] = useState<LatLng[]>([])
   useEffect(() => {
     if (!show) return
     let alive = true
@@ -73,16 +77,36 @@ function AvoidanceOverlay({ show, reload }: { show: boolean; reload: number }) {
         const hz = await getHazards()
         const st = await fetch(`${getServerUrl()}/api/avoidance/status`).then(r => r.json())
         const ids: string[] = (st.drones ?? []).map((d: { drone_id: string }) => d.drone_id)
-        const live = (await Promise.all(ids.map(id => getObstacles(id).catch(() => [])))).flat()
-        if (alive) { setHazards(hz); setObstacles(live) }
+        const per = await Promise.all(ids.map(id =>
+          getObstaclesAndPath(id).catch(() => ({ obstacles: [], reroutePath: null, goal: null }))))
+        if (alive) {
+          setHazards(hz)
+          setObstacles(per.flatMap(p => p.obstacles))
+          setReroutes(per.map(p => p.reroutePath).filter((p): p is LatLng[] => !!p && p.length > 1))
+          setGoals(per.map(p => p.goal).filter((g): g is LatLng => !!g))
+        }
       } catch { /* overlay stays empty if backend unreachable */ }
     }
     void load()
-    return visibleInterval(load, 4000)
+    return visibleInterval(load, 1500)   // fast poll so the reroute updates live
   }, [show, reload])
   if (!show) return null
+  const start = home ?? drone     // mission start = the drone's home / launch point
   return (
     <>
+      {/* Planned mission path: start -> destination, and the endpoints. Drawn
+          even for an API-flown mission so start / land / route are visible. */}
+      {start && goals.map((g, i) => (
+        <Polyline key={`mp-${i}`} positions={[[start.lat, start.lng], [g.lat, g.lng]]}
+          pathOptions={{ color: '#3b82f6', weight: 2, opacity: 0.5, dashArray: '2 7',
+            interactive: false }} />
+      ))}
+      {goals.map((g, i) => (
+        <Marker key={`goal-${i}`} position={[g.lat, g.lng]} icon={destIcon} interactive={false} />
+      ))}
+      {start && (
+        <Marker position={[start.lat, start.lng]} icon={startIcon} interactive={false} />
+      )}
       {hazards.map(h => (
         <Circle key={h.id} center={[h.lat, h.lng]} radius={h.radius_m}
           pathOptions={{ color: '#38bdf8', weight: 1.5, fillColor: '#38bdf8',
@@ -93,6 +117,13 @@ function AvoidanceOverlay({ show, reload }: { show: boolean; reload: number }) {
           pathOptions={{ color: o.is_static ? '#9aa3b5' : '#fbbf24', weight: 1.5,
             fillColor: o.is_static ? '#9aa3b5' : '#fbbf24', fillOpacity: 0.2,
             interactive: false }} />
+      ))}
+      {/* Active reroute path - the detour the drone is flying right now, drawn
+          amber and dashed so it reads as "plan changed to avoid the obstacle". */}
+      {reroutes.map((path, i) => (
+        <Polyline key={`rr-${i}`} positions={path.map(p => [p.lat, p.lng] as [number, number])}
+          pathOptions={{ color: '#f59e0b', weight: 3.5, opacity: 0.95,
+            dashArray: '10 6', interactive: false }} />
       ))}
     </>
   )
@@ -130,6 +161,25 @@ const homeIcon = L.divIcon({
   "><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></div>`,
   iconSize: [22, 22],
   iconAnchor: [11, 11],
+})
+
+// Mission start (A) and destination/land (B) markers for the avoidance overlay.
+const startIcon = L.divIcon({
+  className: '',
+  html: `<div style="width:26px;height:26px;border-radius:50%;background:#22c55e;
+    border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.5);display:flex;
+    align-items:center;justify-content:center;color:#fff;font-weight:800;
+    font-size:12px;font-family:monospace;">A</div>`,
+  iconSize: [26, 26], iconAnchor: [13, 13],
+})
+const destIcon = L.divIcon({
+  className: '',
+  html: `<div style="width:26px;height:26px;border-radius:50% 50% 50% 0;
+    transform:rotate(45deg);background:#ef4444;border:3px solid #fff;
+    box-shadow:0 2px 8px rgba(0,0,0,.5);display:flex;align-items:center;
+    justify-content:center;"><span style="transform:rotate(-45deg);color:#fff;
+    font-weight:800;font-size:12px;font-family:monospace;">B</span></div>`,
+  iconSize: [26, 26], iconAnchor: [13, 24],
 })
 
 const rtlIcon = L.divIcon({
@@ -442,7 +492,10 @@ export default function MissionMap() {
       <ClickHandler pinMode={pinMode} onPin={pinHazard} />
       <DronePositionTracker />
       <FlightZonesOverlay />
-      <AvoidanceOverlay show={showAvoid} reload={hazardNonce} />
+      <AvoidanceOverlay show={showAvoid} reload={hazardNonce}
+        home={homePosition ? { lat: homePosition.lat, lng: homePosition.lng } : null}
+        drone={dronePos && dronePos.latitude_deg !== 0
+          ? { lat: dronePos.latitude_deg, lng: dronePos.longitude_deg } : null} />
 
       {/* Planned flight path (no active mission) - cyan when terrain-follow is on
           (path adapts to terrain), blue when off (fixed altitude relative to home) */}

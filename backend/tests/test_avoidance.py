@@ -371,7 +371,11 @@ async def test_executor_clear_resumes_only_if_intervened():
     did, _ = await executor.apply(m, "clear", None, intervened=False)
     assert did is False and m.calls == []          # never touched an untouched drone
     did, _ = await executor.apply(m, "clear", None, intervened=True)
-    assert did and ("start", None) in m.calls      # hands control back
+    assert did is False and m.calls == []          # detour still flying to goal: leave it
+    import types
+    m._snapshot = types.SimpleNamespace(flight_mode=types.SimpleNamespace(mode="HOLD"))
+    did, _ = await executor.apply(m, "clear", None, intervened=True)
+    assert did and ("start", None) in m.calls      # WE parked it in HOLD: hand control back
 
 
 @pytest.mark.asyncio

@@ -70,3 +70,4 @@ frontend/home/
 .DS_Store
 reconstruction/.venv/
 reconstruction/data/
+.avoidance_state.json
