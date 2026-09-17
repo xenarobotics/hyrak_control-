@@ -66,6 +66,12 @@ start() {
     # 14541 keeps working alongside - MAVLink is fine with two ground stations.
     ../bin/px4-mavlink --instance 1 start -x -u 14551 -o 14550 -t 127.0.0.1 -r 4000000 -f \
         > "$LOGS/px4_mavlink_airunit.log" 2>&1
+    # Server-side session link: the HYRAK "SITL on server" telemetry source
+    # binds udp:14560 IN THE BACKEND and talks to PX4 directly - no desktop
+    # relay, no learned/pinned peer questions. PX4 sends here, MAVSDK replies
+    # to the sender (14561).
+    ../bin/px4-mavlink --instance 1 start -x -u 14561 -o 14560 -t 127.0.0.1 -r 4000000 -f \
+        > "$LOGS/px4_mavlink_session.log" 2>&1
     _spawn cam_bridge python3 "$HERE/gz_cam_bridge.py" "$CAM_TOPIC" 640x480 10 rtp://127.0.0.1:5600
     status
 }
@@ -87,7 +93,7 @@ status() {
     done
     grep -q "Ready for takeoff" "$LOGS/px4.log" 2>/dev/null && echo "PX4: Ready for takeoff (instance 1, fleet adopts udp:14541)"
     echo "video:     H.265 RTP -> 127.0.0.1:5600  (CAMERA -> 'Air unit (UDP) - set in Settings', port 5600)"
-    echo "telemetry: MAVLink  -> 127.0.0.1:14550, uplink 14551  (TELEMETRY -> 'Air unit (UDP, direct)')"
+    echo "telemetry: MAVLink  -> 127.0.0.1:14560 (TELEMETRY -> 'SITL on server')  |  14550/14551 (Air unit (UDP, direct), TX HOST auto)"
 }
 
 case "${1:-}" in

@@ -23,12 +23,15 @@ import {
     browserSerialSupported, getSerialApi, listGrantedPorts,
     requestRadioPort, serialUnavailableReason, type GrantedRadio,
 } from '@/lib/browserSerial'
+// Backend-side bind for a SITL on the server's own machine (see hyrak_sim.sh).
+export const SERVER_SITL_ADDRESS = 'udp://:14560'
 import { useDrone } from '@/hooks/useDrone'
 import { getLocalRelayUrl } from '@/lib/localRfRelay'
 import { getSiyiTelemetryTarget, startSiyiTelemetry } from '@/lib/siyiTelemetryRelay'
 import { isDesktopApp } from '@/lib/nativeBridge'
 import { listNativeSerialPorts, type NativeRadio } from '@/lib/nativeSerialRelay'
 import {
+
     getTelemetryBaud, setTelemetryBaud,
     getTelemetrySource, setTelemetrySource, LINK_CHANGE_EVENT,
 } from '@/lib/linkSettings'
@@ -51,7 +54,7 @@ export function useTelemetryLink() {
     const {
         telemetryStatus, telemetryError,
         connectBrowserSerial, connectNativeSerial, connectNativeRf,
-        connectLocalRelay, connectRemoteSitl, disconnectTelemetry,
+        connectLocalRelay, connectRemoteSitl, connectTelemetry, disconnectTelemetry,
     } = useDrone()
 
     const setSource = useCallback((v: string) => {
@@ -142,9 +145,17 @@ export function useTelemetryLink() {
             void startSiyiTelemetry(getSiyiTelemetryTarget())
             return
         }
+        if (source === 'sitl-server') {
+            // The SITL runs on the SAME machine as the backend (dev box, demo
+            // sim): let the server bind it directly. No desktop relay, no
+            // learned/pinned uplink peer - MAVSDK answers whoever sends to
+            // udp:14560, which hyrak_sim.sh points a PX4 link at.
+            connectTelemetry(SERVER_SITL_ADDRESS)
+            return
+        }
         void connectRemoteSitl()
     }, [source, baud, radios, nativeRadios, connectNativeSerial, connectBrowserSerial,
-        connectNativeRf, connectLocalRelay, connectRemoteSitl])
+        connectNativeRf, connectLocalRelay, connectRemoteSitl, connectTelemetry])
 
     const disconnect = useCallback(async () => {
         setDisconnecting(true)
@@ -158,6 +169,7 @@ export function useTelemetryLink() {
         ...nativeRadios.map((r, i) => ({ value: `nradio-${i}`, label: r.label })),
         ...radios.map((r, i) => ({ value: `radio-${i}`, label: r.label })),
         { value: 'sitl', label: 'SITL' },
+        { value: 'sitl-server', label: 'SITL on server (udp:14560)' },
         // Native first: same ground station as local-relay but with no relay
         // agent to start. Desktop only.
         ...(desktop ? [{ value: 'air-unit-udp', label: 'Air unit (UDP, direct)' }] : []),
