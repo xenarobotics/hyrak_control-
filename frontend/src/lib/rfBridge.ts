@@ -25,6 +25,15 @@ export const DEFAULT_RF_UPLINK_PORT = 14551
 // upload and parameter write is dropped into local loopback - a ground station
 // that looks connected and cannot fly the aircraft.
 export const DEFAULT_RF_UPLINK_HOST = '192.168.50.12'
+// TX HOST = "auto": reply to whoever the downlink comes from, exactly as
+// QGroundControl does. Right for any ground station that is ONE process
+// sending and receiving on one socket (PX4 SITL, mavlink-router, a SIYI
+// unit). Wrong for wfb-ng, where wfb_rx sends from an ephemeral port and the
+// uplink must go to wfb_tx - keep the host there.
+export const RF_UPLINK_AUTO = 'auto'
+export function isRfUplinkAuto(host: string): boolean {
+    return host.trim().toLowerCase() === RF_UPLINK_AUTO
+}
 
 function getPort(key: string, fallback: number): number {
     if (typeof window === 'undefined') return fallback

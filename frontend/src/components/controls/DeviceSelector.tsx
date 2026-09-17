@@ -8,7 +8,7 @@ import { getSiyiTelemetryTarget, setSiyiTelemetryTarget, DEFAULT_SIYI_TELEMETRY_
 // compact picker - two copies of "which radio is selected" is how the two
 // controls end up disagreeing. See hooks/useTelemetryLink.ts.
 import { useTelemetryLink } from '@/hooks/useTelemetryLink'
-import { getRfDownlinkPort, getRfUplinkPort, getRfFanoutPort, setRfFanoutPort,
+import { getRfDownlinkPort, getRfUplinkPort, getRfFanoutPort, setRfFanoutPort, isRfUplinkAuto,
          getRfUplinkHost, setRfUplinkHost, DEFAULT_RF_UPLINK_HOST } from '@/lib/rfBridge'
 import {
     Select, SelectContent, SelectItem,
@@ -240,7 +240,9 @@ export function DeviceSelector() {
                 {source === 'air-unit-udp' && (
                     <>
                         <p className="mt-1.5 text-[10px] font-mono text-app-text-muted leading-relaxed">
-                            Reads udp:{getRfDownlinkPort()} / sends to {rfUplinkHost}:{getRfUplinkPort()} -
+                            Reads udp:{getRfDownlinkPort()} / {isRfUplinkAuto(rfUplinkHost)
+                                ? 'replies to whoever sends (QGC style)'
+                                : `sends to ${rfUplinkHost}:${getRfUplinkPort()}`} -
                             no relay agent needed. Just run start-gs.sh.
                         </p>
                         {/* THE SETTING THAT COSTS A FLIGHT WHEN IT IS WRONG, and
@@ -259,8 +261,8 @@ export function DeviceSelector() {
                                     setRfUplinkHost(e.target.value)
                                 }}
                                 disabled={isConnected}
-                                placeholder={DEFAULT_RF_UPLINK_HOST}
-                                title="Where wfb_tx listens. This machine only if the RF decoder runs here - put the decoder's address here otherwise, or commands go nowhere while telemetry keeps working."
+                                placeholder={`${DEFAULT_RF_UPLINK_HOST} or auto`}
+                                title="Where commands are sent. wfb-ng: the decoder running wfb_tx (this machine only if the decoder runs here - otherwise commands go nowhere while telemetry keeps working). 'auto': reply to the sender, like QGroundControl - use for SITL or a single-process ground station. Editable only while disconnected."
                                 className="h-7 w-full rounded px-2 text-[11px] font-mono bg-app-surface border border-app-border text-app-text outline-none disabled:opacity-60"
                             />
                         </div>

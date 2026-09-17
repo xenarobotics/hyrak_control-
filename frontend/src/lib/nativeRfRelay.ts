@@ -35,7 +35,7 @@
 import { getSocket } from '@/lib/socket'
 import { startHyrakRegistration, stopHyrakRegistration } from '@/lib/hyrakRegister'
 import { isDesktopApp, nativeBridge, type BridgeEvent } from '@/lib/nativeBridge'
-import { getRfDownlinkPort, getRfUplinkPort, getRfUplinkHost, getRfFanoutPort } from '@/lib/rfBridge'
+import { getRfDownlinkPort, getRfUplinkPort, getRfUplinkHost, getRfFanoutPort, isRfUplinkAuto } from '@/lib/rfBridge'
 
 const NATIVE_UDP_ID = 'air-unit-telemetry'
 
@@ -99,9 +99,12 @@ export async function startNativeRfRelay(
         ports: [{
             tag: 0,
             port: downlinkPort,
-            remoteHost: uplinkHost,
-            remotePort: uplinkPort,
-            pinRemote: true,
+            // "auto" = QGC behaviour: no pinned target, the bridge replies to
+            // the address:port the downlink arrives from (udpBridge's learned
+            // peer). Otherwise pin the uplink to wfb_tx at TX HOST:port.
+            ...(isRfUplinkAuto(uplinkHost)
+                ? {}
+                : { remoteHost: uplinkHost, remotePort: uplinkPort, pinRemote: true }),
             // Lets QGroundControl watch the same downlink - see getRfFanoutPort.
             fanoutPort: getRfFanoutPort() || undefined,
         }],
