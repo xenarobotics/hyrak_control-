@@ -274,14 +274,18 @@ export function DeviceSelector() {
                                 onChange={e => {
                                     const v = Number(e.target.value)
                                     setRfFanout(v)
-                                    if (v >= 0 && v < 65536) setRfFanoutPort(v)
+                                    // Never the uplink port: the fan-out would feed the
+                                    // aircraft its own telemetry and drown every command.
+                                    if (v >= 0 && v < 65536 && v !== getRfUplinkPort()) setRfFanoutPort(v)
                                 }}
                                 disabled={isConnected}
                                 className="h-7 w-full rounded px-2 text-[11px] font-mono bg-app-surface border border-app-border text-app-text outline-none disabled:opacity-60"
                             />
                         </div>
                         <p className="mt-1 text-[10px] font-mono text-app-text-muted leading-relaxed">
-                            {rfFanout > 0
+                            {rfFanout === getRfUplinkPort()
+                                ? `${rfFanout} is the uplink port - a copy of the downlink sent there goes straight back into the aircraft. Use another port, or 0.`
+                                : rfFanout > 0
                                 ? `Copy of the downlink sent to udp:${rfFanout} - point QGC's UDP link at that port instead of ${getRfDownlinkPort()} (only one program can own a port). Downlink only: QGC can read params and download the mission, but cannot command the aircraft through this.`
                                 : `0 = off. Set a port (e.g. ${getRfDownlinkPort() + 2}) to let QGroundControl watch the same telemetry alongside HYRAK.`}
                         </p>
