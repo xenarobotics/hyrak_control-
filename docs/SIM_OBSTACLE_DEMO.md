@@ -23,10 +23,11 @@ The sim presents itself exactly like the real air unit: MAVLink on udp:14550
 (uplink accepted on 14551, where the desktop pins it) and H.265 RTP video on
 udp:5600. So the normal single-drone flow works:
 
-1. DEVICES -> TELEMETRY -> **Air unit (UDP, direct)**, set the uplink host
-   field to **127.0.0.1** (it defaults to the ground decoder, 192.168.50.12 -
-   with that, telemetry flows but every command silently goes nowhere), then
-   Connect. Swarm Mode is no longer required; the fleet still adopts the sim
+1. DEVICES -> TELEMETRY -> **Air unit (UDP, direct)**. While disconnected,
+   set **TX HOST** to `auto` (reply to whoever sends, exactly what QGC does;
+   the default 192.168.50.12 is the wfb-ng decoder - with it telemetry flows
+   but every command silently goes nowhere) and **QGC PORT** to `0` (14551
+   there mirrors PX4's own telemetry back into PX4). Then Connect. Swarm Mode is no longer required; the fleet still adopts the sim
    on 14541 in the background, and both register the aircraft under its real
    FC UID, so it is ONE drone record whichever link you use.
 2. DEVICES -> CAMERA -> **Air unit (UDP) - set in Settings** (Settings ->
