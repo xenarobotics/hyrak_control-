@@ -71,3 +71,4 @@ frontend/home/
 reconstruction/.venv/
 reconstruction/data/
 .avoidance_state.json
+simulation/.pids/
