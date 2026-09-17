@@ -145,8 +145,18 @@ async def connect_one(i: int, manual: bool = False) -> str:
         _managers[i] = manager
         _names[i] = f"Station Drone {i}"
         _adopted.add(i)   # watchdog heals it from now on, whatever its index
+    # Register under the FC's real hardware UID whenever it can be read, so a
+    # browser session that connects to the SAME aircraft over its own link
+    # (air-unit UDP, radio) resolves to the same drone record: one identity,
+    # one avoidance controller, one mission history. The synthetic name is
+    # only the fallback for an FC that reports no UID.
+    uid = None
+    try:
+        uid = await manager.get_hardware_uid()
+    except Exception:
+        uid = None
     rec = await drone_registry.upsert_seen(
-        f"sitl-station-fleet-{i}", is_simulated=True)
+        uid or f"sitl-station-fleet-{i}", is_simulated=True)
     if rec:
         _db_ids[i] = rec["id"]
     logger.info(f"Delivery fleet drone {i} connected ({address})")

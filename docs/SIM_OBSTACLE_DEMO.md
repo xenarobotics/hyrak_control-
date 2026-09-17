@@ -19,10 +19,14 @@ Backend and frontend run as usual (`backend: uv run python -m app.main`,
 
 ## In the HYRAK app (desktop)
 
-1. Fly tab -> DEVICES -> **Swarm Mode ON**. The sim is PX4 instance 1
-   (udp 14541); it is a fleet drone, so the single-drone telemetry pickers
-   ("SITL" = instance 0 on 14540, "Air unit" = a real radio) will never see it.
-   "Station Drone 1" appears connected in the fleet list.
+The sim presents itself exactly like the real air unit: MAVLink on udp:14550
+(uplink accepted on 14551, where the desktop pins it) and H.265 RTP video on
+udp:5600. So the normal single-drone flow works:
+
+1. DEVICES -> TELEMETRY -> **Air unit (UDP, direct)** -> Connect. (Swarm Mode
+   is no longer required; the fleet still adopts the sim on 14541 in the
+   background, and both register the aircraft under its real FC UID, so it is
+   ONE drone record whichever link you use.)
 2. DEVICES -> CAMERA -> **Air unit (UDP) - set in Settings** (Settings ->
    Air unit video port = 5600, the default). The backend reads the sim camera
    as H.265 RTP on 127.0.0.1:5600, exactly the wire format the real air unit
@@ -30,8 +34,7 @@ Backend and frontend run as usual (`backend: uv run python -m app.main`,
 3. AI tab -> **Depth mapping**. This is the mode whose module runs the metric
    depth model; its per-frame obstacle observations feed the avoidance loop.
    You see the depth colormap (clip 60 m) in this mode.
-4. Mission tab: draw an A->B mission at 10 m and upload/fly via the fleet
-   path. The map's Avoidance overlay shows what the drone currently sees
+4. Mission tab: draw an A->B mission at 10 m and upload/fly. The map's Avoidance overlay shows what the drone currently sees
    (grey/amber) and the amber dashed reroute it commits to.
 
 Avoidance enable/arm for the drone survives backend restarts

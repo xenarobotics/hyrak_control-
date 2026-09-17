@@ -19,9 +19,10 @@
 #    (sensors). PX4_HOME_ALT=0 because the gz barometer is sea level.
 #  - PX4_PARAM_RTL_RETURN_ALT=10: SITL params reset on every launch; this is
 #    PX4's env override hook, so RTL stays at mission altitude.
-#  - Camera -> H.265 RTP on 127.0.0.1:5600, the same wire format as the real
-#    air unit, read server-side by the HYRAK "Air unit (UDP, server reads)"
-#    video source. No v4l2loopback, no browser capture.
+#  - Camera -> H.265 RTP on 127.0.0.1:5600 and MAVLink -> udp:14550 (uplink
+#    on 14551): the same ports and wire formats as the real air unit, so the
+#    desktop app's "Air unit (UDP, direct)" telemetry and "Air unit (UDP)"
+#    video sources work unchanged. No v4l2loopback, no browser capture.
 #  - NEVER pattern-kills gz/px4: stop uses the PIDs it recorded.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -59,6 +60,12 @@ start() {
         PX4_HOME_LAT="$HOME_LAT" PX4_HOME_LON="$HOME_LON" PX4_HOME_ALT=0 \
         PX4_PARAM_RTL_RETURN_ALT=10 ../bin/px4 -i 1 -d
     for _ in $(seq 1 40); do grep -q "Ready for takeoff" "$LOGS/px4.log" 2>/dev/null && break; sleep 1; done
+    # Look like the real air unit to the desktop app: MAVLink down to
+    # udp:14550 (what "Air unit (UDP, direct)" binds), uplink accepted on
+    # 14551 (where the desktop pins it, mirroring wfb_tx). The fleet link on
+    # 14541 keeps working alongside - MAVLink is fine with two ground stations.
+    ../bin/px4-mavlink --instance 1 start -x -u 14551 -o 14550 -t 127.0.0.1 -r 4000000 -f \
+        > "$LOGS/px4_mavlink_airunit.log" 2>&1
     _spawn cam_bridge python3 "$HERE/gz_cam_bridge.py" "$CAM_TOPIC" 640x480 10 rtp://127.0.0.1:5600
     status
 }
@@ -79,7 +86,8 @@ status() {
         else printf "%-10s down\n" "$n"; fi
     done
     grep -q "Ready for takeoff" "$LOGS/px4.log" 2>/dev/null && echo "PX4: Ready for takeoff (instance 1, fleet adopts udp:14541)"
-    echo "video: H.265 RTP -> 127.0.0.1:5600  (HYRAK: CAMERA -> 'Air unit (UDP) - set in Settings', port 5600)"
+    echo "video:     H.265 RTP -> 127.0.0.1:5600  (CAMERA -> 'Air unit (UDP) - set in Settings', port 5600)"
+    echo "telemetry: MAVLink  -> 127.0.0.1:14550, uplink 14551  (TELEMETRY -> 'Air unit (UDP, direct)')"
 }
 
 case "${1:-}" in
