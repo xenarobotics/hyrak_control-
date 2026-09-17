@@ -96,8 +96,16 @@ class TelemetryManager:
 
     def __init__(self, on_update: Optional[Callable[[dict], None]] = None, fleet_mode: bool = False,
                  on_fc_message: Optional[Callable[[dict], None]] = None,
-                 on_pilot_override: Optional[Callable[[str], None]] = None):
+                 on_pilot_override: Optional[Callable[[str], None]] = None,
+                 sysid: int = 245):
         self._drone: Optional[System] = None
+        # The MAVLink system id this link identifies itself with. Two ground
+        # stations on one aircraft MUST differ here: PX4 routes a reply to the
+        # link where it last saw the target sysid, so when the fleet link and a
+        # browser session both used MAVSDK's default 245 the session's
+        # identity read, geofence and mission uploads all timed out - PX4 was
+        # answering them down the fleet's socket.
+        self._sysid = int(sysid)
         self._on_update = on_update
         # Called with the mode PX4 moved to, the moment the aircraft leaves
         # Offboard without this app asking. The event layer uses it to stop
@@ -328,7 +336,7 @@ class TelemetryManager:
         # SAME server - so all drones mirror one vehicle and every command routes
         # to it (the "arm one drone, all show armed" bug).
         self._grpc_port = _find_free_port()
-        self._drone = System(port=self._grpc_port)
+        self._drone = System(port=self._grpc_port, sysid=self._sysid, compid=190)
         logger.info(f"mavsdk_server gRPC port {self._grpc_port} for {address}")
 
         logger.info(f"Connecting to drone at {address} ...")

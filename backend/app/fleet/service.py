@@ -124,7 +124,10 @@ async def connect_one(i: int, manual: bool = False) -> str:
     # OUTSIDE the lock. Holding _lock across that await serialized every probe
     # and blocked the whole fleet for ~10 s per empty port, which starved the
     # event loop until the HTTP server stopped responding.
-    manager = TelemetryManager(on_update=_snapshot_cb(i), fleet_mode=True)
+    # Distinct sysid per fleet link (201..): browser sessions keep MAVSDK's
+    # default 245, so PX4 never confuses the two ground stations' replies.
+    manager = TelemetryManager(on_update=_snapshot_cb(i), fleet_mode=True,
+                               sysid=min(254, 200 + i))
     ok = await manager.connect(address, kill_stale=True)
     if not ok:
         try:

@@ -23,10 +23,12 @@ The sim presents itself exactly like the real air unit: MAVLink on udp:14550
 (uplink accepted on 14551, where the desktop pins it) and H.265 RTP video on
 udp:5600. So the normal single-drone flow works:
 
-1. DEVICES -> TELEMETRY -> **Air unit (UDP, direct)** -> Connect. (Swarm Mode
-   is no longer required; the fleet still adopts the sim on 14541 in the
-   background, and both register the aircraft under its real FC UID, so it is
-   ONE drone record whichever link you use.)
+1. DEVICES -> TELEMETRY -> **Air unit (UDP, direct)**, set the uplink host
+   field to **127.0.0.1** (it defaults to the ground decoder, 192.168.50.12 -
+   with that, telemetry flows but every command silently goes nowhere), then
+   Connect. Swarm Mode is no longer required; the fleet still adopts the sim
+   on 14541 in the background, and both register the aircraft under its real
+   FC UID, so it is ONE drone record whichever link you use.
 2. DEVICES -> CAMERA -> **Air unit (UDP) - set in Settings** (Settings ->
    Air unit video port = 5600, the default). The backend reads the sim camera
    as H.265 RTP on 127.0.0.1:5600, exactly the wire format the real air unit
@@ -84,6 +86,10 @@ true, about 6 s at 4 m/s; the controller's `reaction_distance_m` (12) and
 - **Backend hang when the drone vanished**: `app/loop_stall.py` now dumps the
   event-loop thread's stack to the log whenever the loop stalls > 3 s.
 - **Avoidance silently OFF after a backend reload**: state is persisted now.
+- **Session identity read, geofence and mission uploads timed out** while the
+  fleet was also connected: both MAVSDK links identified as sysid 245, and PX4
+  routes a reply to the link where it last saw that sysid - the fleet's.
+  Fleet links now use sysid 200+instance; sessions keep 245.
 - **Swarm-mode sessions never bind a drone**, so camera observations were
   dropped: `observe_from_session` falls back to the sole enabled controller.
 - **v4l2loopback wedged** (`VIDIOC_G_FMT: Invalid argument`): not needed any
