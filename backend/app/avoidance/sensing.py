@@ -92,3 +92,10 @@ def submit(session_id: str, img_bgr: np.ndarray) -> None:
             av_loop.observe_from_session(session_id, obs)
 
     fut.add_done_callback(_done)
+
+
+def warm() -> None:
+    """Load the depth model now (when avoidance is switched on) instead of on
+    the first frame - the 2-3 s load happened 20 s into a mission once."""
+    if _depth is None and not _depth_failed:
+        _executor.submit(_analyze, np.zeros((480, 640, 3), np.uint8))

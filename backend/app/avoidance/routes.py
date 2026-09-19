@@ -48,6 +48,9 @@ async def set_enabled(drone_id: str, body: dict,
                 raise HTTPException(status_code=400, detail=f"Bad param {k}")
     if "enabled" in body:
         c.set_enabled(bool(body["enabled"]))
+        if c.enabled:
+            from app.avoidance import sensing
+            sensing.warm()
     avoidance.persist_state()
     return c.status()
 

@@ -81,7 +81,34 @@ def _resolve_link(drone_id: str):
 _NO_GOAL_MODES = {"RETURN_TO_LAUNCH", "RTL", "LAND", "LANDING"}
 
 
-async def _goal_for(drone_id: str) -> tuple[float, float] | None:
+_fc_goal: dict[str, tuple[tuple[float, float] | None, float]] = {}   # drone -> (goal, when)
+_fc_goal_inflight: set[str] = set()
+
+
+async def _fetch_fc_goal(drone_id: str, manager) -> None:
+    """Read the mission stored ON THE AIRCRAFT and take its last waypoint as
+    the goal. This is the source of truth when nothing else knows the
+    destination: a mission restarted without a fresh upload, or one uploaded
+    before the backend last restarted. Runs as a background task so the
+    10 s download timeout never stalls the loop."""
+    import time as _t
+    try:
+        items = await manager.download_mission()
+        wps = [w for w in (items or []) if w.get("cmd") != "takeoff"
+               and w.get("lat") is not None and w.get("lng") is not None]
+        goal = (float(wps[-1]["lat"]), float(wps[-1]["lng"])) if wps else None
+        if goal:
+            logger.info(f"Avoidance goal for {drone_id[:8]} read from the aircraft's "
+                        f"mission: {goal[0]:.6f},{goal[1]:.6f} ({len(wps)} wps)")
+        _fc_goal[drone_id] = (goal, _t.monotonic())
+    except Exception as e:
+        logger.debug(f"FC mission goal for {drone_id[:8]} unavailable: {e}")
+        _fc_goal[drone_id] = (None, _t.monotonic())
+    finally:
+        _fc_goal_inflight.discard(drone_id)
+
+
+async def _goal_for(drone_id: str, manager=None) -> tuple[float, float] | None:
     """The destination the drone is flying toward. For a fleet drone this is
     the fleet's own tracked land target (authoritative, no DB/hash lookup -
     the fleet sets it the moment a mission is flown). Otherwise the last
@@ -124,10 +151,25 @@ async def _goal_for(drone_id: str) -> tuple[float, float] | None:
             return (float(last["lat"]), float(last["lng"]))
     except Exception as e:
         logger.debug(f"goal lookup for {drone_id[:8]} failed: {e}")
-    return None
+    # Last resort: ask the aircraft (cached; refreshed every 60 s, retried
+    # after 20 s on failure).
+    import time as _t
+    cached = _fc_goal.get(drone_id)
+    if cached is not None:
+        goal, when = cached
+        if goal is not None and _t.monotonic() - when < 60.0:
+            return goal
+        if goal is None and _t.monotonic() - when < 20.0:
+            return None
+    if manager is not None and drone_id not in _fc_goal_inflight:
+        _fc_goal_inflight.add(drone_id)
+        asyncio.create_task(_fetch_fc_goal(drone_id, manager))
+    return cached[0] if cached else None
 
 
 _last_seed: dict[str, float] = {}
+_last_speed: dict[str, float] = {}
+_last_speed_t: dict[str, float] = {}
 _last_persist: dict[str, float] = {}
 
 
@@ -169,7 +211,7 @@ async def _tick() -> None:
         # Returning home / landing means the route is finished - see
         # _NO_GOAL_MODES for the ping-pong this prevents.
         pursuing = in_air and mode.upper() not in _NO_GOAL_MODES
-        goal = await _goal_for(c.drone_id) if pursuing else None
+        goal = await _goal_for(c.drone_id, manager) if pursuing else None
 
         prev_state = c.state
         # Reroute at the drone's CURRENT altitude so a lateral dodge stays level
@@ -186,6 +228,23 @@ async def _tick() -> None:
                 c.intervened = True
             elif decision.action == "clear" and c.intervened and did:
                 c.intervened = False
+
+        # Speed governor: the decision core recommends a speed (cap when clear,
+        # down to min_speed at the clearance ring). Nobody applied it before,
+        # so the mission flew at PX4's cruise speed regardless - at 4.9 m/s a
+        # camera that judges ~25 m leaves ~2 s to react. Applied only while
+        # armed, airborne and on a route; re-sent when it changes by > 0.3 m/s.
+        if c.armed and in_air and pursuing and manager is not None:
+            spd = float(decision.recommended_speed_m_s or 0.0)
+            last = _last_speed.get(c.drone_id)
+            if spd > 0.0 and (last is None or abs(spd - last) > 0.3) and \
+                    now - _last_speed_t.get(c.drone_id, 0.0) > 1.0:
+                if await manager.set_speed(spd):
+                    _last_speed[c.drone_id] = spd
+                    _last_speed_t[c.drone_id] = now
+                    logger.info(f"Avoidance speed for {c.drone_id[:8]}: {spd:.1f} m/s")
+        elif not in_air:
+            _last_speed.pop(c.drone_id, None)
 
         if decision.state != prev_state and decision.action != "clear":
             await _record_event(c, decision)
