@@ -49,6 +49,11 @@ class AvoidanceParams:
     # Response preference (1/0 flags so the params endpoint's float setter
     # applies): the order is always reroute -> hold -> return; these say how
     # far down that ladder the loop may go on its own.
+    # Write obstacles this flight confirmed back to the shared hazard map, so
+    # the next flight (any drone) knows them before seeing them. OFF by
+    # default: with a mono camera a phantom becomes a permanent hazard that
+    # is re-seeded every flight; turn on for LiDAR/ToF-grade sensing.
+    learn_hazards: float = 0.0
     allow_reroute: float = 1.0          # 0: never re-plan, hold instead
     allow_return: float = 1.0           # 0: never escalate a hold to RTL
     # 3D avoidance: when no lateral path exists, climb over (if the obstacle's

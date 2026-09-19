@@ -205,7 +205,7 @@ async def _sync_hazards(c, pose, now: float) -> None:
                         "radius_m": h["radius_m"]},
                        top_m=h.get("top_m", 0.0),
                        confidence=h.get("confidence", 0.5), now=now)
-    if now - _last_persist.get(c.drone_id, 0.0) > 10.0:
+    if c.params.learn_hazards and now - _last_persist.get(c.drone_id, 0.0) > 10.0:
         _last_persist[c.drone_id] = now
         for o in c.omap.active(now):
             if o.is_static():
@@ -230,8 +230,12 @@ async def _tick() -> None:
                 _session_missions.pop(c.drone_id, None)   # next flight re-reads its mission
                 _fc_mission.pop(c.drone_id, None)
                 logger.info(f"Avoidance {c.drone_id[:8]}: landed - flight state reset")
-        else:
-            _airborne[c.drone_id] = True
+            # Nothing to decide on the ground: a decision here would only
+            # carry a stale state into the next takeoff.
+            if c.state != avoidance.AvoidanceState.NOMINAL and c.enabled:
+                c.reset_flight_state()
+            continue
+        _airborne[c.drone_id] = True
         if pose is not None:
             try:
                 await _sync_hazards(c, pose, now)
