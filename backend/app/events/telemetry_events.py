@@ -851,6 +851,13 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
             ok, err_msg = await tel.upload_mission(waypoints, terrain_follow=terrain_follow)
             if ok:
+                # Tell avoidance where this aircraft is now going, so an
+                # obstacle on the way is routed around, not just held for.
+                try:
+                    from app.avoidance import loop as _av_loop
+                    _av_loop.note_mission_goal(session.session_id, waypoints)
+                except Exception:
+                    pass
                 # A planned mission whose waypoints match advances to
                 # 'uploaded' - hand-drawn missions simply match nothing.
                 from app.planner import service as mission_service

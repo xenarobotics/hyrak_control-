@@ -30,6 +30,12 @@ async def apply(manager, action: str, waypoints: list | None,
         return False, "no link"
     try:
         if action == "hold":
+            # Already parked by us: sending HOLD again every tick only spams
+            # PX4 with mode commands ("ack for not-existing command" storm).
+            snap = getattr(manager, "_snapshot", None)
+            fm = getattr(snap, "flight_mode", None)
+            if intervened and getattr(fm, "mode", "") == "HOLD":
+                return False, "already holding"
             ok = await manager.set_flight_mode("HOLD")
             return bool(ok), "hold"
         if action == "return":

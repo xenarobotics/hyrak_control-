@@ -96,6 +96,14 @@ async def _goal_for(drone_id: str) -> tuple[float, float] | None:
                 return (float(tgt[0]), float(tgt[1]))
     except Exception:
         pass
+    # A mission a browser session uploaded to this aircraft. Hand-drawn
+    # missions match no planner record, so the DB lookup below finds nothing
+    # and the loop believed the aircraft was in manual flight - it HELD in
+    # front of the first obstacle for 20 s and went home instead of routing
+    # around it. The upload handler records the destination here.
+    g = _session_goals.get(drone_id)
+    if g:
+        return g
     from app.db import db_available, get_session
     from app.db.models import Mission
     from sqlalchemy import select
@@ -207,6 +215,37 @@ async def _run() -> None:
 
 
 _eyes_logged: set[str] = set()
+_session_goals: dict[str, tuple[float, float]] = {}
+
+
+def _controller_for_session(session_id: str):
+    """The controller a browser session's data belongs to: its bound drone,
+    else the sole enabled controller (see observe_from_session)."""
+    sm = _session_manager
+    if sm is None:
+        return None
+    sess = sm.get(session_id)
+    drone = getattr(sess, "drone", None) if sess else None
+    did = (drone or {}).get("id") if isinstance(drone, dict) else getattr(drone, "id", None)
+    c = avoidance.controller(did) if (did and avoidance.has_controller(did)) else None
+    if c is not None and c.enabled:
+        return c
+    return _sole_enabled_controller()
+
+
+def note_mission_goal(session_id: str, waypoints: list) -> None:
+    """Called by the session upload handler: the last waypoint is where the
+    aircraft is going, whatever the planner knows about the mission."""
+    try:
+        c = _controller_for_session(session_id)
+        if c is None or not waypoints:
+            return
+        last = waypoints[-1]
+        _session_goals[c.drone_id] = (float(last["lat"]), float(last["lng"]))
+        logger.info(f"Avoidance goal for {c.drone_id[:8]} set from session upload: "
+                    f"{last['lat']:.6f},{last['lng']:.6f} ({len(waypoints)} wps)")
+    except Exception as e:
+        logger.debug(f"note_mission_goal failed: {e}")
 
 
 def _sole_enabled_controller():
