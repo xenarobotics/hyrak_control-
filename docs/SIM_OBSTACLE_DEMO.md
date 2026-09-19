@@ -36,9 +36,11 @@ in the real air unit's wire format. So the normal single-drone flow works:
    Air unit video port = 5600, the default). The backend reads the sim camera
    as H.265 RTP on 127.0.0.1:5600, exactly the wire format the real air unit
    sends, and serves it to the browser; no virtual webcam is involved.
-3. AI tab -> **Depth mapping**. This is the mode whose module runs the metric
-   depth model; its per-frame obstacle observations feed the avoidance loop.
-   You see the depth colormap (clip 60 m) in this mode.
+3. No AI mode needed. With the Avoidance toggle on, the backend runs the
+   metric depth model on the session's video in the background (~5 fps,
+   `app/avoidance/sensing.py`) whatever tab or AI mode you are in. Depth
+   mapping mode still works and shows the colormap (clip 60 m); it simply
+   feeds the same loop itself.
 4. Mission tab: draw an A->B mission at 10 m and upload/fly. The map's Avoidance overlay shows what the drone currently sees
    (grey/amber) and the amber dashed reroute it commits to.
 

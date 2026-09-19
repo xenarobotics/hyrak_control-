@@ -11,6 +11,7 @@ from aiortc import MediaStreamTrack
 from aiortc.contrib.media import MediaRelay
 from av import VideoFrame
 
+from app.avoidance import sensing as _sensing
 from app.sessions import observer
 
 if TYPE_CHECKING:
@@ -218,6 +219,16 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
         # it was burning CPU on every frame for the most common mode.
         if mode is None or mode.value == "manual-control":
             self._maybe_snapshot(None, frame)
+            # Obstacle avoidance watches the camera in the background when its
+            # toggle is on - whatever tab the operator is on. Throttled and
+            # non-blocking; the relay never waits for it.
+            if _sensing.wants_frame(self.session_id, mode.value if mode else None):
+                try:
+                    img = await asyncio.get_running_loop().run_in_executor(
+                        self._px_executor, partial(frame.to_ndarray, format="bgr24"))
+                    _sensing.submit(self.session_id, img)
+                except Exception:
+                    pass
             self._returned_at = time.perf_counter()
             return frame
 
@@ -236,6 +247,11 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
             self._px_executor, partial(frame.to_ndarray, format="bgr24")
         )
         _t = self._lap("to_ndarray", _t)
+
+        # Same background sensing for every analysis mode except Depth
+        # mapping, which feeds avoidance itself. The frame is already BGR.
+        if _sensing.wants_frame(self.session_id, mode.value):
+            _sensing.submit(self.session_id, img_bgr)
 
         if analyzer:
             try:
