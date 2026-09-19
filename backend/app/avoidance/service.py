@@ -416,7 +416,8 @@ _STATE_FILE = _ROOT_DIR / ".avoidance_state.json"
 def persist_state() -> None:
     try:
         _STATE_FILE.write_text(_json.dumps(
-            {i: {"enabled": c.enabled, "armed": c.armed}
+            {i: {"enabled": c.enabled, "armed": c.armed,
+                 "params": dict(c.params.__dict__)}
              for i, c in _controllers.items()}, indent=1))
     except Exception:
         pass
@@ -433,6 +434,12 @@ def restore_state() -> int:
     for i, st in data.items():
         if st.get("enabled"):
             c = controller(i)
+            for k, v in (st.get("params") or {}).items():
+                if hasattr(c.params, k):
+                    try:
+                        setattr(c.params, k, float(v))
+                    except (TypeError, ValueError):
+                        pass
             c.set_enabled(True)
             c.set_armed(bool(st.get("armed")))
             n += 1
