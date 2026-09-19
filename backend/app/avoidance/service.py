@@ -226,6 +226,10 @@ class AvoidanceController:
                     return self._settle(climb)
 
         # 5. No lateral or vertical path (or no goal) -> hold, then return.
+        # The obstacle that stops us must not evaporate while we sit still:
+        # it expired after 8 s of not being re-seen, the loop said "clear",
+        # resumed the mission and drove straight into it. Keep it 30 s.
+        threat.last_seen = max(threat.last_seen, now + 30.0 - self.omap.ttl_s)
         self._committed_path = None
         return self._settle(self._hold_or_return(
             now, near_d, near_ko,

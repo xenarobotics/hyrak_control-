@@ -81,90 +81,108 @@ def _resolve_link(drone_id: str):
 _NO_GOAL_MODES = {"RETURN_TO_LAUNCH", "RTL", "LAND", "LANDING"}
 
 
-_fc_goal: dict[str, tuple[tuple[float, float] | None, float]] = {}   # drone -> (goal, when)
-_fc_goal_inflight: set[str] = set()
+_fc_mission: dict[str, tuple[list[dict], float]] = {}   # drone -> (items, when)
+_fc_inflight: set[str] = set()
+_session_missions: dict[str, list[dict]] = {}          # drone -> waypoints a session uploaded
+MIN_SENSE_ALT_M = 3.0   # below this the camera sees the pad and the ground plane
 
 
-async def _fetch_fc_goal(drone_id: str, manager) -> None:
-    """Read the mission stored ON THE AIRCRAFT and take its last waypoint as
-    the goal. This is the source of truth when nothing else knows the
-    destination: a mission restarted without a fresh upload, or one uploaded
-    before the backend last restarted. Runs as a background task so the
-    10 s download timeout never stalls the loop."""
+async def _fetch_fc_mission(drone_id: str, manager) -> None:
+    """Read the mission stored ON THE AIRCRAFT. Source of truth when nothing
+    else knows it: a mission restarted without a fresh upload, or uploaded
+    before the backend last restarted. Background task - the 10 s download
+    timeout must never stall the loop."""
     import time as _t
     try:
-        items = await manager.download_mission()
-        wps = [w for w in (items or []) if w.get("cmd") != "takeoff"
-               and w.get("lat") is not None and w.get("lng") is not None]
-        goal = (float(wps[-1]["lat"]), float(wps[-1]["lng"])) if wps else None
-        if goal:
-            logger.info(f"Avoidance goal for {drone_id[:8]} read from the aircraft's "
-                        f"mission: {goal[0]:.6f},{goal[1]:.6f} ({len(wps)} wps)")
-        _fc_goal[drone_id] = (goal, _t.monotonic())
+        items = list(await manager.download_mission() or [])
+        if items:
+            logger.info(f"Avoidance: read {len(items)} mission items from aircraft {drone_id[:8]}")
+        _fc_mission[drone_id] = (items, _t.monotonic())
     except Exception as e:
-        logger.debug(f"FC mission goal for {drone_id[:8]} unavailable: {e}")
-        _fc_goal[drone_id] = (None, _t.monotonic())
+        logger.debug(f"FC mission for {drone_id[:8]} unavailable: {e}")
+        _fc_mission[drone_id] = ([], _t.monotonic())
     finally:
-        _fc_goal_inflight.discard(drone_id)
+        _fc_inflight.discard(drone_id)
 
 
-async def _goal_for(drone_id: str, manager=None) -> tuple[float, float] | None:
-    """The destination the drone is flying toward. For a fleet drone this is
-    the fleet's own tracked land target (authoritative, no DB/hash lookup -
-    the fleet sets it the moment a mission is flown). Otherwise the last
-    waypoint of the drone's latest mission. None for manual flight, in which
-    case an obstacle makes the drone brake/hold instead of rerouting."""
+def _mission_items(drone_id: str, manager) -> list[dict] | None:
+    """The waypoint list the aircraft is flying, from the session's upload or
+    the aircraft itself (cached 60 s, retried after 20 s when empty)."""
+    import time as _t
+    if drone_id in _session_missions:
+        return _session_missions[drone_id]
+    cached = _fc_mission.get(drone_id)
+    if cached is not None:
+        items, when = cached
+        age = _t.monotonic() - when
+        if items and age < 60.0:
+            return items
+        if not items and age < 20.0:
+            return None
+    if manager is not None and drone_id not in _fc_inflight:
+        _fc_inflight.add(drone_id)
+        asyncio.create_task(_fetch_fc_mission(drone_id, manager))
+    return cached[0] if cached and cached[0] else None
+
+
+def _current_index(drone_id: str) -> int:
+    """Index of the mission item the aircraft is flying toward (MAVSDK
+    mission_progress.current), -1 when unknown."""
+    try:
+        from app.fleet import service as fleet_service
+        i = fleet_service.instance_for(drone_id)
+        if i is not None:
+            return int((fleet_service._state.get(i) or {}).get("mission_current_index", -1))
+    except Exception:
+        pass
+    sm = _session_manager
+    if sm is not None:
+        for sess in sm.all_sessions():
+            if (sess.drone or {}).get("id") == drone_id:
+                mgr = sm.get_telemetry(sess.session_id)
+                if mgr is not None and mgr.is_connected:
+                    return int(getattr(mgr.snapshot(), "mission_current_index", -1))
+    return -1
+
+
+def _goal_and_remaining(drone_id: str, manager) -> tuple[tuple[float, float] | None, list[dict]]:
+    """THE fix for multi-leg missions: the goal is the waypoint the aircraft is
+    flying toward RIGHT NOW, not the mission's last one. With the last one the
+    threat cone pointed at the far end of a lawnmower while the aircraft flew
+    the opposite leg into a cylinder. Returns (goal, waypoints after it) so a
+    detour can rejoin the mission instead of ending at the goal."""
+    items = _mission_items(drone_id, manager)
+    if not items:
+        return None, []
+    idx = _current_index(drone_id)
+    n = len(items)
+    start = idx if 0 <= idx < n else 0
+    for k in range(start, n):
+        w = items[k]
+        if w.get("type") == "takeoff" or w.get("lat") is None or w.get("lng") is None:
+            continue
+        return (float(w["lat"]), float(w["lng"])), [dict(x) for x in items[k + 1:]]
+    w = items[-1]
+    if w.get("lat") is not None and w.get("lng") is not None:
+        return (float(w["lat"]), float(w["lng"])), []
+    return None, []
+
+
+async def _goal_for(drone_id: str, manager=None) -> tuple[tuple[float, float] | None, list[dict]]:
+    """(goal, remaining waypoints). Fleet-flown missions carry their own land
+    target (the fleet sets it the moment it flies); everything else comes
+    from the mission the aircraft is flying (session upload or the aircraft
+    itself), indexed by the item it is currently heading for."""
     try:
         from app.fleet import service as fleet_service
         i = fleet_service.instance_for(drone_id)
         if i is not None:
             tgt = fleet_service._land_target.get(i)
             if tgt:
-                return (float(tgt[0]), float(tgt[1]))
+                return (float(tgt[0]), float(tgt[1])), []
     except Exception:
         pass
-    # A mission a browser session uploaded to this aircraft. Hand-drawn
-    # missions match no planner record, so the DB lookup below finds nothing
-    # and the loop believed the aircraft was in manual flight - it HELD in
-    # front of the first obstacle for 20 s and went home instead of routing
-    # around it. The upload handler records the destination here.
-    g = _session_goals.get(drone_id)
-    if g:
-        return g
-    from app.db import db_available, get_session
-    from app.db.models import Mission
-    from sqlalchemy import select
-    if not db_available():
-        return None
-    try:
-        async with get_session() as db:
-            m = (
-                await db.execute(
-                    select(Mission)
-                    .where(Mission.drone_id == drone_id,
-                           Mission.status.in_(("uploaded", "flying")))
-                    .order_by(Mission.created_at.desc()).limit(1)
-                )
-            ).scalars().first()
-        if m and m.waypoints:
-            last = m.waypoints[-1]
-            return (float(last["lat"]), float(last["lng"]))
-    except Exception as e:
-        logger.debug(f"goal lookup for {drone_id[:8]} failed: {e}")
-    # Last resort: ask the aircraft (cached; refreshed every 60 s, retried
-    # after 20 s on failure).
-    import time as _t
-    cached = _fc_goal.get(drone_id)
-    if cached is not None:
-        goal, when = cached
-        if goal is not None and _t.monotonic() - when < 60.0:
-            return goal
-        if goal is None and _t.monotonic() - when < 20.0:
-            return None
-    if manager is not None and drone_id not in _fc_goal_inflight:
-        _fc_goal_inflight.add(drone_id)
-        asyncio.create_task(_fetch_fc_goal(drone_id, manager))
-    return cached[0] if cached else None
+    return _goal_and_remaining(drone_id, manager)
 
 
 _last_seed: dict[str, float] = {}
@@ -211,7 +229,7 @@ async def _tick() -> None:
         # Returning home / landing means the route is finished - see
         # _NO_GOAL_MODES for the ping-pong this prevents.
         pursuing = in_air and mode.upper() not in _NO_GOAL_MODES
-        goal = await _goal_for(c.drone_id, manager) if pursuing else None
+        goal, remaining = (await _goal_for(c.drone_id, manager)) if pursuing else (None, [])
 
         prev_state = c.state
         # Reroute at the drone's CURRENT altitude so a lateral dodge stays level
@@ -222,8 +240,16 @@ async def _tick() -> None:
         # Command the aircraft only when armed AND airborne. Advisory (unarmed)
         # detects and logs but never touches control.
         if c.armed and in_air and manager is not None:
+            wps = decision.waypoints
+            if decision.action == "reroute" and wps and remaining:
+                # Rejoin the mission: detour ends at the current waypoint;
+                # the legs after it follow, so the aircraft finishes the
+                # survey instead of stopping at the first dodge.
+                wps = list(wps) + remaining
+                _session_missions[c.drone_id] = wps      # indices now refer to THIS mission
+                _fc_mission.pop(c.drone_id, None)
             did, note = await executor.apply(
-                manager, decision.action, decision.waypoints, c.intervened)
+                manager, decision.action, wps, c.intervened)
             if decision.action in ("hold", "reroute", "climb", "return") and did:
                 c.intervened = True
             elif decision.action == "clear" and c.intervened and did:
@@ -235,7 +261,10 @@ async def _tick() -> None:
         # camera that judges ~25 m leaves ~2 s to react. Applied only while
         # armed, airborne and on a route; re-sent when it changes by > 0.3 m/s.
         if c.armed and in_air and pursuing and manager is not None:
-            spd = float(decision.recommended_speed_m_s or 0.0)
+            # Cap at cruise too (clear -> the cap): the governor used to speak
+            # only once a threat existed, so the aircraft met every obstacle at
+            # PX4's full cruise speed.
+            spd = float(decision.recommended_speed_m_s or 0.0) or float(c.params.speed_cap_m_s)
             last = _last_speed.get(c.drone_id)
             if spd > 0.0 and (last is None or abs(spd - last) > 0.3) and \
                     now - _last_speed_t.get(c.drone_id, 0.0) > 1.0:
@@ -301,6 +330,8 @@ def note_mission_goal(session_id: str, waypoints: list) -> None:
             return
         last = waypoints[-1]
         _session_goals[c.drone_id] = (float(last["lat"]), float(last["lng"]))
+        _session_missions[c.drone_id] = [dict(w) for w in waypoints]
+        _fc_mission.pop(c.drone_id, None)
         logger.info(f"Avoidance goal for {c.drone_id[:8]} set from session upload: "
                     f"{last['lat']:.6f},{last['lng']:.6f} ({len(waypoints)} wps)")
     except Exception as e:
@@ -345,10 +376,15 @@ def observe_from_session(session_id: str, obs: dict | list) -> None:
         # feeding that in would seed phantom obstacles for the first seconds
         # of the flight. Obstacles only exist to a drone that is flying.
         try:
-            link, _, in_air, _ = _resolve_link(c.drone_id)
+            link, pose, in_air, _ = _resolve_link(c.drone_id)
         except Exception:
-            link, in_air = None, True
+            link, pose, in_air = None, None, True
         if link is not None and not in_air:
+            return
+        # PX4 flags in-air at 0.2 m; the camera still sees the pad and the
+        # ground plane for the first metres of the climb, and one of those
+        # phantoms held the aircraft in front of a real cylinder.
+        if pose is not None and pose.alt_m < MIN_SENSE_ALT_M:
             return
         from app.avoidance.observations import ObstacleObservation
         for one in (obs if isinstance(obs, list) else [obs]):
