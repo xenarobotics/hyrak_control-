@@ -121,3 +121,58 @@ Phased so each step is verifiable in the sim:
   at 3 m altitude. That is a property of gaps 1-4, not of tuning.
 - With A+B+C the sim demo becomes a fair test of the planner; with D the
   same code runs on the real air unit's camera with known limits.
+
+## 7. SITL statistics, 2026-09-19 (flight recorder + avoidance events)
+
+| metric | value |
+|---|---|
+| airborne flights | 9 |
+| flights ending against a cylinder (closest approach < 3 m) | 8 (89 %) |
+| avoidance events | 95: 82 hold, 9 return, 4 reroute |
+| mapped obstacle vs nearest real cylinder | median 15.0 m, mean 14.3 m, min 0.3, max 30 |
+| events that were a real cylinder (< 3 m) | 6 / 95 (6 %) |
+| events that were phantoms (> 8 m from any cylinder) | 77 / 95 (81 %) |
+| distance to the (believed) obstacle when acting | median 7.4 m, min 1.2, max 15.1 |
+| first action in the 16:08 flight | cylinder 4.9 m away at 3 m/s (1.6 s) |
+
+Reading: 94 % of what the loop reacted to did not exist where it thought,
+and when it did react to something real it was already inside braking
+distance. The decision core executed its rules; its inputs were wrong.
+
+## 8. What the field does (2026-09-19 survey)
+
+- **PX4-Avoidance** (3DVFH+ local planner, octomap global planner): ROS 1
+  Noetic, RealSense depth, MAVROS, `COM_OBS_AVOID`; **archived and
+  unmaintained since 2024-08**. Its Gazebo setup used a depth camera, never a
+  mono camera.
+- **PX4 Collision Prevention** (onboard, `CP_DIST`): consumes
+  `OBSTACLE_DISTANCE` at ~10 Hz from a lidar or companion; tested at 4 m/s;
+  **Position mode only, not Mission**; the companion path is "untested".
+- **ArduPilot**: object database in earth frame fed by proximity sensors
+  (360 lidar, rangefinders, RealSense via companion); BendyRuler (probe
+  headings, pick open + goal-ward) and Dijkstra (fence polygons) run in
+  Auto/Guided/RTL on a background thread on the FC. Hobbyists fly it in the
+  field with RPLidar/TF-Luna; it is the reference for "avoidance inside a
+  mission".
+- **Research planners** (FAST-Planner, EGO-Planner, Bubble, Histo-Planner):
+  depth camera -> occupancy/ESDF grid -> gradient/corridor trajectory
+  optimisation at 10-20 Hz on a companion computer, PX4 as the low-level
+  controller via offboard setpoints. Gazebo with a depth camera is the
+  standard test rig.
+- **ROS 2 (2025)**: Aerostack2 (behaviour trees, modular), Nav2 used at fixed
+  altitude with a Collision Monitor braking on raw lidar; D* Lite + MPPI
+  map-free stacks on PX4 SITL + Gazebo Harmonic. Same pattern: range sensor,
+  local grid, high-rate local planner, offboard setpoints.
+- **Monocular depth for avoidance (2025)**: relative depth rescaled to metric
+  with VIO sparse features reaches AbsRel ~0.10 (92 % of pixels within 25 %)
+  and ~0.19 with real VINS features; runs 15 Hz on a Jetson Orin, planner at
+  12 Hz; real test = 7 m in a pillar room, and the authors flag frame-to-frame
+  "chattering" and sky-dominated scenes as failure modes. Aerial-view metric
+  depth benchmarks report large domain gaps for street/indoor-trained models
+  at altitude. Nobody publishes mono-only avoidance at 3-5 m/s over a
+  cloud link.
+
+Conclusion: the direction of the phased plan in section 5 is the field's
+direction. What the field does NOT do is what the current stack does: a
+per-frame mono metric model, placed with a 1-2 Hz pose, driving mission
+uploads from a 2.5 Hz cloud loop.
