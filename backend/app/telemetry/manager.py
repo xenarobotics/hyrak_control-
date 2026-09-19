@@ -410,6 +410,7 @@ class TelemetryManager:
             # no separate rate command needed). Velocity and GPS are dropped entirely.
             rates = [
                 ("position", self._drone.telemetry.set_rate_position, 1.0),
+                ("attitude", self._drone.telemetry.set_rate_attitude_euler, 2.0),
                 ("battery",  self._drone.telemetry.set_rate_battery,  0.2),
             ]
         else:
@@ -549,6 +550,11 @@ class TelemetryManager:
             # This keeps N=3 drones at 12 total streams rather than 18.
             self._tasks = [
                 asyncio.create_task(self._subscribe_position(),    name="fleet_position"),
+                # Attitude at the fleet rate (2 Hz): heading is what places a
+                # camera observation in the world. Without it the fleet
+                # reported heading 0.0 for every drone and avoidance mapped
+                # every obstacle relative to NORTH instead of the nose.
+                asyncio.create_task(self._subscribe_attitude(),    name="fleet_attitude"),
                 asyncio.create_task(self._subscribe_armed(),       name="fleet_armed"),
                 asyncio.create_task(self._subscribe_flight_mode(), name="fleet_mode"),
                 asyncio.create_task(self._subscribe_battery(),     name="fleet_battery"),
