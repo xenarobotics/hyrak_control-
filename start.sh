@@ -16,14 +16,32 @@ export PATH="$HOME/.local/bin:$PATH"
 PIDS=()
 
 free_port() {
+    # EVERY owner of the port, not the first one ss prints: uvicorn's reloader
+    # parent and its worker share the listening socket, and after a code
+    # reload the worker can be a zombie - ss lists the zombie, kill -9 on a
+    # zombie does nothing, the parent keeps the port, and the next start dies
+    # with "Address already in use" while the app looks up (it is wedged).
+    # A zombie's PARENT is what actually holds the socket, so kill that.
     local port="$1"
-    local pid
-    pid=$(ss -ltnp 2>/dev/null | awk -v p=":$port" '$4 ~ p {print $0}' | grep -oP 'pid=\K[0-9]+' | head -1)
-    if [[ -n "${pid:-}" ]]; then
-        echo "Port $port is in use by PID $pid — stopping it..."
-        kill -9 "$pid" 2>/dev/null
+    local pids pid ppid state
+    pids=$(ss -ltnp 2>/dev/null | awk -v p=":$port" '$4 ~ p"$" {print $0}' | grep -oP 'pid=\K[0-9]+' | sort -u)
+    for pid in $pids; do
+        state=$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ')
+        if [[ "$state" == Z* ]]; then
+            ppid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+            echo "Port $port held by zombie PID $pid - stopping its parent $ppid..."
+            [[ -n "$ppid" && "$ppid" != 1 ]] && kill -9 "$ppid" 2>/dev/null
+        else
+            echo "Port $port is in use by PID $pid - stopping it..."
+            kill -9 "$pid" 2>/dev/null
+        fi
+    done
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        ss -ltn 2>/dev/null | awk -v p=":$port" '$4 ~ p"$"' | grep -q . || return 0
         sleep 0.5
-    fi
+    done
+    echo "WARNING: port $port still busy after 5 s"
 }
 
 kill_mavsdk() {
