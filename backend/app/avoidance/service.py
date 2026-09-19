@@ -355,6 +355,9 @@ class AvoidanceController:
             "obstacle_count": len(self.omap.active(now)),
             "recommended_speed_m_s": round(self._recommended_speed, 2),
             "committed_path": self._committed_path is not None,
+            # Where the loop believes the aircraft is going (None = it will
+            # only hold, never reroute) - shown in the Fly-tab panel.
+            "goal": list(self._last_goal) if self._last_goal else None,
             "obstacle_distance_cm": self.bus.obstacle_distance_cm(
                 now, self.params.min_confidence),
         }
