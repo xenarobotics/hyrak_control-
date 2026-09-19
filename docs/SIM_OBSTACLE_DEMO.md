@@ -23,8 +23,8 @@ The sim presents itself exactly like the real air unit: MAVLink on udp:14550
 (uplink accepted on 14551, where the desktop pins it) and H.265 RTP video on
 udp:5600. So the normal single-drone flow works:
 
-1. DEVICES -> TELEMETRY -> **SITL on server (udp:14560)** -> Connect. The
-   backend binds the sim directly (hyrak_sim.sh gives PX4 a link to 14560);
+1. DEVICES -> TELEMETRY -> **Gazebo sim on server (udp:14600)** -> Connect. The
+   backend binds the sim directly (hyrak_sim.sh gives PX4 a link to 14600);
    nothing on the desktop is in the command path. This is the one to use.
    (The "Air unit (UDP, direct)" route through the desktop relay also exists
    - TX HOST `auto`, QGC PORT `0` - but it is the real-hardware path and has
@@ -92,6 +92,8 @@ true, about 6 s at 4 m/s; the controller's `reaction_distance_m` (12) and
   fleet was also connected: both MAVSDK links identified as sysid 245, and PX4
   routes a reply to the link where it last saw that sysid - the fleet's.
   Fleet links now use sysid 200+instance; sessions keep 245.
+- **Session port inside the fleet scan range**: 14560 got adopted as a phantom
+  fleet drone by the 14541..14561 scanner; the session link lives on 14600.
 - **Swarm-mode sessions never bind a drone**, so camera observations were
   dropped: `observe_from_session` falls back to the sole enabled controller.
 - **v4l2loopback wedged** (`VIDIOC_G_FMT: Invalid argument`): not needed any

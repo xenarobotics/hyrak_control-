@@ -24,7 +24,9 @@ import {
     requestRadioPort, serialUnavailableReason, type GrantedRadio,
 } from '@/lib/browserSerial'
 // Backend-side bind for a SITL on the server's own machine (see hyrak_sim.sh).
-export const SERVER_SITL_ADDRESS = 'udp://:14560'
+// 14600, NOT 1454x/1455x: the fleet and swarm scanners probe 14541..14561
+// for SITL instances and adopted the session's port as a phantom drone.
+export const SERVER_SITL_ADDRESS = 'udp://:14600'
 import { useDrone } from '@/hooks/useDrone'
 import { getLocalRelayUrl } from '@/lib/localRfRelay'
 import { getSiyiTelemetryTarget, startSiyiTelemetry } from '@/lib/siyiTelemetryRelay'
@@ -168,8 +170,8 @@ export function useTelemetryLink() {
     const options: LinkOption[] = [
         ...nativeRadios.map((r, i) => ({ value: `nradio-${i}`, label: r.label })),
         ...radios.map((r, i) => ({ value: `radio-${i}`, label: r.label })),
+        { value: 'sitl-server', label: 'Gazebo sim on server (udp:14600)' },
         { value: 'sitl', label: 'SITL' },
-        { value: 'sitl-server', label: 'SITL on server (udp:14560)' },
         // Native first: same ground station as local-relay but with no relay
         // agent to start. Desktop only.
         ...(desktop ? [{ value: 'air-unit-udp', label: 'Air unit (UDP, direct)' }] : []),
