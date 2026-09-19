@@ -19,10 +19,10 @@
 #    (sensors). PX4_HOME_ALT=0 because the gz barometer is sea level.
 #  - PX4_PARAM_RTL_RETURN_ALT=10: SITL params reset on every launch; this is
 #    PX4's env override hook, so RTL stays at mission altitude.
-#  - Camera -> H.265 RTP on 127.0.0.1:5600 and MAVLink -> udp:14550 (uplink
-#    on 14551): the same ports and wire formats as the real air unit, so the
-#    desktop app's "Air unit (UDP, direct)" telemetry and "Air unit (UDP)"
-#    video sources work unchanged. No v4l2loopback, no browser capture.
+#  - Camera -> H.265 RTP on 127.0.0.1:5600, the real air unit's wire format,
+#    read by the "Air unit (UDP)" video source. MAVLink -> udp:14540 for the
+#    desktop's plain "SITL" source (reply-to-sender, QGC style) and udp:14600
+#    for "Gazebo sim on server". No v4l2loopback, no browser capture.
 #  - NEVER pattern-kills gz/px4: stop uses the PIDs it recorded.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -60,12 +60,14 @@ start() {
         PX4_HOME_LAT="$HOME_LAT" PX4_HOME_LON="$HOME_LON" PX4_HOME_ALT=0 \
         PX4_PARAM_RTL_RETURN_ALT=10 ../bin/px4 -i 1 -d
     for _ in $(seq 1 40); do grep -q "Ready for takeoff" "$LOGS/px4.log" 2>/dev/null && break; sleep 1; done
-    # Look like the real air unit to the desktop app: MAVLink down to
-    # udp:14550 (what "Air unit (UDP, direct)" binds), uplink accepted on
-    # 14551 (where the desktop pins it, mirroring wfb_tx). The fleet link on
-    # 14541 keeps working alongside - MAVLink is fine with two ground stations.
-    ../bin/px4-mavlink --instance 1 start -x -u 14551 -o 14550 -t 127.0.0.1 -r 4000000 -f \
-        > "$LOGS/px4_mavlink_airunit.log" 2>&1
+    # (PX4 SITL has 6 MAVLink channels; 0-4 are its own. The air-unit
+    # emulation link (-u 14551 -o 14550) is therefore not started by default -
+    # the desktop's plain "SITL" and "Gazebo sim on server" cover the sim.)
+    # Plain "SITL" in the desktop app: its bridge binds udp:14540 (PX4
+    # instance 0's port) and replies to whoever sends, QGC-style. Give this
+    # instance-1 sim a link there too, so "SITL" just works.
+    ../bin/px4-mavlink --instance 1 start -x -u 14590 -o 14540 -t 127.0.0.1 -r 4000000 -f \
+        > "$LOGS/px4_mavlink_sitl14540.log" 2>&1
     # Server-side session link: the HYRAK "Gazebo sim on server" telemetry
     # source. 14600 on purpose: the fleet/swarm scanners probe 14541..14561
     # and adopted 14560 as a phantom "Drone 19".
@@ -95,7 +97,7 @@ status() {
     done
     grep -q "Ready for takeoff" "$LOGS/px4.log" 2>/dev/null && echo "PX4: Ready for takeoff (instance 1, fleet adopts udp:14541)"
     echo "video:     H.265 RTP -> 127.0.0.1:5600  (CAMERA -> 'Air unit (UDP) - set in Settings', port 5600)"
-    echo "telemetry: MAVLink  -> 127.0.0.1:14600 (TELEMETRY -> 'Gazebo sim on server')  |  14550/14551 (Air unit (UDP, direct), TX HOST auto)"
+    echo "telemetry: TELEMETRY -> 'SITL' (desktop binds udp:14540)  or  'Gazebo sim on server' (udp:14600)"
 }
 
 case "${1:-}" in

@@ -19,16 +19,17 @@ Backend and frontend run as usual (`backend: uv run python -m app.main`,
 
 ## In the HYRAK app (desktop)
 
-The sim presents itself exactly like the real air unit: MAVLink on udp:14550
-(uplink accepted on 14551, where the desktop pins it) and H.265 RTP video on
-udp:5600. So the normal single-drone flow works:
+The sim sends MAVLink to udp:14540 (what the desktop's plain "SITL" source
+binds) and to udp:14600 (server-side bind), and H.265 RTP video on udp:5600
+in the real air unit's wire format. So the normal single-drone flow works:
 
-1. DEVICES -> TELEMETRY -> **Gazebo sim on server (udp:14600)** -> Connect. The
+1. DEVICES -> TELEMETRY -> plain **SITL** -> Connect (the desktop binds
+   udp:14540 and replies to the sender; hyrak_sim.sh gives PX4 a link there).
+   Equivalent: **Gazebo sim on server (udp:14600)** -> Connect. The
    backend binds the sim directly (hyrak_sim.sh gives PX4 a link to 14600);
    nothing on the desktop is in the command path. This is the one to use.
-   (The "Air unit (UDP, direct)" route through the desktop relay also exists
-   - TX HOST `auto`, QGC PORT `0` - but it is the real-hardware path and has
-   two settings that silently kill commands when wrong.) Swarm Mode is no longer required; the fleet still adopts the sim
+   (Do not use "Air unit (UDP, direct)" for the sim: it is the wfb-ng hardware
+   path and its TX HOST / QGC PORT settings silently kill commands when wrong.) Swarm Mode is no longer required; the fleet still adopts the sim
    on 14541 in the background, and both register the aircraft under its real
    FC UID, so it is ONE drone record whichever link you use.
 2. DEVICES -> CAMERA -> **Air unit (UDP) - set in Settings** (Settings ->
