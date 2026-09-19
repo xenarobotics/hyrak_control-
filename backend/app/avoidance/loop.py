@@ -17,6 +17,7 @@ import logging
 
 from app.avoidance import executor
 from app.avoidance import service as avoidance
+from app.avoidance import sensors as sensor_registry
 from app.avoidance.geometry import Pose
 
 logger = logging.getLogger("verocore.avoidance.loop")
@@ -392,6 +393,9 @@ def observe_from_session(session_id: str, obs: dict | list) -> None:
                 _eyes_logged.add(session_id)
                 logger.info(f"Session {session_id[:8]} camera feeds avoidance "
                             f"for drone {c.drone_id[:8]} (session has no bound drone)")
+        # The camera is feeding (this is called with real observations) even
+        # when the gates below decide not to use them yet.
+        sensor_registry.mark_data(c.drone_id, "monocular")
         # On the ground the camera stares at the pad and the ground plane -
         # feeding that in would seed phantom obstacles for the first seconds
         # of the flight. Obstacles only exist to a drone that is flying.

@@ -87,8 +87,17 @@ def submit(session_id: str, img_bgr: np.ndarray) -> None:
             _announced.add(session_id)
             logger.info(f"Background obstacle sensing active for session {session_id[:8]} "
                         f"(~{SENSE_HZ:.0f} fps, independent of the AI mode)")
+        # A processed frame IS the camera feeding, whether or not it held an
+        # obstacle and whatever the altitude. Marking freshness only when an
+        # observation reached the controller made the pad read "NO VIDEO"
+        # (the below-3 m gate drops everything there) - and the arm interlock
+        # then refused every takeoff.
+        from app.avoidance import loop as av_loop
+        c = av_loop._controller_for_session(session_id)
+        if c is not None:
+            from app.avoidance import sensors as sensor_registry
+            sensor_registry.mark_data(c.drone_id, "monocular")
         if obs:
-            from app.avoidance import loop as av_loop
             av_loop.observe_from_session(session_id, obs)
 
     fut.add_done_callback(_done)
