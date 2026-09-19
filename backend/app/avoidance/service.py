@@ -124,6 +124,24 @@ class AvoidanceController:
         elif self.state == AvoidanceState.DISABLED:
             self.state = AvoidanceState.NOMINAL
 
+    def reset_flight_state(self) -> None:
+        """Forget everything about the last flight: the obstacle map, the hold
+        timer, the committed detour. Called when the aircraft is on the ground.
+        Without this the hold timer from a previous flight made the FIRST
+        threat tick of the next one escalate straight to RETURN - the
+        aircraft took off and landed again 5 s later."""
+        self.bus.clear()
+        self.omap.clear()
+        self._hold_since = None
+        self.intervened = False
+        self._committed_path = None
+        self._committed_goal = None
+        self._path_invalid = 0
+        self._recommended_speed = 0.0
+        if self.enabled:
+            self.state = AvoidanceState.NOMINAL
+            self._last_reason = "on the ground"
+
     def set_armed(self, on: bool) -> None:
         """Allow (or forbid) commanding the aircraft. Arming requires
         detection already enabled; disarming never disables detection."""

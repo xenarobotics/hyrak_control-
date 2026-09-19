@@ -187,6 +187,7 @@ async def _goal_for(drone_id: str, manager=None) -> tuple[tuple[float, float] | 
 
 _last_seed: dict[str, float] = {}
 _last_speed: dict[str, float] = {}
+_airborne: dict[str, bool] = {}
 _last_speed_t: dict[str, float] = {}
 _last_persist: dict[str, float] = {}
 
@@ -220,6 +221,17 @@ async def _tick() -> None:
         if not c.enabled:
             continue
         manager, pose, in_air, mode = _resolve_link(c.drone_id)
+        # On the ground: wipe the previous flight's map, hold timer and detour
+        # (once per landing), and never command anything.
+        if not in_air:
+            if _airborne.pop(c.drone_id, False):
+                c.reset_flight_state()
+                _last_speed.pop(c.drone_id, None)
+                _session_missions.pop(c.drone_id, None)   # next flight re-reads its mission
+                _fc_mission.pop(c.drone_id, None)
+                logger.info(f"Avoidance {c.drone_id[:8]}: landed - flight state reset")
+        else:
+            _airborne[c.drone_id] = True
         if pose is not None:
             try:
                 await _sync_hazards(c, pose, now)
@@ -239,7 +251,11 @@ async def _tick() -> None:
 
         # Command the aircraft only when armed AND airborne. Advisory (unarmed)
         # detects and logs but never touches control.
-        if c.armed and in_air and manager is not None:
+        # Command only once clear of the pad: PX4 flags in-air at 0.2 m, and a
+        # hold/return in the first metres of a climb is a landing.
+        can_act = (c.armed and in_air and manager is not None
+                   and pose is not None and pose.alt_m >= MIN_SENSE_ALT_M)
+        if can_act:
             wps = decision.waypoints
             if decision.action == "reroute" and wps and remaining:
                 # Rejoin the mission: detour ends at the current waypoint;

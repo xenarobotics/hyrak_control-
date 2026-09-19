@@ -39,6 +39,10 @@ async def apply(manager, action: str, waypoints: list | None,
             ok = await manager.set_flight_mode("HOLD")
             return bool(ok), "hold"
         if action == "return":
+            snap = getattr(manager, "_snapshot", None)
+            fm = getattr(snap, "flight_mode", None)
+            if intervened and str(getattr(fm, "mode", "")).upper() in ("RETURN", "RETURN_TO_LAUNCH", "RTL"):
+                return False, "already returning"
             ok = await manager.set_flight_mode("RETURN")
             return bool(ok), "return"
         if action in ("reroute", "climb"):
