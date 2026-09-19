@@ -541,6 +541,32 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 logger.warning(f"{action} blocked in red zone for {session.session_id[:8]}")
                 return
 
+        # Avoidance interlock: steering armed but no camera frames reaching
+        # the depth sensor means the aircraft would fly blind while the
+        # operator believes it is covered - that is exactly how it flew into
+        # a cylinder with the video started 18 s after takeoff. Refuse to
+        # launch until the panel's CAMERA row says "feeding" (or Steer is off).
+        if action in ("arm", "takeoff", "start_mission", "arm_and_start_mission",
+                      "restart_mission", "arm_and_restart_mission"):
+            try:
+                from app.avoidance import loop as _av_loop
+                c = _av_loop._controller_for_session(session.session_id)
+                if c is not None and c.armed:
+                    from app.avoidance import sensors as _sensors
+                    inv = _sensors.inventory(c.drone_id)
+                    feeding = any(x.get("status") == "ok" for x in inv)
+                    if not feeding:
+                        await sio.emit("action_result", {
+                            "action": action, "ok": False,
+                            "error": ("Blocked - avoidance steering is ON but the camera is not "
+                                      "feeding the depth sensor. Start the video and wait for "
+                                      "CAMERA: feeding in the AVOIDANCE card, or switch Steer off."),
+                        }, to=sid)
+                        logger.warning(f"{action} blocked for {session.session_id[:8]}: avoidance armed, no camera data")
+                        return
+            except Exception as e:
+                logger.debug(f"avoidance interlock check failed: {e}")
+
         logger.info(f"Action: {action} | session {session.session_id[:8]}")
         result = await execute_drone_action(tel, action, data)
         await sio.emit("action_result", result, to=sid)

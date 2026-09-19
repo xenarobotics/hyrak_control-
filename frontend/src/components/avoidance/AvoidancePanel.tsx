@@ -232,7 +232,14 @@ export function AvoidancePanel() {
                 </select>
             </div>
 
-            {status?.armed && (
+            {status?.armed && !camOk && (
+                <div className="flex items-start gap-2 text-[10px] font-mono px-2 py-1.5 rounded"
+                    style={{ background: '#fbbf2418', color: '#fbbf24' }}>
+                    <TriangleAlert size={12} className="mt-0.5 shrink-0" />
+                    <span>NO VIDEO - steering is on but the camera is not feeding. Start the video first; arming and takeoff are refused until it is.</span>
+                </div>
+            )}
+            {status?.armed && camOk && (
                 <div className="flex items-start gap-2 text-[10px] font-mono px-2 py-1.5 rounded"
                     style={{ background: '#f8717112', color: '#f87171' }}>
                     <TriangleAlert size={12} className="mt-0.5 shrink-0" />
