@@ -11,6 +11,8 @@ import { useDrone } from '@/hooks/useDrone'
 import { MAP_LAYERS, MAV_FRAME_GLOBAL_RELATIVE_ALT, MAV_FRAME_GLOBAL_TERRAIN_ALT } from '@/types/mission'
 import type { MapLayer, Waypoint } from '@/types/mission'
 import WaypointPanel from '@/components/mission/WaypointPanel'
+import { AvoidancePanel } from '@/components/avoidance/AvoidancePanel'
+import { ShieldCheck } from 'lucide-react'
 import WaypointEditor from '@/components/mission/WaypointEditor'
 import SurveyPlanner from '@/components/mission/SurveyPlanner'
 import { getSocket } from '@/lib/socket'
@@ -192,6 +194,7 @@ export default function MissionPage() {
   }
   const [approvedPermits, setApprovedPermits] = useState<MyPermit[]>([])
   const [showPermits, setShowPermits] = useState(false)
+  const [showAvoidPanel, setShowAvoidPanel] = useState(false)
 
   // In swarm mode permits belong to the ACTIVE fleet drone - every permit
   // request/list call must name it explicitly.
@@ -607,6 +610,22 @@ export default function MissionPage() {
           {uploadError}
         </div>
       )}
+
+      {/* ── Obstacle avoidance (same panel as the Fly tab) ─────────────── */}
+      <div className="absolute bottom-16 left-3 z-[2400] font-mono">
+        {showAvoidPanel && (
+          <div className="mb-2 w-72 rounded-xl border p-3"
+            style={{ background: 'rgba(17, 19, 24, .94)', backdropFilter: 'blur(12px)', borderColor: 'rgba(255, 255, 255, .08)' }}>
+            <AvoidancePanel />
+          </div>
+        )}
+        <button onClick={() => setShowAvoidPanel(v => !v)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[10px] tracking-widest"
+          style={{ background: 'rgba(17, 19, 24, .9)', borderColor: showAvoidPanel ? '#22d3ee55' : 'rgba(255,255,255,.08)', color: showAvoidPanel ? '#22d3ee' : '#a1a1aa' }}
+          title="Obstacle avoidance: detection, steering, response, tuning">
+          <ShieldCheck size={12} /> AVOIDANCE
+        </button>
+      </div>
 
       {/* ── Approved red-zone mission profiles ─────────────────────────── */}
       {approvedPermits.length > 0 && (

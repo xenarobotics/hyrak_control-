@@ -46,6 +46,11 @@ class AvoidanceParams:
     min_confidence: float = 0.35        # ignore observations below this
     speed_cap_m_s: float = 4.0          # cap commanded speed while enabled
     hold_to_return_s: float = 20.0      # holding with no path this long -> RTL
+    # Response preference (1/0 flags so the params endpoint's float setter
+    # applies): the order is always reroute -> hold -> return; these say how
+    # far down that ladder the loop may go on its own.
+    allow_reroute: float = 1.0          # 0: never re-plan, hold instead
+    allow_return: float = 1.0           # 0: never escalate a hold to RTL
     # 3D avoidance: when no lateral path exists, climb over (if the obstacle's
     # height is known to be below the ceiling) before holding/returning.
     vertical_enabled: bool = True
@@ -165,7 +170,7 @@ class AvoidanceController:
         self._recommended_speed = rec_speed
         plan_speed = min(speed_m_s, rec_speed)
 
-        if goal is not None:
+        if goal is not None and self.params.allow_reroute:
             # Plan against PREDICTED positions so a moving obstacle is dodged
             # where it is going, and around obstacles tall enough to matter.
             h = self.params.prediction_horizon_s
@@ -224,7 +229,8 @@ class AvoidanceController:
         self._committed_path = None
         return self._settle(self._hold_or_return(
             now, near_d, near_ko,
-            "holding - no lateral or vertical path" if goal
+            "holding - rerouting disabled by operator" if (goal and not self.params.allow_reroute)
+            else "holding - no lateral or vertical path" if goal
             else "holding - manual flight, no route to replan"))
 
     def _safe_speed(self, clearance_m: float) -> float:
@@ -321,7 +327,7 @@ class AvoidanceController:
         if self._hold_since is None:
             self._hold_since = now
         held = now - self._hold_since
-        if held >= self.params.hold_to_return_s:
+        if self.params.allow_return and held >= self.params.hold_to_return_s:
             return Decision("return", AvoidanceState.RETURNING,
                             f"no safe path for {held:.0f}s - returning",
                             obstacle=keepout, fused_distance_m=dist)

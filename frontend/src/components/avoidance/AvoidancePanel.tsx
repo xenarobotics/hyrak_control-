@@ -34,6 +34,20 @@ const TUNING: { key: keyof AvoidanceParams; label: string; unit: string; step: n
       hint: 'Holding with no path this long -> return to launch.' },
 ]
 
+// What the loop may do on its own. The ladder is always reroute -> hold ->
+// return; the choice is how far down it may go.
+const RESPONSES: { value: string; label: string; flags: Partial<AvoidanceParams> }[] = [
+    { value: 'reroute-hold-rtl', label: 'Reroute, else hold, then RTL', flags: { allow_reroute: 1, allow_return: 1 } },
+    { value: 'reroute-hold',     label: 'Reroute, else hold (never RTL)', flags: { allow_reroute: 1, allow_return: 0 } },
+    { value: 'hold-rtl',         label: 'Hold, then RTL (never reroute)', flags: { allow_reroute: 0, allow_return: 1 } },
+    { value: 'hold',             label: 'Hold only', flags: { allow_reroute: 0, allow_return: 0 } },
+]
+function responseOf(p?: AvoidanceParams): string {
+    if (!p) return 'reroute-hold-rtl'
+    const r = (p.allow_reroute ?? 1) ? 1 : 0, t = (p.allow_return ?? 1) ? 1 : 0
+    return r && t ? 'reroute-hold-rtl' : r ? 'reroute-hold' : t ? 'hold-rtl' : 'hold'
+}
+
 type Toggle = { on: boolean; onClick: () => void; disabled?: boolean; title: string; onColor?: string }
 
 function Switch({ on, onClick, disabled, title, onColor = '#22d3ee' }: Toggle) {
@@ -44,8 +58,7 @@ function Switch({ on, onClick, disabled, title, onColor = '#22d3ee' }: Toggle) {
                 background: on ? onColor : 'hsl(var(--app-surface-2))',
                 borderColor: on ? onColor : 'hsl(var(--app-border))',
             }}>
-            <span className="absolute left-0 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-white shadow-md transition-transform duration-200"
-                style={{ transform: `translate(${on ? 21 : 3}px, -50%)` }} />
+            <span className={`absolute left-0 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-white shadow-md transition-transform duration-200 ${on ? 'translate-x-[21px]' : 'translate-x-[3px]'}`} />
         </button>
     )
 }
@@ -86,11 +99,15 @@ export function AvoidancePanel() {
                 if (mine?.drone?.id) { if (alive) setDroneId(mine.drone.id); return }
                 const f = await fetch(`${getServerUrl()}/api/fleet`).then(r => r.json())
                 const fleet = (f.fleet ?? []).filter((d: { connected?: boolean }) => d.connected)
-                if (alive) setDroneId(fleet.length === 1 ? fleet[0].db_id : null)
+                if (fleet.length === 1) { if (alive) setDroneId(fleet[0].db_id); return }
+                // Last resort: the one drone that has avoidance configured.
+                const a = await fetch(`${getServerUrl()}/api/avoidance/status`).then(r => r.json())
+                const ds = (a.drones ?? []) as { drone_id: string; enabled: boolean }[]
+                if (alive) setDroneId(ds.length === 1 ? ds[0].drone_id : null)
             } catch { /* backend away */ }
         }
         resolve()
-        const stop = visibleInterval(resolve, 3000)
+        const stop = visibleInterval(resolve, 1500)
         return () => { alive = false; stop() }
     }, [sessionId, telemetryStatus])
 
@@ -142,7 +159,7 @@ export function AvoidancePanel() {
         return (
             <div className="text-xs font-mono py-3 text-center"
                 style={{ color: 'hsl(var(--app-text-muted))' }}>
-                Connect telemetry to enable obstacle avoidance
+                Connect telemetry (or a fleet drone) to configure avoidance
             </div>
         )
     }
@@ -197,6 +214,22 @@ export function AvoidancePanel() {
                 <Switch on={!!status?.armed} onClick={arm} disabled={busy || !status?.enabled}
                     onColor={confirmArm ? '#fbbf24' : '#f87171'}
                     title={status?.armed ? 'Stop steering (detection stays on)' : 'Allow avoidance to steer'} />
+            </div>
+
+            <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-mono shrink-0" style={{ color: 'hsl(var(--app-text))' }}>Response</span>
+                <select value={responseOf(p)} disabled={busy || !status}
+                    onChange={async e => {
+                        const r = RESPONSES.find(x => x.value === e.target.value)
+                        if (!r || !droneId || !status) return
+                        setBusy(true)
+                        try { setStatus(await setEnabled(droneId, status.enabled, r.flags)) }
+                        finally { setBusy(false) }
+                    }}
+                    title="What it may do on its own when the path is blocked. Order is always reroute, then hold, then return; this is how far it may go."
+                    className="h-7 max-w-[62%] rounded px-1.5 text-[10px] font-mono bg-app-surface border border-app-border text-app-text outline-none">
+                    {RESPONSES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
             </div>
 
             {status?.armed && (

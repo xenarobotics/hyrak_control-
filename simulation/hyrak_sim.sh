@@ -87,6 +87,12 @@ stop() {
     done
     sleep 2
     pkill -TERM -f "ffmpeg .* rtp://127.0.0.1:5600" 2>/dev/null || true   # the bridge's own encoder
+    # Sweep OUR leftovers only: gz servers running our world file, PX4
+    # instance 1, our bridge. A restart once left the previous gz server
+    # alive (stale PID file) and PX4 saw sim time jump backwards.
+    for pid in $(ps -eo pid,args | awk -v w="$WORLD.sdf" '!/bash|awk/ && (index($0, w) && /gz sim/ || /bin\/px4 -i 1 -d/ || /gz_cam_bridge/) {print $1}'); do
+        kill -9 "$pid" 2>/dev/null && echo "swept leftover $pid"
+    done
 }
 
 status() {

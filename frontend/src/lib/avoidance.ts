@@ -14,6 +14,8 @@ export interface AvoidanceParams {
     min_confidence: number
     speed_cap_m_s: number
     hold_to_return_s: number
+    allow_reroute?: number
+    allow_return?: number
 }
 
 export interface SensorInfo {
