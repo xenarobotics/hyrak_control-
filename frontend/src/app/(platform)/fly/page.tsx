@@ -13,6 +13,8 @@ import { AvoidancePanel } from '@/components/avoidance/AvoidancePanel'
 import { FcMessageLog } from '@/components/layout/FcMessageLog'
 import { TelemetryPanel } from '@/components/telemetry/TelemetryPanel'
 import { VideoStream } from '@/components/video/VideoStream'
+import { CameraWall } from '@/components/video/CameraWall'
+import { getVideoSource } from '@/lib/videoSource'
 import { Separator } from '@/components/ui/separator'
 import { ChevronRight, ChevronLeft, Radio, Video, Map as MapIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -121,6 +123,7 @@ function FleetDeviceSummary() {
 
 export default function FlyPage() {
     const [panelCollapsed, setPanelCollapsed] = useState(false)
+    const [wallOn, setWallOn] = useState(false)
     // Deferred mount flag prevents sessionStorage-driven Zustand values from
     // reaching the JSX on the initial (hydration) render. Without this, the
     // server renders with enabled=false while the client immediately reads
@@ -157,7 +160,15 @@ export default function FlyPage() {
                 <div className="relative flex-1 min-w-0 flex">
                     {mounted && swarmEnabled && mainView === 'map'
                         ? <FleetMap />
-                        : <VideoStream />}
+                        : wallOn ? <CameraWall onClose={() => setWallOn(false)} /> : <VideoStream />}
+                    {mounted && !wallOn && getVideoSource() === 'air_unit_udp' && !(swarmEnabled && mainView === 'map') && (
+                        <button onClick={() => setWallOn(true)}
+                            className="absolute right-3 top-3 z-20 px-2 py-1 rounded border text-[10px] font-mono tracking-widest"
+                            style={{ background: 'rgba(17,19,24,.85)', borderColor: 'rgba(255,255,255,.12)', color: '#a1a1aa' }}
+                            title="Show every mesh unit that is delivering video">
+                            WALL
+                        </button>
+                    )}
 
                     {/* THE DRONE'S MESSAGES, ON THE ONE SURFACE THAT IS ALWAYS
                         THERE. This first went into the right-hand panel, which

@@ -26,6 +26,7 @@ logger = logging.getLogger("verocore.webrtc.signaling")
 
 # One relay shared across all peers - efficient media routing
 relay = MediaRelay()
+_session_feed_port: dict[str, int] = {}   # session -> shared feed port it holds (feeds.py)
 
 
 def _on_link_networks() -> "list[ipaddress.IPv4Network]":
@@ -476,6 +477,10 @@ def register_webrtc_events(
                 # video source, so this needs no branch on video_source.
                 from app.webrtc import relay_video_source
                 await relay_video_source.release_async(session.session_id)
+                fp = _session_feed_port.pop(session.session_id, None)
+                if fp is not None:
+                    from app.webrtc import feeds
+                    await feeds.release(fp)
 
         if server_sourced:
             # No browser video track incoming (the offer only declares a
@@ -590,11 +595,12 @@ def register_webrtc_events(
                         ),
                     )
                 else:
-                    from app.webrtc.udp_video_source import open_air_unit_video
+                    # Shared reader (feeds.py): the camera wall and this view
+                    # can show the same unit without fighting over the port.
+                    from app.webrtc import feeds
                     video_port = int(data.get("airUnitVideoPort") or 5600)
-                    source_track = await asyncio.get_event_loop().run_in_executor(
-                        None, functools.partial(open_air_unit_video, port=video_port)
-                    )
+                    source_track = await feeds.acquire(video_port)
+                    _session_feed_port[session.session_id] = video_port
                 # open_air_unit_video's SDP declares the stream format
                 # statically from the SDP text alone, so it "succeeds" the
                 # instant it's opened regardless of whether any real packets
@@ -622,6 +628,10 @@ def register_webrtc_events(
                     )
             except Exception as e:
                 logger.error(f"Server-sourced video open failed ({video_source}): {e}")
+                fp = _session_feed_port.pop(session.session_id, None)
+                if fp is not None:
+                    from app.webrtc import feeds
+                    await feeds.release(fp)
                 msg = str(e)
                 if video_source in ("rtsp_relay", "air_unit_srt", "air_unit_gst"):
                     # ffmpeg's own words are far more useful than "no frames
@@ -702,6 +712,9 @@ def register_webrtc_events(
         except Exception as e:
             logger.exception(f"Offer handling error: {e}")
             await peer_registry.remove(pc_id)
+
+    from app.webrtc import wall as _wall
+    _wall.register(sio)
 
     @sio.on("ice_candidate")
     async def on_ice_candidate(sid, data):

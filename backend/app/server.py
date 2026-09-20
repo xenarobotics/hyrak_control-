@@ -185,6 +185,8 @@ def create_app() -> socketio.ASGIApp:
 
         from app.sessions import observer
         observer.drop_sid(sid)
+        from app.webrtc import wall as _wall
+        await _wall.close_for_sid(sid)
 
         session = session_manager.get_by_socket(sid)
         if session:
