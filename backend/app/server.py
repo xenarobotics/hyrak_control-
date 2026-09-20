@@ -46,6 +46,8 @@ def create_app() -> socketio.ASGIApp:
     fastapi_app.include_router(recon_router)
     from app.avoidance.routes import router as avoidance_router
     fastapi_app.include_router(avoidance_router)
+    from app.webrtc.mesh_units import router as mesh_units_router
+    fastapi_app.include_router(mesh_units_router)
 
     # Desktop app installers + electron-updater manifests - plain static
     # files, no auth (same tier as a public download page). Directory is

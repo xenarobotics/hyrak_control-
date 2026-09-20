@@ -1,0 +1,69 @@
+"""/api/video/mesh-units - which mesh air units are delivering video right now.
+
+The WiFi relay tree sends every unit's RTP/H.265 to the ground station on
+udp 5600 + node id, whatever its position in the tree (only the source IP
+changes). So "which units are up" is answerable from the sockets alone: bind
+each candidate port for a moment and count datagrams. A port that refuses
+to bind is already owned - by this backend's air-unit reader for the unit
+being watched, so it is reported live too. Read-only, no side effects, and
+the probe runs off the event loop.
+"""
+from __future__ import annotations
+
+import asyncio
+import select
+import socket
+import time
+
+from fastapi import APIRouter, Query
+
+router = APIRouter(prefix="/api/video", tags=["video"])
+
+BASE_PORT = 5600
+PROBE_S = 0.35
+
+
+def _probe(max_units: int) -> list[dict]:
+    out: list[dict] = []
+    socks: dict[int, socket.socket] = {}
+    stats: dict[int, dict] = {}
+    for uid in range(1, max_units + 1):
+        port = BASE_PORT + uid
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.setblocking(False)
+        try:
+            s.bind(("0.0.0.0", port))
+            socks[port] = s
+            stats[port] = {"packets": 0, "bytes": 0, "source": None}
+        except OSError:
+            s.close()
+            # Owned by another process - in practice this backend's reader
+            # for the unit currently on screen.
+            out.append({"id": uid, "port": port, "live": True, "in_use": True,
+                        "kbps": None, "source": None})
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < PROBE_S and socks:
+        ready, _, _ = select.select(list(socks.values()), [], [], 0.05)
+        for s in ready:
+            try:
+                d, a = s.recvfrom(4096)
+            except BlockingIOError:
+                continue
+            st = stats[s.getsockname()[1]]
+            st["packets"] += 1
+            st["bytes"] += len(d)
+            st["source"] = a[0]
+    for port, s in socks.items():
+        s.close()
+        st = stats[port]
+        out.append({"id": port - BASE_PORT, "port": port, "live": st["packets"] > 0, "in_use": False,
+                    "kbps": round(st["bytes"] * 8 / PROBE_S / 1000) if st["packets"] else 0,
+                    "source": st["source"]})
+    out.sort(key=lambda u: u["id"])
+    return out
+
+
+@router.get("/mesh-units")
+async def mesh_units(max_units: int = Query(8, ge=1, le=64)):
+    units = await asyncio.get_event_loop().run_in_executor(None, _probe, max_units)
+    return {"base_port": BASE_PORT, "units": units}

@@ -17,7 +17,9 @@ import {
 import { Button } from '@/components/ui/button'
 import { RefreshCw, Camera, Satellite, WifiOff, Wifi, Loader, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { getVideoSource, isServerSourced, needsCameraSelection } from '@/lib/videoSource'
+import { getVideoSource, isServerSourced, needsCameraSelection, getAirUnitVideoPort, setAirUnitVideoPort } from '@/lib/videoSource'
+import { getServerUrl } from '@/lib/server-url'
+import { visibleInterval } from '@/lib/poll'
 
 const SOURCE_LABELS: Record<string, string> = {
     air_unit_udp: 'Air unit (UDP) - set in Settings',
@@ -31,8 +33,52 @@ export function DeviceSelector() {
     useEffect(() => { setMounted(true) }, [])
     const {
         cameras, selectedCameraId: camId, setSelectedCameraId: setCamId,
-        isLoading: camLoading, scanCameras: scanCams
+        isLoading: camLoading, scanCameras: scanCams,
+        isStreaming, startStream, stopStream,
     } = useWebRTCContext()
+
+    // Mesh air units: every unit sends to udp 5600 + node id on the ground
+    // station, so the backend can tell which are delivering video right now.
+    // One tap switches the reader to that unit (a restart of the stream).
+    type MeshUnit = { id: number; port: number; live: boolean; in_use: boolean; kbps: number | null; source: string | null }
+    const [meshUnits, setMeshUnits] = useState<MeshUnit[]>([])
+    const [airPort, setAirPort] = useState(() => getAirUnitVideoPort())
+    const [switching, setSwitching] = useState(false)
+    const videoSourceNow = getVideoSource()
+    useEffect(() => {
+        if (videoSourceNow !== 'air_unit_udp') return
+        let alive = true
+        const poll = async () => {
+            try {
+                const j = await fetch(`${getServerUrl()}/api/video/mesh-units?max_units=8`).then(r => r.json())
+                if (alive) setMeshUnits((j.units ?? []).filter((u: MeshUnit) => u.live || u.in_use || u.port === airPort))
+            } catch { /* backend away */ }
+        }
+        poll()
+        return () => { alive = false }
+    }, [videoSourceNow, airPort])
+    useEffect(() => {
+        if (videoSourceNow !== 'air_unit_udp') return
+        return visibleInterval(async () => {
+            try {
+                const j = await fetch(`${getServerUrl()}/api/video/mesh-units?max_units=8`).then(r => r.json())
+                setMeshUnits((j.units ?? []).filter((u: MeshUnit) => u.live || u.in_use || u.port === airPort))
+            } catch { /* backend away */ }
+        }, 3000)
+    }, [videoSourceNow, airPort])
+    const pickUnit = async (u: MeshUnit) => {
+        if (switching || u.port === airPort) return
+        setSwitching(true)
+        try {
+            setAirUnitVideoPort(u.port)
+            setAirPort(u.port)
+            if (isStreaming) {
+                stopStream()
+                await new Promise(r => setTimeout(r, 400))   // let the old reader release the port
+                await startStream()
+            }
+        } finally { setSwitching(false) }
+    }
 
     // Server-sourced feeds (air-unit UDP, SIYI RTSP) don't use a browser
     // camera - the source is picked once in Settings, not per-tab here.
@@ -117,6 +163,29 @@ export function DeviceSelector() {
                                 ))}
                             </SelectContent>
                         </Select>
+                )}
+                {videoSourceNow === 'air_unit_udp' && meshUnits.length > 0 && (
+                    <div className="mt-1.5">
+                        <div className="text-[10px] font-mono text-app-text-muted mb-1">MESH UNITS - tap to view (port 5600 + id)</div>
+                        <div className="flex flex-wrap gap-1.5">
+                            {meshUnits.map(u => {
+                                const active = u.port === airPort
+                                return (
+                                    <button key={u.id} onClick={() => pickUnit(u)} disabled={switching || !u.live && !u.in_use}
+                                        title={`udp ${u.port}${u.source ? ` from ${u.source}` : ''}${u.kbps ? ` - ${u.kbps} kbit/s` : ''}${u.in_use ? ' - on screen' : ''}`}
+                                        className="px-2 py-1 rounded border text-[11px] font-mono flex items-center gap-1.5 disabled:opacity-40"
+                                        style={{
+                                            borderColor: active ? '#22d3ee88' : 'hsl(var(--app-border))',
+                                            background: active ? '#22d3ee18' : 'hsl(var(--app-surface))',
+                                            color: active ? '#22d3ee' : 'hsl(var(--app-text))',
+                                        }}>
+                                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: (u.live || u.in_use) ? '#4ade80' : '#8a94a8' }} />
+                                        Unit {u.id}{u.kbps ? <span style={{ color: 'hsl(var(--app-text-muted))' }}>{u.kbps} k</span> : null}
+                                    </button>
+                                )
+                            })}
+                        </div>
+                    </div>
                 )}
             </div>
 
