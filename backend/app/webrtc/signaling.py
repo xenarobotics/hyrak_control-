@@ -610,7 +610,11 @@ def register_webrtc_events(
                 try:
                     await asyncio.wait_for(source_track.recv(), timeout=5.0)
                 except asyncio.TimeoutError:
-                    source_track.stop()
+                    # aiortc's stop() joins the player's reader thread, which
+                    # is blocked in ffmpeg on the silent port - on the event
+                    # loop that froze the whole backend for 3.6 s (caught by
+                    # loop_stall). Off-loop it.
+                    await asyncio.get_event_loop().run_in_executor(None, source_track.stop)
                     raise RuntimeError(
                         f"Opened {video_source} but no video frames arrived within 5s - "
                         f"is the source actually sending to this server (not just to its "
