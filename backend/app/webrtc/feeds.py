@@ -73,6 +73,7 @@ class SharedReader:
         self.refs = 0
         self.raw_subs: list[asyncio.Queue] = []
         self.raw_refs = 0
+        self.transcoders: dict[str, "Transcoder"] = {}   # codec -> GPU transcode lane
         self._stop = threading.Event()
         self._seq = 0
         self.last_packet_t = 0.0
@@ -98,11 +99,19 @@ class SharedReader:
 
     @property
     def idle(self) -> bool:
-        return self.refs <= 0 and self.raw_refs <= 0
+        return self.refs <= 0 and self.raw_refs <= 0 and not any(t.subs for t in self.transcoders.values())
+
+    def transcoder(self, codec: str) -> "Transcoder":
+        t = self.transcoders.get(codec)
+        if t is None or not t.alive:
+            t = self.transcoders[codec] = Transcoder(self, codec)
+        return t
 
     def stop(self) -> None:
         self._stop.set()
         self.track.stop()
+        for tr in list(self.transcoders.values()):
+            tr.stop()
 
     # ---- reader thread -------------------------------------------------------
     def _deliver_raw(self, data: bytes, key: bool, seq: int) -> None:
@@ -147,6 +156,8 @@ class SharedReader:
                     self._seq += 1
                     if self.raw_subs:
                         self.loop.call_soon_threadsafe(self._deliver_raw, data, bool(pkt.is_keyframe), self._seq)
+                    for tr in list(self.transcoders.values()):
+                        tr.feed(data, bool(pkt.is_keyframe))
                     if self.refs > 0:
                         try:
                             for frame in cc.decode(pkt):
@@ -173,6 +184,153 @@ class SharedReader:
                     except Exception:
                         pass
         logger.info(f"Feed reader on udp:{self.port} stopped")
+
+
+class Transcoder:
+    """GPU transcode lane: the unit's H.265 units -> system ffmpeg (NVENC H.264)
+    -> framed Annex-B access units for WebCodecs. Used when the browser has no
+    HEVC decoder. The colour signalling of the source (full-range BT.709) is
+    written into the H.264 VUI explicitly so the browser renders the same
+    colours the gst window does - the VP8 WebRTC leg cannot carry it.
+    PyAV's bundled ffmpeg has no NVENC, hence a subprocess."""
+    ENCODERS = {
+        "h264": ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", "10M",
+                 "-maxrate", "10M", "-bufsize", "2M", "-g", "30", "-forced-idr", "1", "-bf", "0",
+                 "-pix_fmt", "yuv420p", "-color_range", "pc", "-colorspace", "bt709",
+                 "-color_primaries", "bt709", "-color_trc", "bt709",
+                 "-bsf:v", "h264_metadata=aud=insert,dump_extra=freq=keyframe", "-f", "h264"],
+    }
+
+    def __init__(self, reader: "SharedReader", codec: str):
+        import subprocess, collections
+        self.reader = reader
+        self.codec = codec
+        self.subs: list[asyncio.Queue] = []
+        self._in = collections.deque(maxlen=120)     # pending input AUs (never blocks the reader)
+        self._in_ev = threading.Event()
+        self._stop = threading.Event()
+        self._seq = 0
+        self._started = False
+        self._err_n = 0
+        self.proc = subprocess.Popen(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-fflags", "nobuffer", "-flags", "low_delay",
+             "-f", "hevc", "-i", "pipe:0", "-an"] + self.ENCODERS[codec] + ["pipe:1"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
+        threading.Thread(target=self._writer, name=f"xcode-in-{reader.port}", daemon=True).start()
+        threading.Thread(target=self._parser, name=f"xcode-out-{reader.port}", daemon=True).start()
+        threading.Thread(target=self._stderr, name=f"xcode-err-{reader.port}", daemon=True).start()
+        logger.info(f"Transcoder {codec} started for udp:{reader.port} (NVENC)")
+
+    @property
+    def alive(self) -> bool:
+        return self.proc.poll() is None and not self._stop.is_set()
+
+    def feed(self, au: bytes, key: bool) -> None:          # reader thread
+        # Begin at a keyframe: a decoder started mid-GOP spends the first
+        # second emitting "PPS id out of range" / missing-ref warnings.
+        if not self._started:
+            if not key:
+                return
+            self._started = True
+        self._in.append(au)
+        self._in_ev.set()
+
+    def subscribe(self) -> asyncio.Queue:
+        q: asyncio.Queue = asyncio.Queue(maxsize=90)
+        q.wait_key = True
+        self.subs.append(q)
+        return q
+
+    def unsubscribe(self, q: asyncio.Queue) -> None:
+        if q in self.subs:
+            self.subs.remove(q)
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._in_ev.set()
+        try:
+            self.proc.stdin.close()
+        except Exception:
+            pass
+        try:
+            self.proc.kill()
+        except Exception:
+            pass
+
+    def _writer(self) -> None:
+        while not self._stop.is_set():
+            self._in_ev.wait(1.0)
+            self._in_ev.clear()
+            while self._in and not self._stop.is_set():
+                au = self._in.popleft()
+                try:
+                    self.proc.stdin.write(au)
+                except Exception:
+                    self._stop.set()
+                    return
+
+    def _stderr(self) -> None:
+        for line in iter(self.proc.stderr.readline, b""):
+            self._err_n += 1
+            # Genuine loss upstream shows up here too; keep the first few and
+            # then one in fifty so a bad link is visible without a flood.
+            if self._err_n <= 5 or self._err_n % 50 == 0:
+                logger.warning(f"xcode udp:{self.reader.port} ({self._err_n}): {line.decode(errors='replace').strip()[:160]}")
+
+    def _parser(self) -> None:
+        # Split the Annex-B output into access units on AUD (NAL 9); a key
+        # AU is one containing an IDR slice (NAL 5).
+        buf = b""
+        au = bytearray()
+        key = False
+        out = self.proc.stdout
+        while not self._stop.is_set():
+            chunk = out.read(65536)
+            if not chunk:
+                break
+            buf += chunk
+            while True:
+                j = buf.find(b"\x00\x00\x01", 0)
+                if j < 0:
+                    break
+                k = buf.find(b"\x00\x00\x01", j + 3)
+                if k < 0:
+                    break
+                start = j - 1 if j > 0 and buf[j - 1] == 0 else j
+                end = k - 1 if buf[k - 1] == 0 else k
+                nal = buf[start:end]
+                buf = buf[end:]
+                ntype = nal[nal.find(b"\x00\x00\x01") + 3] & 0x1F if len(nal) > 4 else 0
+                if ntype == 9:                       # AUD: flush the previous AU
+                    if au:
+                        self._emit(bytes(au), key)
+                        au = bytearray(); key = False
+                    continue
+                if ntype == 5:
+                    key = True
+                au += nal
+        self._stop.set()
+
+    def _emit(self, data: bytes, key: bool) -> None:
+        self._seq += 1
+        payload = AU_HEADER.pack(len(data), 1 if key else 0, self._seq & 0xFFFFFFFF) + data
+        self.reader.loop.call_soon_threadsafe(self._fanout, payload, key)
+
+    def _fanout(self, payload: bytes, key: bool) -> None:
+        for q in list(self.subs):
+            if getattr(q, "wait_key", False):
+                if not key:
+                    continue
+                q.wait_key = False
+            try:
+                q.put_nowait(payload)
+            except asyncio.QueueFull:
+                try:
+                    while True:
+                        q.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                q.wait_key = True
 
 
 _feeds: dict[int, SharedReader] = {}
@@ -254,3 +412,23 @@ def status(port: int) -> dict | None:
     return {"port": port, "decoded_refs": r.refs, "raw_refs": r.raw_refs,
             "width": r.width, "height": r.height,
             "quiet_s": round(time.monotonic() - r.last_packet_t, 1) if r.last_packet_t else None}
+
+
+async def subscribe_transcoded(port: int, codec: str) -> asyncio.Queue:
+    async with _get_lock():
+        r = _get_or_start(port)
+        return r.transcoder(codec).subscribe()
+
+
+async def unsubscribe_transcoded(port: int, codec: str, q: asyncio.Queue) -> None:
+    async with _get_lock():
+        r = _feeds.get(port)
+        if r is None:
+            return
+        t = r.transcoders.get(codec)
+        if t is not None:
+            t.unsubscribe(q)
+            if not t.subs:
+                t.stop()
+                r.transcoders.pop(codec, None)
+        _maybe_stop(port)

@@ -109,6 +109,30 @@ async def feed_hevc(port: int):
                              headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
 
+@router.get("/feeds/{port}/h264")
+async def feed_h264(port: int):
+    """The unit's video transcoded ONCE on the GPU to H.264 with the source's
+    colour signalling (full-range BT.709) written into the VUI, framed like
+    /hevc. For browsers without an HEVC decoder: WebCodecs decodes H.264 in
+    hardware everywhere and honours the VUI, which the VP8 WebRTC leg cannot."""
+    from app.webrtc import feeds
+    q = await feeds.subscribe_transcoded(port, "h264")
+
+    async def gen():
+        try:
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(q.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    continue
+                yield chunk
+        finally:
+            await feeds.unsubscribe_transcoded(port, "h264", q)
+
+    return StreamingResponse(gen(), media_type="application/octet-stream",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
 @router.get("/feeds")
 async def feeds_status():
     from app.webrtc import feeds

@@ -86,6 +86,12 @@ export function WebCodecsVideo({ src, codec: wireCodec = 'h264', className, styl
             if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
                 canvas.width = frame.displayWidth
                 canvas.height = frame.displayHeight
+                // Colour audit: what the decoder says the frame IS (from the
+                // bitstream's VUI). A washed-out picture with fullRange=false
+                // here means the flag was lost upstream, not a display bug.
+                const cs = frame.colorSpace
+                console.info('[webcodecs] frame', frame.displayWidth, 'x', frame.displayHeight,
+                    'colorSpace', { primaries: cs?.primaries, transfer: cs?.transfer, matrix: cs?.matrix, fullRange: cs?.fullRange })
             }
             ctx.drawImage(frame, 0, 0)
             // Painted-frame counter for ModulePerformance. This is the only

@@ -3,7 +3,7 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { useDroneStore } from '@/store/drone'
-import { useServerHevcFeed } from '@/lib/serverHevcFeed'
+import { useServerFeed } from '@/lib/serverHevcFeed'
 import { VideoOSD } from '@/components/osd/VideoOSD'
 import { RecordingControls } from './RecordingControls'
 import { Button } from '@/components/ui/button'
@@ -62,12 +62,13 @@ export function VideoStream() {
     // with WebCodecs, replaces the VP8 re-encode whenever this Chromium can
     // decode HEVC (probed once). A decode failure disables it for the session
     // and the pane falls back to the WebRTC track on the next start.
-    const serverHevcUrl = useServerHevcFeed(isStreaming && !hevcFailed)
+    const serverFeed = useServerFeed(isStreaming && !hevcFailed)
+    const serverHevcUrl = serverFeed?.url ?? null
     const wcUrl = gst?.webcodecs ? gst.previewUrl : (receiver?.previewUrl ?? serverHevcUrl ?? null)
     // The receiver decides between H.265 passthrough and an H.264 transcode at
     // run time, and can change its mind mid-session, so this is read from its
     // status rather than assumed. gst mode always transcodes to H.264.
-    const wcCodec = gst?.webcodecs ? 'h264' : (receiver?.codec ?? (serverHevcUrl ? 'hevc' : 'h264'))
+    const wcCodec = gst?.webcodecs ? 'h264' : (receiver?.codec ?? (serverFeed?.codec ?? 'h264'))
 
     const mode = useDroneStore(s => s.mode)
     // manual-control has nothing to process - bypassing the backend WebRTC
@@ -154,7 +155,7 @@ export function VideoStream() {
                 <WebCodecsVideo
                     src={wcUrl}
                     codec={wcCodec}
-                    onDecodeError={wcCodec === 'hevc' ? (serverHevcUrl ? () => setHevcFailed(true) : fallbackFromHevc) : undefined}
+                    onDecodeError={serverFeed ? () => setHevcFailed(true) : (wcCodec === 'hevc' ? fallbackFromHevc : undefined)}
                     className={aspectRatio === 'fill'
                         ? 'w-full h-full object-cover'
                         : 'h-full object-contain mx-auto'}

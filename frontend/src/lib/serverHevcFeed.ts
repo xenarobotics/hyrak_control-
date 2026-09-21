@@ -45,17 +45,31 @@ export function serverHevcUrl(port: number): string {
     return `${getServerUrl()}/api/video/feeds/${port}/hevc`
 }
 
-/** The feed URL when the source is the server-read air unit AND the browser
- *  can decode HEVC; null otherwise. Follows unit switches (port changes). */
-export function useServerHevcFeed(active: boolean): string | null {
-    const [ready, setReady] = useState(isServerHevcReady())
+export function serverH264Url(port: number): string {
+    return `${getServerUrl()}/api/video/feeds/${port}/h264`
+}
+
+export type ServerFeed = { url: string; codec: 'hevc' | 'h264' }
+
+/** True once WebCodecs itself is known to exist (H.264 decode is universal
+ *  in Chromium; only HEVC needs the probe). */
+export function isServerFeedReady(): boolean {
+    return typeof window !== 'undefined' && 'VideoDecoder' in window && !disabled()
+}
+
+/** The bit-exact HEVC feed when this Chromium can decode HEVC, else the
+ *  once-transcoded H.264 feed (GPU on the server, colour flags preserved);
+ *  null when the source is not the server-read air unit. Follows unit
+ *  switches (port changes). */
+export function useServerFeed(active: boolean): ServerFeed | null {
+    const [probed, setProbed] = useState(supported !== null)
     const [port, setPort] = useState(() => getAirUnitVideoPort())
-    useEffect(() => { probeHevcSupport().then(() => setReady(isServerHevcReady())) }, [])
+    useEffect(() => { probeHevcSupport().then(() => setProbed(true)) }, [])
     useEffect(() => {
         const on = () => setPort(getAirUnitVideoPort())
         window.addEventListener(AIR_UNIT_PORT_EVENT, on)
         return () => window.removeEventListener(AIR_UNIT_PORT_EVENT, on)
     }, [])
-    if (!active || !ready || getVideoSource() !== 'air_unit_udp') return null
-    return serverHevcUrl(port)
+    if (!active || !probed || getVideoSource() !== 'air_unit_udp' || !isServerFeedReady()) return null
+    return supported ? { url: serverHevcUrl(port), codec: 'hevc' } : { url: serverH264Url(port), codec: 'h264' }
 }
