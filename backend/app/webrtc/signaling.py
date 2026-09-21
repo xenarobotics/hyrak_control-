@@ -466,6 +466,36 @@ def register_webrtc_events(
         # Register session with vision pool for current mode
         vision_pool.register_session(session.session_id, session.mode)
 
+        # Outbound video health, every 10 s: what the sender actually pushes
+        # and the bitrate the BROWSER's bandwidth estimate (REMB) has forced
+        # on the encoder. "Soft and choppy" with a healthy source is this
+        # number being small - the path to the viewer, not the encoder.
+        async def _out_stats():
+            last_bytes, last_t = None, None
+            while pc.connectionState not in ("failed", "closed"):
+                await asyncio.sleep(10)
+                try:
+                    report = await pc.getStats()
+                    sent = next((v for v in report.values()
+                                 if getattr(v, "type", "") == "outbound-rtp" and getattr(v, "kind", "") == "video"), None)
+                    tgt = None
+                    for snd in pc.getSenders():
+                        enc = getattr(snd, "_RTCRtpSender__encoder", None)
+                        if enc is not None and hasattr(enc, "target_bitrate"):
+                            tgt = enc.target_bitrate
+                    if sent is not None:
+                        now = asyncio.get_event_loop().time()
+                        if last_bytes is not None:
+                            kbps = (sent.bytesSent - last_bytes) * 8 / max(now - last_t, 0.1) / 1000
+                            logger.info(f"PC {pc_id[:8]} video out: {kbps:.0f} kbit/s sent, "
+                                        f"encoder target {tgt/1000:.0f} kbit/s" if tgt else
+                                        f"PC {pc_id[:8]} video out: {kbps:.0f} kbit/s sent")
+                        last_bytes, last_t = sent.bytesSent, now
+                except Exception as e:
+                    logger.debug(f"out stats failed: {e}")
+                    return
+        asyncio.create_task(_out_stats())
+
         @pc.on("connectionstatechange")
         async def on_state_change():
             logger.info(f"PC {pc_id[:8]} state: {pc.connectionState}")
