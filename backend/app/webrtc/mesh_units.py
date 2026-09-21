@@ -24,37 +24,52 @@ PROBE_S = 0.35
 
 
 def _probe(max_units: int) -> list[dict]:
+    # Ports this backend's own feed readers hold are never probed: binding
+    # would fail anyway, and a probe socket left open by any error here would
+    # hold the port against the reader itself. Every socket is closed in a
+    # finally, whatever happens in between.
+    from app.webrtc import feeds
+    ours = set(feeds.open_ports())
     out: list[dict] = []
     socks: dict[int, socket.socket] = {}
     stats: dict[int, dict] = {}
-    for uid in range(1, max_units + 1):
-        port = BASE_PORT + uid
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.setblocking(False)
-        try:
-            s.bind(("0.0.0.0", port))
-            socks[port] = s
-            stats[port] = {"packets": 0, "bytes": 0, "source": None}
-        except OSError:
-            s.close()
-            # Owned by another process - in practice this backend's reader
-            # for the unit currently on screen.
-            out.append({"id": uid, "port": port, "live": True, "in_use": True,
-                        "kbps": None, "source": None})
-    t0 = time.monotonic()
-    while time.monotonic() - t0 < PROBE_S and socks:
-        ready, _, _ = select.select(list(socks.values()), [], [], 0.05)
-        for s in ready:
-            try:
-                d, a = s.recvfrom(4096)
-            except BlockingIOError:
+    try:
+        for uid in range(1, max_units + 1):
+            port = BASE_PORT + uid
+            if port in ours:
+                out.append({"id": uid, "port": port, "live": True, "in_use": True,
+                            "kbps": None, "source": None})
                 continue
-            st = stats[s.getsockname()[1]]
-            st["packets"] += 1
-            st["bytes"] += len(d)
-            st["source"] = a[0]
-    for port, s in socks.items():
-        s.close()
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.setblocking(False)
+            try:
+                s.bind(("0.0.0.0", port))
+                socks[port] = s
+                stats[port] = {"packets": 0, "bytes": 0, "source": None}
+            except OSError:
+                s.close()
+                # Owned by another process (a gst viewer, another tool).
+                out.append({"id": uid, "port": port, "live": True, "in_use": True,
+                            "kbps": None, "source": None})
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < PROBE_S and socks:
+            ready, _, _ = select.select(list(socks.values()), [], [], 0.05)
+            for s in ready:
+                try:
+                    d, a = s.recvfrom(4096)
+                except OSError:
+                    continue
+                st = stats[s.getsockname()[1]]
+                st["packets"] += 1
+                st["bytes"] += len(d)
+                st["source"] = a[0]
+    finally:
+        for s in socks.values():
+            try:
+                s.close()
+            except OSError:
+                pass
+    for port in socks:
         st = stats[port]
         out.append({"id": port - BASE_PORT, "port": port, "live": st["packets"] > 0, "in_use": False,
                     "kbps": round(st["bytes"] * 8 / PROBE_S / 1000) if st["packets"] else 0,

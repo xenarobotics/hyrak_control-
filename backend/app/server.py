@@ -187,6 +187,15 @@ def create_app() -> socketio.ASGIApp:
         observer.drop_sid(sid)
         from app.webrtc import wall as _wall
         await _wall.close_for_sid(sid)
+        # The single view's shared feed is released when its pc closes; a
+        # client that vanishes without the pc ever changing state would keep
+        # the reader (and the port) alive - free it here too.
+        from app.webrtc import signaling as _sig, feeds as _feeds
+        _sess = session_manager.get_by_socket(sid)
+        if _sess is not None:
+            _fp = _sig._session_feed_port.pop(_sess.session_id, None)
+            if _fp is not None:
+                await _feeds.release(_fp)
 
         session = session_manager.get_by_socket(sid)
         if session:
