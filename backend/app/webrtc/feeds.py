@@ -266,6 +266,18 @@ class SharedReader:
         logger.info(f"Feed reader on udp:{self.port} stopped")
 
 
+def _h264_has_idr(au: bytes) -> bool:
+    i = au.find(b"\x00\x00\x01")
+    while i >= 0 and i + 3 < len(au):
+        if au[i + 3] & 0x1F == 5:
+            return True
+        i = au.find(b"\x00\x00\x01", i + 3)
+    return False
+
+
+HEVC_AUD = b"\x00\x00\x00\x01\x46\x01\x50"     # NAL 35, pic_type any
+
+
 class Transcoder:
     """GPU transcode lane: the unit's H.265 units -> system ffmpeg (NVENC H.264)
     -> framed Annex-B access units for WebCodecs. Used when the browser has no
@@ -276,9 +288,15 @@ class Transcoder:
     ENCODERS = {
         "h264": ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", "10M",
                  "-maxrate", "10M", "-bufsize", "2M", "-g", "30", "-forced-idr", "1", "-bf", "0",
+                 # nvenc buffers (surfaces - 1) frames of output unless told not to
+                 "-delay", "0", "-zerolatency", "1",
                  "-color_range", "pc", "-colorspace", "bt709",
                  "-color_primaries", "bt709", "-color_trc", "bt709",
-                 "-bsf:v", "h264_metadata=aud=insert,dump_extra=freq=keyframe", "-f", "h264"],
+                 "-bsf:v", "h264_metadata=aud=insert,dump_extra=freq=keyframe",
+                 # Every packet written and flushed on its own, inside a RIFF
+                 # chunk that carries its length: the parser hands a frame on
+                 # as soon as its last byte is in, not when the next one starts.
+                 "-flush_packets", "1", "-f", "avi"],
     }
 
     # NVDEC in front of NVENC: zero-copy on the GPU and, unlike ffmpeg's
@@ -296,7 +314,11 @@ class Transcoder:
         # -probesize 32 matters: with a full probe ffmpeg decodes the first frame in
         # software and builds a yuvj420p filter graph that the CUDA frames then
         # cannot enter ("Impossible to convert between the formats", lane dies).
-        hw = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-c:v", "hevc_cuvid"] \
+        # A mid-stream resolution change kills the lane the same way; the
+        # reader restarts it at the next keyframe.
+        # Measured on this lane, 1080p30 in -> H.264 out, AU in to AU out:
+        # hwaccel cuda 37 ms, software 44 ms (0.4 core), hevc_cuvid 70 ms.
+        hw = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"] \
             if Transcoder.cuda_ok else ["-threads", "1"]
         self.subs: list[asyncio.Queue] = []
         self._in = collections.deque(maxlen=120)     # pending input AUs (never blocks the reader)
@@ -327,7 +349,10 @@ class Transcoder:
             if not key:
                 return
             self._started = True
-        self._in.append(au)
+        # The raw HEVC demuxer only knows an access unit ended when the next
+        # one starts (a frame of delay). An access-unit delimiter after each
+        # AU closes it immediately.
+        self._in.append(au + HEVC_AUD)
         self._in_ev.set()
 
     def subscribe(self) -> asyncio.Queue:
@@ -377,37 +402,44 @@ class Transcoder:
                 logger.warning(f"xcode udp:{self.reader.port} ({self._err_n}): {line.decode(errors='replace').strip()[:160]}")
 
     def _parser(self) -> None:
-        # Split the Annex-B output into access units on AUD (NAL 9); a key
-        # AU is one containing an IDR slice (NAL 5).
+        # Walk the AVI (RIFF) stream ffmpeg writes: descend into LIST chunks,
+        # every '00dc' chunk is one complete H.264 access unit (Annex B, AUD
+        # first, SPS/PPS repeated on keyframes). A key AU contains an IDR
+        # slice (NAL 5).
         buf = b""
-        au = bytearray()
-        key = False
+        started = False
         out = self.proc.stdout
         while not self._stop.is_set():
-            chunk = out.read(65536)
+            chunk = out.read1(65536) if hasattr(out, "read1") else out.read(65536)
             if not chunk:
                 break
             buf += chunk
             while True:
-                j = buf.find(b"\x00\x00\x01", 0)
-                if j < 0:
+                if not started:
+                    if len(buf) < 12:
+                        break
+                    if buf[:4] != b"RIFF":
+                        logger.error(f"xcode udp:{self.reader.port}: unexpected output header {buf[:4]!r}")
+                        self._stop.set()
+                        return
+                    buf = buf[12:]
+                    started = True
+                if len(buf) < 8:
                     break
-                k = buf.find(b"\x00\x00\x01", j + 3)
-                if k < 0:
-                    break
-                start = j - 1 if j > 0 and buf[j - 1] == 0 else j
-                end = k - 1 if buf[k - 1] == 0 else k
-                nal = buf[start:end]
-                buf = buf[end:]
-                ntype = nal[nal.find(b"\x00\x00\x01") + 3] & 0x1F if len(nal) > 4 else 0
-                if ntype == 9:                       # AUD: flush the previous AU
-                    if au:
-                        self._emit(bytes(au), key)
-                        au = bytearray(); key = False
+                cid = buf[:4]
+                ln = struct.unpack("<I", buf[4:8])[0]
+                if cid == b"LIST":
+                    if len(buf) < 12:
+                        break
+                    buf = buf[12:]
                     continue
-                if ntype == 5:
-                    key = True
-                au += nal
+                need = 8 + ln + (ln & 1)
+                if len(buf) < need:
+                    break
+                if cid == b"00dc" and ln > 0:
+                    au = buf[8:8 + ln]
+                    self._emit(au, _h264_has_idr(au))
+                buf = buf[need:]
         self._stop.set()
 
     def _emit(self, data: bytes, key: bool) -> None:

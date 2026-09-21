@@ -70,7 +70,7 @@ WebCodecs honours the H.264 VUI. The pane now logs the decoded frame's
 |---|---|
 | unit encode + WiFi | not measured here (mesh session: sub-frame pacing) |
 | RTP demux in the reader | `reorder_queue_size 8`, `max_delay 0`, 4 MB socket buffer - no delay while packets arrive in order (see section 7: a queue of 0 DROPS good packets) |
-| B only: NVENC transcode | 1 frame (33 ms) + a few ms |
+| B only: NVDEC + NVENC transcode | **37 ms** AU in to AU out (measured; was 202 ms, see section 8) |
 | HTTP chunk to browser | loopback, < 1 ms |
 | WebCodecs decode + canvas | 1 frame, `optimizeForLatency` |
 
@@ -118,4 +118,25 @@ app reader 30.3 frames/s at 2.85 Mbit/s against 2.82 Mbit/s on the wire,
 every IDR carries VPS+SPS+PPS, 213 captured frames decode with zero
 warnings, and the NVDEC+NVENC lane converts them at `yuvj420p(pc, bt709)`.
 Debugging lesson: judge frame rate at the wire, not at the decoder's output.
+
+## 8. Transcode lane delay, measured (2026-09-21 evening)
+
+Harness: the captured 1080p30 unit-2 access units piped into the exact lane
+command at 30 fps, output access units matched to input ones by count,
+delay = out time - in time (median over 200 frames).
+
+| lane build | delay | why |
+|---|---|---|
+| as shipped in the morning (`hevc_cuvid`, `-f h264`, default nvenc) | 202 ms | nvenc holds (surfaces - 1) frames of output; raw HEVC demuxer waits for the next AU to close one; the backend parser waited for the next AUD to close an output AU; cuvid's own pipeline |
+| + `-delay 0 -zerolatency 1` on nvenc | 137 ms | output no longer queued in the encoder |
+| + an AUD appended after every input AU | 104 ms | the demuxer's parser releases the AU immediately |
+| + `-f avi` (length-framed chunks) instead of AUD splitting | 70 ms | the backend emits a frame when its last byte is in |
+| + generic `-hwaccel cuda` instead of `hevc_cuvid` | **37 ms** | cuvid's parser/pipeline adds ~1 frame |
+| software decode (`-threads 1`) for comparison | 44 ms at 0.4 core | rejected: CPU, and this laptop already stalls under load |
+
+Also fixed in the pane: the WebCodecs backpressure valve dropped a single
+delta frame when the decode queue grew, and every P-frame after it decoded
+against a missing reference until the next keyframe - that is the "whole
+pane goes green" symptom. A skipped delta now skips everything up to the
+next keyframe (a freeze of at most one second instead of green).
 

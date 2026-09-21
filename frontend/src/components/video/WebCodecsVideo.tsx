@@ -114,6 +114,7 @@ export function WebCodecsVideo({ src, codec: wireCodec = 'h264', className, styl
                 const reader = res.body.getReader()
                 let buf = new Uint8Array(0)
                 let configured = false
+                let skipUntilKey = false
 
                 while (!cancelled) {
                     const { done, value } = await reader.read()
@@ -206,11 +207,17 @@ export function WebCodecsVideo({ src, codec: wireCodec = 'h264', className, styl
                         }
 
                         if (!decoder || decoder.state !== 'configured') continue
-                        // Backpressure valve: if the decoder is already behind,
-                        // skip deltas rather than piling work on it. Dropping a
-                        // frame costs one frame; queueing costs every frame
-                        // that follows.
-                        if (decoder.decodeQueueSize > 2 && !key) continue
+                        // Backpressure valve: if the decoder is well behind,
+                        // skip deltas rather than piling work on it. Once one
+                        // delta is skipped every delta up to the next keyframe
+                        // must go too: a P-frame whose reference was dropped
+                        // decodes into green smear, not a late picture.
+                        if (key) {
+                            skipUntilKey = false
+                        } else if (skipUntilKey || decoder.decodeQueueSize > 4) {
+                            skipUntilKey = true
+                            continue
+                        }
                         decoder.decode(new EncodedVideoChunk({
                             type: key ? 'key' : 'delta',
                             // Microseconds, and only required to be monotonic -
