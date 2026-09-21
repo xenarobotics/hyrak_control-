@@ -140,3 +140,32 @@ against a missing reference until the next keyframe - that is the "whole
 pane goes green" symptom. A skipped delta now skips everything up to the
 next keyframe (a freeze of at most one second instead of green).
 
+## 9. The RTCP port trap and the in-house depacketizer (2026-09-21 evening)
+
+Symptom: the backend log filled with ffmpeg's `RTP: dropping old packet
+received too late` at the full packet rate of the *neighbouring* unit, the
+reader on 5601 reported 1920x1080 while unit 1 sends 720p, opening a second
+unit sometimes failed with "bound by another program", and earlier in the
+day the pane showed frames from two units interleaved.
+
+Cause (read in ffmpeg 6.1.1 `rtpproto.c`): an SDP session always binds a
+second socket for RTCP on **port + 1**. Air units are on 5600 + id, so the
+reader for unit 1 also owned 5602 and received unit 2's video into the same
+RTP context, where it was either parsed as unit 1's stream (reorder queue 0:
+mixed 720p/1080p frames, most access units corrupt, 7-23 fps) or discarded as
+"old" (reorder queue 8: a log line per packet), and unit 2's own reader could
+not bind. The demuxer offers no way to move that socket, and its custom-I/O
+mode stalls after ~40 frames under PyAV.
+
+Fix: `feeds.py` no longer uses ffmpeg's RTP layer. Each reader owns one plain
+UDP socket (4 MB receive buffer) and `HevcDepacketizer` rebuilds access
+units per RFC 7798 (single NAL, aggregation, fragmentation units; AU closed
+on the marker bit or a timestamp change; a sequence gap drops that AU; a new
+SSRC resets parameter sets and the decoder). Decoding for the WebRTC/AI path
+uses a standalone `CodecContext`. `GET /api/video/feeds` now reports per
+port: ssrc, packets, missed_packets, dropped_aus, sender_changes.
+
+Verified with units 1, 2 and 3 read simultaneously through the app: 30
+frames/s each from the first full second, 145/126/134 access units decode
+completely at 720p/1080p/720p, zero "old packet" lines.
+

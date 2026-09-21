@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import fractions
 import logging
+import socket
 import struct
 import threading
 import time
@@ -29,7 +30,6 @@ import av
 from aiortc import MediaStreamTrack
 from aiortc.contrib.media import MediaRelay
 
-from app.webrtc.udp_video_source import _sdp_file
 
 logger = logging.getLogger("verocore.webrtc.feeds")
 
@@ -111,6 +111,109 @@ class ParamSets:
         return b"".join(self.nals[t] for t in missing) + au
 
 
+class HevcDepacketizer:
+    """RTP/H.265 (RFC 7798) to Annex-B access units. Single NAL units,
+    aggregation packets (48) and fragmentation units (49); an access unit
+    ends at the marker bit or at a timestamp change. A sequence gap inside an
+    access unit marks it broken and it is dropped rather than handed to a
+    decoder as a half picture."""
+
+    def __init__(self) -> None:
+        self.ssrc: int | None = None
+        self.expected: int | None = None
+        self.ts: int | None = None
+        self.au = bytearray()
+        self.frag = bytearray()
+        self.broken = False
+        self.key = False
+        self.missed = 0
+        self.broken_aus = 0
+        self.sender_changes = 0
+        self.pkts = 0
+
+    def _flush(self):
+        out = None
+        if self.au and not self.broken:
+            out = (bytes(self.au), self.key, self.ts)
+        elif self.au:
+            self.broken_aus += 1
+        self.au = bytearray(); self.frag = bytearray(); self.broken = False; self.key = False
+        return out
+
+    def _add_nal(self, nal: bytes) -> None:
+        t = (nal[0] >> 1) & 0x3F
+        if 16 <= t <= 21:
+            self.key = True
+        self.au += b"\x00\x00\x00\x01" + nal
+
+    def feed(self, d: bytes):
+        """One UDP datagram in; a completed (annexb, key, rtp_ts) out, or None."""
+        if len(d) < 14 or d[0] >> 6 != 2:
+            return None
+        pt = d[1] & 0x7F
+        if 200 <= pt <= 204:                    # RTCP on the same port: ignore
+            return None
+        marker = bool(d[1] & 0x80)
+        seq, ts, ssrc = struct.unpack(">HII", d[2:12])
+        off = 12 + 4 * (d[0] & 0x0F)            # CSRCs
+        if d[0] & 0x10:                         # extension header
+            if len(d) < off + 4:
+                return None
+            off += 4 + 4 * struct.unpack(">H", d[off + 2:off + 4])[0]
+        if d[0] & 0x20:                         # padding
+            d = d[:len(d) - d[-1]]
+        if len(d) <= off + 2:
+            return None
+        self.pkts += 1
+        out = None
+        if ssrc != self.ssrc:
+            if self.ssrc is not None:
+                self.sender_changes += 1
+            out = self._flush() if self.au else None
+            self.au = bytearray(); self.frag = bytearray(); self.broken = False
+            self.ssrc, self.expected, self.ts = ssrc, None, None
+            out = None                          # never trust an AU straddling senders
+        if self.expected is not None and seq != self.expected:
+            gap = (seq - self.expected) & 0xFFFF
+            if gap < 0x8000:
+                self.missed += gap
+                self.broken = True              # something of this AU is gone
+            else:
+                return None                     # late duplicate / reordered behind: drop
+        self.expected = (seq + 1) & 0xFFFF
+        if self.ts is not None and ts != self.ts and self.au:
+            out = self._flush()                 # sender never set the marker: close on ts change
+        self.ts = ts
+        pl = d[off:]
+        t = (pl[0] >> 1) & 0x3F
+        if t == 48:                             # aggregation packet
+            i = 2
+            while i + 2 <= len(pl):
+                n = struct.unpack(">H", pl[i:i + 2])[0]
+                nal = pl[i + 2:i + 2 + n]
+                if len(nal) == n and n >= 2:
+                    self._add_nal(nal)
+                i += 2 + n
+        elif t == 49:                           # fragmentation unit
+            fu = pl[2]
+            start, end, ftype = fu & 0x80, fu & 0x40, fu & 0x3F
+            if start:
+                self.frag = bytearray(bytes([(pl[0] & 0x81) | (ftype << 1), pl[1]]) + pl[3:])
+            elif self.frag:
+                self.frag += pl[3:]
+            else:
+                self.broken = True              # middle of a fragment we never saw the start of
+            if end and self.frag:
+                self._add_nal(bytes(self.frag))
+                self.frag = bytearray()
+        elif t < 48:
+            self._add_nal(pl)
+        if marker:
+            done = self._flush()
+            out = done if done is not None else out
+        return out
+
+
 class SharedReader:
     def __init__(self, port: int, loop: asyncio.AbstractEventLoop):
         self.port = port
@@ -127,6 +230,7 @@ class SharedReader:
         self.last_packet_t = 0.0
         self.last_error = ""
         self.width = self.height = 0
+        self.depack: HevcDepacketizer | None = None
         self._thread = threading.Thread(target=self._run, name=f"feed-{port}", daemon=True)
         self._thread.start()
 
@@ -182,64 +286,85 @@ class SharedReader:
                 q.wait_key = True
 
     def _run(self) -> None:
-        # reorder_queue_size must NOT be 0: measured on a clean 30 fps wire
-        # (one SSRC, 0 loss) it made ffmpeg's RTP layer deliver 7-23 frames/s;
-        # a queue of 8 with max_delay 0 delivers 30/s from the first second
-        # and adds no delay while packets arrive in order.
-        opts = {"protocol_whitelist": "file,udp,rtp", "fflags": "nobuffer", "flags": "low_delay",
-                "reorder_queue_size": "8", "max_delay": "0", "buffer_size": "4000000"}
+        # One plain UDP socket per port, depacketized here. ffmpeg's SDP/RTP
+        # layer was abandoned because it always binds port+1 for RTCP, which is
+        # the next air unit's video port (units are 5600+id): the neighbour's
+        # packets then land in this reader as "old packets", the neighbour's
+        # own reader cannot bind, and a reorder queue of 0 mixed both streams.
         quiet_since = None
         while not self._stop.is_set():
-            container = None
+            sock = None
             try:
-                container = av.open(_sdp_file(self.port, _param_memory.get(self.port)),
-                                    format="sdp", options=opts, timeout=IO_TIMEOUT_S)
-                vs = container.streams.video[0]
-                cc = vs.codec_context
-                cc.thread_type = "AUTO"
-                self.params.nals.clear()          # a reopen is a new sender as far as we know
-                self.params.learn_extradata(getattr(cc, "extradata", None))   # from the SDP sprop lines
-                for pkt in container.demux(vs):
-                    if self._stop.is_set():
-                        break
-                    if pkt.pts is None and pkt.dts is None:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 << 20)
+                try:
+                    sock.bind(("0.0.0.0", self.port))
+                except OSError as e:
+                    raise RuntimeError(f"bind failed: {e}") from e
+                sock.settimeout(IO_TIMEOUT_S)
+                self.depack = dp = HevcDepacketizer()
+                codec = av.CodecContext.create("hevc", "r")
+                codec.thread_type = "AUTO"
+                decode_wait_key = True
+                self.params.nals.clear()
+                for t, nal in (_param_memory.get(self.port) or {}).items():
+                    self.params.nals[t] = nal   # last known sets for this port, in-band ones replace them
+                last_ssrc = None
+                while not self._stop.is_set():
+                    try:
+                        d = sock.recv(65536)
+                    except socket.timeout:
+                        now = time.monotonic()
+                        if quiet_since is None:
+                            quiet_since = now
+                        elif now - quiet_since > QUIET_LOG_S:
+                            logger.warning(f"udp:{self.port}: no video for {now - quiet_since:.0f}s")
+                            quiet_since = now
                         continue
-                    data = bytes(pkt)
-                    if not data:
-                        continue
-                    now = time.monotonic()
-                    if now - self.last_packet_t > 1.0:
-                        # Gap: the unit's sender restarted (new SSRC, possibly a new
-                        # resolution). Never carry parameter sets across it.
-                        self.params.nals.clear()
-                    self.last_packet_t = now
                     quiet_since = None
+                    au = dp.feed(d)
+                    if dp.ssrc != last_ssrc:
+                        if last_ssrc is not None:
+                            # New sender: never carry parameter sets or decoder state across.
+                            self.params.nals.clear()
+                            codec = av.CodecContext.create("hevc", "r")
+                            codec.thread_type = "AUTO"
+                            decode_wait_key = True
+                            logger.info(f"udp:{self.port}: new sender ssrc 0x{dp.ssrc:08X}")
+                        last_ssrc = dp.ssrc
+                    if au is None:
+                        continue
+                    data, key, ts = au
+                    self.last_packet_t = time.monotonic()
                     self._seq += 1
-                    key = bool(pkt.is_keyframe)
-                    if key and (self.raw_subs or self.transcoders):
+                    if key:
                         data = self.params.complete(data)
                     if self.raw_subs:
                         self.loop.call_soon_threadsafe(self._deliver_raw, data, key, self._seq)
-                    for codec, tr in list(self.transcoders.items()):
+                    for codec_name, tr in list(self.transcoders.items()):
                         if not tr.alive:
-                            # ffmpeg died (bad first AU, GPU hiccup): restart it for
-                            # the subscribers still waiting, at most once a second.
+                            # ffmpeg died (bad first AU, GPU hiccup, resolution change):
+                            # restart it for the subscribers still waiting, at most once a second.
                             if not tr.subs or time.monotonic() - tr.started_at < 1.0:
                                 continue
                             if Transcoder.cuda_ok and tr.frames_out == 0 and tr._cuda_err:
-                                # Died before its first frame with a CUDA complaint:
-                                # NVDEC is not usable here, fall back to software decode.
                                 Transcoder.cuda_ok = False
                                 logger.warning(f"xcode udp:{self.port}: CUDA decode unavailable, lanes will use software decode")
-                            nt = Transcoder(self, codec)
+                            nt = Transcoder(self, codec_name)
                             nt.subs = tr.subs
                             for q in nt.subs:
                                 q.wait_key = True
-                            tr = self.transcoders[codec] = nt
+                            tr = self.transcoders[codec_name] = nt
                         tr.feed(data, key)
                     if self.refs > 0:
+                        if decode_wait_key and not key:
+                            continue
+                        decode_wait_key = False
                         try:
-                            for frame in cc.decode(pkt):
+                            pkt = av.Packet(data)
+                            pkt.pts = pkt.dts = ts
+                            pkt.time_base = fractions.Fraction(1, 90000)
+                            for frame in codec.decode(pkt):
                                 if frame.time_base is None:
                                     frame.time_base = fractions.Fraction(1, 90000)
                                 self.width, self.height = frame.width, frame.height
@@ -258,9 +383,9 @@ class SharedReader:
                     quiet_since = now
                 time.sleep(0.3)
             finally:
-                if container is not None:
+                if sock is not None:
                     try:
-                        container.close()
+                        sock.close()
                     except Exception:
                         pass
         logger.info(f"Feed reader on udp:{self.port} stopped")
@@ -549,9 +674,13 @@ def status(port: int) -> dict | None:
     r = _feeds.get(port)
     if r is None:
         return None
+    dp = getattr(r, "depack", None)
     return {"port": port, "decoded_refs": r.refs, "raw_refs": r.raw_refs,
             "width": r.width, "height": r.height,
-            "quiet_s": round(time.monotonic() - r.last_packet_t, 1) if r.last_packet_t else None}
+            "quiet_s": round(time.monotonic() - r.last_packet_t, 1) if r.last_packet_t else None,
+            "ssrc": f"0x{dp.ssrc:08X}" if dp and dp.ssrc is not None else None,
+            "packets": dp.pkts if dp else 0, "missed_packets": dp.missed if dp else 0,
+            "dropped_aus": dp.broken_aus if dp else 0, "sender_changes": dp.sender_changes if dp else 0}
 
 
 async def subscribe_transcoded(port: int, codec: str) -> asyncio.Queue:
