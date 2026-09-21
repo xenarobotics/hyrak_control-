@@ -198,15 +198,24 @@ class Transcoder:
     ENCODERS = {
         "h264": ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", "10M",
                  "-maxrate", "10M", "-bufsize", "2M", "-g", "30", "-forced-idr", "1", "-bf", "0",
-                 "-pix_fmt", "yuv420p", "-color_range", "pc", "-colorspace", "bt709",
+                 "-color_range", "pc", "-colorspace", "bt709",
                  "-color_primaries", "bt709", "-color_trc", "bt709",
                  "-bsf:v", "h264_metadata=aud=insert,dump_extra=freq=keyframe", "-f", "h264"],
     }
+
+    # NVDEC in front of NVENC: zero-copy on the GPU and, unlike ffmpeg's
+    # frame-threaded software HEVC decoder, no multi-frame output delay.
+    # Cleared if a CUDA start ever dies early, so the lane falls back to
+    # software decode instead of staying dark.
+    cuda_ok = True
 
     def __init__(self, reader: "SharedReader", codec: str):
         import subprocess, collections
         self.reader = reader
         self.codec = codec
+        self.started_at = time.monotonic()
+        self.frames_out = 0
+        hw = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"] if Transcoder.cuda_ok else ["-threads", "1"]
         self.subs: list[asyncio.Queue] = []
         self._in = collections.deque(maxlen=120)     # pending input AUs (never blocks the reader)
         self._in_ev = threading.Event()
@@ -216,12 +225,13 @@ class Transcoder:
         self._err_n = 0
         self.proc = subprocess.Popen(
             ["ffmpeg", "-hide_banner", "-loglevel", "error", "-fflags", "nobuffer", "-flags", "low_delay",
-             "-f", "hevc", "-i", "pipe:0", "-an"] + self.ENCODERS[codec] + ["pipe:1"],
+             "-probesize", "32", "-analyzeduration", "0"] + hw +
+            ["-f", "hevc", "-i", "pipe:0", "-an"] + self.ENCODERS[codec] + ["pipe:1"],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
         threading.Thread(target=self._writer, name=f"xcode-in-{reader.port}", daemon=True).start()
         threading.Thread(target=self._parser, name=f"xcode-out-{reader.port}", daemon=True).start()
         threading.Thread(target=self._stderr, name=f"xcode-err-{reader.port}", daemon=True).start()
-        logger.info(f"Transcoder {codec} started for udp:{reader.port} (NVENC)")
+        logger.info(f"Transcoder {codec} started for udp:{reader.port} (NVENC, {'NVDEC' if Transcoder.cuda_ok else 'sw decode'})")
 
     @property
     def alive(self) -> bool:
@@ -274,6 +284,12 @@ class Transcoder:
     def _stderr(self) -> None:
         for line in iter(self.proc.stderr.readline, b""):
             self._err_n += 1
+            # CUDA/NVDEC unavailable or unsupported profile: ffmpeg dies at
+            # once. Remember it so the next lane starts in software.
+            if Transcoder.cuda_ok and self.frames_out == 0 and time.monotonic() - self.started_at < 5 and \
+                    any(k in line for k in (b"cuda", b"CUDA", b"cuvid", b"hwaccel", b"No decoder")):
+                Transcoder.cuda_ok = False
+                logger.warning(f"xcode udp:{self.reader.port}: CUDA decode unavailable, lanes will use software decode")
             # Genuine loss upstream shows up here too; keep the first few and
             # then one in fifty so a bad link is visible without a flood.
             if self._err_n <= 5 or self._err_n % 50 == 0:
@@ -315,6 +331,7 @@ class Transcoder:
 
     def _emit(self, data: bytes, key: bool) -> None:
         self._seq += 1
+        self.frames_out += 1
         payload = AU_HEADER.pack(len(data), 1 if key else 0, self._seq & 0xFFFFFFFF) + data
         self.reader.loop.call_soon_threadsafe(self._fanout, payload, key)
 
