@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { getSocket } from '@/lib/socket'
 import { getServerUrl } from '@/lib/server-url'
+import { isServerHevcReady } from '@/lib/serverHevcFeed'
 import { useDroneStore } from '@/store/drone'
 import { tuneVideoSender, videoConstraints, getVideoSettings, wantsClientOverlay, wantsEcoUplink } from '@/lib/videoSettings'
 import { getVideoSource, getSiyiRtspUrl, getAirUnitVideoPort, isServerSourced, usesDataChannelSender } from '@/lib/videoSource'
@@ -317,6 +318,10 @@ export function useWebRTC() {
         const mode = useDroneStore.getState().mode
         const overlayableServerSourced =
             (videoSource === 'air_unit_datachannel' && !!getAirUnitPreviewUrl())
+            // Server-read air unit with the bit-exact WebCodecs path: the
+            // picture is decoded locally from the unit's own H.265, so the
+            // server can keep its frames for AI and send only results back.
+            || (videoSource === 'air_unit_udp' && isServerHevcReady())
             // GStreamer mode is overlay-capable for the same reason: there IS
             // a local picture to draw on, so the server can skip the return
             // encode entirely and send only detection JSON.

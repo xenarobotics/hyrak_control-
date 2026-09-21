@@ -3,6 +3,7 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { useDroneStore } from '@/store/drone'
+import { useServerHevcFeed } from '@/lib/serverHevcFeed'
 import { VideoOSD } from '@/components/osd/VideoOSD'
 import { RecordingControls } from './RecordingControls'
 import { Button } from '@/components/ui/button'
@@ -23,6 +24,7 @@ import { WebCodecsVideo } from './WebCodecsVideo'
 type AspectRatio = 'fill' | 'fit' | '16:9' | '4:3' | '1:1'
 
 export function VideoStream() {
+    const [hevcFailed, setHevcFailed] = useState(false)
     const {
         remoteStream, localStream,
         isStreaming, isLoading, stats, lastError,
@@ -56,11 +58,16 @@ export function VideoStream() {
     const localPreviewUrl = relayPreviewUrl ?? gst?.previewUrl ?? receiver?.previewUrl ?? airUnitPreviewUrl
     // WebCodecs renders to a canvas and needs neither the <video> element nor
     // the live-edge controller - there is no playback buffer to clamp.
-    const wcUrl = gst?.webcodecs ? gst.previewUrl : (receiver?.previewUrl ?? null)
+    // Server-read air unit: the backend's bit-exact H.265 stream, decoded here
+    // with WebCodecs, replaces the VP8 re-encode whenever this Chromium can
+    // decode HEVC (probed once). A decode failure disables it for the session
+    // and the pane falls back to the WebRTC track on the next start.
+    const serverHevcUrl = useServerHevcFeed(isStreaming && !hevcFailed)
+    const wcUrl = gst?.webcodecs ? gst.previewUrl : (receiver?.previewUrl ?? serverHevcUrl ?? null)
     // The receiver decides between H.265 passthrough and an H.264 transcode at
     // run time, and can change its mind mid-session, so this is read from its
     // status rather than assumed. gst mode always transcodes to H.264.
-    const wcCodec = gst?.webcodecs ? 'h264' : (receiver?.codec ?? 'h264')
+    const wcCodec = gst?.webcodecs ? 'h264' : (receiver?.codec ?? (serverHevcUrl ? 'hevc' : 'h264'))
 
     const mode = useDroneStore(s => s.mode)
     // manual-control has nothing to process - bypassing the backend WebRTC
@@ -147,7 +154,7 @@ export function VideoStream() {
                 <WebCodecsVideo
                     src={wcUrl}
                     codec={wcCodec}
-                    onDecodeError={wcCodec === 'hevc' ? fallbackFromHevc : undefined}
+                    onDecodeError={wcCodec === 'hevc' ? (serverHevcUrl ? () => setHevcFailed(true) : fallbackFromHevc) : undefined}
                     className={aspectRatio === 'fill'
                         ? 'w-full h-full object-cover'
                         : 'h-full object-contain mx-auto'}

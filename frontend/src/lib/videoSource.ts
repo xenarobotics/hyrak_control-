@@ -261,7 +261,10 @@ export function getAirUnitVideoPort(): number {
 }
 
 export function setAirUnitVideoPort(port: number): void {
-    if (typeof window !== 'undefined') localStorage.setItem(AIR_UNIT_PORT_KEY, String(port))
+    if (typeof window !== 'undefined') {
+        localStorage.setItem(AIR_UNIT_PORT_KEY, String(port))
+        window.dispatchEvent(new Event('hyrak-air-unit-port'))   // serverHevcFeed follows unit switches
+    }
 }
 
 // Optional verbatim copy of the air unit's RTP to another local UDP port.

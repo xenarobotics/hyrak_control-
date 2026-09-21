@@ -16,6 +16,7 @@ import socket
 import time
 
 from fastapi import APIRouter, Query
+from fastapi.responses import StreamingResponse
 
 router = APIRouter(prefix="/api/video", tags=["video"])
 
@@ -82,3 +83,33 @@ def _probe(max_units: int) -> list[dict]:
 async def mesh_units(max_units: int = Query(8, ge=1, le=64)):
     units = await asyncio.get_event_loop().run_in_executor(None, _probe, max_units)
     return {"base_port": BASE_PORT, "units": units}
+
+
+@router.get("/feeds/{port}/hevc")
+async def feed_hevc(port: int):
+    """The unit's OWN H.265, bit-exact, as framed Annex-B access units:
+    [uint32 len][uint8 key][uint32 seq][AU] - the format the app's
+    WebCodecsVideo already parses. Starts at a keyframe (VPS/SPS/PPS in-band)
+    so the decoder can configure from the stream itself."""
+    from app.webrtc import feeds
+    q = await feeds.subscribe_raw(port)
+
+    async def gen():
+        try:
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(q.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    continue          # quiet source: keep the connection, wait
+                yield chunk
+        finally:
+            await feeds.unsubscribe_raw(port, q)
+
+    return StreamingResponse(gen(), media_type="application/octet-stream",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+@router.get("/feeds")
+async def feeds_status():
+    from app.webrtc import feeds
+    return {"feeds": [feeds.status(p) for p in feeds.open_ports()]}
