@@ -189,6 +189,7 @@ class SharedReader:
                 vs = container.streams.video[0]
                 cc = vs.codec_context
                 cc.thread_type = "AUTO"
+                self.params.nals.clear()          # a reopen is a new sender as far as we know
                 self.params.learn_extradata(getattr(cc, "extradata", None))
                 for pkt in container.demux(vs):
                     if self._stop.is_set():
@@ -198,7 +199,12 @@ class SharedReader:
                     data = bytes(pkt)
                     if not data:
                         continue
-                    self.last_packet_t = time.monotonic()
+                    now = time.monotonic()
+                    if now - self.last_packet_t > 1.0:
+                        # Gap: the unit's sender restarted (new SSRC, possibly a new
+                        # resolution). Never carry parameter sets across it.
+                        self.params.nals.clear()
+                    self.last_packet_t = now
                     quiet_since = None
                     self._seq += 1
                     key = bool(pkt.is_keyframe)
@@ -212,6 +218,11 @@ class SharedReader:
                             # the subscribers still waiting, at most once a second.
                             if not tr.subs or time.monotonic() - tr.started_at < 1.0:
                                 continue
+                            if Transcoder.cuda_ok and tr.frames_out == 0 and tr._cuda_err:
+                                # Died before its first frame with a CUDA complaint:
+                                # NVDEC is not usable here, fall back to software decode.
+                                Transcoder.cuda_ok = False
+                                logger.warning(f"xcode udp:{self.port}: CUDA decode unavailable, lanes will use software decode")
                             nt = Transcoder(self, codec)
                             nt.subs = tr.subs
                             for q in nt.subs:
@@ -286,6 +297,7 @@ class Transcoder:
         self._seq = 0
         self._started = False
         self._err_n = 0
+        self._cuda_err = False
         self.proc = subprocess.Popen(
             ["ffmpeg", "-hide_banner", "-loglevel", "error", "-fflags", "nobuffer", "-flags", "low_delay",
              "-probesize", "32", "-analyzeduration", "0"] + hw +
@@ -349,10 +361,8 @@ class Transcoder:
             self._err_n += 1
             # CUDA/NVDEC unavailable or unsupported profile: ffmpeg dies at
             # once. Remember it so the next lane starts in software.
-            if Transcoder.cuda_ok and self.frames_out == 0 and time.monotonic() - self.started_at < 5 and \
-                    any(k in line for k in (b"cuda", b"CUDA", b"cuvid", b"hwaccel", b"hw_frames_ctx", b"No decoder")):
-                Transcoder.cuda_ok = False
-                logger.warning(f"xcode udp:{self.reader.port}: CUDA decode unavailable, lanes will use software decode")
+            if any(k in line for k in (b"cuda", b"CUDA", b"cuvid", b"hwaccel", b"hw_frames_ctx", b"No decoder")):
+                self._cuda_err = True
             # Genuine loss upstream shows up here too; keep the first few and
             # then one in fifty so a bad link is visible without a flood.
             if self._err_n <= 5 or self._err_n % 50 == 0:
