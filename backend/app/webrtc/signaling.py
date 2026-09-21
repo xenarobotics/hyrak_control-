@@ -483,13 +483,27 @@ def register_webrtc_events(
                         enc = getattr(snd, "_RTCRtpSender__encoder", None)
                         if enc is not None and hasattr(enc, "target_bitrate"):
                             tgt = enc.target_bitrate
+                    # Which ICE path carries the media: host (direct), srflx
+                    # (through the NAT) or relay (TURN on the internet - the
+                    # one that makes a same-machine viewer stutter).
+                    path = "?"
+                    try:
+                        for tr in pc.getTransceivers():
+                            ice = tr.receiver.transport.transport
+                            nominated = getattr(ice, "_connection", None) and ice._connection._nominated
+                            if nominated:
+                                pair = next(iter(nominated.values()))
+                                path = f"{pair.local_candidate.type}->{pair.remote_candidate.type} via {pair.remote_candidate.host}"
+                            break
+                    except Exception:
+                        pass
                     if sent is not None:
                         now = asyncio.get_event_loop().time()
                         if last_bytes is not None:
                             kbps = (sent.bytesSent - last_bytes) * 8 / max(now - last_t, 0.1) / 1000
                             logger.info(f"PC {pc_id[:8]} video out: {kbps:.0f} kbit/s sent, "
-                                        f"encoder target {tgt/1000:.0f} kbit/s" if tgt else
-                                        f"PC {pc_id[:8]} video out: {kbps:.0f} kbit/s sent")
+                                        + (f"encoder target {tgt/1000:.0f} kbit/s, " if tgt else "")
+                                        + f"path {path}")
                         last_bytes, last_t = sent.bytesSent, now
                 except Exception as e:
                     logger.debug(f"out stats failed: {e}")
