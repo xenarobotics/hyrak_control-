@@ -69,7 +69,7 @@ WebCodecs honours the H.264 VUI. The pane now logs the decoded frame's
 | stage | cost |
 |---|---|
 | unit encode + WiFi | not measured here (mesh session: sub-frame pacing) |
-| RTP demux in the reader | 0 buffer (`reorder_queue_size 0`, `max_delay 0`) - a reorder is a drop, acceptable at 0 % loss |
+| RTP demux in the reader | `reorder_queue_size 8`, `max_delay 0`, 4 MB socket buffer - no delay while packets arrive in order (see section 7: a queue of 0 DROPS good packets) |
 | B only: NVENC transcode | 1 frame (33 ms) + a few ms |
 | HTTP chunk to browser | loopback, < 1 ms |
 | WebCodecs decode + canvas | 1 frame, `optimizeForLatency` |
@@ -97,3 +97,25 @@ app should now lead the window slightly, not trail it.
 - Camera-wall tiles still use path C (VP8): fine for thumbnails, not for
   judging colour. Move them to B when a wall is used for inspection.
 - Path A on a machine with a hardware HEVC decoder has not been exercised.
+
+## 7. Follow-up audit, 2026-09-21 afternoon (latency still worse than gst)
+
+Method: the wire was measured with a raw UDP socket on 5602 (per-SSRC
+packet, byte, marker-bit and sequence counts), the app's reader through its
+bit-exact endpoint, and each ffmpeg lane offline on the captured bytes.
+Findings, in the order they mattered:
+
+| finding | evidence | fix |
+|---|---|---|
+| The "direct" lane's bytes were leaving the laptop | backend log: `GET /feeds/5602/h264` from 106.192.2.25 (public IP) while WebRTC was host->host | the pane probes `http://localhost:8001` first and streams from there (`serverHevcFeed.ts`) |
+| The reader dropped most frames | wire 30 fps / 0 loss / one SSRC; reader 7-23 frames/s with `reorder_queue_size 0`; 30/s from the first second with a queue of 8 and `max_delay 0` | reader options changed; **never set the queue to 0** |
+| Keyframes were not self-contained | the unit's encoder emitted the VPS once per run; ffmpeg refuses an SPS whose VPS it has not seen, so a late joiner (reader reopen, transcoder start, WebCodecs) could not decode until the next sender restart | mesh side: sender now prepends VPS+SPS+PPS to every keyframe; app side: last VPS/SPS/PPS per port are kept, written into the SDP as sprop lines on reopen, and prepended to any keyframe that lacks them |
+| Two senders on one port | a 4 s capture held 1080p and 720p IDRs, each with its own SPS, interleaved, at 4-9 usable frames/s | mesh side: a leftover sender is killed before a new one starts |
+| NVDEC lane died on start | `Impossible to convert between the formats ... auto_scale_0`: with a full probe ffmpeg decodes the first frame in software and builds a yuvj420p graph the CUDA frames cannot enter | `-probesize 32 -analyzeduration 0 -hwaccel cuda -hwaccel_output_format cuda -c:v hevc_cuvid`; a dead transcoder is restarted for its subscribers |
+
+Verified after the fixes (unit 2, 1080p30, 3 Mbit/s pinned, adaptation off):
+app reader 30.3 frames/s at 2.85 Mbit/s against 2.82 Mbit/s on the wire,
+every IDR carries VPS+SPS+PPS, 213 captured frames decode with zero
+warnings, and the NVDEC+NVENC lane converts them at `yuvj420p(pc, bt709)`.
+Debugging lesson: judge frame rate at the wire, not at the decoder's output.
+
