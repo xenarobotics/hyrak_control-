@@ -32,17 +32,34 @@ a=rtpmap:96 H265/90000
 
 # Keyed by port - the port is user-configurable (Settings), so a single
 # cached path would silently keep serving the old port's SDP after a change.
-_sdp_paths: dict[int, str] = {}
+_sdp_paths: dict[tuple, str] = {}
 
 
-def _sdp_file(port: int) -> str:
-    path = _sdp_paths.get(port)
+def _sdp_file(port: int, params: dict[int, bytes] | None = None) -> str:
+    """SDP for the port. `params` (nal_type -> Annex-B VPS/SPS/PPS) become
+    sprop-vps/sps/pps lines so ffmpeg's parser and decoder start from them:
+    the air unit's encoder sends its VPS once per run, so a reader that opens
+    mid-run would otherwise wait for the next sender restart."""
+    fmtp = ""
+    if params:
+        import base64
+        names = {32: "sprop-vps", 33: "sprop-sps", 34: "sprop-pps"}
+        parts = []
+        for t in (32, 33, 34):
+            nal = params.get(t)
+            if nal:
+                nal = nal[4:] if nal[:4] == b"\x00\x00\x00\x01" else nal[3:] if nal[:3] == b"\x00\x00\x01" else nal
+                parts.append(f"{names[t]}={base64.b64encode(nal).decode()}")
+        if parts:
+            fmtp = "a=fmtp:96 " + ";".join(parts) + "\n"
+    key = (port, fmtp)
+    path = _sdp_paths.get(key)
     if path is None or not os.path.exists(path):
         fd, path = tempfile.mkstemp(suffix=".sdp", prefix=f"hyrak_air_unit_{port}_")
         with os.fdopen(fd, "w") as f:
-            f.write(_SDP_TEMPLATE.format(port=port))
-        _sdp_paths[port] = path
-        logger.info(f"Air-unit SDP written to {path}")
+            f.write(_SDP_TEMPLATE.format(port=port) + fmtp)
+        _sdp_paths[key] = path
+        logger.info(f"Air-unit SDP written to {path}" + (" (with parameter sets)" if fmtp else ""))
     return path
 
 

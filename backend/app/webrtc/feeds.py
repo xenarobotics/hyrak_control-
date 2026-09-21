@@ -84,8 +84,9 @@ class ParamSets:
 
     VPS, SPS, PPS = 32, 33, 34
 
-    def __init__(self) -> None:
+    def __init__(self, on_learn=None) -> None:
         self.nals: dict[int, bytes] = {}
+        self.on_learn = on_learn
 
     def learn_extradata(self, extradata: bytes | None) -> None:
         if extradata and extradata[:3] in (b"\x00\x00\x01", b"\x00\x00\x00"):
@@ -100,6 +101,8 @@ class ParamSets:
             if t in (self.VPS, self.SPS, self.PPS):
                 self.nals[t] = au[s:e]
                 present.add(t)
+                if self.on_learn is not None:
+                    self.on_learn(t, au[s:e])
             elif t < 32:
                 break                        # first slice: no more parameter sets ahead
         missing = [t for t in (self.VPS, self.SPS, self.PPS) if t not in present and t in self.nals]
@@ -117,7 +120,7 @@ class SharedReader:
         self.refs = 0
         self.raw_subs: list[asyncio.Queue] = []
         self.raw_refs = 0
-        self.params = ParamSets()
+        self.params = ParamSets(on_learn=lambda t, nal: _param_memory.setdefault(port, {}).__setitem__(t, nal))
         self.transcoders: dict[str, "Transcoder"] = {}   # codec -> GPU transcode lane
         self._stop = threading.Event()
         self._seq = 0
@@ -179,18 +182,23 @@ class SharedReader:
                 q.wait_key = True
 
     def _run(self) -> None:
+        # reorder_queue_size must NOT be 0: measured on a clean 30 fps wire
+        # (one SSRC, 0 loss) it made ffmpeg's RTP layer deliver 7-23 frames/s;
+        # a queue of 8 with max_delay 0 delivers 30/s from the first second
+        # and adds no delay while packets arrive in order.
         opts = {"protocol_whitelist": "file,udp,rtp", "fflags": "nobuffer", "flags": "low_delay",
-                "reorder_queue_size": "0", "max_delay": "0"}
+                "reorder_queue_size": "8", "max_delay": "0", "buffer_size": "4000000"}
         quiet_since = None
         while not self._stop.is_set():
             container = None
             try:
-                container = av.open(_sdp_file(self.port), format="sdp", options=opts, timeout=IO_TIMEOUT_S)
+                container = av.open(_sdp_file(self.port, _param_memory.get(self.port)),
+                                    format="sdp", options=opts, timeout=IO_TIMEOUT_S)
                 vs = container.streams.video[0]
                 cc = vs.codec_context
                 cc.thread_type = "AUTO"
                 self.params.nals.clear()          # a reopen is a new sender as far as we know
-                self.params.learn_extradata(getattr(cc, "extradata", None))
+                self.params.learn_extradata(getattr(cc, "extradata", None))   # from the SDP sprop lines
                 for pkt in container.demux(vs):
                     if self._stop.is_set():
                         break
@@ -426,6 +434,9 @@ class Transcoder:
 
 
 _feeds: dict[int, SharedReader] = {}
+# port -> {nal_type: Annex-B NAL}: the last VPS/SPS/PPS seen on that port. Survives
+# reader reopens and sender restarts; only ever replaced by a newer in-band set.
+_param_memory: dict[int, dict[int, bytes]] = {}
 _lock: asyncio.Lock | None = None
 
 
