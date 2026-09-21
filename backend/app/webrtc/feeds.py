@@ -64,6 +64,50 @@ class DecodedTrack(MediaStreamTrack):
         return self._frame
 
 
+def _nal_units(data: bytes):
+    """Yield (nal_type, start, end) for every Annex-B NAL in an HEVC access unit."""
+    n = len(data)
+    i = data.find(b"\x00\x00\x01")
+    while i >= 0 and i + 3 < n:
+        j = data.find(b"\x00\x00\x01", i + 3)
+        s = i - 1 if i > 0 and data[i - 1] == 0 else i
+        e = n if j < 0 else (j - 1 if data[j - 1] == 0 else j)
+        yield (data[i + 3] >> 1) & 0x3F, s, e
+        i = j
+
+
+class ParamSets:
+    """VPS/SPS/PPS as last seen in-band (or from the SDP), so every keyframe
+    handed to a raw consumer or a transcoder is self-contained. Some units
+    emit an IDR with only SPS+PPS (VPS once per session), and a decoder that
+    joins on such an IDR cannot start."""
+
+    VPS, SPS, PPS = 32, 33, 34
+
+    def __init__(self) -> None:
+        self.nals: dict[int, bytes] = {}
+
+    def learn_extradata(self, extradata: bytes | None) -> None:
+        if extradata and extradata[:3] in (b"\x00\x00\x01", b"\x00\x00\x00"):
+            for t, s, e in _nal_units(extradata):
+                if t in (self.VPS, self.SPS, self.PPS):
+                    self.nals[t] = extradata[s:e]
+
+    def complete(self, au: bytes) -> bytes:
+        """Learn parameter sets present in a key AU; prepend the missing ones."""
+        present = set()
+        for t, s, e in _nal_units(au):
+            if t in (self.VPS, self.SPS, self.PPS):
+                self.nals[t] = au[s:e]
+                present.add(t)
+            elif t < 32:
+                break                        # first slice: no more parameter sets ahead
+        missing = [t for t in (self.VPS, self.SPS, self.PPS) if t not in present and t in self.nals]
+        if not missing or not present and not self.nals:
+            return au
+        return b"".join(self.nals[t] for t in missing) + au
+
+
 class SharedReader:
     def __init__(self, port: int, loop: asyncio.AbstractEventLoop):
         self.port = port
@@ -73,6 +117,7 @@ class SharedReader:
         self.refs = 0
         self.raw_subs: list[asyncio.Queue] = []
         self.raw_refs = 0
+        self.params = ParamSets()
         self.transcoders: dict[str, "Transcoder"] = {}   # codec -> GPU transcode lane
         self._stop = threading.Event()
         self._seq = 0
@@ -144,6 +189,7 @@ class SharedReader:
                 vs = container.streams.video[0]
                 cc = vs.codec_context
                 cc.thread_type = "AUTO"
+                self.params.learn_extradata(getattr(cc, "extradata", None))
                 for pkt in container.demux(vs):
                     if self._stop.is_set():
                         break
@@ -155,10 +201,23 @@ class SharedReader:
                     self.last_packet_t = time.monotonic()
                     quiet_since = None
                     self._seq += 1
+                    key = bool(pkt.is_keyframe)
+                    if key and (self.raw_subs or self.transcoders):
+                        data = self.params.complete(data)
                     if self.raw_subs:
-                        self.loop.call_soon_threadsafe(self._deliver_raw, data, bool(pkt.is_keyframe), self._seq)
-                    for tr in list(self.transcoders.values()):
-                        tr.feed(data, bool(pkt.is_keyframe))
+                        self.loop.call_soon_threadsafe(self._deliver_raw, data, key, self._seq)
+                    for codec, tr in list(self.transcoders.items()):
+                        if not tr.alive:
+                            # ffmpeg died (bad first AU, GPU hiccup): restart it for
+                            # the subscribers still waiting, at most once a second.
+                            if not tr.subs or time.monotonic() - tr.started_at < 1.0:
+                                continue
+                            nt = Transcoder(self, codec)
+                            nt.subs = tr.subs
+                            for q in nt.subs:
+                                q.wait_key = True
+                            tr = self.transcoders[codec] = nt
+                        tr.feed(data, key)
                     if self.refs > 0:
                         try:
                             for frame in cc.decode(pkt):
@@ -215,7 +274,11 @@ class Transcoder:
         self.codec = codec
         self.started_at = time.monotonic()
         self.frames_out = 0
-        hw = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"] if Transcoder.cuda_ok else ["-threads", "1"]
+        # -probesize 32 matters: with a full probe ffmpeg decodes the first frame in
+        # software and builds a yuvj420p filter graph that the CUDA frames then
+        # cannot enter ("Impossible to convert between the formats", lane dies).
+        hw = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-c:v", "hevc_cuvid"] \
+            if Transcoder.cuda_ok else ["-threads", "1"]
         self.subs: list[asyncio.Queue] = []
         self._in = collections.deque(maxlen=120)     # pending input AUs (never blocks the reader)
         self._in_ev = threading.Event()
@@ -287,7 +350,7 @@ class Transcoder:
             # CUDA/NVDEC unavailable or unsupported profile: ffmpeg dies at
             # once. Remember it so the next lane starts in software.
             if Transcoder.cuda_ok and self.frames_out == 0 and time.monotonic() - self.started_at < 5 and \
-                    any(k in line for k in (b"cuda", b"CUDA", b"cuvid", b"hwaccel", b"No decoder")):
+                    any(k in line for k in (b"cuda", b"CUDA", b"cuvid", b"hwaccel", b"hw_frames_ctx", b"No decoder")):
                 Transcoder.cuda_ok = False
                 logger.warning(f"xcode udp:{self.reader.port}: CUDA decode unavailable, lanes will use software decode")
             # Genuine loss upstream shows up here too; keep the first few and
