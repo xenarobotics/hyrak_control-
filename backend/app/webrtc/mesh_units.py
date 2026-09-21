@@ -79,9 +79,25 @@ def _probe(max_units: int) -> list[dict]:
     return out
 
 
+_probe_lock: asyncio.Lock | None = None
+_probe_cache: tuple[float, int, list] | None = None   # (when, max_units, units)
+
+
 @router.get("/mesh-units")
 async def mesh_units(max_units: int = Query(8, ge=1, le=64)):
-    units = await asyncio.get_event_loop().run_in_executor(None, _probe, max_units)
+    # Serialised and cached for a second: the DEVICES card and the wall both
+    # poll, and two overlapping probes each saw the other's 350 ms socket as
+    # "in use" - reporting a dark unit as live and the wall then waiting 5 s
+    # on it.
+    global _probe_lock, _probe_cache
+    if _probe_lock is None:
+        _probe_lock = asyncio.Lock()
+    async with _probe_lock:
+        now = time.monotonic()
+        if _probe_cache and now - _probe_cache[0] < 1.0 and _probe_cache[1] >= max_units:
+            return {"base_port": BASE_PORT, "units": [u for u in _probe_cache[2] if u["id"] <= max_units]}
+        units = await asyncio.get_event_loop().run_in_executor(None, _probe, max_units)
+        _probe_cache = (now, max_units, units)
     return {"base_port": BASE_PORT, "units": units}
 
 

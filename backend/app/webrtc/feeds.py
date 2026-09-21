@@ -77,6 +77,7 @@ class SharedReader:
         self._stop = threading.Event()
         self._seq = 0
         self.last_packet_t = 0.0
+        self.last_error = ""
         self.width = self.height = 0
         self._thread = threading.Thread(target=self._run, name=f"feed-{port}", daemon=True)
         self._thread.start()
@@ -170,6 +171,7 @@ class SharedReader:
             except Exception as e:
                 if self._stop.is_set():
                     break
+                self.last_error = str(e)[:160]
                 now = time.monotonic()
                 if quiet_since is None:
                     quiet_since = now
@@ -372,8 +374,13 @@ async def acquire(port: int, timeout: float = 5.0):
     while r.last_packet_t == 0.0 and time.monotonic() - t0 < timeout:
         await asyncio.sleep(0.1)
     if r.last_packet_t == 0.0:
+        err = r.last_error
         await release(port)
-        raise RuntimeError(f"No video on udp:{port} within {timeout:.0f}s - is the unit transmitting?")
+        if "Address already in use" in err or "bind failed" in err:
+            raise RuntimeError(f"udp:{port} is bound by another program on the ground station "
+                               f"(a gst viewer or a measurement tool) - close it, the app must own the port")
+        raise RuntimeError(f"No video on udp:{port} within {timeout:.0f}s - is the unit transmitting?"
+                           + (f" (reader: {err})" if err else ""))
     return sub
 
 
