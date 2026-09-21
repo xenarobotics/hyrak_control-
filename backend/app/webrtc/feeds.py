@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import time
 
 from aiortc.contrib.media import MediaRelay
 
@@ -30,14 +31,38 @@ def _get_lock() -> asyncio.Lock:
     return _lock
 
 
-async def acquire(port: int, timeout: float = 5.0):
+# ffmpeg's I/O timeout on the socket. A mesh unit re-parenting through
+# another node can go quiet for tens of seconds; with the stock 5 s the reader
+# ended, its subscribers saw 0 kbit/s, and the dead reader still held the
+# port so the next open failed with "Invalid data found".
+QUIET_TOLERANCE_S = 60.0
+
+
+def _open_with_retry(port: int, timeout: float):
+    try:
+        return open_air_unit_video(port=port, timeout=timeout)
+    except Exception:
+        time.sleep(0.6)   # a just-stopped reader releases its socket a beat later
+        return open_air_unit_video(port=port, timeout=timeout)
+
+
+async def acquire(port: int, timeout: float = QUIET_TOLERANCE_S):
     """A relay-subscribed track for this port, opening the shared reader on
     first use. Raises if the port cannot be opened."""
     async with _get_lock():
         f = _feeds.get(port)
-        if f is None or f["track"].readyState == "ended":
+        if f is not None and f["track"].readyState == "ended":
+            # Stop the dead reader FIRST so it lets go of the socket.
+            _feeds.pop(port, None)
+            try:
+                await asyncio.get_event_loop().run_in_executor(None, f["track"].stop)
+            except Exception:
+                pass
+            logger.info(f"Feed reader on udp:{port} had ended - reopening")
+            f = None
+        if f is None:
             track = await asyncio.get_event_loop().run_in_executor(
-                None, functools.partial(open_air_unit_video, port=port, timeout=timeout))
+                None, functools.partial(_open_with_retry, port, timeout))
             f = _feeds[port] = {"track": track, "relay": MediaRelay(), "refs": 0}
             logger.info(f"Feed reader opened on udp:{port}")
         f["refs"] += 1
