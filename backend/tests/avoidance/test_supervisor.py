@@ -117,3 +117,24 @@ def test_a_pillar_beyond_the_waypoint_is_not_in_the_way():
     c.grid.pin_disc(0.84 + 9.0, 0.0, 1.0, now=500.7)           # pillar ~9 m ahead, beyond the waypoint
     d = c.decide_local((0.84 + 5.0, 0.0), 10.0, now=500.7)     # waypoint 5 m ahead
     assert d.action == "clear", d.reason
+
+
+def test_acting_floor_follows_the_sensor():
+    """SITL 2026-09-26 22:54: depth camera sensing from 2 m, a fixed 3 m acting
+    floor, a mission leg at 2.8 m - the pillar was mapped and avoidance was
+    not allowed to act."""
+    import time as _t
+    c, _ = _controller(alt=2.8)
+    now = _t.monotonic()
+    assert c.acting_floor_m(now) == 3.0                       # no sensor yet
+    pose_history.history("sup").add(LAT0, LNG0, 2.8, 0.0, t=now)
+    c.integrate_scan(_one_hit(), now, "depth")
+    assert c.acting_floor_m(now) == c.params.range_min_alt_m == 2.0
+    m = AvoidanceController("mono"); m.set_enabled(True); m._mono_data_t = now
+    assert m.acting_floor_m(now) == m.params.mono_min_alt_m
+
+
+def test_mission_min_alt_skips_takeoff_and_land():
+    from app.telemetry.failsafe_check import mission_min_alt
+    wps = [{"type": "takeoff", "altitude": 1.0}, {"altitude": 3.1}, {"alt": 10}, {"type": "land", "altitude": 0}]
+    assert mission_min_alt(wps) == 3.1

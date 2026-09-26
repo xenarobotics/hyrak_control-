@@ -111,3 +111,19 @@ def mission_max_alt(waypoints) -> float | None:
                     pass
                 break
     return max(alts) if alts else None
+
+
+def mission_min_alt(waypoints) -> float | None:
+    """Lowest altitude among a mission's waypoints (takeoff/land items skipped)."""
+    alts = []
+    for w in waypoints or []:
+        if not isinstance(w, dict) or w.get("type") in ("takeoff", "land", "rtl"):
+            continue
+        for k in ("altitude", "alt", "relative_altitude_m"):
+            if w.get(k) is not None:
+                try:
+                    alts.append(float(w[k]))
+                except (TypeError, ValueError):
+                    pass
+                break
+    return min(alts) if alts else None

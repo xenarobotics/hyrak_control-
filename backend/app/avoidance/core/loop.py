@@ -292,6 +292,7 @@ INTERVAL_S_LOCAL = 0.1       # 10 Hz: the local planner's setpoint rate
 _last_legacy_t: dict[str, float] = {}
 _listeners: dict[str, tuple] = {}     # drone_id -> (manager, fn)
 _prev_action: dict[str, str] = {}
+_crashed_until: dict[str, float] = {}
 
 
 def _ensure_pose_feed(c, manager) -> None:
@@ -403,8 +404,24 @@ async def _local_step(c, manager, pose, in_air, mode, now) -> None:
     decision = c.decide_local(goal_ne, goal_alt, now)
 
     pilot = getattr(manager, "_pilot_override_mode", None) if manager is not None else None
+    # Never command a crashed aircraft: after an impact PX4 may stay armed and
+    # the in-air guess (altitude > 1.5 m) can hold, and avoidance then drove a
+    # tumbled drone in Offboard (22:54:23). Past 60 deg of roll or pitch it is
+    # not flying; stand down for 30 s.
+    if manager is not None:
+        att = getattr(getattr(manager, "_snapshot", None), "attitude", None)
+        if att is not None and (abs(att.roll_deg) > 60.0 or abs(att.pitch_deg) > 60.0):
+            if now >= _crashed_until.get(c.drone_id, 0.0):
+                logger.warning(f"Avoidance {c.drone_id[:8]}: attitude roll {att.roll_deg:.0f} "
+                               f"pitch {att.pitch_deg:.0f} - aircraft not flying, standing down")
+            _crashed_until[c.drone_id] = now + 30.0
+    crashed = now < _crashed_until.get(c.drone_id, 0.0)
+    if crashed and c.state != avoidance.AvoidanceState.NOMINAL:
+        c._reset_local(); c.intervened = False
+        c.state = avoidance.AvoidanceState.NOMINAL
+        c._last_reason = "aircraft not flying (attitude) - standing down"
     can_act = (c.armed and in_air and manager is not None and pose is not None
-               and pose.alt_m >= MIN_SENSE_ALT_M and pilot is None)
+               and pose.alt_m >= c.acting_floor_m(now) and pilot is None and not crashed)
     if pilot is not None and c.state in (avoidance.AvoidanceState.AVOIDING,
                                          avoidance.AvoidanceState.HOLDING):
         # The pilot took the aircraft: avoidance stands down, it never fights a human.

@@ -582,6 +582,14 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                     note = "Avoidance is OFF - this mission flies with NO obstacle avoidance."
                 elif not c.armed:
                     note = "Avoidance is detecting only (Steer OFF) - it will NOT steer around obstacles."
+                else:
+                    # Mission legs below the height avoidance may act at fly unprotected.
+                    from app.telemetry.failsafe_check import mission_min_alt
+                    low = mission_min_alt(getattr(session, "last_mission", None))
+                    floor = c.acting_floor_m()
+                    if low is not None and low < floor:
+                        note = (f"Part of this mission is at {low:g} m; avoidance only acts above "
+                                f"{floor:g} m with the current sensor - raise the mission or those legs fly unprotected.")
                 if note:
                     await sio.emit("fc_message", {"severity": "WARNING", "text": note,
                                                   "rank": 4, "ts": time.time()}, to=sid)

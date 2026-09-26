@@ -163,6 +163,19 @@ class AvoidanceController:
                             confidence_scale=max(0.3, min(1.0, obs.confidence / 0.5)),
                             to_bus=False)
 
+    def acting_floor_m(self, now: float | None = None) -> float:
+        """Lowest altitude at which avoidance may COMMAND the aircraft: the same
+        height its current sensor is trusted to see from. The old fixed 3 m
+        floor (written for mono, which sees the pad and ground low down) left a
+        depth-camera aircraft flying a 2.8 m mission leg with the pillar mapped
+        and avoidance forbidden to act (SITL 2026-09-26 22:54)."""
+        mode = self.sensor_mode(now)
+        if mode == "range":
+            return float(self.params.range_min_alt_m)
+        if mode == "mono":
+            return float(self.params.mono_min_alt_m)
+        return 3.0
+
     def sensor_mode(self, now: float | None = None) -> str:
         """'range' while a real range sensor is streaming, else 'mono' while the
         camera is, else 'none'. A range sensor always wins: mono is dropped
