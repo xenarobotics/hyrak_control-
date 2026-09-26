@@ -43,6 +43,15 @@ _busy: set[str] = set()
 _announced: set[str] = set()
 
 
+def warm() -> None:
+    """Load the depth model now (when avoidance is switched on) instead of on
+    the first frame - the 2-3 s load happened 20 s into a mission once.
+    Called by POST /enable; it went missing in the layered cleanup and every
+    Detection-on click answered 500 ("Failed to fetch" in the browser)."""
+    if _depth is None and not _depth_failed:
+        _executor.submit(_analyze, np.zeros((480, 640, 3), np.uint8), None)
+
+
 def wants_frame(session_id: str, mode_value: str | None) -> bool:
     """Should this session's next frame go through the sensor? Cheap: a dict
     lookup and a controller check, so it is safe to call per frame."""
