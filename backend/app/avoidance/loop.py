@@ -468,6 +468,15 @@ def pick_goal_by_motion(candidates: list[tuple[int, tuple[float, float]]], prefe
         return abs((math.degrees(math.atan2(de, dn)) - vb + 180.0) % 360.0 - 180.0)
     if preferred in by_idx and off(by_idx[preferred]) <= 60.0:
         return by_idx[preferred]
+
+    def dist(ll):
+        n, e = to_ne(*ll)
+        return math.hypot(n - pos_ne[0], e - pos_ne[1])
+    # The NEAREST waypoint lying along the motion: on a lawnmower the far ends
+    # of later legs are also roughly ahead, but further away.
+    ahead = [c for c in candidates if off(c[1]) <= 30.0]
+    if ahead:
+        return min(ahead, key=lambda c: dist(c[1]))[1]
     best = min(candidates, key=lambda c: off(c[1]))
     return best[1] if off(best[1]) <= 60.0 else by_idx.get(preferred) or best[1]
 
@@ -482,7 +491,11 @@ def _goal_from_motion(c, manager, hist) -> tuple[float, float] | None:
     items = _mission_items(c.drone_id, manager) or []
     idx = _current_index(c.drone_id)
     cands = []
-    for k in range(max(0, idx - 1), min(len(items), max(idx, 0) + 2)):
+    # Reported item and its neighbours; EVERY waypoint when the link does not
+    # know the current item (-1: the fleet link never learns it for a mission
+    # another link uploaded - SITL 21:36-21:39 resumed "at item -1" each cycle).
+    rng = range(len(items)) if idx < 0 else range(max(0, idx - 1), min(len(items), idx + 2))
+    for k in rng:
         w = items[k]
         if w.get("type") == "takeoff" or w.get("lat") is None or w.get("lng") is None:
             continue

@@ -399,3 +399,14 @@ def test_steering_holds_the_altitude_it_took_over_at():
     c.grid.pin_disc(10.0, 0.0, 1.0, now=100.7)
     d = c.decide_local((60.0, 0.0), 4.0, now=100.7)        # mission altitude says 4 m
     assert d.action == "avoid" and abs(d.setpoint.vd) < 0.05   # no dive (SITL 21:33 sank 9.6 -> 4 m)
+
+
+def test_unknown_mission_index_picks_the_nearest_waypoint_ahead():
+    """Lawnmower, current item unknown (-1): flying south down leg 2 - the goal
+    is that leg's south end, not waypoint 0 and not a later leg's far end."""
+    from app.avoidance.loop import pick_goal_by_motion
+    h = pose_history.PoseHistory(); h.origin = (LAT0, LNG0)
+    legs = [(60.0, 0.0), (-60.0, 0.0), (-60.0, 10.0), (60.0, 10.0), (60.0, 20.0), (-60.0, 20.0)]
+    cands = [(k, h.to_latlng(*ne)) for k, ne in enumerate(legs)]
+    got = pick_goal_by_motion(cands, -1, (0.0, 10.0), (-3.0, 0.0), h.to_ne)   # on leg 2->... heading south at east=10
+    assert got == h.to_latlng(-60.0, 10.0)
