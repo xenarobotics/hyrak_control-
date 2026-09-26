@@ -13,6 +13,7 @@ import { startDataChannelSender, stopDataChannelSender, getLastSenderError, clea
 import { getAirUnitPreviewUrl } from '@/lib/airUnitPreview'
 import { startGstPipeline, stopGstPipeline, getGstPreviewUrl, getLastGstError } from '@/lib/gstPreview'
 import { startReceiver, stopReceiver, getReceiverPreviewUrl, getLastReceiverError } from '@/lib/hyrakReceiver'
+import { AIR_UNIT_BRIDGE_ID } from '@/hooks/useAirUnitVideoBridge'
 
 const STUN_ONLY: RTCIceServer[] = [
     { urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] },
@@ -163,6 +164,12 @@ export function useWebRTC() {
                 nativeBridge()?.stop('rtsp-relay', RTSP_RELAY_BRIDGE_ID),
                 stopGstPipeline(),
                 stopReceiver(),
+                // The virtual-webcam bridge (Settings > Native air-unit video
+                // bridge) holds udp:5600 AND 5601 (ffmpeg's RTCP port+1). It is
+                // only wanted when the source IS that webcam; for every other
+                // source it just makes the server reader fail "port in use".
+                ...(videoSource !== 'camera'
+                    ? [nativeBridge()?.stop('air-unit-video', AIR_UNIT_BRIDGE_ID)] : []),
             ])
         }
         const serverSourced = isServerSourced(videoSource)
