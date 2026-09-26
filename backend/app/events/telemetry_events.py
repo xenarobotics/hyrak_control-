@@ -567,6 +567,27 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             except Exception as e:
                 logger.warning(f"failsafe check failed ({e}) - not blocking")
 
+        # Say so when a mission starts with avoidance OFF. Switching Steer off
+        # mid-flight to stop a loop and forgetting it is exactly how the aircraft
+        # flew a leg into a pillar with nothing watching (SITL 2026-09-26 21:50).
+        # A notice, not a block: flying without avoidance can be deliberate.
+        if action in ("start_mission", "arm_and_start_mission",
+                      "restart_mission", "arm_and_restart_mission"):
+            try:
+                from app.avoidance import loop as _av_loop, service as _av
+                c = _av_loop._controller_for_session(session.session_id)
+                note = None
+                if c is None:
+                    note = "Avoidance is OFF - this mission flies with NO obstacle avoidance."
+                elif not c.armed:
+                    note = "Avoidance is detecting only (Steer OFF) - it will NOT steer around obstacles."
+                if note:
+                    await sio.emit("fc_message", {"severity": "WARNING", "text": note,
+                                                  "rank": 4, "ts": time.time()}, to=sid)
+                    logger.info(f"{action} for {session.session_id[:8]}: {note}")
+            except Exception as e:
+                logger.debug(f"avoidance-off notice failed: {e}")
+
         # Avoidance interlock: steering armed but no camera frames reaching
         # the depth sensor means the aircraft would fly blind while the
         # operator believes it is covered - that is exactly how it flew into
