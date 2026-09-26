@@ -157,6 +157,12 @@ class TelemetrySnapshot:
     # takes control back, so that a stray tap cannot snatch the aircraft out
     # of a pilot's hands mid-recovery.
     pilot_override: Optional[str] = None
+    # ── Link health ──────────────────────────────────────────────────────
+    # False while this link has delivered nothing for LINK_STALE_S; the
+    # operator sees LINK LOST within ~2 s instead of when MAVSDK's 3 s
+    # heartbeat timeout fires (and that one never says which link it was).
+    link_ok: bool = True
+    link_lost_s: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -183,6 +189,8 @@ class TelemetrySnapshot:
             "altitude_warning": self.altitude_warning,
             "offboard_active": self.offboard_active,
             "pilot_override": self.pilot_override,
+            "link_ok": self.link_ok,
+            "link_lost_s": round(self.link_lost_s, 1),
         }
 
 

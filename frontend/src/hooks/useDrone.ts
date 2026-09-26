@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useCallback } from 'react'
-import { getSocket, connectSocket } from '@/lib/socket'
+import { getSocket, connectSocket, setResumeSession } from '@/lib/socket'
 import { startBrowserSerial, stopBrowserSerial, isBrowserSerialActive, type SerialPortLike } from '@/lib/browserSerial'
 import { startLocalRelay, stopLocalRelay, isLocalRelayActive } from '@/lib/localRfRelay'
 import { startRemoteSitlRelay, stopRemoteSitlRelay, isRemoteSitlRelayActive, setSitlSilenceHandler } from '@/lib/remoteSitlRelay'
@@ -14,6 +14,9 @@ import { colorForDrone, FLEET_SCAN_COUNT } from '@/lib/fleet'
 import type { TelemetrySnapshot } from '@/types/telemetry'
 import type { SessionInfo } from '@/types/session'
 import type { CVResult } from '@/types/vision'
+
+// Slightly past the server's SESSION_GRACE_S (90 s): after this the session is gone anyway.
+const RESUME_GIVE_UP_MS = 95_000
 
 /** How long a command may sit unanswered before the UI stops claiming it is
  *  in flight. Generous: a takeoff over a slow radio legitimately takes several
@@ -36,14 +39,47 @@ export function useDrone() {
         // Critical: multiple components call useDrone(); without named refs,
         // one component's cleanup nukes every other component's listeners.
         const onConnect        = () => store.setConnectionStatus('connected')
-        const onDisconnect     = () => {
+        // A dropped socket is NOT a lost session: the server holds the session,
+        // its drone link and our radio relay for SESSION_GRACE_S and hands it
+        // back when we reconnect. Tear down locally only if that fails.
+        let giveUpTimer: ReturnType<typeof setTimeout> | null = null
+        const fullReset = () => {
+            if (giveUpTimer) { clearTimeout(giveUpTimer); giveUpTimer = null }
+            setResumeSession(null)
             store.setConnectionStatus('disconnected')
             store.setTelemetryStatus('disconnected')
             store.reset()
             void stopBrowserSerial()
         }
+        const onDisconnect     = (reason?: string) => {
+            // Our own disconnect (logout, page teardown): nothing to hold.
+            if (reason === 'io client disconnect' || !useDroneStore.getState().session) {
+                fullReset()
+                return
+            }
+            store.setConnectionStatus('reconnecting')
+            if (giveUpTimer) clearTimeout(giveUpTimer)
+            giveUpTimer = setTimeout(fullReset, RESUME_GIVE_UP_MS)
+        }
         const onConnectError   = () => store.setConnectionStatus('error')
         const onSessionReady = (data: SessionInfo) => {
+            if (giveUpTimer) { clearTimeout(giveUpTimer); giveUpTimer = null }
+            if (data.resumed) {
+                // Same session, same drone link: keep everything as it is.
+                store.setSession(data)
+                store.setConnectionStatus('connected')
+                console.info(`[socket] session resumed after ${data.away_s ?? '?'}s away`)
+                window.dispatchEvent(new Event('hyrak-session-resumed'))   // video restarts itself
+                return
+            }
+            if (useDroneStore.getState().session && useDroneStore.getState().session?.session_id !== data.session_id) {
+                // The server could not give our session back (expired or restarted):
+                // everything held locally belongs to a session that no longer exists.
+                store.setTelemetryStatus('disconnected')
+                store.reset()
+                void stopBrowserSerial()
+            }
+            setResumeSession(data.session_id)
             store.setSession(data)
             // If swarm mode was enabled before this page load/reconnect, clear stale
             // drone entries and re-scan so the fleet repopulates automatically.

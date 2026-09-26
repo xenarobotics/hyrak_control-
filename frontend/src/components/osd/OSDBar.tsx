@@ -60,6 +60,17 @@ export function OSDBar() {
                     </span>
                 </Pill>
 
+                {/* Drone link lost (backend watchdog, ~2 s) - distinct from the
+                    socket to the cloud, which the pill above shows */}
+                {telemetry && telemetry.link_ok === false && (
+                    <Pill className="border-red-500/50 bg-red-500/15">
+                        <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                        <span className="text-red-500 font-semibold">
+                            DRONE LINK LOST {Math.round(telemetry.link_lost_s ?? 0)}s
+                        </span>
+                    </Pill>
+                )}
+
                 {/* Armed */}
                 <Pill className={cn(
                     armed && 'border-red-500/40 bg-red-500/10'

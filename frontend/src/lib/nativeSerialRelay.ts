@@ -146,7 +146,8 @@ export async function startNativeSerial(
             sawTraffic = true
             if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null }
         }
-        socket.emit('serial_uplink', event.data)
+        // volatile: dropped while the socket is down, never replayed stale on reconnect
+        socket.volatile.emit('serial_uplink', event.data)
     }) ?? null
 
     if (silenceTimer) clearTimeout(silenceTimer)

@@ -19,6 +19,9 @@
 #    (sensors). PX4_HOME_ALT=0 because the gz barometer is sea level.
 #  - PX4_PARAM_RTL_RETURN_ALT=10: SITL params reset on every launch; this is
 #    PX4's env override hook, so RTL stays at mission altitude.
+#  - PX4_PARAM_NAV_DLL_ACT=2: return when the ground-station link is lost. The
+#    firmware default is 0 (do nothing), which the app's pre-flight failsafe
+#    check refuses for cloud-flown aircraft (backend/app/telemetry/failsafe_check.py).
 #  - Camera -> H.265 RTP on 127.0.0.1:5600, the real air unit's wire format,
 #    read by the "Air unit (UDP)" video source. MAVLink -> udp:14540 for the
 #    desktop's plain "SITL" source (reply-to-sender, QGC style) and udp:14600
@@ -70,7 +73,7 @@ start() {
     [ -z "${HEADLESS:-}" ] && _spawn gz_gui gz sim --render-engine ogre2 -g
     _spawn px4 env PX4_SYS_AUTOSTART="$AUTOSTART" PX4_SIM_MODEL="$MODEL" PX4_GZ_WORLD="$WORLD" \
         PX4_HOME_LAT="$HOME_LAT" PX4_HOME_LON="$HOME_LON" PX4_HOME_ALT=0 \
-        PX4_PARAM_RTL_RETURN_ALT=10 ../bin/px4 -i 1 -d
+        PX4_PARAM_RTL_RETURN_ALT=10 PX4_PARAM_NAV_DLL_ACT=2 ../bin/px4 -i 1 -d
     for _ in $(seq 1 40); do grep -q "Ready for takeoff" "$LOGS/px4.log" 2>/dev/null && break; sleep 1; done
     # (PX4 SITL has 6 MAVLink channels; 0-4 are its own. The air-unit
     # emulation link (-u 14551 -o 14550) is therefore not started by default -

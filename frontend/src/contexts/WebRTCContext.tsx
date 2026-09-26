@@ -2,7 +2,7 @@
 
 import {
     createContext, useContext, useState,
-    useCallback, useEffect, type ReactNode
+    useCallback, useEffect, useRef, type ReactNode
 } from 'react'
 import { useWebRTC, type WebRTCStats } from '@/hooks/useWebRTC'
 import { useCamera } from '@/hooks/useCamera'
@@ -175,6 +175,24 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
         stopCamera()
         void stopRtspCameraStream()
     }, [stopWebRTC, stopCamera])
+
+    // A RESUMED SESSION KEEPS ITS DRONE LINK BUT NOT ITS VIDEO. The server
+    // closes the peer connection the moment the socket drops (media cannot be
+    // parked the way a session can), so after a resume the picture would sit
+    // frozen until someone pressed restart. Do that for them.
+    const streamingRef = useRef(isStreaming)
+    useEffect(() => { streamingRef.current = isStreaming }, [isStreaming])
+    useEffect(() => {
+        let t: ReturnType<typeof setTimeout> | null = null
+        const onResumed = () => {
+            if (!streamingRef.current) return
+            stopStream()
+            if (t) clearTimeout(t)
+            t = setTimeout(() => { t = null; void startStream() }, 600)
+        }
+        window.addEventListener('hyrak-session-resumed', onResumed)
+        return () => { window.removeEventListener('hyrak-session-resumed', onResumed); if (t) clearTimeout(t) }
+    }, [startStream, stopStream])
 
     return (
         <WebRTCContext.Provider value={{

@@ -183,7 +183,7 @@ async function readLoop() {
                     const { value, done } = await reader.read()
                     if (done || !active) break
                     if (value && value.byteLength > 0) {
-                        socket.emit(
+                        socket.volatile.emit(
                             'serial_uplink',
                             value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength),
                         )

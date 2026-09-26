@@ -1,4 +1,5 @@
 import asyncio
+import time
 import logging
 from app.sessions import observer
 from app.sessions.manager import SessionManager
@@ -541,6 +542,31 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 logger.warning(f"{action} blocked in red zone for {session.session_id[:8]}")
                 return
 
+        # Link-loss failsafes (app/telemetry/failsafe_check.py): the cloud is
+        # the companion computer, so what PX4 does in the seconds a link is
+        # gone must be set sanely BEFORE the aircraft leaves the ground.
+        if action in ("arm", "takeoff", "start_mission", "arm_and_start_mission",
+                      "restart_mission", "arm_and_restart_mission"):
+            try:
+                from app.telemetry import failsafe_check as _fs
+                params = await _fs.read_params(tel)
+                block, warn = _fs.evaluate(
+                    params, _fs.mission_max_alt(getattr(session, "last_mission", None)))
+                if block:
+                    await sio.emit("action_result", {
+                        "action": action, "ok": False,
+                        "error": "Blocked by the link-loss failsafe check - " + " ".join(block),
+                    }, to=sid)
+                    logger.warning(f"{action} blocked for {session.session_id[:8]}: {block}")
+                    return
+                for w in warn:
+                    await sio.emit("fc_message", {"severity": "WARNING", "text": f"Failsafe check: {w}",
+                                                  "rank": 4, "ts": time.time()}, to=sid)
+                if warn:
+                    logger.info(f"Failsafe check warnings for {session.session_id[:8]}: {warn}")
+            except Exception as e:
+                logger.warning(f"failsafe check failed ({e}) - not blocking")
+
         # Avoidance interlock: steering armed but no camera frames reaching
         # the depth sensor means the aircraft would fly blind while the
         # operator believes it is covered - that is exactly how it flew into
@@ -882,6 +908,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 try:
                     from app.avoidance import loop as _av_loop
                     _av_loop.note_mission_goal(session.session_id, waypoints)
+                    session.last_mission = list(waypoints)   # failsafe check: RTL vs mission altitude
                 except Exception:
                     pass
                 # A planned mission whose waypoints match advances to

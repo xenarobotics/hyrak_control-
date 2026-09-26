@@ -22,6 +22,7 @@ export type ConnectionStatus =
     | 'disconnected'
     | 'connecting'
     | 'connected'
+    | 'reconnecting'   // socket dropped; the cloud session (and drone link) is being held for us
     | 'error'
 
 export type TelemetryStatus =
@@ -35,4 +36,7 @@ export interface SessionInfo {
     device: string
     gpu_count: number
     max_sessions: number
+    resumed?: boolean              // true: the server kept our session through a socket drop
+    away_s?: number
+    telemetry_connected?: boolean
 }

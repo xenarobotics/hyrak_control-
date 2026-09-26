@@ -4,16 +4,28 @@ import { getServerUrl } from './server-url'
 const SECRET_TOKEN = process.env.NEXT_PUBLIC_SECRET_TOKEN || 'change_this_to_a_random_string'
 
 let socket: Socket | null = null
+// The cloud session this page holds. Offered back on every reconnect so a
+// dropped socket reclaims its session - drone link, relay, flight record -
+// instead of the server tearing it all down. Page lifetime only: a reload
+// cannot resume a radio relay that died with the page.
+let resumeSessionId: string | null = null
+
+export function setResumeSession(id: string | null): void {
+    resumeSessionId = id
+}
 
 export function getSocket(): Socket {
     if (!socket) {
         socket = io(getServerUrl(), {
-            auth: { token: SECRET_TOKEN },
+            auth: (cb: (data: object) => void) =>
+                cb({ token: SECRET_TOKEN, resume_session: resumeSessionId }),
             transports: ['websocket'],
             reconnection: true,
-            reconnectionAttempts: 10,
-            reconnectionDelay: 1000,
-            reconnectionDelayMax: 5000,
+            // Keep trying: the server holds the session for 90 s, and a
+            // pilot's link must come back on its own, not after 10 tries.
+            reconnectionAttempts: Infinity,
+            reconnectionDelay: 500,
+            reconnectionDelayMax: 3000,
             autoConnect: false,
         })
         // DEV ONLY: a handle for driving the UI from the console.
@@ -41,6 +53,7 @@ export function connectSocket(): void {
 }
 
 export function disconnectSocket(): void {
+    resumeSessionId = null
     if (socket) {
         socket.disconnect()
         socket = null

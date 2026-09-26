@@ -107,4 +107,7 @@ export interface TelemetrySnapshot {
      *  taken back deliberately, so a stray tap cannot snatch the aircraft out
      *  of a pilot's hands mid-recovery. */
     pilot_override?: string | null
+    // Backend link watchdog: false after ~2 s with nothing from the aircraft
+    link_ok?: boolean
+    link_lost_s?: number
 }

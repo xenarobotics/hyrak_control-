@@ -35,6 +35,12 @@ class DroneSession:
     """
     session_id: str           = field(default_factory=lambda: str(uuid.uuid4()))
     socket_id:  str           = ""
+    # Session survival across a socket drop: every socket id this session has
+    # had (callbacks captured the one current when they were made; a returning
+    # socket joins all of their rooms), and when it lost its socket.
+    sid_aliases: list = field(default_factory=list)
+    detached_at: Optional[float] = None
+    last_mission: Optional[list] = None   # waypoints last uploaded by this session
     mode:       AnalysisMode  = AnalysisMode.MANUAL_CONTROL
     is_streaming: bool        = False
     telemetry_connected: bool = False

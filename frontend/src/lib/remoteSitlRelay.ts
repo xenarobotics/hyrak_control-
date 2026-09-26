@@ -79,7 +79,8 @@ export async function startRemoteSitlRelay(port = 14540): Promise<void> {
         // localSwarmRelay.ts's native path, which sends a freshly
         // allocated, exact-size buffer). socket.io-client serializes a
         // TypedArray correctly on its own.
-        socket.emit('serial_uplink', event.data)
+        // volatile: dropped while the socket is down, never replayed stale on reconnect
+        socket.volatile.emit('serial_uplink', event.data)
     })
 
     socket.on('serial_downlink', onNativeDownlink)

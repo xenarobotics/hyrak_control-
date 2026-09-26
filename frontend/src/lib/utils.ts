@@ -31,6 +31,7 @@ export function connectionColor(status: string): string {
   switch (status) {
     case 'connected': return 'bg-green-500'
     case 'connecting': return 'bg-yellow-500'
+    case 'reconnecting': return 'bg-amber-500 animate-pulse'
     case 'error': return 'bg-red-500'
     default: return 'bg-zinc-500'
   }

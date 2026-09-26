@@ -1,4 +1,5 @@
 import asyncio
+import time
 import logging
 import socketio
 from fastapi import FastAPI
@@ -68,13 +69,18 @@ def create_app() -> socketio.ASGIApp:
     sio = socketio.AsyncServer(
         async_mode="asgi",
         cors_allowed_origins=cors_origins,
-        ping_timeout=20,
-        ping_interval=10,
+        # A dead path is noticed in ping_interval + ping_timeout (5 s), not 30 s.
+        # Cheap: a few bytes per ping. A client that drops is not torn down
+        # any more (see SESSION_GRACE_S), so a short timeout costs nothing.
+        ping_timeout=3,
+        ping_interval=2,
         # NaN/inf anywhere in a payload is invalid JSON; a browser client
         # that receives it closes the connection (see utils/safe_json.py).
         json=safe_json,
     )
     set_sio(sio)
+    SESSION_GRACE_S = 90.0
+    _expiry_tasks: dict = {}
 
     # ------------------------------------------------------------------ #
     # Shared state - created once, passed everywhere                      #
@@ -146,7 +152,37 @@ def create_app() -> socketio.ASGIApp:
             logger.warning(f"Rejected {sid[:8]} - bad token")
             return False
 
+        # A socket that dropped and came back reclaims its session - drone
+        # link, radio relay, flight record, avoidance - instead of starting
+        # over. Only a session that is waiting for its client can be taken.
+        resume_id = (auth or {}).get("resume_session")
+        prior = session_manager.get(resume_id) if resume_id else None
+        if prior is not None and prior.detached_at is not None:
+            gone = time.monotonic() - prior.detached_at
+            prior.detached_at = None
+            prior.socket_id = sid
+            for alias in list(prior.sid_aliases):
+                await sio.enter_room(sid, alias)
+            prior.sid_aliases.append(sid)
+            task = _expiry_tasks.pop(prior.session_id, None)
+            if task is not None:
+                task.cancel()
+            logger.info(f"Resumed session {prior.session_id[:8]} on {sid[:8]} after {gone:.1f}s away")
+
+            async def _send_resumed():
+                await asyncio.sleep(0.05)
+                await sio.emit("session_ready", {
+                    "session_id": prior.session_id, "device": settings.device,
+                    "gpu_count": settings.gpu_count,
+                    "max_sessions": settings.max_concurrent_sessions,
+                    "resumed": True, "away_s": round(gone, 1),
+                    "telemetry_connected": bool(prior.telemetry_connected),
+                }, to=sid)
+            asyncio.create_task(_send_resumed())
+            return True
+
         session = session_manager.create(socket_id=sid)
+        session.sid_aliases.append(sid)
         logger.info(f"Connected {sid[:8]} → session {session.session_id[:8]}")
 
         # Approximate client location for the admin map. Through the tunnel
@@ -201,31 +237,53 @@ def create_app() -> socketio.ASGIApp:
 
         session = session_manager.get_by_socket(sid)
         if session:
-            from app.telemetry.serial_bridge import close_bridge
-            close_bridge(session.session_id)
-            close_swarm_relay_bridge(session.session_id)
-            from app.flights import recorder
-            await recorder.end_flight(session.session_id)
-            from app.zones import monitor as zone_monitor
-            zone_monitor.drop(session.session_id)
-            # A relay listener holds a port AND its own ffmpeg, neither tied
-            # to the peer connection - a client that vanishes without the pc
-            # ever changing state would leak both.
-            from app.webrtc import relay_video_source
-            relay_video_source.release(session.session_id)
-            # Same reasoning for the DataChannel ingest: it holds a socket and a
-            # loopback port owned by the DESKTOP's PeerConnection, not the
-            # browser's. Session teardown is the only unambiguous place to free
-            # it - releasing it when the browser's pc changes state would kill a
-            # feed the desktop is still pushing.
-            from app.webrtc import datachannel_video_source
-            datachannel_video_source.release(session.session_id)
-            observer.drop_session(session.session_id)
-            await vision_pool.unregister_session(session.session_id)
-            await session_manager.destroy(session.session_id)
-            cleanup_session_fleet_state(session.session_id)
-
+            # Park the session instead of destroying it: its drone link keeps
+            # running (the cloud is the companion computer - it does not stop
+            # flying because the operator's browser blinked) and the client
+            # reclaims it on reconnect. Torn down only if nobody comes back.
+            session.detached_at = time.monotonic()
+            logger.info(f"Session {session.session_id[:8]} lost its socket {sid[:8]} - "
+                        f"held for {SESSION_GRACE_S:.0f}s for the client to return")
+            _expiry_tasks[session.session_id] = asyncio.create_task(
+                _expire_session(session.session_id))
         logger.info(f"Disconnected {sid[:8]}")
+
+    async def _expire_session(session_id: str):
+        await asyncio.sleep(SESSION_GRACE_S)
+        _expiry_tasks.pop(session_id, None)
+        session = session_manager.get(session_id)
+        if session is None or session.detached_at is None:
+            return
+        logger.info(f"Session {session_id[:8]}: client did not return within {SESSION_GRACE_S:.0f}s - tearing down")
+        await _teardown_session(session)
+
+    async def _teardown_session(session):
+        """Everything a session owns beyond its socket. Runs once, when the
+        client has not come back within SESSION_GRACE_S."""
+        from app.sessions import observer
+        from app.telemetry.serial_bridge import close_bridge
+        close_bridge(session.session_id)
+        close_swarm_relay_bridge(session.session_id)
+        from app.flights import recorder
+        await recorder.end_flight(session.session_id)
+        from app.zones import monitor as zone_monitor
+        zone_monitor.drop(session.session_id)
+        # A relay listener holds a port AND its own ffmpeg, neither tied
+        # to the peer connection - a client that vanishes without the pc
+        # ever changing state would leak both.
+        from app.webrtc import relay_video_source
+        relay_video_source.release(session.session_id)
+        # Same reasoning for the DataChannel ingest: it holds a socket and a
+        # loopback port owned by the DESKTOP's PeerConnection, not the
+        # browser's. Session teardown is the only unambiguous place to free
+        # it - releasing it when the browser's pc changes state would kill a
+        # feed the desktop is still pushing.
+        from app.webrtc import datachannel_video_source
+        datachannel_video_source.release(session.session_id)
+        observer.drop_session(session.session_id)
+        await vision_pool.unregister_session(session.session_id)
+        await session_manager.destroy(session.session_id)
+        cleanup_session_fleet_state(session.session_id)
 
     # ------------------------------------------------------------------ #
     # Register event handlers                                              #

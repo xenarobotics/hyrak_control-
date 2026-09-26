@@ -153,6 +153,10 @@ class TelemetryManager:
         # with these (see app/avoidance/pose_history.py).
         self._pose_listeners: list[Callable] = []
         self._pose_rates_boosted = False
+        # Link watchdog: monotonic time of the last message of any kind, and
+        # when the current outage began (None = link healthy).
+        self._last_rx_t: float = 0.0
+        self._link_lost_since: Optional[float] = None
         # Monotonic time of the last velocity setpoint from the commanding loop.
         # 0.0 = none yet, which the watchdog treats as "not commanding" rather
         # than "stale" - an armed Offboard session that has never been given a
@@ -222,6 +226,7 @@ class TelemetryManager:
         """
         import time as _time
         now = _time.monotonic()
+        self._last_rx_t = now          # link watchdog: a real message arrived
         if self._rate_window_start is None:
             self._rate_window_start = now
         self._rate_counts[stream] = self._rate_counts.get(stream, 0) + 1
@@ -570,6 +575,7 @@ class TelemetryManager:
                 asyncio.create_task(self._subscribe_mission_progress(), name="fleet_mission"),
                 asyncio.create_task(self._command_loop(),          name="fleet_cmd"),
                 asyncio.create_task(self._offboard_watchdog(),      name="fleet_ob_watchdog"),
+                asyncio.create_task(self._link_watch(),             name="fleet_link_watch"),
             ]
         else:
             self._tasks = [
@@ -594,6 +600,7 @@ class TelemetryManager:
                 # The only stop for a runaway that does not depend on the vision
                 # loop still working - see _offboard_watchdog.
                 asyncio.create_task(self._offboard_watchdog(),          name="tel_ob_watchdog"),
+                asyncio.create_task(self._link_watch(),                 name="tel_link_watch"),
             ]
 
         logger.info(f"Telemetry started - {len(self._tasks)} tasks ({'fleet' if self._fleet_mode else 'primary'})")
@@ -721,6 +728,7 @@ class TelemetryManager:
                 if not self._running:
                     break
                 name = str(mode).replace("FlightMode.", "")
+                self._last_rx_t = time.monotonic()     # heartbeat-derived: the link is alive
                 changed = self._snapshot.flight_mode.mode != name
                 self._snapshot.flight_mode.mode = name
                 if changed:
@@ -2189,6 +2197,56 @@ class TelemetryManager:
     # tuned conservatively since it's fighting tracking-loop noise, not a setpoint.
     _ALT_HOLD_KP = 0.6
     _ALT_HOLD_MAX_MS = 1.0
+
+    # ── Link watchdog ─────────────────────────────────────────────────────
+    LINK_STALE_S = 2.0
+
+    def link_label(self) -> str:
+        role = "fleet" if self._fleet_mode else "session"
+        kind = getattr(self, "_link_kind", "") or "udp"
+        return f"{role} link {self._address} ({kind}, our sysid {self._sysid})"
+
+    async def _link_watch(self):
+        """Say which link went silent, when, and for how long.
+
+        MAVSDK's own "heartbeats timed out" comes from its subprocess with no
+        address on it, so with a fleet link and a session link to the same
+        aircraft nobody could tell which one failed. Every message of any kind
+        counts as life (the fleet profile streams at 1-2 Hz, so 2 s of silence
+        is a real outage, not jitter)."""
+        while True:
+            try:
+                await asyncio.sleep(0.25)
+                if not (self._running and self._connected) or self._last_rx_t <= 0.0:
+                    continue
+                now = time.monotonic()
+                silent = now - self._last_rx_t
+                if self._link_lost_since is None and silent >= self.LINK_STALE_S:
+                    self._link_lost_since = self._last_rx_t
+                    s = self._snapshot
+                    logger.warning(
+                        f"LINK LOST: {self.link_label()} - nothing received for {silent:.1f}s "
+                        f"(last: mode {s.flight_mode.mode}, alt {s.position.relative_altitude_m:.1f} m, "
+                        f"offboard {'on' if self._offboard_active else 'off'})")
+                    s.link_ok = False
+                if self._link_lost_since is not None:
+                    self._snapshot.link_lost_s = now - self._link_lost_since
+                    if silent < self.LINK_STALE_S:
+                        dur = self._last_rx_t - self._link_lost_since
+                        logger.warning(f"LINK RESTORED: {self.link_label()} after {dur:.1f}s")
+                        self._link_lost_since = None
+                        self._snapshot.link_ok = True
+                        self._snapshot.link_lost_s = 0.0
+                    # Push the state even though no telemetry is arriving.
+                    if self._on_update:
+                        try:
+                            self._on_update(self._snapshot.to_dict())
+                        except Exception:
+                            pass
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.debug(f"link watch: {e}")
 
     # ── Avoidance hooks ───────────────────────────────────────────────────
     def add_pose_listener(self, fn: Callable) -> None:

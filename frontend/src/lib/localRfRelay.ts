@@ -70,7 +70,7 @@ export async function startLocalRelay(url: string = DEFAULT_LOCAL_RELAY_URL): Pr
 // radio's received bytes always were.
 function onRelayMessage(event: MessageEvent) {
     if (event.data instanceof ArrayBuffer && event.data.byteLength > 0) {
-        getSocket().emit('serial_uplink', event.data)
+        getSocket().volatile.emit('serial_uplink', event.data)
     }
 }
 
