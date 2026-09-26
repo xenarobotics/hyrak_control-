@@ -68,6 +68,9 @@ start() {
     # the camera inside the server and hoards every frame (see header).
     export GZ_SIM_SERVER_CONFIG_PATH="$HERE/hyrak_server.config"
     if _alive gz_server; then echo "already running (./hyrak_sim.sh status)"; return 0; fi
+    # Not running (or its server died): clear anything the last run left
+    # behind BEFORE starting, or its bridges keep sending next to the new ones.
+    _sweep
     _spawn gz_server gz sim --render-engine ogre2 --verbose=1 -r -s "$PX4_GZ_WORLDS/$WORLD.sdf"
     sleep 6
     [ -z "${HEADLESS:-}" ] && _spawn gz_gui gz sim --render-engine ogre2 -g
@@ -104,10 +107,16 @@ stop() {
         rm -f "$PIDS/$n"
     done
     sleep 2
+    _sweep
+}
+
+_sweep() {
     pkill -TERM -f "ffmpeg .* rtp://127.0.0.1:5600" 2>/dev/null || true   # the bridge's own encoder
     # Sweep OUR leftovers only: gz servers running our world file, PX4
-    # instance 1, our bridge. A restart once left the previous gz server
-    # alive (stale PID file) and PX4 saw sim time jump backwards.
+    # instance 1, our bridges. A restart once left the previous gz server
+    # alive (stale PID file) and PX4 saw sim time jump backwards; another left
+    # the previous camera bridge running, so two streams shared udp:5600 and
+    # the app decoded neither (2026-09-26 21:23).
     for pid in $(ps -eo pid,args | awk -v w="$WORLD.sdf" '!/bash|awk/ && (index($0, w) && /gz sim/ || /bin\/px4 -i 1 -d/ || /gz_cam_bridge/ || /gz_depth_sensor/) {print $1}'); do
         kill -9 "$pid" 2>/dev/null && echo "swept leftover $pid"
     done
