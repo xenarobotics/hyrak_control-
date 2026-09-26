@@ -97,6 +97,7 @@ class Decision:
     obstacle_count: int = 0            # obstacles the map is tracking
     recommended_speed_m_s: float = 0.0  # speed-governor output
     setpoint: object | None = None      # local planner Setpoint (action "avoid")
+    advance: bool = False               # "resume" at the NEXT mission item (this one is reached)
     ttc_s: float | None = None
 
 
@@ -141,6 +142,7 @@ class AvoidanceController:
         self._prev_dir: float | None = None
         self.last_setpoint = None
         self._resumed_at = -1e9
+        self._resume_cooldown_s = 3.0
         self._engage_alt: float | None = None
         self._latched_goal = None
         self._scans = {"integrated": 0, "dropped_no_pose": 0, "dropped_low": 0,
@@ -433,9 +435,22 @@ class AvoidanceController:
         reach = min(self.params.reaction_distance_m, dist_goal) if (toward_goal and dist_goal is not None) \
             else self.params.reaction_distance_m
         threat = ahead_free < reach or (ttc is not None and ttc < self.params.ttc_engage_s)
+        # Obstacles BEYOND the waypoint on the line of travel are not in the
+        # way: PX4 stops or turns there. Counting them made a waypoint in
+        # front of a pillar look like a collision course.
+        speed_now = math.hypot(*vel)
+        if ttc is not None and toward_goal and dist_goal is not None and ttc * speed_now > dist_goal + 1.0:
+            ttc = None
+            threat = ahead_free < reach
         # Real danger, as opposed to "the line to the waypoint passes near
-        # something": closing fast, or almost touching.
-        danger = (ttc is not None and ttc < pp.ttc_brake_s) or ahead_free < 1.5
+        # something": closing fast, or an obstacle genuinely close ahead - by
+        # RAW distance. The clearance-grown distance (ahead_free) made every
+        # waypoint beside a pillar "danger", so the cooldown never held and
+        # the aircraft ping-ponged 3-6 times at each (SITL 21:57-21:59).
+        raw_ahead = min((d for k, d in enumerate(polar)
+                         if abs(((k + 0.5) * pp.sector_deg - travel + 180.0) % 360.0 - 180.0) <= 15.0),
+                        default=math.inf)
+        danger = (ttc is not None and ttc < pp.ttc_brake_s) or raw_ahead < 2.0
         near = min(polar) if polar else math.inf
         # A waypoint counts as reached once the aircraft is within this of it.
         # Wider when the waypoint itself sits inside an obstacle's clearance:
@@ -451,7 +466,7 @@ class AvoidanceController:
         at_goal = dist_goal is not None and dist_goal <= accept_m
         # Just handed back: give PX4 the leg before taking it again, unless
         # something is actually about to be hit (the resume/re-engage ping-pong).
-        cooling = (now - self._resumed_at) < 3.0
+        cooling = (now - self._resumed_at) < self._resume_cooldown_s
         near_m = near if math.isfinite(near) else None
         can_steer = goal_ne is not None and bool(self.params.allow_reroute)
 
@@ -495,13 +510,21 @@ class AvoidanceController:
             if at_goal and not danger:
                 self._reset_local()
                 self._resumed_at = now
-                return _d("resume", AvoidanceState.NOMINAL,
-                          f"waypoint reached ({dist_goal:.1f} m) - resuming mission")
+                # The waypoint is as reached as it can be (PX4 wants ~2 m, the
+                # clearance keeps us further): hand back at the NEXT one, or PX4
+                # heads straight back at the pillar to touch it, and give it a
+                # longer settle before any non-danger take-over.
+                self._resume_cooldown_s = 8.0
+                d = _d("resume", AvoidanceState.NOMINAL,
+                       f"waypoint reached ({dist_goal:.1f} m) - on to the next one")
+                d.advance = True
+                return d
             if lp.direct_path_clear(polar, pp, pos, goal_ne) and not threat:
                 self._clear_since = self._clear_since or now
                 if now - self._clear_since >= self.params.handback_clear_s:
                     self._reset_local()
                     self._resumed_at = now
+                    self._resume_cooldown_s = 3.0
                     return _d("resume", AvoidanceState.NOMINAL, "way to the waypoint is clear - resuming mission")
             else:
                 self._clear_since = None

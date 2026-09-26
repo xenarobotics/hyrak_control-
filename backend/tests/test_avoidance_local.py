@@ -410,3 +410,96 @@ def test_unknown_mission_index_picks_the_nearest_waypoint_ahead():
     cands = [(k, h.to_latlng(*ne)) for k, ne in enumerate(legs)]
     got = pick_goal_by_motion(cands, -1, (0.0, 10.0), (-3.0, 0.0), h.to_ne)   # on leg 2->... heading south at east=10
     assert got == h.to_latlng(-60.0, 10.0)
+
+
+def _fly_route(route, cylinders, cruise=3.0, max_t=240.0, dt=0.1, accept=2.0):
+    """Multi-waypoint PX4 stand-in: MISSION flies to route[i] and moves on
+    within `accept` m (PX4 NAV_ACC_RAD); a 'resume' with advance=True moves
+    it on as PX4's set_current_mission_item(i+1) would."""
+    c = AvoidanceController("route"); c.set_enabled(True); c.set_armed(True)
+    c.params.speed_cap_m_s = cruise
+    h = pose_history.history("route"); h.origin = (LAT0, LNG0)
+    pos, vel, yaw, t, i = [0.0, 0.0], [0.0, 0.0], 0.0, 5000.0, 0
+    mode, min_clear, takeovers = "MISSION", math.inf, [0] * len(route)
+    prev = None
+    while t < 5000.0 + max_t:
+        lat, lng = h.to_latlng(*pos)
+        h.add(lat, lng, 10.0, yaw, t=t)
+        c.integrate_scan(_synthetic_scan(pos, yaw, cylinders), t, "depth")
+        d = c.decide_local(route[i], 10.0, now=t)
+        if d.action == "avoid":
+            if prev != "avoid":
+                takeovers[i] += 1
+            mode, want = "OFFBOARD", (d.setpoint.vn, d.setpoint.ve)
+            dy = (d.setpoint.yaw_deg - yaw + 180) % 360 - 180
+            yaw = (yaw + max(-9.0, min(9.0, dy))) % 360
+        elif d.action == "hold":
+            mode, want = "HOLD", (0.0, 0.0)
+        elif d.action == "resume":
+            mode = "MISSION"
+            if getattr(d, "advance", False) and i < len(route) - 1:
+                i += 1
+            elif getattr(d, "advance", False):
+                return {"done": True, "min_clear": min_clear, "takeovers": takeovers, "t": t - 5000.0}
+        prev = d.action
+        if mode == "MISSION":
+            dn, de = route[i][0] - pos[0], route[i][1] - pos[1]
+            dist = math.hypot(dn, de)
+            if dist < accept:
+                if i == len(route) - 1:
+                    return {"done": True, "min_clear": min_clear, "takeovers": takeovers, "t": t - 5000.0}
+                i += 1
+                continue
+            want = (cruise * dn / dist, cruise * de / dist)
+            dy = (math.degrees(math.atan2(de, dn)) - yaw + 180) % 360 - 180
+            yaw = (yaw + max(-9.0, min(9.0, dy))) % 360
+        a = dt / 0.4
+        vel = [vel[0] + (want[0] - vel[0]) * a, vel[1] + (want[1] - vel[1]) * a]
+        pos = [pos[0] + vel[0] * dt, pos[1] + vel[1] * dt]
+        for cn, ce, r in cylinders:
+            min_clear = min(min_clear, math.hypot(pos[0] - cn, pos[1] - ce) - r)
+        t += dt
+    return {"done": False, "min_clear": min_clear, "takeovers": takeovers, "t": max_t}
+
+
+def test_route_with_waypoints_beside_pillars_does_not_ping_pong():
+    """SITL 2026-09-26 21:57-21:59: waypoints 16, 18 and 21 sat within the
+    clearance of a pillar; the aircraft handed back to the SAME waypoint,
+    PX4 chased it toward the pillar, avoidance re-took it within 1-2 s - 3 to
+    6 cycles at each. Each waypoint may cost at most two take-overs."""
+    route = [(40.0, 0.0), (40.0, 30.0), (0.0, 30.0), (0.0, 60.0)]
+    pillars = [(41.5, 1.5, 1.0),       # beside waypoint 0
+               (38.0, 31.8, 1.0),      # beside waypoint 1
+               (20.0, 30.5, 1.0),      # on the leg 1 -> 2
+               (-1.2, 61.5, 1.0)]      # beside the LAST waypoint
+    r = _fly_route(route, pillars)
+    assert r["done"], r
+    assert max(r["takeovers"]) <= 2, r
+    assert r["min_clear"] > 0.8, r
+
+
+# ---- the three mechanisms behind the 21:57-21:59 ping-pong, pinned directly
+def test_handing_back_at_a_reached_waypoint_moves_on_to_the_next():
+    c, h = _controller(t=300.0)
+    c.grid.pin_disc(41.5, 1.5, 1.0, now=300.0)                 # pillar beside the waypoint
+    c.state = AvoidanceState.AVOIDING; c.intervened = True
+    lat, lng = h.to_latlng(37.0, -1.0); h.add(lat, lng, 10.0, 0.0, t=300.1)   # 3.2 m from it
+    d = c.decide_local((40.0, 0.0), 10.0, now=300.1)
+    assert d.action == "resume" and getattr(d, "advance", False), (d.action, d.reason)
+
+
+def test_clearance_grown_distance_is_not_danger_during_the_settle():
+    """PX4 slowing into a waypoint 3.5 m short of a pillar right after a
+    hand-back: close by the clearance margin, not a collision course."""
+    c, h = _moving(1.2, 0.0, t0=400.0)
+    c.grid.pin_disc(0.84 + 3.5 + 1.0, 0.0, 1.0, now=400.7)    # surface ~3.5 m ahead of the aircraft
+    c._resumed_at, c._resume_cooldown_s = 400.5, 8.0
+    d = c.decide_local((4.0, 0.0), 10.0, now=400.7)
+    assert d.action == "clear", d.reason
+
+
+def test_a_pillar_beyond_the_waypoint_is_not_in_the_way():
+    c, h = _moving(3.0, 0.0, t0=500.0)                          # heading north at 3 m/s
+    c.grid.pin_disc(0.84 + 9.0, 0.0, 1.0, now=500.7)           # pillar ~9 m ahead, beyond the waypoint
+    d = c.decide_local((0.84 + 5.0, 0.0), 10.0, now=500.7)     # waypoint 5 m ahead
+    assert d.action == "clear", d.reason

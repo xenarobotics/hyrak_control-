@@ -416,7 +416,12 @@ async def _local_step(c, manager, pose, in_air, mode, now) -> None:
         first = decision.action != _prev_action.get(c.drone_id)
         probe = latency_probe.AvoidanceProbe(
             manager, decision.action, getattr(c, "_last_frame_t", None), now) if first else None
-        did, note = await executor.apply_local(manager, c, decision, _current_index(c.drone_id))
+        resume_idx = _current_index(c.drone_id)
+        if decision.action == "resume" and getattr(decision, "advance", False):
+            n_items = len(_mission_items(c.drone_id, manager) or [])
+            if 0 <= resume_idx < n_items - 1:
+                resume_idx += 1          # this waypoint is reached; PX4 would chase it into the pillar
+        did, note = await executor.apply_local(manager, c, decision, resume_idx)
         if probe is not None:
             probe.done(did, note)
         _prev_action[c.drone_id] = decision.action
