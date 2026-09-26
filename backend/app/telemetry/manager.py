@@ -2269,7 +2269,6 @@ class TelemetryManager:
         "TAKEOFF": {"TAKEOFF"},
     }
 
-    @_claims_mode_change
     async def set_speed(self, speed_m_s: float) -> bool:
         """Change the aircraft's cruise speed in flight (MAV_CMD_DO_CHANGE_SPEED).
         Used by the avoidance speed governor: slower in clutter, so a camera
@@ -2283,6 +2282,7 @@ class TelemetryManager:
             logger.debug(f"set_speed({speed_m_s}) failed: {e}")
             return False
 
+    @_claims_mode_change
     async def set_flight_mode(self, mode: str) -> bool:
         """Switch flight mode, for real, and confirm the aircraft agreed.
 
