@@ -395,6 +395,20 @@ async def _local_step(c, manager, pose, in_air, mode, now) -> None:
         except Exception as e:
             logger.debug(f"hazard seed failed: {e}")
     pursuing = in_air and mode.upper() not in _NO_GOAL_MODES
+    # A HOLD the operator commanded is a hold: no route to steer toward, and
+    # never a hand-back that restarts the mission (only the keep-clear reflex
+    # may move the aircraft). HOLDs avoidance itself entered keep the route so
+    # it can resume. The flag survives our own OFFBOARD excursion and clears
+    # once the operator picks any other mode.
+    m = mode.upper()
+    if m in ("HOLD", "LOITER") and not c.intervened:
+        c._operator_hold = True
+    elif m not in ("HOLD", "LOITER", "OFFBOARD", ""):
+        c._operator_hold = False
+    if getattr(c, "_operator_hold", False):
+        pursuing = False
+        if c.state == avoidance.AvoidanceState.NOMINAL:
+            c.intervened = False
     hist = pose_history.history(c.drone_id)
     goal = _goal_from_motion(c, manager, hist) if pursuing else None
     goal_ne = hist.to_ne(*goal) if (goal is not None and hist.origin is not None) else None

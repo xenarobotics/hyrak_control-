@@ -83,6 +83,13 @@ class AvoidanceParams:
     # height floors dropped. Never for flight - a flying camera needs the
     # ground fit or it maps phantoms.
     mono_bench: float = 0.0
+    # Keep-clear reflex while hovering with no route (operator HOLD, manual
+    # hover): something inside keep_clear_m in view -> back straight away from
+    # it, still facing it (the camera sees forward only), until it is
+    # keep_clear_release_m away, then HOLD again. 0 = off.
+    keep_clear_m: float = 3.0
+    keep_clear_release_m: float = 5.0
+    keep_clear_speed_m_s: float = 1.0
     bench_cam_height_m: float = 1.0
 
     # --- legacy path only: keep-out map + mission-upload reroute ------------
@@ -394,10 +401,59 @@ class AvoidanceController:
 
     # -- redesign: supervisor over the local planner (layer 4) -------------
     def _reset_local(self) -> None:
+        self._repelling = False
         self._clear_since = None
         self._blocked_since = None
         self._prev_dir = None
         self.last_setpoint = None
+
+    def _keep_clear(self, polar, pp, pose, now, _d):
+        """The hover reflex. Returns a Decision while backing away (or the
+        HOLD that ends it), None when nothing is close."""
+        from app.avoidance.planning.local_planner import Setpoint, enlarged_free
+        p = self.params
+        finite = [(d, k) for k, d in enumerate(polar) if math.isfinite(d)]
+        near_d, near_k = min(finite) if finite else (math.inf, None)
+        repelling = getattr(self, "_repelling", False)
+        if not repelling and near_d >= p.keep_clear_m:
+            return None
+        if repelling and near_d >= p.keep_clear_release_m:
+            self._reset_local()
+            self._hold_since = now
+            return _d("hold", AvoidanceState.HOLDING,
+                      f"kept clear - obstacle now {near_d:.1f} m, holding" if math.isfinite(near_d)
+                      else "kept clear - holding")
+        if near_k is None:
+            return None
+        sd = pp.sector_deg
+        obst_brg = (near_k + 0.5) * sd
+        # Straight away from it if that way is open, else the most open
+        # direction at least 100 deg off the obstacle.
+        free = enlarged_free(polar, sd, 1.0)
+        away = (obst_brg + 180.0) % 360.0
+        best = int(away // sd) % len(free)
+        if free[best] < 2.0:
+            cands = [k for k in range(len(free))
+                     if abs(((k + 0.5) * sd - obst_brg + 180.0) % 360.0 - 180.0) >= 100.0]
+            best = max(cands, key=lambda k: free[k]) if cands else best
+        if free[best] < 1.0:
+            self._repelling = True
+            sp = Setpoint(0.0, 0.0, 0.0, pose.yaw_deg, 0.0, None, free[best], None, True,
+                          f"obstacle {near_d:.1f} m and no room to back away - holding position")
+            self.last_setpoint = sp
+            return _d("avoid", AvoidanceState.AVOIDING, sp.reason, sp)
+        brg = (best + 0.5) * sd
+        spd = p.keep_clear_speed_m_s
+        if self._engage_alt is None or not repelling:
+            self._engage_alt = pose.alt_m
+        vd = max(-pp.max_vz_m_s, min(pp.max_vz_m_s, pp.alt_kp * (pose.alt_m - self._engage_alt)))
+        rad = math.radians(brg)
+        # Keep facing the obstacle: the camera looks forward only.
+        sp = Setpoint(spd * math.cos(rad), spd * math.sin(rad), vd, obst_brg, spd, brg, free[best], None, False,
+                      f"keeping clear - obstacle {near_d:.1f} m, backing away")
+        self._repelling = True
+        self.last_setpoint = sp
+        return _d("avoid", AvoidanceState.AVOIDING, sp.reason, sp)
 
     def planner_params(self, now: float | None = None):
         from app.avoidance.planning.local_planner import PlannerParams
@@ -507,6 +563,20 @@ class AvoidanceController:
             return self._settle(d)
 
         st = self.state
+        # No route (operator HOLD, manual hover): nothing to steer toward, so
+        # the only job is keeping clear of what comes close in view.
+        if goal_ne is None and getattr(self, "_operator_hold", False):
+            if self.params.keep_clear_m > 0:
+                rep = self._keep_clear(polar, pp, pose, now, _d)
+                if rep is not None:
+                    return rep
+            # Otherwise the operator's HOLD stands: never escalate it (no
+            # hold timer, no RTL) and never resume a route from it.
+            self._hold_since = None
+            return _d("clear", AvoidanceState.NOMINAL,
+                      f"operator hold - nearest obstacle {near:.1f} m" if math.isfinite(near)
+                      else "operator hold - nothing in view")
+
         if st in (AvoidanceState.NOMINAL, AvoidanceState.DISABLED):
             if not threat or at_goal or (cooling and not danger):
                 self._hold_since = None
