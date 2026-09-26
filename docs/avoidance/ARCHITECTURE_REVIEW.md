@@ -1,3 +1,7 @@
+> **History.** This review explains why the first design failed and proposes the
+> redesign that is now built (section 9). For how avoidance works today, see
+> `README.md` in this folder.
+
 # Obstacle avoidance - architecture review (2026-09-19)
 
 Written after six sim flights in one afternoon, five of which ended against a

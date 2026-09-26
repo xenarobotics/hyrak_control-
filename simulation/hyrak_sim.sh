@@ -35,7 +35,7 @@ LOGS="$HERE/.logs"; PIDS="$HERE/.pids"
 WORLD="${WORLD:-hyrak_obstacles}"
 MODEL="${MODEL:-gz_x500_mono_cam}"
 HOME_LAT="${HOME_LAT:-17.596569}"; HOME_LON="${HOME_LON:-78.125203}"
-# MODEL=gz_x500_depth (step A of docs/AVOIDANCE_ARCHITECTURE_REVIEW.md): PX4's
+# MODEL=gz_x500_depth (step A of docs/avoidance/ARCHITECTURE_REVIEW.md): PX4's
 # x500 with an OAK-D Lite - a TRUE depth camera (73 deg, 19 m) that
 # gz_depth_sensor.py feeds to avoidance as a range sensor, plus its 1080p RGB
 # camera streamed (scaled to 640x360) as the video feed.

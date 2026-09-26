@@ -16,7 +16,7 @@ export interface AvoidanceParams {
     hold_to_return_s: number
     allow_reroute?: number
     allow_return?: number
-    // Redesign (docs/AVOIDANCE_ARCHITECTURE_REVIEW.md section 5)
+    // Redesign (docs/avoidance/ARCHITECTURE_REVIEW.md section 5)
     local_planner?: number          // 1 = grid + Offboard local planner, 0 = legacy mission upload
     local_clearance_m?: number
     ttc_engage_s?: number

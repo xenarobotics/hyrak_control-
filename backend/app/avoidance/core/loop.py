@@ -15,16 +15,17 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from app.avoidance import executor
-from app.avoidance import service as avoidance
-from app.avoidance import sensors as sensor_registry
-from app.avoidance.geometry import Pose
+from app.avoidance.core import executor
+from app.avoidance.core import controller as avoidance
+from app.avoidance.sensing import registry as sensor_registry
+from app.avoidance.planning.geometry import Pose
 
 logger = logging.getLogger("verocore.avoidance.loop")
 
 INTERVAL_S = 0.4  # ~2.5 Hz - nominal ticks are cheap (no reroute unless seen)
 
 _task: asyncio.Task | None = None
+_event_fail_t = -1e9
 _session_manager = None
 
 
@@ -198,7 +199,7 @@ async def _sync_hazards(c, pose, now: float) -> None:
     hazards near the drone (re-loaded as it flies, so they stay fresh in the
     short-ttl map), and write confirmed-static obstacles back to the shared
     map for the next flight / other drones."""
-    from app.avoidance import hazard_db
+    from app.avoidance.mapping import hazards as hazard_db
     if now - _last_seed.get(c.drone_id, 0.0) > 3.0:
         _last_seed[c.drone_id] = now
         for h in await hazard_db.load_near(pose.lat, pose.lng, 250.0):
@@ -297,7 +298,7 @@ def _ensure_pose_feed(c, manager) -> None:
     """Register this controller's pose history on its telemetry link (every
     attitude/position update, stamped on arrival) and raise the link's pose
     rates. Re-registers when the link object changes (reconnect)."""
-    from app.avoidance import pose_history
+    from app.avoidance.mapping import pose_history
     cur = _listeners.get(c.drone_id)
     if cur is not None and cur[0] is manager:
         return
@@ -386,7 +387,7 @@ async def _tick() -> None:
 
 async def _local_step(c, manager, pose, in_air, mode, now) -> None:
     """Redesigned path: occupancy grid -> supervisor -> Offboard local planner."""
-    from app.avoidance import pose_history
+    from app.avoidance.mapping import pose_history
     if pose is not None and now - _last_seed.get(c.drone_id, 0.0) > 3.0:
         try:
             await _seed_hazards_grid(c, pose, now)
@@ -523,7 +524,8 @@ async def _seed_hazards_grid(c, pose, now: float) -> None:
     """Known hazards (operator-marked, or learned when learn_hazards is on)
     are pinned into the occupancy grid; learned write-back uses the grid's
     confirmed clusters."""
-    from app.avoidance import hazard_db, pose_history
+    from app.avoidance.mapping import hazards as hazard_db
+    from app.avoidance.mapping import pose_history
     _last_seed[c.drone_id] = now
     h = pose_history.history(c.drone_id)
     if h.origin is None:
@@ -548,7 +550,13 @@ async def _record_event(controller, decision) -> None:
             obstacle=decision.obstacle, armed=controller.armed,
             fused_distance_m=decision.fused_distance_m)
     except Exception as e:
-        logger.debug(f"avoidance event record failed: {e}")
+        # Was debug: a schema mismatch silently dropped every event the local
+        # planner produced. Loud, but once a minute.
+        import time as _t
+        global _event_fail_t
+        if _t.monotonic() - _event_fail_t > 60.0:
+            _event_fail_t = _t.monotonic()
+            logger.warning(f"avoidance event NOT recorded ({decision.action}/{decision.state.value}): {e}")
 
 
 async def _run() -> None:
@@ -655,7 +663,7 @@ def observe_from_session(session_id: str, obs: dict | list,
         # phantoms held the aircraft in front of a real cylinder.
         if pose is not None and pose.alt_m < MIN_SENSE_ALT_M:
             return
-        from app.avoidance.observations import ObstacleObservation
+        from app.avoidance.sensing.observations import ObstacleObservation
         if captured_at is not None:
             _last_frame_t[c.drone_id] = captured_at
         for one in (obs if isinstance(obs, list) else [obs]):

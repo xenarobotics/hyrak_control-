@@ -346,7 +346,7 @@ class BaseAnalyzer(ABC):
                 obs_list = meta.get("obstacle_observations")
                 if obs_list:
                     try:
-                        from app.avoidance import loop as _av_loop
+                        from app.avoidance.core import loop as _av_loop
                         _av_loop.observe_from_session(
                             client_id, obs_list,
                             captured_at=context.captured_at if context is not None else None)

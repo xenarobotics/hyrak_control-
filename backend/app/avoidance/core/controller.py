@@ -23,11 +23,11 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 
-from app.avoidance import reroute as reroute_mod
-from app.avoidance import sensors as sensor_registry
-from app.avoidance.geometry import Pose, distance_m, observation_to_keepout
-from app.avoidance.obstacle_map import ObstacleMap
-from app.avoidance.observations import ObservationBus, ObstacleObservation
+from app.avoidance.planning import reroute as reroute_mod
+from app.avoidance.sensing import registry as sensor_registry
+from app.avoidance.planning.geometry import Pose, distance_m, observation_to_keepout
+from app.avoidance.mapping.keepouts import ObstacleMap
+from app.avoidance.sensing.observations import ObservationBus, ObstacleObservation
 
 
 class AvoidanceState(str, Enum):
@@ -42,47 +42,45 @@ class AvoidanceState(str, Enum):
 
 @dataclass
 class AvoidanceParams:
-    reaction_distance_m: float = 12.0   # react to obstacles within this range
-    clearance_m: float = 4.0            # keep-out radius padding around one
-    forward_cone_deg: float = 60.0      # only obstacles this far off the nose
-    min_confidence: float = 0.35        # ignore observations below this
-    speed_cap_m_s: float = 4.0          # cap commanded speed while enabled
-    hold_to_return_s: float = 20.0      # holding with no path this long -> RTL
-    # Response preference (1/0 flags so the params endpoint's float setter
-    # applies): the order is always reroute -> hold -> return; these say how
-    # far down that ladder the loop may go on its own.
-    # Write obstacles this flight confirmed back to the shared hazard map, so
-    # the next flight (any drone) knows them before seeing them. OFF by
-    # default: with a mono camera a phantom becomes a permanent hazard that
-    # is re-seeded every flight; turn on for LiDAR/ToF-grade sensing.
-    learn_hazards: float = 0.0
-    allow_reroute: float = 1.0          # 0: never re-plan, hold instead
+    """Tunables, persisted per drone in .avoidance_state.json and editable
+    from the Avoidance card. Grouped by which planner reads them."""
+
+    # --- both planners -----------------------------------------------------
+    local_planner: float = 1.0          # 1 = grid + Offboard local planner (current), 0 = legacy
+    reaction_distance_m: float = 12.0   # something closer than this on the way -> act
+    speed_cap_m_s: float = 4.0          # cruise speed while avoidance is on
+    hold_to_return_s: float = 20.0      # holding with no way through this long -> RTL
+    # Response ladder is always reroute/steer -> hold -> return; 1/0 flags say
+    # how far down it the loop may go on its own (floats so the params
+    # endpoint's setter applies).
+    allow_reroute: float = 1.0          # 0: never steer / re-plan, hold instead
     allow_return: float = 1.0           # 0: never escalate a hold to RTL
-    # 3D avoidance: when no lateral path exists, climb over (if the obstacle's
-    # height is known to be below the ceiling) before holding/returning.
-    vertical_enabled: bool = True
-    max_climb_alt_m: float = 40.0       # never auto-climb above this
-    climb_step_m: float = 4.0           # clearance to add above an obstacle top
-    # Speed governor: slow down in clutter. Commanded speed scales from
-    # min_speed_m_s (obstacle at the clearance ring) up to speed_cap_m_s (clear
-    # to the reaction distance). Predict dynamic obstacles this far ahead.
-    min_speed_m_s: float = 1.0
-    prediction_horizon_s: float = 1.5
-    # --- redesign (docs/AVOIDANCE_ARCHITECTURE_REVIEW.md section 5) --------
-    # 1 = occupancy grid + 10 Hz Offboard local planner (default);
-    # 0 = the legacy keep-out map + mission-upload reroute.
-    local_planner: float = 1.0
-    local_clearance_m: float = 3.0      # body + margin the local planner keeps
-    lookahead_m: float = 18.0
+    # Write confirmed static obstacles to the shared known_obstacles table.
+    # OFF by default: a mono phantom would become a permanent hazard.
+    learn_hazards: float = 0.0
+    min_confidence: float = 0.35        # single readings below this are ignored
+
+    # --- current path: occupancy grid + local planner ----------------------
+    local_clearance_m: float = 3.0      # body + margin kept from every occupied cell
+    lookahead_m: float = 18.0           # planning radius
     ttc_engage_s: float = 4.0           # take control when closing faster than this
     handback_clear_s: float = 1.5       # direct path free this long -> back to the mission
-    block_hold_s: float = 3.0           # planner boxed in this long -> HOLD
-    # Monocular gates (step D): mono-only flight senses from higher up and
-    # flies slower, until its calibrated error is measured good enough.
+    block_hold_s: float = 3.0           # boxed in this long -> HOLD
+    # Monocular gates: camera-only flight senses from higher up and flies
+    # slower until its calibrated error is measured good enough.
     mono_min_alt_m: float = 8.0
     mono_speed_cap_m_s: float = 1.5
-    range_min_alt_m: float = 2.0        # a real range sensor can sense lower
+    range_min_alt_m: float = 2.0        # a real range sensor may sense lower
     camera_pitch_deg: float = 0.0       # mono camera mount tilt, + = down
+
+    # --- legacy path only: keep-out map + mission-upload reroute ------------
+    clearance_m: float = 4.0            # keep-out radius padding
+    forward_cone_deg: float = 60.0      # obstacles this far off the travel line count
+    vertical_enabled: bool = True       # climb over known-height obstacles
+    max_climb_alt_m: float = 40.0
+    climb_step_m: float = 4.0
+    min_speed_m_s: float = 1.0          # speed governor floor at the clearance ring
+    prediction_horizon_s: float = 1.5   # dynamic obstacles predicted this far ahead
 
 
 @dataclass
@@ -130,8 +128,8 @@ class AvoidanceController:
         self._last_goal: tuple[float, float] | None = None  # for the map overlay
         # Redesign state: occupancy grid (layer 2), local-planner bookkeeping
         # (layer 3/4) and the mono scale tracker (step D).
-        from app.avoidance.local_map import OccupancyGrid
-        from app.avoidance.mono_calibration import ScaleTracker
+        from app.avoidance.mapping.occupancy import OccupancyGrid
+        from app.avoidance.sensing.mono_calibration import ScaleTracker
         self.grid = OccupancyGrid()
         self.mono_scale = ScaleTracker()
         self._range_data_t = 0.0          # last scan from a real range sensor
@@ -156,7 +154,7 @@ class AvoidanceController:
         reading's time."""
         self.bus.add(obs)
         sensor_registry.mark_data(self.drone_id, obs.source)
-        from app.avoidance.depth_scan import ScanBin
+        from app.avoidance.sensing.depth_scan import ScanBin
         self.integrate_scan([ScanBin(bearing_deg=obs.bearing_deg,
                                      half_width_deg=max(1.0, obs.half_width_deg),
                                      hit_m=obs.distance_m, free_m=obs.distance_m,
@@ -180,7 +178,7 @@ class AvoidanceController:
                        confidence_scale: float = 1.0, to_bus: bool = True) -> bool:
         """Place one scan in the occupancy grid ONCE, with the pose at the
         frame's capture time (step B). Returns False if it was dropped."""
-        from app.avoidance import pose_history
+        from app.avoidance.mapping import pose_history
         now = time.monotonic()
         is_range = source in ("depth", "lidar", "tof", "rangefinder", "injected")
         if is_range:
@@ -371,7 +369,7 @@ class AvoidanceController:
         self.last_setpoint = None
 
     def planner_params(self, now: float | None = None):
-        from app.avoidance.local_planner import PlannerParams
+        from app.avoidance.planning.local_planner import PlannerParams
         p = self.params
         cruise = p.speed_cap_m_s
         if self.sensor_mode(now) == "mono":
@@ -389,8 +387,8 @@ class AvoidanceController:
           resume - hand the aircraft back to its mission at the current item
           return - held too long with no way through
         """
-        from app.avoidance import pose_history
-        from app.avoidance import local_planner as lp
+        from app.avoidance.mapping import pose_history
+        from app.avoidance.planning import local_planner as lp
         now = now if now is not None else time.monotonic()
         if not self.enabled:
             return self._settle(Decision("clear", AvoidanceState.DISABLED, "avoidance off"))
@@ -557,7 +555,7 @@ class AvoidanceController:
 
     def local_obstacles(self, now: float | None = None) -> list[dict]:
         """Occupied clusters as lat/lng keep-outs - the map overlay."""
-        from app.avoidance import pose_history
+        from app.avoidance.mapping import pose_history
         h = pose_history.history(self.drone_id)
         if h.origin is None:
             return []
@@ -720,7 +718,7 @@ class AvoidanceController:
 
 
 def _pose_rate(drone_id: str) -> float:
-    from app.avoidance import pose_history
+    from app.avoidance.mapping import pose_history
     return pose_history.history(drone_id).rate_hz()
 
 

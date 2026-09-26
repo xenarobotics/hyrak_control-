@@ -150,7 +150,7 @@ class TelemetryManager:
         self._offboard_release_until: float = 0.0
         # Called with the snapshot on every attitude/position update, at the
         # moment it arrives - the avoidance pose history stamps observations
-        # with these (see app/avoidance/pose_history.py).
+        # with these (see app/avoidance/mapping/pose_history.py).
         self._pose_listeners: list[Callable] = []
         self._pose_rates_boosted = False
         # Link watchdog: monotonic time of the last message of any kind, and

@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from app.avoidance.observations import ObstacleObservation
+from app.avoidance.sensing.observations import ObstacleObservation
 
 M_PER_DEG_LAT = 111_320.0
 

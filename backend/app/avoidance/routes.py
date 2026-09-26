@@ -10,10 +10,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Header, HTTPException
 
 from app.config import get_settings
-from app.avoidance import service as avoidance
-from app.avoidance import sensors as sensor_registry
-from app.avoidance.geometry import Pose
-from app.avoidance.observations import ObstacleObservation
+from app.avoidance.core import controller as avoidance
+from app.avoidance.sensing import registry as sensor_registry
+from app.avoidance.planning.geometry import Pose
+from app.avoidance.sensing.observations import ObstacleObservation
 
 settings = get_settings()
 router = APIRouter(prefix="/api/avoidance", tags=["avoidance"])
@@ -49,7 +49,7 @@ async def set_enabled(drone_id: str, body: dict,
     if "enabled" in body:
         c.set_enabled(bool(body["enabled"]))
         if c.enabled:
-            from app.avoidance import sensing
+            from app.avoidance.sensing import camera as sensing
             sensing.warm()
     avoidance.persist_state()
     return c.status()
@@ -120,8 +120,8 @@ async def depth_scan(drone_id: str, body: dict,
     _auth(x_auth_token)
     import time as _time
     import numpy as np
-    from app.avoidance import pose_history
-    from app.avoidance.depth_scan import scan_from_depth
+    from app.avoidance.mapping import pose_history
+    from app.avoidance.sensing.depth_scan import scan_from_depth
     c = _resolve_drone(drone_id)
     if not c.enabled:
         return {"ok": False, "reason": "avoidance off"}
@@ -197,7 +197,7 @@ async def drone_obstacles(drone_id: str):
 @router.get("/hazards")
 async def known_hazards():
     """The persistent shared hazard map (all known static obstacles)."""
-    from app.avoidance import hazard_db
+    from app.avoidance.mapping import hazards as hazard_db
     return {"hazards": await hazard_db.all_hazards()}
 
 
@@ -206,7 +206,7 @@ async def add_hazard(body: dict,
                      x_auth_token: str = Header(None, alias="X-Auth-Token")):
     """Operator-marked hazard - manually pin a known obstacle on the map."""
     _auth(x_auth_token)
-    from app.avoidance import hazard_db
+    from app.avoidance.mapping import hazards as hazard_db
     try:
         lat, lng = float(body["lat"]), float(body["lng"])
         radius_m = max(1.0, float(body.get("radius_m", 5.0)))
@@ -221,7 +221,7 @@ async def add_hazard(body: dict,
 @router.post("/hazards/clear")
 async def clear_hazards(x_auth_token: str = Header(None, alias="X-Auth-Token")):
     _auth(x_auth_token)
-    from app.avoidance import hazard_db
+    from app.avoidance.mapping import hazards as hazard_db
     return {"removed": await hazard_db.clear()}
 
 

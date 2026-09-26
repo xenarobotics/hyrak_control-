@@ -1,7 +1,7 @@
 """Depth image -> level, ground-rejected range scan.
 
 Every depth source ends here: the simulator's true depth camera (step A of
-docs/AVOIDANCE_ARCHITECTURE_REVIEW.md) and the scale-calibrated monocular
+docs/avoidance/ARCHITECTURE_REVIEW.md) and the scale-calibrated monocular
 model (step D). Each pixel's depth is turned into a 3D point with the
 camera's mounting pitch AND the aircraft's roll/pitch at capture time, so
 

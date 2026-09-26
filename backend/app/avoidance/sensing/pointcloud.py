@@ -17,7 +17,7 @@ import math
 from collections import defaultdict
 from typing import Iterable, Sequence
 
-from app.avoidance.observations import ObstacleObservation
+from app.avoidance.sensing.observations import ObstacleObservation
 
 
 def observations_from_pointcloud(

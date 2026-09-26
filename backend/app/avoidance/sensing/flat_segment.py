@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from app.avoidance.observations import ObstacleObservation
+from app.avoidance.sensing.observations import ObstacleObservation
 
 # Monocular is assist-grade on purpose - never let it outvote a range sensor.
 MONO_MAX_CONFIDENCE = 0.55

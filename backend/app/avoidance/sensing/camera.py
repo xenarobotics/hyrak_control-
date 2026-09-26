@@ -8,7 +8,7 @@ module no longer extracts obstacles itself). At most SENSE_HZ frames per
 second per session, never queued (a frame arriving while inference is busy is
 dropped), on its own thread so the video path never waits.
 
-Per frame (step D of docs/AVOIDANCE_ARCHITECTURE_REVIEW.md):
+Per frame (step D of docs/avoidance/ARCHITECTURE_REVIEW.md):
   1. the frame's capture time is stamped and the aircraft's pose AT that time
      taken from the pose history (step B);
   2. the model's raw depth is pooled and its scale fitted to the ground plane
@@ -48,10 +48,10 @@ def wants_frame(session_id: str, mode_value: str | None) -> bool:
     lookup and a controller check, so it is safe to call per frame."""
     if _depth_failed:
         return False
-    from app.avoidance import service as avoidance
+    from app.avoidance.core import controller as avoidance
     if not avoidance.any_enabled():
         return False
-    from app.avoidance import loop as av_loop
+    from app.avoidance.core import loop as av_loop
     c = av_loop._controller_for_session(session_id)
     if c is None:
         return False
@@ -84,14 +84,14 @@ def analyze_depth(depth: np.ndarray, frame_w: int, frame_h: int, ctx: dict | Non
                   hfov_deg: float, max_range_m: float) -> dict:
     """Pure part of the per-frame work (testable without the model)."""
     if ctx is None:
-        from app.avoidance.detector import observations_from_depth
+        from app.avoidance.sensing.flat_segment import observations_from_depth
         obs = observations_from_depth(depth, hfov_deg=hfov_deg, max_distance_m=max_range_m)
         return {"legacy": [
             {"bearing_deg": o.bearing_deg, "distance_m": o.distance_m,
              "half_width_deg": o.half_width_deg, "confidence": o.confidence,
              "source": o.source, "top_m": o.top_m} for o in obs]}
-    from app.avoidance.depth_scan import pool_min, scan_from_depth, vfov_for
-    from app.avoidance.mono_calibration import fit_scale
+    from app.avoidance.sensing.depth_scan import pool_min, scan_from_depth, vfov_for
+    from app.avoidance.sensing.mono_calibration import fit_scale
     vfov = vfov_for(hfov_deg, frame_w, frame_h)
     pooled = pool_min(depth, POOL_ROWS, POOL_COLS, percentile=20)
     fit = fit_scale(pooled, hfov_deg, vfov, alt_m=ctx["alt_m"], roll_deg=ctx["roll_deg"],
@@ -125,8 +125,8 @@ def submit(session_id: str, img_bgr: np.ndarray) -> None:
     """Hand one BGR frame to the sensor. Returns immediately; the result is
     integrated from the executor's completion, on the event loop."""
     captured_at = time.monotonic()
-    from app.avoidance import loop as av_loop
-    from app.avoidance import pose_history
+    from app.avoidance.core import loop as av_loop
+    from app.avoidance.mapping import pose_history
     c = av_loop._controller_for_session(session_id)
     ctx = None
     if c is not None:
@@ -155,7 +155,7 @@ def submit(session_id: str, img_bgr: np.ndarray) -> None:
             return
         # A processed frame IS the camera feeding, whether or not it held an
         # obstacle and whatever the altitude (the arm interlock reads this).
-        from app.avoidance import sensors as sensor_registry
+        from app.avoidance.sensing import registry as sensor_registry
         sensor_registry.mark_data(cc.drone_id, "monocular")
         cc._mono_data_t = time.monotonic()      # mono gates apply even when a frame fails to calibrate
         if "legacy" in res:

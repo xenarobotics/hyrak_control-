@@ -592,7 +592,7 @@ class AvoidanceEvent(Base):
     __table_args__ = (
         Index("ix_avoidance_events_drone_t", "drone_id", "t"),
         CheckConstraint(
-            "action IN ('clear','hold','reroute','climb','return')",
+            "action IN ('clear','hold','reroute','climb','return','avoid','resume','track')",
             name="ck_avoidance_events_action"),
     )
 

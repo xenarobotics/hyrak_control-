@@ -11,7 +11,7 @@ from aiortc import MediaStreamTrack
 from aiortc.contrib.media import MediaRelay
 from av import VideoFrame
 
-from app.avoidance import sensing as _sensing
+from app.avoidance.sensing import camera as _sensing
 from app.sessions import observer
 
 if TYPE_CHECKING:

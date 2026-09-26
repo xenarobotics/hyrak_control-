@@ -22,7 +22,7 @@ import math
 import time
 from dataclasses import dataclass, field
 
-from app.avoidance.depth_scan import ScanBin
+from app.avoidance.sensing.depth_scan import ScanBin
 
 # Evidence per reading, by source. A source's hit must reach L_OCC on its own
 # only if one reading of it is trusted (a real range sensor); mono needs three.

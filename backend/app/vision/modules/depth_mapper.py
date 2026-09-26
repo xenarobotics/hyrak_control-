@@ -71,7 +71,7 @@ class DepthMapper(BaseAnalyzer):
         depth = np.nan_to_num(depth, nan=0.0, posinf=self.viz_max_depth, neginf=0.0)
 
         # Obstacle extraction for avoidance is NOT done here any more: it runs
-        # in app/avoidance/sensing.py for every AI mode, where the frame's
+        # in app/avoidance/sensing/camera.py for every AI mode, where the frame's
         # capture time and the aircraft's pose are known (ground-plane scale
         # calibration + geometric ground rejection need both).
         obstacle_obs = None

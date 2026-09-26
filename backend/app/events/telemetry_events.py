@@ -574,7 +574,8 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         if action in ("start_mission", "arm_and_start_mission",
                       "restart_mission", "arm_and_restart_mission"):
             try:
-                from app.avoidance import loop as _av_loop, service as _av
+                from app.avoidance.core import loop as _av_loop
+                from app.avoidance.core import controller as _av
                 c = _av_loop._controller_for_session(session.session_id)
                 note = None
                 if c is None:
@@ -596,10 +597,10 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         if action in ("arm", "takeoff", "start_mission", "arm_and_start_mission",
                       "restart_mission", "arm_and_restart_mission"):
             try:
-                from app.avoidance import loop as _av_loop
+                from app.avoidance.core import loop as _av_loop
                 c = _av_loop._controller_for_session(session.session_id)
                 if c is not None and c.armed:
-                    from app.avoidance import sensors as _sensors
+                    from app.avoidance.sensing import registry as _sensors
                     inv = _sensors.inventory(c.drone_id)
                     feeding = any(x.get("status") == "ok" for x in inv)
                     if not feeding:
@@ -927,7 +928,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 # Tell avoidance where this aircraft is now going, so an
                 # obstacle on the way is routed around, not just held for.
                 try:
-                    from app.avoidance import loop as _av_loop
+                    from app.avoidance.core import loop as _av_loop
                     _av_loop.note_mission_goal(session.session_id, waypoints)
                     session.last_mission = list(waypoints)   # failsafe check: RTL vs mission altitude
                 except Exception:
