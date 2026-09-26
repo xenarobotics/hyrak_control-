@@ -103,6 +103,12 @@ def analyze_depth(depth: np.ndarray, frame_w: int, frame_h: int, ctx: dict | Non
     from app.avoidance.sensing.mono_calibration import fit_scale
     vfov = vfov_for(hfov_deg, frame_w, frame_h)
     pooled = pool_min(depth, POOL_ROWS, POOL_COLS, percentile=20)
+    if ctx.get("bench"):
+        # Fixed camera on a bench: the model's metres as they come, camera
+        # level at a known height (the floor/desk is rejected as ground).
+        scan = scan_from_depth(pooled, hfov_deg, vfov, alt_m=ctx["bench_h"],
+                               max_range_m=max_range_m, invalid_is_free=False)
+        return {"fit": None, "scan": scan, "bench": True}
     fit = fit_scale(pooled, hfov_deg, vfov, alt_m=ctx["alt_m"], roll_deg=ctx["roll_deg"],
                     pitch_deg=ctx["pitch_deg"], cam_pitch_deg=ctx["cam_pitch_deg"])
     scale = ctx.get("scale")
@@ -143,7 +149,9 @@ def submit(session_id: str, img_bgr: np.ndarray) -> None:
         if pose is not None:
             ctx = {"alt_m": pose.alt_m, "roll_deg": pose.roll_deg, "pitch_deg": pose.pitch_deg,
                    "cam_pitch_deg": float(c.params.camera_pitch_deg),
-                   "scale": c.mono_scale.scale}
+                   "scale": c.mono_scale.scale,
+                   "bench": bool(c.params.mono_bench),
+                   "bench_h": float(c.params.bench_cam_height_m)}
     _busy.add(session_id)
     loop = asyncio.get_running_loop()
     fut = loop.run_in_executor(_executor, _analyze, img_bgr, ctx)
@@ -171,7 +179,8 @@ def submit(session_id: str, img_bgr: np.ndarray) -> None:
             if res["legacy"]:
                 av_loop.observe_from_session(session_id, res["legacy"], captured_at=captured_at)
             return
-        cc.mono_scale.update(res.get("fit"))
+        if not res.get("bench"):
+            cc.mono_scale.update(res.get("fit"))
         if res.get("scan"):
             cc.integrate_scan(res["scan"], captured_at, "monocular")
 

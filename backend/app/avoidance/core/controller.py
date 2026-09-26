@@ -77,6 +77,13 @@ class AvoidanceParams:
     # (camera) - e.g. to try a webcam while the sim's depth camera keeps
     # posting. Set from the Command window's camera menu.
     use_range_sensor: float = 1.0
+    # BENCH TEST of the camera path (a fixed webcam beside a SITL/real drone,
+    # like tuning the trackers): 1 = trust the depth model's own metres, no
+    # ground fit, camera taken as level at bench_cam_height_m, and the camera
+    # height floors dropped. Never for flight - a flying camera needs the
+    # ground fit or it maps phantoms.
+    mono_bench: float = 0.0
+    bench_cam_height_m: float = 1.0
 
     # --- legacy path only: keep-out map + mission-upload reroute ------------
     clearance_m: float = 4.0            # keep-out radius padding
@@ -178,6 +185,8 @@ class AvoidanceController:
         if mode == "range":
             return float(self.params.range_min_alt_m)
         if mode == "mono":
+            if self.params.mono_bench:
+                return float(self.params.range_min_alt_m)
             return float(self.params.mono_min_alt_m)
         return 3.0
 
@@ -214,7 +223,8 @@ class AvoidanceController:
         if pose is None:
             self._scans["dropped_no_pose"] += 1
             return False
-        min_alt = self.params.range_min_alt_m if is_range else self.params.mono_min_alt_m
+        min_alt = self.params.range_min_alt_m if is_range else \
+            (0.0 if self.params.mono_bench else self.params.mono_min_alt_m)
         if pose.alt_m < min_alt:
             self._scans["dropped_low"] += 1
             return False
