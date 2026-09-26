@@ -24,6 +24,8 @@ export interface AvoidanceParams {
     mono_speed_cap_m_s?: number
     range_min_alt_m?: number
     use_range_sensor?: number       // 0 = ignore range scans, sense with the video stream
+    mono_bench?: number             // 1 = bench test of the camera path (fixed webcam)
+    bench_cam_height_m?: number
 }
 
 export interface SensorInfo {

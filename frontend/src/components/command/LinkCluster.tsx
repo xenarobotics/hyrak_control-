@@ -126,11 +126,15 @@ export function LinkCluster({ avoid }: { avoid: AvoidanceStatus | null }) {
     const camLabel = needsCam ? cameras.find(c => c.deviceId === selectedCameraId)?.label : undefined
     const desktopApp = isDesktopApp()
 
-    const useRange = avoid?.params?.use_range_sensor !== 0
-    const setAvoidSensor = async (range: boolean) => {
+    type Sense = 'range' | 'camera' | 'bench'
+    const sense: Sense = avoid?.params?.use_range_sensor !== 0 ? 'range' : avoid?.params?.mono_bench ? 'bench' : 'camera'
+    const setAvoidSensor = async (to: Sense) => {
         if (!avoid) return
         setSensorBusy(true)
-        try { await setEnabled(avoid.drone_id, avoid.enabled, { use_range_sensor: range ? 1 : 0 }) } finally { setSensorBusy(false) }
+        try {
+            await setEnabled(avoid.drone_id, avoid.enabled,
+                { use_range_sensor: to === 'range' ? 1 : 0, mono_bench: to === 'bench' ? 1 : 0 })
+        } finally { setSensorBusy(false) }
     }
 
     return (
@@ -196,10 +200,13 @@ export function LinkCluster({ avoid }: { avoid: AvoidanceStatus | null }) {
                         {avoid?.enabled && (
                             <>
                                 <Section title="AVOIDANCE SENSES WITH" action={sensorBusy ? <Loader2 size={11} className="animate-spin" /> : undefined} />
-                                <Item active={useRange} label="Depth / range sensor when present"
-                                    sub="the aircraft's own range data wins (default)" onClick={() => { void setAvoidSensor(true) }} />
-                                <Item active={!useRange} label="This video stream (camera)"
-                                    sub="ignores range data - acts above the camera floor only" onClick={() => { void setAvoidSensor(false) }} />
+                                <Item active={sense === 'range'} label="Depth / range sensor when present"
+                                    sub="the aircraft's own range data wins (default)" onClick={() => { void setAvoidSensor('range') }} />
+                                <Item active={sense === 'camera'} label="This video stream (camera)"
+                                    sub="flight mode: ground-calibrated, acts above 8 m" onClick={() => { void setAvoidSensor('camera') }} />
+                                <Item active={sense === 'bench'} label="Camera bench test (fixed webcam)"
+                                    sub="model metres as-is, camera level ~1 m up - hold things 0.5-3 m away. Not for flight."
+                                    onClick={() => { void setAvoidSensor('bench') }} />
                             </>
                         )}
                     </Menu>

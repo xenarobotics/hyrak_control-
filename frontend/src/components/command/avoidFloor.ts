@@ -8,6 +8,6 @@ export function actingFloorM(a: AvoidanceStatus | null): number | null {
     if (!a || !a.enabled) return null
     const p = a.params
     if (a.sensor_mode === 'range') return p.range_min_alt_m ?? 2
-    if (a.sensor_mode === 'mono') return p.mono_min_alt_m ?? 8
+    if (a.sensor_mode === 'mono') return p.mono_bench ? (p.range_min_alt_m ?? 2) : (p.mono_min_alt_m ?? 8)
     return 3
 }
