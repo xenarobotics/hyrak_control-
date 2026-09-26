@@ -620,6 +620,31 @@ def _maybe_stop(port: int) -> None:
         logger.info(f"Feed reader closed on udp:{port}")
 
 
+def _port_holder(port: int) -> str:
+    """Who holds a UDP port on this machine, in words an operator can act on."""
+    import subprocess
+    try:
+        out = subprocess.run(["ss", "-lunpH", f"sport = :{port}"], capture_output=True,
+                             text=True, timeout=2).stdout
+        import re
+        m = re.search(r'users:\(\("([^"]+)",pid=(\d+)', out)
+        if not m:
+            return "another program"
+        name, pid = m.group(1), m.group(2)
+        try:
+            cmd = open(f"/proc/{pid}/cmdline", "rb").read().replace(b"\0", b" ").decode(errors="replace")
+        except OSError:
+            cmd = ""
+        if name == "ffmpeg" and "/dev/video" in cmd:
+            return ("the desktop app's Native air-unit video bridge (virtual webcam) - "
+                    "Settings > Native air-unit video bridge > Stop")
+        if name.startswith("gst"):
+            return f"a GStreamer viewer ({name}, pid {pid})"
+        return f"{name} (pid {pid})"
+    except Exception:
+        return "another program"
+
+
 async def acquire(port: int, timeout: float = 5.0):
     """A relay-subscribed DECODED track for this port. `timeout` is how long
     to wait for the first frame before raising - the reader itself never
@@ -635,8 +660,8 @@ async def acquire(port: int, timeout: float = 5.0):
         err = r.last_error
         await release(port)
         if "Address already in use" in err or "bind failed" in err:
-            raise RuntimeError(f"udp:{port} is bound by another program on the ground station "
-                               f"(a gst viewer or a measurement tool) - close it, the app must own the port")
+            raise RuntimeError(f"udp:{port} is already in use on the ground station by {_port_holder(port)} "
+                               f"- stop it, the app must own the port")
         raise RuntimeError(f"No video on udp:{port} within {timeout:.0f}s - is the unit transmitting?"
                            + (f" (reader: {err})" if err else ""))
     return sub

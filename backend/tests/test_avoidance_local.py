@@ -336,3 +336,23 @@ async def test_local_executor_enters_offboard_once_streams_then_holds_and_resume
     assert (await executor.apply_local(link, c, Decision("resume", AvoidanceState.NOMINAL, ""), 4))[0]
     assert link.calls == ["offboard", "ned", "ned", "ned", "HOLD", "resume@4"]
     assert not c.intervened
+
+
+def test_waypoint_next_to_an_obstacle_is_reached_not_orbited():
+    """SITL 2026-09-26 17:33: the waypoint sat inside an obstacle's clearance,
+    the planner could never call the way to it clear, and orbited it in
+    Offboard. It must hand back to the mission once it is close enough."""
+    r = _fly([(60.0, 2.5, 1.0)], goal=(60.0, 0.0), max_t=60.0)
+    assert r["reached"], r
+    assert r["events"].count("avoid") <= 2, r        # no take-over / hand-back ping-pong
+
+
+def test_no_immediate_retake_after_a_resume():
+    c, h = _controller(t=50.0)
+    c.grid.pin_disc(12.0, 1.5, 1.0, now=50.0)        # beside the leg, not in the way of a stop
+    c._resumed_at = 50.0
+    c.state = AvoidanceState.NOMINAL
+    d = c.decide_local((40.0, 0.0), 10.0, now=51.0)
+    assert d.action == "clear", d.reason              # cooling down, no real danger
+    d = c.decide_local((40.0, 0.0), 10.0, now=54.0)
+    assert d.action == "avoid"                         # cooldown over, obstacle still on the line

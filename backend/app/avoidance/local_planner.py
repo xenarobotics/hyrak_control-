@@ -170,7 +170,10 @@ def plan(pos_ne: tuple[float, float], alt_m: float, yaw_deg: float,
     else:
         speed *= math.cos(math.radians(err))
     # Arrive at the waypoint, do not overshoot it.
-    speed = min(speed, math.sqrt(2.0 * p.decel_m_s2 * dist_goal))
+    # Arrive, do not overshoot: the braking curve alone still allowed ~2.8 m/s
+    # at 2 m, and with the vehicle's velocity lag that carried it past the
+    # waypoint into a turn-around orbit. Proportional in the last metres.
+    speed = min(speed, math.sqrt(2.0 * p.decel_m_s2 * dist_goal), max(0.5, 0.8 * dist_goal))
     rad = math.radians(chosen)
     return Setpoint(speed * math.cos(rad), speed * math.sin(rad), vd, chosen, speed,
                     chosen, f, ttc, False, reason)

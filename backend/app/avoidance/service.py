@@ -140,6 +140,7 @@ class AvoidanceController:
         self._blocked_since: float | None = None
         self._prev_dir: float | None = None
         self.last_setpoint = None
+        self._resumed_at = -1e9
         self._scans = {"integrated": 0, "dropped_no_pose": 0, "dropped_low": 0,
                        "dropped_mono_overridden": 0}
 
@@ -420,7 +421,25 @@ class AvoidanceController:
         reach = self.params.reaction_distance_m if dist_goal is None else \
             min(self.params.reaction_distance_m, dist_goal)
         threat = ahead_free < reach or (ttc is not None and ttc < self.params.ttc_engage_s)
+        # Real danger, as opposed to "the line to the waypoint passes near
+        # something": closing fast, or almost touching.
+        danger = (ttc is not None and ttc < pp.ttc_brake_s) or ahead_free < 1.5
         near = min(polar) if polar else math.inf
+        # A waypoint counts as reached once the aircraft is within this of it.
+        # Wider when the waypoint itself sits inside an obstacle's clearance:
+        # the planner can never get "clear" to it, and without this it orbited
+        # the waypoint in Offboard indefinitely (SITL 2026-09-26 17:33).
+        accept_m = max(2.5, pp.clearance_m)
+        if goal_ne is not None:
+            gp = self.grid.polar(goal_ne[0], goal_ne[1], pp.clearance_m + 1.0, pp.sector_deg, now,
+                                 min_top_m=pose.alt_m - 1.5)
+            g_near = min(gp) if gp else math.inf
+            if g_near < pp.clearance_m:
+                accept_m = max(accept_m, pp.clearance_m + 1.5)
+        at_goal = dist_goal is not None and dist_goal <= accept_m
+        # Just handed back: give PX4 the leg before taking it again, unless
+        # something is actually about to be hit (the resume/re-engage ping-pong).
+        cooling = (now - self._resumed_at) < 3.0
         near_m = near if math.isfinite(near) else None
         can_steer = goal_ne is not None and bool(self.params.allow_reroute)
 
@@ -433,7 +452,7 @@ class AvoidanceController:
 
         st = self.state
         if st in (AvoidanceState.NOMINAL, AvoidanceState.DISABLED):
-            if not threat:
+            if not threat or at_goal or (cooling and not danger):
                 self._hold_since = None
                 return _d("clear", AvoidanceState.NOMINAL,
                           "path ahead clear" if n_obs == 0 else f"{n_obs} obstacle(s) mapped, none in the way")
@@ -460,10 +479,16 @@ class AvoidanceController:
                     return _d("hold", AvoidanceState.HOLDING, "holding - no free direction")
             else:
                 self._blocked_since = None
+            if at_goal and not danger:
+                self._reset_local()
+                self._resumed_at = now
+                return _d("resume", AvoidanceState.NOMINAL,
+                          f"waypoint reached ({dist_goal:.1f} m) - resuming mission")
             if lp.direct_path_clear(polar, pp, pos, goal_ne) and not threat:
                 self._clear_since = self._clear_since or now
                 if now - self._clear_since >= self.params.handback_clear_s:
                     self._reset_local()
+                    self._resumed_at = now
                     return _d("resume", AvoidanceState.NOMINAL, "way to the waypoint is clear - resuming mission")
             else:
                 self._clear_since = None
@@ -475,6 +500,7 @@ class AvoidanceController:
             if not threat:
                 if goal_ne is not None and self.intervened:
                     self._hold_since = None
+                    self._resumed_at = now
                     return _d("resume", AvoidanceState.NOMINAL, "obstacle gone - resuming mission")
                 self._hold_since = None
                 return _d("clear", AvoidanceState.NOMINAL, "obstacle gone")
