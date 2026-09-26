@@ -180,7 +180,7 @@ export function DeviceSelector() {
                                             color: active ? '#22d3ee' : 'hsl(var(--app-text))',
                                         }}>
                                         <span style={{ width: 6, height: 6, borderRadius: '50%', background: (u.live || u.in_use) ? '#4ade80' : '#8a94a8' }} />
-                                        Unit {u.id}{u.kbps ? <span style={{ color: 'hsl(var(--app-text-muted))' }}>{u.kbps} k</span> : null}
+                                        {u.id === 0 ? 'Sim / 5600' : `Unit ${u.id}`}{u.kbps ? <span style={{ color: 'hsl(var(--app-text-muted))' }}>{u.kbps} k</span> : null}
                                     </button>
                                 )
                             })}

@@ -35,7 +35,10 @@ def _probe(max_units: int) -> list[dict]:
     socks: dict[int, socket.socket] = {}
     stats: dict[int, dict] = {}
     try:
-        for uid in range(1, max_units + 1):
+        # id 0 = udp:5600 itself: the Gazebo sim camera (and a single air unit
+        # on the default port). It was never listed, so the sim feed could not
+        # be picked from the MESH UNITS row at all.
+        for uid in range(0, max_units + 1):
             port = BASE_PORT + uid
             if port in ours:
                 out.append({"id": uid, "port": port, "live": True, "in_use": True,
