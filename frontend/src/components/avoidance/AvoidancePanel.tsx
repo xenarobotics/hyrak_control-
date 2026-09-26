@@ -325,7 +325,7 @@ export function AvoidancePanel() {
                     {events.slice(0, 3).map(e => (
                         <div key={e.id} className="text-[10px] font-mono truncate" title={e.reason}
                             style={{ color: STATE_COLOR[e.state] ?? 'hsl(var(--app-text-muted))' }}>
-                            {(e.t ?? '').slice(11, 19)} {e.action.toUpperCase()} - {e.reason}
+                            {e.t ? new Date(e.t).toLocaleTimeString([], { hour12: false }) : ''} {e.action.toUpperCase()} - {e.reason}
                         </div>
                     ))}
                 </div>
