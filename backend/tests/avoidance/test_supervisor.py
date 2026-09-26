@@ -138,3 +138,27 @@ def test_mission_min_alt_skips_takeoff_and_land():
     from app.telemetry.failsafe_check import mission_min_alt
     wps = [{"type": "takeoff", "altitude": 1.0}, {"altitude": 3.1}, {"alt": 10}, {"type": "land", "altitude": 0}]
     assert mission_min_alt(wps) == 3.1
+
+
+def test_no_hand_back_while_flying_away_from_the_waypoint():
+    """SITL 18:22:00: handed back at 4 m/s AWAY from the waypoint; PX4 braked
+    and turned, the camera swept the pillar again and avoidance re-took."""
+    c, h = _moving(4.0, 0.0, t0=100.0)              # heading north
+    c.state = AvoidanceState.AVOIDING
+    for k in range(30):
+        d = c.decide_local((-40.0, 0.0), 10.0, now=100.8 + k * 0.1)   # waypoint south
+        assert d.action != "resume", d.reason
+
+
+def test_operator_can_make_avoidance_ignore_the_range_sensor():
+    """Webcam trial in SITL: the sim depth camera keeps posting, and range
+    always won, so the chosen camera was never used."""
+    c, _ = _controller(alt=12.0)
+    import time as _t
+    now = _t.monotonic()
+    pose_history.history("sup").add(LAT0, LNG0, 12.0, 0.0, t=now)
+    c.params.use_range_sensor = 0.0
+    assert not c.integrate_scan(_one_hit(), now, "depth")
+    assert c.sensor_mode() != "range"
+    assert c.integrate_scan(_one_hit(), now, "monocular")
+    assert c.sensor_mode() == "mono"

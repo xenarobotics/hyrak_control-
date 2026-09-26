@@ -252,7 +252,7 @@ export default function CommandPage() {
                         className="h-9 px-2.5 rounded-lg border border-white/10 text-[10px] font-mono tracking-widest text-zinc-400"
                         title="Show every mesh unit delivering video">WALL</button>
                 )}
-                {mounted && <LinkCluster />}
+                {mounted && <LinkCluster avoid={avoid} />}
                 <button onClick={toggleDock} title={dockHidden ? 'Show panel (P)' : 'Hide panel (P)'}
                     className="h-9 w-9 rounded-lg border border-white/10 text-zinc-300 flex items-center justify-center">
                     {dockHidden ? <PanelRightOpen size={15} /> : <PanelRightClose size={15} />}

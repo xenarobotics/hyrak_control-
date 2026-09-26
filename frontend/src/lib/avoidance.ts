@@ -22,6 +22,8 @@ export interface AvoidanceParams {
     ttc_engage_s?: number
     mono_min_alt_m?: number
     mono_speed_cap_m_s?: number
+    range_min_alt_m?: number
+    use_range_sensor?: number       // 0 = ignore range scans, sense with the video stream
 }
 
 export interface SensorInfo {

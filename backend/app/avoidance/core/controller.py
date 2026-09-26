@@ -72,6 +72,11 @@ class AvoidanceParams:
     mono_speed_cap_m_s: float = 1.5
     range_min_alt_m: float = 2.0        # a real range sensor may sense lower
     camera_pitch_deg: float = 0.0       # mono camera mount tilt, + = down
+    # Which sensor avoidance senses with. 1 = a range sensor wins whenever it
+    # streams (the default); 0 = ignore range scans and use the video stream
+    # (camera) - e.g. to try a webcam while the sim's depth camera keeps
+    # posting. Set from the Command window's camera menu.
+    use_range_sensor: float = 1.0
 
     # --- legacy path only: keep-out map + mission-upload reroute ------------
     clearance_m: float = 4.0            # keep-out radius padding
@@ -144,7 +149,7 @@ class AvoidanceController:
         self._engage_alt: float | None = None
         self._latched_goal = None
         self._scans = {"integrated": 0, "dropped_no_pose": 0, "dropped_low": 0,
-                       "dropped_mono_overridden": 0}
+                       "dropped_mono_overridden": 0, "dropped_range_off": 0}
 
     # -- ingest -----------------------------------------------------------
     def observe(self, obs: ObstacleObservation) -> None:
@@ -194,6 +199,9 @@ class AvoidanceController:
         from app.avoidance.mapping import pose_history
         now = time.monotonic()
         is_range = source in ("depth", "lidar", "tof", "rangefinder", "injected")
+        if is_range and source != "injected" and not self.params.use_range_sensor:
+            self._scans["dropped_range_off"] = self._scans.get("dropped_range_off", 0) + 1
+            return False                    # operator chose the camera
         if is_range:
             self._range_data_t = now
         elif source == "monocular":
@@ -530,7 +538,13 @@ class AvoidanceController:
                        f"waypoint reached ({dist_goal:.1f} m) - on to the next one")
                 d.advance = True
                 return d
-            if lp.direct_path_clear(polar, pp, pos, goal_ne) and not threat:
+            # Only hand back while heading toward the waypoint (or slow):
+            # handing PX4 an aircraft moving away from its target made it
+            # brake and turn, sweeping the camera across the obstacle it had
+            # just cleared, and avoidance took over again (SITL 18:22:00).
+            closing = (vel[0] * (goal_ne[0] - pos[0]) + vel[1] * (goal_ne[1] - pos[1])) / max(dist_goal or 0.0, 1e-6)
+            heading_home = math.hypot(*vel) < 1.0 or closing > 0.5
+            if lp.direct_path_clear(polar, pp, pos, goal_ne) and not threat and heading_home:
                 self._clear_since = self._clear_since or now
                 if now - self._clear_since >= self.params.handback_clear_s:
                     self._reset_local()

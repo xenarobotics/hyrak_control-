@@ -339,6 +339,69 @@ function ClickHandler({ pinMode, onPin }: { pinMode: boolean; onPin: (lat: numbe
   return null
 }
 
+// ── Live drone marker, smooth like QGC ─────────────────────────────────────
+// Telemetry arrives a few times a second. Rebuilding the icon per sample (the
+// old <Marker icon={makeDroneIcon(heading)}>) replaced its DOM every update and
+// teleported it from point to point. Here the marker is created ONCE and each
+// animation frame moves it along the last two samples, spread over the gap
+// between them, with the heading turning the short way round. It trails the
+// real position by one sample interval (~0.1-0.5 s) in exchange for motion
+// that reads as flight rather than hops.
+
+function SmoothDroneMarker() {
+  const map = useMap()
+  useEffect(() => {
+    const marker = L.marker([0, 0], { icon: makeDroneIcon(0), interactive: false, keyboard: false })
+    let added = false
+    let raf = 0
+    // interpolation state
+    let from = { lat: 0, lng: 0, hdg: 0 }
+    let to = { lat: 0, lng: 0, hdg: 0 }
+    let shown = { lat: 0, lng: 0, hdg: 0 }
+    let t0 = 0, span = 200, lastSample = 0
+
+    const arrow = () => (marker.getElement()?.firstElementChild?.firstElementChild as HTMLElement | null)
+    const frame = () => {
+      raf = requestAnimationFrame(frame)
+      if (!added) return
+      const f = Math.min(1, (performance.now() - t0) / span)
+      const e = f * f * (3 - 2 * f)                 // ease so each segment joins softly
+      const dh = ((to.hdg - from.hdg + 540) % 360) - 180
+      shown = { lat: from.lat + (to.lat - from.lat) * e, lng: from.lng + (to.lng - from.lng) * e, hdg: from.hdg + dh * e }
+      marker.setLatLng([shown.lat, shown.lng])
+      const a = arrow()
+      if (a) a.style.transform = `rotate(${shown.hdg}deg)`
+    }
+    const onSample = (lat: number, lng: number, hdg: number) => {
+      const now = performance.now()
+      if (!added) {
+        from = to = shown = { lat, lng, hdg }
+        marker.setLatLng([lat, lng]).addTo(map)
+        added = true
+      } else {
+        from = shown
+        to = { lat, lng, hdg }
+        // Spread the move over the time since the previous sample, within
+        // limits: a long gap (link hiccup) should not crawl for seconds.
+        span = Math.max(60, Math.min(700, now - lastSample))
+      }
+      t0 = now
+      lastSample = now
+    }
+    const take = (t: ReturnType<typeof useDroneStore.getState>['telemetry']) => {
+      const p = t?.position
+      if (!p || !p.latitude_deg || !p.longitude_deg) return
+      if (p.latitude_deg === to.lat && p.longitude_deg === to.lng && (t!.heading_deg ?? 0) === to.hdg && added) return
+      onSample(p.latitude_deg, p.longitude_deg, t!.heading_deg ?? 0)
+    }
+    take(useDroneStore.getState().telemetry)
+    const unsub = useDroneStore.subscribe(s => take(s.telemetry))
+    raf = requestAnimationFrame(frame)
+    return () => { unsub(); cancelAnimationFrame(raf); marker.remove() }
+  }, [map])
+  return null
+}
+
 // ── Fly to drone position on first telemetry ────────────────────────────────
 
 function DronePositionTracker() {
@@ -583,14 +646,8 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
         <Marker position={[rtlWp.lat, rtlWp.lng]} icon={rtlIcon} />
       )}
 
-      {/* Live drone */}
-      {dronePos && dronePos.latitude_deg !== 0 && (
-        <Marker
-          position={[dronePos.latitude_deg, dronePos.longitude_deg]}
-          icon={makeDroneIcon(telemetry?.heading_deg ?? 0)}
-          interactive={false}
-        />
-      )}
+      {/* Live drone - glides between telemetry samples */}
+      <SmoothDroneMarker />
 
       {/* Survey area polygon while drawing */}
       {surveyMode && surveyPolygon.length >= 2 && (

@@ -2295,6 +2295,7 @@ class TelemetryManager:
         if not self._connected or self._pilot_override_mode is not None:
             return
         self._last_velocity_cmd_t = time.monotonic()
+        self._last_ned_sp = (float(north_m_s), float(east_m_s), float(down_m_s), float(yaw_deg))
         if self._offboard_stale:
             self._offboard_stale = False
         try:
@@ -2319,10 +2320,31 @@ class TelemetryManager:
         and start it."""
         if self._pilot_override_mode is not None:
             return False
+        # Keep streaming the planner's last command until MISSION has taken
+        # over. Going quiet here let the Offboard watchdog brake to zero during
+        # the set-current round trip, so PX4 took over mid-brake: its auto
+        # trajectory starts from our last setpoint (0 m/s) plus the braking
+        # acceleration, integrated that into ~2.5 m/s BACK toward the obstacle,
+        # and avoidance took over again - 5 flips at one pillar (SITL
+        # 2026-09-26 18:21:45-18:22:26).
+        sp = getattr(self, "_last_ned_sp", None)
+        keep: asyncio.Task | None = None
+        if sp is not None and self._offboard_active:
+            async def _keepalive():
+                while True:
+                    await self.send_velocity_ned(*sp)
+                    await asyncio.sleep(0.1)
+            keep = asyncio.create_task(_keepalive())
         try:
-            if item_index is not None and item_index >= 0:
+            # Already the current item (the usual case: avoided mid-leg):
+            # skip the round trip altogether.
+            if item_index is not None and item_index >= 0 \
+                    and item_index != self._snapshot.mission_current_index:
                 await asyncio.wait_for(
                     self._drone.mission.set_current_mission_item(int(item_index)), timeout=3.0)
+            if keep is not None:
+                keep.cancel()
+                keep = None
             self.release_offboard_state()
             await self._drone.mission.start_mission()
             ok = await self._wait_for_mission_mode(timeout=2.0)
@@ -2332,6 +2354,9 @@ class TelemetryManager:
         except Exception as e:
             logger.error(f"Resume mission failed: {e}")
             return False
+        finally:
+            if keep is not None:
+                keep.cancel()
 
     async def send_velocity_command(
         self,
