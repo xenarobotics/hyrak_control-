@@ -17,6 +17,29 @@ cd simulation
 Backend and frontend run as usual (`backend: uv run python -m app.main`,
 `frontend: npm run dev`). The fleet watchdog adopts the sim within ~25 s.
 
+## With a true depth camera (recommended first)
+
+```
+cd simulation
+MODEL=gz_x500_depth ./hyrak_sim.sh start
+```
+
+PX4 spawns `x500_depth` (OAK-D Lite: 73 deg depth camera, 0.2-19.1 m, plus a
+1080p RGB camera). The RGB camera is streamed as the video (640x360 on
+udp:5600, same source as below); `gz_depth_sensor.py` posts the depth to
+`/api/avoidance/auto/depth_scan`, so exactly ONE drone must have avoidance
+enabled. `.logs/depth_sensor.log` shows `depth frames arriving on ...` and a
+`posted=` counter; the AVOIDANCE card shows `SENSOR: depth camera (measured
+range)`. With the depth camera streaming, the mono model is switched off for
+the map. Run this before judging the camera-only path: it separates the loop
+(map, planner, Offboard) from the sensor.
+
+What to expect when it works: in MISSION the card reads NOMINAL; a cylinder
+on the leg turns it AVOIDING (cyan, PX4 switches to OFFBOARD), the aircraft
+turns to face its chosen gap and slides past with ~3 m to spare, then
+MISSION resumes at the same waypoint. `LATENCY_PROBE=true` in `.env` logs
+frame -> OFFBOARD -> motion for each take-over.
+
 ## In the HYRAK app (desktop)
 
 The sim sends MAVLink to udp:14540 (what the desktop's plain "SITL" source

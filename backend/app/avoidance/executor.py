@@ -79,3 +79,60 @@ async def apply(manager, action: str, waypoints: list | None,
         logger.warning(f"Avoidance executor {action} failed: {e}")
         return False, f"error: {e}"
     return False, "noop"
+
+
+async def apply_local(manager, controller, decision, mission_index: int) -> tuple[bool, str]:
+    """Apply a local-planner supervisor Decision (params.local_planner = 1).
+
+      avoid  - Offboard: enter it once, then stream the planner's NED velocity
+               + heading every tick (10 Hz). No mission upload, ever.
+      hold   - HOLD mode (brake), leaving Offboard as our own mode change.
+      resume - back to the mission at the waypoint it was flying to.
+      return - RTL.
+      clear  - nothing: PX4 (or the pilot) is flying.
+    """
+    if manager is None or not getattr(manager, "is_connected", False):
+        return False, "no link"
+    action = decision.action
+    mode = str(getattr(getattr(getattr(manager, "_snapshot", None), "flight_mode", None), "mode", "") or "")
+    try:
+        if action == "avoid":
+            sp = decision.setpoint
+            if sp is None:
+                return False, "no setpoint"
+            # Entered once. Not re-checked against the reported mode: that comes
+            # from a 1 Hz heartbeat and lags the switch, and a departure we did
+            # not ask for is the pilot latch's job, not a reason to re-enter.
+            if not getattr(manager, "_offboard_active", False):
+                if not await manager.start_offboard():
+                    # Refused (pilot latch) or failed: fall back to a brake.
+                    ok = await manager.set_flight_mode("HOLD")
+                    controller.intervened = bool(ok) or controller.intervened
+                    return bool(ok), "offboard refused - holding"
+            await manager.send_velocity_ned(sp.vn, sp.ve, sp.vd, sp.yaw_deg)
+            controller.intervened = True
+            return True, "avoid"
+        if action == "hold":
+            if controller.intervened and mode == "HOLD":
+                return False, "already holding"
+            ok = await manager.set_flight_mode("HOLD")
+            if ok:
+                manager.release_offboard_state()
+                controller.intervened = True
+            return bool(ok), "hold"
+        if action == "return":
+            if mode.upper() in ("RETURN", "RETURN_TO_LAUNCH", "RTL"):
+                return False, "already returning"
+            ok = await manager.set_flight_mode("RETURN")
+            if ok:
+                manager.release_offboard_state()
+            return bool(ok), "return"
+        if action == "resume":
+            ok = await manager.resume_mission_from_offboard(mission_index)
+            if ok:
+                controller.intervened = False
+            return bool(ok), "resumed"
+        return False, "nominal"
+    except Exception as e:
+        logger.warning(f"Avoidance local executor {action} failed: {e}")
+        return False, f"error: {e}"

@@ -16,9 +16,9 @@ from dataclasses import dataclass, field
 # Sensor kinds and their default trust. Monocular is assist-grade on purpose:
 # scale-ambiguous, blind to thin obstacles - it must never outvote a real
 # range sensor.
-SENSOR_KINDS = ("monocular", "tof", "rangefinder", "lidar")
+SENSOR_KINDS = ("monocular", "depth", "tof", "rangefinder", "lidar")
 DEFAULT_CONFIDENCE = {
-    "monocular": 0.4, "tof": 0.85, "rangefinder": 0.8, "lidar": 0.9,
+    "monocular": 0.4, "depth": 0.9, "tof": 0.85, "rangefinder": 0.8, "lidar": 0.9,
 }
 FRESH_S = 3.0  # a sensor silent longer than this reads as NO DATA
 

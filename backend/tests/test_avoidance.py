@@ -238,6 +238,7 @@ def test_static_obstacle_is_confirmed_but_mover_is_not():
 @pytest.mark.asyncio
 async def test_controller_exposes_live_obstacles():
     c = AvoidanceController("d1"); c.set_enabled(True)
+    c.params.local_planner = 0.0                  # legacy keep-out map path
     c.observe(ObstacleObservation(bearing_deg=0, distance_m=8, confidence=0.9))
     await c.decide(Pose(17.6, 78.12, 0), None)   # ingests into the map
     obs = c.obstacles()

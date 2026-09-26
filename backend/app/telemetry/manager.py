@@ -26,6 +26,7 @@ from mavsdk.offboard import (
     OffboardError,
     AttitudeRate,
     VelocityBodyYawspeed,
+    VelocityNedYaw,
 )
 from app.telemetry.calibration import (
     LEVEL_MAX_TILT_DEG, SENSORS, CalibrationSession,
@@ -147,6 +148,11 @@ class TelemetryManager:
         # being asserted: "we asked for a mode change just now, so the next one
         # to arrive is the answer to it and not a pilot."
         self._offboard_release_until: float = 0.0
+        # Called with the snapshot on every attitude/position update, at the
+        # moment it arrives - the avoidance pose history stamps observations
+        # with these (see app/avoidance/pose_history.py).
+        self._pose_listeners: list[Callable] = []
+        self._pose_rates_boosted = False
         # Monotonic time of the last velocity setpoint from the commanding loop.
         # 0.0 = none yet, which the watchdog treats as "not commanding" rather
         # than "stale" - an armed Offboard session that has never been given a
@@ -633,6 +639,7 @@ class TelemetryManager:
                 # (one less stream in mavsdk_server's shared callback queue).
                 self._snapshot.heading_deg = round(att.yaw_deg % 360, 1)
                 self._count("attitude")
+                self._notify_pose()
                 self._emit()
         except asyncio.CancelledError:
             pass
@@ -651,6 +658,7 @@ class TelemetryManager:
                     relative_altitude_m=round(pos.relative_altitude_m, 2),
                 )
                 self._count("position")
+                self._notify_pose()
                 self._emit()
         except asyncio.CancelledError:
             pass
@@ -2181,6 +2189,91 @@ class TelemetryManager:
     # tuned conservatively since it's fighting tracking-loop noise, not a setpoint.
     _ALT_HOLD_KP = 0.6
     _ALT_HOLD_MAX_MS = 1.0
+
+    # ── Avoidance hooks ───────────────────────────────────────────────────
+    def add_pose_listener(self, fn: Callable) -> None:
+        if fn not in self._pose_listeners:
+            self._pose_listeners.append(fn)
+
+    def remove_pose_listener(self, fn: Callable) -> None:
+        if fn in self._pose_listeners:
+            self._pose_listeners.remove(fn)
+
+    def _notify_pose(self) -> None:
+        for fn in list(self._pose_listeners):
+            try:
+                fn(self._snapshot)
+            except Exception as e:
+                logger.debug(f"pose listener failed: {e}")
+
+    async def boost_pose_rates(self, on: bool) -> None:
+        """Avoidance needs pose at 10 Hz+ to place what the camera saw at the
+        moment it saw it; the fleet profile runs position at 1 Hz and
+        attitude at 2 Hz. Raised only while avoidance is enabled for this
+        aircraft, and gentler on a radio link (half-duplex: downlink rate is
+        taken from the command budget)."""
+        if on == self._pose_rates_boosted or not self._drone:
+            return
+        self._pose_rates_boosted = on
+        if not on:
+            await self._set_rates()
+            return
+        radio = (self._link_kind == "radio" or self._address.startswith("serial://"))
+        pos_hz, att_hz = (5.0, 10.0) if radio else (10.0, 20.0)
+        for name, setter, hz in (("position", self._drone.telemetry.set_rate_position, pos_hz),
+                                 ("attitude", self._drone.telemetry.set_rate_attitude_euler, att_hz)):
+            try:
+                await asyncio.wait_for(setter(hz), timeout=2.0)
+            except Exception as e:
+                logger.warning(f"Avoidance pose rate {name} {hz:g} Hz not applied: {e}")
+        logger.info(f"Avoidance pose rates: position {pos_hz:g} Hz, attitude {att_hz:g} Hz"
+                    + (" (radio)" if radio else ""))
+
+    async def send_velocity_ned(self, north_m_s: float, east_m_s: float,
+                                down_m_s: float, yaw_deg: float) -> None:
+        """World-frame velocity + absolute heading setpoint (Offboard) - the
+        avoidance local planner's command. Same pilot latch and watchdog
+        bookkeeping as send_velocity_command."""
+        if not self._connected or self._pilot_override_mode is not None:
+            return
+        self._last_velocity_cmd_t = time.monotonic()
+        if self._offboard_stale:
+            self._offboard_stale = False
+        try:
+            await self._drone.offboard.set_velocity_ned(
+                VelocityNedYaw(float(north_m_s), float(east_m_s), float(down_m_s), float(yaw_deg)))
+        except Exception as e:
+            logger.warning(f"NED velocity command failed: {e}")
+
+    def release_offboard_state(self) -> None:
+        """Forget our Offboard session after leaving it by a mode change of our
+        own (HOLD, MISSION, RTL) rather than stop_offboard()."""
+        self._offboard_active = False
+        self._snapshot.offboard_active = False
+        self._offboard_hold_alt = None
+        self._last_velocity_cmd_t = 0.0
+        self._offboard_stale = False
+
+    @_claims_mode_change
+    async def resume_mission_from_offboard(self, item_index: int | None) -> bool:
+        """Hand the aircraft back to its mission after an avoidance manoeuvre:
+        point the mission at the waypoint it was flying to (not waypoint 0)
+        and start it."""
+        if self._pilot_override_mode is not None:
+            return False
+        try:
+            if item_index is not None and item_index >= 0:
+                await asyncio.wait_for(
+                    self._drone.mission.set_current_mission_item(int(item_index)), timeout=3.0)
+            self.release_offboard_state()
+            await self._drone.mission.start_mission()
+            ok = await self._wait_for_mission_mode(timeout=2.0)
+            if ok:
+                logger.info(f"Avoidance: mission resumed at item {item_index}")
+            return bool(ok)
+        except Exception as e:
+            logger.error(f"Resume mission failed: {e}")
+            return False
 
     async def send_velocity_command(
         self,

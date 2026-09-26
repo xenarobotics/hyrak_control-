@@ -18,6 +18,7 @@ The pilot can always disable or override; this layer only ever proposes.
 """
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -34,6 +35,7 @@ class AvoidanceState(str, Enum):
     HOLDING = "holding"
     REROUTED = "rerouted"
     CLIMBING = "climbing"
+    AVOIDING = "avoiding"     # local planner has the aircraft (Offboard)
     RETURNING = "returning"
     DISABLED = "disabled"
 
@@ -66,6 +68,21 @@ class AvoidanceParams:
     # to the reaction distance). Predict dynamic obstacles this far ahead.
     min_speed_m_s: float = 1.0
     prediction_horizon_s: float = 1.5
+    # --- redesign (docs/AVOIDANCE_ARCHITECTURE_REVIEW.md section 5) --------
+    # 1 = occupancy grid + 10 Hz Offboard local planner (default);
+    # 0 = the legacy keep-out map + mission-upload reroute.
+    local_planner: float = 1.0
+    local_clearance_m: float = 3.0      # body + margin the local planner keeps
+    lookahead_m: float = 18.0
+    ttc_engage_s: float = 4.0           # take control when closing faster than this
+    handback_clear_s: float = 1.5       # direct path free this long -> back to the mission
+    block_hold_s: float = 3.0           # planner boxed in this long -> HOLD
+    # Monocular gates (step D): mono-only flight senses from higher up and
+    # flies slower, until its calibrated error is measured good enough.
+    mono_min_alt_m: float = 8.0
+    mono_speed_cap_m_s: float = 1.5
+    range_min_alt_m: float = 2.0        # a real range sensor can sense lower
+    camera_pitch_deg: float = 0.0       # mono camera mount tilt, + = down
 
 
 @dataclass
@@ -79,6 +96,8 @@ class Decision:
     target_alt_m: float | None = None  # for a climb-over
     obstacle_count: int = 0            # obstacles the map is tracking
     recommended_speed_m_s: float = 0.0  # speed-governor output
+    setpoint: object | None = None      # local planner Setpoint (action "avoid")
+    ttc_s: float | None = None
 
 
 class AvoidanceController:
@@ -108,11 +127,86 @@ class AvoidanceController:
         self._recommended_speed = 0.0
         self._path_invalid = 0   # consecutive ticks the committed path looked blocked
         self._last_goal: tuple[float, float] | None = None  # for the map overlay
+        # Redesign state: occupancy grid (layer 2), local-planner bookkeeping
+        # (layer 3/4) and the mono scale tracker (step D).
+        from app.avoidance.local_map import OccupancyGrid
+        from app.avoidance.mono_calibration import ScaleTracker
+        self.grid = OccupancyGrid()
+        self.mono_scale = ScaleTracker()
+        self._range_data_t = 0.0          # last scan from a real range sensor
+        self._mono_data_t = 0.0
+        self._last_frame_t: float | None = None   # capture time of the newest scan
+        self._clear_since: float | None = None
+        self._blocked_since: float | None = None
+        self._prev_dir: float | None = None
+        self.last_setpoint = None
+        self._scans = {"integrated": 0, "dropped_no_pose": 0, "dropped_low": 0,
+                       "dropped_mono_overridden": 0}
 
     # -- ingest -----------------------------------------------------------
     def observe(self, obs: ObstacleObservation) -> None:
+        """A single body-frame reading (the /observe route, legacy detectors).
+        Goes on the bus (legacy planner, OBSTACLE_DISTANCE status) AND into
+        the occupancy grid as a one-bin scan placed with the pose at the
+        reading's time."""
         self.bus.add(obs)
         sensor_registry.mark_data(self.drone_id, obs.source)
+        from app.avoidance.depth_scan import ScanBin
+        self.integrate_scan([ScanBin(bearing_deg=obs.bearing_deg,
+                                     half_width_deg=max(1.0, obs.half_width_deg),
+                                     hit_m=obs.distance_m, free_m=obs.distance_m,
+                                     top_m=obs.top_m, points=1)],
+                            captured_at=obs.t, source=obs.source,
+                            confidence_scale=max(0.3, min(1.0, obs.confidence / 0.5)),
+                            to_bus=False)
+
+    def sensor_mode(self, now: float | None = None) -> str:
+        """'range' while a real range sensor is streaming, else 'mono' while the
+        camera is, else 'none'. A range sensor always wins: mono is dropped
+        from the map while one is fresh (it would only add its errors)."""
+        now = now if now is not None else time.monotonic()
+        if now - self._range_data_t <= 1.5:
+            return "range"
+        if now - self._mono_data_t <= 3.0:
+            return "mono"
+        return "none"
+
+    def integrate_scan(self, scan: list, captured_at: float, source: str,
+                       confidence_scale: float = 1.0, to_bus: bool = True) -> bool:
+        """Place one scan in the occupancy grid ONCE, with the pose at the
+        frame's capture time (step B). Returns False if it was dropped."""
+        from app.avoidance import pose_history
+        now = time.monotonic()
+        is_range = source in ("depth", "lidar", "tof", "rangefinder", "injected")
+        if is_range:
+            self._range_data_t = now
+        elif source == "monocular":
+            self._mono_data_t = now
+            if now - self._range_data_t <= 1.5:
+                self._scans["dropped_mono_overridden"] += 1
+                return False
+        sensor_registry.mark_data(self.drone_id, source)
+        pose = pose_history.history(self.drone_id).at(captured_at)
+        if pose is None:
+            self._scans["dropped_no_pose"] += 1
+            return False
+        min_alt = self.params.range_min_alt_m if is_range else self.params.mono_min_alt_m
+        if pose.alt_m < min_alt:
+            self._scans["dropped_low"] += 1
+            return False
+        self.grid.integrate(pose.north_m, pose.east_m, pose.yaw_deg, scan, source,
+                            now=captured_at, confidence_scale=confidence_scale)
+        self._last_frame_t = captured_at
+        self._scans["integrated"] += 1
+        if to_bus:
+            for b in scan:
+                if b.hit_m is not None:
+                    self.bus.add(ObstacleObservation(
+                        bearing_deg=b.bearing_deg, distance_m=b.hit_m,
+                        half_width_deg=b.half_width_deg,
+                        confidence=0.9 if is_range else 0.45, source=source,
+                        top_m=b.top_m, t=captured_at))
+        return True
 
     def set_enabled(self, on: bool) -> None:
         self.enabled = on
@@ -123,6 +217,8 @@ class AvoidanceController:
             self.intervened = False
             self.bus.clear()
             self.omap.clear()
+            self.grid.clear()
+            self._reset_local()
             self._committed_path = None
             self._committed_goal = None
             self._path_invalid = 0
@@ -137,6 +233,8 @@ class AvoidanceController:
         aircraft took off and landed again 5 s later."""
         self.bus.clear()
         self.omap.clear()
+        self.grid.clear()
+        self._reset_local()
         self._hold_since = None
         self.intervened = False
         self._committed_path = None
@@ -260,6 +358,155 @@ class AvoidanceController:
             else "holding - no lateral or vertical path" if goal
             else "holding - manual flight, no route to replan"))
 
+    # -- redesign: supervisor over the local planner (layer 4) -------------
+    def _reset_local(self) -> None:
+        self._clear_since = None
+        self._blocked_since = None
+        self._prev_dir = None
+        self.last_setpoint = None
+
+    def planner_params(self, now: float | None = None):
+        from app.avoidance.local_planner import PlannerParams
+        p = self.params
+        cruise = p.speed_cap_m_s
+        if self.sensor_mode(now) == "mono":
+            cruise = min(cruise, p.mono_speed_cap_m_s)
+        return PlannerParams(cruise_m_s=cruise, clearance_m=p.local_clearance_m,
+                             lookahead_m=p.lookahead_m, ttc_slow_s=max(2.5, p.ttc_engage_s))
+
+    def decide_local(self, goal_ne: tuple[float, float] | None, goal_alt_m: float | None,
+                     now: float | None = None) -> Decision:
+        """One supervisor tick against the occupancy grid. Returns a Decision
+        whose action is one of:
+          clear  - nothing to do (PX4 flies its mission / the pilot flies)
+          avoid  - the local planner steers; decision.setpoint is the command
+          hold   - brake and hold (no free direction, no route, or reroute off)
+          resume - hand the aircraft back to its mission at the current item
+          return - held too long with no way through
+        """
+        from app.avoidance import pose_history
+        from app.avoidance import local_planner as lp
+        now = now if now is not None else time.monotonic()
+        if not self.enabled:
+            return self._settle(Decision("clear", AvoidanceState.DISABLED, "avoidance off"))
+        hist = pose_history.history(self.drone_id)
+        pose = hist.latest()
+        if pose is None:
+            return self._settle(Decision("clear", AvoidanceState.NOMINAL, "no pose yet"))
+        if goal_ne is not None and hist.origin is not None:
+            self._last_goal = hist.to_latlng(*goal_ne)
+        pp = self.planner_params(now)
+        pos = (pose.north_m, pose.east_m)
+        vel = hist.velocity_ne()
+        alt_goal = goal_alt_m if goal_alt_m is not None else pose.alt_m
+        # Obstacles whose known top is well below us are flown over, not around.
+        polar = self.grid.polar(pos[0], pos[1], pp.lookahead_m, pp.sector_deg, now,
+                                min_top_m=pose.alt_m - 1.5)
+        free = lp.enlarged_free(polar, pp.sector_deg, pp.clearance_m)
+        ttc = lp.ttc_along(polar, pp.sector_deg, vel[0], vel[1], pp.clearance_m * 0.5)
+        n_obs = len(self.grid.clusters(now)) if self.state != AvoidanceState.NOMINAL or \
+            any(math.isfinite(d) for d in polar) else 0
+
+        # Direction of travel: the goal on a mission, else motion, else the nose.
+        if goal_ne is not None:
+            travel = math.degrees(math.atan2(goal_ne[1] - pos[1], goal_ne[0] - pos[0])) % 360.0
+            dist_goal = math.hypot(goal_ne[0] - pos[0], goal_ne[1] - pos[1])
+        elif math.hypot(*vel) > 0.5:
+            travel, dist_goal = math.degrees(math.atan2(vel[1], vel[0])) % 360.0, None
+        else:
+            travel, dist_goal = pose.yaw_deg, None
+        s_idx = int(travel // pp.sector_deg) % len(free)
+        ahead_free = free[s_idx]
+        reach = self.params.reaction_distance_m if dist_goal is None else \
+            min(self.params.reaction_distance_m, dist_goal)
+        threat = ahead_free < reach or (ttc is not None and ttc < self.params.ttc_engage_s)
+        near = min(polar) if polar else math.inf
+        near_m = near if math.isfinite(near) else None
+        can_steer = goal_ne is not None and bool(self.params.allow_reroute)
+
+        def _d(action, state, reason, sp=None):
+            d = Decision(action, state, reason, fused_distance_m=near_m,
+                         obstacle_count=n_obs)
+            d.setpoint = sp
+            d.ttc_s = ttc
+            return self._settle(d)
+
+        st = self.state
+        if st in (AvoidanceState.NOMINAL, AvoidanceState.DISABLED):
+            if not threat:
+                self._hold_since = None
+                return _d("clear", AvoidanceState.NOMINAL,
+                          "path ahead clear" if n_obs == 0 else f"{n_obs} obstacle(s) mapped, none in the way")
+            if not can_steer:
+                self._hold_since = now
+                return _d("hold", AvoidanceState.HOLDING,
+                          "holding - rerouting disabled by operator" if goal_ne is not None
+                          else "holding - manual flight, obstacle ahead")
+            self._reset_local()
+            st = AvoidanceState.AVOIDING      # fall through: plan this tick
+
+        if st == AvoidanceState.AVOIDING and goal_ne is None:
+            self._hold_since = now
+            return _d("hold", AvoidanceState.HOLDING, "holding - lost the route while avoiding")
+        if st == AvoidanceState.AVOIDING:
+            sp = lp.plan(pos, pose.alt_m, pose.yaw_deg, vel, goal_ne, alt_goal, polar, pp, self._prev_dir)
+            self.last_setpoint = sp
+            if sp.chosen_deg is not None:
+                self._prev_dir = sp.chosen_deg
+            if sp.blocked:
+                self._blocked_since = self._blocked_since or now
+                if now - self._blocked_since >= self.params.block_hold_s:
+                    self._hold_since = now
+                    return _d("hold", AvoidanceState.HOLDING, "holding - no free direction")
+            else:
+                self._blocked_since = None
+            if lp.direct_path_clear(polar, pp, pos, goal_ne) and not threat:
+                self._clear_since = self._clear_since or now
+                if now - self._clear_since >= self.params.handback_clear_s:
+                    self._reset_local()
+                    return _d("resume", AvoidanceState.NOMINAL, "way to the waypoint is clear - resuming mission")
+            else:
+                self._clear_since = None
+            return _d("avoid", AvoidanceState.AVOIDING, sp.reason, sp)
+
+        if st == AvoidanceState.HOLDING:
+            if self._hold_since is None:
+                self._hold_since = now
+            if not threat:
+                if goal_ne is not None and self.intervened:
+                    self._hold_since = None
+                    return _d("resume", AvoidanceState.NOMINAL, "obstacle gone - resuming mission")
+                self._hold_since = None
+                return _d("clear", AvoidanceState.NOMINAL, "obstacle gone")
+            if can_steer:
+                sp = lp.plan(pos, pose.alt_m, pose.yaw_deg, vel, goal_ne, alt_goal, polar, pp, self._prev_dir)
+                if not sp.blocked and sp.speed > 0.2:
+                    self._blocked_since = None
+                    self._hold_since = None
+                    return _d("avoid", AvoidanceState.AVOIDING, "a way around opened - steering", sp)
+            held = now - self._hold_since
+            if self.params.allow_return and held >= self.params.hold_to_return_s:
+                return _d("return", AvoidanceState.RETURNING, f"no way through for {held:.0f}s - returning")
+            return _d("hold", AvoidanceState.HOLDING, self._last_reason or "holding")
+
+        if st == AvoidanceState.RETURNING:
+            return _d("clear", AvoidanceState.RETURNING, "returning home")
+        return _d("clear", st, self._last_reason)
+
+    def local_obstacles(self, now: float | None = None) -> list[dict]:
+        """Occupied clusters as lat/lng keep-outs - the map overlay."""
+        from app.avoidance import pose_history
+        h = pose_history.history(self.drone_id)
+        if h.origin is None:
+            return []
+        out = []
+        for c in self.grid.clusters(now):
+            lat, lng = h.to_latlng(c["north_m"], c["east_m"])
+            out.append({"lat": lat, "lng": lng, "radius_m": round(c["radius_m"], 1),
+                        "top_m": round(c["top_m"], 1), "speed_mps": 0.0,
+                        "is_static": c["cells"] >= 3, "hits": c["cells"]})
+        return out
+
     def _safe_speed(self, clearance_m: float) -> float:
         """Speed-governor: scale commanded speed from min_speed (obstacle at the
         clearance ring) up to speed_cap (clear out to the reaction distance).
@@ -369,6 +616,8 @@ class AvoidanceController:
     def obstacles(self, now: float | None = None) -> list[dict]:
         """The live map obstacles - for the Mission-tab overlay."""
         now = now if now is not None else time.monotonic()
+        if self.params.local_planner:
+            return self.local_obstacles(now)
         return [{"lat": o.lat, "lng": o.lng, "radius_m": round(o.radius_m, 1),
                  "top_m": round(o.top_m, 1), "speed_mps": round(o.speed_mps(), 1),
                  "is_static": o.is_static(), "hits": o.hits}
@@ -385,7 +634,8 @@ class AvoidanceController:
             "reason": self._last_reason,
             "params": self.params.__dict__,
             "sensors": sensor_registry.inventory(self.drone_id, now),
-            "obstacle_count": len(self.omap.active(now)),
+            "obstacle_count": len(self.grid.clusters(now)) if self.params.local_planner
+                              else len(self.omap.active(now)),
             "recommended_speed_m_s": round(self._recommended_speed, 2),
             "committed_path": self._committed_path is not None,
             # Where the loop believes the aircraft is going (None = it will
@@ -393,7 +643,23 @@ class AvoidanceController:
             "goal": list(self._last_goal) if self._last_goal else None,
             "obstacle_distance_cm": self.bus.obstacle_distance_cm(
                 now, self.params.min_confidence),
+            "sensor_mode": self.sensor_mode(now),
+            "scans": dict(self._scans),
+            "mono_calibration": self.mono_scale.status(),
+            "pose_rate_hz": round(_pose_rate(self.drone_id), 1),
+            "planner": None if self.last_setpoint is None else {
+                "reason": self.last_setpoint.reason,
+                "speed_m_s": round(self.last_setpoint.speed, 2),
+                "free_m": round(self.last_setpoint.free_m, 1) if math.isfinite(self.last_setpoint.free_m) else None,
+                "ttc_s": round(self.last_setpoint.ttc_s, 1) if self.last_setpoint.ttc_s else None,
+                "heading_deg": round(self.last_setpoint.chosen_deg, 0) if self.last_setpoint.chosen_deg is not None else None,
+            },
         }
+
+
+def _pose_rate(drone_id: str) -> float:
+    from app.avoidance import pose_history
+    return pose_history.history(drone_id).rate_hz()
 
 
 # -- registry -------------------------------------------------------------

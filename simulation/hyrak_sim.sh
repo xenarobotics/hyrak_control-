@@ -32,7 +32,19 @@ LOGS="$HERE/.logs"; PIDS="$HERE/.pids"
 WORLD="${WORLD:-hyrak_obstacles}"
 MODEL="${MODEL:-gz_x500_mono_cam}"
 HOME_LAT="${HOME_LAT:-17.596569}"; HOME_LON="${HOME_LON:-78.125203}"
-CAM_TOPIC="/world/$WORLD/model/x500_mono_cam_1/link/camera_link/sensor/camera/image"
+# MODEL=gz_x500_depth (step A of docs/AVOIDANCE_ARCHITECTURE_REVIEW.md): PX4's
+# x500 with an OAK-D Lite - a TRUE depth camera (73 deg, 19 m) that
+# gz_depth_sensor.py feeds to avoidance as a range sensor, plus its 1080p RGB
+# camera streamed (scaled to 640x360) as the video feed.
+if [ "$MODEL" = "gz_x500_depth" ]; then
+    AUTOSTART=4002
+    CAM_TOPIC="/world/$WORLD/model/x500_depth_1/link/camera_link/sensor/IMX214/image"
+    CAM_IN=1920x1080; CAM_OUT=640x360
+else
+    AUTOSTART=4001
+    CAM_TOPIC="/world/$WORLD/model/x500_mono_cam_1/link/camera_link/sensor/camera/image"
+    CAM_IN=640x480; CAM_OUT=""
+fi
 
 export GZ_IP=127.0.0.1 GZ_PARTITION=hyrak_demo DISPLAY="${DISPLAY:-:1}"
 
@@ -56,7 +68,7 @@ start() {
     _spawn gz_server gz sim --render-engine ogre2 --verbose=1 -r -s "$PX4_GZ_WORLDS/$WORLD.sdf"
     sleep 6
     [ -z "${HEADLESS:-}" ] && _spawn gz_gui gz sim --render-engine ogre2 -g
-    _spawn px4 env PX4_SYS_AUTOSTART=4001 PX4_SIM_MODEL="$MODEL" PX4_GZ_WORLD="$WORLD" \
+    _spawn px4 env PX4_SYS_AUTOSTART="$AUTOSTART" PX4_SIM_MODEL="$MODEL" PX4_GZ_WORLD="$WORLD" \
         PX4_HOME_LAT="$HOME_LAT" PX4_HOME_LON="$HOME_LON" PX4_HOME_ALT=0 \
         PX4_PARAM_RTL_RETURN_ALT=10 ../bin/px4 -i 1 -d
     for _ in $(seq 1 40); do grep -q "Ready for takeoff" "$LOGS/px4.log" 2>/dev/null && break; sleep 1; done
@@ -76,12 +88,15 @@ start() {
     # to the sender (14601).
     ../bin/px4-mavlink --instance 1 start -x -u 14601 -o 14600 -t 127.0.0.1 -r 4000000 -f \
         > "$LOGS/px4_mavlink_session.log" 2>&1
-    _spawn cam_bridge python3 "$HERE/gz_cam_bridge.py" "$CAM_TOPIC" 640x480 10 rtp://127.0.0.1:5600
+    _spawn cam_bridge python3 "$HERE/gz_cam_bridge.py" "$CAM_TOPIC" "$CAM_IN" 10 rtp://127.0.0.1:5600 $CAM_OUT
+    if [ "$MODEL" = "gz_x500_depth" ]; then
+        _spawn depth_sensor env WORLD="$WORLD" python3 "$HERE/gz_depth_sensor.py" auto
+    fi
     status
 }
 
 stop() {
-    for n in cam_bridge px4 gz_gui gz_server; do
+    for n in depth_sensor cam_bridge px4 gz_gui gz_server; do
         if _alive "$n"; then kill "$(cat "$PIDS/$n")" 2>/dev/null; echo "stopped $n"; fi
         rm -f "$PIDS/$n"
     done
@@ -90,13 +105,13 @@ stop() {
     # Sweep OUR leftovers only: gz servers running our world file, PX4
     # instance 1, our bridge. A restart once left the previous gz server
     # alive (stale PID file) and PX4 saw sim time jump backwards.
-    for pid in $(ps -eo pid,args | awk -v w="$WORLD.sdf" '!/bash|awk/ && (index($0, w) && /gz sim/ || /bin\/px4 -i 1 -d/ || /gz_cam_bridge/) {print $1}'); do
+    for pid in $(ps -eo pid,args | awk -v w="$WORLD.sdf" '!/bash|awk/ && (index($0, w) && /gz sim/ || /bin\/px4 -i 1 -d/ || /gz_cam_bridge/ || /gz_depth_sensor/) {print $1}'); do
         kill -9 "$pid" 2>/dev/null && echo "swept leftover $pid"
     done
 }
 
 status() {
-    for n in gz_server gz_gui px4 cam_bridge; do
+    for n in gz_server gz_gui px4 cam_bridge depth_sensor; do
         if _alive "$n"; then
             printf "%-10s up   pid %s  rss %s MB\n" "$n" "$(cat "$PIDS/$n")" "$(( $(ps -o rss= -p "$(cat "$PIDS/$n")") / 1024 ))"
         else printf "%-10s down\n" "$n"; fi
@@ -104,6 +119,7 @@ status() {
     grep -q "Ready for takeoff" "$LOGS/px4.log" 2>/dev/null && echo "PX4: Ready for takeoff (instance 1, fleet adopts udp:14541)"
     echo "video:     H.265 RTP -> 127.0.0.1:5600  (CAMERA -> 'Air unit (UDP) - set in Settings', port 5600)"
     echo "telemetry: TELEMETRY -> 'SITL' (desktop binds udp:14540)  or  'Gazebo sim on server' (udp:14600)"
+    [ -f "$PIDS/depth_sensor" ] && echo "depth:     gz depth camera -> /api/avoidance/auto/depth_scan (log: $LOGS/depth_sensor.log)"
 }
 
 case "${1:-}" in

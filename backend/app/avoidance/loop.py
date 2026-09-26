@@ -215,13 +215,151 @@ async def _sync_hazards(c, pose, now: float) -> None:
                                      source="avoidance")
 
 
+async def _legacy_step(c, manager, pose, in_air, mode, now) -> None:
+    """The pre-redesign path (params.local_planner = 0): keep-out map +
+    mission-upload reroute. Unchanged, kept as a selectable fallback."""
+    import time as _t
+    if pose is not None:
+        try:
+            await _sync_hazards(c, pose, now)
+        except Exception as e:
+            logger.debug(f"hazard sync failed: {e}")
+    # Only pursue a goal while the aircraft is actually flying its route.
+    # Returning home / landing means the route is finished - see
+    # _NO_GOAL_MODES for the ping-pong this prevents.
+    pursuing = in_air and mode.upper() not in _NO_GOAL_MODES
+    goal, remaining = (await _goal_for(c.drone_id, manager)) if pursuing else (None, [])
+
+    prev_state = c.state
+    # Reroute at the drone's CURRENT altitude so a lateral dodge stays level
+    # (a constant-altitude mission must not climb just to go around).
+    cruise = pose.alt_m if (pose is not None and pose.alt_m > 1.0) else 10.0
+    decision = await c.decide(pose, goal, cruise_alt_m=cruise)
+    decided_t = _t.monotonic()
+
+    # Command the aircraft only when armed AND airborne. Advisory (unarmed)
+    # detects and logs but never touches control.
+    # Command only once clear of the pad: PX4 flags in-air at 0.2 m, and a
+    # hold/return in the first metres of a climb is a landing.
+    can_act = (c.armed and in_air and manager is not None
+               and pose is not None and pose.alt_m >= MIN_SENSE_ALT_M)
+    if can_act:
+        wps = decision.waypoints
+        if decision.action == "reroute" and wps and remaining:
+            # Rejoin the mission: detour ends at the current waypoint;
+            # the legs after it follow, so the aircraft finishes the
+            # survey instead of stopping at the first dodge.
+            wps = list(wps) + remaining
+            _session_missions[c.drone_id] = wps      # indices now refer to THIS mission
+            _fc_mission.pop(c.drone_id, None)
+        from app import latency_probe
+        probe = latency_probe.AvoidanceProbe(
+            manager, decision.action, _last_frame_t.get(c.drone_id), decided_t)
+        did, note = await executor.apply(
+            manager, decision.action, wps, c.intervened)
+        probe.done(did, note)
+        if decision.action in ("hold", "reroute", "climb", "return") and did:
+            c.intervened = True
+        elif decision.action == "clear" and c.intervened and did:
+            c.intervened = False
+
+    # Speed governor: the decision core recommends a speed (cap when clear,
+    # down to min_speed at the clearance ring). Nobody applied it before,
+    # so the mission flew at PX4's cruise speed regardless - at 4.9 m/s a
+    # camera that judges ~25 m leaves ~2 s to react. Applied only while
+    # armed, airborne and on a route; re-sent when it changes by > 0.3 m/s.
+    if c.armed and in_air and pursuing and manager is not None:
+        # Cap at cruise too (clear -> the cap): the governor used to speak
+        # only once a threat existed, so the aircraft met every obstacle at
+        # PX4's full cruise speed.
+        spd = float(decision.recommended_speed_m_s or 0.0) or float(c.params.speed_cap_m_s)
+        last = _last_speed.get(c.drone_id)
+        if spd > 0.0 and (last is None or abs(spd - last) > 0.3) and \
+                now - _last_speed_t.get(c.drone_id, 0.0) > 1.0:
+            if await manager.set_speed(spd):
+                _last_speed[c.drone_id] = spd
+                _last_speed_t[c.drone_id] = now
+                logger.info(f"Avoidance speed for {c.drone_id[:8]}: {spd:.1f} m/s")
+    elif not in_air:
+        _last_speed.pop(c.drone_id, None)
+
+    if decision.state != prev_state and decision.action != "clear":
+        await _record_event(c, decision)
+
+
+INTERVAL_S_LOCAL = 0.1       # 10 Hz: the local planner's setpoint rate
+_last_legacy_t: dict[str, float] = {}
+_listeners: dict[str, tuple] = {}     # drone_id -> (manager, fn)
+_prev_action: dict[str, str] = {}
+
+
+def _ensure_pose_feed(c, manager) -> None:
+    """Register this controller's pose history on its telemetry link (every
+    attitude/position update, stamped on arrival) and raise the link's pose
+    rates. Re-registers when the link object changes (reconnect)."""
+    from app.avoidance import pose_history
+    cur = _listeners.get(c.drone_id)
+    if cur is not None and cur[0] is manager:
+        return
+    if cur is not None:
+        try:
+            cur[0].remove_pose_listener(cur[1])
+        except Exception:
+            pass
+    h = pose_history.history(c.drone_id)
+
+    def _on_pose(snap, _h=h):
+        pos, att = snap.position, snap.attitude
+        if pos.latitude_deg or pos.longitude_deg:
+            _h.add(pos.latitude_deg, pos.longitude_deg, pos.relative_altitude_m,
+                   snap.heading_deg, att.roll_deg, att.pitch_deg)
+
+    if hasattr(manager, "add_pose_listener"):
+        manager.add_pose_listener(_on_pose)
+        _listeners[c.drone_id] = (manager, _on_pose)
+        _on_pose(manager._snapshot)
+        if hasattr(manager, "boost_pose_rates"):
+            asyncio.create_task(manager.boost_pose_rates(True))
+
+
+def _release_pose_feed(drone_id: str) -> None:
+    cur = _listeners.pop(drone_id, None)
+    if cur is not None:
+        try:
+            cur[0].remove_pose_listener(cur[1])
+            asyncio.create_task(cur[0].boost_pose_rates(False))
+        except Exception:
+            pass
+
+
+def _goal_alt(drone_id: str, manager) -> float | None:
+    items = _mission_items(drone_id, manager) or []
+    idx = _current_index(drone_id)
+    for k in range(max(0, idx), len(items)):
+        w = items[k]
+        if w.get("lat") is None or w.get("type") == "takeoff":
+            continue
+        for key in ("altitude", "alt", "relative_altitude_m"):
+            if w.get(key) is not None:
+                try:
+                    return float(w[key])
+                except (TypeError, ValueError):
+                    pass
+        return None
+    return None
+
+
 async def _tick() -> None:
     import time as _t
     now = _t.monotonic()
+    for did in [d for d in _listeners if not (avoidance.has_controller(d) and avoidance.controller(d).enabled)]:
+        _release_pose_feed(did)
     for c in list(avoidance._controllers.values()):
         if not c.enabled:
             continue
         manager, pose, in_air, mode = _resolve_link(c.drone_id)
+        if manager is not None:
+            _ensure_pose_feed(c, manager)
         # On the ground: wipe the previous flight's map, hold timer and detour
         # (once per landing), and never command anything.
         if not in_air:
@@ -230,6 +368,7 @@ async def _tick() -> None:
                 _last_speed.pop(c.drone_id, None)
                 _session_missions.pop(c.drone_id, None)   # next flight re-reads its mission
                 _fc_mission.pop(c.drone_id, None)
+                _prev_action.pop(c.drone_id, None)
                 logger.info(f"Avoidance {c.drone_id[:8]}: landed - flight state reset")
             # Nothing to decide on the ground: a decision here would only
             # carry a stale state into the next takeoff.
@@ -237,72 +376,86 @@ async def _tick() -> None:
                 c.reset_flight_state()
             continue
         _airborne[c.drone_id] = True
-        if pose is not None:
-            try:
-                await _sync_hazards(c, pose, now)
-            except Exception as e:
-                logger.debug(f"hazard sync failed: {e}")
-        # Only pursue a goal while the aircraft is actually flying its route.
-        # Returning home / landing means the route is finished - see
-        # _NO_GOAL_MODES for the ping-pong this prevents.
-        pursuing = in_air and mode.upper() not in _NO_GOAL_MODES
-        goal, remaining = (await _goal_for(c.drone_id, manager)) if pursuing else (None, [])
+        if not c.params.local_planner:
+            if now - _last_legacy_t.get(c.drone_id, 0.0) >= INTERVAL_S:
+                _last_legacy_t[c.drone_id] = now
+                await _legacy_step(c, manager, pose, in_air, mode, now)
+            continue
+        await _local_step(c, manager, pose, in_air, mode, now)
 
-        prev_state = c.state
-        # Reroute at the drone's CURRENT altitude so a lateral dodge stays level
-        # (a constant-altitude mission must not climb just to go around).
-        cruise = pose.alt_m if (pose is not None and pose.alt_m > 1.0) else 10.0
-        decision = await c.decide(pose, goal, cruise_alt_m=cruise)
-        decided_t = _t.monotonic()
 
-        # Command the aircraft only when armed AND airborne. Advisory (unarmed)
-        # detects and logs but never touches control.
-        # Command only once clear of the pad: PX4 flags in-air at 0.2 m, and a
-        # hold/return in the first metres of a climb is a landing.
-        can_act = (c.armed and in_air and manager is not None
-                   and pose is not None and pose.alt_m >= MIN_SENSE_ALT_M)
-        if can_act:
-            wps = decision.waypoints
-            if decision.action == "reroute" and wps and remaining:
-                # Rejoin the mission: detour ends at the current waypoint;
-                # the legs after it follow, so the aircraft finishes the
-                # survey instead of stopping at the first dodge.
-                wps = list(wps) + remaining
-                _session_missions[c.drone_id] = wps      # indices now refer to THIS mission
-                _fc_mission.pop(c.drone_id, None)
-            from app import latency_probe
-            probe = latency_probe.AvoidanceProbe(
-                manager, decision.action, _last_frame_t.get(c.drone_id), decided_t)
-            did, note = await executor.apply(
-                manager, decision.action, wps, c.intervened)
+async def _local_step(c, manager, pose, in_air, mode, now) -> None:
+    """Redesigned path: occupancy grid -> supervisor -> Offboard local planner."""
+    from app.avoidance import pose_history
+    if pose is not None and now - _last_seed.get(c.drone_id, 0.0) > 3.0:
+        try:
+            await _seed_hazards_grid(c, pose, now)
+        except Exception as e:
+            logger.debug(f"hazard seed failed: {e}")
+    pursuing = in_air and mode.upper() not in _NO_GOAL_MODES
+    goal, _remaining = (await _goal_for(c.drone_id, manager)) if pursuing else (None, [])
+    hist = pose_history.history(c.drone_id)
+    goal_ne = hist.to_ne(*goal) if (goal is not None and hist.origin is not None) else None
+    goal_alt = _goal_alt(c.drone_id, manager) if goal is not None else None
+
+    prev_state = c.state
+    decision = c.decide_local(goal_ne, goal_alt, now)
+
+    pilot = getattr(manager, "_pilot_override_mode", None) if manager is not None else None
+    can_act = (c.armed and in_air and manager is not None and pose is not None
+               and pose.alt_m >= MIN_SENSE_ALT_M and pilot is None)
+    if pilot is not None and c.state in (avoidance.AvoidanceState.AVOIDING,
+                                         avoidance.AvoidanceState.HOLDING):
+        # The pilot took the aircraft: avoidance stands down, it never fights a human.
+        c.intervened = False
+        c._reset_local()
+        c.state = avoidance.AvoidanceState.NOMINAL
+        c._last_reason = f"pilot has the aircraft ({pilot})"
+    elif can_act:
+        from app import latency_probe
+        first = decision.action != _prev_action.get(c.drone_id)
+        probe = latency_probe.AvoidanceProbe(
+            manager, decision.action, getattr(c, "_last_frame_t", None), now) if first else None
+        did, note = await executor.apply_local(manager, c, decision, _current_index(c.drone_id))
+        if probe is not None:
             probe.done(did, note)
-            if decision.action in ("hold", "reroute", "climb", "return") and did:
-                c.intervened = True
-            elif decision.action == "clear" and c.intervened and did:
-                c.intervened = False
+        _prev_action[c.drone_id] = decision.action
 
-        # Speed governor: the decision core recommends a speed (cap when clear,
-        # down to min_speed at the clearance ring). Nobody applied it before,
-        # so the mission flew at PX4's cruise speed regardless - at 4.9 m/s a
-        # camera that judges ~25 m leaves ~2 s to react. Applied only while
-        # armed, airborne and on a route; re-sent when it changes by > 0.3 m/s.
-        if c.armed and in_air and pursuing and manager is not None:
-            # Cap at cruise too (clear -> the cap): the governor used to speak
-            # only once a threat existed, so the aircraft met every obstacle at
-            # PX4's full cruise speed.
-            spd = float(decision.recommended_speed_m_s or 0.0) or float(c.params.speed_cap_m_s)
-            last = _last_speed.get(c.drone_id)
-            if spd > 0.0 and (last is None or abs(spd - last) > 0.3) and \
-                    now - _last_speed_t.get(c.drone_id, 0.0) > 1.0:
-                if await manager.set_speed(spd):
-                    _last_speed[c.drone_id] = spd
-                    _last_speed_t[c.drone_id] = now
-                    logger.info(f"Avoidance speed for {c.drone_id[:8]}: {spd:.1f} m/s")
-        elif not in_air:
-            _last_speed.pop(c.drone_id, None)
+    # Speed governor while PX4 flies the mission (not while we steer).
+    if c.armed and in_air and pursuing and manager is not None and \
+            c.state == avoidance.AvoidanceState.NOMINAL:
+        spd = float(c.params.speed_cap_m_s)
+        if c.sensor_mode(now) == "mono":
+            spd = min(spd, float(c.params.mono_speed_cap_m_s))
+        last = _last_speed.get(c.drone_id)
+        if (last is None or abs(spd - last) > 0.3) and now - _last_speed_t.get(c.drone_id, 0.0) > 1.0:
+            if await manager.set_speed(spd):
+                _last_speed[c.drone_id] = spd
+                _last_speed_t[c.drone_id] = now
+                logger.info(f"Avoidance speed for {c.drone_id[:8]}: {spd:.1f} m/s ({c.sensor_mode(now)})")
 
-        if decision.state != prev_state and decision.action != "clear":
-            await _record_event(c, decision)
+    if decision.state != prev_state:
+        await _record_event(c, decision)
+
+
+async def _seed_hazards_grid(c, pose, now: float) -> None:
+    """Known hazards (operator-marked, or learned when learn_hazards is on)
+    are pinned into the occupancy grid; learned write-back uses the grid's
+    confirmed clusters."""
+    from app.avoidance import hazard_db, pose_history
+    _last_seed[c.drone_id] = now
+    h = pose_history.history(c.drone_id)
+    if h.origin is None:
+        return
+    for hz in await hazard_db.load_near(pose.lat, pose.lng, 250.0):
+        n, e = h.to_ne(hz["lat"], hz["lng"])
+        c.grid.pin_disc(n, e, float(hz["radius_m"]), float(hz.get("top_m", 0.0) or 0.0), now)
+    if c.params.learn_hazards and now - _last_persist.get(c.drone_id, 0.0) > 10.0:
+        _last_persist[c.drone_id] = now
+        for o in c.local_obstacles(now):
+            if o["is_static"]:
+                await hazard_db.save(o["lat"], o["lng"], o["radius_m"], top_m=o["top_m"],
+                                     confidence=0.9, source="avoidance")
 
 
 async def _record_event(controller, decision) -> None:
@@ -325,7 +478,7 @@ async def _run() -> None:
             raise
         except Exception as e:
             logger.warning(f"Avoidance loop tick failed: {e}")
-        await asyncio.sleep(INTERVAL_S)
+        await asyncio.sleep(INTERVAL_S_LOCAL)
 
 
 _eyes_logged: set[str] = set()
@@ -431,7 +584,8 @@ def observe_from_session(session_id: str, obs: dict | list,
                 half_width_deg=float(one.get("half_width_deg", 8.0)),
                 confidence=float(one.get("confidence", 0.4)),
                 top_m=float(one.get("top_m", 0.0)),
-                source=str(one.get("source", "monocular"))))
+                source=str(one.get("source", "monocular")),
+                t=captured_at or 0.0))
     except Exception as e:
         logger.debug(f"observe_from_session failed: {e}")
 

@@ -48,49 +48,33 @@ class DepthMapper(BaseAnalyzer):
             raise
 
     @torch.inference_mode()
+    def predict_metric(self, frame_bgr: np.ndarray) -> np.ndarray:
+        """Raw metric depth (metres, model scale, NOT calibrated) at the
+        inference resolution. Used by avoidance sensing, which calibrates the
+        scale against the ground plane itself (app/avoidance/mono_calibration)."""
+        frame_small = cv2.resize(frame_bgr, (self.infer_w, self.infer_h))
+        frame_rgb   = cv2.cvtColor(frame_small, cv2.COLOR_BGR2RGB)
+        result = self.estimator(Image.fromarray(frame_rgb))
+        depth  = result["predicted_depth"].squeeze().cpu().numpy()
+        if depth.ndim != 2:
+            depth = depth.squeeze()
+        return depth
+
+    @torch.inference_mode()
     def _analyze_frame_blocking(
         self, frame_bgr: np.ndarray
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
         H, W = frame_bgr.shape[:2]
-
-        # Downscale for faster inference
-        frame_small = cv2.resize(frame_bgr, (self.infer_w, self.infer_h))
-        frame_rgb   = cv2.cvtColor(frame_small, cv2.COLOR_BGR2RGB)
-        pil_image   = Image.fromarray(frame_rgb)
-
-        result = self.estimator(pil_image)
-        depth  = result["predicted_depth"].squeeze().cpu().numpy()
-
-        if depth.ndim != 2:
-            depth = depth.squeeze()
+        depth = self.predict_metric(frame_bgr)
 
         # Fix NaN/inf before any arithmetic - this was the original crash
         depth = np.nan_to_num(depth, nan=0.0, posinf=self.viz_max_depth, neginf=0.0)
 
-        # Obstacle avoidance tap: the raw model output is metric (metres),
-        # so - only when some drone actually has avoidance enabled, to add zero
-        # cost otherwise - extract the nearest obstacle ahead. It rides out in
-        # meta (per-frame, so no cross-session race) and the base loop forwards
-        # it to that session's avoidance bus. This is the live monocular
-        # sensing path; real hardware feeds the same detector.
+        # Obstacle extraction for avoidance is NOT done here any more: it runs
+        # in app/avoidance/sensing.py for every AI mode, where the frame's
+        # capture time and the aircraft's pose are known (ground-plane scale
+        # calibration + geometric ground rejection need both).
         obstacle_obs = None
-        try:
-            from app.avoidance import service as _av
-            if _av.any_enabled():
-                # DENSE: one obstacle per angular bin (gaps preserved), so the
-                # planner can thread between obstacles, not just dodge the
-                # single nearest one.
-                from app.avoidance.detector import observations_from_depth
-                obstacle_obs = [
-                    {"bearing_deg": ob.bearing_deg, "distance_m": ob.distance_m,
-                     "half_width_deg": ob.half_width_deg,
-                     "confidence": ob.confidence, "source": ob.source,
-                     "top_m": ob.top_m}
-                    for ob in observations_from_depth(depth, hfov_deg=self.hfov_deg,
-                                                      max_distance_m=self.obstacle_max_m)
-                ] or None
-        except Exception:
-            obstacle_obs = None
 
         depth = np.clip(depth, self.viz_min_depth, self.viz_max_depth)
 

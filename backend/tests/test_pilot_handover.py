@@ -581,6 +581,7 @@ _MODE_CHANGING = [
     ("start_offboard", ()),
     ("stop_offboard", ()),
     ("handover_to_pilot", ()),
+    ("resume_mission_from_offboard", (3,)),
 ]
 
 

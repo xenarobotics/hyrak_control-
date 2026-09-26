@@ -95,6 +95,58 @@ async def observe(drone_id: str, body: dict,
     return {"ok": True}
 
 
+def _resolve_drone(drone_id: str):
+    """'auto' = the sole drone with avoidance enabled (the sim bridge does not
+    know the fleet's drone id)."""
+    if drone_id != "auto":
+        return avoidance.controller(drone_id)
+    on = [c for c in avoidance._controllers.values() if c.enabled]
+    if len(on) != 1:
+        raise HTTPException(status_code=409,
+                            detail=f"'auto' needs exactly one drone with avoidance on ({len(on)} are)")
+    return on[0]
+
+
+@router.post("/{drone_id}/depth_scan")
+async def depth_scan(drone_id: str, body: dict,
+                     x_auth_token: str = Header(None, alias="X-Auth-Token")):
+    """A pooled depth image from a range sensor (the sim's depth camera via
+    simulation/gz_depth_sensor.py, or a real stereo/ToF camera).
+    body: {captured_wall: unix time of capture, hfov_deg, vfov_deg, rows, cols,
+           depth: [rows*cols floats, row-major, metres along the optical axis;
+                   <= 0 = no data, >= max_range_m = nothing within range],
+           max_range_m, cam_pitch_deg?, source?: "depth"}
+    The scan is placed with the aircraft's pose AT captured_wall."""
+    _auth(x_auth_token)
+    import time as _time
+    import numpy as np
+    from app.avoidance import pose_history
+    from app.avoidance.depth_scan import scan_from_depth
+    c = _resolve_drone(drone_id)
+    if not c.enabled:
+        return {"ok": False, "reason": "avoidance off"}
+    try:
+        rows, cols = int(body["rows"]), int(body["cols"])
+        z = np.asarray(body["depth"], dtype=np.float32).reshape(rows, cols)
+        max_r = float(body.get("max_range_m", 20.0))
+        hfov, vfov = float(body["hfov_deg"]), float(body["vfov_deg"])
+        wall = float(body.get("captured_wall") or _time.time())
+    except (KeyError, TypeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=f"bad depth_scan body: {e}")
+    captured_at = _time.monotonic() - max(0.0, _time.time() - wall)
+    pose = pose_history.history(c.drone_id).at(captured_at)
+    if pose is None:
+        return {"ok": False, "reason": "no pose history yet (is the aircraft linked?)"}
+    z = np.where(z <= 0, np.nan, np.where(z >= max_r, np.inf, z))
+    scan = scan_from_depth(z, hfov, vfov, alt_m=pose.alt_m, roll_deg=pose.roll_deg,
+                           pitch_deg=pose.pitch_deg,
+                           cam_pitch_deg=float(body.get("cam_pitch_deg", 0.0)),
+                           max_range_m=max_r)
+    used = c.integrate_scan(scan, captured_at, str(body.get("source", "depth")))
+    return {"ok": used, "hits": sum(1 for b in scan if b.hit_m is not None),
+            "age_ms": round((_time.monotonic() - captured_at) * 1000.0, 1)}
+
+
 @router.post("/{drone_id}/decide")
 async def decide(drone_id: str, body: dict,
                  x_auth_token: str = Header(None, alias="X-Auth-Token")):

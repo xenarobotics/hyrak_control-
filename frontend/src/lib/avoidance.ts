@@ -16,10 +16,16 @@ export interface AvoidanceParams {
     hold_to_return_s: number
     allow_reroute?: number
     allow_return?: number
+    // Redesign (docs/AVOIDANCE_ARCHITECTURE_REVIEW.md section 5)
+    local_planner?: number          // 1 = grid + Offboard local planner, 0 = legacy mission upload
+    local_clearance_m?: number
+    ttc_engage_s?: number
+    mono_min_alt_m?: number
+    mono_speed_cap_m_s?: number
 }
 
 export interface SensorInfo {
-    kind: 'monocular' | 'tof' | 'rangefinder' | 'lidar'
+    kind: 'monocular' | 'depth' | 'tof' | 'rangefinder' | 'lidar'
     mount: string
     max_range_m: number
     fov_deg: number
@@ -32,7 +38,7 @@ export interface AvoidanceStatus {
     drone_id: string
     enabled: boolean
     armed: boolean
-    state: 'nominal' | 'holding' | 'rerouted' | 'climbing' | 'returning' | 'disabled'
+    state: 'nominal' | 'holding' | 'rerouted' | 'climbing' | 'avoiding' | 'returning' | 'disabled'
     reason: string
     params: AvoidanceParams
     sensors: SensorInfo[]
@@ -40,6 +46,10 @@ export interface AvoidanceStatus {
     recommended_speed_m_s?: number
     committed_path?: boolean
     obstacle_distance_cm: number[]
+    sensor_mode?: 'range' | 'mono' | 'none'
+    pose_rate_hz?: number
+    planner?: { reason: string; speed_m_s: number; free_m: number | null; ttc_s: number | null; heading_deg: number | null } | null
+    mono_calibration?: { scale: number | null; fits: number; rejected: number; error_pct_p50: number | null; error_pct_p90: number | null } | null
 }
 
 export interface AvoidanceEvent {

@@ -195,7 +195,8 @@ def note_setpoint(manager, cmd: dict, frame_t: float | None, decided_t: float | 
 
 
 _MODE_FOR = {"hold": ("HOLD",), "return": ("RETURN_TO_LAUNCH", "RETURN"),
-             "reroute": ("MISSION",), "climb": ("MISSION",), "resumed": ("MISSION",)}
+             "reroute": ("MISSION",), "climb": ("MISSION",), "resumed": ("MISSION",),
+             "avoid": ("OFFBOARD",), "resume": ("MISSION",)}
 
 
 class AvoidanceProbe:

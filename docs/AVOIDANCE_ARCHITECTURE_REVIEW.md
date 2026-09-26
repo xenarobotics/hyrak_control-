@@ -176,3 +176,47 @@ Conclusion: the direction of the phased plan in section 5 is the field's
 direction. What the field does NOT do is what the current stack does: a
 per-frame mono metric model, placed with a 1-2 Hz pose, driving mission
 uploads from a 2.5 Hz cloud loop.
+
+## 9. Implemented, 2026-09-26 (A, B, C and D)
+
+All four steps of section 5 are built. The old keep-out map with
+mission-upload reroute is kept as a selectable fallback
+(`params.local_planner = 0`); the new path is the default.
+
+| layer | module | what it does now |
+|---|---|---|
+| A. truth sensor | `simulation/gz_depth_sensor.py`, `MODEL=gz_x500_depth ./hyrak_sim.sh start` | PX4's x500 with an OAK-D Lite depth camera (73 deg, 0.2-19.1 m). Frames pooled to 48x64, stamped on arrival, POSTed to `/api/avoidance/auto/depth_scan` at up to 10 Hz. While it streams, mono is ignored for the map. |
+| B. timing | `avoidance/pose_history.py`, `TelemetryManager.add_pose_listener`, `boost_pose_rates` | Every attitude/position update is recorded when it arrives; pose rates raised to 10/20 Hz (5/10 on a radio) while avoidance is on. Each scan is placed ONCE with the pose interpolated at its capture time. |
+| 1. geometry | `avoidance/depth_scan.py` | Depth pixel -> 3D point using camera tilt and aircraft roll/pitch at capture. Ground rejected by HEIGHT, only structure within +/- 2.5 m of flight altitude is an obstacle, its top height kept for fly-over. |
+| 2. map | `avoidance/local_map.py` | Log-odds occupancy grid, 0.5 m cells, local N/E metres. Hits raise a cell, rays through it lower it, evidence decays (20 s). Depth: one hit occupies. Mono: three agreeing frames. Operator/DB hazards pinned. |
+| C. local planner | `avoidance/local_planner.py`, `executor.apply_local`, `TelemetryManager.send_velocity_ned` | 10 Hz Offboard. VFH on the grid's polar histogram with obstacles grown by the clearance; prefers directions free to the horizon (steers early); speed from free distance and time-to-collision (brake under 2 s); turns to look before moving sideways; holds goal altitude. |
+| 4. supervisor | `AvoidanceController.decide_local`, `loop._local_step` | NOMINAL (PX4 flies the mission) -> AVOIDING on a threat in the direction of travel or TTC < 4 s -> back to the mission at the current waypoint (`resume_mission_from_offboard`) once the straight line to it has been clear for 1.5 s. Boxed in 3 s -> HOLD; HOLD past `hold_to_return_s` -> RTL. No mission, or reroute disabled -> HOLD. Pilot mode change -> stands down at once. Mission upload is never used in flight. |
+| D. mono | `avoidance/mono_calibration.py`, `avoidance/sensing.py` | Model depth scale fitted per frame to the ground plane (true ground depth from altitude and tilt), robust median with inliers, smoothed. Uncalibrated frames produce no obstacles. Mono senses only above 8 m and caps speed at 1.5 m/s. Fit error is reported (`mono_calibration.error_pct_p50/p90` in status). |
+
+Also fixed on the way: `set_flight_mode` had lost its `@_claims_mode_change`
+decorator (moved onto `set_speed` by f586259), so any mode the app set
+mid-follow could read as a pilot takeover (273ea64).
+
+### Offline results (closed-loop kinematic harness, not Gazebo)
+
+`backend/tests/test_avoidance_local.py` flies a point mass (0.4 s velocity
+lag, 90 deg/s yaw limit) along an 80 m mission leg with a synthetic 73 deg /
+19.1 m depth camera, through the real sensing -> grid -> supervisor ->
+planner code:
+
+| scenario | reached | min clearance to a surface | time |
+|---|---|---|---|
+| head-on, 3 m/s | yes | 3.51 m | 27.0 s |
+| offset left / right, 3 m/s | yes | 3.76 / 3.65 m | 26.9 s |
+| two in line, 3 m/s | yes | 3.51 m | 27.3 s |
+| gate 10 m wide, 3 m/s | yes | 2.98 m | 30.1 s |
+| row of 3 with 4 m gaps (too narrow, goes round) | yes | 3.40 m | 29.9 s |
+| 5 cylinders, 3 m/s | yes | 3.65 m | 27.4 s |
+| head-on / two in line, 5 m/s | yes | 3.73 / 3.66 m | 16.8 / 17.1 s |
+| mono-like (range +/- 20 %, 2 % phantom bins), 1.5 m/s, 3 scenarios | yes | 3.13-3.23 m | 54-59 s |
+
+Every run: `avoid` then `resume`, no hold, no return. This proves the logic
+and the geometry, not the flight: Gazebo physics, PX4's Offboard response,
+MAVLink latency and the real depth camera are the next test, and only
+Japesh's SITL runs (then field runs) count as results. The latency probe
+(`LATENCY_PROBE=true`) records the real capture-to-motion times.

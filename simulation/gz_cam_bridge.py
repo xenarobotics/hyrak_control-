@@ -21,7 +21,10 @@ Two outputs, chosen by the 4th argument:
 
 Run with GZ_PARTITION matching the sim (hyrak_demo):
     GZ_IP=127.0.0.1 GZ_PARTITION=hyrak_demo python3 gz_cam_bridge.py \
-        [topic] [WxH] [fps] [/dev/videoN | rtp://127.0.0.1:5600]
+        [topic] [WxH] [fps] [/dev/videoN | rtp://127.0.0.1:5600] [outWxH]
+
+WxH is the camera's own image size; the optional outWxH scales the stream
+(the x500_depth model's RGB camera is 1920x1080, streamed at 640x360).
 """
 import subprocess
 import sys
@@ -39,6 +42,8 @@ TOPIC = sys.argv[1] if len(sys.argv) > 1 else (
 W, H = (int(x) for x in (sys.argv[2] if len(sys.argv) > 2 else "640x480").split("x"))
 FPS = int(sys.argv[3]) if len(sys.argv) > 3 else 10
 DEV = sys.argv[4] if len(sys.argv) > 4 else "/dev/video10"
+OUT = sys.argv[5] if len(sys.argv) > 5 else ""
+_SCALE = ["-vf", "scale=" + OUT.replace("x", ":")] if OUT else []
 
 _IN = ["ffmpeg", "-hide_banner", "-loglevel", "error",
        "-f", "rawvideo", "-pixel_format", "rgb24",
@@ -49,12 +54,12 @@ if DEV.startswith("rtp://"):
     # SDP-only receiver can decode from the next IDR only if the headers
     # ride in-band. zerolatency = no B-frames, no lookahead, one frame in
     # flight. Payload type 96 matches udp_video_source's SDP.
-    _OUT = ["-an", "-c:v", "libx265", "-preset", "ultrafast", "-tune", "zerolatency",
+    _OUT = _SCALE + ["-an", "-c:v", "libx265", "-preset", "ultrafast", "-tune", "zerolatency",
             "-pix_fmt", "yuv420p", "-g", str(FPS), "-b:v", "1500k",
             "-x265-params", f"keyint={FPS}:min-keyint={FPS}:no-open-gop=1:repeat-headers=1:log-level=error",
             "-f", "rtp", "-payload_type", "96", DEV + "?pkt_size=1200"]
 else:
-    _OUT = ["-f", "v4l2", "-pix_fmt", "yuv420p", DEV]
+    _OUT = _SCALE + ["-f", "v4l2", "-pix_fmt", "yuv420p", DEV]
 ff = subprocess.Popen(_IN + _OUT, stdin=subprocess.PIPE)
 
 _latest = [None]           # one-slot buffer: only the newest frame survives

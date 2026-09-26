@@ -19,7 +19,7 @@ import {
 
 const STATE_COLOR: Record<string, string> = {
     nominal: '#4ade80', holding: '#fbbf24', rerouted: '#22d3ee',
-    climbing: '#a78bfa', returning: '#f87171', disabled: '#8a94a8',
+    climbing: '#a78bfa', avoiding: '#22d3ee', returning: '#f87171', disabled: '#8a94a8',
 }
 
 // The knobs worth exposing, with what each one means to the pilot.
@@ -32,6 +32,12 @@ const TUNING: { key: keyof AvoidanceParams; label: string; unit: string; step: n
       hint: 'Cruise while avoidance is on. Slower buys the camera reaction time.' },
     { key: 'hold_to_return_s', label: 'HOLD -> RTL', unit: 's', step: 5, min: 5, max: 120,
       hint: 'Holding with no path this long -> return to launch.' },
+    { key: 'local_clearance_m', label: 'STEER GAP', unit: 'm', step: 0.5, min: 1.5, max: 8,
+      hint: 'Distance the local planner keeps from every obstacle while it steers (body + margin).' },
+    { key: 'ttc_engage_s', label: 'TAKE OVER AT', unit: 's TTC', step: 0.5, min: 2, max: 10,
+      hint: 'Take control when closing on something faster than this, whatever its distance.' },
+    { key: 'mono_speed_cap_m_s', label: 'MONO SPEED', unit: 'm/s', step: 0.5, min: 0.5, max: 5,
+      hint: 'Speed cap while the camera is the only sensor (its range is estimated, not measured).' },
 ]
 
 // What the loop may do on its own. The ladder is always reroute -> hold ->
@@ -167,8 +173,9 @@ export function AvoidancePanel() {
     const state = status?.state ?? 'disabled'
     const color = STATE_COLOR[state] ?? '#8a94a8'
     const nearest = status ? nearestAheadM(status.obstacle_distance_cm) : null
-    const cam = status?.sensors.find(s => s.kind === 'monocular')
-    const camOk = cam?.status === 'ok'
+    // Any sensor streaming counts, exactly like the takeoff interlock: with the
+    // sim's depth camera running, the mono path is switched off on purpose.
+    const camOk = !!status?.sensors.some(s => s.status === 'ok')
     const goal = (status as (AvoidanceStatus & { goal?: [number, number] | null }) | null)?.goal ?? null
     const p = status?.params
 
@@ -243,7 +250,7 @@ export function AvoidancePanel() {
                 <div className="flex items-start gap-2 text-[10px] font-mono px-2 py-1.5 rounded"
                     style={{ background: '#f8717112', color: '#f87171' }}>
                     <TriangleAlert size={12} className="mt-0.5 shrink-0" />
-                    <span>ARMED - the cloud may hold, reroute or return this drone. You can override any time.</span>
+                    <span>ARMED - avoidance may steer this drone around obstacles (Offboard), hold it or return it. Switching mode on the RC hands it back to you at once.</span>
                 </div>
             )}
 
@@ -258,6 +265,20 @@ export function AvoidancePanel() {
                 <Row label="NEAREST AHEAD"
                     value={`${nearest !== null ? `${nearest.toFixed(1)} m` : 'clear'}${status?.obstacle_count ? `  (${status.obstacle_count} tracked)` : ''}`}
                     color={nearest !== null && nearest < (p?.reaction_distance_m ?? 12) ? '#fbbf24' : undefined} />
+                {status?.enabled && (
+                    <Row label="SENSOR"
+                        value={status.sensor_mode === 'range' ? 'depth camera (measured range)'
+                            : status.sensor_mode === 'mono'
+                                ? `camera (estimated${status.mono_calibration?.error_pct_p50 != null ? `, ground-fit err ${status.mono_calibration.error_pct_p50}%` : ', not calibrated yet'})`
+                                : 'none'}
+                        color={status.sensor_mode === 'range' ? '#4ade80' : status.sensor_mode === 'mono' ? '#fbbf24' : undefined}
+                        hint={`What the map is built from. Camera-only: senses above ${p?.mono_min_alt_m ?? 8} m, capped at ${p?.mono_speed_cap_m_s ?? 1.5} m/s. Pose ${status.pose_rate_hz ?? 0} Hz.`} />
+                )}
+                {status?.state === 'avoiding' && status.planner && (
+                    <Row label="STEERING"
+                        value={`${status.planner.reason}${status.planner.ttc_s != null ? `  TTC ${status.planner.ttc_s}s` : ''}  ${status.planner.speed_m_s.toFixed(1)} m/s`}
+                        color="#22d3ee" hint="The local planner has the aircraft in Offboard; it hands back to the mission once the way to the waypoint is clear." />
+                )}
                 {!!status?.recommended_speed_m_s && status.enabled && (
                     <Row label="SPEED" value={`${status.recommended_speed_m_s.toFixed(1)} m/s`}
                         hint="What the governor is asking of the aircraft right now." />
