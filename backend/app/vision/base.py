@@ -347,7 +347,9 @@ class BaseAnalyzer(ABC):
                 if obs_list:
                     try:
                         from app.avoidance import loop as _av_loop
-                        _av_loop.observe_from_session(client_id, obs_list)
+                        _av_loop.observe_from_session(
+                            client_id, obs_list,
+                            captured_at=context.captured_at if context is not None else None)
                     except Exception:
                         pass
                 if context is not None:
@@ -358,6 +360,9 @@ class BaseAnalyzer(ABC):
                     meta["capture_age_ms"] = round(
                         (time.monotonic() - context.captured_at) * 1000.0, 1
                     )
+                    # Monotonic stamps for the latency probe (app/latency_probe.py).
+                    meta["captured_at_mono"] = context.captured_at
+                    meta["decided_at_mono"] = time.monotonic()
 
                 if client_id in self._clients:
                     async with self._clients[client_id]["lock"]:

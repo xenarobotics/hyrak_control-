@@ -73,6 +73,7 @@ def submit(session_id: str, img_bgr: np.ndarray) -> None:
     """Hand one BGR frame to the sensor. Returns immediately; the result is
     forwarded to the avoidance loop from the executor's completion."""
     _busy.add(session_id)
+    captured_at = time.monotonic()
     loop = asyncio.get_running_loop()
     fut = loop.run_in_executor(_executor, _analyze, img_bgr)
 
@@ -98,7 +99,7 @@ def submit(session_id: str, img_bgr: np.ndarray) -> None:
             from app.avoidance import sensors as sensor_registry
             sensor_registry.mark_data(c.drone_id, "monocular")
         if obs:
-            av_loop.observe_from_session(session_id, obs)
+            av_loop.observe_from_session(session_id, obs, captured_at=captured_at)
 
     fut.add_done_callback(_done)
 

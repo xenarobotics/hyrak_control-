@@ -354,6 +354,9 @@ class Settings(BaseSettings):
     # guess that replaced it: 10/8 Hz came to ~920 B/s, 57% of that ceiling -
     # and 115%, i.e. over it, if AIR_SPEED is 32k rather than 64k. Nothing
     # here can read AIR_SPEED, which is why this moves one step at a time.
+    # Opt-in capture-to-reaction latency probe (app/latency_probe.py). Writes
+    # .logs/latency_probe.jsonl; also switchable at runtime via the API.
+    latency_probe: bool = Field(default=False)
     telemetry_rate_position_radio: float = Field(default=2.0)
     telemetry_rate_position_udp: float = Field(default=4.0)
     telemetry_rate_attitude_radio: float = Field(default=6.0)

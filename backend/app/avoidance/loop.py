@@ -253,6 +253,7 @@ async def _tick() -> None:
         # (a constant-altitude mission must not climb just to go around).
         cruise = pose.alt_m if (pose is not None and pose.alt_m > 1.0) else 10.0
         decision = await c.decide(pose, goal, cruise_alt_m=cruise)
+        decided_t = _t.monotonic()
 
         # Command the aircraft only when armed AND airborne. Advisory (unarmed)
         # detects and logs but never touches control.
@@ -269,8 +270,12 @@ async def _tick() -> None:
                 wps = list(wps) + remaining
                 _session_missions[c.drone_id] = wps      # indices now refer to THIS mission
                 _fc_mission.pop(c.drone_id, None)
+            from app import latency_probe
+            probe = latency_probe.AvoidanceProbe(
+                manager, decision.action, _last_frame_t.get(c.drone_id), decided_t)
             did, note = await executor.apply(
                 manager, decision.action, wps, c.intervened)
+            probe.done(did, note)
             if decision.action in ("hold", "reroute", "climb", "return") and did:
                 c.intervened = True
             elif decision.action == "clear" and c.intervened and did:
@@ -366,7 +371,13 @@ def _sole_enabled_controller():
     return live[0] if len(live) == 1 else None
 
 
-def observe_from_session(session_id: str, obs: dict | list) -> None:
+#: drone_id -> monotonic time of the newest camera frame that produced an
+#: observation (the latency probe's "frame" stage for avoidance commands).
+_last_frame_t: dict[str, float] = {}
+
+
+def observe_from_session(session_id: str, obs: dict | list,
+                         captured_at: float | None = None) -> None:
     """Bridge vision-derived obstacle observation(s) (from the depth analyzer)
     to the avoidance bus, resolving which drone this browser session is flying.
     Accepts one observation or a dense list. Only feeds a drone that already
@@ -411,6 +422,8 @@ def observe_from_session(session_id: str, obs: dict | list) -> None:
         if pose is not None and pose.alt_m < MIN_SENSE_ALT_M:
             return
         from app.avoidance.observations import ObstacleObservation
+        if captured_at is not None:
+            _last_frame_t[c.drone_id] = captured_at
         for one in (obs if isinstance(obs, list) else [obs]):
             c.observe(ObstacleObservation(
                 bearing_deg=float(one["bearing_deg"]),

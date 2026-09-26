@@ -324,6 +324,9 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
                 if drone_cmd and drone_cmd.get("type") == "velocity":
                     tel = self._session_mgr.get_telemetry(self.session_id)
                     if tel and tel.is_connected:
+                        from app import latency_probe
+                        latency_probe.note_setpoint(
+                            tel, drone_cmd, meta.get("captured_at_mono"), meta.get("decided_at_mono"))
                         asyncio.create_task(
                             tel.send_velocity_command(
                                 forward_m_s = drone_cmd.get("forward_m_s", 0.0),
