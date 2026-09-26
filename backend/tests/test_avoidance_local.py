@@ -356,3 +356,46 @@ def test_no_immediate_retake_after_a_resume():
     assert d.action == "clear", d.reason              # cooling down, no real danger
     d = c.decide_local((40.0, 0.0), 10.0, now=54.0)
     assert d.action == "avoid"                         # cooldown over, obstacle still on the line
+
+
+# ---------------------------------------------------------------- SITL 21:33 loop
+def _moving(vn, ve, t0=100.0, n=8, alt=10.0):
+    c = AvoidanceController("mv"); c.set_enabled(True)
+    h = pose_history.history("mv"); h.origin = (LAT0, LNG0)
+    for k in range(n):
+        lat, lng = h.to_latlng(vn * k * 0.1, ve * k * 0.1)
+        h.add(lat, lng, alt, 180.0 if vn < 0 else 0.0, t=t0 + k * 0.1)
+    return c, h
+
+
+def test_threat_is_judged_along_the_motion_not_toward_a_wrong_goal():
+    """PX4 flies south; the derived goal (off by one on a lawnmower) is north,
+    with the pillar between. Nothing is ahead of the aircraft: no take-over."""
+    c, h = _moving(-3.0, 0.0)
+    c.grid.pin_disc(10.0, 0.0, 1.0, now=100.7)            # pillar to the NORTH
+    d = c.decide_local((60.0, 0.0), 10.0, now=100.7)       # goal to the north
+    assert d.action == "clear", d.reason
+
+
+def test_pillar_on_the_actual_path_still_triggers():
+    c, h = _moving(-3.0, 0.0)
+    c.grid.pin_disc(-12.0, 0.0, 1.0, now=100.7)           # pillar to the SOUTH, where it is going
+    d = c.decide_local((-60.0, 0.0), 10.0, now=100.7)
+    assert d.action == "avoid"
+
+
+def test_goal_picked_to_match_what_px4_is_flying():
+    from app.avoidance.loop import pick_goal_by_motion
+    h = pose_history.PoseHistory(); h.origin = (LAT0, LNG0)
+    north, south = h.to_latlng(60.0, 0.0), h.to_latlng(-60.0, 0.0)
+    cands = [(5, north), (6, south)]
+    assert pick_goal_by_motion(cands, 5, (0.0, 0.0), (-3.0, 0.0), h.to_ne) == south   # reported 5, flying south
+    assert pick_goal_by_motion(cands, 5, (0.0, 0.0), (3.0, 0.0), h.to_ne) == north    # reported 5 and consistent
+    assert pick_goal_by_motion(cands, 5, (0.0, 0.0), (0.2, 0.0), h.to_ne) == north    # hovering: trust the report
+
+
+def test_steering_holds_the_altitude_it_took_over_at():
+    c, h = _moving(3.0, 0.0, alt=9.6)
+    c.grid.pin_disc(10.0, 0.0, 1.0, now=100.7)
+    d = c.decide_local((60.0, 0.0), 4.0, now=100.7)        # mission altitude says 4 m
+    assert d.action == "avoid" and abs(d.setpoint.vd) < 0.05   # no dive (SITL 21:33 sank 9.6 -> 4 m)

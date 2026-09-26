@@ -141,6 +141,8 @@ class AvoidanceController:
         self._prev_dir: float | None = None
         self.last_setpoint = None
         self._resumed_at = -1e9
+        self._engage_alt: float | None = None
+        self._latched_goal = None
         self._scans = {"integrated": 0, "dropped_no_pose": 0, "dropped_low": 0,
                        "dropped_mono_overridden": 0}
 
@@ -408,18 +410,28 @@ class AvoidanceController:
         n_obs = len(self.grid.clusters(now)) if self.state != AvoidanceState.NOMINAL or \
             any(math.isfinite(d) for d in polar) else 0
 
-        # Direction of travel: the goal on a mission, else motion, else the nose.
-        if goal_ne is not None:
-            travel = math.degrees(math.atan2(goal_ne[1] - pos[1], goal_ne[0] - pos[0])) % 360.0
-            dist_goal = math.hypot(goal_ne[0] - pos[0], goal_ne[1] - pos[1])
-        elif math.hypot(*vel) > 0.5:
-            travel, dist_goal = math.degrees(math.atan2(vel[1], vel[0])) % 360.0, None
+        # Direction of travel. While PX4 flies (NOMINAL) that is where the
+        # aircraft is actually GOING - its velocity - not the bearing to a goal
+        # we derived: judging the way ahead toward a point PX4 was flying away
+        # from is what looped the aircraft past a pillar (SITL 21:33). Slow or
+        # hovering: the goal, else the nose.
+        dist_goal = math.hypot(goal_ne[0] - pos[0], goal_ne[1] - pos[1]) if goal_ne is not None else None
+        goal_brg = math.degrees(math.atan2(goal_ne[1] - pos[1], goal_ne[0] - pos[0])) % 360.0 \
+            if goal_ne is not None else None
+        moving = math.hypot(*vel) > 1.0
+        if self.state in (AvoidanceState.NOMINAL, AvoidanceState.DISABLED) and moving:
+            travel = math.degrees(math.atan2(vel[1], vel[0])) % 360.0
+        elif goal_brg is not None:
+            travel = goal_brg
+        elif moving:
+            travel = math.degrees(math.atan2(vel[1], vel[0])) % 360.0
         else:
-            travel, dist_goal = pose.yaw_deg, None
+            travel = pose.yaw_deg
         s_idx = int(travel // pp.sector_deg) % len(free)
         ahead_free = free[s_idx]
-        reach = self.params.reaction_distance_m if dist_goal is None else \
-            min(self.params.reaction_distance_m, dist_goal)
+        toward_goal = goal_brg is not None and abs((travel - goal_brg + 180.0) % 360.0 - 180.0) < 30.0
+        reach = min(self.params.reaction_distance_m, dist_goal) if (toward_goal and dist_goal is not None) \
+            else self.params.reaction_distance_m
         threat = ahead_free < reach or (ttc is not None and ttc < self.params.ttc_engage_s)
         # Real danger, as opposed to "the line to the waypoint passes near
         # something": closing fast, or almost touching.
@@ -462,13 +474,14 @@ class AvoidanceController:
                           "holding - rerouting disabled by operator" if goal_ne is not None
                           else "holding - manual flight, obstacle ahead")
             self._reset_local()
+            self._engage_alt = pose.alt_m      # steer level at the altitude we took over at
             st = AvoidanceState.AVOIDING      # fall through: plan this tick
 
         if st == AvoidanceState.AVOIDING and goal_ne is None:
             self._hold_since = now
             return _d("hold", AvoidanceState.HOLDING, "holding - lost the route while avoiding")
         if st == AvoidanceState.AVOIDING:
-            sp = lp.plan(pos, pose.alt_m, pose.yaw_deg, vel, goal_ne, alt_goal, polar, pp, self._prev_dir)
+            sp = lp.plan(pos, pose.alt_m, pose.yaw_deg, vel, goal_ne, self._engage_alt if self._engage_alt is not None else alt_goal, polar, pp, self._prev_dir)
             self.last_setpoint = sp
             if sp.chosen_deg is not None:
                 self._prev_dir = sp.chosen_deg
@@ -505,7 +518,7 @@ class AvoidanceController:
                 self._hold_since = None
                 return _d("clear", AvoidanceState.NOMINAL, "obstacle gone")
             if can_steer:
-                sp = lp.plan(pos, pose.alt_m, pose.yaw_deg, vel, goal_ne, alt_goal, polar, pp, self._prev_dir)
+                sp = lp.plan(pos, pose.alt_m, pose.yaw_deg, vel, goal_ne, self._engage_alt if self._engage_alt is not None else alt_goal, polar, pp, self._prev_dir)
                 if not sp.blocked and sp.speed > 0.2:
                     self._blocked_since = None
                     self._hold_since = None

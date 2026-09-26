@@ -393,10 +393,10 @@ async def _local_step(c, manager, pose, in_air, mode, now) -> None:
         except Exception as e:
             logger.debug(f"hazard seed failed: {e}")
     pursuing = in_air and mode.upper() not in _NO_GOAL_MODES
-    goal, _remaining = (await _goal_for(c.drone_id, manager)) if pursuing else (None, [])
     hist = pose_history.history(c.drone_id)
+    goal = _goal_from_motion(c, manager, hist) if pursuing else None
     goal_ne = hist.to_ne(*goal) if (goal is not None and hist.origin is not None) else None
-    goal_alt = _goal_alt(c.drone_id, manager) if goal is not None else None
+    goal_alt = None       # steering holds the altitude it took over at (level dodge)
 
     prev_state = c.state
     decision = c.decide_local(goal_ne, goal_alt, now)
@@ -436,6 +436,69 @@ async def _local_step(c, manager, pose, in_air, mode, now) -> None:
 
     if decision.state != prev_state:
         await _record_event(c, decision)
+
+
+def pick_goal_by_motion(candidates: list[tuple[int, tuple[float, float]]], preferred: int,
+                        pos_ne: tuple[float, float], vel_ne: tuple[float, float], to_ne) -> tuple[float, float] | None:
+    """The waypoint PX4 is really flying to. `candidates` are (index, (lat, lng))
+    around the reported current item; the reported one wins unless the
+    aircraft is clearly moving AWAY from it and a neighbour lies along its
+    motion. Pure, so it is unit-tested.
+
+    Why: the reported mission index and the waypoint list can disagree by one
+    (a takeoff item counted on one side and not the other). On a lawnmower
+    that puts the goal at the far end of the OTHER leg: avoidance judged the
+    pillar "ahead" toward a point PX4 was flying away from, took over, flew
+    toward it, handed back, and PX4 turned round - a 10 s loop (SITL
+    2026-09-26 21:33)."""
+    import math
+    if not candidates:
+        return None
+    speed = math.hypot(*vel_ne)
+    by_idx = dict(candidates)
+    if speed < 1.0:
+        return by_idx.get(preferred) or candidates[0][1]
+    vb = math.degrees(math.atan2(vel_ne[1], vel_ne[0])) % 360.0
+
+    def off(ll):
+        n, e = to_ne(*ll)
+        dn, de = n - pos_ne[0], e - pos_ne[1]
+        if math.hypot(dn, de) < 2.0:
+            return 180.0
+        return abs((math.degrees(math.atan2(de, dn)) - vb + 180.0) % 360.0 - 180.0)
+    if preferred in by_idx and off(by_idx[preferred]) <= 60.0:
+        return by_idx[preferred]
+    best = min(candidates, key=lambda c: off(c[1]))
+    return best[1] if off(best[1]) <= 60.0 else by_idx.get(preferred) or best[1]
+
+
+def _goal_from_motion(c, manager, hist) -> tuple[float, float] | None:
+    """Goal for the local planner: chosen while PX4 flies (NOMINAL) from the
+    mission items around the reported index and the aircraft's motion, then
+    LATCHED while avoidance steers (the motion is then ours, not PX4's)."""
+    if c.state in (avoidance.AvoidanceState.AVOIDING, avoidance.AvoidanceState.HOLDING) \
+            and getattr(c, "_latched_goal", None) is not None:
+        return c._latched_goal
+    items = _mission_items(c.drone_id, manager) or []
+    idx = _current_index(c.drone_id)
+    cands = []
+    for k in range(max(0, idx - 1), min(len(items), max(idx, 0) + 2)):
+        w = items[k]
+        if w.get("type") == "takeoff" or w.get("lat") is None or w.get("lng") is None:
+            continue
+        cands.append((k, (float(w["lat"]), float(w["lng"]))))
+    if not cands:
+        # Nothing indexable: fall back to the old rule (session/aircraft/fleet goal).
+        g, _ = _goal_and_remaining(c.drone_id, manager)
+        c._latched_goal = g
+        return g
+    p = hist.latest()
+    if p is None or hist.origin is None:
+        g = dict(cands).get(idx) or cands[0][1]
+    else:
+        g = pick_goal_by_motion(cands, idx, (p.north_m, p.east_m), hist.velocity_ne(), hist.to_ne)
+    c._latched_goal = g
+    return g
 
 
 async def _seed_hazards_grid(c, pose, now: float) -> None:
