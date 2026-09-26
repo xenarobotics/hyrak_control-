@@ -1,6 +1,6 @@
 'use client'
 
-// One line across the top of the Command window: is everything connected, what
+// The status cells in the Command window's top bar: is everything connected, what
 // is the aircraft doing, is avoidance watching. Built for a glance, not for
 // reading - the details live in the dock.
 
@@ -38,8 +38,7 @@ export function StatusStrip({ avoid }: { avoid: AvoidanceStatus | null }) {
     const mm = String(Math.floor(elapsed / 60)).padStart(2, '0'), ss = String(elapsed % 60).padStart(2, '0')
 
     return (
-        <div className="flex items-stretch h-9 font-mono rounded-lg border border-white/10 overflow-x-auto"
-            style={{ background: 'rgba(9,11,16,.78)', backdropFilter: 'blur(8px)' }}>
+        <div className="flex items-stretch h-9 font-mono overflow-x-auto [scrollbar-width:none]">
             <Cell icon={<Cloud size={13} />} value={cloudOk ? 'CLOUD' : connectionStatus.toUpperCase()}
                 color={cloudOk ? '#4ade80' : connectionStatus === 'reconnecting' ? '#fbbf24' : '#f87171'}
                 title="Browser to cloud (socket)" />

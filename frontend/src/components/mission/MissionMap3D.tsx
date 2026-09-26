@@ -191,7 +191,10 @@ function makeDroneCanvas(): HTMLCanvasElement {
 
 // ── Component ───────────────────────────────────────────────────────────────
 
-export default function MissionMap3D() {
+// readOnly: a flight view (Command window) - no waypoint add/drag/select.
+export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean } = {}) {
+  const readOnlyRef     = useRef(readOnly)
+  readOnlyRef.current = readOnly
   const containerRef    = useRef<HTMLDivElement>(null)
   const viewerRef       = useRef<any>(null)
   const CesiumRef       = useRef<any>(null)
@@ -469,7 +472,7 @@ export default function MissionMap3D() {
       // LEFT_DOWN: pause follow temporarily (not permanently); start waypoint drag if needed.
       handler.setInputAction((down: any) => {
         if (followDroneRef.current) startInactivityTimer()
-        const picked = viewer.scene.pick(down.position)
+        const picked = readOnlyRef.current ? null : viewer.scene.pick(down.position)
         if (picked?.id?._id?.startsWith?.('wp-')) {
           draggingIdRef.current = picked.id._id.replace('wp-', '')
           viewer.scene.screenSpaceCameraController.enableRotate = false
@@ -510,6 +513,7 @@ export default function MissionMap3D() {
         }
 
         // Regular click - select or add waypoint
+        if (readOnlyRef.current) return
         const picked = viewer.scene.pick(up.position)
         if (picked?.id?._id?.startsWith?.('wp-')) {
           useMissionStore.getState().selectWaypoint(picked.id._id.replace('wp-', ''))

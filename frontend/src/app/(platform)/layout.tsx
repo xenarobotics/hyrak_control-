@@ -181,10 +181,11 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
         return () => window.removeEventListener(STATUSBAR_CHANGE_EVENT, onChange)
     }, [])
 
-    // Fly tab already has its own OSD/DroneControls - the global bar would
-    // just duplicate them there, so it's shown everywhere else instead.
-    const onFlyTab = pathname === '/fly' || pathname.startsWith('/fly/')
-    const showStatusBar = mounted && statusBarOn && !onFlyTab
+    // Fly and Command carry their own status and flight controls - the global
+    // bar would only duplicate them (and cover their OSD), so it's shown
+    // everywhere else instead.
+    const ownBar = ['/fly', '/command'].some(p => pathname === p || pathname.startsWith(p + '/'))
+    const showStatusBar = mounted && statusBarOn && !ownBar
 
     return (
         <TooltipProvider>

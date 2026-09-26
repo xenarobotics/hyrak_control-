@@ -23,7 +23,9 @@ import { WebCodecsVideo } from './WebCodecsVideo'
 // analysing, so a detection can sit where the operator cannot see it.
 type AspectRatio = 'fill' | 'fit' | '16:9' | '4:3' | '1:1'
 
-export function VideoStream() {
+// `bare`: picture + OSD only, no control bar. For hosts that put Start/Stop
+// and the rest in their own chrome (the Command window's top bar).
+export function VideoStream({ bare = false }: { bare?: boolean } = {}) {
     const [hevcFailed, setHevcFailed] = useState(false)
     const {
         remoteStream, localStream,
@@ -212,7 +214,7 @@ export function VideoStream() {
             )}
 
             {/* Controls */}
-            <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-2"
+            {!bare && <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-2"
                 style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.7), transparent)' }}
             >
                 <RecordingControls videoRef={mainVideoRef} isStreaming={isStreaming} />
@@ -262,7 +264,7 @@ export function VideoStream() {
                         {isFullscreen ? <Shrink size={14} /> : <Expand size={14} />}
                     </Button>
                 </div>
-            </div>
+            </div>}
         </div>
     )
 }

@@ -2,19 +2,19 @@
 
 // COMMAND - the all-in-one flight window.
 //
-// Built for flying from one screen, not assembled from the Fly and Mission
-// tabs: the view (video or map) fills the window, with the other as a
-// minimap; everything needed while flying floats on the view where the eye
-// already is -
-//   top     status strip: cloud + aircraft link, mode, armed, battery, GPS,
-//           home distance, flight time, avoidance state and sensor
-//   left    action rail: arm, take off (altitude stepper), mission, hold,
-//           RTL, land, kill (two taps)
-//   centre  flight HUD over the video: horizon, heading tape, speed, altitude
-//   bottom  mission progress, what avoidance is doing, the latest FC message
-// The dock on the right holds the detail, one tab at a time: avoidance,
-// telemetry, setup (devices + full flight controls) and the message log. It
-// resizes by dragging its edge and hides entirely.
+// Fixed places, no chrome floating over the picture:
+//   top     status cells (links, mode, armed, battery, GPS, home, time,
+//           avoidance) + the two link switches: telemetry CONNECT and
+//           START VIDEO, side by side + the panel toggle
+//   left    action rail: arm, take off, START mission, hold, RTL, land, kill
+//   centre  the view - video (with the Fly tab's configurable OSD) or map
+//           (2D or 3D) - and the other one as a picture-in-picture pinned to
+//           a corner. Click the PiP to swap; drag it to another corner.
+//   right   the dock, one tab at a time: avoidance (+ optional radar and
+//           forward-depth views), telemetry, setup (devices + full
+//           controls), message log. Drag its edge to resize; P hides it.
+//   bottom  mission bar: altitude profile along the route with the
+//           avoidance floor, next/left/time, avoidance state, last message.
 //
 // Keys: M swaps video and map, P shows/hides the dock.
 // Swapping never remounts the video or the map, so the stream never restarts.
@@ -22,10 +22,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
-import { CornerDownLeft, Maximize2, Minimize2, PanelRightClose, PanelRightOpen } from 'lucide-react'
+import { Maximize2, Minimize2, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { getSocket } from '@/lib/socket'
 import { useSwarmStore } from '@/store/swarm'
 import { useDroneStore } from '@/store/drone'
+import { useMissionStore } from '@/store/mission'
 import { getVideoSource } from '@/lib/videoSource'
 import { cn } from '@/lib/utils'
 import { VideoStream } from '@/components/video/VideoStream'
@@ -35,19 +36,19 @@ import { DroneControls } from '@/components/controls/DroneControls'
 import { AvoidancePanel } from '@/components/avoidance/AvoidancePanel'
 import { TelemetryPanel } from '@/components/telemetry/TelemetryPanel'
 import { StatusStrip } from '@/components/command/StatusStrip'
+import { LinkCluster } from '@/components/command/LinkCluster'
 import { ActionRail } from '@/components/command/ActionRail'
-import { FlightHud } from '@/components/command/FlightHud'
-import { MissionStrip } from '@/components/command/MissionStrip'
+import { MissionBar } from '@/components/command/MissionBar'
+import { ObstacleRadar, DepthStrip } from '@/components/command/ObstacleRadar'
 import { useAvoidanceLive } from '@/components/command/useAvoidanceLive'
 
-const MissionMap = dynamic(() => import('@/components/mission/MissionMap'), {
-    ssr: false,
-    loading: () => (
-        <div className="w-full h-full flex items-center justify-center bg-zinc-900">
-            <p className="text-xs font-mono text-zinc-400">Loading map…</p>
-        </div>
-    ),
-})
+const mapLoading = () => (
+    <div className="w-full h-full flex items-center justify-center bg-zinc-900">
+        <p className="text-xs font-mono text-zinc-400">Loading map…</p>
+    </div>
+)
+const MissionMap = dynamic(() => import('@/components/mission/MissionMap'), { ssr: false, loading: mapLoading })
+const MissionMap3D = dynamic(() => import('@/components/mission/MissionMap3D'), { ssr: false, loading: mapLoading })
 
 type View = 'video' | 'map'
 type Corner = 'bl' | 'br' | 'tl' | 'tr'
@@ -55,23 +56,22 @@ type PipSize = 's' | 'm' | 'l'
 type DockTab = 'avoid' | 'telemetry' | 'setup' | 'log'
 interface Layout {
     big: View; corner: Corner; size: PipSize; dockW: number; dockHidden: boolean; tab: DockTab
+    map3d: boolean; radar: boolean; depth: boolean
 }
 
-const DEFAULT: Layout = { big: 'video', corner: 'br', size: 'm', dockW: 340, dockHidden: false, tab: 'avoid' }
-const STORE_KEY = 'hyrak-command-layout-v2'
-const PIP_DIMS: Record<PipSize, [number, number]> = { s: [220, 140], m: [320, 200], l: [440, 275] }
-const CORNERS: Corner[] = ['br', 'bl', 'tl', 'tr']
-const TOP_CLEAR = 52        // below the status strip
-// The video's own control bar (Start, fullscreen) owns the bottom ~46 px when
-// the video is full screen; the mission strip and minimap sit above it.
-const VIDEO_BAR = 46
-const stripBottom = (big: View) => (big === 'video' ? VIDEO_BAR : 8)
-const pipBottom = (big: View) => stripBottom(big) + 44
+const DEFAULT: Layout = {
+    big: 'video', corner: 'br', size: 'm', dockW: 340, dockHidden: false, tab: 'avoid',
+    map3d: false, radar: false, depth: false,
+}
+const STORE_KEY = 'hyrak-command-layout-v3'
+const PIP_DIMS: Record<PipSize, [number, number]> = { s: [240, 150], m: [336, 210], l: [460, 288] }
+const EDGE = 10             // PiP gap to the stage edge
 const DOCK_MIN = 280, DOCK_MAX = 600
 const TABS: { id: DockTab; label: string }[] = [
     { id: 'avoid', label: 'AVOID' }, { id: 'telemetry', label: 'TELEMETRY' },
     { id: 'setup', label: 'SETUP' }, { id: 'log', label: 'LOG' },
 ]
+const PANEL: React.CSSProperties = { background: '#0b0e13', borderColor: 'rgba(255,255,255,.08)' }
 
 function loadLayout(): Layout {
     try {
@@ -84,11 +84,11 @@ function saveLayout(l: Layout) {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(l)) } catch { /* not critical */ }
 }
 
-function pipBox(corner: Corner, size: PipSize, big: View): React.CSSProperties {
+function pipBox(corner: Corner, size: PipSize): React.CSSProperties {
     const [w, h] = PIP_DIMS[size]
-    const pos: React.CSSProperties = { width: w, height: h, maxWidth: '42%', maxHeight: '42%' }
-    if (corner[0] === 'b') pos.bottom = pipBottom(big); else pos.top = TOP_CLEAR
-    if (corner[1] === 'l') pos.left = 76; else pos.right = 10      // clear of the action rail
+    const pos: React.CSSProperties = { width: w, height: h, maxWidth: '45%', maxHeight: '45%' }
+    if (corner[0] === 'b') pos.bottom = EDGE; else pos.top = EDGE
+    if (corner[1] === 'l') pos.left = EDGE; else pos.right = EDGE
     return pos
 }
 
@@ -107,13 +107,27 @@ function MessageLog() {
     )
 }
 
+function Toggle({ on, label, hint, onClick }: { on: boolean; label: string; hint: string; onClick: () => void }) {
+    return (
+        <button onClick={onClick} title={hint}
+            className="flex-1 h-8 rounded-md border text-[10px] font-mono tracking-widest transition-colors"
+            style={on
+                ? { background: 'rgba(34,211,238,.15)', borderColor: 'rgba(34,211,238,.6)', color: '#67e8f9' }
+                : { borderColor: 'hsl(var(--app-border))', color: 'hsl(var(--app-text-muted))' }}>
+            {label} {on ? 'ON' : 'OFF'}
+        </button>
+    )
+}
+
 export default function CommandPage() {
     const [mounted, setMounted] = useState(false)
     const [layout, setLayout] = useState<Layout>(DEFAULT)
     const [wallOn, setWallOn] = useState(false)
+    const [drag, setDrag] = useState<{ x: number; y: number } | null>(null)
     const swarmEnabled = useSwarmStore(s => s.enabled)
     const avoid = useAvoidanceLive()
-    const dragRef = useRef<{ x: number; w: number } | null>(null)
+    const dockDrag = useRef<{ x: number; w: number } | null>(null)
+    const stageRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
         getSocket().emit('set_analysis_mode', { mode: 'manual-control' })   // raw feed
@@ -131,6 +145,16 @@ export default function CommandPage() {
         const next = { ...prev, dockHidden: !prev.dockHidden }; saveLayout(next); return next
     }), [])
 
+    // 3D chase camera follows the aircraft while it is shown here; the
+    // Mission tab's own setting is put back on the way out.
+    useEffect(() => {
+        if (!mounted || !layout.map3d) return
+        const st = useMissionStore.getState()
+        const before = st.followDrone
+        st.setFollowDrone(true)
+        return () => useMissionStore.getState().setFollowDrone(before)
+    }, [mounted, layout.map3d])
+
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             const el = e.target as HTMLElement | null
@@ -143,16 +167,16 @@ export default function CommandPage() {
         return () => window.removeEventListener('keydown', onKey)
     }, [swap, toggleDock])
 
-    const onDragStart = (e: React.MouseEvent) => {
+    const onDockDrag = (e: React.MouseEvent) => {
         e.preventDefault()
-        dragRef.current = { x: e.clientX, w: layout.dockW }
+        dockDrag.current = { x: e.clientX, w: layout.dockW }
         const move = (ev: MouseEvent) => {
-            if (!dragRef.current) return
-            const w = Math.max(DOCK_MIN, Math.min(DOCK_MAX, dragRef.current.w + (dragRef.current.x - ev.clientX)))
+            if (!dockDrag.current) return
+            const w = Math.max(DOCK_MIN, Math.min(DOCK_MAX, dockDrag.current.w + (dockDrag.current.x - ev.clientX)))
             setLayout(prev => ({ ...prev, dockW: w }))
         }
         const up = () => {
-            dragRef.current = null
+            dockDrag.current = null
             window.removeEventListener('mousemove', move)
             window.removeEventListener('mouseup', up)
             setLayout(prev => { saveLayout(prev); return prev })
@@ -161,116 +185,169 @@ export default function CommandPage() {
         window.addEventListener('mouseup', up)
     }
 
+    // PiP: a click swaps, a drag moves it and it snaps to the nearest corner.
+    const onPipDown = (e: React.PointerEvent) => {
+        if (e.button !== 0) return
+        const stage = stageRef.current?.getBoundingClientRect()
+        const box = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect()
+        if (!stage) return
+        const sx = e.clientX, sy = e.clientY
+        const ox = sx - box.left, oy = sy - box.top
+        let moved = false
+        const move = (ev: PointerEvent) => {
+            if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 6) return
+            moved = true
+            setDrag({
+                x: Math.max(0, Math.min(stage.width - box.width, ev.clientX - stage.left - ox)),
+                y: Math.max(0, Math.min(stage.height - box.height, ev.clientY - stage.top - oy)),
+            })
+        }
+        const up = (ev: PointerEvent) => {
+            window.removeEventListener('pointermove', move)
+            window.removeEventListener('pointerup', up)
+            if (!moved) { swap(); return }
+            const cx = ev.clientX - stage.left - ox + box.width / 2
+            const cy = ev.clientY - stage.top - oy + box.height / 2
+            update({ corner: `${cy > stage.height / 2 ? 'b' : 't'}${cx > stage.width / 2 ? 'r' : 'l'}` as Corner })
+            setDrag(null)
+        }
+        window.addEventListener('pointermove', move)
+        window.addEventListener('pointerup', up)
+    }
+
     const boxFor = (v: View): React.CSSProperties =>
         layout.big === v
             ? { position: 'absolute', inset: 0, zIndex: 0 }
-            : { position: 'absolute', zIndex: 30, borderRadius: 10, overflow: 'hidden',
-                boxShadow: '0 10px 30px rgba(0,0,0,.6)', border: '1px solid rgba(255,255,255,.2)',
-                ...pipBox(layout.corner, layout.size, layout.big) }
+            : {
+                position: 'absolute', zIndex: 30, borderRadius: 10, overflow: 'hidden',
+                boxShadow: '0 10px 30px rgba(0,0,0,.6)', border: '1px solid rgba(255,255,255,.22)',
+                ...pipBox(layout.corner, layout.size),
+                ...(drag ? { left: drag.x, top: drag.y, right: 'auto', bottom: 'auto' } : {}),
+            }
 
     const pipChrome = (label: string) => (
         <>
-            <button onClick={swap} aria-label={`Show ${label} full screen`}
-                className="absolute inset-0 z-[1500] cursor-pointer" style={{ background: 'transparent' }} />
-            <div className="absolute top-1.5 left-1.5 right-1.5 z-[1600] flex items-center justify-between pointer-events-none">
-                <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold tracking-widest bg-black/60 text-zinc-200">
-                    {label} · tap to expand</span>
-                <span className="flex gap-1 pointer-events-auto">
-                    <button onClick={() => update({ corner: CORNERS[(CORNERS.indexOf(layout.corner) + 1) % 4] })}
-                        className="p-1 rounded bg-black/60 text-zinc-200" title="Move to the next corner"><CornerDownLeft size={11} /></button>
-                    <button onClick={() => update({ size: layout.size === 's' ? 'm' : layout.size === 'm' ? 'l' : 's' })}
-                        className="p-1 rounded bg-black/60 text-zinc-200" title="Minimap size">
-                        {layout.size === 'l' ? <Minimize2 size={11} /> : <Maximize2 size={11} />}</button>
-                </span>
+            <div onPointerDown={onPipDown} role="button" aria-label={`Show ${label} full screen`}
+                className="absolute inset-0 z-[1500] cursor-pointer touch-none select-none" style={{ background: 'transparent' }} />
+            <div className="absolute top-1.5 left-1.5 right-1.5 z-[1600] flex items-center justify-between pointer-events-none select-none">
+                <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold tracking-widest bg-black/65 text-zinc-100">
+                    {label} · click to swap · drag to move</span>
+                <button onClick={() => update({ size: layout.size === 's' ? 'm' : layout.size === 'm' ? 'l' : 's' })}
+                    className="p-1.5 rounded bg-black/65 text-zinc-200 pointer-events-auto" title="Picture size">
+                    {layout.size === 'l' ? <Minimize2 size={12} /> : <Maximize2 size={12} />}</button>
             </div>
         </>
     )
 
     const dockHidden = mounted && layout.dockHidden
+    const mapBig = layout.big === 'map'
 
     return (
-        <div className="flex h-full min-h-0">
-            {/* ── Stage ───────────────────────────────────────────────────── */}
-            <div className="relative flex-1 min-w-0 rounded-xl border border-white/10 overflow-hidden bg-black">
-                <div style={boxFor('video')} className="flex">
-                    <div className="absolute inset-0 flex">
-                        {wallOn ? <CameraWall onClose={() => setWallOn(false)} /> : <VideoStream />}
-                    </div>
-                    {layout.big !== 'video' && pipChrome('VIDEO')}
-                </div>
-                <div style={boxFor('map')}>
-                    {mounted && <MissionMap readOnly follow compact={layout.big !== 'map'} />}
-                    {layout.big !== 'map' && pipChrome('MAP')}
-                </div>
-
-                {mounted && layout.big === 'video' && !wallOn && (
-                    <div className="absolute inset-0 z-10 pointer-events-none"><FlightHud /></div>
+        <div className="flex flex-col h-full min-h-0 gap-2 text-zinc-100">
+            {/* ── Top bar ─────────────────────────────────────────────────── */}
+            <div className="h-12 shrink-0 flex items-center gap-2 px-2 rounded-xl border" style={PANEL}>
+                <div className="flex-1 min-w-0"><StatusStrip avoid={avoid} /></div>
+                {mounted && !wallOn && getVideoSource() === 'air_unit_udp' && (
+                    <button onClick={() => setWallOn(true)}
+                        className="h-9 px-2.5 rounded-lg border border-white/10 text-[10px] font-mono tracking-widest text-zinc-400"
+                        title="Show every mesh unit delivering video">WALL</button>
                 )}
+                {mounted && <LinkCluster />}
+                <button onClick={toggleDock} title={dockHidden ? 'Show panel (P)' : 'Hide panel (P)'}
+                    className="h-9 w-9 rounded-lg border border-white/10 text-zinc-300 flex items-center justify-center">
+                    {dockHidden ? <PanelRightOpen size={15} /> : <PanelRightClose size={15} />}
+                </button>
+            </div>
 
-                <div className="absolute top-2 left-2 right-2 z-20 flex items-start gap-2">
-                    <div className="flex-1 min-w-0"><StatusStrip avoid={avoid} /></div>
-                    <button onClick={toggleDock} title={dockHidden ? 'Show panels (P)' : 'Hide panels (P)'}
-                        className="h-9 px-2.5 rounded-lg border border-white/10 text-zinc-300 flex items-center gap-1 text-[10px] font-mono"
-                        style={{ background: 'rgba(9,11,16,.78)' }}>
-                        {dockHidden ? <PanelRightOpen size={14} /> : <PanelRightClose size={14} />}
-                    </button>
-                </div>
-
-                <div className="absolute left-2 z-20 overflow-y-auto" style={{ top: TOP_CLEAR, bottom: pipBottom(layout.big) }}>
+            <div className="flex flex-1 min-h-0 gap-2">
+                {/* ── Action rail ─────────────────────────────────────────── */}
+                <div className="shrink-0 rounded-xl border p-1.5 overflow-y-auto" style={PANEL}>
                     <ActionRail />
                 </div>
 
-                {mounted && layout.big === 'video' && !wallOn && getVideoSource() === 'air_unit_udp' && (
-                    <button onClick={() => setWallOn(true)}
-                        className="absolute right-2 z-20 px-2 py-1 rounded border border-white/10 text-[10px] font-mono tracking-widest text-zinc-400"
-                        style={{ top: TOP_CLEAR, background: 'rgba(9,11,16,.78)' }}
-                        title="Show every mesh unit delivering video">WALL</button>
-                )}
-
-                <div className="absolute left-[76px] z-20"
-                    style={{ bottom: stripBottom(layout.big), right: 10, maxWidth: 760 }}>
-                    <MissionStrip avoid={avoid} />
+                {/* ── Stage ───────────────────────────────────────────────── */}
+                <div ref={stageRef} className="relative flex-1 min-w-0 rounded-xl border border-white/10 overflow-hidden bg-black">
+                    <div style={boxFor('video')} className="flex">
+                        <div className="absolute inset-0 flex">
+                            {wallOn ? <CameraWall onClose={() => setWallOn(false)} /> : <VideoStream bare />}
+                        </div>
+                        {layout.big !== 'video' && pipChrome('VIDEO')}
+                    </div>
+                    <div style={boxFor('map')}>
+                        {mounted && (layout.map3d
+                            ? <MissionMap3D readOnly />
+                            : <MissionMap readOnly follow compact={!mapBig} />)}
+                        {!mapBig && pipChrome(layout.map3d ? 'MAP 3D' : 'MAP')}
+                        {mapBig && (
+                            <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1600] flex rounded-lg border border-white/15 overflow-hidden text-[11px] font-mono"
+                                style={{ background: 'rgba(9,11,16,.85)' }}>
+                                {([false, true] as const).map(is3d => (
+                                    <button key={String(is3d)} onClick={() => update({ map3d: is3d })}
+                                        className="px-3 h-8 tracking-widest"
+                                        style={layout.map3d === is3d ? { background: 'rgba(34,211,238,.2)', color: '#67e8f9' } : { color: '#a1a1aa' }}>
+                                        {is3d ? '3D' : '2D'}</button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                 </div>
+
+                {/* ── Dock: tabs, resizable, hideable ─────────────────────── */}
+                {!dockHidden && (
+                    <>
+                        <div onMouseDown={onDockDrag} className="w-1.5 -mx-1 shrink-0 cursor-col-resize flex items-center justify-center group"
+                            title="Drag to resize">
+                            <div className="w-0.5 h-10 rounded bg-zinc-500/40 group-hover:bg-cyan-400/80" />
+                        </div>
+                        <aside className="shrink-0 flex flex-col min-h-0 rounded-xl border overflow-hidden"
+                            style={{ width: layout.dockW, background: 'hsl(var(--app-surface))', borderColor: 'hsl(var(--app-border))' }}>
+                            <div className="flex shrink-0 border-b" style={{ borderColor: 'hsl(var(--app-border))' }}>
+                                {TABS.filter(tb => !(tb.id === 'avoid' && swarmEnabled)).map(tb => (
+                                    <button key={tb.id} onClick={() => update({ tab: tb.id })}
+                                        className={cn('flex-1 py-2.5 text-[10px] font-mono tracking-widest border-b-2 transition-colors',
+                                            layout.tab === tb.id ? 'border-cyan-400 text-cyan-400' : 'border-transparent')}
+                                        style={layout.tab === tb.id ? undefined : { color: 'hsl(var(--app-text-muted))' }}>
+                                        {tb.label}
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-4">
+                                {layout.tab === 'avoid' && !swarmEnabled && (
+                                    <>
+                                        <div className="flex gap-2">
+                                            <Toggle on={layout.radar} label="RADAR" onClick={() => update({ radar: !layout.radar })}
+                                                hint="Top-down view of sensor sectors and mapped obstacles (polls the map once a second while on)" />
+                                            <Toggle on={layout.depth} label="DEPTH" onClick={() => update({ depth: !layout.depth })}
+                                                hint="Forward 90 degrees as a proximity bar" />
+                                        </div>
+                                        {layout.radar && <ObstacleRadar avoid={avoid} />}
+                                        {layout.depth && <DepthStrip avoid={avoid} />}
+                                        <AvoidancePanel />
+                                    </>
+                                )}
+                                {layout.tab === 'telemetry' && <TelemetryPanel />}
+                                {layout.tab === 'setup' && (
+                                    <>
+                                        {mounted && swarmEnabled
+                                            ? <p className="text-xs font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>
+                                                Swarm mode - manage the fleet on the Fly tab.</p>
+                                            : <DeviceSelector />}
+                                        <div className="border-t pt-4" style={{ borderColor: 'hsl(var(--app-border))' }}>
+                                            <DroneControls />
+                                        </div>
+                                    </>
+                                )}
+                                {layout.tab === 'log' && <MessageLog />}
+                            </div>
+                        </aside>
+                    </>
+                )}
             </div>
 
-            {/* ── Dock: tabs, resizable, hideable ─────────────────────────── */}
-            {!dockHidden && (
-                <>
-                    <div onMouseDown={onDragStart} className="w-2 shrink-0 cursor-col-resize flex items-center justify-center group"
-                        title="Drag to resize">
-                        <div className="w-0.5 h-10 rounded bg-zinc-500/40 group-hover:bg-cyan-400/80" />
-                    </div>
-                    <aside className="shrink-0 flex flex-col min-h-0 rounded-xl border overflow-hidden"
-                        style={{ width: layout.dockW, background: 'hsl(var(--app-surface))', borderColor: 'hsl(var(--app-border))' }}>
-                        <div className="flex shrink-0 border-b" style={{ borderColor: 'hsl(var(--app-border))' }}>
-                            {TABS.filter(tb => !(tb.id === 'avoid' && swarmEnabled)).map(tb => (
-                                <button key={tb.id} onClick={() => update({ tab: tb.id })}
-                                    className={cn('flex-1 py-2.5 text-[10px] font-mono tracking-widest border-b-2 transition-colors',
-                                        layout.tab === tb.id ? 'border-cyan-400 text-cyan-400' : 'border-transparent')}
-                                    style={layout.tab === tb.id ? undefined : { color: 'hsl(var(--app-text-muted))' }}>
-                                    {tb.label}
-                                </button>
-                            ))}
-                        </div>
-                        <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-4">
-                            {layout.tab === 'avoid' && !swarmEnabled && <AvoidancePanel />}
-                            {layout.tab === 'telemetry' && <TelemetryPanel />}
-                            {layout.tab === 'setup' && (
-                                <>
-                                    {mounted && swarmEnabled
-                                        ? <p className="text-xs font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>
-                                            Swarm mode - manage the fleet on the Fly tab.</p>
-                                        : <DeviceSelector />}
-                                    <div className="border-t pt-4" style={{ borderColor: 'hsl(var(--app-border))' }}>
-                                        <DroneControls />
-                                    </div>
-                                </>
-                            )}
-                            {layout.tab === 'log' && <MessageLog />}
-                        </div>
-                    </aside>
-                </>
-            )}
+            {/* ── Mission bar ─────────────────────────────────────────────── */}
+            <div className="h-[68px] shrink-0 rounded-xl border" style={PANEL}>
+                <MissionBar avoid={avoid} />
+            </div>
         </div>
     )
 }
