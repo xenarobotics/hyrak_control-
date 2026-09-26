@@ -111,6 +111,9 @@ class ParamSets:
         return b"".join(self.nals[t] for t in missing) + au
 
 
+SENDER_HANDOVER_S = 1.0     # current sender silent this long -> another may take over
+
+
 class HevcDepacketizer:
     """RTP/H.265 (RFC 7798) to Annex-B access units. Single NAL units,
     aggregation packets (48) and fragmentation units (49); an access unit
@@ -130,6 +133,8 @@ class HevcDepacketizer:
         self.broken_aus = 0
         self.sender_changes = 0
         self.pkts = 0
+        self.last_rx = 0.0
+        self.competing: dict[int, int] = {}   # ssrc -> packets ignored from a second sender
 
     def _flush(self):
         out = None
@@ -166,6 +171,16 @@ class HevcDepacketizer:
             return None
         self.pkts += 1
         out = None
+        now = time.monotonic()
+        if ssrc != self.ssrc and self.ssrc is not None and now - self.last_rx < SENDER_HANDOVER_S:
+            # A SECOND sender on the same port while the current one is still
+            # talking (a leftover bridge, two unit instances across a restart).
+            # Switching on every packet decoded neither stream (SITL 21:30:
+            # "no video frames within 5s" with two SSRCs alternating). Keep the
+            # one we have; take the other only once the current goes quiet.
+            self.competing[ssrc] = self.competing.get(ssrc, 0) + 1
+            return None
+        self.last_rx = now
         if ssrc != self.ssrc:
             if self.ssrc is not None:
                 self.sender_changes += 1
@@ -231,6 +246,7 @@ class SharedReader:
         self.last_error = ""
         self.width = self.height = 0
         self.depack: HevcDepacketizer | None = None
+        self._competing_warned = -1e9
         self._thread = threading.Thread(target=self._run, name=f"feed-{port}", daemon=True)
         self._thread.start()
 
@@ -323,6 +339,12 @@ class SharedReader:
                         continue
                     quiet_since = None
                     au = dp.feed(d)
+                    if dp.competing and time.monotonic() - self._competing_warned > 60.0:
+                        self._competing_warned = time.monotonic()
+                        others = ", ".join(f"0x{k:08X} ({v} pkts)" for k, v in dp.competing.items())
+                        logger.warning(f"udp:{self.port}: TWO senders on this port - showing 0x{dp.ssrc:08X}, "
+                                       f"ignoring {others}. Something else is also sending here "
+                                       f"(a leftover bridge or a second unit instance).")
                     if dp.ssrc != last_ssrc:
                         if last_ssrc is not None:
                             # New sender: never carry parameter sets or decoder state across.
@@ -705,7 +727,8 @@ def status(port: int) -> dict | None:
             "quiet_s": round(time.monotonic() - r.last_packet_t, 1) if r.last_packet_t else None,
             "ssrc": f"0x{dp.ssrc:08X}" if dp and dp.ssrc is not None else None,
             "packets": dp.pkts if dp else 0, "missed_packets": dp.missed if dp else 0,
-            "dropped_aus": dp.broken_aus if dp else 0, "sender_changes": dp.sender_changes if dp else 0}
+            "dropped_aus": dp.broken_aus if dp else 0, "sender_changes": dp.sender_changes if dp else 0,
+            "competing_senders": {f"0x{k:08X}": v for k, v in dp.competing.items()} if dp else {}}
 
 
 async def subscribe_transcoded(port: int, codec: str) -> asyncio.Queue:
