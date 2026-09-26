@@ -377,6 +377,23 @@ function DroneFollower() {
   return null
 }
 
+// Leaflet caches its container size; when the pane is resized (the Command
+// tab's minimap swap, a dock drag) it must be told, or it draws grey tiles.
+function MapResizeWatcher() {
+  const map = useMap()
+  useEffect(() => {
+    const el = map.getContainer()
+    let raf = 0
+    const ro = new ResizeObserver(() => {       // at most one redraw per frame
+      if (raf) return
+      raf = requestAnimationFrame(() => { raf = 0; map.invalidateSize({ animate: false }) })
+    })
+    ro.observe(el)
+    return () => { ro.disconnect(); if (raf) cancelAnimationFrame(raf) }
+  }, [map])
+  return null
+}
+
 // ── Draggable waypoint marker ───────────────────────────────────────────────
 
 function WaypointMarker({ wp, index, readOnly = false }: { wp: Waypoint; index: number; readOnly?: boolean }) {
@@ -413,9 +430,10 @@ function WaypointMarker({ wp, index, readOnly = false }: { wp: Waypoint; index: 
 /**
  * readOnly: a monitoring view (Command tab) - clicks never add or move
  * waypoints and hazards cannot be pinned, so a stray click while flying
- * cannot change the mission. follow: keep the drone in view.
+ * cannot change the mission. follow: keep the drone in view. compact: a
+ * minimap - no legend box.
  */
-export default function MissionMap({ readOnly = false, follow = false }: { readOnly?: boolean; follow?: boolean } = {}) {
+export default function MissionMap({ readOnly = false, follow = false, compact = false }: { readOnly?: boolean; follow?: boolean; compact?: boolean } = {}) {
   const rawWaypoints       = useMissionStore(s => s.waypoints)
   const homePosition       = useMissionStore(s => s.homePosition)
   const getRtlWaypoint     = useMissionStore(s => s.getRtlWaypoint)
@@ -516,6 +534,7 @@ export default function MissionMap({ readOnly = false, follow = false }: { readO
       {!readOnly && <ClickHandler pinMode={pinMode} onPin={pinHazard} />}
       <DronePositionTracker />
       {follow && <DroneFollower />}
+      <MapResizeWatcher />
       <FlightZonesOverlay />
       <AvoidanceOverlay show={showAvoid} reload={hazardNonce}
         home={homePosition ? { lat: homePosition.lat, lng: homePosition.lng } : null}
@@ -665,7 +684,7 @@ export default function MissionMap({ readOnly = false, follow = false }: { readO
     </MapContainer>
 
       {/* Avoidance overlay control - toggle visibility, legend, click-to-pin */}
-      <div style={{
+      {!compact && <div style={{
         position: 'absolute', bottom: 12, left: 12, zIndex: 1000,
         background: 'rgba(10,12,18,0.82)', backdropFilter: 'blur(6px)',
         border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8,
@@ -697,7 +716,7 @@ export default function MissionMap({ readOnly = false, follow = false }: { readO
             </button>}
           </div>
         )}
-      </div>
+      </div>}
     </div>
   )
 }
