@@ -36,6 +36,7 @@ import { getSocket } from '@/lib/socket'
 import { startHyrakRegistration, stopHyrakRegistration } from '@/lib/hyrakRegister'
 import { isDesktopApp, nativeBridge, type BridgeEvent } from '@/lib/nativeBridge'
 import { getRfDownlinkPort, getRfUplinkPort, getRfUplinkHost, getRfFanoutPort, isRfUplinkAuto } from '@/lib/rfBridge'
+import { feedLocal, registerLocalLink, unregisterLocalLink } from '@/lib/localLink'
 
 const NATIVE_UDP_ID = 'air-unit-telemetry'
 
@@ -57,6 +58,9 @@ export function setRfSilenceHandler(h: RfSilenceHandler | null) { onSilence = h 
 
 export const isNativeRfRelayActive = () => active
 
+
+// The local link fallback (lib/localLink.ts) writes through the same path.
+const localSend = (b: Uint8Array) => onDownlink(b)
 function onDownlink(data: ArrayBuffer | Uint8Array) {
     // Backend -> wfb_tx:14551 -> RF -> aircraft.
     const bytes = data instanceof Uint8Array ? data : new Uint8Array(data)
@@ -135,6 +139,7 @@ export async function startNativeRfRelay(
             if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null }
         }
         // volatile: dropped while the socket is down, never replayed stale on reconnect
+        feedLocal(event.data)
         socket.volatile.emit('serial_uplink', event.data)
     }) ?? null
 
@@ -150,6 +155,7 @@ export async function startNativeRfRelay(
     }, SILENCE_TIMEOUT_MS)
 
     socket.on('serial_downlink', onDownlink)
+    registerLocalLink(localSend)
     // Same event every other telemetry path sends - from here they are identical.
     socket.emit('connect_browser_serial', { source: 'native-rf' })
     active = true
@@ -161,6 +167,7 @@ export async function stopNativeRfRelay(): Promise<void> {
     if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null }
     if (unsubscribe) { unsubscribe(); unsubscribe = null }
     try { getSocket().off('serial_downlink', onDownlink) } catch { /* socket gone */ }
+    unregisterLocalLink(localSend)
     // Drop this link's claim. Note this does NOT un-register: the decoder
     // never expires a client, so the feeds keep flowing - what stops is the
     // self-healing tick, and only once video has let go too.

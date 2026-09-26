@@ -13,6 +13,7 @@
 
 import { getSocket } from '@/lib/socket'
 import { isDesktopApp, nativeBridge, type BridgeEvent } from '@/lib/nativeBridge'
+import { feedLocal, registerLocalLink, unregisterLocalLink } from '@/lib/localLink'
 
 let active = false
 let nativeUnsubscribe: (() => void) | null = null
@@ -80,13 +81,18 @@ export async function startRemoteSitlRelay(port = 14540): Promise<void> {
         // allocated, exact-size buffer). socket.io-client serializes a
         // TypedArray correctly on its own.
         // volatile: dropped while the socket is down, never replayed stale on reconnect
+        feedLocal(event.data)
         socket.volatile.emit('serial_uplink', event.data)
     })
 
     socket.on('serial_downlink', onNativeDownlink)
+    registerLocalLink(localSend)
     socket.emit('connect_browser_serial', { source: 'remote-sitl' })
     active = true
 }
+
+// The local link fallback (lib/localLink.ts) writes through the same path.
+const localSend = (b: Uint8Array) => { nativeBridge()?.send('udp', NATIVE_UDP_ID, b, { tag: 0 }) }
 
 function onNativeDownlink(data: ArrayBuffer) {
     nativeBridge()?.send('udp', NATIVE_UDP_ID, new Uint8Array(data), { tag: 0 })
@@ -106,5 +112,6 @@ export async function stopRemoteSitlRelay(): Promise<void> {
         nativeUnsubscribe = null
     }
     socket.off('serial_downlink', onNativeDownlink)
+    unregisterLocalLink(localSend)
     await nativeBridge()?.stop('udp', NATIVE_UDP_ID)
 }

@@ -23,6 +23,7 @@
 
 import { getSocket } from '@/lib/socket'
 import { isDesktopApp, nativeBridge, type BridgeEvent } from '@/lib/nativeBridge'
+import { feedLocal, registerLocalLink, unregisterLocalLink } from '@/lib/localLink'
 
 const NATIVE_UDP_ID = 'siyi-telemetry'
 const TARGET_KEY = 'hyrak-siyi-telemetry-target'
@@ -96,6 +97,9 @@ export function isSiyiTelemetryActive(): boolean {
     return active
 }
 
+
+// The local link fallback (lib/localLink.ts) writes through the same path.
+const localSend = (b: Uint8Array) => onDownlink(b)
 function onDownlink(data: ArrayBuffer | Uint8Array) {
     // Backend -> ground unit -> aircraft. Sent to the last peer seen on the
     // port; if none has been seen the bridge drops it rather than guessing.
@@ -148,6 +152,7 @@ export async function startSiyiTelemetry(
             if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null }
         }
         // volatile: dropped while the socket is down, never replayed stale on reconnect
+        feedLocal(event.data)
         socket.volatile.emit('serial_uplink', event.data)
     }) ?? null
 
@@ -166,6 +171,7 @@ export async function startSiyiTelemetry(
     }, FIRST_TELEMETRY_TIMEOUT_MS)
 
     socket.on('serial_downlink', onDownlink)
+    registerLocalLink(localSend)
     // Tells the backend to spin up its MAVLink parser for this session. The same
     // event a Web Serial radio sends, because from here on the paths are
     // identical.
@@ -179,6 +185,7 @@ export async function stopSiyiTelemetry(): Promise<void> {
     if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null }
     if (unsubscribe) { unsubscribe(); unsubscribe = null }
     try { getSocket().off('serial_downlink', onDownlink) } catch { /* socket gone */ }
+    unregisterLocalLink(localSend)
     if (isDesktopApp()) {
         try { await nativeBridge()?.stop('udp', NATIVE_UDP_ID) } catch { /* not running */ }
     }

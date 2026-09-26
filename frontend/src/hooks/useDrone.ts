@@ -2,6 +2,7 @@
 
 import { useEffect, useCallback } from 'react'
 import { getSocket, connectSocket, setResumeSession } from '@/lib/socket'
+import { setCloudUp } from '@/lib/localLink'
 import { startBrowserSerial, stopBrowserSerial, isBrowserSerialActive, type SerialPortLike } from '@/lib/browserSerial'
 import { startLocalRelay, stopLocalRelay, isLocalRelayActive } from '@/lib/localRfRelay'
 import { startRemoteSitlRelay, stopRemoteSitlRelay, isRemoteSitlRelayActive, setSitlSilenceHandler } from '@/lib/remoteSitlRelay'
@@ -38,7 +39,7 @@ export function useDrone() {
         // not all handlers for the event (which happens with bare .off('event')).
         // Critical: multiple components call useDrone(); without named refs,
         // one component's cleanup nukes every other component's listeners.
-        const onConnect        = () => store.setConnectionStatus('connected')
+        const onConnect        = () => { setCloudUp(true); store.setConnectionStatus('connected') }
         // A dropped socket is NOT a lost session: the server holds the session,
         // its drone link and our radio relay for SESSION_GRACE_S and hands it
         // back when we reconnect. Tear down locally only if that fails.
@@ -52,6 +53,9 @@ export function useDrone() {
             void stopBrowserSerial()
         }
         const onDisconnect     = (reason?: string) => {
+            // The local link fallback takes over the radio/SITL link now (it
+            // keeps a ground-station heartbeat going and offers HOLD/RTL/LAND).
+            setCloudUp(false)
             // Our own disconnect (logout, page teardown): nothing to hold.
             if (reason === 'io client disconnect' || !useDroneStore.getState().session) {
                 fullReset()

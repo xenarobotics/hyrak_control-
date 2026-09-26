@@ -10,6 +10,7 @@
 // granted radio currently plugged in, and connecting needs no popup.
 
 import { getSocket } from '@/lib/socket'
+import { feedLocal, registerLocalLink, unregisterLocalLink } from '@/lib/localLink'
 
 export type SerialPortLike = {
     open(opts: { baudRate: number; bufferSize?: number }): Promise<void>
@@ -159,6 +160,7 @@ export async function startBrowserSerial(radio: SerialPortLike, baudRate = 57600
 
     const socket = getSocket()
     socket.on('serial_downlink', onDownlink)
+    registerLocalLink(localSend)
     // The backend waits for the drone's heartbeat to arrive through this
     // relay, so start pumping bytes immediately - don't wait for status.
     socket.emit('connect_browser_serial', { source: 'web-serial' })
@@ -183,6 +185,7 @@ async function readLoop() {
                     const { value, done } = await reader.read()
                     if (done || !active) break
                     if (value && value.byteLength > 0) {
+                        feedLocal(value)
                         socket.volatile.emit(
                             'serial_uplink',
                             value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength),
@@ -207,6 +210,9 @@ async function readLoop() {
     if (active) void stopBrowserSerial()
 }
 
+// The local link fallback (lib/localLink.ts) writes through the same path.
+const localSend = (b: Uint8Array) => { writer?.write(b).catch(() => { /* port closing */ }) }
+
 function onDownlink(data: ArrayBuffer) {
     writer?.write(new Uint8Array(data)).catch(() => { /* port closing */ })
 }
@@ -215,6 +221,7 @@ export async function stopBrowserSerial(): Promise<void> {
     if (!active && !port) return
     active = false
     getSocket().off('serial_downlink', onDownlink)
+    unregisterLocalLink(localSend)
     try { await reader?.cancel() } catch { /* already released */ }
     try { writer?.releaseLock() } catch { /* already released */ }
     writer = null

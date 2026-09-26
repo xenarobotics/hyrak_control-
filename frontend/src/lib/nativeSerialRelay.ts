@@ -27,6 +27,7 @@
 
 import { getSocket } from '@/lib/socket'
 import { isDesktopApp, nativeBridge, type BridgeEvent } from '@/lib/nativeBridge'
+import { feedLocal, registerLocalLink, unregisterLocalLink } from '@/lib/localLink'
 
 const NATIVE_SERIAL_ID = 'telemetry-radio'
 
@@ -105,6 +106,9 @@ export async function listNativeSerialPorts(): Promise<NativeRadio[]> {
     }
 }
 
+
+// The local link fallback (lib/localLink.ts) writes through the same path.
+const localSend = (b: Uint8Array) => onDownlink(b)
 function onDownlink(data: ArrayBuffer | Uint8Array) {
     // mavsdk's replies (commands to the aircraft) -> radio -> air side.
     const bytes = data instanceof Uint8Array ? data : new Uint8Array(data)
@@ -147,6 +151,7 @@ export async function startNativeSerial(
             if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null }
         }
         // volatile: dropped while the socket is down, never replayed stale on reconnect
+        feedLocal(event.data)
         socket.volatile.emit('serial_uplink', event.data)
     }) ?? null
 
@@ -163,6 +168,7 @@ export async function startNativeSerial(
     }, SILENCE_TIMEOUT_MS)
 
     socket.on('serial_downlink', onDownlink)
+    registerLocalLink(localSend)
     // Same event a Web Serial radio sends - from here the paths are identical.
     socket.emit('connect_browser_serial', { source: 'native-serial' })
     active = true
@@ -174,6 +180,7 @@ export async function stopNativeSerial(): Promise<void> {
     if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null }
     if (unsubscribe) { unsubscribe(); unsubscribe = null }
     try { getSocket().off('serial_downlink', onDownlink) } catch { /* socket gone */ }
+    unregisterLocalLink(localSend)
     if (isDesktopApp()) {
         try { await nativeBridge()?.stop('serial', NATIVE_SERIAL_ID) } catch { /* not running */ }
     }

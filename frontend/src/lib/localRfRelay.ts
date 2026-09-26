@@ -11,6 +11,7 @@
 // needed zero backend changes.
 
 import { getSocket } from '@/lib/socket'
+import { feedLocal, registerLocalLink, unregisterLocalLink } from '@/lib/localLink'
 
 let ws: WebSocket | null = null
 let active = false
@@ -50,6 +51,7 @@ export async function startLocalRelay(url: string = DEFAULT_LOCAL_RELAY_URL): Pr
             active = true
             const io = getSocket()
             io.on('serial_downlink', onDownlink)
+            registerLocalLink(localSend)
             socket.onmessage = onRelayMessage
             socket.onclose = () => { if (active) void stopLocalRelay() }
             socket.onerror = () => { /* handled via onclose */ }
@@ -70,12 +72,16 @@ export async function startLocalRelay(url: string = DEFAULT_LOCAL_RELAY_URL): Pr
 // radio's received bytes always were.
 function onRelayMessage(event: MessageEvent) {
     if (event.data instanceof ArrayBuffer && event.data.byteLength > 0) {
+        feedLocal(event.data)
         getSocket().volatile.emit('serial_uplink', event.data)
     }
 }
 
 // mavsdk's outgoing replies (commands to the drone) - forward to the relay
 // agent, which sends them out as UDP to wfb_tx's uplink listener (:14551).
+// The local link fallback (lib/localLink.ts) writes through the same path.
+const localSend = (b: Uint8Array) => onDownlink(b.slice().buffer)
+
 function onDownlink(data: ArrayBuffer) {
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(data)
@@ -86,6 +92,7 @@ export async function stopLocalRelay(): Promise<void> {
     if (!active && !ws) return
     active = false
     getSocket().off('serial_downlink', onDownlink)
+    unregisterLocalLink(localSend)
     try { ws?.close() } catch { /* already closed */ }
     ws = null
 }

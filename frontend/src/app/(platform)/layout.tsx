@@ -7,6 +7,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { ThemeToggle } from '@/components/controls/ThemeToggle'
 import { ZoneBanner } from '@/components/controls/ZoneBanner'
 import { UpdatePrompt } from '@/components/updater/UpdatePrompt'
+import { LocalLinkPanel } from '@/components/controls/LocalLinkPanel'
 import { useDrone } from '@/hooks/useDrone'
 import { WebRTCProvider } from '@/contexts/WebRTCContext'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
@@ -206,6 +207,7 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
                     {mounted && swarmEnabled && <FleetAside />}
                 </div>
                 <UpdatePrompt />
+                <LocalLinkPanel />
             </WebRTCProvider>
         </TooltipProvider>
     )
