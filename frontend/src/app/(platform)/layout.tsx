@@ -15,7 +15,7 @@ import { useDroneStore } from '@/store/drone'
 import { getSocket } from '@/lib/socket'
 import { cn } from '@/lib/utils'
 import Image from 'next/image'
-import { Radio, Map, Bot, Package, SlidersHorizontal, Settings, AlertTriangle } from 'lucide-react'
+import { Radio, Map, Bot, Package, SlidersHorizontal, Settings, AlertTriangle, LayoutDashboard } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useSwarmStore } from '@/store/swarm'
 import { FleetAside } from '@/components/swarm/FleetAside'
@@ -24,6 +24,7 @@ import { getStatusBarEnabled, STATUSBAR_CHANGE_EVENT } from '@/lib/statusBarSett
 
 const NAV = [
     { href: '/fly',       label: 'Fly',     icon: Radio },
+    { href: '/command',   label: 'Command', icon: LayoutDashboard },
     { href: '/mission',   label: 'Mission',  icon: Map },
     { href: '/modules',   label: 'AI',       icon: Bot },
     { href: '/deliveries', label: 'Deliver', icon: Package },

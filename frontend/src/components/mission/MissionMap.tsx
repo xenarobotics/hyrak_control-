@@ -358,9 +358,28 @@ function DronePositionTracker() {
   return null
 }
 
+// ── Keep the drone in view (Command tab) - pans only near the edge, so the
+// operator can still zoom and look around.
+
+function DroneFollower() {
+  const map = useMap()
+  const telemetry = useDroneStore(s => s.telemetry)
+  useEffect(() => {
+    const p = telemetry?.position
+    if (!p || !p.latitude_deg || !p.longitude_deg) return
+    const pt = map.latLngToContainerPoint([p.latitude_deg, p.longitude_deg])
+    const size = map.getSize()
+    const margin = Math.min(size.x, size.y) * 0.2
+    if (pt.x < margin || pt.y < margin || pt.x > size.x - margin || pt.y > size.y - margin) {
+      map.panTo([p.latitude_deg, p.longitude_deg], { animate: true })
+    }
+  }, [telemetry, map])
+  return null
+}
+
 // ── Draggable waypoint marker ───────────────────────────────────────────────
 
-function WaypointMarker({ wp, index }: { wp: Waypoint; index: number }) {
+function WaypointMarker({ wp, index, readOnly = false }: { wp: Waypoint; index: number; readOnly?: boolean }) {
   const selectedId    = useMissionStore(s => s.selectedId)
   const selectWaypoint = useMissionStore(s => s.selectWaypoint)
   const updateWaypoint = useMissionStore(s => s.updateWaypoint)
@@ -374,8 +393,8 @@ function WaypointMarker({ wp, index }: { wp: Waypoint; index: number }) {
     <Marker
       position={[wp.lat, wp.lng]}
       icon={icon}
-      draggable
-      eventHandlers={{
+      draggable={!readOnly}
+      eventHandlers={readOnly ? {} : {
         click: () => selectWaypoint(wp.id),
         dragend: (e) => {
           const { lat, lng } = e.target.getLatLng()
@@ -391,7 +410,12 @@ function WaypointMarker({ wp, index }: { wp: Waypoint; index: number }) {
 
 // ── Main map ────────────────────────────────────────────────────────────────
 
-export default function MissionMap() {
+/**
+ * readOnly: a monitoring view (Command tab) - clicks never add or move
+ * waypoints and hazards cannot be pinned, so a stray click while flying
+ * cannot change the mission. follow: keep the drone in view.
+ */
+export default function MissionMap({ readOnly = false, follow = false }: { readOnly?: boolean; follow?: boolean } = {}) {
   const rawWaypoints       = useMissionStore(s => s.waypoints)
   const homePosition       = useMissionStore(s => s.homePosition)
   const getRtlWaypoint     = useMissionStore(s => s.getRtlWaypoint)
@@ -489,8 +513,9 @@ export default function MissionMap() {
         />
       )}
 
-      <ClickHandler pinMode={pinMode} onPin={pinHazard} />
+      {!readOnly && <ClickHandler pinMode={pinMode} onPin={pinHazard} />}
       <DronePositionTracker />
+      {follow && <DroneFollower />}
       <FlightZonesOverlay />
       <AvoidanceOverlay show={showAvoid} reload={hazardNonce}
         home={homePosition ? { lat: homePosition.lat, lng: homePosition.lng } : null}
@@ -600,7 +625,7 @@ export default function MissionMap() {
 
       {/* Waypoint markers */}
       {waypoints.map((wp, i) => (
-        <WaypointMarker key={wp.id} wp={wp} index={i} />
+        <WaypointMarker key={wp.id} wp={wp} index={i} readOnly={readOnly} />
       ))}
 
       {/* Fleet mission lanes (swarm mode) - every OTHER connected drone's
@@ -659,7 +684,7 @@ export default function MissionMap() {
             <LegendRow color="#38bdf8" label="Known hazard" />
             <LegendRow color="#9aa3b5" label="Static obstacle" />
             <LegendRow color="#fbbf24" label="Moving obstacle" />
-            <button
+            {!readOnly && <button
               onClick={() => setPinMode(p => !p)}
               style={{
                 marginTop: 4, width: '100%', padding: '4px 6px', borderRadius: 5,
@@ -669,7 +694,7 @@ export default function MissionMap() {
                 fontFamily: 'inherit', fontSize: 10.5, fontWeight: 600,
               }}>
               {pinMode ? 'Click map to pin...' : '+ Pin hazard'}
-            </button>
+            </button>}
           </div>
         )}
       </div>

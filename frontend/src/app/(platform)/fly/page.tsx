@@ -18,6 +18,7 @@ import { getVideoSource } from '@/lib/videoSource'
 import { Separator } from '@/components/ui/separator'
 import { ChevronRight, ChevronLeft, Radio, Video, Map as MapIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { SurfaceCard } from '@/components/layout/SurfaceCard'
 
 // Leaflet touches `window` - no SSR
 const FleetMap = dynamic(() => import('@/components/swarm/FleetMap'), {
@@ -29,29 +30,6 @@ const FleetMap = dynamic(() => import('@/components/swarm/FleetMap'), {
         </div>
     ),
 })
-
-function SurfaceCard({ title, children, className }: {
-    title: string
-    children: React.ReactNode
-    className?: string
-}) {
-    return (
-        <div
-            className={cn('rounded-xl border p-4 flex flex-col gap-3', className)}
-            style={{
-                background: 'hsl(var(--app-surface))',
-                borderColor: 'hsl(var(--app-border))',
-            }}
-        >
-            <p className="text-[10px] font-mono tracking-widest"
-                style={{ color: 'hsl(var(--app-text-muted))' }}
-            >
-                {title}
-            </p>
-            {children}
-        </div>
-    )
-}
 
 // ── Fleet device summary shown instead of DeviceSelector in swarm mode ──────
 
