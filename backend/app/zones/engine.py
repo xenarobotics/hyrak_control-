@@ -115,6 +115,26 @@ def check_point(lat: float, lng: float, alt_m: float | None = None) -> dict:
     }
 
 
+def ceiling_at(lat: float, lng: float, alt_m: float) -> float | None:
+    """The lowest altitude above alt_m where restricted airspace (red or
+    orange) starts over this point - the height nothing automatic may climb
+    through. None = no restricted layer overhead."""
+    with _lock:
+        tree, zones = _tree, _zones
+    if tree is None:
+        return None
+    p = Point(lng, lat)
+    best = None
+    for idx in tree.query(p):
+        z = zones[idx]
+        if z["zone_class"] not in ("red", "orange") or not z["geom"].covers(p):
+            continue
+        floor = float(z["floor_m"] or 0.0)
+        if floor > alt_m and (best is None or floor < best):
+            best = floor
+    return best
+
+
 def predict_red(lat: float, lng: float, alt_m: float | None = None) -> bool:
     """True only if the point is meaningfully INSIDE a red zone (eroded by
     ~5 m) - used for breach prediction so boundary-skimming doesn't trip."""

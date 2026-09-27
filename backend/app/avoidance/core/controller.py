@@ -97,7 +97,8 @@ class AvoidanceParams:
     # so PX4 does not descend onto what was just cleared. Nothing above the
     # aircraft is sensed (forward camera) - keep climb_max_gain_m modest.
     climb_over: float = 1.0
-    climb_after_blocked_s: float = 1.0
+    climb_after_blocked_s: float = 3.0   # brake and look sideways first; same moment HOLD would come
+    ceiling_margin_m: float = 1.0        # stay this far under a restricted layer overhead
     climb_margin_m: float = 2.0
     climb_max_gain_m: float = 12.0
     climb_rate_m_s: float = 1.0
@@ -416,6 +417,7 @@ class AvoidanceController:
     def _reset_local(self) -> None:
         self._repelling = False
         self._climb_target = None
+        self._climb_refusal = None
         self._climb_started = None
         self._pre_climb_alt = None
         self._clear_since = None
@@ -440,10 +442,39 @@ class AvoidanceController:
             tops.append(top)
         if not tops or any(t <= 0.0 for t in tops):
             return None                         # nothing to climb over, or a top never seen
-        target = max(tops) + p.climb_margin_m
+        target = max(max(tops) + p.climb_margin_m, pose.alt_m + 1.0)
         if target > p.max_climb_alt_m or target - pose.alt_m > p.climb_max_gain_m:
+            self._climb_refusal = f"climb to {target:.0f} m exceeds the climb limit"
             return None
-        return max(target, pose.alt_m + 1.0)
+        # Airspace ceilings: never climb into a restricted layer, here or
+        # along the way on toward the goal (steering continues up there).
+        ceiling = self._airspace_ceiling(pos, goal_ne, pose.alt_m, reach)
+        if ceiling is not None and target > ceiling - p.ceiling_margin_m:
+            self._climb_refusal = f"airspace ceiling {ceiling:.0f} m - no room to climb over"
+            return None
+        self._climb_refusal = None
+        return target
+
+    def _airspace_ceiling(self, pos, goal_ne, alt_m: float, reach: float) -> float | None:
+        """Lowest restricted-airspace floor above alt_m over the aircraft and
+        along the line toward the goal (to reach + 10 m)."""
+        from app.avoidance.mapping import pose_history
+        from app.zones import engine as zones
+        h = pose_history.history(self.drone_id)
+        if h.origin is None:
+            return None
+        dn, de = goal_ne[0] - pos[0], goal_ne[1] - pos[1]
+        dist = math.hypot(dn, de)
+        span = min(dist, reach + 10.0)
+        lows = []
+        steps = max(1, int(span // 3.0))
+        for i in range(steps + 1):
+            f = (i * span / steps) / dist if dist > 1e-6 else 0.0
+            lat, lng = h.to_latlng(pos[0] + dn * f, pos[1] + de * f)
+            c = zones.ceiling_at(lat, lng, alt_m)
+            if c is not None:
+                lows.append(c)
+        return min(lows) if lows else None
 
     def _keep_clear(self, polar, pp, pose, now, _d):
         """The hover reflex. Returns a Decision while backing away (or the
@@ -675,7 +706,9 @@ class AvoidanceController:
                         return _d("avoid", AvoidanceState.CLIMBING, climb_sp.reason, climb_sp)
                 if now - self._blocked_since >= self.params.block_hold_s:
                     self._hold_since = now
-                    return _d("hold", AvoidanceState.HOLDING, "holding - no free direction")
+                    why = getattr(self, "_climb_refusal", None)
+                    return _d("hold", AvoidanceState.HOLDING,
+                              f"holding - no free direction ({why})" if why else "holding - no free direction")
             else:
                 self._blocked_since = None
             if at_goal and not danger:

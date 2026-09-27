@@ -80,3 +80,38 @@ def test_a_top_inside_the_frame_is_known():
     z[25:, 30:50] = 5.0                                  # box, sky above it
     tops = [b.top_m for b in _scan(z) if b.hit_m is not None]
     assert tops and all(t > 0.0 for t in tops)
+
+
+def test_a_ceiling_overhead_forbids_the_climb_and_says_so(monkeypatch):
+    from app.zones import engine as zones
+    monkeypatch.setattr(zones, "ceiling_at", lambda lat, lng, alt: 8.5)   # 8 m target > 8.5 - 1
+    c, _ = _controller(alt=5.0, t=50.0)
+    _ring(c, top=6.0, now=50.0)
+    d = _engage_and_block(c, 50.0)
+    assert c.state != AvoidanceState.CLIMBING
+    d = c.decide_local((40.0, 0.0), None, now=50.0 + c.params.block_hold_s + 0.2)
+    assert d.action == "hold" and "ceiling" in d.reason, d.reason
+
+
+def test_a_high_enough_ceiling_still_allows_the_climb(monkeypatch):
+    from app.zones import engine as zones
+    monkeypatch.setattr(zones, "ceiling_at", lambda lat, lng, alt: 30.0)
+    c, _ = _controller(alt=5.0, t=60.0)
+    _ring(c, top=6.0, now=60.0)
+    _engage_and_block(c, 60.0)
+    assert c.state == AvoidanceState.CLIMBING
+
+
+def test_ceiling_at_is_the_lowest_restricted_floor_overhead(monkeypatch):
+    from shapely.geometry import box
+    from shapely.strtree import STRtree
+    from app.zones import engine as zones
+    sq = box(78.0, 17.0, 78.2, 17.2)
+    zs = [{"id": 1, "name": "a", "zone_class": "red", "floor_m": 30.0, "ceiling_m": None, "geom": sq},
+          {"id": 2, "name": "b", "zone_class": "orange", "floor_m": 20.0, "ceiling_m": 60.0, "geom": sq},
+          {"id": 3, "name": "c", "zone_class": "green", "floor_m": 10.0, "ceiling_m": None, "geom": sq}]
+    monkeypatch.setattr(zones, "_zones", zs)
+    monkeypatch.setattr(zones, "_tree", STRtree([z["geom"] for z in zs]))
+    assert zones.ceiling_at(17.1, 78.1, 5.0) == 20.0     # green does not restrict
+    assert zones.ceiling_at(17.1, 78.1, 25.0) == 30.0
+    assert zones.ceiling_at(17.5, 78.5, 5.0) is None     # outside every zone
