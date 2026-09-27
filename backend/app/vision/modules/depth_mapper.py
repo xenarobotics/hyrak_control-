@@ -29,36 +29,33 @@ class DepthMapper(BaseAnalyzer):
         self.infer_w = 640
         self.infer_h = 360
 
+        # Backend per model id (app/vision/depth_models.py). Depth Anything 3
+        # loads from its source checkout; if that is missing or broken the
+        # previous default (V2 metric outdoor) keeps avoidance and the depth
+        # mode working, and the log says why.
+        from app.vision import depth_models
         try:
             logger.info(f"Loading depth model {self.model_name} on {self.device}...")
-            from transformers import pipeline
-            dtype = torch.float16 if self.device == "cuda" else torch.float32
-            self.estimator = pipeline(
-                "depth-estimation",
-                model=self.model_name,
-                device=self.device,
-                torch_dtype=dtype,
-            )
-            # Warm-up: first CUDA inference pays kernel/alloc init (~1s);
-            # do it here so it doesn't stall the first live frames.
-            self.estimator(Image.new("RGB", (self.infer_w, self.infer_h)))
-            logger.info(f"✅ DepthMapper using {self.model_name.split('/')[-1]} on {self.device.upper()}")
+            self.backend = depth_models.load(self.model_name, self.device)
         except Exception as e:
-            logger.error(f"DepthMapper load failed: {e}")
-            raise
+            fallback = "depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf"
+            if self.model_name == fallback:
+                logger.error(f"DepthMapper load failed: {e}")
+                raise
+            logger.error(f"Depth model {self.model_name} failed to load ({e}) - falling back to {fallback}")
+            self.model_name = fallback
+            self.backend = depth_models.load(fallback, self.device)
+        logger.info(f"DepthMapper using {self.model_name.split('/')[-1]} on {self.device.upper()}")
 
-    @torch.inference_mode()
-    def predict_metric(self, frame_bgr: np.ndarray) -> np.ndarray:
-        """Raw metric depth (metres, model scale, NOT calibrated) at the
-        inference resolution. Used by avoidance sensing, which calibrates the
-        scale against the ground plane itself (app/avoidance/mono_calibration)."""
-        frame_small = cv2.resize(frame_bgr, (self.infer_w, self.infer_h))
-        frame_rgb   = cv2.cvtColor(frame_small, cv2.COLOR_BGR2RGB)
-        result = self.estimator(Image.fromarray(frame_rgb))
-        depth  = result["predicted_depth"].squeeze().cpu().numpy()
-        if depth.ndim != 2:
-            depth = depth.squeeze()
-        return depth
+    def predict_metric(self, frame_bgr: np.ndarray, hfov_deg: float | None = None) -> np.ndarray:
+        """Metric depth (metres, the model's own scale - NOT ground-calibrated)
+        at the model's output resolution. hfov_deg is the frame's horizontal
+        field of view (default: the camera calibration); lens-aware models
+        use it to put distances in metres. Avoidance sensing calibrates the
+        scale on top (app/avoidance/sensing/mono_calibration)."""
+        if hfov_deg is None:
+            hfov_deg = float(get_settings().camera_hfov_deg)
+        return self.backend.predict(frame_bgr, hfov_deg)
 
     @torch.inference_mode()
     def _analyze_frame_blocking(

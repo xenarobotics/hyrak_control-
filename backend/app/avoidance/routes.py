@@ -238,3 +238,32 @@ async def set_sensors(drone_id: str, body: dict,
     if not isinstance(specs, list):
         raise HTTPException(status_code=400, detail="sensors must be a list")
     return {"sensors": sensor_registry.set_inventory(drone_id, specs)}
+
+
+# -- person-ruler depth calibration (sensing/person_ruler.py) ---------------
+@router.post("/{drone_id}/calibrate_person")
+async def calibrate_person(drone_id: str, body: dict,
+                           x_auth_token: str = Header(None, alias="X-Auth-Token")):
+    """Start (or {cancel: true}) a person-ruler run for the camera feeding
+    this drone's avoidance. Body: {height_m?: 1.70}. Needs avoidance
+    Detection on and the video streaming."""
+    _auth(x_auth_token)
+    from app.avoidance.sensing import person_ruler
+    c = _resolve_drone(drone_id)
+    if body.get("cancel"):
+        person_ruler.cancel(c.drone_id)
+        return person_ruler.status(c.drone_id)
+    if not c.enabled:
+        raise HTTPException(status_code=409, detail="turn avoidance Detection on first - the camera path feeds the calibration")
+    try:
+        return person_ruler.start(c.drone_id, float(body.get("height_m") or 1.70))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/{drone_id}/calibrate_person")
+async def calibrate_person_status(drone_id: str):
+    from app.avoidance.sensing import person_ruler
+    c = _resolve_drone(drone_id)
+    person_ruler.pending(c.drone_id)          # applies the timeout
+    return {**person_ruler.status(c.drone_id), "profiles": person_ruler._load()}

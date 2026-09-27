@@ -22,6 +22,7 @@ import {
 } from '@/lib/videoSource'
 import { isDesktopApp } from '@/lib/nativeBridge'
 import { setEnabled, type AvoidanceStatus } from '@/lib/avoidance'
+import { PersonCalibration } from './PersonCalibration'
 
 function Pill({ on, busy, label, detail, onClick, disabled, title, icon, menuOpen, onMenu }: {
     on: boolean; busy: boolean; label: string; detail: string; onClick: () => void
@@ -205,8 +206,10 @@ export function LinkCluster({ avoid }: { avoid: AvoidanceStatus | null }) {
                                 <Item active={sense === 'camera'} label="This video stream (camera)"
                                     sub="flight mode: ground-calibrated, acts above 8 m" onClick={() => { void setAvoidSensor('camera') }} />
                                 <Item active={sense === 'bench'} label="Camera bench test (fixed webcam)"
-                                    sub="model metres as-is, camera level ~1 m up - hold things 0.5-3 m away. Not for flight."
+                                    sub="model metres x the person-ruler scale, camera level ~1 m up - hold things 0.5-3 m away. Not for flight."
                                     onClick={() => { void setAvoidSensor('bench') }} />
+                                <Section title="CAMERA DISTANCE CALIBRATION" />
+                                <PersonCalibration droneId={avoid.drone_id} />
                             </>
                         )}
                     </Menu>

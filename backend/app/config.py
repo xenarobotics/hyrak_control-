@@ -28,7 +28,11 @@ class Settings(BaseSettings):
     # must match the setting: ZoeDepth's NYU (indoor) weights read a post 30 m
     # away as 1.7 m on outdoor footage - every obstacle looked one step ahead.
     # The outdoor Depth-Anything-V2 metric model (40 ms on a 4070) reads 5-60 m.
-    depth_model: str = Field(default="depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf")
+    # Since 2026-09-27: Depth Anything 3 metric (lens-aware, ~35 % less shape
+    # error than V2 outdoor on the Gazebo benchmark, 54 ms on the laptop
+    # 4070; docs/avoidance/DEPTH_MODELS.md). Falls back to V2 outdoor if its
+    # source checkout (DA3_SRC) is missing.
+    depth_model: str = Field(default="depth-anything/DA3METRIC-LARGE")
     depth_viz_max_m: float = Field(default=60.0)   # colormap clip, metres
     # Farthest depth reading treated as an obstacle. Monocular metric depth
     # compresses with range (measured on the sim: 31 m reads 22.6, 58 m reads

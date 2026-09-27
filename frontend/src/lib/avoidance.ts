@@ -176,3 +176,31 @@ export function nearestAheadM(cm: number[], coneDeg = 30): number | null {
     }
     return best
 }
+
+// Person-ruler depth calibration (backend app/avoidance/sensing/person_ruler.py).
+export interface PersonCalibration {
+    state: 'idle' | 'collecting' | 'done' | 'failed'
+    reason?: string
+    samples?: number
+    scale?: number
+    height_m?: number
+    profiles?: Record<string, { scale: number; spread: number; height_m: number; at: string }>
+}
+
+export async function startPersonCalibration(droneId: string, heightM: number): Promise<PersonCalibration> {
+    const r = await fetch(api(`/${droneId}/calibrate_person`), {
+        method: 'POST', headers: AUTH, body: JSON.stringify({ height_m: heightM }),
+    })
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? `HTTP ${r.status}`)
+    return r.json()
+}
+
+export async function cancelPersonCalibration(droneId: string): Promise<void> {
+    await fetch(api(`/${droneId}/calibrate_person`), {
+        method: 'POST', headers: AUTH, body: JSON.stringify({ cancel: true }),
+    })
+}
+
+export async function getPersonCalibration(droneId: string): Promise<PersonCalibration> {
+    return j(await fetch(api(`/${droneId}/calibrate_person`)))
+}

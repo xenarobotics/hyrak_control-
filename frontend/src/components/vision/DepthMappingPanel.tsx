@@ -70,7 +70,7 @@ export function DepthMappingPanel() {
                         fontSize: 11, color: 'rgba(93,202,165,0.9)',
                         fontFamily: 'monospace',
                     }}>
-                        ✓ ZoeDepth metric depth · Blue = near · Red = far
+                        ✓ Depth Anything 3 metric depth · Blue = near · Red = far
                     </div>
                 </>
             ) : (
