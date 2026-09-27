@@ -25,7 +25,11 @@ type AspectRatio = 'fill' | 'fit' | '16:9' | '4:3' | '1:1'
 
 // `bare`: picture + OSD only, no control bar. For hosts that put Start/Stop
 // and the rest in their own chrome (the Command window's top bar).
-export function VideoStream({ bare = false }: { bare?: boolean } = {}) {
+// `cleanFeed`: always show the unprocessed picture when a local one exists,
+// even while an AI mode runs - for hosts that show the AI view separately
+// (Command). Without it an overlay-mode stream, which has no return video,
+// leaves this pane black.
+export function VideoStream({ bare = false, cleanFeed = false }: { bare?: boolean; cleanFeed?: boolean } = {}) {
     const [hevcFailed, setHevcFailed] = useState(false)
     const {
         remoteStream, localStream,
@@ -81,7 +85,7 @@ export function VideoStream({ bare = false }: { bare?: boolean } = {}) {
     // Doesn't apply to server-sourced feeds - there's no local camera
     // stream to fall back to (localStream stays null), so that path would
     // just render blank instead of the real remote video.
-    const isRaw = mode === 'manual-control' && !serverSourced
+    const isRaw = !serverSourced && (mode === 'manual-control' || (cleanFeed && !!localStream))
 
     const mainVideoRef = useRef<HTMLVideoElement | null>(null)
     const localVideoRef = useCallback((el: HTMLVideoElement | null) => {

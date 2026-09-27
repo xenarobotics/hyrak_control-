@@ -11,7 +11,8 @@ import {
     UsersRound, ScanLine, TrafficCone, Box,
 } from 'lucide-react'
 
-const MODES = [
+// Exported: the Command window's AI drawer offers exactly this catalogue.
+export const MODES = [
     {
         value: 'enhance',
         label: 'Enhance',
@@ -38,7 +39,7 @@ const MODES = [
         label: 'Depth',
         icon: Layers,
         color: '#f59e0b',
-        desc: 'ZoeDepth metric'
+        desc: 'Depth Anything 3 metric'
     },
     {
         value: 'person-tracking',
@@ -91,6 +92,12 @@ const MODES = [
     },
 ] as const
 
+// Modes that are implemented; the rest render as "coming soon".
+export const AVAILABLE_MODES: readonly string[] = [
+    'manual-control', 'object-detection', 'human-tracking', 'depth-mapping', 'person-tracking',
+    'enhance', 'crowd-management', 'vehicle-plate-tracking', 'traffic-management', '3d-reconstruction',
+]
+
 export function ModeSelector() {
     const { setMode } = useDrone()
     const currentMode = useDroneStore(s => s.mode)
@@ -101,7 +108,7 @@ export function ModeSelector() {
             {MODES.map(m => {
                 const active = currentMode === m.value
                 const Icon = m.icon
-                const available = ['manual-control', 'object-detection', 'human-tracking', 'depth-mapping', 'person-tracking', 'enhance', 'crowd-management', 'vehicle-plate-tracking', 'traffic-management', '3d-reconstruction'].includes(m.value)
+                const available = AVAILABLE_MODES.includes(m.value)
 
                 return (
                     <button
