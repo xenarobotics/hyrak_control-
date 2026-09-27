@@ -327,10 +327,19 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
                         from app import latency_probe
                         latency_probe.note_setpoint(
                             tel, drone_cmd, meta.get("captured_at_mono"), meta.get("decided_at_mono"))
+                        # Obstacle avoidance's follow guard: bends / slows /
+                        # holds the tracker's horizontal command near
+                        # obstacles; yaw and vertical stay the tracker's.
+                        # Pass-through when avoidance is off or on error.
+                        from app.avoidance.core import loop as _av_loop
+                        fwd_g, right_g = _av_loop.guard_follow(
+                            self.session_id,
+                            drone_cmd.get("forward_m_s", 0.0),
+                            drone_cmd.get("right_m_s", 0.0))
                         asyncio.create_task(
                             tel.send_velocity_command(
-                                forward_m_s = drone_cmd.get("forward_m_s", 0.0),
-                                right_m_s   = drone_cmd.get("right_m_s",   0.0),
+                                forward_m_s = fwd_g,
+                                right_m_s   = right_g,
                                 down_m_s    = drone_cmd.get("down_m_s",    0.0),
                                 yaw_deg_s   = drone_cmd.get("yaw_deg_s",   0.0),
                             )

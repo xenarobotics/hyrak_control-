@@ -12,6 +12,7 @@ import type { AvoidanceStatus } from '@/lib/avoidance'
 const AVOID_COLOR: Record<string, string> = {
     nominal: '#4ade80', avoiding: '#22d3ee', holding: '#fbbf24', returning: '#f87171',
     rerouted: '#22d3ee', climbing: '#a78bfa', disabled: '#71717a',
+    guarding: '#22d3ee', follow: '#4ade80',
 }
 
 function Cell({ icon, label, value, color, title }: {
@@ -34,7 +35,11 @@ export function StatusStrip({ avoid }: { avoid: AvoidanceStatus | null }) {
     const bat = t?.battery.remaining_percent
     const batColor = bat == null ? undefined : bat < 20 ? '#f87171' : bat < 35 ? '#fbbf24' : '#4ade80'
     const armed = t?.flight_mode.is_armed ?? false
-    const aState = avoid ? (avoid.enabled ? (avoid.armed ? avoid.state : 'watching') : 'off') : '-'
+    const aState = avoid
+        ? (avoid.enabled
+            ? (avoid.armed ? (avoid.guarding ? 'guarding' : avoid.following ? 'follow' : avoid.state) : 'watching')
+            : 'off')
+        : '-'
     const mm = String(Math.floor(elapsed / 60)).padStart(2, '0'), ss = String(elapsed % 60).padStart(2, '0')
 
     return (

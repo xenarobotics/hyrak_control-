@@ -51,6 +51,8 @@ export interface AvoidanceStatus {
     committed_path?: boolean
     obstacle_distance_cm: number[]
     sensor_mode?: 'range' | 'mono' | 'none'
+    following?: boolean        // a tracker / follow mode is commanding through the guard
+    guarding?: boolean         // the follow guard is bending / holding that command now
     pose_rate_hz?: number
     planner?: { reason: string; speed_m_s: number; free_m: number | null; ttc_s: number | null; heading_deg: number | null } | null
     mono_calibration?: { scale: number | null; fits: number; rejected: number; error_pct_p50: number | null; error_pct_p90: number | null } | null

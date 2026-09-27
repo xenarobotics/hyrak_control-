@@ -97,6 +97,14 @@ class AvoidanceParams:
     # so PX4 does not descend onto what was just cleared. Nothing above the
     # aircraft is sensed (forward camera) - keep climb_max_gain_m modest.
     climb_over: float = 1.0
+    # FOLLOW GUARD (tracking / follow modes). The tracker keeps the aircraft
+    # and the yaw; its velocity command passes through guard_body() on the
+    # way out, which bends it to the nearest open direction, slows it by the
+    # room left, or holds it in place - never a mode change, never a mission
+    # goal. 0 = pass the tracker's command through untouched.
+    guard_follow: float = 1.0
+    # Moving where the forward camera is not looking: at most this fast.
+    guard_unseen_speed_m_s: float = 2.0
     climb_after_blocked_s: float = 3.0   # brake and look sideways first; same moment HOLD would come
     ceiling_margin_m: float = 1.0        # stay this far under a restricted layer overhead
     climb_margin_m: float = 2.0
@@ -175,6 +183,9 @@ class AvoidanceController:
         self._resumed_at = -1e9
         self._resume_cooldown_s = 3.0
         self._engage_alt: float | None = None
+        self._follow_cmd_t = 0.0          # last tracker command through the guard
+        self._guard_active = False        # the guard is bending/holding the command
+        self._guard_t = 0.0
         self._latched_goal = None
         self._scans = {"integrated": 0, "dropped_no_pose": 0, "dropped_low": 0,
                        "dropped_mono_overridden": 0, "dropped_range_off": 0}
@@ -424,6 +435,110 @@ class AvoidanceController:
         self._blocked_since = None
         self._prev_dir = None
         self.last_setpoint = None
+
+    FOLLOW_WINDOW_S = 1.0
+
+    def following(self, now: float | None = None) -> bool:
+        """A tracker has been commanding the aircraft through the guard
+        within the last second - the follow owns Offboard, not the mission."""
+        now = now if now is not None else time.monotonic()
+        return now - self._follow_cmd_t < self.FOLLOW_WINDOW_S
+
+    def guard_body(self, fwd: float, right: float, now: float | None = None
+                   ) -> tuple[float, float, str | None]:
+        """Filter one tracker velocity command (body frame, m/s). Returns
+        (forward, right, event) where event is "start" / "end" when a guard
+        episode begins or ends, else None. Pure with respect to the aircraft:
+        it only reads the map and pose history. Passes the command through
+        unchanged whenever it cannot judge (off, Steer off, no pose, below the
+        acting floor) - exactly the behaviour before the guard existed."""
+        from app.avoidance.mapping import pose_history
+        from app.avoidance.planning import local_planner as lp
+        now = now if now is not None else time.monotonic()
+        self._follow_cmd_t = now
+
+        def passed(reason_clear: str = "follow guard - path clear"):
+            ev = None
+            if self._guard_active:
+                self._guard_active = False
+                self._last_reason = reason_clear
+                ev = "end"
+            return fwd, right, ev
+
+        if not (self.enabled and self.armed and self.params.guard_follow):
+            return passed()
+        pose = pose_history.history(self.drone_id).latest()
+        if pose is None or pose.alt_m < self.acting_floor_m(now):
+            return passed()
+        yaw = math.radians(pose.yaw_deg)
+        cy, sy = math.cos(yaw), math.sin(yaw)
+        vn, ve = fwd * cy - right * sy, fwd * sy + right * cy
+        speed = math.hypot(vn, ve)
+        if speed < 0.15:
+            return passed()
+
+        pp = self.planner_params(now)
+        sd = pp.sector_deg
+        polar = self.grid.polar(pose.north_m, pose.east_m, pp.lookahead_m, sd, now,
+                                min_top_m=pose.alt_m - 1.5)
+        free = lp.enlarged_free(polar, sd, pp.clearance_m)
+        n = len(free)
+        want = math.degrees(math.atan2(ve, vn)) % 360.0
+        k_want = int(want // sd) % n
+        need = speed * speed / (2.0 * pp.decel_m_s2) + 1.0
+        raw_ahead = min((polar[k % n] for k in range(k_want - 3, k_want + 4)), default=math.inf)
+
+        def unseen(brg: float) -> bool:
+            return abs(((brg - pose.yaw_deg) + 180.0) % 360.0 - 180.0) > pp.sensor_half_fov_deg
+
+        if free[k_want] >= need and raw_ahead >= 2.0:
+            if unseen(want) and speed > self.params.guard_unseen_speed_m_s:
+                f = self.params.guard_unseen_speed_m_s / speed
+                return fwd * f, right * f, None
+            return passed()
+
+        # Bend: the direction nearest to the tracker's (within 90 deg) that
+        # has room to stop at the commanded speed; only if none does, the
+        # nearest with any room, slowed to it. Choosing merely "some room"
+        # first crept straight at the obstacle and stopped against it.
+        def pick(min_free: float):
+            best, best_cost = None, math.inf
+            for k in range(n):
+                centre = (k + 0.5) * sd
+                diff = abs((centre - want + 180.0) % 360.0 - 180.0)
+                if diff > 90.0 or free[k] < min_free:
+                    continue
+                cost = diff + (15.0 if unseen(centre) else 0.0)
+                if cost < best_cost:
+                    best, best_cost = k, cost
+            return best
+        best = pick(need)
+        if best is None:
+            best = pick(1.5)
+        if best is None:
+            out_n = out_e = 0.0
+            reason = "follow guard - obstacle in the way, holding position"
+        else:
+            centre = (best + 0.5) * sd
+            diff = abs((centre - want + 180.0) % 360.0 - 180.0)
+            room = math.sqrt(2.0 * pp.decel_m_s2 * max(0.0, free[best] - 1.0))
+            v = min(speed * math.cos(math.radians(diff)), room)
+            if unseen(centre):
+                v = min(v, self.params.guard_unseen_speed_m_s)
+            v = max(0.0, v)
+            out_n, out_e = v * math.cos(math.radians(centre)), v * math.sin(math.radians(centre))
+            reason = ("follow guard - slowing, obstacle ahead" if diff < sd
+                      else f"follow guard - sliding {diff:.0f} deg around obstacle")
+        near = min(polar) if polar else math.inf
+        if math.isfinite(near):
+            reason += f" ({near:.1f} m)"
+        ev = None if self._guard_active else "start"
+        self._guard_active = True
+        self._guard_t = now
+        self._last_reason = reason
+        f_out = out_n * cy + out_e * sy
+        r_out = -out_n * sy + out_e * cy
+        return f_out, r_out, ev
 
     def _climb_plan(self, pos, pose, goal_ne, pp, now) -> float | None:
         """Height to climb to so the blockers toward the goal pass underneath,
@@ -922,6 +1037,8 @@ class AvoidanceController:
             "obstacle_distance_cm": self.bus.obstacle_distance_cm(
                 now, self.params.min_confidence),
             "sensor_mode": self.sensor_mode(now),
+            "following": self.following(now),
+            "guarding": bool(self._guard_active and self.following(now)),
             "scans": dict(self._scans),
             "mono_calibration": self.mono_scale.status(),
             "pose_rate_hz": round(_pose_rate(self.drone_id), 1),

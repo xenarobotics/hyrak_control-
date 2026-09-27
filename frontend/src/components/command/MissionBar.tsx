@@ -87,11 +87,12 @@ export function MissionBar({ avoid }: { avoid: AvoidanceStatus | null }) {
     const area = n > 1 ? `M0,100 L${pts.join(' L')} L1000,100 Z` : ''
     const floorY = floor != null ? 100 - (floor / geo.maxAlt) * 100 : null
 
-    const steer = avoid?.state && AVOID_TONE[avoid.state]
+    const steer = avoid?.guarding ? { fg: '#67e8f9', bg: 'rgba(8,51,68,.9)', label: 'GUARDING' }
+        : avoid?.state && AVOID_TONE[avoid.state]
     const aLine = !avoid ? null
         : !avoid.enabled ? { fg: '#fca5a5', bg: 'transparent', label: 'AVOID OFF', why: 'Obstacle avoidance is off for this aircraft' }
             : !avoid.armed ? { fg: '#fcd34d', bg: 'transparent', label: 'WATCHING', why: 'Detects only - Steer is off' }
-                : steer ? { ...steer, why: avoid.planner?.reason ?? avoid.reason }
+                : steer ? { ...steer, why: avoid.guarding ? avoid.reason : (avoid.planner?.reason ?? avoid.reason) }
                     : { fg: '#86efac', bg: 'transparent', label: 'CLEAR', why: avoid.reason || 'Path clear' }
     const lowLeg = floor != null && inAir && t && t.position.relative_altitude_m < floor && avoid?.enabled
 

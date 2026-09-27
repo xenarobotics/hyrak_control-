@@ -394,6 +394,20 @@ async def _local_step(c, manager, pose, in_air, mode, now) -> None:
             await _seed_hazards_grid(c, pose, now)
         except Exception as e:
             logger.debug(f"hazard seed failed: {e}")
+    # A follow / tracking mode owns Offboard: the guard (guard_follow, on the
+    # tracker's command path) is avoidance's only say. The mission supervisor
+    # stands down entirely - it used to HOLD the aircraft (ending the follow)
+    # or steer toward a MISSION waypoint and then resume the mission.
+    if c.following(now):
+        if c.intervened or c.state != avoidance.AvoidanceState.NOMINAL:
+            c._reset_local()
+            c.intervened = False
+            c.state = avoidance.AvoidanceState.NOMINAL
+        if not c._guard_active:
+            c._last_reason = "follow guard - path clear" if c.armed else "follow - detecting only (Steer off)"
+        _prev_action[c.drone_id] = "clear"
+        return
+
     pursuing = in_air and mode.upper() not in _NO_GOAL_MODES
     # A HOLD the operator commanded is a hold: no route to steer toward, and
     # never a hand-back that restarts the mission (only the keep-clear reflex
@@ -605,6 +619,37 @@ async def _run() -> None:
 
 _eyes_logged: set[str] = set()
 _session_goals: dict[str, tuple[float, float]] = {}
+
+
+def guard_follow(session_id: str, forward_m_s: float, right_m_s: float) -> tuple[float, float]:
+    """The tracker's velocity command, made safe (see
+    AvoidanceController.guard_body). Never raises: on any error the command
+    passes through unchanged, which is the pre-guard behaviour."""
+    global _guard_fail_t
+    try:
+        c = _controller_for_session(session_id)
+        if c is None:
+            return forward_m_s, right_m_s
+        f, r, ev = c.guard_body(float(forward_m_s), float(right_m_s))
+        if ev is not None:
+            try:
+                d = avoidance.Decision(
+                    "avoid" if ev == "start" else "clear",
+                    avoidance.AvoidanceState.AVOIDING if ev == "start" else avoidance.AvoidanceState.NOMINAL,
+                    c._last_reason)
+                asyncio.get_running_loop().create_task(_record_event(c, d))
+            except RuntimeError:
+                pass                      # no running loop (tests): nothing to log to
+        return f, r
+    except Exception as e:
+        import time as _t
+        if _t.monotonic() - _guard_fail_t > 60.0:
+            _guard_fail_t = _t.monotonic()
+            logger.warning(f"follow guard failed, command passed through: {e}")
+        return forward_m_s, right_m_s
+
+
+_guard_fail_t = -1e9
 
 
 def _controller_for_session(session_id: str):
