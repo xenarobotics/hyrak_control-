@@ -140,7 +140,11 @@ def scan_from_depth(z: np.ndarray, hfov_deg: float, vfov_deg: float, *,
         top = 0.0
         if hit is not None:
             near = m & obstacle & (rng_h <= hit + 1.5)
-            if near.any():
+            # A top is KNOWN only if it lies inside the frame: an obstacle
+            # still present in the top row runs out of view, and its
+            # highest visible point is not its top (vertical avoidance would
+            # climb into it). Unknown stays 0.
+            if near.any() and not near[0].any():
                 top = float(height[near].max())
         out.append(ScanBin(bearing_deg=centre, half_width_deg=(hi - lo) / 2.0,
                            hit_m=hit, free_m=max(0.0, free), top_m=top,

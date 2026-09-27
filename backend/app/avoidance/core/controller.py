@@ -88,6 +88,19 @@ class AvoidanceParams:
     # it, still facing it (the camera sees forward only), until it is
     # keep_clear_release_m away, then HOLD again. 0 = off.
     keep_clear_m: float = 3.0
+    # Vertical escape, LAST RESORT: only when the local planner finds no
+    # horizontal direction for climb_after_blocked_s, and only over obstacles
+    # whose TOP the sensor has actually seen (a top cut off by the frame is
+    # unknown, and unknown is never climbed). Climbs straight up to the
+    # tallest blocker + climb_margin_m, then steers on at that height; hands
+    # back to the mission only once the way is clear at the ORIGINAL height,
+    # so PX4 does not descend onto what was just cleared. Nothing above the
+    # aircraft is sensed (forward camera) - keep climb_max_gain_m modest.
+    climb_over: float = 1.0
+    climb_after_blocked_s: float = 1.0
+    climb_margin_m: float = 2.0
+    climb_max_gain_m: float = 12.0
+    climb_rate_m_s: float = 1.0
     keep_clear_release_m: float = 5.0
     keep_clear_speed_m_s: float = 1.0
     bench_cam_height_m: float = 1.0
@@ -402,10 +415,35 @@ class AvoidanceController:
     # -- redesign: supervisor over the local planner (layer 4) -------------
     def _reset_local(self) -> None:
         self._repelling = False
+        self._climb_target = None
+        self._climb_started = None
+        self._pre_climb_alt = None
         self._clear_since = None
         self._blocked_since = None
         self._prev_dir = None
         self.last_setpoint = None
+
+    def _climb_plan(self, pos, pose, goal_ne, pp, now) -> float | None:
+        """Height to climb to so the blockers toward the goal pass underneath,
+        or None when climbing is not a safe option: a blocker's top unknown,
+        or the target beyond climb_max_gain_m / max_climb_alt_m."""
+        p = self.params
+        goal_brg = math.degrees(math.atan2(goal_ne[1] - pos[1], goal_ne[0] - pos[0])) % 360.0
+        reach = min(pp.lookahead_m, max(6.0, p.reaction_distance_m))
+        tops = []
+        for n, e, top in self.grid.occupied(now, pos, reach):
+            brg = math.degrees(math.atan2(e - pos[1], n - pos[0])) % 360.0
+            if abs((brg - goal_brg + 180.0) % 360.0 - 180.0) > 75.0:
+                continue                        # not between us and the goal
+            if 0.0 < top < pose.alt_m - 1.5:
+                continue                        # already below us
+            tops.append(top)
+        if not tops or any(t <= 0.0 for t in tops):
+            return None                         # nothing to climb over, or a top never seen
+        target = max(tops) + p.climb_margin_m
+        if target > p.max_climb_alt_m or target - pose.alt_m > p.climb_max_gain_m:
+            return None
+        return max(target, pose.alt_m + 1.0)
 
     def _keep_clear(self, polar, pp, pose, now, _d):
         """The hover reflex. Returns a Decision while backing away (or the
@@ -591,6 +629,28 @@ class AvoidanceController:
             self._engage_alt = pose.alt_m      # steer level at the altitude we took over at
             st = AvoidanceState.AVOIDING      # fall through: plan this tick
 
+        if st == AvoidanceState.CLIMBING:
+            target = getattr(self, "_climb_target", None)
+            if target is None or goal_ne is None:
+                self._hold_since = now
+                return _d("hold", AvoidanceState.HOLDING, "holding - climb lost its route")
+            if pose.alt_m >= target - 0.3:
+                self._engage_alt = target          # steer on at the new height
+                self._blocked_since = None
+                self._prev_dir = None
+                st = AvoidanceState.AVOIDING       # fall through: plan this tick
+            else:
+                start_alt = self._pre_climb_alt if self._pre_climb_alt is not None else pose.alt_m
+                budget = (target - start_alt) / max(0.2, self.params.climb_rate_m_s) + 8.0
+                if now - (self._climb_started or now) > budget:
+                    self._hold_since = now
+                    return _d("hold", AvoidanceState.HOLDING, "holding - climb not making progress")
+                climb_sp = lp.Setpoint(0.0, 0.0, -self.params.climb_rate_m_s, pose.yaw_deg,
+                                       0.0, None, 0.0, ttc, False,
+                                       f"no way around - climbing over to {target:.1f} m")
+                self.last_setpoint = climb_sp
+                return _d("avoid", AvoidanceState.CLIMBING, climb_sp.reason, climb_sp)
+
         if st == AvoidanceState.AVOIDING and goal_ne is None:
             self._hold_since = now
             return _d("hold", AvoidanceState.HOLDING, "holding - lost the route while avoiding")
@@ -601,6 +661,18 @@ class AvoidanceController:
                 self._prev_dir = sp.chosen_deg
             if sp.blocked:
                 self._blocked_since = self._blocked_since or now
+                if self.params.climb_over and now - self._blocked_since >= self.params.climb_after_blocked_s \
+                        and getattr(self, "_climb_target", None) is None:
+                    target = self._climb_plan(pos, pose, goal_ne, pp, now)
+                    if target is not None:
+                        self._pre_climb_alt = self._engage_alt if self._engage_alt is not None else pose.alt_m
+                        self._climb_target = target
+                        self._climb_started = now
+                        climb_sp = lp.Setpoint(0.0, 0.0, -self.params.climb_rate_m_s, pose.yaw_deg,
+                                               0.0, None, 0.0, ttc, False,
+                                               f"no way around - climbing over to {target:.1f} m")
+                        self.last_setpoint = climb_sp
+                        return _d("avoid", AvoidanceState.CLIMBING, climb_sp.reason, climb_sp)
                 if now - self._blocked_since >= self.params.block_hold_s:
                     self._hold_since = now
                     return _d("hold", AvoidanceState.HOLDING, "holding - no free direction")
@@ -624,7 +696,13 @@ class AvoidanceController:
             # just cleared, and avoidance took over again (SITL 18:22:00).
             closing = (vel[0] * (goal_ne[0] - pos[0]) + vel[1] * (goal_ne[1] - pos[1])) / max(dist_goal or 0.0, 1e-6)
             heading_home = math.hypot(*vel) < 1.0 or closing > 0.5
-            if lp.direct_path_clear(polar, pp, pos, goal_ne) and not threat and heading_home:
+            # After a climb, judge the way at the ORIGINAL height: PX4 flies
+            # the mission back down, and must not descend onto the obstacle.
+            polar_leg = polar
+            if getattr(self, "_pre_climb_alt", None) is not None:
+                polar_leg = self.grid.polar(pos[0], pos[1], pp.lookahead_m, pp.sector_deg, now,
+                                            min_top_m=self._pre_climb_alt - 1.5)
+            if lp.direct_path_clear(polar_leg, pp, pos, goal_ne) and not threat and heading_home:
                 self._clear_since = self._clear_since or now
                 if now - self._clear_since >= self.params.handback_clear_s:
                     self._reset_local()

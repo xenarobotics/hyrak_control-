@@ -437,7 +437,8 @@ async def _local_step(c, manager, pose, in_air, mode, now) -> None:
     can_act = (c.armed and in_air and manager is not None and pose is not None
                and pose.alt_m >= c.acting_floor_m(now) and pilot is None and not crashed)
     if pilot is not None and c.state in (avoidance.AvoidanceState.AVOIDING,
-                                         avoidance.AvoidanceState.HOLDING):
+                                         avoidance.AvoidanceState.HOLDING,
+                                         avoidance.AvoidanceState.CLIMBING):
         # The pilot took the aircraft: avoidance stands down, it never fights a human.
         c.intervened = False
         c._reset_local()
@@ -522,7 +523,8 @@ def _goal_from_motion(c, manager, hist) -> tuple[float, float] | None:
     """Goal for the local planner: chosen while PX4 flies (NOMINAL) from the
     mission items around the reported index and the aircraft's motion, then
     LATCHED while avoidance steers (the motion is then ours, not PX4's)."""
-    if c.state in (avoidance.AvoidanceState.AVOIDING, avoidance.AvoidanceState.HOLDING) \
+    if c.state in (avoidance.AvoidanceState.AVOIDING, avoidance.AvoidanceState.HOLDING,
+                   avoidance.AvoidanceState.CLIMBING) \
             and getattr(c, "_latched_goal", None) is not None:
         return c._latched_goal
     items = _mission_items(c.drone_id, manager) or []
