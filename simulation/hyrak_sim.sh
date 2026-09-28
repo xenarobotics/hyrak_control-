@@ -32,17 +32,47 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PX4="${PX4_DIR:-$HOME/PX4-Autopilot}"
 ROOTFS="$PX4/build/px4_sitl_default/rootfs"
 LOGS="$HERE/.logs"; PIDS="$HERE/.pids"
-WORLD="${WORLD:-hyrak_obstacles}"
 MODEL="${MODEL:-gz_x500_mono_cam}"
+# The indoor vehicle flies the indoor world unless told otherwise.
+if [ "$MODEL" = "gz_x500_indoor" ]; then WORLD="${WORLD:-hyrak_indoor}"; else WORLD="${WORLD:-hyrak_obstacles}"; fi
 HOME_LAT="${HOME_LAT:-17.596569}"; HOME_LON="${HOME_LON:-78.125203}"
 # MODEL=gz_x500_depth (step A of docs/avoidance/ARCHITECTURE_REVIEW.md): PX4's
 # x500 with an OAK-D Lite - a TRUE depth camera (73 deg, 19 m) that
 # gz_depth_sensor.py feeds to avoidance as a range sensor, plus its 1080p RGB
 # camera streamed (scaled to 640x360) as the video feed.
+#
+# MODEL=gz_x500_indoor: GPS-DENIED indoor flight, the way a real indoor PX4
+# drone flies - on VISUAL ODOMETRY. Our model simulation/models/x500_indoor =
+# x500 + gz OdometryPublisher (the VIO stand-in PX4's x500_vision uses) + a
+# downward LW20 rangefinder + the same OAK-D Lite as x500_depth (so video,
+# depth sensor and avoidance are identical). Airframe 4005 (gz_x500_vision)
+# plus INDOOR_PARAMS below: GPS off, EKF2 on external vision (position,
+# velocity, yaw, height), rangefinder aiding, magnetometer off (vision gives
+# yaw), link loss -> Land (Return needs GPS). World:
+# simulation/worlds/hyrak_indoor.sdf (rooms, corridor, ceiling).
+# Not optical flow: PX4's libOpticalFlowSystem.so segfaults the gz server on
+# this machine (it links sdformat14 AND sdformat15 - two Gazebo generations).
+SERVER_CONFIG=hyrak_server.config
+PX4_MODELS_DIR=""                      # empty: PX4's own models folder
+INDOOR_PARAMS=()
 if [ "$MODEL" = "gz_x500_depth" ]; then
     AUTOSTART=4002
     CAM_TOPIC="/world/$WORLD/model/x500_depth_1/link/camera_link/sensor/IMX214/image"
     CAM_IN=1920x1080; CAM_OUT=640x360
+elif [ "$MODEL" = "gz_x500_indoor" ]; then
+    AUTOSTART=4005
+    CAM_TOPIC="/world/$WORLD/model/x500_indoor_1/link/camera_link/sensor/IMX214/image"
+    CAM_IN=1920x1080; CAM_OUT=640x360
+    # PX4 spawns file://$PX4_GZ_MODELS/<model>/model.sdf (px4-rc.gzsim) -
+    # point it at our models for this one; its includes (x500, LW20,
+    # OakD-Lite) resolve through GZ_SIM_RESOURCE_PATH as usual.
+    PX4_MODELS_DIR="$HERE/models"
+    # EKF2_EV_CTRL 15 = horizontal + vertical position, velocity, yaw;
+    # EKF2_HGT_REF 3 = vision; EKF2_MAG_TYPE 5 = none; NAV_DLL_ACT 3 = Land.
+    INDOOR_PARAMS=(PX4_PARAM_SYS_HAS_GPS=0 PX4_PARAM_SIM_GPS_USED=0 PX4_PARAM_EKF2_GPS_CTRL=0
+                   PX4_PARAM_EKF2_EV_CTRL=15 PX4_PARAM_EKF2_HGT_REF=3 PX4_PARAM_EKF2_EV_DELAY=0
+                   PX4_PARAM_EKF2_RNG_CTRL=1 PX4_PARAM_EKF2_MAG_TYPE=5 PX4_PARAM_SIM_GZ_EN_LIDAR=1
+                   PX4_PARAM_NAV_DLL_ACT=3)
 else
     AUTOSTART=4001
     CAM_TOPIC="/world/$WORLD/model/x500_mono_cam_1/link/camera_link/sensor/camera/image"
@@ -54,6 +84,11 @@ export GZ_IP=127.0.0.1 GZ_PARTITION=hyrak_demo DISPLAY="${DISPLAY:-:1}"
 _env() {  # PX4's gz_env.sh appends to these, so they must exist under set -u
     : "${GZ_SIM_RESOURCE_PATH:=}" "${GZ_SIM_SYSTEM_PLUGIN_PATH:=}"
     cd "$ROOTFS" && { . ./gz_env.sh 2>/dev/null || . ../gz_env.sh; }
+    # Our own models/worlds first (x500_indoor, hyrak_indoor_assets); PX4's
+    # stay on the path for everything else.
+    export GZ_SIM_RESOURCE_PATH="$HERE/models:$HERE/worlds:$GZ_SIM_RESOURCE_PATH"
+    # A world in simulation/worlds wins over PX4's of the same name.
+    if [ -f "$HERE/worlds/$WORLD.sdf" ]; then WORLD_FILE="$HERE/worlds/$WORLD.sdf"; else WORLD_FILE="$PX4_GZ_WORLDS/$WORLD.sdf"; fi
 }
 _alive() { [ -f "$PIDS/$1" ] && kill -0 "$(cat "$PIDS/$1")" 2>/dev/null; }
 _spawn() {  # name, then command
@@ -66,17 +101,18 @@ start() {
     mkdir -p "$LOGS" "$PIDS"; _env
     # PX4's server.config minus its GstCameraSystem: that system subscribes to
     # the camera inside the server and hoards every frame (see header).
-    export GZ_SIM_SERVER_CONFIG_PATH="$HERE/hyrak_server.config"
+    export GZ_SIM_SERVER_CONFIG_PATH="$HERE/$SERVER_CONFIG"
     if _alive gz_server; then echo "already running (./hyrak_sim.sh status)"; return 0; fi
     # Not running (or its server died): clear anything the last run left
     # behind BEFORE starting, or its bridges keep sending next to the new ones.
     _sweep
-    _spawn gz_server gz sim --render-engine ogre2 --verbose=1 -r -s "$PX4_GZ_WORLDS/$WORLD.sdf"
+    _spawn gz_server gz sim --render-engine ogre2 --verbose=1 -r -s "$WORLD_FILE"
     sleep 6
     [ -z "${HEADLESS:-}" ] && _spawn gz_gui gz sim --render-engine ogre2 -g
     _spawn px4 env PX4_SYS_AUTOSTART="$AUTOSTART" PX4_SIM_MODEL="$MODEL" PX4_GZ_WORLD="$WORLD" \
+        PX4_GZ_MODELS="${PX4_MODELS_DIR:-$PX4_GZ_MODELS}" \
         PX4_HOME_LAT="$HOME_LAT" PX4_HOME_LON="$HOME_LON" PX4_HOME_ALT=0 \
-        PX4_PARAM_RTL_RETURN_ALT=10 PX4_PARAM_NAV_DLL_ACT=2 ../bin/px4 -i 1 -d
+        PX4_PARAM_RTL_RETURN_ALT=10 PX4_PARAM_NAV_DLL_ACT=2 "${INDOOR_PARAMS[@]}" ../bin/px4 -i 1 -d
     for _ in $(seq 1 40); do grep -q "Ready for takeoff" "$LOGS/px4.log" 2>/dev/null && break; sleep 1; done
     # (PX4 SITL has 6 MAVLink channels; 0-4 are its own. The air-unit
     # emulation link (-u 14551 -o 14550) is therefore not started by default -
@@ -95,7 +131,7 @@ start() {
     ../bin/px4-mavlink --instance 1 start -x -u 14601 -o 14600 -t 127.0.0.1 -r 4000000 -f \
         > "$LOGS/px4_mavlink_session.log" 2>&1
     _spawn cam_bridge python3 "$HERE/gz_cam_bridge.py" "$CAM_TOPIC" "$CAM_IN" 10 rtp://127.0.0.1:5600 $CAM_OUT
-    if [ "$MODEL" = "gz_x500_depth" ]; then
+    if [ "$MODEL" = "gz_x500_depth" ] || [ "$MODEL" = "gz_x500_indoor" ]; then
         _spawn depth_sensor env WORLD="$WORLD" python3 "$HERE/gz_depth_sensor.py" auto
     fi
     status

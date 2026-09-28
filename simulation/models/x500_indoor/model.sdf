@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- HYRAK indoor vehicle - what a real GPS-denied PX4 drone carries:
+       - VISUAL ODOMETRY: gz OdometryPublisher publishes the body pose/velocity
+         that PX4's gz_bridge feeds to EKF2 as external vision (the airframe
+         4005 / x500_vision path). It stands in for a VIO / tracking camera.
+         (PX4's optical-flow simulation, x500_flow, is NOT used: its
+         libOpticalFlowSystem.so segfaults on this machine - it links two
+         Gazebo generations at once, sdformat14 AND sdformat15.)
+       - DOWNWARD RANGEFINDER: x500_flow's LW20 lidar link, same topic, so
+         PX4 (SIM_GZ_EN_LIDAR) gets a distance sensor for height.
+       - FORWARD CAMERA: the OAK-D Lite exactly as on x500_depth (IMX214 RGB
+         1920x1080 @ 1.204 rad, depth 640x480) - video, depth sensor and
+         avoidance behave as with x500_depth. -->
+<sdf version='1.9'>
+  <model name='x500_indoor'>
+    <include merge='true'>
+      <uri>x500</uri>
+    </include>
+    <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher">
+      <dimensions>3</dimensions>
+    </plugin>
+
+    <include merge='true'>
+      <uri>model://LW20</uri>
+      <pose relative_to="base_link">0 0 -0.079 0 1.57 0</pose>
+    </include>
+    <joint name="lidar_model_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>lw20_link</child>
+      <pose relative_to="base_link">-0 0 0 0 0 0</pose>
+    </joint>
+    <joint name="lidar_sensor_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>lidar_sensor_link</child>
+    </joint>
+    <link name="lidar_sensor_link">
+      <pose relative_to="base_link">0 0 -0.05 0 1.57 0</pose>
+      <inertial>
+        <mass>0.001</mass>
+        <inertia><ixx>0.00001</ixx><iyy>0.00001</iyy><izz>0.00001</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+      </inertial>
+      <sensor name='lidar' type='gpu_lidar'>
+        <gz_frame_id>lidar_sensor_link</gz_frame_id>
+        <pose>0 0 0 3.14 0 0</pose>
+        <update_rate>50</update_rate>
+        <ray>
+          <scan>
+            <horizontal><samples>1</samples><resolution>1</resolution><min_angle>0</min_angle><max_angle>0</max_angle></horizontal>
+            <vertical><samples>1</samples><resolution>1</resolution><min_angle>0</min_angle><max_angle>0</max_angle></vertical>
+          </scan>
+          <range><min>0.1</min><max>100.0</max><resolution>0.01</resolution></range>
+        </ray>
+        <always_on>1</always_on>
+        <visualize>true</visualize>
+      </sensor>
+    </link>
+
+    <include merge='true'>
+      <uri>model://OakD-Lite</uri>
+      <pose>.12 .03 .242 0 0 0</pose>
+    </include>
+    <joint name="CameraJoint" type="fixed">
+      <parent>base_link</parent>
+      <child>camera_link</child>
+      <pose relative_to="base_link">.12 .03 .242 0 0 0</pose>
+    </joint>
+  </model>
+</sdf>

@@ -44,6 +44,8 @@ WORLD = os.environ.get("WORLD", "hyrak_obstacles")
 TOPICS = [t for t in os.environ.get("DEPTH_TOPICS", "").split(",") if t] or [
     "/depth_camera",
     f"/world/{WORLD}/model/x500_depth_1/link/camera_link/sensor/StereoOV7251/depth_image",
+    # the indoor vehicle carries the same OAK-D Lite (simulation/models/x500_indoor)
+    f"/world/{WORLD}/model/x500_indoor_1/link/camera_link/sensor/StereoOV7251/depth_image",
 ]
 
 
