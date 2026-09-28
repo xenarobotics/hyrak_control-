@@ -32,7 +32,7 @@ const TUNING: { key: keyof AvoidanceParams; label: string; unit: string; step: n
       hint: 'Cruise while avoidance is on. Slower buys the camera reaction time.' },
     { key: 'hold_to_return_s', label: 'HOLD -> RTL', unit: 's', step: 5, min: 5, max: 120,
       hint: 'Holding with no path this long -> return to launch.' },
-    { key: 'local_clearance_m', label: 'STEER GAP', unit: 'm', step: 0.5, min: 1.5, max: 8,
+    { key: 'local_clearance_m', label: 'STEER GAP', unit: 'm', step: 0.05, min: 0.3, max: 8,
       hint: 'Distance the local planner keeps from every obstacle while it steers (body + margin).' },
     { key: 'ttc_engage_s', label: 'TAKE OVER AT', unit: 's TTC', step: 0.5, min: 2, max: 10,
       hint: 'Take control when closing on something faster than this, whatever its distance.' },

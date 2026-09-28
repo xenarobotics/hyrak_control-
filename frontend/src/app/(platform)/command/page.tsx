@@ -44,6 +44,7 @@ import { ActionRail } from '@/components/command/ActionRail'
 import { MissionBar } from '@/components/command/MissionBar'
 import { ObstacleRadar, DepthStrip } from '@/components/command/ObstacleRadar'
 import { useAvoidanceLive } from '@/components/command/useAvoidanceLive'
+import { IndoorNavCard } from '@/components/command/IndoorNavCard'
 import { AiDrawer } from '@/components/command/AiDrawer'
 import { AiView } from '@/components/command/AiView'
 import { AiPanel } from '@/components/command/AiPanel'
@@ -436,6 +437,7 @@ export default function CommandPage() {
                                 {layout.tab === 'telemetry' && <TelemetryPanel />}
                                 {layout.tab === 'setup' && (
                                     <>
+                                        {!swarmEnabled && <IndoorNavCard avoid={avoid} />}
                                         {mounted && swarmEnabled
                                             ? <p className="text-xs font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>
                                                 Swarm mode - manage the fleet on the Fly tab.</p>

@@ -24,6 +24,7 @@ export interface AvoidanceParams {
     mono_speed_cap_m_s?: number
     range_min_alt_m?: number
     use_range_sensor?: number       // 0 = ignore range scans, sense with the video stream
+    env_mode?: number               // 0 auto, 1 outdoor, 2 indoor
     mono_bench?: number             // 1 = bench test of the camera path (fixed webcam)
     bench_cam_height_m?: number
 }
@@ -51,6 +52,10 @@ export interface AvoidanceStatus {
     committed_path?: boolean
     obstacle_distance_cm: number[]
     sensor_mode?: 'range' | 'mono' | 'none'
+    env?: 'indoor' | 'outdoor'             // environment profile in force
+    env_mode?: number                      // 0 auto, 1 outdoor, 2 indoor
+    env_reason?: string
+    pose_source?: 'gps' | 'local' | null   // where avoidance's position comes from
     following?: boolean        // a tracker / follow mode is commanding through the guard
     guarding?: boolean         // the follow guard is bending / holding that command now
     pose_rate_hz?: number

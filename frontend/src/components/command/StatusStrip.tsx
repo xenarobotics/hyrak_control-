@@ -62,6 +62,10 @@ export function StatusStrip({ avoid }: { avoid: AvoidanceStatus | null }) {
                 value={String(aState).toUpperCase()}
                 color={aState === 'off' ? '#f87171' : aState === 'watching' ? '#fbbf24' : AVOID_COLOR[aState] ?? '#e5e7eb'}
                 title={avoid?.reason || (aState === 'off' ? 'Avoidance is off' : aState === 'watching' ? 'Detecting only - Steer is off' : '')} />
+            {avoid?.env === 'indoor' && (
+                <Cell label="NAV" value="INDOOR" color="#fcd34d"
+                    title={`${avoid.env_reason ?? ''} - position from ${avoid.pose_source === 'local' ? 'PX4 local' : 'GPS'}`} />
+            )}
             {avoid?.sensor_mode && (
                 <Cell label="SENSOR" value={avoid.sensor_mode === 'range' ? 'DEPTH' : avoid.sensor_mode === 'mono' ? 'CAMERA' : 'NONE'}
                     color={avoid.sensor_mode === 'none' ? '#f87171' : '#e5e7eb'} />
