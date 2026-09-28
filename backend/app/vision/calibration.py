@@ -54,6 +54,14 @@ FIELDS: List[Dict[str, Any]] = [
                 "the lens. Every speed and distance reading scales off this.",
     },
     {
+        "key": "webcam_hfov_deg", "group": "camera", "type": "float",
+        "label": "Webcam FOV", "unit": "deg", "min": 20.0, "max": 179.0, "step": 0.5,
+        "help": "Horizontal FOV of a camera on THIS computer (video source "
+                "'Camera (webcam)') - a different lens from the drone's. Depth "
+                "models turn their output into metres with it. Most webcams are "
+                "60-78; measure it the same way as the drone's.",
+    },
+    {
         "key": "camera_vfov_deg", "group": "camera", "type": "float",
         "label": "Vertical FOV", "unit": "deg", "min": 0.0, "max": 179.0, "step": 0.5,
         "help": "Leave at 0 to derive it from the frame's aspect ratio, which is "

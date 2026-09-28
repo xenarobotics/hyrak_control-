@@ -438,6 +438,8 @@ def register_webrtc_events(
         # preview is actually running, and it only sends clientOverlay for a
         # source it can display locally.
         video_source = data.get("videoSource", "camera")
+        from app.vision import camera_profiles
+        camera_profiles.set_source(session.session_id, video_source)   # which lens the frames have
         # Must stay in step with isServerSourced() in frontend/src/lib/
         # videoSource.ts. When the two disagree the failure is silent and
         # total: the browser sends a recvonly transceiver and no track

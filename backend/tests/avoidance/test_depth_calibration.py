@@ -116,3 +116,31 @@ def test_bench_multiplies_by_the_stored_scale():
 def test_flight_seed_never_makes_obstacles_without_a_ground_fit():
     res = camera.analyze_depth(_box(4.0), 160, 120, _ctx(scale_seed=2.0), 70.0, 20.0)
     assert res["scan"] is None
+
+
+# -- lens per video source, colour range -----------------------------------
+
+def test_webcam_frames_use_the_webcam_lens(monkeypatch):
+    from app.vision import camera_profiles
+    s = camera_profiles.get_settings()
+    monkeypatch.setattr(s, "camera_hfov_deg", 99.7)
+    monkeypatch.setattr(s, "webcam_hfov_deg", 70.0)
+    camera_profiles.set_source("web", "camera")
+    camera_profiles.set_source("air", "air_unit_udp")
+    assert camera_profiles.hfov_for("web") == 70.0
+    assert camera_profiles.hfov_for("air") == 99.7
+    assert camera_profiles.hfov_for("unknown") == 99.7
+
+
+def test_depth_colours_follow_the_scene(monkeypatch):
+    from app.vision.modules import depth_mapper
+    monkeypatch.setattr(depth_mapper.BaseAnalyzer, "__init__", lambda self, **k: None)
+    monkeypatch.setattr(depth_models, "load",
+                        lambda *a, **k: type("B", (), {"predict": lambda self, f, h: room})())
+    room = np.tile(np.linspace(0.8, 5.0, 64, dtype=np.float32), (48, 1))    # a 5 m room
+    m = depth_mapper.DepthMapper()
+    img, meta = m._analyze_frame_blocking(np.zeros((480, 640, 3), np.uint8))
+    lo, hi = meta["viz_range_m"]
+    assert lo < 1.2 and 4.5 < hi < 5.5                   # the scale spans the room, not 0.3-60 m
+    left, right = img[240, 96].astype(int), img[240, 544].astype(int)
+    assert np.linalg.norm(left - right) > 150             # near and far get clearly different colours

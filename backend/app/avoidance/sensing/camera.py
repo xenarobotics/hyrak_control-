@@ -135,7 +135,7 @@ def analyze_depth(depth: np.ndarray, frame_w: int, frame_h: int, ctx: dict | Non
     return {"fit": fit, "scan": scan}
 
 
-def _analyze(img_bgr: np.ndarray, ctx: dict | None) -> dict | None:
+def _analyze(img_bgr: np.ndarray, ctx: dict | None, session_id: str | None = None) -> dict | None:
     """Worker thread: model inference + analyze_depth (or, during a
     person-ruler run, one ruler measurement instead)."""
     m = _mapper()
@@ -143,8 +143,9 @@ def _analyze(img_bgr: np.ndarray, ctx: dict | None) -> dict | None:
         return None
     from app.config import get_settings
     from app.avoidance.sensing import person_ruler
+    from app.vision import camera_profiles
     cfg = get_settings()
-    hfov = float(cfg.camera_hfov_deg)
+    hfov = camera_profiles.hfov_for(session_id)          # this session's lens
     depth = np.nan_to_num(m.predict_metric(img_bgr, hfov), nan=0.0, posinf=0.0, neginf=0.0)
     h, w = img_bgr.shape[:2]
     key = person_ruler.profile_key(w, h, hfov, m.model_name)
@@ -201,7 +202,7 @@ def submit(session_id: str, img_bgr: np.ndarray) -> None:
             ctx = {"ruler_height": person_ruler.status(c.drone_id).get("height_m", 1.70)}
     _busy.add(session_id)
     loop = asyncio.get_running_loop()
-    fut = loop.run_in_executor(_executor, _analyze, img_bgr, ctx)
+    fut = loop.run_in_executor(_executor, _analyze, img_bgr, ctx, session_id)
 
     def _done(f):
         _busy.discard(session_id)

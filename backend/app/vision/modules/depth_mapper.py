@@ -20,6 +20,7 @@ class DepthMapper(BaseAnalyzer):
         self.device      = settings.device
         self.viz_min_depth = 0.3   # metres - clip below this
         self.viz_max_depth = float(settings.depth_viz_max_m)   # clip above this
+        self._viz_range: tuple[float, float] | None = None       # smoothed colour range
         self.hfov_deg = float(settings.camera_hfov_deg)
         self.obstacle_max_m = float(settings.depth_obstacle_max_m)
         self.model_name = settings.depth_model
@@ -54,8 +55,23 @@ class DepthMapper(BaseAnalyzer):
         use it to put distances in metres. Avoidance sensing calibrates the
         scale on top (app/avoidance/sensing/mono_calibration)."""
         if hfov_deg is None:
-            hfov_deg = float(get_settings().camera_hfov_deg)
+            # This analyzer's session (one per session) decides the lens.
+            from app.vision import camera_profiles
+            hfov_deg = camera_profiles.hfov_for(next(iter(getattr(self, "_clients", {})), None))
         return self.backend.predict(frame_bgr, hfov_deg)
+
+    @staticmethod
+    def _draw_scale(img: np.ndarray, lo: float, hi: float) -> None:
+        """Colour bar with its metres, bottom-left."""
+        h, w = img.shape[:2]
+        bw, bh, x0 = max(120, w // 5), max(10, h // 45), 12
+        y0 = h - bh - 28
+        bar = cv2.applyColorMap(np.tile(np.linspace(0, 255, bw).astype(np.uint8), (bh, 1)), cv2.COLORMAP_TURBO)
+        img[y0:y0 + bh, x0:x0 + bw] = bar
+        cv2.rectangle(img, (x0 - 1, y0 - 1), (x0 + bw, y0 + bh), (255, 255, 255), 1)
+        for txt, x in ((f"{lo:.1f} m", x0), (f"{hi:.1f} m", x0 + bw - 44)):
+            cv2.putText(img, txt, (x, y0 + bh + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 3, cv2.LINE_AA)
+            cv2.putText(img, txt, (x, y0 + bh + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
     @torch.inference_mode()
     def _analyze_frame_blocking(
@@ -75,13 +91,28 @@ class DepthMapper(BaseAnalyzer):
 
         depth = np.clip(depth, self.viz_min_depth, self.viz_max_depth)
 
-        # Normalize to 0-255 for colormap
-        depth_norm = ((depth - self.viz_min_depth) / (self.viz_max_depth - self.viz_min_depth) * 255)
-        depth_norm = np.clip(depth_norm, 0, 255).astype(np.uint8)
+        # Colour range follows the SCENE, not a fixed 0.3-60 m: with a fixed
+        # scale a 5 m room used 8 % of it and came out uniformly blue. The
+        # 2nd-98th percentile, smoothed across frames (no flicker), at least
+        # 1.5 m wide; the metres are printed on the image so colours stay
+        # readable. Blue = near, red = far.
+        valid = depth[depth > self.viz_min_depth]
+        if valid.size > 50:
+            lo, hi = np.percentile(valid, 2), np.percentile(valid, 98)
+            if self._viz_range is None:
+                self._viz_range = (lo, hi)
+            else:
+                a = 0.2
+                self._viz_range = (self._viz_range[0] * (1 - a) + lo * a,
+                                   self._viz_range[1] * (1 - a) + hi * a)
+        lo, hi = self._viz_range or (self.viz_min_depth, self.viz_max_depth)
+        hi = max(hi, lo + 1.5)
+        depth_norm = np.clip((depth - lo) / (hi - lo) * 255, 0, 255).astype(np.uint8)
 
         # Upscale back to original resolution
         depth_full = cv2.resize(depth_norm, (W, H), interpolation=cv2.INTER_LINEAR)
-        colormap   = cv2.applyColorMap(depth_full, cv2.COLORMAP_JET)
+        colormap   = cv2.applyColorMap(depth_full, cv2.COLORMAP_TURBO)
+        self._draw_scale(colormap, lo, hi)
 
         # Metric stats from the same clipped depth the colormap uses, so UI
         # values match the visualization. (No per-frame empty_cache here -
@@ -91,6 +122,7 @@ class DepthMapper(BaseAnalyzer):
             "min_depth_m":  round(float(depth.min()), 2),
             "max_depth_m":  round(float(depth.max()), 2),
             "mean_depth_m": round(float(depth.mean()), 2),
+            "viz_range_m":  [round(float(lo), 2), round(float(hi), 2)],
         }
         if obstacle_obs is not None:
             meta["obstacle_observations"] = obstacle_obs

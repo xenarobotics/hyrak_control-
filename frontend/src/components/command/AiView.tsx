@@ -23,6 +23,7 @@ import { useAirUnitPreview } from '@/lib/airUnitPreview'
 import { useGstPreview } from '@/lib/gstPreview'
 import { useReceiver, fallbackFromHevc } from '@/lib/hyrakReceiver'
 import { clampToLiveEdge } from '@/lib/liveEdge'
+import { useServerFeed } from '@/lib/serverHevcFeed'
 
 export function AiView() {
     const { localStream, remoteStream, isStreaming, overlayActive } = useWebRTCContext()
@@ -35,8 +36,15 @@ export function AiView() {
     const gst = useGstPreview()
     const receiver = useReceiver()
     const localPreviewUrl = gst?.previewUrl ?? receiver?.previewUrl ?? airUnitPreviewUrl
-    const wcUrl = overlayActive ? (gst?.webcodecs ? gst.previewUrl : (receiver?.previewUrl ?? null)) : null
-    const wcCodec = gst?.webcodecs ? 'h264' : (receiver?.codec ?? 'h264')
+    // Server-read air unit (the sim camera too): in overlay modes the picture
+    // is the server's bit-exact feed decoded here, exactly like the main
+    // video - without it this view was black for every box-drawing mode.
+    // The feed hands each viewer its own queue, so a second one is fine.
+    const serverFeed = useServerFeed(isStreaming && overlayActive)
+    const wcUrl = overlayActive
+        ? (gst?.webcodecs ? gst.previewUrl : (receiver?.previewUrl ?? serverFeed?.url ?? null))
+        : null
+    const wcCodec = gst?.webcodecs ? 'h264' : (receiver?.codec ?? serverFeed?.codec ?? 'h264')
 
     useEffect(() => {
         const el = videoRef.current

@@ -42,8 +42,15 @@ class Settings(BaseSettings):
     depth_obstacle_max_m: float = Field(default=20.0)
     # Horizontal FOV of the drone's forward camera. Obstacle bearings come
     # straight from it, so a wrong value puts every obstacle at the wrong
-    # angle (SIYI A8 ~81, gz x500 mono_cam 99.7). Set CAMERA_HFOV_DEG in .env.
+    # angle (SIYI A8 ~81, gz x500 mono_cam 99.7, gz x500_depth IMX214 69).
+    # Set CAMERA_HFOV_DEG in .env.
     camera_hfov_deg: float = Field(default=70.0)
+    # A camera on the operator's machine (video source "camera": webcam,
+    # USB camera) is a different lens from the drone's. Metric depth models
+    # turn their output into metres through the focal length, so using the
+    # drone's FOV for a webcam made every distance ~40 % short (a 99.7 deg
+    # drone setting on a ~70 deg webcam). Typical webcams: 60-78 deg.
+    webcam_hfov_deg: float = Field(default=70.0)
     # Fallback inference width for any mode not listed in
     # inference_width_by_mode below.
     inference_resize_width: int = Field(default=640)
