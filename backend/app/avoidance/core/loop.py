@@ -62,7 +62,7 @@ def _resolve_link(drone_id: str):
                 continue
             mgr = sm.get_telemetry(s.session_id)
             if mgr is not None and mgr.is_connected:
-                snap = mgr.snapshot()
+                snap = mgr.snapshot          # a property, not a method
                 lat, lng = snap.position.latitude_deg, snap.position.longitude_deg
                 if not (lat or lng):
                     return None, None, False, ""
@@ -143,7 +143,7 @@ def _current_index(drone_id: str) -> int:
             if (sess.drone or {}).get("id") == drone_id:
                 mgr = sm.get_telemetry(sess.session_id)
                 if mgr is not None and mgr.is_connected:
-                    return int(getattr(mgr.snapshot(), "mission_current_index", -1))
+                    return int(getattr(mgr.snapshot, "mission_current_index", -1))
     return -1
 
 
