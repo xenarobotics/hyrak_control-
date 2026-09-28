@@ -28,6 +28,7 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+import cv2
 import numpy as np
 
 logger = logging.getLogger("verocore.avoidance.sensing")
@@ -155,6 +156,7 @@ def _analyze(img_bgr: np.ndarray, ctx: dict | None, session_id: str | None = Non
         except Exception as e:
             scale, why = None, f"person detector failed: {e}"
         return {"ruler": (scale, why, key)}
+    env = environment_stats(depth, getattr(getattr(m, "backend", None), "last_sky", None))
     if ctx is not None:
         stored = _stored_scale(key)
         ctx = {**ctx, "stored_scale": stored}
@@ -162,7 +164,33 @@ def _analyze(img_bgr: np.ndarray, ctx: dict | None, session_id: str | None = Non
             # Flight: seed the ground fit with it - blended into a real fit
             # only. A frame with NO ground fit still yields no obstacles.
             ctx["scale_seed"] = stored
-    return analyze_depth(depth, w, h, ctx, hfov, float(cfg.depth_obstacle_max_m))
+    res = analyze_depth(depth, w, h, ctx, hfov, float(cfg.depth_obstacle_max_m))
+    if res is not None:
+        res["env"] = env
+    return res
+
+
+def environment_stats(depth: np.ndarray, sky: np.ndarray | None) -> tuple[float | None, float, bool]:
+    """(sky fraction, median depth m, ceiling seen) for the indoor/outdoor
+    verdict. A ceiling: most of the frame's top band returns a near surface
+    that is not sky."""
+    valid = depth[np.isfinite(depth) & (depth > 0)]
+    median = float(np.median(valid)) if valid.size else 0.0
+    sky_frac = None
+    sky_top = None
+    if sky is not None and sky.size:
+        sky_b = sky > 0.5
+        sky_frac = float(sky_b.mean())
+        if sky_b.shape != depth.shape:
+            sky_b = cv2.resize(sky_b.astype(np.uint8), (depth.shape[1], depth.shape[0]),
+                               interpolation=cv2.INTER_NEAREST).astype(bool)
+        sky_top = sky_b
+    band = max(1, int(depth.shape[0] * 0.15))
+    top = depth[:band]
+    near = np.isfinite(top) & (top > 0) & (top < 6.0)
+    if sky_top is not None:
+        near &= ~sky_top[:band]
+    return sky_frac, median, bool(near.mean() > 0.6)
 
 
 _scale_cache: dict[str, tuple[float, float | None]] = {}
@@ -234,6 +262,8 @@ def submit(session_id: str, img_bgr: np.ndarray) -> None:
             if res["legacy"]:
                 av_loop.observe_from_session(session_id, res["legacy"], captured_at=captured_at)
             return
+        if res.get("env"):
+            cc.note_vision_env(*res["env"])
         if not res.get("bench"):
             cc.mono_scale.update(res.get("fit"))
         if res.get("scan"):

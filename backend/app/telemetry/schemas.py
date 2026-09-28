@@ -21,6 +21,19 @@ class PositionData:
 
 
 @dataclass
+class LocalPositionData:
+    """PX4's LOCAL position (EKF2, metres from its origin, NED). Exists
+    without GPS - optical flow, a rangefinder, visual odometry or motion
+    capture feed it - which is what indoor navigation runs on. `valid` is
+    set once PX4 reports it; `t` is the monotonic arrival time."""
+    north_m: float = 0.0
+    east_m: float = 0.0
+    down_m: float = 0.0
+    valid: bool = False
+    t: float = 0.0
+
+
+@dataclass
 class VelocityData:
     north_m_s: float = 0.0
     east_m_s: float = 0.0
@@ -101,6 +114,9 @@ class TelemetrySnapshot:
     attitude: AttitudeData = field(default_factory=AttitudeData)
     position: PositionData = field(default_factory=PositionData)
     velocity: VelocityData = field(default_factory=VelocityData)
+    local_position: LocalPositionData = field(default_factory=LocalPositionData)
+    # Downward rangefinder (m), None = no reading. Indoors this is the height.
+    rangefinder_m: float | None = None
     battery: BatteryData = field(default_factory=BatteryData)
     gps: GPSData = field(default_factory=GPSData)
     flight_mode: FlightModeData = field(default_factory=FlightModeData)
@@ -169,6 +185,8 @@ class TelemetrySnapshot:
             "attitude": self.attitude.__dict__,
             "position": self.position.__dict__,
             "velocity": self.velocity.__dict__,
+            "local_position": self.local_position.__dict__,
+            "rangefinder_m": self.rangefinder_m,
             "battery": self.battery.__dict__,
             "gps": self.gps.__dict__,
             "flight_mode": self.flight_mode.__dict__,

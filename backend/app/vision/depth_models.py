@@ -118,6 +118,8 @@ class DA3Depth:
         with torch.inference_mode():
             pred = self._model.inference([rgb], process_res=self.process_res)
         canon = np.asarray(pred.depth[0], dtype=np.float32)
+        # Sky mask (0..1), kept for the indoor/outdoor verdict.
+        self.last_sky = None if getattr(pred, "sky", None) is None else np.asarray(pred.sky[0])
         h, w = canon.shape
         hf = float(hfov_deg or 70.0)
         # Processed image keeps the frame's aspect (to 14-px multiples):

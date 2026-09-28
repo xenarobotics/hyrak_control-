@@ -550,8 +550,18 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             try:
                 from app.telemetry import failsafe_check as _fs
                 params = await _fs.read_params(tel)
+                gps_denied = False
+                try:                    # indoors: avoidance's environment, or no GPS at all
+                    from app.avoidance.core import controller as _av
+                    did = (session.drone or {}).get("id") if isinstance(session.drone, dict) else None
+                    snap = tel.snapshot
+                    gps_denied = (not (snap.position.latitude_deg or snap.position.longitude_deg)) or \
+                        bool(did and _av.has_controller(did) and _av.controller(did).env == "indoor")
+                except Exception:
+                    pass
                 block, warn = _fs.evaluate(
-                    params, _fs.mission_max_alt(getattr(session, "last_mission", None)))
+                    params, _fs.mission_max_alt(getattr(session, "last_mission", None)),
+                    gps_denied=gps_denied)
                 if block:
                     await sio.emit("action_result", {
                         "action": action, "ok": False,

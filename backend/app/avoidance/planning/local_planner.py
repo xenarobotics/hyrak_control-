@@ -35,6 +35,7 @@ class PlannerParams:
     clearance_m: float = 3.0        # body + margin kept from every occupied cell
     lookahead_m: float = 18.0       # histogram radius / "free enough" horizon
     decel_m_s2: float = 2.0         # braking the planner assumes it can do
+    min_free_m: float = 4.0         # least room a chosen direction must have (room-sized indoors)
     ttc_brake_s: float = 2.0        # closing on something faster than this: brake
     ttc_slow_s: float = 4.0         # below this, speed scales down with TTC
     sensor_half_fov_deg: float = 35.0   # forward camera; outside it space is unseen
@@ -124,7 +125,7 @@ def plan(pos_ne: tuple[float, float], alt_m: float, yaw_deg: float,
 
     # Free distance needed in a direction to fly it at cruise and still stop.
     stop_m = p.cruise_m_s ** 2 / (2.0 * p.decel_m_s2) + 1.0
-    need = min(max(stop_m, 4.0), max(1.0, dist_goal))
+    need = min(max(stop_m, p.min_free_m), max(1.0, dist_goal))
 
     horizon = max(need, min(p.lookahead_m, dist_goal))
     best, best_cost = None, math.inf

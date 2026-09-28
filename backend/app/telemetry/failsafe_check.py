@@ -40,9 +40,13 @@ CACHE_S = 120.0
 _cache: dict[int, tuple[float, dict]] = {}     # id(manager) -> (when, params)
 
 
-def evaluate(p: dict, mission_max_alt_m: float | None = None) -> tuple[list[str], list[str]]:
+def evaluate(p: dict, mission_max_alt_m: float | None = None,
+             gps_denied: bool = False) -> tuple[list[str], list[str]]:
     """(blocking problems, warnings) for a parameter dict. Missing values are
-    reported as warnings - an unreadable parameter is not proof of danger."""
+    reported as warnings - an unreadable parameter is not proof of danger.
+    gps_denied: indoors / no GPS - PX4 cannot fly a Return without a global
+    position, so a Return failsafe there degrades to whatever PX4 falls back
+    to; say so and suggest Land or Hold."""
     block, warn = [], []
     dll = p.get("NAV_DLL_ACT")
     if dll is None:
@@ -59,6 +63,12 @@ def evaluate(p: dict, mission_max_alt_m: float | None = None) -> tuple[list[str]
     elif int(obl) in (6, 7):
         block.append(f"COM_OBL_RC_ACT = {int(obl)} ({OBL[int(obl)]}): losing cloud Offboard control "
                      f"would {'cut the motors' if int(obl) == 6 else 'disarm in the air'}. Set 5 (Hold).")
+    if gps_denied:
+        if dll is not None and int(dll) == 2:
+            warn.append("indoors / no GPS: NAV_DLL_ACT = 2 (Return) needs a global position PX4 does not "
+                        "have here - set 3 (Land) or 1 (Hold) for indoor flight")
+        if obl is not None and int(obl) == 3:
+            warn.append("indoors / no GPS: COM_OBL_RC_ACT = 3 (Return) - set 5 (Hold) or 4 (Land)")
     t = p.get("COM_DL_LOSS_T")
     if t is not None and not (3 <= float(t) <= 30):
         warn.append(f"COM_DL_LOSS_T = {float(t):g} s: link-loss reaction outside 3-30 s")

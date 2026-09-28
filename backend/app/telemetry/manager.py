@@ -32,6 +32,7 @@ from app.telemetry.calibration import (
     LEVEL_MAX_TILT_DEG, SENSORS, CalibrationSession,
 )
 from app.telemetry.schemas import (
+    LocalPositionData,
     TelemetrySnapshot,
     AttitudeData,
     PositionData,
@@ -691,6 +692,37 @@ class TelemetryManager:
             pass
         except Exception as e:
             logger.error(f"Velocity subscription error: {e}")
+
+    async def _subscribe_local_position(self):
+        """PX4's local NED position - the pose source for GPS-denied
+        (indoor) navigation. Started on demand by boost_pose_rates."""
+        try:
+            async for pv in self._drone.telemetry.position_velocity_ned():
+                if not self._running:
+                    break
+                p = pv.position
+                self._snapshot.local_position = LocalPositionData(
+                    north_m=round(p.north_m, 3), east_m=round(p.east_m, 3),
+                    down_m=round(p.down_m, 3), valid=True, t=time.monotonic())
+                self._count("local_position")
+                self._notify_pose()
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Local position subscription error: {e}")
+
+    async def _subscribe_rangefinder(self):
+        """Downward distance sensor (height above the floor indoors)."""
+        try:
+            async for ds in self._drone.telemetry.distance_sensor():
+                if not self._running:
+                    break
+                d = ds.current_distance_m
+                self._snapshot.rangefinder_m = round(d, 2) if d == d and d > 0 else None
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.debug(f"Rangefinder subscription error: {e}")
 
     async def _subscribe_battery(self):
         try:
@@ -2278,8 +2310,18 @@ class TelemetryManager:
             return
         radio = (self._link_kind == "radio" or self._address.startswith("serial://"))
         pos_hz, att_hz = (5.0, 10.0) if radio else (10.0, 20.0)
+        # Local position + rangefinder: what GPS-denied (indoor) avoidance
+        # navigates on. Subscribed only here, so fleet drones without
+        # avoidance keep their small stream budget.
+        if not getattr(self, "_local_tasks", None):
+            self._local_tasks = [
+                asyncio.create_task(self._subscribe_local_position(), name="tel_local_pos"),
+                asyncio.create_task(self._subscribe_rangefinder(), name="tel_rangefinder"),
+            ]
+            self._tasks.extend(self._local_tasks)
         for name, setter, hz in (("position", self._drone.telemetry.set_rate_position, pos_hz),
-                                 ("attitude", self._drone.telemetry.set_rate_attitude_euler, att_hz)):
+                                 ("attitude", self._drone.telemetry.set_rate_attitude_euler, att_hz),
+                                 ("local position", self._drone.telemetry.set_rate_position_velocity_ned, pos_hz)):
             try:
                 await asyncio.wait_for(setter(hz), timeout=2.0)
             except Exception as e:

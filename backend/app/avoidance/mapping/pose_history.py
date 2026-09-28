@@ -12,6 +12,14 @@ Positions are kept in a local north/east/down frame in metres around an
 origin fixed at the first sample (flat-earth over a few km is well under a
 centimetre of error), which is also the frame the occupancy grid and the
 local planner work in.
+
+Two sources feed it:
+  add()     GPS latitude/longitude (outdoors, as before)
+  add_ne()  PX4's LOCAL position - EKF2 metres from its own origin, which
+            exists without GPS (optical flow, rangefinder, visual odometry,
+            motion capture): indoor / GPS-denied navigation.
+Switching source starts a new frame (`epoch` increments): positions from the
+two are not comparable, so whatever was mapped in the old frame must go.
 """
 from __future__ import annotations
 
@@ -47,6 +55,18 @@ class PoseHistory:
         self._s: deque[PoseSample] = deque()
         self.origin: tuple[float, float] | None = None
         self._last_key: tuple | None = None
+        self.source: str | None = None        # 'gps' | 'local'
+        self.epoch = 0                        # bumps when the frame changes
+
+    def _switch(self, source: str, origin: tuple[float, float] | None) -> None:
+        if self.source == source:
+            return
+        if self.source is not None:
+            self.epoch += 1
+        self.source = source
+        self._s.clear()
+        self._last_key = None
+        self.origin = origin
 
     # -- frame conversions ----------------------------------------------------
     def to_ne(self, lat: float, lng: float) -> tuple[float, float]:
@@ -69,6 +89,7 @@ class PoseHistory:
         poller faster than the telemetry stream records each update once
         (and the interpolation sees the real update times). Returns True if
         the sample was new."""
+        self._switch("gps", None)
         key = (round(lat, 7), round(lng, 7), round(alt_m, 2), round(yaw_deg, 1),
                round(roll_deg, 1), round(pitch_deg, 1))
         if key == self._last_key:
@@ -77,6 +98,28 @@ class PoseHistory:
         t = t if t is not None else time.monotonic()
         n, e = self.to_ne(lat, lng)
         self._s.append(PoseSample(t, lat, lng, n, e, alt_m, yaw_deg % 360.0,
+                                  roll_deg, pitch_deg))
+        while self._s and t - self._s[0].t > HISTORY_S:
+            self._s.popleft()
+        return True
+
+    def add_ne(self, north_m: float, east_m: float, alt_m: float, yaw_deg: float,
+               roll_deg: float = 0.0, pitch_deg: float = 0.0, t: float | None = None,
+               origin_latlng: tuple[float, float] | None = None) -> bool:
+        """Record a sample in PX4's LOCAL frame (metres from the EKF origin).
+        origin_latlng anchors that frame to the globe (for mission waypoints
+        and the map): the GPS position minus the local offset when GPS is
+        also available, else the home point, else (0, 0) - indoors with no
+        global reference only relative positions matter."""
+        self._switch("local", origin_latlng or (0.0, 0.0))
+        key = ("ne", round(north_m, 3), round(east_m, 3), round(alt_m, 2), round(yaw_deg, 1),
+               round(roll_deg, 1), round(pitch_deg, 1))
+        if key == self._last_key:
+            return False
+        self._last_key = key
+        t = t if t is not None else time.monotonic()
+        lat, lng = self.to_latlng(north_m, east_m)
+        self._s.append(PoseSample(t, lat, lng, north_m, east_m, alt_m, yaw_deg % 360.0,
                                   roll_deg, pitch_deg))
         while self._s and t - self._s[0].t > HISTORY_S:
             self._s.popleft()

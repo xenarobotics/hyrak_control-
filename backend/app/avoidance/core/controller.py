@@ -65,6 +65,7 @@ class AvoidanceParams:
     lookahead_m: float = 18.0           # planning radius
     ttc_engage_s: float = 4.0           # take control when closing faster than this
     handback_clear_s: float = 1.5       # direct path free this long -> back to the mission
+    plan_min_free_m: float = 4.0        # least room a direction must have to be chosen
     block_hold_s: float = 3.0           # boxed in this long -> HOLD
     # Monocular gates: camera-only flight senses from higher up and flies
     # slower until its calibrated error is measured good enough.
@@ -103,6 +104,11 @@ class AvoidanceParams:
     # room left, or holds it in place - never a mode change, never a mission
     # goal. 0 = pass the tracker's command through untouched.
     guard_follow: float = 1.0
+    # Navigation environment (Command -> SETUP -> Indoor navigation):
+    # 0 = auto (GPS + what the camera sees), 1 = outdoor, 2 = indoor.
+    # Indoor swaps in the INDOOR_PROFILE below and navigates on PX4's local
+    # position instead of GPS.
+    env_mode: float = 0.0
     # Moving where the forward camera is not looking: at most this fast.
     guard_unseen_speed_m_s: float = 2.0
     climb_after_blocked_s: float = 3.0   # brake and look sideways first; same moment HOLD would come
@@ -122,6 +128,35 @@ class AvoidanceParams:
     climb_step_m: float = 4.0
     min_speed_m_s: float = 1.0          # speed governor floor at the clearance ring
     prediction_horizon_s: float = 1.5   # dynamic obstacles predicted this far ahead
+
+
+# Parameters that change between outdoors (the dataclass defaults, or what
+# the operator tuned) and indoors. Indoors: corridors ~1.6-2 m and doorways
+# ~1 m, so the clearance and look-ahead are room-sized, speeds walking pace,
+# no climbing (a ceiling), and the camera floors low (flying at 1-1.5 m).
+# Clearance = the airframe's radius + margin: 0.45 m suits an x500 (~0.7 m
+# across with props). A gap is passable when it is wider than
+# 2 x (clearance + ~0.14 m map cell): 1.2 m for the x500 - a standard ~1 m
+# doorway needs a smaller airframe and a smaller clearance.
+INDOOR_GRID_CELL_M = 0.2       # outdoors 0.5 (OccupancyGrid default)
+INDOOR_PROFILE: dict[str, float] = {
+    "local_clearance_m": 0.45,
+    "lookahead_m": 6.0,
+    "reaction_distance_m": 3.0,
+    "speed_cap_m_s": 1.0,
+    "mono_speed_cap_m_s": 0.8,
+    "ttc_engage_s": 3.0,
+    "handback_clear_s": 1.0,
+    "plan_min_free_m": 1.5,
+    "keep_clear_m": 1.0,
+    "keep_clear_release_m": 1.8,
+    "keep_clear_speed_m_s": 0.4,
+    "guard_unseen_speed_m_s": 0.8,
+    "climb_over": 0.0,
+    "range_min_alt_m": 0.4,
+    "mono_min_alt_m": 0.8,
+}
+ENV_SETTLE_S = 5.0          # a new environment must hold this long before it applies
 
 
 @dataclass
@@ -183,6 +218,13 @@ class AvoidanceController:
         self._resumed_at = -1e9
         self._resume_cooldown_s = 3.0
         self._engage_alt: float | None = None
+        self.env = "outdoor"              # environment in force
+        self.env_reason = "default"
+        self._env_candidate: tuple[str, float, str] | None = None
+        self._outdoor_saved: dict[str, float] | None = None
+        self._gps_ok: bool | None = None
+        self._vision_env: tuple[float, str] | None = None     # (t, 'indoor'|'outdoor'|'unsure')
+        self._grid_epoch = 0
         self._follow_cmd_t = 0.0          # last tracker command through the guard
         self._guard_active = False        # the guard is bending/holding the command
         self._guard_t = 0.0
@@ -436,6 +478,79 @@ class AvoidanceController:
         self._prev_dir = None
         self.last_setpoint = None
 
+    # -- environment: indoor / outdoor ---------------------------------------
+    def note_gps(self, ok: bool) -> None:
+        self._gps_ok = ok
+
+    def note_vision_env(self, sky_frac: float | None, median_m: float, ceiling: bool,
+                        now: float | None = None) -> None:
+        """One camera frame's verdict. Enclosed: no sky, a ceiling in the top
+        of the frame, and nearly everything within ~8 m. Open: sky, or a far
+        scene. Anything else says nothing."""
+        now = now if now is not None else time.monotonic()
+        if (sky_frac is None or sky_frac < 0.01) and ceiling and median_m < 8.0:
+            v = "indoor"
+        elif (sky_frac is not None and sky_frac > 0.05) or median_m > 15.0:
+            v = "outdoor"
+        else:
+            v = "unsure"
+        self._vision_env = (now, v)
+
+    def update_env(self, now: float | None = None) -> str | None:
+        """Apply the environment the operator chose, or in auto the one the
+        evidence points to once it has held ENV_SETTLE_S. Never switches in
+        the middle of a manoeuvre. Returns the new environment on a switch."""
+        now = now if now is not None else time.monotonic()
+        mode = int(round(self.params.env_mode))
+        if mode == 1:
+            want, why = "outdoor", "set by operator"
+        elif mode == 2:
+            want, why = "indoor", "set by operator"
+        else:
+            vis = self._vision_env if self._vision_env and now - self._vision_env[0] < 5.0 else None
+            if self._gps_ok is False:
+                want, why = "indoor", "auto: no usable GPS"
+            elif vis and vis[1] == "indoor":
+                want, why = "indoor", "auto: camera sees an enclosed space (no sky, ceiling, near walls)"
+            else:
+                want, why = "outdoor", ("auto: sky / open scene" if vis and vis[1] == "outdoor"
+                                        else "auto: GPS good")
+        if want == self.env:
+            self._env_candidate = None
+            self.env_reason = why
+            return None
+        if mode == 0:                       # auto: let it settle first
+            if self._env_candidate is None or self._env_candidate[0] != want:
+                self._env_candidate = (want, now, why)
+                return None
+            if now - self._env_candidate[1] < ENV_SETTLE_S:
+                return None
+        if self.state in (AvoidanceState.AVOIDING, AvoidanceState.CLIMBING):
+            return None                     # finish the manoeuvre first
+        self._apply_env(want)
+        self.env_reason = why
+        self._env_candidate = None
+        return want
+
+    def _apply_env(self, env: str) -> None:
+        from app.avoidance.mapping.occupancy import OccupancyGrid
+        p = self.params
+        # Room-scale gaps need a finer map (0.5 m cells alone ate ~0.35 m of
+        # every corridor); the map is rebuilt in the new resolution.
+        self.grid.clear()
+        self.grid.cell_m = INDOOR_GRID_CELL_M if env == "indoor" else OccupancyGrid.cell_m
+        if env == "indoor":
+            if self._outdoor_saved is None:
+                self._outdoor_saved = {k: getattr(p, k) for k in INDOOR_PROFILE}
+            for k, v in INDOOR_PROFILE.items():
+                setattr(p, k, v)
+        elif self._outdoor_saved is not None:
+            for k, v in self._outdoor_saved.items():
+                setattr(p, k, v)
+            self._outdoor_saved = None
+        self.env = env
+        self._reset_local()
+
     FOLLOW_WINDOW_S = 1.0
 
     def following(self, now: float | None = None) -> bool:
@@ -646,7 +761,8 @@ class AvoidanceController:
         if self.sensor_mode(now) == "mono":
             cruise = min(cruise, p.mono_speed_cap_m_s)
         return PlannerParams(cruise_m_s=cruise, clearance_m=p.local_clearance_m,
-                             lookahead_m=p.lookahead_m, ttc_slow_s=max(2.5, p.ttc_engage_s))
+                             lookahead_m=p.lookahead_m, ttc_slow_s=max(2.5, p.ttc_engage_s),
+                             min_free_m=p.plan_min_free_m)
 
     def decide_local(self, goal_ne: tuple[float, float] | None, goal_alt_m: float | None,
                      now: float | None = None) -> Decision:
@@ -664,6 +780,14 @@ class AvoidanceController:
         if not self.enabled:
             return self._settle(Decision("clear", AvoidanceState.DISABLED, "avoidance off"))
         hist = pose_history.history(self.drone_id)
+        if hist.epoch != self._grid_epoch:
+            # Pose source changed (GPS <-> PX4 local): the map was built in
+            # the other frame. Start clean rather than dodge ghosts.
+            self._grid_epoch = hist.epoch
+            self.grid.clear()
+            self._reset_local()
+            if self.state in (AvoidanceState.AVOIDING, AvoidanceState.CLIMBING):
+                self.state = AvoidanceState.NOMINAL
         pose = hist.latest()
         if pose is None:
             return self._settle(Decision("clear", AvoidanceState.NOMINAL, "no pose yet"))
@@ -1038,6 +1162,10 @@ class AvoidanceController:
                 now, self.params.min_confidence),
             "sensor_mode": self.sensor_mode(now),
             "following": self.following(now),
+            "env": self.env,
+            "env_mode": int(round(self.params.env_mode)),
+            "env_reason": self.env_reason,
+            "pose_source": _pose_source(self.drone_id),
             "guarding": bool(self._guard_active and self.following(now)),
             "scans": dict(self._scans),
             "mono_calibration": self.mono_scale.status(),
@@ -1050,6 +1178,11 @@ class AvoidanceController:
                 "heading_deg": round(self.last_setpoint.chosen_deg, 0) if self.last_setpoint.chosen_deg is not None else None,
             },
         }
+
+
+def _pose_source(drone_id: str) -> str | None:
+    from app.avoidance.mapping import pose_history
+    return pose_history.history(drone_id).source
 
 
 def _pose_rate(drone_id: str) -> float:
@@ -1104,8 +1237,11 @@ _STATE_FILE = _ROOT_DIR / ".avoidance_state.json"
 def persist_state() -> None:
     try:
         _STATE_FILE.write_text(_json.dumps(
+            # While the indoor profile is applied, save the OUTDOOR values it
+            # replaced: a restart must not turn the indoor numbers into the
+            # outdoor defaults. The environment itself is re-decided live.
             {i: {"enabled": c.enabled, "armed": c.armed,
-                 "params": dict(c.params.__dict__)}
+                 "params": {**c.params.__dict__, **(c._outdoor_saved or {})}}
              for i, c in _controllers.items()}, indent=1))
     except Exception:
         pass

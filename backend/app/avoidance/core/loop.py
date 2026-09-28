@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import time
 
 from app.avoidance.core import executor
 from app.avoidance.core import controller as avoidance
@@ -47,6 +49,9 @@ def _resolve_link(drone_id: str):
                 entry = next((d for d in fleet_service.status()
                               if d.get("db_id") == drone_id), None)
                 lv = (entry or {}).get("live")
+                lpose = _local_pose(drone_id)
+                if lv and lpose is not None:        # GPS-denied: PX4 local frame
+                    return mgr, lpose, bool(lv.get("in_air")) or lpose.alt_m > 1.0, str(lv.get("mode") or "")
                 if lv and (lv["lat"] or lv["lng"]):
                     pose = Pose(lat=lv["lat"], lng=lv["lng"],
                                 heading_deg=lv.get("heading", 0.0),
@@ -64,6 +69,10 @@ def _resolve_link(drone_id: str):
             if mgr is not None and mgr.is_connected:
                 snap = mgr.snapshot          # a property, not a method
                 lat, lng = snap.position.latitude_deg, snap.position.longitude_deg
+                lpose = _local_pose(drone_id)
+                if lpose is not None:               # GPS-denied: PX4 local frame
+                    in_air = bool(snap.flight_mode.is_in_air) or lpose.alt_m > 1.0
+                    return mgr, lpose, in_air, str(snap.flight_mode.mode or "")
                 if not (lat or lng):
                     return None, None, False, ""
                 pose = Pose(lat=lat, lng=lng, heading_deg=snap.heading_deg,
@@ -310,9 +319,26 @@ def _ensure_pose_feed(c, manager) -> None:
             pass
     h = pose_history.history(c.drone_id)
 
-    def _on_pose(snap, _h=h):
+    def _on_pose(snap, _h=h, _c=c):
         pos, att = snap.position, snap.attitude
-        if pos.latitude_deg or pos.longitude_deg:
+        gps_ok = _gps_ok(snap)
+        lp = getattr(snap, "local_position", None)
+        local_ok = lp is not None and lp.valid and time.monotonic() - lp.t < 1.0
+        # PX4's local position when indoors or GPS is gone (EKF2 fed by
+        # optical flow / rangefinder / VIO); GPS as before otherwise.
+        if local_ok and (_c.env == "indoor" or not gps_ok):
+            if gps_ok:          # anchor the local frame to the globe
+                m_lng = pose_history.M_PER_DEG_LAT * max(0.2, math.cos(math.radians(pos.latitude_deg)))
+                origin = (pos.latitude_deg - lp.north_m / pose_history.M_PER_DEG_LAT,
+                          pos.longitude_deg - lp.east_m / m_lng)
+            elif snap.home_lat or snap.home_lng:
+                origin = (snap.home_lat, snap.home_lng)
+            else:
+                origin = None
+            _h.add_ne(lp.north_m, lp.east_m, -lp.down_m, snap.heading_deg,
+                      att.roll_deg, att.pitch_deg,
+                      origin_latlng=origin if _h.source != "local" else None)
+        elif gps_ok:
             _h.add(pos.latitude_deg, pos.longitude_deg, pos.relative_altitude_m,
                    snap.heading_deg, att.roll_deg, att.pitch_deg)
 
@@ -322,6 +348,26 @@ def _ensure_pose_feed(c, manager) -> None:
         _on_pose(manager._snapshot)
         if hasattr(manager, "boost_pose_rates"):
             asyncio.create_task(manager.boost_pose_rates(True))
+
+
+def _gps_ok(snap) -> bool:
+    """A usable GPS position. Links that do not stream GPS status (the fleet
+    profile) report fix_type 0 = unknown: coordinates alone decide there."""
+    pos = snap.position
+    if not (pos.latitude_deg or pos.longitude_deg):
+        return False
+    fix = getattr(getattr(snap, "gps", None), "fix_type", 0) or 0
+    return fix == 0 or fix >= 3
+
+
+def _local_pose(drone_id: str):
+    """A Pose from the history when it runs on PX4's local frame (no GPS)."""
+    from app.avoidance.mapping import pose_history
+    h = pose_history.history(drone_id)
+    s = h.latest()
+    if h.source != "local" or s is None or time.monotonic() - s.t > 2.0:
+        return None
+    return Pose(lat=s.lat, lng=s.lng, heading_deg=s.yaw_deg, alt_m=s.alt_m)
 
 
 def _release_pose_feed(drone_id: str) -> None:
@@ -389,6 +435,14 @@ async def _tick() -> None:
 async def _local_step(c, manager, pose, in_air, mode, now) -> None:
     """Redesigned path: occupancy grid -> supervisor -> Offboard local planner."""
     from app.avoidance.mapping import pose_history
+    # Indoor / outdoor: GPS health every tick, the camera's verdict arrives
+    # from sensing; the controller applies the profile once it has settled.
+    snap = getattr(manager, "_snapshot", None) if manager is not None else None
+    if snap is not None and hasattr(snap, "position"):
+        c.note_gps(_gps_ok(snap))
+    switched = c.update_env(now)
+    if switched:
+        logger.info(f"Avoidance {c.drone_id[:8]}: environment -> {switched.upper()} ({c.env_reason})")
     if pose is not None and now - _last_seed.get(c.drone_id, 0.0) > 3.0:
         try:
             await _seed_hazards_grid(c, pose, now)
