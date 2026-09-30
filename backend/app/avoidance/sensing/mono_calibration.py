@@ -100,12 +100,16 @@ class ScaleTracker:
     errors: list = field(default_factory=list)
     last: ScaleFit | None = None
 
+    last_fit_t: float = 0.0        # monotonic time of the last accepted fit
+
     def update(self, fit: ScaleFit | None) -> float | None:
         if fit is None:
             self.rejected += 1
             return self.scale
         self.fits += 1
         self.last = fit
+        import time as _t
+        self.last_fit_t = _t.monotonic()
         self.errors.append(fit.error_pct)
         if len(self.errors) > 300:
             self.errors = self.errors[-300:]

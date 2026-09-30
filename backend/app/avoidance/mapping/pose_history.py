@@ -92,10 +92,12 @@ class PoseHistory:
         self._switch("gps", None)
         key = (round(lat, 7), round(lng, 7), round(alt_m, 2), round(yaw_deg, 1),
                round(roll_deg, 1), round(pitch_deg, 1))
+        t = t if t is not None else time.monotonic()
         if key == self._last_key:
+            if self._s:
+                self._s[-1].t = t        # still receiving: a hover is not a stale pose
             return False
         self._last_key = key
-        t = t if t is not None else time.monotonic()
         n, e = self.to_ne(lat, lng)
         self._s.append(PoseSample(t, lat, lng, n, e, alt_m, yaw_deg % 360.0,
                                   roll_deg, pitch_deg))
@@ -114,10 +116,12 @@ class PoseHistory:
         self._switch("local", origin_latlng or (0.0, 0.0))
         key = ("ne", round(north_m, 3), round(east_m, 3), round(alt_m, 2), round(yaw_deg, 1),
                round(roll_deg, 1), round(pitch_deg, 1))
+        t = t if t is not None else time.monotonic()
         if key == self._last_key:
+            if self._s:
+                self._s[-1].t = t
             return False
         self._last_key = key
-        t = t if t is not None else time.monotonic()
         lat, lng = self.to_latlng(north_m, east_m)
         self._s.append(PoseSample(t, lat, lng, north_m, east_m, alt_m, yaw_deg % 360.0,
                                   roll_deg, pitch_deg))
@@ -131,6 +135,9 @@ class PoseHistory:
         # The origin is kept: grid cells already placed stay valid.
 
     # -- query ----------------------------------------------------------------
+    def sample_count(self) -> int:
+        return len(self._s)
+
     def latest(self) -> PoseSample | None:
         return self._s[-1] if self._s else None
 

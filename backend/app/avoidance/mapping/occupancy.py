@@ -51,6 +51,7 @@ class _Cell:
 @dataclass
 class OccupancyGrid:
     cell_m: float = 0.5
+    MAX_RAY_M = 60.0     # a client's free_m of 1e9 must not walk the ray forever
     cells: dict = field(default_factory=dict)       # (i, j) -> _Cell
 
     def _key(self, n: float, e: float) -> tuple[int, int]:
@@ -73,7 +74,7 @@ class OccupancyGrid:
         if c.pinned:
             return
         c.l = max(L_MIN, min(L_MAX, self._value(c, now) + dl))
-        c.t = now
+        c.t = max(c.t, now)                 # an out-of-order older scan must not rewind decay
         if top_m > 0:
             c.top_m = max(c.top_m, top_m)
         if c.l <= 0.0 and c.top_m == 0.0:
@@ -96,11 +97,16 @@ class OccupancyGrid:
             # Free along the ray up to one cell short of the hit (or the seen
             # free range), with several rays across a wide bin.
             spread = max(1, int(math.ceil(2 * b.half_width_deg / 1.5)))
+            # One update per cell per bin per scan: with `seen` inside the
+            # sub-ray loop two sub-rays stamped the SAME hit cell, so mono's
+            # "three agreeing frames" was really two (and depth got 2.8 from
+            # one frame).
+            seen = set()
             for s in range(spread):
                 a = world + math.radians(-b.half_width_deg + (s + 0.5) * 2 * b.half_width_deg / spread)
                 ca, sa = math.cos(a), math.sin(a)
-                free_to = (b.hit_m - self.cell_m) if b.hit_m is not None else b.free_m
-                seen = set()
+                free_to = min((b.hit_m - self.cell_m) if b.hit_m is not None else b.free_m,
+                              self.MAX_RAY_M)
                 d = self.cell_m
                 while d < free_to:
                     k = self._key(north_m + d * ca, east_m + d * sa)
@@ -111,6 +117,7 @@ class OccupancyGrid:
                 if b.hit_m is not None:
                     k = self._key(north_m + b.hit_m * ca, east_m + b.hit_m * sa)
                     if k not in seen:
+                        seen.add(k)             # once per bin, whatever the sub-ray
                         self._update(k, l_hit, now, b.top_m)
                         n_hit += 1
         return n_hit

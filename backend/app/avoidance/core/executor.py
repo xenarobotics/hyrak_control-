@@ -17,6 +17,7 @@ the loop can call apply() every tick.
 from __future__ import annotations
 
 import logging
+import math
 
 logger = logging.getLogger("verocore.avoidance.executor")
 
@@ -100,6 +101,16 @@ async def apply_local(manager, controller, decision, mission_index: int) -> tupl
             sp = decision.setpoint
             if sp is None:
                 return False, "no setpoint"
+            # Independent sanity clamp on every setpoint: finite, within the
+            # speed cap and a modest vertical rate, whatever the planner did.
+            cap = float(getattr(controller.params, "speed_cap_m_s", 4.0))
+            vals = (sp.vn, sp.ve, sp.vd, sp.yaw_deg)
+            if not all(math.isfinite(v) for v in vals):
+                return False, "setpoint not finite"
+            h = math.hypot(sp.vn, sp.ve)
+            if h > cap:
+                sp.vn, sp.ve = sp.vn * cap / h, sp.ve * cap / h
+            sp.vd = max(-1.5, min(1.5, sp.vd))
             # Entered once. Not re-checked against the reported mode: that comes
             # from a 1 Hz heartbeat and lags the switch, and a departure we did
             # not ask for is the pilot latch's job, not a reason to re-enter.
@@ -109,23 +120,29 @@ async def apply_local(manager, controller, decision, mission_index: int) -> tupl
                     ok = await manager.set_flight_mode("HOLD")
                     controller.intervened = bool(ok) or controller.intervened
                     return bool(ok), "offboard refused - holding"
+                # Who opened it: the loop's stand-down keys on this, so a
+                # lost decision (ours, orphaned) is told apart from a
+                # tracker's session (theirs, leave alone).
+                manager._offboard_owner = "avoidance"
             await manager.send_velocity_ned(sp.vn, sp.ve, sp.vd, sp.yaw_deg)
             controller.intervened = True
             return True, "avoid"
         if action == "hold":
             if controller.intervened and mode == "HOLD":
                 return False, "already holding"
+            # We are leaving Offboard on purpose: say so BEFORE the mode
+            # change, or the departure detector (2 s window vs a 4 s mode
+            # confirm on a radio link) latches a phantom "pilot has control".
+            manager.release_offboard_state()
             ok = await manager.set_flight_mode("HOLD")
             if ok:
-                manager.release_offboard_state()
                 controller.intervened = True
             return bool(ok), "hold"
         if action == "return":
             if mode.upper() in ("RETURN", "RETURN_TO_LAUNCH", "RTL"):
                 return False, "already returning"
+            manager.release_offboard_state()
             ok = await manager.set_flight_mode("RETURN")
-            if ok:
-                manager.release_offboard_state()
             return bool(ok), "return"
         if action == "resume":
             ok = await manager.resume_mission_from_offboard(mission_index)

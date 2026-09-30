@@ -16,6 +16,9 @@ from app.avoidance.planning.geometry import Pose
 from app.avoidance.sensing.observations import ObstacleObservation
 
 settings = get_settings()
+import logging
+logger = logging.getLogger("verocore.avoidance.routes")
+_stale_logged = -1e9
 router = APIRouter(prefix="/api/avoidance", tags=["avoidance"])
 
 
@@ -31,6 +34,9 @@ async def all_status():
 
 @router.get("/{drone_id}/status")
 async def drone_status(drone_id: str):
+    # Non-creating: a stale id from the UI must not spawn a phantom controller.
+    if not avoidance.has_controller(drone_id):
+        raise HTTPException(status_code=404, detail="no avoidance controller for this drone")
     return avoidance.controller(drone_id).status()
 
 
@@ -131,9 +137,23 @@ async def depth_scan(drone_id: str, body: dict,
         max_r = float(body.get("max_range_m", 20.0))
         hfov, vfov = float(body["hfov_deg"]), float(body["vfov_deg"])
         wall = float(body.get("captured_wall") or _time.time())
+        # Bounds: a sender's 1e9 range or NaN FOV must not walk rays forever
+        # or 500 the event loop.
+        if not (1 <= rows * cols <= 65536) or not (0.5 < max_r <= 60.0) \
+                or not (5.0 < hfov < 175.0) or not (5.0 < vfov < 175.0):
+            raise ValueError("rows*cols <= 65536, max_range_m in (0.5, 60], fov in (5, 175)")
     except (KeyError, TypeError, ValueError) as e:
         raise HTTPException(status_code=400, detail=f"bad depth_scan body: {e}")
-    captured_at = _time.monotonic() - max(0.0, _time.time() - wall)
+    age = _time.time() - wall
+    if age > 1.5:
+        # Placed with a pose that old the scan lands metres behind the truth
+        # (a sender clock 2 s behind = 8 m at 4 m/s).
+        global _stale_logged
+        if _time.monotonic() - _stale_logged > 60.0:
+            _stale_logged = _time.monotonic()
+            logger.warning(f"depth_scan for {c.drone_id[:8]} is {age:.1f} s old (sender clock?) - dropped")
+        return {"ok": False, "reason": f"stale ({age:.1f} s)"}
+    captured_at = _time.monotonic() - max(0.0, age)
     pose = pose_history.history(c.drone_id).at(captured_at)
     if pose is None:
         return {"ok": False, "reason": "no pose history yet (is the aircraft linked?)"}

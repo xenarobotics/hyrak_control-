@@ -49,6 +49,7 @@ class BatteryData:
 @dataclass
 class GPSData:
     fix_type: int = 0
+    seen: bool = False          # a GPS message has arrived (fix 0 then = NO_GPS, not unknown)
     satellites_visible: int = 0
     hdop: float = 0.0
 

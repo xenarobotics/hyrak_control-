@@ -34,6 +34,7 @@ import numpy as np
 logger = logging.getLogger("verocore.avoidance.sensing")
 
 SENSE_HZ = 5.0            # 4 m/s -> a frame every 0.8 m; the model does 33 ms
+FIT_MAX_AGE_S = 2.0       # a frame with no ground fit may borrow a scale this old
 POOL_ROWS, POOL_COLS = 60, 80
 
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="avoid-sense")
@@ -125,6 +126,11 @@ def analyze_depth(depth: np.ndarray, frame_w: int, frame_h: int, ctx: dict | Non
     scale = ctx.get("scale")
     if scale is None and fit is not None and ctx.get("scale_seed"):
         scale = float(ctx["scale_seed"])
+    if fit is None and scale is not None and ctx.get("fit_age_s", 0.0) > FIT_MAX_AGE_S:
+        # No ground fit in this frame and the tracker's scale is old: the
+        # benchmark shows a model's scale wanders between scenes, so a stale
+        # scale on a wall-filling frame makes phantoms. No obstacles.
+        return {"fit": None, "scan": None}
     if fit is not None:
         scale = fit.scale if scale is None else 0.7 * scale + 0.3 * fit.scale
     if scale is None:
@@ -194,6 +200,7 @@ def environment_stats(depth: np.ndarray, sky: np.ndarray | None) -> tuple[float 
 
 
 _scale_cache: dict[str, tuple[float, float | None]] = {}
+_fail_logged_t = -1e9
 
 
 def _stored_scale(key: str) -> float | None:
@@ -220,9 +227,19 @@ def submit(session_id: str, img_bgr: np.ndarray) -> None:
     if c is not None:
         pose = pose_history.history(c.drone_id).at(captured_at)
         if pose is not None:
-            ctx = {"alt_m": pose.alt_m, "roll_deg": pose.roll_deg, "pitch_deg": pose.pitch_deg,
+            # Camera height above the GROUND, not above home: over terrain
+            # the ground fit and the ground rejection both need the real AGL.
+            # The downward rangefinder gives it when fresh and sane.
+            alt = pose.alt_m
+            rf = getattr(getattr(av_loop._resolve_link(c.drone_id)[0], "_snapshot", None), "rangefinder_m", None) \
+                if not c.params.mono_bench else None
+            if rf is not None and 0.3 <= rf <= 40.0 and abs(rf - pose.alt_m) / max(pose.alt_m, 1.0) > 0.15:
+                alt = float(rf)
+            import time as _t
+            ctx = {"alt_m": alt, "roll_deg": pose.roll_deg, "pitch_deg": pose.pitch_deg,
                    "cam_pitch_deg": float(c.params.camera_pitch_deg),
                    "scale": c.mono_scale.scale,
+                   "fit_age_s": (_t.monotonic() - c.mono_scale.last_fit_t) if c.mono_scale.last_fit_t else 1e9,
                    "bench": bool(c.params.mono_bench),
                    "bench_h": float(c.params.bench_cam_height_m)}
         from app.avoidance.sensing import person_ruler
@@ -237,7 +254,12 @@ def submit(session_id: str, img_bgr: np.ndarray) -> None:
         try:
             res = f.result()
         except Exception as e:
-            logger.debug(f"obstacle sensing frame failed: {e}")
+            # Rate-limited WARNING: a persistent model/CUDA failure used to
+            # be invisible except as "no_data".
+            global _fail_logged_t
+            if time.monotonic() - _fail_logged_t > 30.0:
+                _fail_logged_t = time.monotonic()
+                logger.warning(f"obstacle sensing frame failed: {e!r}")
             return
         if session_id not in _announced:
             _announced.add(session_id)

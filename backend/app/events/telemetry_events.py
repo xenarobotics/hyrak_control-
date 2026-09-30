@@ -8,6 +8,7 @@ from app.telemetry.rc_monitor import RcChannelMonitor
 from app.telemetry.schemas import DroneCommand
 from app.sessions.models import AnalysisMode
 
+INDOOR_TAKEOFF_MAX_M = 2.0
 logger = logging.getLogger("verocore.events.telemetry")
 
 
@@ -555,8 +556,10 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                     from app.avoidance.core import controller as _av
                     did = (session.drone or {}).get("id") if isinstance(session.drone, dict) else None
                     snap = tel.snapshot
-                    gps_denied = (not (snap.position.latitude_deg or snap.position.longitude_deg)) or \
-                        bool(did and _av.has_controller(did) and _av.controller(did).env == "indoor")
+                    from app.avoidance.core import loop as _avl
+                    ctl = _av.controller(did) if (did and _av.has_controller(did)) else None
+                    gps_denied = (not _avl._gps_ok(snap)) or \
+                        bool(ctl and (ctl.env == "indoor" or int(round(ctl.params.env_mode)) == 2))
                 except Exception:
                     pass
                 block, warn = _fs.evaluate(
@@ -634,6 +637,20 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 logger.debug(f"avoidance interlock check failed: {e}")
 
         logger.info(f"Action: {action} | session {session.session_id[:8]}")
+        if action == "takeoff" and data.get("altitude") is not None:
+            # Indoors a 10 m default takeoff meets the ceiling: cap at the
+            # indoor takeoff height (the UI defaults to 1.5 m; this is the net).
+            try:
+                from app.avoidance.core import controller as _avc
+                did = (session.drone or {}).get("id") if isinstance(session.drone, dict) else None
+                if did and _avc.has_controller(did) and _avc.controller(did).env == "indoor" \
+                        and float(data["altitude"]) > INDOOR_TAKEOFF_MAX_M:
+                    logger.warning(f"takeoff {float(data['altitude']):g} m capped to {INDOOR_TAKEOFF_MAX_M} m (indoor)")
+                    data = {**data, "altitude": INDOOR_TAKEOFF_MAX_M}
+                    await sio.emit("fc_message", {"severity": "WARNING", "rank": 4, "ts": time.time(),
+                                                  "text": f"Indoor: takeoff capped to {INDOOR_TAKEOFF_MAX_M:g} m"}, to=sid)
+            except Exception:
+                pass
         result = await execute_drone_action(tel, action, data)
         await sio.emit("action_result", result, to=sid)
 

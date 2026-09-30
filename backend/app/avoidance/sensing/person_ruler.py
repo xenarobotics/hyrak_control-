@@ -43,6 +43,7 @@ STORE = Path(str(ROOT_DIR)) / ".data" / "depth_scale.json"
 SAMPLES = 10
 TIMEOUT_S = 15.0
 MAX_SPREAD = 0.12
+SCALE_MIN, SCALE_MAX = 0.2, 5.0     # outside this the frame is wrong, not the model
 
 _lock = threading.Lock()
 _runs: dict[str, dict] = {}          # drone_id -> run state
@@ -154,7 +155,12 @@ def scale_from_box(boxes: list, depth: np.ndarray, w: int, h: int, hfov_deg: flo
     if patch.size < 4:
         return None, "person too small in the depth map"
     d_model = float(np.median(patch))
-    return d_ruler / d_model, f"{d_ruler:.1f} m by ruler, model reads {d_model:.1f} m"
+    if d_model < 0.5:
+        return None, f"model reads {d_model:.2f} m for the person - not a usable frame"
+    scale = d_ruler / d_model
+    if not (SCALE_MIN <= scale <= SCALE_MAX):
+        return None, f"scale x{scale:.1f} is not plausible (model reads {d_model:.1f} m, ruler {d_ruler:.1f} m)"
+    return scale, f"{d_ruler:.1f} m by ruler, model reads {d_model:.1f} m"
 
 
 def add_sample(drone_id: str, scale: float | None, why: str, key: str) -> None:

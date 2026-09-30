@@ -237,7 +237,11 @@ def test_calibration_overrides_reach_geometry(tmp_path, monkeypatch):
     )
     calibration.reset()
     try:
-        assert camera_from_settings(1920, 1080).hfov_deg == 70.0   # default
+        # The .env default on THIS machine, whatever it is (a dev laptop sets
+        # CAMERA_HFOV_DEG for its sim camera) - the test is that a saved
+        # calibration overrides it, not what the default happens to be.
+        from app.config import get_settings
+        assert camera_from_settings(1920, 1080).hfov_deg == get_settings().camera_hfov_deg
 
         calibration.save({"camera_hfov_deg": 48.0, "camera_mount_tilt_deg": 33.0})
         # No restart, no new session — the next frame uses the new lens.
@@ -278,7 +282,8 @@ def test_corrupt_calibration_file_falls_back_to_defaults(tmp_path, monkeypatch):
     path.write_text("{ this is not json")
     monkeypatch.setattr(calibration, "CALIBRATION_PATH", str(path))
     calibration._cache = None
-    assert calibration.effective()["camera_hfov_deg"] == 70.0
+    from app.config import get_settings
+    assert calibration.effective()["camera_hfov_deg"] == get_settings().camera_hfov_deg
 
 
 def test_schema_serves_ranges_for_the_ui(tmp_path, monkeypatch):

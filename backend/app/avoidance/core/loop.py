@@ -52,6 +52,11 @@ def _resolve_link(drone_id: str):
                 lpose = _local_pose(drone_id)
                 if lv and lpose is not None:        # GPS-denied: PX4 local frame
                     return mgr, lpose, bool(lv.get("in_air")) or lpose.alt_m > 1.0, str(lv.get("mode") or "")
+                if not lv or not (lv["lat"] or lv["lng"]):
+                    # Linked, no position yet (no GPS and the local feed not
+                    # registered yet): the caller registers the pose feed
+                    # from this manager - the indoor bootstrap.
+                    return mgr, None, False, str((lv or {}).get("mode") or "")
                 if lv and (lv["lat"] or lv["lng"]):
                     pose = Pose(lat=lv["lat"], lng=lv["lng"],
                                 heading_deg=lv.get("heading", 0.0),
@@ -74,7 +79,7 @@ def _resolve_link(drone_id: str):
                     in_air = bool(snap.flight_mode.is_in_air) or lpose.alt_m > 1.0
                     return mgr, lpose, in_air, str(snap.flight_mode.mode or "")
                 if not (lat or lng):
-                    return None, None, False, ""
+                    return mgr, None, False, str(snap.flight_mode.mode or "")
                 pose = Pose(lat=lat, lng=lng, heading_deg=snap.heading_deg,
                             alt_m=snap.position.relative_altitude_m)
                 in_air = (bool(snap.flight_mode.is_in_air)
@@ -90,6 +95,9 @@ def _resolve_link(drone_id: str):
 # "off-path", and rerouted it straight back to that waypoint - upload +
 # start, over and over, so it never landed. No goal => no reroute.
 _NO_GOAL_MODES = {"RETURN_TO_LAUNCH", "RTL", "LAND", "LANDING"}
+# Hand-flown modes: the pilot has the aircraft, avoidance only watches.
+_PILOT_MODES = {"POSCTL", "POSITION", "ALTCTL", "ALTITUDE", "STABILIZED", "MANUAL", "ACRO",
+                "RATTITUDE", "STAB"}
 
 
 _fc_mission: dict[str, tuple[list[dict], float]] = {}   # drone -> (items, when)
@@ -321,12 +329,33 @@ def _ensure_pose_feed(c, manager) -> None:
 
     def _on_pose(snap, _h=h, _c=c):
         pos, att = snap.position, snap.attitude
+        if not all(math.isfinite(v) for v in (pos.latitude_deg, pos.longitude_deg,
+                                              pos.relative_altitude_m, snap.heading_deg)):
+            return                      # a NaN pose would poison every decision
         gps_ok = _gps_ok(snap)
         lp = getattr(snap, "local_position", None)
-        local_ok = lp is not None and lp.valid and time.monotonic() - lp.t < 1.0
+        now = time.monotonic()
+        local_ok = lp is not None and lp.valid and now - lp.t < 1.0
         # PX4's local position when indoors or GPS is gone (EKF2 fed by
         # optical flow / rangefinder / VIO); GPS as before otherwise.
-        if local_ok and (_c.env == "indoor" or not gps_ok):
+        # HYSTERESIS: every source switch starts a new frame (map wiped), so a
+        # GPS fix flickering 2 <-> 3 under trees must not flip it each second:
+        # to local only after GPS has been bad SOURCE_SWITCH_S, back to GPS
+        # only after it has been good 5 s, and never while avoidance is mid
+        # manoeuvre (it would lose the map it is dodging with).
+        want_local = local_ok and (_c.env == "indoor" or not gps_ok)
+        cur = _h.source
+        if cur is not None and (want_local != (cur == "local")):
+            since = _src_change.setdefault(_c.drone_id, now)
+            dwell = SOURCE_SWITCH_S if want_local else 5.0
+            if now - since < dwell or _c.intervened or \
+                    _c.state != avoidance.AvoidanceState.NOMINAL:
+                want_local = (cur == "local")           # keep the current source
+                if not (local_ok if want_local else gps_ok):
+                    return                              # current source has no data: wait
+        else:
+            _src_change.pop(_c.drone_id, None)
+        if want_local:
             if gps_ok:          # anchor the local frame to the globe
                 m_lng = pose_history.M_PER_DEG_LAT * max(0.2, math.cos(math.radians(pos.latitude_deg)))
                 origin = (pos.latitude_deg - lp.north_m / pose_history.M_PER_DEG_LAT,
@@ -350,13 +379,20 @@ def _ensure_pose_feed(c, manager) -> None:
             asyncio.create_task(manager.boost_pose_rates(True))
 
 
+SOURCE_SWITCH_S = 2.0
+_src_change: dict[str, float] = {}
+
+
 def _gps_ok(snap) -> bool:
     """A usable GPS position. Links that do not stream GPS status (the fleet
     profile) report fix_type 0 = unknown: coordinates alone decide there."""
     pos = snap.position
     if not (pos.latitude_deg or pos.longitude_deg):
         return False
-    fix = getattr(getattr(snap, "gps", None), "fix_type", 0) or 0
+    gps = getattr(snap, "gps", None)
+    fix = getattr(gps, "fix_type", 0) or 0
+    if fix == 0 and getattr(gps, "seen", False):
+        return False                    # MAVSDK FixType.NO_GPS, reported as such
     return fix == 0 or fix >= 3
 
 
@@ -405,9 +441,62 @@ async def _tick() -> None:
     for c in list(avoidance._controllers.values()):
         if not c.enabled:
             continue
-        manager, pose, in_air, mode = _resolve_link(c.drone_id)
-        if manager is not None:
-            _ensure_pose_feed(c, manager)
+        try:
+            await _tick_one(c, now)
+        except Exception as e:
+            # One drone's failure must not starve the others, and must be
+            # visible: the aircraft may be in Offboard on our setpoints.
+            c._last_reason = f"loop error: {e}"
+            if now - _err_logged.get(c.drone_id, -1e9) > 60.0:
+                _err_logged[c.drone_id] = now
+                logger.warning(f"Avoidance {c.drone_id[:8]}: tick failed ({e!r})", exc_info=True)
+            if c.intervened:
+                try:
+                    mgr, _, _, _ = _resolve_link(c.drone_id)
+                    if mgr is not None:
+                        await executor.apply_local(
+                            mgr, c, avoidance.Decision("hold", avoidance.AvoidanceState.HOLDING,
+                                                       "loop error - holding"), -1)
+                        c.state = avoidance.AvoidanceState.HOLDING
+                except Exception:
+                    pass
+
+
+_err_logged: dict[str, float] = {}
+_stale_hold: set[str] = set()
+
+
+async def _tick_one(c, now: float) -> None:
+    manager, pose, in_air, mode = _resolve_link(c.drone_id)
+    if manager is not None:
+        _ensure_pose_feed(c, manager)
+        # Environment (indoor / outdoor) is decided on the ground as well:
+        # the first metres of an indoor flight must already use the indoor
+        # profile, and the pre-arm failsafe advice reads env.
+        snap = getattr(manager, "_snapshot", None)
+        if snap is not None and hasattr(snap, "position"):
+            c.note_gps(_gps_ok(snap))
+        switched = c.update_env(now)
+        if switched:
+            logger.info(f"Avoidance {c.drone_id[:8]}: environment -> {switched.upper()} ({c.env_reason})")
+    if manager is None:
+        # Link gone (or flapping): keep the flight state - LINK LOST handling
+        # and PX4's failsafe own this moment, not a "landed" reset.
+        return
+    if pose is None:
+        # Linked but no usable pose (feed not registered yet, or stale):
+        # nothing to decide on. If we are mid manoeuvre, park the aircraft
+        # in PX4's own Hold once rather than leave it on watchdog zeros.
+        if c.intervened and c.drone_id not in _stale_hold:
+            _stale_hold.add(c.drone_id)
+            logger.warning(f"Avoidance {c.drone_id[:8]}: pose lost while steering - holding")
+            await executor.apply_local(
+                manager, c, avoidance.Decision("hold", avoidance.AvoidanceState.HOLDING,
+                                               "pose lost - holding"), -1)
+            c.state = avoidance.AvoidanceState.HOLDING
+        return
+    _stale_hold.discard(c.drone_id)
+    if True:
         # On the ground: wipe the previous flight's map, hold timer and detour
         # (once per landing), and never command anything.
         if not in_air:
@@ -422,27 +511,19 @@ async def _tick() -> None:
             # carry a stale state into the next takeoff.
             if c.state != avoidance.AvoidanceState.NOMINAL and c.enabled:
                 c.reset_flight_state()
-            continue
+            return
         _airborne[c.drone_id] = True
         if not c.params.local_planner:
             if now - _last_legacy_t.get(c.drone_id, 0.0) >= INTERVAL_S:
                 _last_legacy_t[c.drone_id] = now
                 await _legacy_step(c, manager, pose, in_air, mode, now)
-            continue
+            return
         await _local_step(c, manager, pose, in_air, mode, now)
 
 
 async def _local_step(c, manager, pose, in_air, mode, now) -> None:
     """Redesigned path: occupancy grid -> supervisor -> Offboard local planner."""
     from app.avoidance.mapping import pose_history
-    # Indoor / outdoor: GPS health every tick, the camera's verdict arrives
-    # from sensing; the controller applies the profile once it has settled.
-    snap = getattr(manager, "_snapshot", None) if manager is not None else None
-    if snap is not None and hasattr(snap, "position"):
-        c.note_gps(_gps_ok(snap))
-    switched = c.update_env(now)
-    if switched:
-        logger.info(f"Avoidance {c.drone_id[:8]}: environment -> {switched.upper()} ({c.env_reason})")
     if pose is not None and now - _last_seed.get(c.drone_id, 0.0) > 3.0:
         try:
             await _seed_hazards_grid(c, pose, now)
@@ -452,7 +533,13 @@ async def _local_step(c, manager, pose, in_air, mode, now) -> None:
     # tracker's command path) is avoidance's only say. The mission supervisor
     # stands down entirely - it used to HOLD the aircraft (ending the follow)
     # or steer toward a MISSION waypoint and then resume the mission.
-    if c.following(now):
+    m = mode.upper()
+    offboard_active = bool(getattr(manager, "_offboard_active", False))
+    ours = getattr(manager, "_offboard_owner", None) == "avoidance"
+    # Someone else's Offboard session (a tracker whose frames stalled for a
+    # second, the AI tab): still theirs. Keying only on command recency let a
+    # 1 s video stall hand a live follow to the mission supervisor.
+    if c.following(now) or (offboard_active and not c.intervened and not ours):
         if c.intervened or c.state != avoidance.AvoidanceState.NOMINAL:
             c._reset_local()
             c.intervened = False
@@ -461,8 +548,42 @@ async def _local_step(c, manager, pose, in_air, mode, now) -> None:
             c._last_reason = "follow guard - path clear" if c.armed else "follow - detecting only (Steer off)"
         _prev_action[c.drone_id] = "clear"
         return
+    # A stick mode is a human flying. Avoidance never takes Offboard from a
+    # pilot, never HOLDs them near a wall, never RTLs them: detect and report
+    # only. (The pilot latch covers only departures FROM our Offboard.)
+    if m in _PILOT_MODES:
+        if c.intervened or c.state != avoidance.AvoidanceState.NOMINAL:
+            c._reset_local()
+            c.intervened = False
+            c.state = avoidance.AvoidanceState.NOMINAL
+        c._last_reason = f"pilot flying ({m}) - detecting only"
+        _prev_action[c.drone_id] = "clear"
+        return
+    # The aircraft left our Offboard for RTL / LAND (operator, or PX4 failsafe)
+    # while we were steering: that decision stands. Holding it "for the lost
+    # route" cancelled an operator's RTL.
+    if c.intervened and m in _NO_GOAL_MODES:
+        c._reset_local()
+        c.intervened = False
+        c.state = avoidance.AvoidanceState.NOMINAL
+        c._last_reason = f"aircraft went to {m} - standing down"
+        if hasattr(manager, "release_offboard_state"):
+            manager.release_offboard_state()
+        _prev_action[c.drone_id] = "clear"
+        return
 
-    pursuing = in_air and mode.upper() not in _NO_GOAL_MODES
+    # Steering and hand-back only from a MISSION (or our own Offboard
+    # excursion out of one): never toward a stored mission from any other mode.
+    pursuing = in_air and (m.startswith("MISSION") or m.startswith("AUTO") or m == ""
+                           or (m == "OFFBOARD" and (c.intervened or ours)))
+    # Parked after repeated hand-back failures: something is wrong with the
+    # mission side; do not re-take the aircraft for a while, say so.
+    if now < getattr(c, "_no_resume_until", 0.0):
+        if c.state != avoidance.AvoidanceState.HOLDING:
+            c.state = avoidance.AvoidanceState.HOLDING
+        c._last_reason = "hand-back keeps failing - parked in HOLD (check the mission)"
+        _prev_action[c.drone_id] = "hold"
+        return
     # A HOLD the operator commanded is a hold: no route to steer toward, and
     # never a hand-back that restarts the mission (only the keep-clear reflex
     # may move the aircraft). HOLDs avoidance itself entered keep the route so
@@ -517,15 +638,60 @@ async def _local_step(c, manager, pose, in_air, mode, now) -> None:
         first = decision.action != _prev_action.get(c.drone_id)
         probe = latency_probe.AvoidanceProbe(
             manager, decision.action, getattr(c, "_last_frame_t", None), now) if first else None
-        resume_idx = _current_index(c.drone_id)
-        if decision.action == "resume" and getattr(decision, "advance", False):
-            n_items = len(_mission_items(c.drone_id, manager) or [])
-            if 0 <= resume_idx < n_items - 1:
-                resume_idx += 1          # this waypoint is reached; PX4 would chase it into the pillar
+        resume_idx = _resume_index(c, manager, decision)
         did, note = await executor.apply_local(manager, c, decision, resume_idx)
         if probe is not None:
             probe.done(did, note)
+        c._last_cmd = (decision.action, bool(did), note, now)
         _prev_action[c.drone_id] = decision.action
+        if decision.action == "resume" and not did:
+            # The supervisor settled NOMINAL before the aircraft agreed. A
+            # hand-back that failed leaves the aircraft in Offboard on the
+            # watchdog's zeros: keep the obligation and try again next tick;
+            # after three failures park it in PX4's own Hold.
+            n = _resume_fails.get(c.drone_id, 0) + 1
+            _resume_fails[c.drone_id] = n
+            if n >= 3:
+                await executor.apply_local(
+                    manager, c, avoidance.Decision("hold", avoidance.AvoidanceState.HOLDING,
+                                                   f"hand-back failed {n}x ({note}) - holding"), -1)
+                c.state = avoidance.AvoidanceState.HOLDING
+                c._hold_since = now
+                c._no_resume_until = now + 30.0
+                _resume_fails.pop(c.drone_id, None)
+            else:
+                c.state = avoidance.AvoidanceState.AVOIDING
+                c.intervened = True
+                c._last_reason = f"hand-back failed ({note}) - retrying"
+        elif decision.action == "resume":
+            _resume_fails.pop(c.drone_id, None)
+        elif decision.action == "avoid" and not did and "refused" in (note or ""):
+            # Offboard refused (pilot latch, PX4): do not hammer it at 10 Hz.
+            c.state = avoidance.AvoidanceState.HOLDING
+            c._hold_since = now
+            c._last_reason = f"offboard refused - holding"
+    elif decision.action == "resume":
+        # Could not act this tick (below the floor, no pose): the hand-back
+        # must not be lost, or the aircraft stays in Offboard for good.
+        c.state = avoidance.AvoidanceState.AVOIDING
+        c.intervened = True
+        c._last_reason = "hand-back deferred - cannot act right now"
+    # Belief vs aircraft: NOMINAL and not intervened, yet our Offboard is
+    # still open (a lost decision, a reset): hand back or hold, do not sit.
+    if c.state == avoidance.AvoidanceState.NOMINAL and not c.intervened and offboard_active \
+            and not c.following(now) and c.armed and manager is not None:
+        if now - _orphan_since.setdefault(c.drone_id, now) > 1.0:
+            _orphan_since.pop(c.drone_id, None)
+            logger.warning(f"Avoidance {c.drone_id[:8]}: Offboard open with nothing steering - handing back")
+            ok = await manager.resume_mission_from_offboard(_current_index(c.drone_id)) \
+                if pursuing else False
+            if not ok:
+                await executor.apply_local(
+                    manager, c, avoidance.Decision("hold", avoidance.AvoidanceState.HOLDING,
+                                                   "offboard orphaned - holding"), -1)
+                c.state = avoidance.AvoidanceState.HOLDING
+    else:
+        _orphan_since.pop(c.drone_id, None)
 
     # Speed governor while PX4 flies the mission (not while we steer).
     if c.armed and in_air and pursuing and manager is not None and \
@@ -533,6 +699,8 @@ async def _local_step(c, manager, pose, in_air, mode, now) -> None:
         spd = float(c.params.speed_cap_m_s)
         if c.sensor_mode(now) == "mono":
             spd = min(spd, float(c.params.mono_speed_cap_m_s))
+        if c.sensor_stale(now):
+            spd = min(spd, float(c.params.min_speed_m_s))     # blind: crawl
         last = _last_speed.get(c.drone_id)
         if (last is None or abs(spd - last) > 0.3) and now - _last_speed_t.get(c.drone_id, 0.0) > 1.0:
             if await manager.set_speed(spd):
@@ -563,7 +731,11 @@ def pick_goal_by_motion(candidates: list[tuple[int, tuple[float, float]]], prefe
     speed = math.hypot(*vel_ne)
     by_idx = dict(candidates)
     if speed < 1.0:
-        return by_idx.get(preferred) or candidates[0][1]
+        if preferred in by_idx:
+            return by_idx[preferred]
+        # Unknown item and hovering: the nearest waypoint, not the first one
+        # (waypoint 0 was 60 m behind - the threat cone pointed backwards).
+        return min(candidates, key=lambda c: math.hypot(*(lambda n, e, q: (n - q[0], e - q[1]))(*to_ne(*c[1]), pos_ne)))[1]
     vb = math.degrees(math.atan2(vel_ne[1], vel_ne[0])) % 360.0
 
     def off(ll):
@@ -585,6 +757,26 @@ def pick_goal_by_motion(candidates: list[tuple[int, tuple[float, float]]], prefe
         return min(ahead, key=lambda c: dist(c[1]))[1]
     best = min(candidates, key=lambda c: off(c[1]))
     return best[1] if off(best[1]) <= 60.0 else by_idx.get(preferred) or best[1]
+
+
+_resume_fails: dict[str, int] = {}
+_orphan_since: dict[str, float] = {}
+
+
+def _resume_index(c, manager, decision) -> int:
+    """Mission item to resume at. The reported index when the link knows it,
+    else the LATCHED goal's own list index (the fleet link never learns the
+    current item for a mission another link uploaded: -1). A reached waypoint
+    advances to the next one, or PX4 heads straight back to touch it."""
+    idx = _current_index(c.drone_id)
+    latched = getattr(c, "_latched_idx", None)
+    if idx < 0 and latched is not None:
+        idx = latched
+    if getattr(decision, "advance", False):
+        n_items = len(_mission_items(c.drone_id, manager) or [])
+        if 0 <= idx < n_items - 1:
+            idx += 1
+    return idx
 
 
 def _goal_from_motion(c, manager, hist) -> tuple[float, float] | None:
@@ -611,6 +803,7 @@ def _goal_from_motion(c, manager, hist) -> tuple[float, float] | None:
         # Nothing indexable: fall back to the old rule (session/aircraft/fleet goal).
         g, _ = _goal_and_remaining(c.drone_id, manager)
         c._latched_goal = g
+        c._latched_idx = None
         return g
     p = hist.latest()
     if p is None or hist.origin is None:
@@ -618,6 +811,7 @@ def _goal_from_motion(c, manager, hist) -> tuple[float, float] | None:
     else:
         g = pick_goal_by_motion(cands, idx, (p.north_m, p.east_m), hist.velocity_ne(), hist.to_ne)
     c._latched_goal = g
+    c._latched_idx = next((k for k, ll in cands if ll == g), None)
     return g
 
 
@@ -629,15 +823,17 @@ async def _seed_hazards_grid(c, pose, now: float) -> None:
     from app.avoidance.mapping import pose_history
     _last_seed[c.drone_id] = now
     h = pose_history.history(c.drone_id)
-    if h.origin is None:
-        return
+    if h.origin is None or (h.source == "local" and h.origin == (0.0, 0.0)):
+        return                      # unanchored local frame: lat/lng mean nothing
     for hz in await hazard_db.load_near(pose.lat, pose.lng, 250.0):
         n, e = h.to_ne(hz["lat"], hz["lng"])
         c.grid.pin_disc(n, e, float(hz["radius_m"]), float(hz.get("top_m", 0.0) or 0.0), now)
     if c.params.learn_hazards and now - _last_persist.get(c.drone_id, 0.0) > 10.0:
         _last_persist[c.drone_id] = now
         for o in c.local_obstacles(now):
-            if o["is_static"]:
+            # A learned hazard is permanent (pinned) for every future flight:
+            # only solid clusters, never a 3-cell mono phantom.
+            if o["is_static"] and o["hits"] >= 8:
                 await hazard_db.save(o["lat"], o["lng"], o["radius_m"], top_m=o["top_m"],
                                      confidence=0.9, source="avoidance")
 
@@ -718,6 +914,8 @@ def _controller_for_session(session_id: str):
     c = avoidance.controller(did) if (did and avoidance.has_controller(did)) else None
     if c is not None and c.enabled:
         return c
+    if did:
+        return None                 # bound to a drone without avoidance: not another drone's map
     return _sole_enabled_controller()
 
 

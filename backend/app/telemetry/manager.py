@@ -614,6 +614,8 @@ class TelemetryManager:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
+        self._local_tasks = []              # re-subscribed by the next boost_pose_rates
+        self._pose_rates_boosted = False
         # Kill OUR OWN mavsdk_server, matched by its unique gRPC port - NOT by
         # the shared UDP endpoint. During a page reload the old session's
         # destroy runs concurrently with the new session's scan on the SAME
@@ -747,6 +749,7 @@ class TelemetryManager:
                 self._snapshot.gps = GPSData(
                     fix_type=gps.fix_type.value,
                     satellites_visible=gps.num_satellites,
+                    seen=True,
                 )
                 self._emit()
         except asyncio.CancelledError:
@@ -2350,6 +2353,7 @@ class TelemetryManager:
         """Forget our Offboard session after leaving it by a mode change of our
         own (HOLD, MISSION, RTL) rather than stop_offboard()."""
         self._offboard_active = False
+        self._offboard_owner = None
         self._snapshot.offboard_active = False
         self._offboard_hold_alt = None
         self._last_velocity_cmd_t = 0.0
@@ -2384,14 +2388,20 @@ class TelemetryManager:
                     and item_index != self._snapshot.mission_current_index:
                 await asyncio.wait_for(
                     self._drone.mission.set_current_mission_item(int(item_index)), timeout=3.0)
+            await self._drone.mission.start_mission()
+            # Streaming setpoints only gates ENTERING Offboard, never leaving
+            # it: keep the last command flowing until MISSION is confirmed.
+            # Releasing first left a refused MISSION_START with no setpoints
+            # at all -> PX4's offboard-loss failsafe decided the outcome.
+            ok = await self._wait_for_mission_mode(timeout=2.0)
             if keep is not None:
                 keep.cancel()
                 keep = None
-            self.release_offboard_state()
-            await self._drone.mission.start_mission()
-            ok = await self._wait_for_mission_mode(timeout=2.0)
             if ok:
+                self.release_offboard_state()
                 logger.info(f"Avoidance: mission resumed at item {item_index}")
+            else:
+                logger.warning("Resume mission: MISSION not confirmed - Offboard kept open (watchdog holds)")
             return bool(ok)
         except Exception as e:
             logger.error(f"Resume mission failed: {e}")

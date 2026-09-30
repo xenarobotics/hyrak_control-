@@ -111,6 +111,10 @@ class AvoidanceParams:
     env_mode: float = 0.0
     # Moving where the forward camera is not looking: at most this fast.
     guard_unseen_speed_m_s: float = 2.0
+    # Space the camera never looked at counts as free only this far: the
+    # guard must not slide at speed into a second obstacle it cannot see.
+    guard_unseen_free_m: float = 3.0
+    guard_hold_notice_s: float = 5.0      # guard holding this long -> event + warning
     climb_after_blocked_s: float = 3.0   # brake and look sideways first; same moment HOLD would come
     ceiling_margin_m: float = 1.0        # stay this far under a restricted layer overhead
     climb_margin_m: float = 2.0
@@ -151,6 +155,7 @@ INDOOR_PROFILE: dict[str, float] = {
     "keep_clear_m": 1.0,
     "keep_clear_release_m": 1.8,
     "keep_clear_speed_m_s": 0.4,
+    "allow_return": 0.0,           # RTL needs a global position and climbs into the ceiling
     "guard_unseen_speed_m_s": 0.8,
     "climb_over": 0.0,
     "range_min_alt_m": 0.4,
@@ -225,6 +230,11 @@ class AvoidanceController:
         self._gps_ok: bool | None = None
         self._vision_env: tuple[float, str] | None = None     # (t, 'indoor'|'outdoor'|'unsure')
         self._grid_epoch = 0
+        self._frame_changed_at: float | None = None   # pose frame switched: no resume until fresh scans
+        self._guard_hold_since: float | None = None
+        self._guard_hold_noticed = False
+        self._last_speed_m_s = 0.0
+        self._last_cmd: tuple | None = None
         self._follow_cmd_t = 0.0          # last tracker command through the guard
         self._guard_active = False        # the guard is bending/holding the command
         self._guard_t = 0.0
@@ -264,6 +274,16 @@ class AvoidanceController:
             return float(self.params.mono_min_alt_m)
         return 3.0
 
+    SENSOR_STALE_S = 2.0
+    POSE_STALE_S = 2.0
+
+    def sensor_stale(self, now: float | None = None) -> bool:
+        """No scan has reached the map for SENSOR_STALE_S although the sensor
+        had been streaming: the aircraft is blind, whatever the map says."""
+        now = now if now is not None else time.monotonic()
+        t = getattr(self, "_last_frame_t", None)
+        return t is not None and now - t > self.SENSOR_STALE_S
+
     def sensor_mode(self, now: float | None = None) -> str:
         """'range' while a real range sensor is streaming, else 'mono' while the
         camera is, else 'none'. A range sensor always wins: mono is dropped
@@ -302,9 +322,14 @@ class AvoidanceController:
         if pose.alt_m < min_alt:
             self._scans["dropped_low"] += 1
             return False
+        if not is_range:
+            # A mono top is scale-dependent (a 25 % under-read of a 9 m mast
+            # says 7 m and the planner flies over it): unknown, never climbed.
+            for b in scan:
+                b.top_m = 0.0
         self.grid.integrate(pose.north_m, pose.east_m, pose.yaw_deg, scan, source,
                             now=captured_at, confidence_scale=confidence_scale)
-        self._last_frame_t = captured_at
+        self._last_frame_t = max(captured_at, self._last_frame_t or -math.inf)
         self._scans["integrated"] += 1
         if to_bus:
             for b in scan:
@@ -494,7 +519,7 @@ class AvoidanceController:
             v = "outdoor"
         else:
             v = "unsure"
-        self._vision_env = (now, v)
+        self._vision_env = (now, v, sky_frac is not None)
 
     def update_env(self, now: float | None = None) -> str | None:
         """Apply the environment the operator chose, or in auto the one the
@@ -508,9 +533,13 @@ class AvoidanceController:
             want, why = "indoor", "set by operator"
         else:
             vis = self._vision_env if self._vision_env and now - self._vision_env[0] < 5.0 else None
-            if self._gps_ok is False:
+            # Auto indoor needs more than one weak signal: no GPS at all, or
+            # the camera's enclosed-space verdict WITH a real sky mask while
+            # slow (a facade or a bridge at mission speed must not shrink the
+            # clearance to 0.45 m).
+            if self._gps_ok is False and not (vis and vis[1] == "outdoor"):
                 want, why = "indoor", "auto: no usable GPS"
-            elif vis and vis[1] == "indoor":
+            elif vis and vis[1] == "indoor" and vis[2] and self._last_speed_m_s < 1.5:
                 want, why = "indoor", "auto: camera sees an enclosed space (no sky, ceiling, near walls)"
             else:
                 want, why = "outdoor", ("auto: sky / open scene" if vis and vis[1] == "outdoor"
@@ -525,8 +554,9 @@ class AvoidanceController:
                 return None
             if now - self._env_candidate[1] < ENV_SETTLE_S:
                 return None
-        if self.state in (AvoidanceState.AVOIDING, AvoidanceState.CLIMBING):
-            return None                     # finish the manoeuvre first
+        if self.state in (AvoidanceState.AVOIDING, AvoidanceState.CLIMBING, AvoidanceState.HOLDING) \
+                or self.intervened:
+            return None                     # finish the manoeuvre (or the hold) first
         self._apply_env(want)
         self.env_reason = why
         self._env_candidate = None
@@ -574,6 +604,8 @@ class AvoidanceController:
 
         def passed(reason_clear: str = "follow guard - path clear"):
             ev = None
+            self._guard_hold_since = None
+            self._guard_hold_noticed = False
             if self._guard_active:
                 self._guard_active = False
                 self._last_reason = reason_clear
@@ -584,7 +616,7 @@ class AvoidanceController:
             return passed()
         pose = pose_history.history(self.drone_id).latest()
         if pose is None or pose.alt_m < self.acting_floor_m(now):
-            return passed()
+            return passed(f"follow guard inactive below {self.acting_floor_m(now):.0f} m" if pose else "follow guard - no pose")
         yaw = math.radians(pose.yaw_deg)
         cy, sy = math.cos(yaw), math.sin(yaw)
         vn, ve = fwd * cy - right * sy, fwd * sy + right * cy
@@ -621,7 +653,15 @@ class AvoidanceController:
             for k in range(n):
                 centre = (k + 0.5) * sd
                 diff = abs((centre - want + 180.0) % 360.0 - 180.0)
-                if diff > 90.0 or free[k] < min_free:
+                # Unseen space is only free for guard_unseen_free_m, and is
+                # entered at the unseen speed cap, so it needs less room.
+                if unseen(centre):
+                    f = min(free[k], self.params.guard_unseen_free_m)
+                    v_un = self.params.guard_unseen_speed_m_s
+                    need_k = min(min_free, v_un * v_un / (2.0 * pp.decel_m_s2) + 1.0)
+                else:
+                    f, need_k = free[k], min_free
+                if diff > 90.0 or f < need_k:
                     continue
                 cost = diff + (15.0 if unseen(centre) else 0.0)
                 if cost < best_cost:
@@ -636,7 +676,8 @@ class AvoidanceController:
         else:
             centre = (best + 0.5) * sd
             diff = abs((centre - want + 180.0) % 360.0 - 180.0)
-            room = math.sqrt(2.0 * pp.decel_m_s2 * max(0.0, free[best] - 1.0))
+            f_best = free[best] if not unseen(centre) else min(free[best], self.params.guard_unseen_free_m)
+            room = math.sqrt(2.0 * pp.decel_m_s2 * max(0.0, f_best - 1.0))
             v = min(speed * math.cos(math.radians(diff)), room)
             if unseen(centre):
                 v = min(v, self.params.guard_unseen_speed_m_s)
@@ -648,6 +689,14 @@ class AvoidanceController:
         if math.isfinite(near):
             reason += f" ({near:.1f} m)"
         ev = None if self._guard_active else "start"
+        if best is None:
+            self._guard_hold_since = self._guard_hold_since or now
+            if not self._guard_hold_noticed and now - self._guard_hold_since > self.params.guard_hold_notice_s:
+                self._guard_hold_noticed = True
+                ev = ev or "hold"
+        else:
+            self._guard_hold_since = None
+            self._guard_hold_noticed = False
         self._guard_active = True
         self._guard_t = now
         self._last_reason = reason
@@ -728,7 +777,7 @@ class AvoidanceController:
         obst_brg = (near_k + 0.5) * sd
         # Straight away from it if that way is open, else the most open
         # direction at least 100 deg off the obstacle.
-        free = enlarged_free(polar, sd, 1.0)
+        free = enlarged_free(polar, sd, min(1.0, pp.clearance_m))
         away = (obst_brg + 180.0) % 360.0
         best = int(away // sd) % len(free)
         if free[best] < 2.0:
@@ -782,15 +831,38 @@ class AvoidanceController:
         hist = pose_history.history(self.drone_id)
         if hist.epoch != self._grid_epoch:
             # Pose source changed (GPS <-> PX4 local): the map was built in
-            # the other frame. Start clean rather than dodge ghosts.
+            # the other frame. Start clean rather than dodge ghosts - and if
+            # we were steering, park in HOLD until fresh scans have refilled
+            # the map (an empty map reads as "obstacle gone").
             self._grid_epoch = hist.epoch
             self.grid.clear()
             self._reset_local()
-            if self.state in (AvoidanceState.AVOIDING, AvoidanceState.CLIMBING):
-                self.state = AvoidanceState.NOMINAL
+            self._frame_changed_at = now
+            if self.intervened or self.state in (AvoidanceState.AVOIDING, AvoidanceState.CLIMBING):
+                self.state = AvoidanceState.HOLDING
+                self._hold_since = now
+                return self._settle(Decision("hold", AvoidanceState.HOLDING,
+                                             "pose frame changed - holding until the map refills"))
         pose = hist.latest()
         if pose is None:
             return self._settle(Decision("clear", AvoidanceState.NOMINAL, "no pose yet"))
+        # Stale pose: the planner would command from where the aircraft WAS,
+        # with a phantom velocity. Brake while steering, judge nothing otherwise.
+        pose_age = now - pose.t
+        # (A single sample says nothing about the stream; every real link
+        # delivers many per second, and a FROZEN feed keeps its last ones.)
+        if pose_age > self.POSE_STALE_S and hist.sample_count() >= 2:
+            if self.state in (AvoidanceState.AVOIDING, AvoidanceState.CLIMBING) or self.intervened:
+                self._hold_since = self._hold_since or now
+                self.state = AvoidanceState.HOLDING
+                return self._settle(Decision("hold", AvoidanceState.HOLDING,
+                                             f"pose stale ({pose_age:.1f} s) - holding"))
+            return self._settle(Decision("clear", self.state if self.state != AvoidanceState.DISABLED
+                                         else AvoidanceState.NOMINAL, f"pose stale ({pose_age:.1f} s) - not judging"))
+        # Blind: no scan for SENSOR_STALE_S. Freeze the map's clock (evidence
+        # must not fade while nothing replaces it) and brake if steering.
+        blind = self.sensor_stale(now)
+        grid_now = self._last_frame_t if blind else now
         if goal_ne is not None and hist.origin is not None:
             self._last_goal = hist.to_latlng(*goal_ne)
         pp = self.planner_params(now)
@@ -798,10 +870,25 @@ class AvoidanceController:
         vel = hist.velocity_ne()
         alt_goal = goal_alt_m if goal_alt_m is not None else pose.alt_m
         # Obstacles whose known top is well below us are flown over, not around.
-        polar = self.grid.polar(pos[0], pos[1], pp.lookahead_m, pp.sector_deg, now,
+        polar = self.grid.polar(pos[0], pos[1], pp.lookahead_m, pp.sector_deg, grid_now,
                                 min_top_m=pose.alt_m - 1.5)
         free = lp.enlarged_free(polar, pp.sector_deg, pp.clearance_m)
         ttc = lp.ttc_along(polar, pp.sector_deg, vel[0], vel[1], pp.clearance_m * 0.5)
+        self._last_speed_m_s = math.hypot(*vel)
+        if blind and (self.state in (AvoidanceState.AVOIDING, AvoidanceState.CLIMBING)):
+            since = self._blind_since = getattr(self, "_blind_since", None) or now
+            if now - since > 3.0:
+                self._hold_since = now
+                self.state = AvoidanceState.HOLDING
+                return self._settle(Decision("hold", AvoidanceState.HOLDING,
+                                             "sensor lost for 3 s - holding"))
+            sp = lp.Setpoint(0.0, 0.0, 0.0, pose.yaw_deg, 0.0, None, 0.0, None, False,
+                             "sensor lost - braking")
+            self.last_setpoint = sp
+            d = Decision("avoid", self.state, sp.reason, fused_distance_m=None)
+            d.setpoint = sp
+            return self._settle(d)
+        self._blind_since = None
         n_obs = len(self.grid.clusters(now)) if self.state != AvoidanceState.NOMINAL or \
             any(math.isfinite(d) for d in polar) else 0
 
@@ -832,6 +919,12 @@ class AvoidanceController:
         # way: PX4 stops or turns there. Counting them made a waypoint in
         # front of a pillar look like a collision course.
         speed_now = math.hypot(*vel)
+        # ... unless PX4 is flying (NOMINAL), it sits within the turn PX4
+        # makes there (acceptance radius ~2 m) and we are closing on it fast:
+        # a corner cut at speed. While WE steer, at_goal must still hand back
+        # (the 17:33 orbit), so only the NOMINAL branch sees this.
+        corner_cut = (ttc is not None and toward_goal and dist_goal is not None
+                      and ttc < pp.ttc_brake_s and dist_goal + 1.0 < ttc * speed_now < dist_goal + 3.0)
         if ttc is not None and toward_goal and dist_goal is not None and ttc * speed_now > dist_goal + 1.0:
             ttc = None
             threat = ahead_free < reach
@@ -871,6 +964,11 @@ class AvoidanceController:
             return self._settle(d)
 
         st = self.state
+        # Evidence newer than the last map wipe (a pose-frame switch), and a
+        # live sensor: an empty map is not a clear one.
+        wiped = getattr(self, "_frame_changed_at", None)
+        fresh_map = wiped is None or (self._last_frame_t is not None and not blind
+                                      and self._last_frame_t > wiped + 0.5)
         # No route (operator HOLD, manual hover): nothing to steer toward, so
         # the only job is keeping clear of what comes close in view.
         if goal_ne is None and getattr(self, "_operator_hold", False):
@@ -886,7 +984,10 @@ class AvoidanceController:
                       else "operator hold - nothing in view")
 
         if st in (AvoidanceState.NOMINAL, AvoidanceState.DISABLED):
-            if not threat or at_goal or (cooling and not danger):
+            # At the waypoint PX4 turns for the next item: not a threat unless
+            # something is closing FAST (raw nearness is normal beside a pillar
+            # - the 17:33 orbit).
+            if (not threat and not corner_cut) or at_goal or (cooling and not danger):
                 self._hold_since = None
                 return _d("clear", AvoidanceState.NOMINAL,
                           "path ahead clear" if n_obs == 0 else f"{n_obs} obstacle(s) mapped, none in the way")
@@ -950,7 +1051,13 @@ class AvoidanceController:
                               f"holding - no free direction ({why})" if why else "holding - no free direction")
             else:
                 self._blocked_since = None
-            if at_goal and not danger:
+            polar_leg = polar
+            if getattr(self, "_pre_climb_alt", None) is not None:
+                polar_leg = self.grid.polar(pos[0], pos[1], pp.lookahead_m, pp.sector_deg, grid_now,
+                                            min_top_m=self._pre_climb_alt - 1.5)
+            climbed_clear = getattr(self, "_pre_climb_alt", None) is None or \
+                lp.direct_path_clear(polar_leg, pp, pos, goal_ne)
+            if at_goal and not danger and climbed_clear:
                 self._reset_local()
                 self._resumed_at = now
                 # The waypoint is as reached as it can be (PX4 wants ~2 m, the
@@ -970,11 +1077,8 @@ class AvoidanceController:
             heading_home = math.hypot(*vel) < 1.0 or closing > 0.5
             # After a climb, judge the way at the ORIGINAL height: PX4 flies
             # the mission back down, and must not descend onto the obstacle.
-            polar_leg = polar
-            if getattr(self, "_pre_climb_alt", None) is not None:
-                polar_leg = self.grid.polar(pos[0], pos[1], pp.lookahead_m, pp.sector_deg, now,
-                                            min_top_m=self._pre_climb_alt - 1.5)
-            if lp.direct_path_clear(polar_leg, pp, pos, goal_ne) and not threat and heading_home:
+            if lp.direct_path_clear(polar_leg, pp, pos, goal_ne) and not threat and heading_home \
+                    and fresh_map and not blind:
                 self._clear_since = self._clear_since or now
                 if now - self._clear_since >= self.params.handback_clear_s:
                     self._reset_local()
@@ -988,21 +1092,28 @@ class AvoidanceController:
         if st == AvoidanceState.HOLDING:
             if self._hold_since is None:
                 self._hold_since = now
-            if not threat:
+            # "Obstacle gone" needs evidence: scans newer than the hold (or
+            # than a map wipe), and a live sensor - an empty map is not clear.
+            fresh = (self._last_frame_t is None and self._frame_changed_at is None) or \
+                (self._last_frame_t is not None and not blind
+                 and self._last_frame_t > max(self._frame_changed_at or -math.inf, self._hold_since) + 0.5)
+            if not threat and fresh:
                 if goal_ne is not None and self.intervened:
                     self._hold_since = None
                     self._resumed_at = now
                     return _d("resume", AvoidanceState.NOMINAL, "obstacle gone - resuming mission")
                 self._hold_since = None
                 return _d("clear", AvoidanceState.NOMINAL, "obstacle gone")
-            if can_steer:
+            if can_steer and fresh_map and not blind:
                 sp = lp.plan(pos, pose.alt_m, pose.yaw_deg, vel, goal_ne, self._engage_alt if self._engage_alt is not None else alt_goal, polar, pp, self._prev_dir)
-                if not sp.blocked and sp.speed > 0.2:
+                # A way around that needs a turn first (speed 0, "turning to
+                # look") is still a way around.
+                if not sp.blocked and (sp.speed > 0.2 or (sp.chosen_deg is not None and sp.free_m >= 3.0)):
                     self._blocked_since = None
                     self._hold_since = None
                     return _d("avoid", AvoidanceState.AVOIDING, "a way around opened - steering", sp)
             held = now - self._hold_since
-            if self.params.allow_return and held >= self.params.hold_to_return_s:
+            if self.params.allow_return and goal_ne is not None and held >= self.params.hold_to_return_s:
                 return _d("return", AvoidanceState.RETURNING, f"no way through for {held:.0f}s - returning")
             return _d("hold", AvoidanceState.HOLDING, self._last_reason or "holding")
 
@@ -1162,6 +1273,11 @@ class AvoidanceController:
                 now, self.params.min_confidence),
             "sensor_mode": self.sensor_mode(now),
             "following": self.following(now),
+            "pose_age_s": round(now - _pose_age_ref(self.drone_id), 2) if _pose_age_ref(self.drone_id) else None,
+            "sensor_stale": self.sensor_stale(now),
+            "last_cmd": None if self._last_cmd is None else {
+                "action": self._last_cmd[0], "ok": self._last_cmd[1], "note": self._last_cmd[2],
+                "age_s": round(now - self._last_cmd[3], 1)},
             "env": self.env,
             "env_mode": int(round(self.params.env_mode)),
             "env_reason": self.env_reason,
@@ -1178,6 +1294,12 @@ class AvoidanceController:
                 "heading_deg": round(self.last_setpoint.chosen_deg, 0) if self.last_setpoint.chosen_deg is not None else None,
             },
         }
+
+
+def _pose_age_ref(drone_id: str) -> float | None:
+    from app.avoidance.mapping import pose_history
+    s = pose_history.history(drone_id).latest()
+    return s.t if s else None
 
 
 def _pose_source(drone_id: str) -> str | None:
