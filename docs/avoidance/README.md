@@ -111,7 +111,64 @@ Legacy path only: `clearance_m`, `forward_cone_deg`, `vertical_enabled`,
 | timeline empty | `grep "avoidance event NOT recorded" .logs/backend.log` (schema / DB) |
 | latency | `LATENCY_PROBE=true`, `GET /api/latency-probe/stats` |
 
-## 7. Legacy path (`local_planner = 0`)
+## 7. Safety invariants (audit 2026-09-30)
+
+Pinned by `backend/tests/avoidance/test_audit_robustness.py`. Anything that
+breaks one of these is a bug, whatever else it improves.
+
+Ownership
+- Avoidance takes Offboard only from a MISSION (or its own excursion out
+  of one). A stick mode (POSCTL, ALTCTL, STABILIZED, ...) is a pilot:
+  detect only, never HOLD or RTL them.
+- An Offboard session it did not open (`manager._offboard_owner` is not
+  "avoidance") is left alone, however long the tracker's frames stall.
+- RTL / LAND entered while it steers stands; it stands down.
+- A goal-less hold never escalates to RTL.
+
+Hand-back
+- A "resume" is an obligation: retried until MISSION is confirmed; after
+  three failures the aircraft is parked in PX4 HOLD for 30 s and status says
+  so. Setpoints keep streaming until MISSION is confirmed; Offboard state
+  is released only then.
+- Our own Offboard with nothing steering it (NOMINAL, not intervened) is
+  handed back within 1 s.
+- The executor releases Offboard state BEFORE its own HOLD/RTL mode change.
+- Every setpoint is clamped independently of the planner: finite, speed
+  cap, |vd| <= 1.5 m/s.
+
+Freshness
+- Pose older than 2 s on a streaming feed: brake/hold, never steer from it.
+- No scan for 2 s while steering: brake; HOLD after 3 s; the map's clock
+  is frozen; no hand-back and no re-engage while blind; the speed governor
+  crawls while blind in a mission.
+- A map wipe (pose-frame switch) holds until scans newer than the wipe
+  have arrived. An empty map is never "obstacle gone".
+
+Indoor / environment
+- The pose source switches with hysteresis (2 s to local, 5 s back) and
+  never mid-manoeuvre. GPS fix 0 after GPS data means NO GPS.
+- Auto indoor needs no GPS, or the camera's enclosed verdict with a real
+  sky mask while slow; never switches while HOLDING / AVOIDING /
+  intervened. The indoor profile never returns home.
+- A link with no global position still resolves, so the local-position
+  feed can start (the indoor bootstrap). Link loss keeps the flight state.
+- Takeoff is capped at 2 m indoors (backend), the UI defaults to 1.5 m.
+
+Sensing / map
+- Mono evidence counts once per cell per bin per frame (three agreeing
+  frames really means three). An older scan never rewinds a cell's clock.
+- A mono frame with no ground fit yields no obstacles unless a fit is at
+  most 2 s old. Mono tops are unknown (never climbed).
+- `/depth_scan` bounds its inputs and drops scans older than 1.5 s;
+  `GET /status` never creates a controller.
+
+Loop
+- One drone's exception never starves the others; an intervened drone
+  whose tick failed is parked in HOLD.
+- A session bound to a drone without avoidance is never guarded by
+  another drone's map.
+
+## 8. Legacy path (`local_planner = 0`)
 
 The first design: mono detections -> keep-out circles -> A* detour uploaded as
 a new mission. It crashed in 8 of 9 SITL flights (ARCHITECTURE_REVIEW.md

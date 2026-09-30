@@ -9,7 +9,7 @@
 
 import { useState } from 'react'
 import { Building2, Loader2, Trees } from 'lucide-react'
-import { setEnabled, type AvoidanceStatus } from '@/lib/avoidance'
+import { setParams, type AvoidanceStatus } from '@/lib/avoidance'
 
 const MODES: { v: number; label: string }[] = [
     { v: 0, label: 'AUTO' }, { v: 2, label: 'INDOOR' }, { v: 1, label: 'OUTDOOR' },
@@ -17,6 +17,7 @@ const MODES: { v: number; label: string }[] = [
 
 export function IndoorNavCard({ avoid }: { avoid: AvoidanceStatus | null }) {
     const [busy, setBusy] = useState(false)
+    const [err, setErr] = useState<string | null>(null)
     const muted = { color: 'hsl(var(--app-text-muted))' }
     const box = 'rounded-lg border p-3 flex flex-col gap-2'
     const border = { borderColor: 'hsl(var(--app-border))' }
@@ -40,8 +41,8 @@ export function IndoorNavCard({ avoid }: { avoid: AvoidanceStatus | null }) {
     const mode = avoid.env_mode ?? 0
     const indoor = avoid.env === 'indoor'
     const set = async (v: number) => {
-        setBusy(true)
-        try { await setEnabled(avoid.drone_id, avoid.enabled, { env_mode: v }) } finally { setBusy(false) }
+        setBusy(true); setErr(null)
+        try { await setParams(avoid.drone_id, { env_mode: v }) } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
     }
     return (
         <div className={box} style={border}>
@@ -58,6 +59,7 @@ export function IndoorNavCard({ avoid }: { avoid: AvoidanceStatus | null }) {
                     </button>
                 ))}
             </div>
+            {err && <p className="text-[10.5px] text-red-300">{err}</p>}
             <div className="flex items-center gap-2 text-[12px] font-mono">
                 {indoor ? <Building2 size={14} className="text-amber-300" /> : <Trees size={14} className="text-emerald-300" />}
                 <span className={indoor ? 'text-amber-200' : 'text-emerald-200'}>{indoor ? 'INDOOR' : 'OUTDOOR'}</span>

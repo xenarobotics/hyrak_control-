@@ -56,6 +56,13 @@ export interface AvoidanceStatus {
     env_mode?: number                      // 0 auto, 1 outdoor, 2 indoor
     env_reason?: string
     pose_source?: 'gps' | 'local' | null   // where avoidance's position comes from
+    pose_age_s?: number | null
+    sensor_stale?: boolean
+    last_cmd?: { action: string; ok: boolean; note: string; age_s: number } | null
+    // Set by useAvoidanceLive, not the backend: the status poll has failed
+    // for a while and everything above is old.
+    stale?: boolean
+    stale_s?: number
     following?: boolean        // a tracker / follow mode is commanding through the guard
     guarding?: boolean         // the follow guard is bending / holding that command now
     pose_rate_hz?: number
@@ -83,10 +90,22 @@ export async function getStatus(droneId: string): Promise<AvoidanceStatus> {
 
 export async function setEnabled(droneId: string, enabled: boolean,
                                  params?: Partial<AvoidanceParams>): Promise<AvoidanceStatus> {
-    return j(await fetch(api(`/${droneId}/enable`), {
+    const r = await fetch(api(`/${droneId}/enable`), {
         method: 'POST', headers: AUTH,
         body: JSON.stringify({ enabled, params }),
-    }))
+    })
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? `HTTP ${r.status}`)
+    return r.json()
+}
+
+// Tuning only: never re-sends `enabled` from a possibly stale snapshot (a
+// Detection switched off a second ago would have come back on).
+export async function setParams(droneId: string, params: Partial<AvoidanceParams>): Promise<AvoidanceStatus> {
+    const r = await fetch(api(`/${droneId}/enable`), {
+        method: 'POST', headers: AUTH, body: JSON.stringify({ params }),
+    })
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? `HTTP ${r.status}`)
+    return r.json()
 }
 
 export async function setArmed(droneId: string, armed: boolean): Promise<AvoidanceStatus> {
@@ -116,6 +135,8 @@ export async function getEvents(droneId: string, limit = 50): Promise<AvoidanceE
 
 // --- obstacle / hazard-map overlay data ---
 export interface LiveObstacle {
+    dn_m?: number                 // metres north / east of the aircraft (local frame)
+    de_m?: number
     lat: number; lng: number; radius_m: number; top_m: number
     speed_mps: number; is_static: boolean; hits: number
 }
@@ -171,7 +192,9 @@ export function nearestAheadM(cm: number[], coneDeg = 30): number | null {
     if (!cm || cm.length !== 72) return null
     const sectors = Math.round(coneDeg / 5)
     let best: number | null = null
-    for (let k = -sectors; k <= sectors; k++) {
+    // sector 0 = [0, 5) deg clockwise of the nose, so +-N sectors is
+    // symmetric only as -N .. N-1
+    for (let k = -sectors; k < sectors; k++) {
         const idx = (k + 72) % 72
         const v = cm[idx]
         if (v > 0 && v < 65535) {

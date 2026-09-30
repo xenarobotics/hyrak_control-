@@ -1128,11 +1128,18 @@ class AvoidanceController:
         if h.origin is None:
             return []
         out = []
+        p = h.latest()
         for c in self.grid.clusters(now):
             lat, lng = h.to_latlng(c["north_m"], c["east_m"])
-            out.append({"lat": lat, "lng": lng, "radius_m": round(c["radius_m"], 1),
-                        "top_m": round(c["top_m"], 1), "speed_mps": 0.0,
-                        "is_static": c["cells"] >= 3, "hits": c["cells"]})
+            rec = {"lat": lat, "lng": lng, "radius_m": round(c["radius_m"], 1),
+                   "top_m": round(c["top_m"], 1), "speed_mps": 0.0,
+                   "is_static": c["cells"] >= 3, "hits": c["cells"]}
+            if p is not None:
+                # Relative to the aircraft too: indoors the lat/lng are a
+                # local frame's fiction and the radar must not use them.
+                rec["dn_m"] = round(c["north_m"] - p.north_m, 2)
+                rec["de_m"] = round(c["east_m"] - p.east_m, 2)
+            out.append(rec)
         return out
 
     def _safe_speed(self, clearance_m: float) -> float:

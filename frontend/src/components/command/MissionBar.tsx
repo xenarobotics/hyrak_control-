@@ -63,7 +63,9 @@ export function MissionBar({ avoid }: { avoid: AvoidanceStatus | null }) {
     const n = plan.length
     const idx = t?.mission_current_index ?? -1
     const finished = t?.mission_finished ?? false
-    const here = t ? { lat: t.position.latitude_deg, lng: t.position.longitude_deg } : null
+    // Indoors (PX4 local frame) the lat/lng are a fiction: no distances from them.
+    const localNav = avoid?.pose_source === 'local' || !!(t && !t.position.latitude_deg && !t.position.longitude_deg)
+    const here = t && !localNav ? { lat: t.position.latitude_deg, lng: t.position.longitude_deg } : null
     const inAir = t?.flight_mode.is_in_air ?? false
 
     // Where along the route the aircraft is (metres from the first item).
@@ -90,6 +92,7 @@ export function MissionBar({ avoid }: { avoid: AvoidanceStatus | null }) {
     const steer = avoid?.guarding ? { fg: '#67e8f9', bg: 'rgba(8,51,68,.9)', label: 'GUARDING' }
         : avoid?.state && AVOID_TONE[avoid.state]
     const aLine = !avoid ? null
+        : avoid.stale ? { fg: '#fca5a5', bg: 'rgba(69,10,10,.9)', label: `STALE ${avoid.stale_s ?? 0}s`, why: 'No answer from avoidance - not live' }
         : !avoid.enabled ? { fg: '#fca5a5', bg: 'transparent', label: 'AVOID OFF', why: 'Obstacle avoidance is off for this aircraft' }
             : !avoid.armed ? { fg: '#fcd34d', bg: 'transparent', label: 'WATCHING', why: 'Detects only - Steer is off' }
                 : steer ? { ...steer, why: avoid.guarding ? avoid.reason : (avoid.planner?.reason ?? avoid.reason) }
@@ -158,9 +161,9 @@ export function MissionBar({ avoid }: { avoid: AvoidanceStatus | null }) {
             </div>
 
             <div className="flex items-center gap-4 shrink-0">
-                <Stat k="NEXT" v={nextM != null ? fmtM(nextM) : '-'} />
-                <Stat k="LEFT" v={leftM != null && idx >= 0 ? fmtM(leftM) : '-'} />
-                <Stat k="TIME" v={leftM != null && idx >= 0 && inAir ? fmtT(leftM / speed) : '-'} />
+                <Stat k="NEXT" v={localNav ? 'local' : nextM != null ? fmtM(nextM) : '-'} />
+                <Stat k="LEFT" v={localNav ? 'nav' : leftM != null && idx >= 0 ? fmtM(leftM) : '-'} />
+                <Stat k="TIME" v={localNav ? '-' : leftM != null && idx >= 0 && inAir ? fmtT(leftM / speed) : '-'} />
                 <Stat k="GS" v={t ? `${t.groundspeed_m_s.toFixed(1)} m/s` : '-'} />
             </div>
 

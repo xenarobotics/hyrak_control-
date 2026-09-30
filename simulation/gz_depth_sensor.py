@@ -128,6 +128,12 @@ def worker():
                 _stats["errors"] += 1
                 if _stats["errors"] % 50 == 1:
                     print(f"depth post failed: {e}", flush=True)
+        # A status line every 5 s: `hyrak_sim.sh status` shows the last one,
+        # so "up" is never mistaken for "delivering" (recv=0 = wrong topic).
+        if time.time() - _stats.get("printed", 0.0) > 5.0:
+            _stats["printed"] = time.time()
+            print(f"depth sensor: posted={_stats['posted']} hits={_stats['hits']} errors={_stats['errors']}"
+                  + ("" if _topic_seen else "  NO FRAMES YET - is the sim's depth camera publishing?"), flush=True)
         dt = period - (time.time() - t0)
         if dt > 0:
             time.sleep(dt)

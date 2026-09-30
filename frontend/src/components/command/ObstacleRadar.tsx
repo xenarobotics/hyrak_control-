@@ -20,7 +20,7 @@ const NO_READING = 65535
 const SECTOR = 5
 const tone = (m: number) => (m < 2 ? '#f87171' : m < 5 ? '#fbbf24' : '#22d3ee')
 
-interface Obstacle { lat: number; lng: number; radius_m: number }
+interface Obstacle { lat: number; lng: number; radius_m: number; dn_m?: number; de_m?: number }
 
 function sectorsM(a: AvoidanceStatus | null): (number | null)[] {
     const cm = a?.obstacle_distance_cm ?? []
@@ -52,9 +52,16 @@ export function ObstacleRadar({ avoid, rangeM = 15 }: { avoid: AvoidanceStatus |
 
     // world obstacle -> body frame (x right, y forward), metres
     const place = (o: Obstacle) => {
-        if (!here) return null
-        const n = (o.lat - here.lat) * 111320
-        const e = (o.lng - here.lng) * 111320 * Math.cos(here.lat * Math.PI / 180)
+        // Backend-relative offsets when present (indoors the lat/lng are a
+        // local frame's fiction); lat/lng maths only as the fallback.
+        let n: number, e: number
+        if (o.dn_m != null && o.de_m != null) {
+            n = o.dn_m; e = o.de_m
+        } else {
+            if (!here) return null
+            n = (o.lat - here.lat) * 111320
+            e = (o.lng - here.lng) * 111320 * Math.cos(here.lat * Math.PI / 180)
+        }
         const h = hdg * Math.PI / 180
         return { x: e * Math.cos(h) - n * Math.sin(h), y: e * Math.sin(h) + n * Math.cos(h), r: o.radius_m }
     }

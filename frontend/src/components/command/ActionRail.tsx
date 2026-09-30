@@ -14,6 +14,8 @@ import { useEffect, useState } from 'react'
 import { ArrowDownToLine, CirclePause, Home, Loader2, Minus, OctagonX, Play, Plus, Power, RotateCcw, Rocket } from 'lucide-react'
 import { useDrone } from '@/hooks/useDrone'
 import { useDroneStore } from '@/store/drone'
+import type { AvoidanceStatus } from '@/lib/avoidance'
+import { actingFloorM } from './avoidFloor'
 
 type Tone = 'default' | 'go' | 'warn' | 'danger' | 'fire'
 const TONES: Record<Tone, { fg: string; bg: string; bd: string }> = {
@@ -49,10 +51,18 @@ const Group = ({ label }: { label: string }) => (
     <span className="text-[8.5px] font-mono tracking-[0.2em] text-zinc-500 pt-1.5 pl-0.5">{label}</span>
 )
 
-export function ActionRail() {
+const INDOOR_TAKEOFF_M = 1.5, INDOOR_TAKEOFF_MAX_M = 2      // backend caps at 2 m too
+
+export function ActionRail({ avoid }: { avoid?: AvoidanceStatus | null }) {
     const { sendAction, arm, disarm, emergencyStop } = useDrone()
     const { telemetry: t, telemetryStatus, pendingAction, lastActionResult } = useDroneStore()
+    const indoor = avoid?.env === 'indoor'
     const [alt, setAlt] = useState(10)
+    // Indoors the 10 m default meets the ceiling: drop to 1.5 m and cap at 2.
+    useEffect(() => { if (indoor) setAlt(a => Math.min(a, INDOOR_TAKEOFF_M)) }, [indoor])
+    const altMax = indoor ? INDOOR_TAKEOFF_MAX_M : 120
+    const floor = actingFloorM(avoid ?? null)
+    const belowFloor = floor != null && alt < floor
     const [killArmed, setKillArmed] = useState(false)
     const [flash, setFlash] = useState<string | null>(null)
 
@@ -99,24 +109,26 @@ export function ActionRail() {
                 title={armed && inAir ? 'Cannot disarm in the air' : undefined} />
             <div className="rounded-lg border flex flex-col overflow-hidden"
                 style={{ borderColor: TONES.go.bd, background: TONES.go.bg }}>
-                <button onClick={() => sendAction('takeoff', { altitude: alt })} disabled={!linked || inAir}
-                    title={`Take off to ${alt} m`}
+                <button onClick={() => sendAction('takeoff', { altitude: Math.min(alt, altMax) })} disabled={!linked || inAir}
+                    title={`Take off to ${Math.min(alt, altMax)} m` + (indoor ? ' (indoor: capped at 2 m)' : '')
+                        + (belowFloor ? ` - below the avoidance floor (${floor} m): avoidance cannot steer there` : '')}
                     className="h-[44px] flex flex-col items-center justify-center gap-0.5 disabled:opacity-30 hover:brightness-125"
                     style={{ color: TONES.go.fg }}>
                     {pend('takeoff') ? <Loader2 size={17} className="animate-spin" /> : <Rocket size={17} />}
                     <span className="text-[9.5px] font-mono font-bold tracking-wider leading-none">TAKEOFF</span>
                 </button>
                 <div className="flex items-center justify-between border-t px-0.5" style={{ borderColor: TONES.go.bd }}>
-                    <button onClick={() => setAlt(a => Math.max(2, a - 1))} className="p-1.5 text-zinc-300" aria-label="Lower takeoff altitude"><Minus size={11} /></button>
-                    <span className="text-[10px] font-mono font-bold text-zinc-100 tabular-nums">{alt}m</span>
-                    <button onClick={() => setAlt(a => Math.min(120, a + 1))} className="p-1.5 text-zinc-300" aria-label="Raise takeoff altitude"><Plus size={11} /></button>
+                    <button onClick={() => setAlt(a => Math.max(indoor ? 1 : 2, a - (indoor ? 0.5 : 1)))} className="p-1.5 text-zinc-300" aria-label="Lower takeoff altitude"><Minus size={11} /></button>
+                    <span className="text-[10px] font-mono font-bold tabular-nums" style={{ color: belowFloor ? '#fcd34d' : '#f4f4f5' }}
+                        title={belowFloor ? `below the avoidance floor (${floor} m)` : undefined}>{Math.min(alt, altMax)}m</span>
+                    <button onClick={() => setAlt(a => Math.min(altMax, a + (indoor ? 0.5 : 1)))} className="p-1.5 text-zinc-300" aria-label="Raise takeoff altitude"><Plus size={11} /></button>
                 </div>
             </div>
 
             <Group label="MISSION" />
             <RailButton icon={start.icon} label={start.label} tone="go" tall
-                disabled={!linked || inMission} active={inMission}
-                sub={inMission ? 'flying' : undefined}
+                disabled={!linked || (inMission && !finished)} active={inMission && !finished}
+                sub={inMission && !finished ? 'flying' : undefined}
                 pending={pend('start_mission', 'arm_and_start_mission', 'restart_mission', 'arm_and_restart_mission')}
                 onClick={() => sendAction(start.action)} title={inMission ? 'Mission is flying - HOLD pauses it' : start.title} />
             <RailButton icon={<CirclePause size={17} />} label="HOLD" disabled={!linked || !inAir}

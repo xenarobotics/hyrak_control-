@@ -32,6 +32,14 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PX4="${PX4_DIR:-$HOME/PX4-Autopilot}"
 ROOTFS="$PX4/build/px4_sitl_default/rootfs"
 LOGS="$HERE/.logs"; PIDS="$HERE/.pids"
+# stop / status / a restart act on what START launched, whatever MODEL and
+# WORLD are set to now: start records them in .pids/run. (A plain
+# `./hyrak_sim.sh stop` after an indoor start used to look for the outdoor
+# world, leave the indoor server running and lose its PID file.)
+if [ "${1:-}" != "start" ] && [ -f "$PIDS/run" ]; then
+    # shellcheck disable=SC1091
+    . "$PIDS/run"
+fi
 MODEL="${MODEL:-gz_x500_mono_cam}"
 # The indoor vehicle flies the indoor world unless told otherwise.
 if [ "$MODEL" = "gz_x500_indoor" ]; then WORLD="${WORLD:-hyrak_indoor}"; else WORLD="${WORLD:-hyrak_obstacles}"; fi
@@ -55,6 +63,7 @@ HOME_LAT="${HOME_LAT:-17.596569}"; HOME_LON="${HOME_LON:-78.125203}"
 SERVER_CONFIG=hyrak_server.config
 PX4_MODELS_DIR=""                      # empty: PX4's own models folder
 INDOOR_PARAMS=()
+OUTDOOR_PARAMS=(PX4_PARAM_NAV_DLL_ACT=2)    # link loss -> Return (indoor sets Land instead)
 if [ "$MODEL" = "gz_x500_depth" ]; then
     AUTOSTART=4002
     CAM_TOPIC="/world/$WORLD/model/x500_depth_1/link/camera_link/sensor/IMX214/image"
@@ -69,6 +78,7 @@ elif [ "$MODEL" = "gz_x500_indoor" ]; then
     PX4_MODELS_DIR="$HERE/models"
     # EKF2_EV_CTRL 15 = horizontal + vertical position, velocity, yaw;
     # EKF2_HGT_REF 3 = vision; EKF2_MAG_TYPE 5 = none; NAV_DLL_ACT 3 = Land.
+    OUTDOOR_PARAMS=()
     INDOOR_PARAMS=(PX4_PARAM_SYS_HAS_GPS=0 PX4_PARAM_SIM_GPS_USED=0 PX4_PARAM_EKF2_GPS_CTRL=0
                    PX4_PARAM_EKF2_EV_CTRL=15 PX4_PARAM_EKF2_HGT_REF=3 PX4_PARAM_EKF2_EV_DELAY=0
                    PX4_PARAM_EKF2_RNG_CTRL=1 PX4_PARAM_EKF2_MAG_TYPE=5 PX4_PARAM_SIM_GZ_EN_LIDAR=1
@@ -106,14 +116,24 @@ start() {
     # Not running (or its server died): clear anything the last run left
     # behind BEFORE starting, or its bridges keep sending next to the new ones.
     _sweep
+    if [ ! -f "$WORLD_FILE" ]; then echo "world file not found: $WORLD_FILE"; exit 1; fi
+    printf 'MODEL=%q\nWORLD=%q\n' "$MODEL" "$WORLD" > "$PIDS/run"
     _spawn gz_server gz sim --render-engine ogre2 --verbose=1 -r -s "$WORLD_FILE"
-    sleep 6
+    # Wait for the WORLD, not a fixed 6 s: PX4's own rc starts a second gz
+    # server (and resets PX4_GZ_MODELS to its tree) when it finds no
+    # /world/<name>/clock yet - the indoor world's textures load slowly.
+    for _ in $(seq 1 60); do
+        gz topic -l 2>/dev/null | grep -q "^/world/$WORLD/clock" && break
+        sleep 1
+    done
+    gz topic -l 2>/dev/null | grep -q "^/world/$WORLD/clock" || { echo "gz world $WORLD did not come up (see $LOGS/gz_server.log)"; stop; exit 1; }
     [ -z "${HEADLESS:-}" ] && _spawn gz_gui gz sim --render-engine ogre2 -g
     _spawn px4 env PX4_SYS_AUTOSTART="$AUTOSTART" PX4_SIM_MODEL="$MODEL" PX4_GZ_WORLD="$WORLD" \
         PX4_GZ_MODELS="${PX4_MODELS_DIR:-$PX4_GZ_MODELS}" \
         PX4_HOME_LAT="$HOME_LAT" PX4_HOME_LON="$HOME_LON" PX4_HOME_ALT=0 \
-        PX4_PARAM_RTL_RETURN_ALT=10 PX4_PARAM_NAV_DLL_ACT=2 "${INDOOR_PARAMS[@]}" ../bin/px4 -i 1 -d
+        PX4_PARAM_RTL_RETURN_ALT=10 "${OUTDOOR_PARAMS[@]}" "${INDOOR_PARAMS[@]}" ../bin/px4 -i 1 -d
     for _ in $(seq 1 40); do grep -q "Ready for takeoff" "$LOGS/px4.log" 2>/dev/null && break; sleep 1; done
+    grep -q "Ready for takeoff" "$LOGS/px4.log" 2>/dev/null || echo "WARNING: PX4 not ready after 40 s (see $LOGS/px4.log) - continuing"
     # (PX4 SITL has 6 MAVLink channels; 0-4 are its own. The air-unit
     # emulation link (-u 14551 -o 14550) is therefore not started by default -
     # the desktop's plain "SITL" and "Gazebo sim on server" cover the sim.)
@@ -139,11 +159,19 @@ start() {
 
 stop() {
     for n in depth_sensor cam_bridge px4 gz_gui gz_server; do
-        if _alive "$n"; then kill "$(cat "$PIDS/$n")" 2>/dev/null; echo "stopped $n"; fi
+        if _alive "$n"; then
+            pid=$(cat "$PIDS/$n")
+            # gz sim ignores SIGTERM: interrupt it like Ctrl-C, then make sure.
+            kill -INT "$pid" 2>/dev/null
+            for _ in 1 2 3 4 5 6; do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+            kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null
+            echo "stopped $n"
+        fi
         rm -f "$PIDS/$n"
     done
-    sleep 2
+    sleep 1
     _sweep
+    rm -f "$PIDS/run"
 }
 
 _sweep() {
@@ -154,6 +182,12 @@ _sweep() {
     # the previous camera bridge running, so two streams shared udp:5600 and
     # the app decoded neither (2026-09-26 21:23).
     for pid in $(ps -eo pid,args | awk -v w="$WORLD.sdf" '!/bash|awk/ && (index($0, w) && /gz sim/ || /bin\/px4 -i 1 -d/ || /gz_cam_bridge/ || /gz_depth_sensor/) {print $1}'); do
+        # Only OUR partition: the depth benchmark and a second session run the
+        # same world file on their own partitions and must survive a restart.
+        if tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -q "^GZ_PARTITION=" \
+            && ! tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -q "^GZ_PARTITION=$GZ_PARTITION$"; then
+            continue
+        fi
         kill -9 "$pid" 2>/dev/null && echo "swept leftover $pid"
     done
 }
@@ -164,7 +198,11 @@ status() {
             printf "%-10s up   pid %s  rss %s MB\n" "$n" "$(cat "$PIDS/$n")" "$(( $(ps -o rss= -p "$(cat "$PIDS/$n")") / 1024 ))"
         else printf "%-10s down\n" "$n"; fi
     done
+    [ -f "$PIDS/run" ] && echo "running:   $(tr '\n' ' ' < "$PIDS/run")"
     grep -q "Ready for takeoff" "$LOGS/px4.log" 2>/dev/null && echo "PX4: Ready for takeoff (instance 1, fleet adopts udp:14541)"
+    # Liveness is not delivery: a bridge with recv=0 is up and useless.
+    [ -f "$LOGS/cam_bridge.log" ] && echo "camera:    $(grep -a 'recv=' "$LOGS/cam_bridge.log" | tail -1)"
+    [ -f "$LOGS/depth_sensor.log" ] && echo "depth:     $(grep -aE 'posted|scans|recv|frames' "$LOGS/depth_sensor.log" | tail -1)"
     echo "video:     H.265 RTP -> 127.0.0.1:5600  (CAMERA -> 'Air unit (UDP) - set in Settings', port 5600)"
     echo "telemetry: TELEMETRY -> 'SITL' (desktop binds udp:14540)  or  'Gazebo sim on server' (udp:14600)"
     [ -f "$PIDS/depth_sensor" ] && echo "depth:     gz depth camera -> /api/avoidance/auto/depth_scan (log: $LOGS/depth_sensor.log)"

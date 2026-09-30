@@ -317,6 +317,8 @@ export default function CommandPage() {
     )
 
     const dockHidden = mounted && layout.dockHidden
+    // Swarm mode has no AVOID tab: a persisted 'avoid' left the dock blank.
+    const activeTab: DockTab = swarmEnabled && layout.tab === 'avoid' ? 'telemetry' : layout.tab
     const mapBig = layout.big === 'map'
     const runningMod = MODES.find(m => m.value === ai.mode)
     const toggleModule = (m: string) => {
@@ -360,7 +362,7 @@ export default function CommandPage() {
             <div className="flex flex-1 min-h-0 gap-2">
                 {/* ── Action rail ─────────────────────────────────────────── */}
                 <div className="shrink-0 rounded-xl border p-1.5 overflow-y-auto" style={PANEL}>
-                    <ActionRail />
+                    <ActionRail avoid={avoid} />
                 </div>
 
                 {/* ── Stage ───────────────────────────────────────────────── */}
@@ -413,14 +415,14 @@ export default function CommandPage() {
                                 {TABS.filter(tb => !(tb.id === 'avoid' && swarmEnabled)).map(tb => (
                                     <button key={tb.id} onClick={() => update({ tab: tb.id })}
                                         className={cn('flex-1 py-2.5 text-[10px] font-mono tracking-widest border-b-2 transition-colors',
-                                            layout.tab === tb.id ? 'border-cyan-400 text-cyan-400' : 'border-transparent')}
-                                        style={layout.tab === tb.id ? undefined : { color: 'hsl(var(--app-text-muted))' }}>
+                                            activeTab === tb.id ? 'border-cyan-400 text-cyan-400' : 'border-transparent')}
+                                        style={activeTab === tb.id ? undefined : { color: 'hsl(var(--app-text-muted))' }}>
                                         {tb.label}
                                     </button>
                                 ))}
                             </div>
                             <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-4">
-                                {layout.tab === 'avoid' && !swarmEnabled && (
+                                {activeTab === 'avoid' && !swarmEnabled && (
                                     <>
                                         <div className="flex gap-2">
                                             <Toggle on={layout.radar} label="RADAR" onClick={() => update({ radar: !layout.radar })}
@@ -433,9 +435,9 @@ export default function CommandPage() {
                                         <AvoidancePanel />
                                     </>
                                 )}
-                                {layout.tab === 'ai' && <AiPanel onStop={ai.stop} />}
-                                {layout.tab === 'telemetry' && <TelemetryPanel />}
-                                {layout.tab === 'setup' && (
+                                {activeTab === 'ai' && <AiPanel onStop={ai.stop} />}
+                                {activeTab === 'telemetry' && <TelemetryPanel />}
+                                {activeTab === 'setup' && (
                                     <>
                                         {!swarmEnabled && <IndoorNavCard avoid={avoid} />}
                                         {mounted && swarmEnabled
@@ -447,7 +449,7 @@ export default function CommandPage() {
                                         </div>
                                     </>
                                 )}
-                                {layout.tab === 'log' && <MessageLog />}
+                                {activeTab === 'log' && <MessageLog />}
                             </div>
                         </aside>
                     </>

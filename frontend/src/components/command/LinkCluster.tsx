@@ -21,7 +21,7 @@ import {
     VIDEO_SOURCES, SOURCE_GROUPS,
 } from '@/lib/videoSource'
 import { isDesktopApp } from '@/lib/nativeBridge'
-import { setEnabled, type AvoidanceStatus } from '@/lib/avoidance'
+import { setParams, type AvoidanceStatus } from '@/lib/avoidance'
 import { PersonCalibration } from './PersonCalibration'
 
 function Pill({ on, busy, label, detail, onClick, disabled, title, icon, menuOpen, onMenu }: {
@@ -133,7 +133,7 @@ export function LinkCluster({ avoid }: { avoid: AvoidanceStatus | null }) {
         if (!avoid) return
         setSensorBusy(true)
         try {
-            await setEnabled(avoid.drone_id, avoid.enabled,
+            await setParams(avoid.drone_id,
                 { use_range_sensor: to === 'range' ? 1 : 0, mono_bench: to === 'bench' ? 1 : 0 })
         } finally { setSensorBusy(false) }
     }

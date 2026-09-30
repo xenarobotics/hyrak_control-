@@ -35,7 +35,9 @@ export function StatusStrip({ avoid }: { avoid: AvoidanceStatus | null }) {
     const bat = t?.battery.remaining_percent
     const batColor = bat == null ? undefined : bat < 20 ? '#f87171' : bat < 35 ? '#fbbf24' : '#4ade80'
     const armed = t?.flight_mode.is_armed ?? false
-    const aState = avoid
+    const rangeLost = !!avoid && avoid.enabled && (avoid.params?.use_range_sensor ?? 1) !== 0
+        && avoid.sensor_mode !== 'range' && (t?.flight_mode.is_in_air ?? false) && !avoid.stale
+    const aState = avoid?.stale ? 'stale' : avoid
         ? (avoid.enabled
             ? (avoid.armed ? (avoid.guarding ? 'guarding' : avoid.following ? 'follow' : avoid.state) : 'watching')
             : 'off')
@@ -59,9 +61,16 @@ export function StatusStrip({ avoid }: { avoid: AvoidanceStatus | null }) {
             <Cell icon={<Navigation size={13} />} label="HOME" value={t ? `${Math.round(t.home_distance_m)} m` : '-'} />
             <Cell icon={<Timer size={13} />} value={`${mm}:${ss}`} title="Flight time" />
             <Cell icon={<ShieldCheck size={13} />} label="AVOID"
-                value={String(aState).toUpperCase()}
-                color={aState === 'off' ? '#f87171' : aState === 'watching' ? '#fbbf24' : AVOID_COLOR[aState] ?? '#e5e7eb'}
-                title={avoid?.reason || (aState === 'off' ? 'Avoidance is off' : aState === 'watching' ? 'Detecting only - Steer is off' : '')} />
+                value={aState === 'stale' ? `STALE ${avoid?.stale_s ?? 0}s` : String(aState).toUpperCase()}
+                color={aState === 'stale' || aState === 'off' ? '#f87171' : aState === 'watching' ? '#fbbf24' : AVOID_COLOR[aState] ?? '#e5e7eb'}
+                title={aState === 'stale' ? 'No answer from avoidance - what you see is old' : avoid?.reason || (aState === 'off' ? 'Avoidance is off' : aState === 'watching' ? 'Detecting only - Steer is off' : '')} />
+            {rangeLost && (
+                <Cell label="SENSOR" value="RANGE LOST" color="#f87171"
+                    title="The range sensor stopped streaming: avoidance is on the camera (or blind) and its acting floor moved up" />
+            )}
+            {avoid?.sensor_stale && !avoid.stale && (
+                <Cell value="BLIND" color="#f87171" title="No scan has reached the map for 2 s" />
+            )}
             {avoid?.env === 'indoor' && (
                 <Cell label="NAV" value="INDOOR" color="#fcd34d"
                     title={`${avoid.env_reason ?? ''} - position from ${avoid.pose_source === 'local' ? 'PX4 local' : 'GPS'}`} />
