@@ -163,7 +163,7 @@ function DisplayGroup() {
                 sub="Normal: a simple, bright flight screen anyone can use - big buttons, plain words, only what matters right now. Dev: the full engineering interface with every tab and readout."
                 right={
                     <SegmentControl
-                        value={uiMode ?? 'normal'}
+                        value={uiMode ?? 'dev'}
                         onChange={v => setMode(v as 'normal' | 'dev')}
                         options={[
                             { value: 'normal', label: 'Normal', icon: <Sun size={12} /> },

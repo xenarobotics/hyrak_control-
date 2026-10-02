@@ -83,15 +83,17 @@ export function applyUiTextSize(size: UiTextSize) {
 
 
 // -- Interface mode ------------------------------------------------------------
-// normal: the plain-language flight screen anyone can use (default).
-// dev:    the full engineering interface (every tab, panel and readout).
+// normal: the plain-language flight screen anyone can use (opt-in, still
+//         being refined).
+// dev:    the full engineering interface (every tab, panel and readout) -
+//         the default.
 export type UiMode = 'normal' | 'dev'
 const MODE_KEY = 'hyrak-ui-mode'
 export const UI_MODE_EVENT = 'hyrak-ui-mode-change'
 
 export function getUiMode(): UiMode {
-    if (typeof window === 'undefined') return 'normal'
-    return localStorage.getItem(MODE_KEY) === 'dev' ? 'dev' : 'normal'
+    if (typeof window === 'undefined') return 'dev'
+    return localStorage.getItem(MODE_KEY) === 'normal' ? 'normal' : 'dev'
 }
 
 export function setUiMode(mode: UiMode) {
