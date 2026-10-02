@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils'
 import Image from 'next/image'
 import { Radio, Map, Bot, Package, SlidersHorizontal, Settings, AlertTriangle, LayoutDashboard } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useUiMode } from '@/hooks/useUiMode'
 import { useSwarmStore } from '@/store/swarm'
 import { FleetAside } from '@/components/swarm/FleetAside'
 import { StatusBar } from '@/components/layout/StatusBar'
@@ -39,7 +40,17 @@ function DroneConnection() {
 }
 
 // Lives inside WebRTCProvider so it can access streaming state
+// Normal mode: three places with plain names. Dev mode: every tool.
+const NAV_NORMAL = [
+    { href: '/command',  label: 'Fly',      icon: Radio },
+    { href: '/mission',  label: 'Plan',     icon: Map },
+    { href: '/settings', label: 'Settings', icon: Settings },
+]
+
 function PlatformNav() {
+    const [uiMode] = useUiMode()
+    const normal = uiMode === 'normal'
+    const nav = normal ? NAV_NORMAL : NAV
     const pathname = usePathname()
     const router = useRouter()
     const { isStreaming, stopStream } = useWebRTCContext()
@@ -70,17 +81,24 @@ function PlatformNav() {
     return (
         <>
             <aside
-                className="w-16 flex flex-col items-center py-4 gap-1 shrink-0 border-r"
-                style={{ background: 'hsl(var(--app-sidebar))', borderColor: 'hsl(var(--app-border))' }}
+                className={cn('flex flex-col items-center py-4 gap-1 shrink-0 border-r', normal ? 'hy-simple w-24 gap-2' : 'w-16')}
+                style={normal ? { borderColor: 'var(--s-line)', background: 'var(--s-panel)' }
+                    : { background: 'hsl(var(--app-sidebar))', borderColor: 'hsl(var(--app-border))' }}
             >
                 <div className="mb-6 p-2" title="HYRAK">
-                    <Image src="/brand/icon-dark.png" alt="HYRAK" width={26} height={26}
-                        className="dark:hidden" />
-                    <Image src="/brand/icon.png" alt="HYRAK" width={26} height={26}
-                        className="hidden dark:block" />
+                    {normal ? (
+                        <Image src="/brand/icon-dark.png" alt="HYRAK" width={30} height={30} />
+                    ) : (
+                        <>
+                            <Image src="/brand/icon-dark.png" alt="HYRAK" width={26} height={26}
+                                className="dark:hidden" />
+                            <Image src="/brand/icon.png" alt="HYRAK" width={26} height={26}
+                                className="hidden dark:block" />
+                        </>
+                    )}
                 </div>
 
-                {NAV.map(({ href, label, icon: Icon }) => {
+                {nav.map(({ href, label, icon: Icon }) => {
                     const active = pathname === href || pathname.startsWith(href + '/')
                     return (
                         <Link
@@ -88,22 +106,27 @@ function PlatformNav() {
                             href={href}
                             title={label}
                             onClick={(e) => handleNavClick(href, e)}
+                            aria-current={active ? 'page' : undefined}
                             className={cn(
-                                'flex flex-col items-center gap-1 w-12 py-2 rounded-lg text-xs transition-colors',
-                                active
+                                'flex flex-col items-center rounded-lg transition-colors',
+                                normal ? 'gap-1.5 w-20 py-3' : 'gap-1 w-12 py-2 text-xs',
+                                normal ? '' : active
                                     ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400'
                                     : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
                             )}
+                            style={normal ? (active ? { background: 'var(--s-blue)', color: '#fff' } : { color: 'var(--s-ink)' }) : undefined}
                         >
-                            <Icon size={18} />
-                            <span className="text-[10px] font-mono">{label}</span>
+                            <Icon size={normal ? 26 : 18} />
+                            <span className={normal ? 'text-[16px] font-bold' : 'text-[10px] font-mono'}>{label}</span>
                         </Link>
                     )
                 })}
 
-                <div className="mt-auto">
-                    <ThemeToggle />
-                </div>
+                {!normal && (
+                    <div className="mt-auto">
+                        <ThemeToggle />
+                    </div>
+                )}
             </aside>
 
             {/* Navigation guard popup */}
@@ -185,7 +208,8 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
     // bar would only duplicate them (and cover their OSD), so it's shown
     // everywhere else instead.
     const ownBar = ['/fly', '/command'].some(p => pathname === p || pathname.startsWith(p + '/'))
-    const showStatusBar = mounted && statusBarOn && !ownBar
+    const [uiMode] = useUiMode()
+    const showStatusBar = mounted && statusBarOn && !ownBar && uiMode !== 'normal'
 
     return (
         <TooltipProvider>
@@ -202,7 +226,8 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
                     <div className="flex flex-col flex-1 overflow-hidden">
                         {showStatusBar && <StatusBar />}
                         <ZoneBanner />
-                        <main className="flex-1 overflow-hidden p-3 md:p-4">
+                        <main className="flex-1 overflow-hidden p-3 md:p-4"
+                            style={uiMode === 'normal' ? { background: '#F4F7FB' } : undefined}>
                             {children}
                         </main>
                     </div>

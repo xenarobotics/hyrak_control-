@@ -321,3 +321,41 @@ html[data-fontsize='xlarge'] .text-\[13px\] { font-size: 17px !important; }
 }
 .rc-rise { animation: hyrak-rise 340ms ease-out both; }
 .rc-pulse { animation: hyrak-pulse 1.6s ease-in-out infinite; }
+
+/* ── Normal mode ("anyone can fly") ─────────────────────────────────────────
+   Daylight palette, always light whatever the app theme: cool paper, navy
+   ink, one cobalt for "do this", and traffic-light meaning for state only
+   (green = fine, amber = attention, red = stop). Every text/fill pair is
+   >= 4.5:1. Scoped to .hy-simple so Dev mode is untouched. */
+.hy-simple {
+  --s-paper: #F4F7FB;
+  --s-panel: #FFFFFF;
+  --s-ink: #0F1E33;
+  --s-ink-2: #43546B;
+  --s-line: #D3DCE7;
+  --s-blue: #1D55CF;
+  --s-blue-ink: #FFFFFF;
+  --s-blue-soft: #E5EDFC;
+  --s-green: #0A7A44;
+  --s-green-soft: #E2F4EA;
+  --s-amber: #FFC21F;
+  --s-amber-ink: #3D2A00;
+  --s-amber-soft: #FFF4D1;
+  --s-red: #C2261B;
+  --s-red-soft: #FCE6E4;
+  --s-radius: 14px;
+  color: var(--s-ink);
+  background: var(--s-paper);
+  color-scheme: light;
+  font-family: var(--font-atkinson), system-ui, sans-serif;
+  font-size: 17px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+.hy-simple :focus-visible {
+  outline: 3px solid var(--s-blue);
+  outline-offset: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hy-simple *, .hy-simple *::before, .hy-simple *::after { transition: none !important; animation: none !important; }
+}

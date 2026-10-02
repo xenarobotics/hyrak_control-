@@ -1,5 +1,6 @@
 'use client'
 
+import { useUiMode } from '@/hooks/useUiMode'
 import { useState, useEffect } from 'react'
 import { useTheme } from '@/lib/theme'
 import { getUiFont, setUiFont, getUiZoom, setUiZoom, getUiTextSize, setUiTextSize, UI_FONTS, UI_ZOOMS, UI_TEXT_SIZES, type UiFont, type UiTextSize } from '@/lib/uiPrefs'
@@ -153,9 +154,24 @@ function DisplayGroup() {
     const [font, setFont] = useState<UiFont>(() => getUiFont())
     const [zoom, setZoom] = useState<number>(() => getUiZoom())
     const [textSize, setTextSize] = useState<UiTextSize>(() => getUiTextSize())
+    const [uiMode, setMode] = useUiMode()
 
     return (
         <>
+            <PrefRow
+                label="Interface"
+                sub="Normal: a simple, bright flight screen anyone can use - big buttons, plain words, only what matters right now. Dev: the full engineering interface with every tab and readout."
+                right={
+                    <SegmentControl
+                        value={uiMode ?? 'normal'}
+                        onChange={v => setMode(v as 'normal' | 'dev')}
+                        options={[
+                            { value: 'normal', label: 'Normal', icon: <Sun size={12} /> },
+                            { value: 'dev',    label: 'Dev',    icon: <SlidersHorizontal size={12} /> },
+                        ]}
+                    />
+                }
+            />
             <PrefRow
                 label="Theme"
                 sub="Classic is the original palette. Midnight is the reworked dark - brighter secondary text and visible panel edges, for reading dense pages at a glance. Bright is the light theme."

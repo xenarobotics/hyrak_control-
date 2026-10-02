@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { Geist, Geist_Mono, Ubuntu, Inter, Nunito } from 'next/font/google'
+import { Geist, Geist_Mono, Ubuntu, Inter, Nunito, Atkinson_Hyperlegible_Next } from 'next/font/google'
 import { ThemeProvider } from '@/lib/theme'
 import './globals.css'
 
@@ -31,6 +31,14 @@ const nunito = Nunito({
   subsets: ['latin'],
 })
 
+// Normal mode's typeface: designed by the Braille Institute for readers with
+// low vision - unambiguous letter shapes (I/l/1, O/0) at a glance.
+const atkinson = Atkinson_Hyperlegible_Next({
+  variable: '--font-atkinson',
+  subsets: ['latin'],
+  weight: ['400', '500', '700', '800'],
+})
+
 export const metadata: Metadata = {
   title: 'HYRAK',
   description: 'Cloud-native drone intelligence',
@@ -56,7 +64,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={`${geistSans.variable} ${geistMono.variable} ${ubuntu.variable} ${inter.variable} ${nunito.variable} antialiased`} suppressHydrationWarning>
+      <body className={`${geistSans.variable} ${geistMono.variable} ${ubuntu.variable} ${inter.variable} ${nunito.variable} ${atkinson.variable} antialiased`} suppressHydrationWarning>
         <ThemeProvider>
           {children}
         </ThemeProvider>

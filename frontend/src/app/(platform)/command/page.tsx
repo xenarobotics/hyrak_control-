@@ -44,6 +44,8 @@ import { ActionRail } from '@/components/command/ActionRail'
 import { MissionBar } from '@/components/command/MissionBar'
 import { ObstacleRadar, DepthStrip } from '@/components/command/ObstacleRadar'
 import { useAvoidanceLive } from '@/components/command/useAvoidanceLive'
+import { useUiMode } from '@/hooks/useUiMode'
+import { SimpleCommand } from '@/components/simple/SimpleCommand'
 import { IndoorNavCard } from '@/components/command/IndoorNavCard'
 import { AiDrawer } from '@/components/command/AiDrawer'
 import { AiView } from '@/components/command/AiView'
@@ -160,7 +162,14 @@ function Toggle({ on, label, hint, onClick }: { on: boolean; label: string; hint
     )
 }
 
+// Normal mode (anyone can fly) or Dev mode (this full engineering screen).
 export default function CommandPage() {
+    const [uiMode] = useUiMode()
+    if (uiMode === null) return null
+    return uiMode === 'normal' ? <SimpleCommand /> : <DevCommand />
+}
+
+function DevCommand() {
     const [mounted, setMounted] = useState(false)
     const [layout, setLayout] = useState<Layout>(DEFAULT)
     const [wallOn, setWallOn] = useState(false)

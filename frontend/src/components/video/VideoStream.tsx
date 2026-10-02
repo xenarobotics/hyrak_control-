@@ -29,7 +29,9 @@ type AspectRatio = 'fill' | 'fit' | '16:9' | '4:3' | '1:1'
 // even while an AI mode runs - for hosts that show the AI view separately
 // (Command). Without it an overlay-mode stream, which has no return video,
 // leaves this pane black.
-export function VideoStream({ bare = false, cleanFeed = false }: { bare?: boolean; cleanFeed?: boolean } = {}) {
+// `noOsd`: the picture only, no flight overlay (Normal mode draws its own,
+// plainer readouts outside the picture).
+export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: { bare?: boolean; cleanFeed?: boolean; noOsd?: boolean } = {}) {
     const [hevcFailed, setHevcFailed] = useState(false)
     const {
         remoteStream, localStream,
@@ -182,7 +184,7 @@ export function VideoStream({ bare = false, cleanFeed = false }: { bare?: boolea
             {/* Offline state - the relay preview is live before the backend
                 stream negotiates, so "VIDEO OFFLINE" over a working picture
                 would be wrong. */}
-            {!isStreaming && !localPreviewUrl && (
+            {!isStreaming && !localPreviewUrl && !noOsd && (
                 <div className="flex-1 flex flex-col items-center justify-center gap-3"
                     style={{ color: 'rgba(255,255,255,0.3)' }}
                 >
@@ -198,7 +200,7 @@ export function VideoStream({ bare = false, cleanFeed = false }: { bare?: boolea
             )}
 
             {/* OSD overlay - fly tab only */}
-            {isStreaming && <VideoOSD stats={stats} />}
+            {isStreaming && !noOsd && <VideoOSD stats={stats} />}
 
             {/* PiP local feed - only useful as a comparison while viewing the AI-processed remote feed */}
             {isStreaming && localStream && !isRaw && (

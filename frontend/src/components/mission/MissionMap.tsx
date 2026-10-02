@@ -18,7 +18,7 @@ import { useMissionStore, planKeyForDrone } from '@/store/mission'
 import { useDroneStore } from '@/store/drone'
 import { useSwarmStore } from '@/store/swarm'
 import { MAP_LAYERS, WP_META } from '@/types/mission'
-import type { Waypoint } from '@/types/mission'
+import type { Waypoint, MapLayer } from '@/types/mission'
 import { getServerUrl } from '@/lib/server-url'
 import { visibleInterval } from '@/lib/poll'
 import { getHazards, getObstaclesAndPath, addHazard, type KnownHazard, type LiveObstacle, type LatLng } from '@/lib/avoidance'
@@ -496,11 +496,14 @@ function WaypointMarker({ wp, index, readOnly = false }: { wp: Waypoint; index: 
  * cannot change the mission. follow: keep the drone in view. compact: a
  * minimap - no legend box.
  */
-export default function MissionMap({ readOnly = false, follow = false, compact = false }: { readOnly?: boolean; follow?: boolean; compact?: boolean } = {}) {
+// `layer`: force a base layer for this instance (Normal mode uses the plain
+// street map) without touching the operator's saved choice.
+export default function MissionMap({ readOnly = false, follow = false, compact = false, layer }: { readOnly?: boolean; follow?: boolean; compact?: boolean; layer?: MapLayer } = {}) {
   const rawWaypoints       = useMissionStore(s => s.waypoints)
   const homePosition       = useMissionStore(s => s.homePosition)
   const getRtlWaypoint     = useMissionStore(s => s.getRtlWaypoint)
-  const mapLayer           = useMissionStore(s => s.mapLayer)
+  const savedLayer         = useMissionStore(s => s.mapLayer)
+  const mapLayer           = layer ?? savedLayer
   const surveyPolygon      = useMissionStore(s => s.surveyPolygon)
   const surveyMode         = useMissionStore(s => s.surveyMode)
   const updateSurveyPoint  = useMissionStore(s => s.updateSurveyPoint)
