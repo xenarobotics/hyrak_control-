@@ -519,7 +519,9 @@ def test_status_route_does_not_create_phantom_controllers():
     from app.avoidance import routes
     from app.avoidance.core import controller as avoidance
     app = FastAPI(); app.include_router(routes.router)
-    assert TestClient(app).get("/api/avoidance/never-seen-id/status").status_code == 404
+    r = TestClient(app).get("/api/avoidance/never-seen-id/status")
+    assert r.status_code == 200 and r.json()["enabled"] is False
+    assert isinstance(r.json()["sensors"], list)            # the shape the panels read
     assert not avoidance.has_controller("never-seen-id")
 
 

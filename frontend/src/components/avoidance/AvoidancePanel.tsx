@@ -175,7 +175,7 @@ export function AvoidancePanel() {
     const nearest = status ? nearestAheadM(status.obstacle_distance_cm) : null
     // Any sensor streaming counts, exactly like the takeoff interlock: with the
     // sim's depth camera running, the mono path is switched off on purpose.
-    const camOk = !!status?.sensors.some(s => s.status === 'ok')
+    const camOk = !!status?.sensors?.some(s => s.status === 'ok')
     const goal = (status as (AvoidanceStatus & { goal?: [number, number] | null }) | null)?.goal ?? null
     const p = status?.params
 

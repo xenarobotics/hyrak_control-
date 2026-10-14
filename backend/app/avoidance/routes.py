@@ -34,9 +34,12 @@ async def all_status():
 
 @router.get("/{drone_id}/status")
 async def drone_status(drone_id: str):
-    # Non-creating: a stale id from the UI must not spawn a phantom controller.
+    # Non-creating: a stale id from the UI must not spawn a phantom
+    # controller - but the answer keeps the full status shape (avoidance off),
+    # because the Fly and Command panels render it. A 404 here crashed the
+    # Fly tab's avoidance card (2026-10-14).
     if not avoidance.has_controller(drone_id):
-        raise HTTPException(status_code=404, detail="no avoidance controller for this drone")
+        return avoidance.AvoidanceController(drone_id).status()
     return avoidance.controller(drone_id).status()
 
 

@@ -85,7 +85,11 @@ export interface AvoidanceEvent {
 async function j<T>(r: Response): Promise<T> { return r.json() as Promise<T> }
 
 export async function getStatus(droneId: string): Promise<AvoidanceStatus> {
-    return j(await fetch(api(`/${droneId}/status`)))
+    // Throws on an error answer: callers keep their last good status rather
+    // than render an error body as one (the Fly-tab crash of 2026-10-14).
+    const r = await fetch(api(`/${droneId}/status`))
+    if (!r.ok) throw new Error(`avoidance status HTTP ${r.status}`)
+    return r.json()
 }
 
 export async function setEnabled(droneId: string, enabled: boolean,
