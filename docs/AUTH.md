@@ -91,8 +91,8 @@ Generate a real value with `python3 -c "import secrets; print(secrets.token_urls
 ## Login protection
 
 * Per client IP: 5 failures in 15 minutes lock that address out for the window (HTTP 429).
-* Per username: after 5 failures each further attempt must wait an exponentially growing delay (2 s, 4 s, 8 s ... capped at 120 s), reset by a success or 15 minutes of quiet. Deliberately not a hard lock: an attacker spraying a known operator name from many addresses must not lock the operator out of their aircraft.
-* Client IP is `CF-Connecting-IP`, then `X-Forwarded-For`, but only when the socket peer is in `TRUSTED_PROXIES` (default loopback, where cloudflared runs); otherwise the socket peer itself.
+* Per username: after 5 failures each further attempt must wait an exponentially growing delay (2 s, 4 s, 8 s ... capped at 120 s), reset by a success or 15 minutes of quiet, with at most one attempt in flight while in backoff and a hard cap of 20 attempts per username per window. Attempts are counted before the first await, so concurrent requests cannot slip past the limit. Deliberately not a hard lock: an attacker spraying a known operator name from many addresses must not lock the operator out of their aircraft.
+* Client IP is `CF-Connecting-IP`, then `X-Forwarded-For` read right to left (the first entry that is not a trusted proxy), but only when the socket peer is in `TRUSTED_PROXIES` (default loopback, where cloudflared runs); otherwise the socket peer itself.
 * The username / password check runs scrypt even for an unknown user, so timing does not reveal whether a name exists; the error text is the same either way.
 * Every success and failure is logged with the IP; passwords are never logged.
 

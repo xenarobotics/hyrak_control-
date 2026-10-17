@@ -49,11 +49,35 @@ def is_trusted_proxy(peer: str | None) -> bool:
     return any(addr in net for net in _trusted_networks())
 
 
+def _from_xff(x_forwarded_for: str | None) -> str | None:
+    """The client per X-Forwarded-For, read from the RIGHT.
+
+    Each proxy appends the address it received from, so only the entries a
+    trusted proxy wrote can be believed; anything to their left was supplied
+    by the client and is free text. Walk right to left and stop at the first
+    address that is not one of our proxies. An unparseable entry ends the
+    walk with no answer (the caller falls back to the socket peer)."""
+    entries = [e.strip() for e in (x_forwarded_for or "").split(",") if e.strip()]
+    for entry in reversed(entries):
+        try:
+            ipaddress.ip_address(entry)
+        except ValueError:
+            return None
+        if not is_trusted_proxy(entry):
+            return entry
+    return None
+
+
 def client_ip_from(peer: str | None, cf_connecting_ip: str | None,
                    x_forwarded_for: str | None) -> str:
     """The address to log, rate-limit and geolocate."""
     if is_trusted_proxy(peer):
-        forwarded = (cf_connecting_ip or "").strip() or (x_forwarded_for or "").split(",")[0].strip()
+        # cloudflared sets CF-Connecting-IP itself (overwriting any client
+        # value), and it is only read when the peer is a trusted proxy.
+        cf = (cf_connecting_ip or "").strip()
+        if cf:
+            return cf
+        forwarded = _from_xff(x_forwarded_for)
         if forwarded:
             return forwarded
     return (peer or "").strip() or "-"

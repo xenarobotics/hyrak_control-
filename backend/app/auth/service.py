@@ -55,6 +55,9 @@ LOGIN_WINDOW_S = 15 * 60
 # attacker's side of the connection.
 USERNAME_BACKOFF_BASE_S = 2.0
 USERNAME_BACKOFF_MAX_S = 120.0
+# Absolute ceiling per username per window, whatever the spacing: backoff
+# alone would still allow ~10 guesses an hour forever.
+USERNAME_HARD_CAP = 20
 # How often a live socket's token is re-checked against the store.
 SOCKET_REVALIDATE_S = TOKEN_CACHE_S
 LEGACY_USER_ID = "legacy-token"
@@ -114,6 +117,7 @@ def reset_for_tests() -> None:
     _memory = MemoryStore()
     _token_cache.clear()
     _failures.clear()
+    _inflight.clear()
     _revocation_listeners.clear()
 
 
@@ -193,17 +197,45 @@ def username_backoff_s(username: str, now: float | None = None) -> float:
     return max(0.0, q[-1] + delay - now)
 
 
-def _limited(username: str, ip: str) -> float | None:
-    """None when the attempt may proceed, else the seconds to wait (0 means
-    the per-IP hard lock, i.e. the rest of the window)."""
+# Attempts currently between reservation and verdict, per username.
+_inflight: dict[str, int] = {}
+
+
+def _reserve_attempt(username: str, ip: str) -> None:
+    """Check the limits AND count this attempt, with no await in between.
+
+    The attempt is recorded as a failure up front (a success clears it), so
+    twenty concurrent requests cannot all pass the check before the first
+    verdict lands: the sixth already sees five. Raises RateLimited."""
     now = time.monotonic()
-    if len(_prune(f"ip:{ip}", now)) >= LOGIN_MAX_FAILURES:
-        return 0.0
-    wait = username_backoff_s(username, now)
-    return wait if wait > 0 else None
+    ipq = _prune(f"ip:{ip}", now)
+    uq = _prune(f"u:{username}", now)
+    if len(ipq) >= LOGIN_MAX_FAILURES:
+        raise RateLimited("Too many attempts from this address. Try again in 15 minutes.")
+    if len(uq) >= USERNAME_HARD_CAP:
+        raise RateLimited("Too many attempts for this account. Try again in 15 minutes.")
+    if len(uq) >= LOGIN_MAX_FAILURES:
+        # In backoff: one attempt at a time, and only after the delay.
+        if _inflight.get(username, 0) > 0:
+            raise RateLimited("Another sign-in for this account is in progress. Try again shortly.")
+        wait = username_backoff_s(username, now)
+        if wait > 0:
+            raise RateLimited(f"Too many attempts. Try again in {int(wait) + 1} seconds.")
+    ipq.append(now)
+    uq.append(now)
+    _inflight[username] = _inflight.get(username, 0) + 1
+
+
+def _release_attempt(username: str) -> None:
+    n = _inflight.get(username, 0) - 1
+    if n > 0:
+        _inflight[username] = n
+    else:
+        _inflight.pop(username, None)
 
 
 def _record_failure(username: str, ip: str) -> None:
+    """A failure that took no reservation (malformed request)."""
     now = time.monotonic()
     _prune(f"u:{username}", now).append(now)
     _prune(f"ip:{ip}", now).append(now)
@@ -344,20 +376,21 @@ async def login(username: str, password: str, ip: str, label: str = "") -> tuple
         _record_failure(username or "-", ip)
         logger.warning(f"auth: login failed (malformed) ip={ip}")
         raise AuthError("Invalid username or password")
-    wait = _limited(username, ip)
-    if wait is not None:
-        logger.warning(f"auth: login rate-limited user={username} ip={ip} wait={wait:.0f}s")
-        if wait > 0:
-            raise RateLimited(f"Too many attempts. Try again in {int(wait) + 1} seconds.")
-        raise RateLimited("Too many attempts from this address. Try again in 15 minutes.")
-
-    user = await _find_user(username)
-    # Always run the hash, even for an unknown user, so the response time
-    # does not say whether the username exists.
-    stored = user.password_hash if user else _DUMMY_HASH
-    ok = verify_password(password, stored) and user is not None and not user.disabled
+    try:
+        _reserve_attempt(username, ip)      # synchronous: no await before this
+    except RateLimited as e:
+        logger.warning(f"auth: login rate-limited user={username} ip={ip}: {e}")
+        raise
+    try:
+        user = await _find_user(username)
+        # Always run the hash, even for an unknown user, so the response
+        # time does not say whether the username exists.
+        stored = user.password_hash if user else _DUMMY_HASH
+        ok = verify_password(password, stored) and user is not None and not user.disabled
+    finally:
+        _release_attempt(username)
     if not ok:
-        _record_failure(username, ip)
+        # Already counted by the reservation.
         logger.warning(f"auth: login failed user={username} ip={ip}")
         raise AuthError("Invalid username or password")
 

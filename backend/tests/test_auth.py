@@ -355,10 +355,84 @@ def test_client_ip_honours_proxy_headers_only_from_trusted_peers(monkeypatch):
     from app.config import get_settings
     monkeypatch.setattr(get_settings(), "trusted_proxies", "127.0.0.1,::1,10.8.0.0/24")
     assert clientip.client_ip_from("127.0.0.1", "203.0.113.9", None) == "203.0.113.9"
-    assert clientip.client_ip_from("127.0.0.1", None, "198.51.100.4, 10.0.0.1") == "198.51.100.4"
+    # XFF is read from the right: trusted hops are skipped, the first
+    # untrusted address is the client; a spoofed leftmost entry is ignored.
+    assert clientip.client_ip_from("127.0.0.1", None, "198.51.100.4, 10.8.0.5") == "198.51.100.4"
+    assert clientip.client_ip_from("127.0.0.1", None, "6.6.6.6, 203.0.113.7") == "203.0.113.7"
+    assert clientip.client_ip_from("127.0.0.1", None, "6.6.6.6, 203.0.113.7, 10.8.0.5") == "203.0.113.7"
+    assert clientip.client_ip_from("127.0.0.1", None, "garbage, 10.8.0.5") == "127.0.0.1"
+    assert clientip.client_ip_from("127.0.0.1", None, "10.8.0.5, ::1") == "127.0.0.1"
     assert clientip.client_ip_from("10.8.0.17", "203.0.113.9", None) == "203.0.113.9"
     # An untrusted peer's headers are ignored.
     assert clientip.client_ip_from("192.168.1.50", "203.0.113.9", "1.2.3.4") == "192.168.1.50"
     assert clientip.client_ip_from(None, "203.0.113.9", None) == "-"
     monkeypatch.setattr(get_settings(), "trusted_proxies", "")
     assert clientip.client_ip_from("127.0.0.1", "203.0.113.9", None) == "127.0.0.1"
+
+
+async def test_concurrent_bad_logins_cannot_bypass_the_limit(monkeypatch):
+    """All checks used to pass before any failure was recorded, because the
+    user lookup awaits. The reservation is now taken before the first await."""
+    import asyncio
+    await _user("kim")
+    real_find = service._find_user
+
+    async def slow_find(username):
+        await asyncio.sleep(0.02)                             # a real suspension point
+        return await real_find(username)
+    monkeypatch.setattr(service, "_find_user", slow_find)
+
+    async def attempt(i):
+        try:
+            await service.login("kim", "wrong-password-here", f"10.2.0.{i}")
+        except service.RateLimited:
+            return "limited"
+        except service.AuthError:
+            return "checked"
+        return "ok"
+
+    results = await asyncio.gather(*(attempt(i) for i in range(20)))
+    assert results.count("checked") == service.LOGIN_MAX_FAILURES
+    assert results.count("limited") == 20 - service.LOGIN_MAX_FAILURES
+    assert not service._inflight                              # every reservation released
+
+
+async def test_backoff_allows_one_in_flight_attempt_and_hard_cap(monkeypatch):
+    import asyncio
+    await _user("lee")
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(service.time, "monotonic", lambda: clock["t"])
+    for i in range(service.LOGIN_MAX_FAILURES):
+        with pytest.raises(service.AuthError):
+            await service.login("lee", "wrong-password-here", f"10.3.0.{i}")
+    clock["t"] += service.USERNAME_BACKOFF_MAX_S                # delay elapsed
+
+    gate = asyncio.Event()
+    real_find = service._find_user
+
+    async def held_find(username):
+        await gate.wait()
+        return await real_find(username)
+    monkeypatch.setattr(service, "_find_user", held_find)
+    first = asyncio.create_task(service.login("lee", "wrong-password-here", "10.3.1.1"))
+    await asyncio.sleep(0)
+    with pytest.raises(service.RateLimited, match="in progress"):
+        await service.login("lee", "correct-horse-battery", "10.3.1.2")
+    gate.set()
+    with pytest.raises(service.AuthError):
+        await first
+    monkeypatch.setattr(service, "_find_user", real_find)
+
+    # Hard cap: guesses that each wait out the backoff still stop at the
+    # cap. (At the real cap of 20 the backoff alone outlasts the window, so
+    # use a small cap to reach it inside one window.)
+    monkeypatch.setattr(service, "USERNAME_HARD_CAP", service.LOGIN_MAX_FAILURES + 3)
+    n = service.LOGIN_MAX_FAILURES + 1
+    while n < service.USERNAME_HARD_CAP:
+        clock["t"] += service.username_backoff_s("lee") + 0.01
+        with pytest.raises(service.AuthError):
+            await service.login("lee", "wrong-password-here", f"10.4.0.{n}")
+        n += 1
+    clock["t"] += service.username_backoff_s("lee") + 0.01
+    with pytest.raises(service.RateLimited, match="this account"):
+        await service.login("lee", "correct-horse-battery", "10.4.1.1")
