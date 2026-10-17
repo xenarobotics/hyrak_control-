@@ -92,27 +92,82 @@ for a in "$@"; do
 done
 
 # -- process housekeeping -------------------------------------------------------
+# EVERY kill in this file is scoped to a PID this launcher recorded in
+# $RUN_DIR/<service>.pid (backend, frontend, cloudflared) or to a descendant
+# of one. Nothing is ever matched by name or killed because it holds a port:
+# mavsdk_server processes are the backend's children and go with its tree,
+# and a port held by a process we did not start is reported, not shot.
+# (Earlier revisions ran `pkill -f mavsdk_server` and `kill -9` on whatever
+# owned :8001/:3000, which took out other sessions' servers.)
+
+descendants() {  # pid -> every descendant pid, depth first
+    local child
+    for child in $(ps -o pid= --ppid "$1" 2>/dev/null); do
+        descendants "$child"
+        echo "$child"
+    done
+}
+is_recorded() {  # pid -> 0 if pid is a recorded service pid or a descendant of one
+    local pid="$1" f rec d
+    for f in "$RUN_DIR"/*.pid; do
+        [ -f "$f" ] || continue
+        rec=$(cat "$f" 2>/dev/null); [ -n "$rec" ] || continue
+        [ "$pid" = "$rec" ] && return 0
+        for d in $(descendants "$rec"); do [ "$pid" = "$d" ] && return 0; done
+    done
+    return 1
+}
+kill_tree() {  # pid [signal]: signal pid and all its descendants, children first
+    local pid="$1" sig="${2:-TERM}" d
+    for d in $(descendants "$pid"); do kill -"$sig" "$d" 2>/dev/null; done
+    kill -"$sig" "$pid" 2>/dev/null
+}
+kill_recorded() {  # name expect: stop the recorded service tree (TERM, then KILL after 5 s)
+    # `expect` is a substring the recorded PID's command line must contain: a
+    # pid file left by a crashed launcher may name a pid the kernel has since
+    # given to something else, and that something else is not ours to stop.
+    local name="$1" expect="$2" f="$RUN_DIR/$1.pid" pid i args
+    [ -f "$f" ] || return 0
+    pid=$(cat "$f" 2>/dev/null); rm -f "$f"
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 0
+    args=$(ps -o args= -p "$pid" 2>/dev/null)
+    if [[ "$args" != *"$expect"* ]]; then
+        warn launcher "$name.pid names $pid but that is now '${args:0:60}' - leaving it alone"
+        return 0
+    fi
+    kill_tree "$pid" TERM
+    for i in $(seq 1 10); do kill -0 "$pid" 2>/dev/null || return 0; sleep 0.5; done
+    warn launcher "$name ($pid) ignored SIGTERM - killing its tree"
+    kill_tree "$pid" KILL
+}
+
 free_port() {
-    # EVERY owner of the port, not the first one ss prints: uvicorn's reloader
-    # parent and its worker share the listening socket, and after a code
-    # reload the worker can be a zombie - ss lists the zombie, kill -9 on a
-    # zombie does nothing, the parent keeps the port, and the next start dies
-    # with "Address already in use" while the app looks up (it is wedged).
-    # A zombie's PARENT is what actually holds the socket, so kill that.
+    # Reports EVERY owner of the port, not the first one ss prints: uvicorn's
+    # reloader parent and its worker share the listening socket, and after a
+    # code reload the worker can be a zombie - ss lists the zombie, and the
+    # zombie's PARENT is what actually holds the socket.
     # `ss -p` walks every process's fds and has hung for minutes on this
     # machine: bounded, and fuser as the fallback.
-    local port="$1" pids pid ppid state i
+    local port="$1" pids pid ppid state i who
     pids=$(timeout 5 ss -ltnp 2>/dev/null | awk -v p=":$port" '$4 ~ p"$"' | grep -oP 'pid=\K[0-9]+' | sort -u)
     [ -z "$pids" ] && pids=$(timeout 5 fuser -n tcp "$port" 2>/dev/null)
     for pid in $pids; do
         state=$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ')
         if [[ "$state" == Z* ]]; then
             ppid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
-            warn launcher "port $port held by zombie $pid - stopping its parent $ppid"
-            [[ -n "$ppid" && "$ppid" != 1 ]] && kill -9 "$ppid" 2>/dev/null
+            [[ -n "$ppid" && "$ppid" != 1 ]] && pid="$ppid"
+        fi
+        if is_recorded "$pid"; then
+            warn launcher "port $port held by a previous launch ($pid) - stopping it"
+            kill_tree "$pid" TERM
+            for i in $(seq 1 10); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
+            kill -0 "$pid" 2>/dev/null && kill_tree "$pid" KILL
         else
-            warn launcher "port $port in use by $pid - stopping it"
-            kill -9 "$pid" 2>/dev/null
+            who=$(ps -o pid=,user=,comm=,args= -p "$pid" 2>/dev/null | cut -c1-120)
+            bad launcher "port $port is held by a process this launcher did not start:"
+            printf '    %s\n' "$who"
+            bad launcher "stop it yourself (or run its own launcher's stop), then rerun ./start.sh"
+            exit 1
         fi
     done
     for i in $(seq 1 10); do
@@ -121,8 +176,19 @@ free_port() {
     done
     bad launcher "port $port still busy after 5 s"
 }
-kill_mavsdk()      { pkill -TERM -f mavsdk_server 2>/dev/null && sleep 0.5 || true; }
-kill_cloudflared() { pkill -TERM -f "cloudflared tunnel run" 2>/dev/null && sleep 0.5 || true; }
+
+# Log rotation: .logs/backend.log once reached 16 MB and kept growing. On every
+# start, any service log over 5 MB moves to <name>.log.1 (replacing the previous
+# .1), so a fresh run starts on a small file and one generation of history stays.
+rotate_logs() {
+    local f
+    for f in "$LOG_DIR"/*.log; do
+        [ -f "$f" ] || continue
+        if [ "$(stat -c %s "$f" 2>/dev/null || echo 0)" -gt $((5 * 1024 * 1024)) ]; then
+            mv -f "$f" "$f.1" && : > "$f"
+        fi
+    done
+}
 
 PIDS=()
 cleanup() {
@@ -131,10 +197,13 @@ cleanup() {
     say launcher "$B" "stopping..."
     touch "$RUN_DIR/stopping"
     for pid in "${PIDS[@]:-}"; do kill "$pid" 2>/dev/null; done
-    kill_cloudflared
+    # Recorded trees only: the backend's tree includes the mavsdk_server
+    # children it spawned, the frontend's includes next's worker.
+    kill_recorded cloudflared cloudflared
+    kill_recorded backend app.main
+    kill_recorded frontend next
     wait 2>/dev/null
-    kill_mavsdk
-    rm -f "$RUN_DIR/stopping" "$RUN_DIR/cloudflared.pid"
+    rm -f "$RUN_DIR/stopping"
     say launcher "$B" "stopped"
     exit 0
 }
@@ -229,16 +298,22 @@ printf '%s\n\n' "${D}full logs: ./start.sh logs backend|frontend|tunnel     heal
 : > "$LOG_DIR/events.log"
 rm -f "$RUN_DIR/stopping"
 
+rotate_logs
+# Leftovers of a previous launch that did not get to clean up (its pid files
+# are still here): stop those trees, and only those. mavsdk_server children
+# go with the backend's tree.
+kill_recorded backend app.main
+kill_recorded frontend next
+kill_recorded cloudflared cloudflared
 free_port 8001
 free_port 3000
-kill_mavsdk
-[ $TUNNEL = 1 ] && kill_cloudflared
 
 feed_backend & PIDS+=($!)
 feed_frontend & PIDS+=($!)
 
 say backend "$CYA" "starting (FastAPI)"
 (cd "$BACKEND_DIR" && exec uv run python -m app.main) >> "$LOG_DIR/backend.log" 2>&1 & PIDS+=($!)
+echo $! > "$RUN_DIR/backend.pid"
 
 if [ $PROD = 1 ]; then
     say frontend "$MAG" "building production bundle (1-3 min)..."
@@ -249,9 +324,11 @@ if [ $PROD = 1 ]; then
     fi
     ok frontend "built"
     (cd "$FRONTEND_DIR" && exec npm run start -- -p 3000) >> "$LOG_DIR/frontend.log" 2>&1 & PIDS+=($!)
+    echo $! > "$RUN_DIR/frontend.pid"
 else
     say frontend "$MAG" "starting (Next.js dev, hot reload)"
     (cd "$FRONTEND_DIR" && exec npm run dev) >> "$LOG_DIR/frontend.log" 2>&1 & PIDS+=($!)
+    echo $! > "$RUN_DIR/frontend.pid"
 fi
 
 if [ $TUNNEL = 1 ]; then
