@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
-Local RF relay agent — bridges this ground-station laptop's wfb-ng MAVLink
+Local RF relay agent - bridges this ground-station laptop's wfb-ng MAVLink
 UDP (start-gs.sh's downlink on 127.0.0.1:14550, uplink listener on
 127.0.0.1:14551) to a plain loopback WebSocket the browser can actually
-read — see frontend/src/lib/localRfRelay.ts for the browser side.
+read - see frontend/src/lib/localRfRelay.ts for the browser side.
 
-Never touches the internet — only 127.0.0.1. This plays exactly the role a
+Never touches the internet - only 127.0.0.1. This plays exactly the role a
 USB radio's OS driver already plays for the site's existing Web Serial
 telemetry bridge: something has to turn "raw bytes on this machine" into a
 form the browser has an API for. The browser is still the only thing that
-ever talks to the actual server.
+ever talks to the actual server. Only the HYRAK site's origin may connect
+(see allowed_origins below; HYRAK_ALLOWED_ORIGINS / --allow-origin extend
+it) and HYRAK_RELAY_TOKEN adds a shared secret on top.
 
 Setup:
     pip install websockets
@@ -21,12 +23,57 @@ Usage (run alongside start-gs.sh, on this same laptop):
 import argparse
 import asyncio
 import logging
+import os
 import socket
 
 import websockets
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("telemetry_relay")
+
+# ---------------------------------------------------------------------------
+# Who may connect. This socket is loopback-only, but ANY web page open in a
+# browser on this machine can open ws://127.0.0.1:<port> and, before this
+# check existed, inject MAVLink into the aircraft. Browsers always send an
+# Origin header, so the relay only accepts the HYRAK site (and a dev
+# frontend); add more with HYRAK_ALLOWED_ORIGINS=https://a,https://b or
+# --allow-origin. Connections without an Origin come from non-browser
+# processes on this machine, which could reach the UDP ports directly
+# anyway, so they are allowed.
+#
+# Optional second lock: HYRAK_RELAY_TOKEN=<secret>. When set, the first
+# WebSocket message must be exactly that token (text or bytes) or the
+# connection is closed; the browser side sends it when configured with the
+# same value.
+# ---------------------------------------------------------------------------
+DEFAULT_ORIGINS = ["https://dev.xenarobotics.com", "http://localhost:3000"]
+RELAY_TOKEN = os.environ.get("HYRAK_RELAY_TOKEN", "")
+
+
+def allowed_origins(extra: list[str] | None = None) -> list:
+    origins = list(DEFAULT_ORIGINS)
+    origins += [o.strip() for o in os.environ.get("HYRAK_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+    origins += [o.strip() for o in (extra or []) if o.strip()]
+    return origins + [None]   # None = no Origin header (non-browser client)
+
+
+async def check_token(ws) -> bool:
+    """First-message shared-secret check. True when the client may proceed."""
+    if not RELAY_TOKEN:
+        return True
+    try:
+        first = await asyncio.wait_for(ws.recv(), timeout=5.0)
+    except Exception:
+        logger.warning("client sent no token within 5 s - closing")
+        await ws.close(1008, "token required")
+        return False
+    if isinstance(first, (bytes, bytearray)):
+        first = first.decode(errors="replace")
+    if first != RELAY_TOKEN:
+        logger.warning("client sent a wrong HYRAK_RELAY_TOKEN - closing")
+        await ws.close(1008, "bad token")
+        return False
+    return True
 
 
 async def main():
@@ -37,7 +84,7 @@ async def main():
     # THE HOSTS WERE NOT LOOPBACK-FOREVER, AND WERE WRITTEN AS IF THEY WERE.
     #
     # Both directions assumed wfb-ng runs on this same laptop. Move the decoder
-    # onto its own board — which is exactly what the Luckfox ground dongle is —
+    # onto its own board - which is exactly what the Luckfox ground dongle is -
     # and the two directions break differently, which is what makes it so hard
     # to see:
     #
@@ -51,7 +98,7 @@ async def main():
     ap.add_argument("--uplink-host", default="127.0.0.1",
                     help="Host running wfb_tx's uplink listener. Set this when the "
                          "RF decoder is NOT on this machine (e.g. a Luckfox dongle) "
-                         "— otherwise commands go into this laptop's loopback and "
+                         "- otherwise commands go into this laptop's loopback and "
                          "vanish while telemetry keeps working.")
     ap.add_argument("--downlink-host", default="127.0.0.1",
                     help="Address to receive wfb_rx's downlink on. Use 0.0.0.0 when "
@@ -61,6 +108,8 @@ async def main():
                          "useful if something else on this network should own them.")
     ap.add_argument("--register-port", type=int, default=9000,
                     help="The decoder's registration listener.")
+    ap.add_argument("--allow-origin", action="append", default=[],
+                    help="Extra browser origin allowed to connect (repeatable; also HYRAK_ALLOWED_ORIGINS)")
     args = ap.parse_args()
 
     current_client = {"ws": None}
@@ -73,7 +122,7 @@ async def main():
         try:
             await ws.send(data)
         except Exception:
-            pass  # client disconnected mid-send — next datagram will just drop too, fine for telemetry
+            pass  # client disconnected mid-send - next datagram will just drop too, fine for telemetry
 
     class _DownlinkProtocol(asyncio.DatagramProtocol):
         def datagram_received(self, data: bytes, addr) -> None:
@@ -87,8 +136,8 @@ async def main():
 
         WHY THE AGENT AND NOT THE BROWSER. The decoder pushes telemetry to one
         client and must be told which. The desktop app tells it directly, but
-        a browser tab cannot open a UDP socket — which is the entire reason
-        this agent exists — so a browser session had no way to say so and fell
+        a browser tab cannot open a UDP socket - which is the entire reason
+        this agent exists - so a browser session had no way to say so and fell
         back to the decoder inferring the destination from its DHCP lease
         file. That inference cannot see a statically addressed PC at all, and
         after another machine has held the address it keeps aiming at the
@@ -105,8 +154,8 @@ async def main():
             return                       # nothing to claim on our own loopback
         target = (args.uplink_host, args.register_port)
         # A datagram endpoint rather than a raw socket with loop.sock_recvfrom.
-        # sock_recvfrom is NOT implemented on every event loop — uvloop raises
-        # NotImplementedError — and this file is a standalone script that
+        # sock_recvfrom is NOT implemented on every event loop - uvloop raises
+        # NotImplementedError - and this file is a standalone script that
         # someone may well run under uvloop for the same reason the server
         # does. create_datagram_endpoint is the portable spelling and it is
         # the one asyncio actually guarantees.
@@ -126,7 +175,7 @@ async def main():
             #
             # There is exactly ONE direct-UDP client on the decoder and an
             # explicit registration beats everything, including another
-            # explicit registration — and a registration from a DIFFERENT
+            # explicit registration - and a registration from a DIFFERENT
             # address does not update a variable, it tears down and respawns
             # both wfb_rx processes.
             #
@@ -150,7 +199,7 @@ async def main():
 
             # WATCH FOR A SECOND REGISTRANT. The reply names where the decoder
             # is sending. If that destination is different from the one our own
-            # last registration produced, something else registered in between —
+            # last registration produced, something else registered in between -
             # and two registrants on a timer thrash the feeds indefinitely.
             # We cannot see our own address, but we do not need to: a change
             # between our own consecutive registrations is the signal.
@@ -171,7 +220,7 @@ async def main():
                 flaps += 1
                 logger.warning(
                     f"the decoder's MAVLink destination changed to {dest} between our "
-                    f"own registrations (was {last_dest}) — something else is "
+                    f"own registrations (was {last_dest}) - something else is "
                     f"registering too, and only one client can have the feeds"
                 )
                 if flaps >= 3:
@@ -179,7 +228,7 @@ async def main():
                     logger.error(
                         "STOPPING registration: another ground station keeps claiming "
                         "this decoder, and two registrants on a timer restart the feeds "
-                        "every few seconds indefinitely — which looks exactly like an RF "
+                        "every few seconds indefinitely - which looks exactly like an RF "
                         "or air-unit fault. Backing off so the other one wins and the "
                         "feeds stay up. Close the other ground station, or start this "
                         "agent with --no-register."
@@ -188,7 +237,7 @@ async def main():
             if dest:
                 last_dest = dest
 
-            # Not a keepalive — the decoder never expires a client. This is
+            # Not a keepalive - the decoder never expires a client. This is
             # self-healing: if this PC's address changes, the next tick
             # re-points the feed with no user action. Measured free on the
             # decoder: no process restart, no stream churn.
@@ -216,8 +265,10 @@ async def main():
             )
 
     async def _handle_client(ws) -> None:
+        if not await check_token(ws):
+            return
         if current_client["ws"] is not None:
-            logger.warning("New browser tab connected — replacing the previous one")
+            logger.warning("New browser tab connected - replacing the previous one")
         current_client["ws"] = ws
         logger.info("Browser connected")
         try:
@@ -237,13 +288,16 @@ async def main():
     logger.info(f"Forwarding uplink to udp:{args.uplink_host}:{args.uplink_port}")
     if args.uplink_host in ("127.0.0.1", "localhost"):
         logger.info("Uplink target is this machine. If wfb_tx runs elsewhere "
-                    "(a Luckfox dongle, another PC), pass --uplink-host — "
+                    "(a Luckfox dongle, another PC), pass --uplink-host - "
                     "otherwise telemetry will work and commands will not.")
     asyncio.ensure_future(_report())
     asyncio.ensure_future(_register())
 
-    async with websockets.serve(_handle_client, "127.0.0.1", args.port):
-        logger.info(f"WebSocket relay ready at ws://127.0.0.1:{args.port} — point the site's Telemetry source here")
+    origins = allowed_origins(args.allow_origin)
+    async with websockets.serve(_handle_client, "127.0.0.1", args.port, origins=origins):
+        logger.info(f"WebSocket relay ready at ws://127.0.0.1:{args.port} - point the site's Telemetry source here")
+        logger.info("allowed origins: " + ", ".join(o for o in origins if o)
+                    + ("; HYRAK_RELAY_TOKEN required" if RELAY_TOKEN else "; no HYRAK_RELAY_TOKEN set"))
         await asyncio.Future()  # run forever
 
 
