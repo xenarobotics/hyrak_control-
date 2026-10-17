@@ -63,7 +63,12 @@ modules:
   desktop:
     - name: bridges
       path: desktop/src/bridges
-      files: [udpBridge.ts, tcpBridge.ts, serialBridge.ts, rtspBridge.ts, rtspRelayBridge.ts, airUnitVideoBridge.ts, registry.ts, types.ts]
+      # The 9 bridges registered in registry.ts (kind -> file): udp, tcp, serial,
+      # rtsp, rtsp-relay, air-unit-video, webrtc-sender, gstreamer-preview,
+      # hyrak-receiver. processGuard.ts (ffmpeg lifetime) and annexb.ts (H.264/
+      # H.265 Annex B parsing) support them; desktop/src/netProbe.ts is the
+      # reachability pre-check the bridges' users call first.
+      files: [udpBridge.ts, tcpBridge.ts, serialBridge.ts, rtspBridge.ts, rtspRelayBridge.ts, airUnitVideoBridge.ts, webrtcSenderBridge.ts, gstreamerBridge.ts, receiverBridge.ts, processGuard.ts, annexb.ts, registry.ts, types.ts]
       contract: NativeBridge
     - name: shell
       path: desktop/src
