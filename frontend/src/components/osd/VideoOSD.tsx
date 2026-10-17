@@ -80,7 +80,7 @@ function RollArc({ roll }: { roll: number }) {
             <text x={cx} y={h - 2}
                 fontSize={9} fill="white" textAnchor="middle"
                 fontFamily="monospace" opacity={0.5}
-                style={{ paintOrder: 'stroke fill' } as any}
+                style={{ paintOrder: 'stroke fill' }}
                 stroke="rgba(0,0,0,0.8)" strokeWidth={2}
             >
                 {roll.toFixed(1)}°

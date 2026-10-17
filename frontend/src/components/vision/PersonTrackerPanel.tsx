@@ -258,9 +258,9 @@ export function PersonTrackerPanel() {
                 setFaceThumbnail(data.face_thumbnail)
                 setUploadState('face_found')
             }
-        } catch (err: any) {
+        } catch (err) {
             setUploadState('error')
-            setUploadError(err.message ?? 'Network error')
+            setUploadError(err instanceof Error ? err.message : 'Network error')
         }
 
         // Reset file input so the same file can be re-uploaded

@@ -178,7 +178,7 @@ function DisplayGroup() {
                 sub="Classic is the original palette. Midnight is the reworked dark - brighter secondary text and visible panel edges, for reading dense pages at a glance. Bright is the light theme."
                 right={
                     <SegmentControl
-                        value={(theme as any) ?? 'dark'}
+                        value={theme ?? 'dark'}
                         onChange={v => setTheme(v as 'dark' | 'midnight' | 'light')}
                         options={[
                             { value: 'dark',     label: 'Classic',  icon: <Moon size={12} /> },
@@ -258,7 +258,7 @@ function UnitsGroup() {
                 label="Distance"
                 tip="Horizontal distance unit for map measurements and mission planning"
                 right={
-                    <ChipGroup value={distance as any} onChange={v => { setDistance(v); save('hyrak-unit-dist', v) }} options={[
+                    <ChipGroup value={distance} onChange={v => { setDistance(v); save('hyrak-unit-dist', v) }} options={[
                         { value: 'metric',   label: 'm / km' },
                         { value: 'imperial', label: 'ft / mi' },
                     ]} />
@@ -268,7 +268,7 @@ function UnitsGroup() {
                 label="Altitude"
                 tip="Altitude unit for OSD, telemetry displays, and mission altitude inputs"
                 right={
-                    <ChipGroup value={altitude as any} onChange={v => { setAltitude(v); save('hyrak-unit-alt', v) }} options={[
+                    <ChipGroup value={altitude} onChange={v => { setAltitude(v); save('hyrak-unit-alt', v) }} options={[
                         { value: 'meters', label: 'Meters' },
                         { value: 'feet',   label: 'Feet' },
                     ]} />
@@ -278,7 +278,7 @@ function UnitsGroup() {
                 label="Speed"
                 tip="Speed unit for OSD and telemetry displays"
                 right={
-                    <ChipGroup value={speed as any} onChange={v => { setSpeed(v); save('hyrak-unit-speed', v) }} options={[
+                    <ChipGroup value={speed} onChange={v => { setSpeed(v); save('hyrak-unit-speed', v) }} options={[
                         { value: 'ms',    label: 'm/s' },
                         { value: 'kmh',   label: 'km/h' },
                         { value: 'knots', label: 'kts' },
@@ -299,7 +299,7 @@ function MapGroup() {
                 label="Default map style"
                 sub="Used in the Mission tab. Can be changed per-session there too."
                 right={
-                    <ChipGroup value={style as any} onChange={v => { setStyle(v); lsSet('hyrak-map-style', v) }} options={[
+                    <ChipGroup value={style} onChange={v => { setStyle(v); lsSet('hyrak-map-style', v) }} options={[
                         { value: 'satellite', label: 'Satellite' },
                         { value: 'streets',   label: 'Streets' },
                         { value: 'hybrid',    label: 'Hybrid' },

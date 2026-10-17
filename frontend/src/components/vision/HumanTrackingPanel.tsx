@@ -493,7 +493,7 @@ export function HumanTrackingPanel() {
 
             {persons.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {persons.map((p: any) => {
+                    {persons.map((p) => {
                         const isSelected = p.id === selectedId
                         return (
                             <div

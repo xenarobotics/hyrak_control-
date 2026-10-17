@@ -53,7 +53,7 @@ export function SpeedTape({ height = 200 }: Props) {
                                         fontSize={9} fill="rgba(255,255,255,0.6)"
                                         fontFamily="monospace"
                                         stroke="rgba(0,0,0,0.9)" strokeWidth={2.5}
-                                        style={{ paintOrder: 'stroke fill' } as any}
+                                        style={{ paintOrder: 'stroke fill' }}
                                     >
                                         {lineSpd}
                                     </text>
@@ -76,7 +76,7 @@ export function SpeedTape({ height = 200 }: Props) {
                     fontSize={11} fill="white" fontFamily="monospace"
                     textAnchor="middle" fontWeight="bold"
                     stroke="rgba(0,0,0,0.9)" strokeWidth={2.5}
-                    style={{ paintOrder: 'stroke fill' } as any}
+                    style={{ paintOrder: 'stroke fill' }}
                 >
                     {speed.toFixed(1)}
                 </text>

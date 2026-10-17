@@ -78,7 +78,7 @@ export function HeadingTape({ width = 300 }: Props) {
                                         fontFamily="monospace"
                                         fontWeight={isMajor ? 'bold' : 'normal'}
                                         stroke="rgba(0,0,0,0.9)" strokeWidth={2.5}
-                                        style={{ paintOrder: 'stroke fill' } as any}
+                                        style={{ paintOrder: 'stroke fill' }}
                                     >
                                         {cardinalMap[deg] ?? deg}
                                     </text>

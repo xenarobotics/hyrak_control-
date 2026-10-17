@@ -61,7 +61,7 @@ export function AltitudeTape({ height = 200 }: Props) {
                                         fill={`rgba(255,255,255,${isMajor ? 0.7 : 0.4})`}
                                         fontFamily="monospace"
                                         stroke="rgba(0,0,0,0.9)" strokeWidth={2.5}
-                                        style={{ paintOrder: 'stroke fill' } as any}
+                                        style={{ paintOrder: 'stroke fill' }}
                                     >
                                         {lineAlt}
                                     </text>
@@ -84,7 +84,7 @@ export function AltitudeTape({ height = 200 }: Props) {
                     fontSize={11} fill="white" fontFamily="monospace"
                     textAnchor="middle" fontWeight="bold"
                     stroke="rgba(0,0,0,0.9)" strokeWidth={2.5}
-                    style={{ paintOrder: 'stroke fill' } as any}
+                    style={{ paintOrder: 'stroke fill' }}
                 >
                     {alt.toFixed(1)}
                 </text>
