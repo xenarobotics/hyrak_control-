@@ -27,10 +27,8 @@ logger = logging.getLogger("verocore.webrtc.signaling")
 
 # One relay shared across all peers - efficient media routing
 relay = MediaRelay()
-# Feed-port ownership moved onto PeerEntry.feed_port (peer_registry.py) and is
-# released by PeerRegistry.remove. This mapping is no longer written; it stays
-# only so server.py's disconnect path, which still pops it, keeps importing.
-_session_feed_port: dict[str, int] = {}
+# Feed-port ownership lives on PeerEntry.feed_port (peer_registry.py) and is
+# released by PeerRegistry.remove.
 
 _RELAY_SOURCES = ("rtsp_relay", "air_unit_srt", "air_unit_gst", "hyrak_receiver")
 
