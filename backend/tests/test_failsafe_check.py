@@ -1,3 +1,4 @@
+import pytest
 from app.telemetry.failsafe_check import evaluate, mission_max_alt
 
 SAFE = {"NAV_DLL_ACT": 2, "COM_DL_LOSS_T": 10, "COM_OBL_RC_ACT": 5, "COM_OF_LOSS_T": 1.0, "RTL_RETURN_ALT": 30.0}
@@ -30,3 +31,29 @@ def test_unreadable_params_warn_never_block():
 def test_mission_max_alt():
     assert mission_max_alt([{"altitude": 10}, {"alt": 25.5}, {"lat": 1}]) == 25.5
     assert mission_max_alt(None) is None
+
+
+# --------------------------------------------------------------------------- #
+# Audit B27: the parameter cache must not outlive its manager                  #
+# --------------------------------------------------------------------------- #
+
+class _ParamManager:
+    async def get_param(self, name, kind):
+        return 2 if kind == "int" else 10.0
+
+
+@pytest.mark.asyncio
+async def test_param_cache_is_keyed_weakly_and_evicted_with_the_manager():
+    """id(manager) keys were never evicted and CPython reuses ids, so a new
+    link could read a dead link's cached failsafe settings."""
+    import gc
+    from app.telemetry import failsafe_check
+
+    m = _ParamManager()
+    params = await failsafe_check.read_params(m)
+    assert params["NAV_DLL_ACT"] == 2
+    assert m in failsafe_check._cache
+    assert await failsafe_check.read_params(m) is params     # cache hit
+    del m
+    gc.collect()
+    assert len(failsafe_check._cache) == 0
