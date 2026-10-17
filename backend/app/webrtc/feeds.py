@@ -29,6 +29,7 @@ import time
 import av
 from aiortc import MediaStreamTrack
 from aiortc.contrib.media import MediaRelay
+from aiortc.mediastreams import MediaStreamError
 
 
 logger = logging.getLogger("verocore.webrtc.feeds")
@@ -57,11 +58,23 @@ class DecodedTrack(MediaStreamTrack):
         self._event.set()
 
     async def recv(self):
+        # MediaStreamError, not a bare Exception: it is the one error aiortc's
+        # MediaRelay proxies and RTCRtpSender treat as "the track ended" and
+        # unwind cleanly on. Anything else escaped the relay's serve loop as
+        # an unhandled task exception while the consumers hung (audit B21).
         if self.readyState != "live":
-            raise Exception("track ended")
+            raise MediaStreamError("track ended")
         await self._event.wait()
         self._event.clear()
+        if self.readyState != "live":
+            raise MediaStreamError("track ended")
         return self._frame
+
+    def stop(self) -> None:
+        super().stop()
+        # Wake anyone parked in recv() so it sees the ended state instead of
+        # waiting for a frame that will never come.
+        self._event.set()
 
 
 def _nal_units(data: bytes):
@@ -252,7 +265,11 @@ class SharedReader:
 
     # ---- consumers ---------------------------------------------------------
     def subscribe_decoded(self):
-        return self.relay.subscribe(self.track)
+        # buffered=False: the proxy hands out the newest frame and drops the
+        # rest. aiortc's default (buffered=True) gives every subscriber an
+        # UNBOUNDED queue, so a wall tile the browser decodes slowly grew
+        # memory and latency without limit (audit B21).
+        return self.relay.subscribe(self.track, buffered=False)
 
     def subscribe_raw(self) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=90)   # ~3 s at 30 fps
@@ -281,6 +298,19 @@ class SharedReader:
         self.track.stop()
         for tr in list(self.transcoders.values()):
             tr.stop()
+        # The reader thread is parked in sock.recv() with a 3 s timeout. An
+        # empty datagram to our own port wakes it at once (too short to be a
+        # packet, it is ignored by the depacketizer), so the port is free
+        # within milliseconds instead of up to IO_TIMEOUT_S later.
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.sendto(b"", ("127.0.0.1", self.port))
+        except OSError:
+            pass
+
+    def join(self, timeout: float) -> None:
+        """Blocking: waits for the reader thread (and its socket) to go."""
+        self._thread.join(timeout)
 
     # ---- reader thread -------------------------------------------------------
     def _deliver_raw(self, data: bytes, key: bool, seq: int) -> None:
@@ -613,6 +643,11 @@ class Transcoder:
 
 
 _feeds: dict[int, SharedReader] = {}
+# port -> reader that was just stopped and whose thread may still hold the
+# port. A re-acquire joins it first, so the new reader never sees its own
+# predecessor as "in use by another program" (that was the symptom when a
+# view was restarted within IO_TIMEOUT_S of being closed).
+_stopping: dict[int, SharedReader] = {}
 # port -> {nal_type: Annex-B NAL}: the last VPS/SPS/PPS seen on that port. Survives
 # reader reopens and sender restarts; only ever replaced by a newer in-band set.
 _param_memory: dict[int, dict[int, bytes]] = {}
@@ -626,9 +661,14 @@ def _get_lock() -> asyncio.Lock:
     return _lock
 
 
-def _get_or_start(port: int) -> SharedReader:
+async def _get_or_start(port: int) -> SharedReader:
     r = _feeds.get(port)
     if r is None:
+        prev = _stopping.pop(port, None)
+        if prev is not None:
+            # Off the loop: a join is a blocking wait. stop() already poked
+            # the socket, so this is normally sub-millisecond.
+            await asyncio.to_thread(prev.join, IO_TIMEOUT_S + 1.0)
         r = _feeds[port] = SharedReader(port, asyncio.get_event_loop())
         logger.info(f"Feed reader opened on udp:{port}")
     return r
@@ -639,6 +679,7 @@ def _maybe_stop(port: int) -> None:
     if r is not None and r.idle:
         _feeds.pop(port, None)
         r.stop()
+        _stopping[port] = r
         logger.info(f"Feed reader closed on udp:{port}")
 
 
@@ -672,7 +713,7 @@ async def acquire(port: int, timeout: float = 5.0):
     to wait for the first frame before raising - the reader itself never
     gives up on a quiet port."""
     async with _get_lock():
-        r = _get_or_start(port)
+        r = await _get_or_start(port)
         r.refs += 1
         sub = r.subscribe_decoded()
     t0 = time.monotonic()
@@ -682,7 +723,9 @@ async def acquire(port: int, timeout: float = 5.0):
         err = r.last_error
         await release(port)
         if "Address already in use" in err or "bind failed" in err:
-            raise RuntimeError(f"udp:{port} is already in use on the ground station by {_port_holder(port)} "
+            # `ss` plus /proc reads, up to 2 s: never on the loop (audit B20).
+            holder = await asyncio.to_thread(_port_holder, port)
+            raise RuntimeError(f"udp:{port} is already in use on the ground station by {holder} "
                                f"- stop it, the app must own the port")
         raise RuntimeError(f"No video on udp:{port} within {timeout:.0f}s - is the unit transmitting?"
                            + (f" (reader: {err})" if err else ""))
@@ -700,7 +743,7 @@ async def release(port: int) -> None:
 
 async def subscribe_raw(port: int) -> asyncio.Queue:
     async with _get_lock():
-        r = _get_or_start(port)
+        r = await _get_or_start(port)
         return r.subscribe_raw()
 
 
@@ -733,7 +776,7 @@ def status(port: int) -> dict | None:
 
 async def subscribe_transcoded(port: int, codec: str) -> asyncio.Queue:
     async with _get_lock():
-        r = _get_or_start(port)
+        r = await _get_or_start(port)
         return r.transcoder(codec).subscribe()
 
 
