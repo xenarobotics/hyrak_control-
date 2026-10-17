@@ -47,6 +47,11 @@ function writePersistedEnabled(v: boolean) {
 
 interface SwarmStore {
     enabled: boolean
+    /** Read the persisted flag after mount. The initial value is false on
+     *  BOTH server and client so the first render matches; reading
+     *  sessionStorage at module init made them disagree whenever swarm was
+     *  on, which React reports as a hydration mismatch. */
+    hydrate: () => void
     drones: Record<number, DroneEntry>
     activeDroneId: number | null
     scanStatus: ScanStatus
@@ -84,7 +89,8 @@ function upsertEntry(drones: Record<number, DroneEntry>, id: number): DroneEntry
 }
 
 export const useSwarmStore = create<SwarmStore>((set) => ({
-    enabled: readPersistedEnabled(),
+    enabled: false,
+    hydrate: () => set({ enabled: readPersistedEnabled() }),
     drones: {},
     activeDroneId: null,
     scanStatus: 'idle',

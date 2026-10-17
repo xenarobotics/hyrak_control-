@@ -6,6 +6,7 @@ import { useDroneStore } from '@/store/drone'
 import { useSwarmStore } from '@/store/swarm'
 import { WP_META } from '@/types/mission'
 import type { Waypoint } from '@/types/mission'
+import type * as CesiumNS from 'cesium'
 
 // ── Bezier smooth-path ──────────────────────────────────────────────────────
 
@@ -196,17 +197,19 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
   const readOnlyRef     = useRef(readOnly)
   readOnlyRef.current = readOnly
   const containerRef    = useRef<HTMLDivElement>(null)
-  const viewerRef       = useRef<any>(null)
-  const CesiumRef       = useRef<any>(null)
-  const wpEntitiesRef   = useRef<Map<string, any>>(new Map())
-  const rtlEntityRef    = useRef<any>(null)
-  const svEntitiesRef   = useRef<any[]>([])
-  const pathEntityRef   = useRef<any>(null)
-  const completedPathEntityRef = useRef<any>(null)
-  const surveyEntityRef = useRef<any>(null)
-  const droneEntityRef  = useRef<any>(null)
-  const fleetEntitiesRef = useRef<Map<number, any>>(new Map())
-  const handlerRef      = useRef<any>(null)
+  const viewerRef       = useRef<CesiumNS.Viewer | null>(null)
+  const CesiumRef       = useRef<typeof CesiumNS | null>(null)
+  const wpEntitiesRef   = useRef<Map<string, CesiumNS.Entity>>(new Map())
+  const rtlEntityRef    = useRef<CesiumNS.Entity | null>(null)
+  const svEntitiesRef   = useRef<CesiumNS.Entity[]>([])
+  const pathEntityRef   = useRef<CesiumNS.Entity | null>(null)
+  const completedPathEntityRef = useRef<CesiumNS.Entity | null>(null)
+  const surveyEntityRef = useRef<CesiumNS.Entity | null>(null)
+  const droneEntityRef  = useRef<CesiumNS.Entity | null>(null)
+  const fleetEntitiesRef = useRef<Map<number, CesiumNS.Entity>>(new Map())
+  const handlerRef      = useRef<CesiumNS.ScreenSpaceEventHandler | null>(null)
+  // Removes the chase-cam preUpdate listener; set once the viewer is built.
+  const chaseCleanupRef = useRef<(() => void) | null>(null)
   const flewRef         = useRef(false)
   const draggingIdRef   = useRef<string | null>(null)
   const terrainReadyRef = useRef(false)
@@ -227,9 +230,9 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
   const followOffsetRef = useRef({ behindM: 30, upM: 10 })
   // Smooth camera state - EMA-interpolated values written every frame
   const camModeRef       = useRef<'follow' | 'perspective'>('follow')
-  const camSmoothPosRef  = useRef<any>(null)   // Cartesian3 camera ECEF pos, null = uninitialised
-  const camSmoothLookRef = useRef<any>(null)   // Cartesian3 look-target ECEF, null = uninitialised
-  const perspOffsetRef   = useRef<any>(null)   // ECEF offset from drone to camera
+  const camSmoothPosRef  = useRef<CesiumNS.Cartesian3 | null>(null)   // Cartesian3 camera ECEF pos, null = uninitialised
+  const camSmoothLookRef = useRef<CesiumNS.Cartesian3 | null>(null)   // Cartesian3 look-target ECEF, null = uninitialised
+  const perspOffsetRef   = useRef<CesiumNS.Cartesian3 | null>(null)   // ECEF offset from drone to camera
   const userInteractingRef  = useRef(false)        // true while user is orbiting
   const inactivityTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -315,7 +318,7 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
     }
 
     // Must set base URL before importing Cesium
-    ;(window as any).CESIUM_BASE_URL = '/cesium/'
+    ;(window as Window & { CESIUM_BASE_URL?: string }).CESIUM_BASE_URL = '/cesium/'
 
     import('cesium').then(async (Cesium) => {
       if (destroyed || !containerRef.current) return
@@ -345,12 +348,12 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
       // has genuine global coverage without "not available" tiles; Cesium
       // upsamples those tiles for closer zoom positions so camera zoom is never
       // blocked, just blurrier at extreme close zoom.
-      let baseLayer: any
+      let baseLayer: CesiumNS.ImageryLayer | undefined
       if (ionToken) {
         try {
-          baseLayer = (Cesium as any).ImageryLayer.fromProviderAsync(
-            (Cesium as any).createWorldImageryAsync({
-              style: (Cesium as any).IonWorldImageryStyle?.AERIAL ?? 0,
+          baseLayer = Cesium.ImageryLayer.fromProviderAsync(
+            Cesium.createWorldImageryAsync({
+              style: Cesium.IonWorldImageryStyle.AERIAL,
             })
           )
         } catch (e) {
@@ -470,7 +473,7 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
       }
 
       // LEFT_DOWN: pause follow temporarily (not permanently); start waypoint drag if needed.
-      handler.setInputAction((down: any) => {
+      handler.setInputAction((down: CesiumNS.ScreenSpaceEventHandler.PositionedEvent) => {
         if (followDroneRef.current) startInactivityTimer()
         const picked = readOnlyRef.current ? null : viewer.scene.pick(down.position)
         if (picked?.id?._id?.startsWith?.('wp-')) {
@@ -482,17 +485,17 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
       }, Cesium.ScreenSpaceEventType.LEFT_DOWN)
 
       // MOUSE_MOVE: drag waypoint
-      handler.setInputAction((move: any) => {
+      handler.setInputAction((move: CesiumNS.ScreenSpaceEventHandler.MotionEvent) => {
         if (!draggingIdRef.current) return
         const cart = viewer.scene.pickPosition(move.endPosition)
           ?? viewer.camera.pickEllipsoid(move.endPosition, Cesium.Ellipsoid.WGS84)
         if (!cart) return
         const entity = viewer.entities.getById(`wp-${draggingIdRef.current}`)
-        if (entity) (entity.position as any) = new Cesium.ConstantPositionProperty(cart)
+        if (entity) entity.position = new Cesium.ConstantPositionProperty(cart)
       }, Cesium.ScreenSpaceEventType.MOUSE_MOVE)
 
       // LEFT_UP: end drag or click to add
-      handler.setInputAction((up: any) => {
+      handler.setInputAction((up: CesiumNS.ScreenSpaceEventHandler.PositionedEvent) => {
         if (draggingIdRef.current) {
           const entity = viewer.entities.getById(`wp-${draggingIdRef.current}`)
           if (entity) {
@@ -554,7 +557,7 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
       // smooth between telemetry ticks. Any mouse interaction releases it.
       // Reuse a single ConstantProperty for rotation instead of allocating
       // a new one every frame - setValue updates it in-place with no GC churn.
-      let droneRotationProp: any = null
+      let droneRotationProp: CesiumNS.ConstantProperty | null = null
       const chaseCamHandler = () => {
         // Keep the heading arrow world-aligned every frame. billboard.rotation
         // is in screen space (CCW positive), so we offset by camera.heading
@@ -620,15 +623,18 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
             camSmoothLookRef.current = Cesium.Cartesian3.clone(targetLookPos)
           }
 
+          const smoothPos = camSmoothPosRef.current
+          const smoothLook = camSmoothLookRef.current ?? Cesium.Cartesian3.clone(targetLookPos)
+          camSmoothLookRef.current = smoothLook
           if (!userInteractingRef.current) {
             // EMA-smooth camera position and look target (α=0.08 ≈ 200 ms lag at 60 fps)
-            Cesium.Cartesian3.lerp(camSmoothPosRef.current,  targetCamPos,  0.08, camSmoothPosRef.current)
-            Cesium.Cartesian3.lerp(camSmoothLookRef.current, targetLookPos, 0.08, camSmoothLookRef.current)
+            Cesium.Cartesian3.lerp(smoothPos,  targetCamPos,  0.08, smoothPos)
+            Cesium.Cartesian3.lerp(smoothLook, targetLookPos, 0.08, smoothLook)
 
             // Direction vector: from camera toward look target
             const direction = Cesium.Cartesian3.subtract(
-              camSmoothLookRef.current,
-              camSmoothPosRef.current,
+              smoothLook,
+              smoothPos,
               new Cesium.Cartesian3(),
             )
             Cesium.Cartesian3.normalize(direction, direction)
@@ -674,17 +680,20 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
             camSmoothPosRef.current = Cesium.Cartesian3.clone(viewer.camera.position)
           }
 
+          const offset = perspOffsetRef.current
+          const smoothPos = camSmoothPosRef.current ?? Cesium.Cartesian3.clone(viewer.camera.position)
+          camSmoothPosRef.current = smoothPos
           const targetPos = Cesium.Cartesian3.add(
             droneAbsPos,
-            perspOffsetRef.current,
+            offset,
             new Cesium.Cartesian3(),
           )
-          Cesium.Cartesian3.lerp(camSmoothPosRef.current, targetPos, 0.10, camSmoothPosRef.current)
+          Cesium.Cartesian3.lerp(smoothPos, targetPos, 0.10, smoothPos)
           // Preserve user's current orientation: read heading/pitch/roll then
           // re-apply at the new position via setView so the camera frame stays
           // valid (direct .position assignment leaves direction/up undefined).
           viewer.camera.setView({
-            destination: camSmoothPosRef.current,
+            destination: smoothPos,
             orientation: {
               heading: viewer.camera.heading,
               pitch:   viewer.camera.pitch,
@@ -716,14 +725,15 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
 
       setViewerReady(true)
       // Store the chaseCamHandler removal callback for cleanup
-      ;(viewer as any)._chaseCamCleanup = () => viewer.scene.preUpdate.removeEventListener(chaseCamHandler)
+      chaseCleanupRef.current = () => viewer.scene.preUpdate.removeEventListener(chaseCamHandler)
     })
 
     return () => {
       destroyed = true
       if (tileSettleTimer.current) clearTimeout(tileSettleTimer.current)
       if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current)
-      viewerRef.current?._chaseCamCleanup?.()
+      chaseCleanupRef.current?.()
+      chaseCleanupRef.current = null
       handlerRef.current?.destroy()
       viewerRef.current?.destroy()
       viewerRef.current = null
@@ -775,10 +785,12 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
 
       if (wpEntitiesRef.current.has(wp.id)) {
         const entity = wpEntitiesRef.current.get(wp.id)!
-        entity.position = Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, alt)
-        entity.billboard.image = new Cesium.ConstantProperty(makeWaypointCanvas(i + 1, colorHex, size))
-        entity.billboard.width = new Cesium.ConstantProperty(size)
-        entity.billboard.height = new Cesium.ConstantProperty(size)
+        entity.position = new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, alt))
+        if (entity.billboard) {
+          entity.billboard.image = new Cesium.ConstantProperty(makeWaypointCanvas(i + 1, colorHex, size))
+          entity.billboard.width = new Cesium.ConstantProperty(size)
+          entity.billboard.height = new Cesium.ConstantProperty(size)
+        }
       } else {
         const entity = viewer.entities.add({
           id: `wp-${wp.id}`,
@@ -805,7 +817,7 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
       const rtl = getRtlWaypoint()
       const rtlColor = Cesium.Color.fromCssColorString('#a855f7')
       if (rtlEntityRef.current) {
-        rtlEntityRef.current.position = Cesium.Cartesian3.fromDegrees(rtl.lng, rtl.lat, rtl.altitude)
+        rtlEntityRef.current.position = new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(rtl.lng, rtl.lat, rtl.altitude))
       } else {
         rtlEntityRef.current = viewer.entities.add({
           id: 'rtl-marker',
@@ -860,9 +872,9 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
     const myGen = pathGenRef.current
 
     const commitSegment = (
-      entityRef: { current: any },
+      entityRef: { current: CesiumNS.Entity | null },
       segmentWaypoints: Waypoint[],
-      color: any,
+      color: CesiumNS.Color,
       glow: boolean,
       useDensify: boolean,
     ) => {
@@ -883,10 +895,12 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
 
       const cartographics = samplePoints.map(p => Cesium.Cartographic.fromDegrees(p.lng, p.lat))
       Cesium.sampleTerrainMostDetailed(viewer.scene.terrainProvider, cartographics)
-        .then((sampled: any[]) => commit(sampled.map((c: any) => c.height ?? 0)))
+        .then((sampled: CesiumNS.Cartographic[]) => commit(sampled.map(c => c.height ?? 0)))
         .catch(() => commit(samplePoints.map(() => 0)))
 
-      function commit(groundHeights: number[]) {
+      // An arrow (not a hoisted declaration) so the viewer/Cesium narrowing
+      // above carries into it.
+      const commit = (groundHeights: number[]) => {
         if (pathGenRef.current !== myGen) return // superseded by a newer update
         // +0.3 m above the sampled terrain prevents z-fighting with the terrain
         // mesh surface, which causes the line to flicker in/out at low altitude.
@@ -1040,13 +1054,10 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
     )
 
     if (droneEntityRef.current) {
-      droneEntityRef.current.position = position
-      droneEntityRef.current.billboard.image = new Cesium.ConstantProperty(
-        makeDroneCanvas()
-      )
-      droneEntityRef.current.label.text = new Cesium.ConstantProperty(
-        `${relAlt.toFixed(1)} m`
-      )
+      const ent = droneEntityRef.current
+      ent.position = new Cesium.ConstantPositionProperty(position)
+      if (ent.billboard) ent.billboard.image = new Cesium.ConstantProperty(makeDroneCanvas())
+      if (ent.label) ent.label.text = new Cesium.ConstantProperty(`${relAlt.toFixed(1)} m`)
     } else {
       droneEntityRef.current = viewer.entities.add({
         position,
@@ -1132,7 +1143,7 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
 
       if (fleetEntitiesRef.current.has(drone.id)) {
         const entity = fleetEntitiesRef.current.get(drone.id)!
-        entity.position = position
+        entity.position = new Cesium.ConstantPositionProperty(position)
         if (entity.label) {
           entity.label.text = new Cesium.ConstantProperty(`${drone.name}\n${altText}`)
         }

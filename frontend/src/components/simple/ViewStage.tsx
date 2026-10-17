@@ -5,11 +5,12 @@
 // switch) swaps them. Neither view is ever remounted, so the video does not
 // restart when you swap.
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import dynamic from 'next/dynamic'
 import { VideoStream } from '@/components/video/VideoStream'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { getVideoSource, needsCameraSelection } from '@/lib/videoSource'
+import { useClientValue, useHydrated } from '@/hooks/useClientValue'
 
 const MissionMap = dynamic(() => import('@/components/mission/MissionMap'), { ssr: false })
 
@@ -17,14 +18,14 @@ type View = 'camera' | 'map'
 const KEY = 'hyrak-simple-view'
 
 export function ViewStage({ alert }: { alert?: React.ReactNode }) {
-    const [big, setBig] = useState<View>('camera')
-    const [mounted, setMounted] = useState(false)
+    const mounted = useHydrated()
+    const savedBig = useClientValue<View>(() => {
+        try { return localStorage.getItem(KEY) === 'map' ? 'map' : 'camera' } catch { return 'camera' }
+    }, 'camera')
+    const [pickedBig, setBig] = useState<View | null>(null)
+    const big = pickedBig ?? savedBig
     const { isStreaming, isLoading, startStream, selectedCameraId } = useWebRTCContext()
     const camBlocked = needsCameraSelection(getVideoSource()) && !selectedCameraId
-    useEffect(() => {
-        setMounted(true)
-        try { if (localStorage.getItem(KEY) === 'map') setBig('map') } catch { /* */ }
-    }, [])
     const choose = (v: View) => { setBig(v); try { localStorage.setItem(KEY, v) } catch { /* */ } }
 
     const box = (v: View): React.CSSProperties => big === v

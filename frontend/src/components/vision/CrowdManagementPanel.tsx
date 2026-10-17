@@ -175,17 +175,38 @@ export function CrowdManagementPanel() {
     // ignored with nothing to indicate why. Comparing against what the backend
     // actually reports is self-healing - it converges as soon as the analyzer
     // is up, and costs nothing once the two agree.
+    //
+    // Bounded, though: at most one re-send every 2 s, and it stops once a
+    // full round trip came back unchanged - the analyzer has then heard us
+    // and still disagrees (a backend clamp, say), and re-sending the same
+    // numbers forever at cv_results rate is a loop, not a fix.
+    const thresholdSync = useRef({ lastSentAt: 0, sentLight: NaN, sentModerate: NaN, givenUp: false })
+    const liveLight = cvResults?.light_max
+    const liveModerate = cvResults?.moderate_max
     useEffect(() => {
-        if (!cvResults) return
+        if (liveLight === undefined) return
         const want = getCrowdThresholds()
-        const live = { lightMax: cvResults.light_max, moderateMax: cvResults.moderate_max }
-        if (live.lightMax === undefined) return
-        if (live.lightMax !== want.lightMax || live.moderateMax !== want.moderateMax) {
-            getSocket().emit('set_crowd_thresholds', {
-                light_max: want.lightMax, moderate_max: want.moderateMax,
-            })
+        if (liveLight === want.lightMax && liveModerate === want.moderateMax) {
+            thresholdSync.current.givenUp = false
+            return
         }
-    }, [cvResults?.light_max, cvResults?.moderate_max, cvResults])
+        const t = thresholdSync.current
+        if (t.givenUp) return
+        const now = Date.now()
+        if (now - t.lastSentAt < 2000) return
+        // The same values went out before and the analyzer has since reported
+        // (this is a later cv_results) without adopting them: stop.
+        if (t.sentLight === want.lightMax && t.sentModerate === want.moderateMax) {
+            t.givenUp = true
+            return
+        }
+        t.lastSentAt = now
+        t.sentLight = want.lightMax
+        t.sentModerate = want.moderateMax
+        getSocket().emit('set_crowd_thresholds', {
+            light_max: want.lightMax, moderate_max: want.moderateMax,
+        })
+    }, [liveLight, liveModerate])
 
     const loadHistory = () => fetchCrowdHistory(10).then(d => { setSessions(d.sessions); setAlerts(d.alerts) })
 

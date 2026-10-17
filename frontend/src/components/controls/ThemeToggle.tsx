@@ -1,15 +1,13 @@
 'use client'
 
 import { useTheme } from '@/lib/theme'
-import { useState, useEffect } from 'react'
 import { Sun, Moon } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useHydrated } from '@/hooks/useClientValue'
 
 export function ThemeToggle() {
     const { theme, setTheme } = useTheme()
-    const [mounted, setMounted] = useState(false)
-
-    useEffect(() => { setMounted(true) }, [])
+    const mounted = useHydrated()
 
     // Render placeholder until mounted - prevents hydration mismatch
     if (!mounted) {

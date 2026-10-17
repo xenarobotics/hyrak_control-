@@ -16,6 +16,7 @@ import { useGstPreview } from '@/lib/gstPreview'
 import { useReceiver, fallbackFromHevc } from '@/lib/hyrakReceiver'
 import { clampToLiveEdge } from '@/lib/liveEdge'
 import { WebCodecsVideo } from './WebCodecsVideo'
+import { useClientValue } from '@/hooks/useClientValue'
 
 // 'fit' shows the WHOLE frame at the source's own aspect, letterboxed -
 // distinct from the fixed presets, which force an aspect the camera may not
@@ -36,21 +37,15 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
     const {
         remoteStream, localStream,
         isStreaming, isLoading, stats, lastError,
-        selectedCameraId, startStream, stopStream,
+        selectedCameraId, camerasScanned, startStream, stopStream,
     } = useWebRTCContext()
 
     // Server-sourced feeds (air-unit UDP, SIYI RTSP) need no browser camera
-    // at all. Starts false (matches the server-rendered HTML, which has no
-    // localStorage to read) and is set for real after mount - reading
-    // getVideoSource() straight into the initial state would make the
-    // server and client's first render disagree whenever a non-default
-    // source is saved, which React flags as a hydration mismatch.
-    const [serverSourced, setServerSourced] = useState(false)
-    const [needsCamera, setNeedsCamera] = useState(false)
-    useEffect(() => {
-        setServerSourced(isServerSourced(getVideoSource()))
-        setNeedsCamera(needsCameraSelection(getVideoSource()))
-    }, [])
+    // at all. Read hydration-safely: the server has no localStorage, so its
+    // render (and the hydrating one) sees the default source.
+    const videoSource = useClientValue(getVideoSource, 'camera')
+    const serverSourced = isServerSourced(videoSource)
+    const needsCamera = needsCameraSelection(videoSource)
 
     // Relay mode serves the operator a local preview straight off the same
     // ffmpeg that feeds the server, so the picture on this screen never
@@ -194,7 +189,7 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
                 >
                     <VideoOff size={40} strokeWidth={1.5} />
                     <p className="font-mono text-sm tracking-wider">VIDEO OFFLINE</p>
-                    {needsCamera && !selectedCameraId && (
+                    {needsCamera && camerasScanned && !selectedCameraId && (
                         <p className="text-xs opacity-50">Select a camera in Devices panel</p>
                     )}
                     {lastError && (
@@ -227,7 +222,12 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
             {!bare && <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-2"
                 style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.7), transparent)' }}
             >
-                <RecordingControls videoRef={mainVideoRef} isStreaming={isStreaming} />
+                {/* The recorder captures the <video>'s MediaStream. A WebCodecs
+                    canvas has no <video>, and a local preview URL plays via
+                    src= (no srcObject) - both recorded black or nothing. */}
+                {!wcUrl && !localPreviewUrl
+                    ? <RecordingControls videoRef={mainVideoRef} isStreaming={isStreaming} />
+                    : <span />}
                 <div className="flex items-center gap-1.5">
                     {isStreaming && (
                         <div className="flex gap-1">
@@ -258,7 +258,7 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
                         // PC. needsCameraSelection() exists for this and was
                         // already used correctly for the hint above; this call
                         // site was missed.
-                        disabled={isLoading || (needsCamera && !selectedCameraId && !isStreaming)}
+                        disabled={isLoading || (needsCamera && camerasScanned && !selectedCameraId && !isStreaming)}
                     >
                         {isLoading
                             ? <><Loader size={12} className="animate-spin" /> Starting...</>
@@ -267,10 +267,14 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
                                 : <><Video size={12} /> Start</>
                         }
                     </Button>
-                    <Button size="sm" variant="outline" className="shadow-lg" onClick={() => setMaximized(m => !m)}>
+                    <Button size="sm" variant="outline" className="shadow-lg" onClick={() => setMaximized(m => !m)}
+                        aria-label={maximized ? 'Restore video size' : 'Maximize video'}
+                        title={maximized ? 'Restore video size' : 'Maximize video'}>
                         {maximized ? <Minimize size={14} /> : <Maximize size={14} />}
                     </Button>
-                    <Button size="sm" variant="outline" className="shadow-lg" onClick={handleFullscreen}>
+                    <Button size="sm" variant="outline" className="shadow-lg" onClick={handleFullscreen}
+                        aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+                        title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}>
                         {isFullscreen ? <Shrink size={14} /> : <Expand size={14} />}
                     </Button>
                 </div>

@@ -25,7 +25,7 @@ export function HoldButton({ onConfirm, holdMs = 1500, label, hint, disabled }: 
         if (!done.current) setP(0)
     }, [])
 
-    const frame = useCallback(() => {
+    const frame = useCallback(function tick() {
         if (start.current == null) return
         const f = Math.min(1, (performance.now() - start.current) / holdMs)
         setP(f)
@@ -36,7 +36,7 @@ export function HoldButton({ onConfirm, holdMs = 1500, label, hint, disabled }: 
             setTimeout(() => { done.current = false; setP(0) }, 1200)
             return
         }
-        raf.current = requestAnimationFrame(frame)
+        raf.current = requestAnimationFrame(tick)
     }, [holdMs, onConfirm])
 
     const begin = useCallback(() => {

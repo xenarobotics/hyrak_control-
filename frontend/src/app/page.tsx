@@ -8,6 +8,7 @@ import {
     detectPlatform, resolveLatestAsset, formatBytes,
     PLATFORM_LABELS, PLATFORM_OPTIONS, type Platform, type ReleaseAsset,
 } from '@/lib/desktopReleases'
+import { useClientValue, useHydrated } from '@/hooks/useClientValue'
 
 function CopyCommand({ text }: { text: string }) {
     const [copied, setCopied] = useState(false)
@@ -28,21 +29,22 @@ function CopyCommand({ text }: { text: string }) {
 }
 
 function DesktopDownloadCard() {
-    const [platform, setPlatform] = useState<Platform>('windows')
-    const [mounted, setMounted]   = useState(false)
-    const [asset, setAsset]       = useState<ReleaseAsset | null>(null)
-    const [loading, setLoading]   = useState(true)
-
-    useEffect(() => {
-        setMounted(true)
-        setPlatform(detectPlatform())
-    }, [])
+    const mounted = useHydrated()
+    const detected = useClientValue<Platform>(detectPlatform, 'windows')
+    const [picked, setPlatform] = useState<Platform | null>(null)
+    const platform = picked ?? detected
+    // Which platform the asset was resolved FOR: loading is simply "the
+    // answer on hand is not for the platform on screen", so switching
+    // platforms needs no reset step.
+    const [resolved, setResolved] = useState<{ platform: Platform; asset: ReleaseAsset | null } | null>(null)
+    const loading = resolved?.platform !== platform
+    const asset = loading ? null : resolved.asset
 
     useEffect(() => {
         if (!mounted) return
-        setLoading(true)
-        setAsset(null)
-        resolveLatestAsset(platform).then(a => { setAsset(a); setLoading(false) })
+        let alive = true
+        resolveLatestAsset(platform).then(a => { if (alive) setResolved({ platform, asset: a }) })
+        return () => { alive = false }
     }, [platform, mounted])
 
     return (

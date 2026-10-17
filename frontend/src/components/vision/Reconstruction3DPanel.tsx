@@ -43,15 +43,15 @@ const input: React.CSSProperties = {
 }
 
 export function Reconstruction3DPanel() {
-    const cvResults = useDroneStore(s => s.cvResults) as Record<string, unknown> | null
+    const cvResults = useDroneStore(s => s.cvResults)
     const [engine, setEngine] = useState<EngineT | null>(null)
     const [results, setResults] = useState<ResultT[]>([])
     const [scanBusy, setScanBusy] = useState<string>('')   // session being reprocessed
     const [scanPhase, setScanPhase] = useState('')
     const [error, setError] = useState('')
 
-    const live = cvResults && 'tracking_state' in cvResults
-    const track = String((cvResults?.tracking_state as string) ?? 'n/a')
+    const live = cvResults?.tracking_state !== undefined
+    const track = cvResults?.tracking_state ?? 'n/a'
     const trackColor = TRACK_COLORS[track] ?? 'hsl(var(--app-text-muted))'
 
     const refreshEngine = useCallback(async () => {
@@ -158,15 +158,15 @@ export function Reconstruction3DPanel() {
                             textTransform: 'uppercase',
                         }}>{track}</span>
                         <span style={{ ...label, alignSelf: 'center' }}>
-                            KF {String(cvResults?.keyframes ?? 0)} · LM {String(cvResults?.landmarks ?? 0)}
+                            KF {cvResults?.keyframes ?? 0} · LM {cvResults?.landmarks ?? 0}
                         </span>
-                        {Number(cvResults?.input_w ?? 0) > 0 && (
+                        {(cvResults?.input_w ?? 0) > 0 && (
                             <span style={{
                                 ...label, alignSelf: 'center',
-                                color: Number(cvResults?.input_w) < 1280
+                                color: (cvResults?.input_w ?? 0) < 1280
                                     ? '#fbbf24' : 'hsl(var(--app-text-muted))',
                             }}>
-                                IN {String(cvResults?.input_w)}x{String(cvResults?.input_h)}
+                                IN {cvResults?.input_w}x{cvResults?.input_h}
                             </span>
                         )}
                     </div>

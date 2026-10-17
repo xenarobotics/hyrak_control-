@@ -90,7 +90,9 @@ const OVERLAY_CAPABLE = [
 ]
 
 export function getFeedMode(): FeedMode {
-    if (typeof window === 'undefined') return 'processed'
+    // Same default on the server as the client's fallback, or the first
+    // client render disagrees with the HTML it hydrates.
+    if (typeof window === 'undefined') return 'overlay'
     try {
         const v = JSON.parse(localStorage.getItem('hyrak-feed-mode') ?? '""')
         if (v === 'overlay' || v === 'processed') return v

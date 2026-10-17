@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import { Settings2, X } from 'lucide-react'
-import { cn } from '@/lib/utils'
 
 export interface OSDWidgetConfig {
     enabled: boolean

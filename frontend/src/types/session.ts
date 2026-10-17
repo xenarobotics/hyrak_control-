@@ -25,11 +25,27 @@ export type ConnectionStatus =
     | 'reconnecting'   // socket dropped; the cloud session (and drone link) is being held for us
     | 'error'
 
+/** The WebRTC video stream's own state, kept apart from the cloud socket. */
+export type StreamStatus =
+    | 'idle'
+    | 'connecting'
+    | 'connected'
+    | 'error'
+
 export type TelemetryStatus =
     | 'disconnected'
     | 'connecting'
     | 'connected'
     | 'error'
+
+/** The registry's record for the aircraft this session is flying, as the
+ *  backend's drone_identity event carries it. */
+export interface BoundDrone {
+    id: string
+    name?: string
+    hardware_uid?: string
+    is_simulated?: boolean
+}
 
 export interface SessionInfo {
     session_id: string
@@ -39,4 +55,8 @@ export interface SessionInfo {
     resumed?: boolean              // true: the server kept our session through a socket drop
     away_s?: number
     telemetry_connected?: boolean
+    /** Filled from drone_identity a few seconds after telemetry connects;
+     *  cleared when the link drops. Null while no drone is bound. */
+    drone?: BoundDrone | null
+    hardware_uid?: string | null
 }

@@ -1,13 +1,21 @@
 'use client'
 
+import { createElement, type ComponentType, type ReactElement } from 'react'
 import { useDrone } from '@/hooks/useDrone'
 import { useDroneStore } from '@/store/drone'
-import { getSocket } from '@/lib/socket'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
-import { cn } from '@/lib/utils'
+import { ObjectDetectionPanel } from '@/components/vision/ObjectDetectionPanel'
+import { HumanTrackingPanel } from '@/components/vision/HumanTrackingPanel'
+import { DepthMappingPanel } from '@/components/vision/DepthMappingPanel'
+import { PersonTrackerPanel } from '@/components/vision/PersonTrackerPanel'
+import { EnhancePanel } from '@/components/vision/EnhancePanel'
+import { CrowdManagementPanel } from '@/components/vision/CrowdManagementPanel'
+import { TrafficManagementPanel } from '@/components/vision/TrafficManagementPanel'
+import { VehiclePlateTrackingPanel } from '@/components/vision/VehiclePlateTrackingPanel'
+import { Reconstruction3DPanel } from '@/components/vision/Reconstruction3DPanel'
 import {
     ScanSearch, Users, Layers,
-    ShieldAlert, Brain, Target, ScanFace, Sparkles,
+    ShieldAlert, Brain, ScanFace, Sparkles,
     UsersRound, ScanLine, TrafficCone, Box,
 } from 'lucide-react'
 
@@ -92,11 +100,31 @@ export const MODES = [
     },
 ] as const
 
+/** Each implemented mode's results panel. ONE table: the AI tab's results
+ *  column and the Command dock's AI tab both render from it, so a new mode
+ *  is added here once instead of in two switch statements. */
+const MODE_PANELS: Record<string, ComponentType> = {
+    'object-detection': ObjectDetectionPanel,
+    'human-tracking': HumanTrackingPanel,
+    'depth-mapping': DepthMappingPanel,
+    'person-tracking': PersonTrackerPanel,
+    'enhance': EnhancePanel,
+    'crowd-management': CrowdManagementPanel,
+    'vehicle-plate-tracking': VehiclePlateTrackingPanel,
+    'traffic-management': TrafficManagementPanel,
+    '3d-reconstruction': Reconstruction3DPanel,
+}
+
+/** The results panel element for `mode`, or null when it has none. Returns
+ *  an element rather than the component, so callers never bind a component
+ *  type to a render-time variable (which remounts it on every render). */
+export function panelFor(mode: string): ReactElement | null {
+    const Panel = MODE_PANELS[mode]
+    return Panel ? createElement(Panel) : null
+}
+
 // Modes that are implemented; the rest render as "coming soon".
-export const AVAILABLE_MODES: readonly string[] = [
-    'manual-control', 'object-detection', 'human-tracking', 'depth-mapping', 'person-tracking',
-    'enhance', 'crowd-management', 'vehicle-plate-tracking', 'traffic-management', '3d-reconstruction',
-]
+export const AVAILABLE_MODES: readonly string[] = ['manual-control', ...Object.keys(MODE_PANELS)]
 
 export function ModeSelector() {
     const { setMode } = useDrone()
@@ -115,6 +143,8 @@ export function ModeSelector() {
                         key={m.value}
                         onClick={() => available && !isStreaming && setMode(m.value)}
                         disabled={!available || isStreaming}
+                        aria-pressed={active}
+                        aria-label={`${m.label} - ${available ? m.desc : 'coming soon'}`}
                         style={{
                             display: 'flex', alignItems: 'center', gap: 8,
                             padding: '8px 10px', borderRadius: 10, cursor: available ? 'pointer' : 'not-allowed',

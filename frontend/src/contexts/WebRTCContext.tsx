@@ -6,7 +6,6 @@ import {
 } from 'react'
 import { useWebRTC, type WebRTCStats } from '@/hooks/useWebRTC'
 import { useCamera } from '@/hooks/useCamera'
-import { useDroneStore } from '@/store/drone'
 import { getSocket } from '@/lib/socket'
 import { getVideoSource, isServerSourced } from '@/lib/videoSource'
 import { startRtspCameraStream, stopRtspCameraStream } from '@/lib/rtspCameraStream'
@@ -28,9 +27,14 @@ interface WebRTCContextValue {
     cameras: Array<{ deviceId: string; label: string }>
     selectedCameraId: string
     setSelectedCameraId: (id: string) => void
-    scanCameras: () => void
+    /** True once a camera scan has run (the list may still be empty). */
+    camerasScanned: boolean
+    scanCameras: () => Promise<Array<{ deviceId: string; label: string }>>
     startStream: () => Promise<void>
     stopStream: () => void
+    /** Renegotiate the peer connection without stopping the local
+     *  producers or releasing the relay port - for a session resume. */
+    restartStream: () => Promise<void>
     applyVideoSettings: () => Promise<void>
 }
 
@@ -41,6 +45,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
         remoteStream, localStream,
         isStreaming, overlayActive, stats, lastError,
         startStream: startWebRTC, stopStream: stopWebRTC,
+        restartStream: restartWebRTC,
         applyVideoSettings,
     } = useWebRTC()
 
@@ -51,7 +56,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
     const {
         cameras, selectedId: selectedCameraId,
         setSelectedId: setSelectedCameraId,
-        scan: scanCameras,
+        scan: scanCameras, scanned: camerasScanned,
         startStream: startCamera, stopStream: stopCamera,
     } = useCamera()
 
@@ -119,7 +124,9 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
     // describe an attempt that is already over.
     useEffect(() => { if (isStreaming || lastError) setProgress(null) }, [isStreaming, lastError])
 
-    const startStream = useCallback(async () => {
+    // One body for start and restart: the only difference is which
+    // useWebRTC entry point gets the (possibly null) local stream.
+    const runStream = useCallback(async (go: (s: MediaStream | null) => Promise<void>) => {
         if (isLoading || pending) return
         setPending(true)
         // Server-sourced feeds (air-unit UDP, SIYI RTSP): no browser camera
@@ -128,7 +135,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
         if (isServerSourced(src)) {
             setIsLoading(true)
             try {
-                await startWebRTC(null)
+                await go(null)
             } catch (e) {
                 console.error('startStream failed:', e)
                 setPending(false)
@@ -144,7 +151,7 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
             setRtspCameraError(null)
             try {
                 const stream = await startRtspCameraStream()
-                await startWebRTC(stream)
+                await go(stream)
             } catch (e) {
                 console.error('RTSP camera failed:', e)
                 setRtspCameraError((e as Error).message)
@@ -154,12 +161,16 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
             }
             return
         }
-        if (!selectedCameraId) { setPending(false); return }
         setIsLoading(true)
         try {
-            const stream = await startCamera(selectedCameraId)
+            // No scan yet (the camera list is filled lazily): scan now and take
+            // the first device, so the first Start is one click and not two.
+            let camId = selectedCameraId
+            if (!camId) camId = (await scanCameras())[0]?.deviceId ?? ''
+            if (!camId) { setPending(false); return }
+            const stream = await startCamera(camId)
             if (stream) {
-                await startWebRTC(stream)
+                await go(stream)
             }
         } catch (e) {
             console.error('startStream failed:', e)
@@ -167,7 +178,10 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
         } finally {
             setIsLoading(false)
         }
-    }, [selectedCameraId, isLoading, pending, startCamera, startWebRTC])
+    }, [selectedCameraId, isLoading, pending, startCamera, scanCameras])
+
+    const startStream = useCallback(() => runStream(startWebRTC), [runStream, startWebRTC])
+    const restartStream = useCallback(() => runStream(restartWebRTC), [runStream, restartWebRTC])
 
     const stopStream = useCallback(() => {
         setPending(false)
@@ -179,20 +193,22 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
     // A RESUMED SESSION KEEPS ITS DRONE LINK BUT NOT ITS VIDEO. The server
     // closes the peer connection the moment the socket drops (media cannot be
     // parked the way a session can), so after a resume the picture would sit
-    // frozen until someone pressed restart. Do that for them.
+    // frozen until someone pressed restart. Do that for them - but only the
+    // peer connection: the local gst/receiver/datachannel processes and the
+    // relay port are still fine, and a full stop/start would kill them and
+    // come back with a NEW relay port (see useWebRTC.restartStream).
     const streamingRef = useRef(isStreaming)
     useEffect(() => { streamingRef.current = isStreaming }, [isStreaming])
     useEffect(() => {
         let t: ReturnType<typeof setTimeout> | null = null
         const onResumed = () => {
             if (!streamingRef.current) return
-            stopStream()
             if (t) clearTimeout(t)
-            t = setTimeout(() => { t = null; void startStream() }, 600)
+            t = setTimeout(() => { t = null; void restartStream() }, 600)
         }
         window.addEventListener('hyrak-session-resumed', onResumed)
         return () => { window.removeEventListener('hyrak-session-resumed', onResumed); if (t) clearTimeout(t) }
-    }, [startStream, stopStream])
+    }, [restartStream])
 
     return (
         <WebRTCContext.Provider value={{
@@ -204,8 +220,8 @@ export function WebRTCProvider({ children }: { children: ReactNode }) {
             startPhase: !pending ? 'idle' : modelLoading ? 'model' : 'connecting',
             startDetail: progress,
             lastError: rtspCameraError ?? lastError,
-            cameras, selectedCameraId, setSelectedCameraId, scanCameras,
-            startStream, stopStream, applyVideoSettings,
+            cameras, selectedCameraId, setSelectedCameraId, camerasScanned, scanCameras,
+            startStream, stopStream, restartStream, applyVideoSettings,
         }}>
             {children}
         </WebRTCContext.Provider>

@@ -53,6 +53,22 @@ export interface CVResult {
     min_depth_m?: number
     max_depth_m?: number
     mean_depth_m?: number
+    // Enhance
+    input_resolution?: string
+    output_resolution?: string
+    upscaled?: boolean
+    upscale_method?: string
+    /** The server reused the previous output instead of processing this frame. */
+    reused_frame?: boolean
+    // 3D reconstruction (the analyzer publishes engine/tracking state as
+    // the mode's results so the map view can say what is happening)
+    engine_state?: string
+    engine_error?: string
+    tracking_state?: string
+    keyframes?: number
+    landmarks?: number
+    input_w?: number
+    input_h?: number
     // Crowd management
     people?: {
         id: number

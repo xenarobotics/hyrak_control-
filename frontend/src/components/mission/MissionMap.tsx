@@ -88,7 +88,9 @@ function AvoidanceOverlay({ show, reload, home, drone }: {
       } catch { /* overlay stays empty if backend unreachable */ }
     }
     void load()
-    return visibleInterval(load, 1500)   // fast poll so the reroute updates live
+    const stop = visibleInterval(load, 1500)   // fast poll so the reroute updates live
+    // Without this a poll in flight at unmount set state on a dead overlay.
+    return () => { alive = false; stop() }
   }, [show, reload])
   if (!show) return null
   const start = home ?? drone     // mission start = the drone's home / launch point
@@ -547,7 +549,6 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
 
   // Drone position trail - last 60 positions for a flight path ghost
   const [droneTrail, setDroneTrail] = useState<[number, number][]>([])
-  const lastTrailPos = useRef<{ lat: number; lng: number } | null>(null)
   const [showAvoid, setShowAvoid] = useState(true)   // obstacle-avoidance overlay
   const [pinMode, setPinMode] = useState(false)      // click-to-pin a known hazard
   const [hazardNonce, setHazardNonce] = useState(0)  // bump to force overlay reload
@@ -560,15 +561,21 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
     setPinMode(false)             // one pin per activation
   }, [])
 
-  useEffect(() => {
-    if (!dronePos || dronePos.latitude_deg === 0) return
-    const lat = dronePos.latitude_deg
-    const lng = dronePos.longitude_deg
-    const last = lastTrailPos.current
-    if (last && Math.abs(lat - last.lat) < 0.000005 && Math.abs(lng - last.lng) < 0.000005) return
-    lastTrailPos.current = { lat, lng }
-    setDroneTrail(prev => [...prev.slice(-59), [lat, lng]])
-  }, [dronePos])
+  // Appended during render when a new position arrives (an effect would
+  // render every telemetry packet twice). The trail's own last point is the
+  // reference for the "moved far enough" check.
+  const [trailFor, setTrailFor] = useState(dronePos)
+  if (dronePos !== trailFor) {
+    setTrailFor(dronePos)
+    if (dronePos && dronePos.latitude_deg !== 0) {
+      const lat = dronePos.latitude_deg
+      const lng = dronePos.longitude_deg
+      const last = droneTrail[droneTrail.length - 1]
+      if (!last || Math.abs(lat - last[0]) >= 0.000005 || Math.abs(lng - last[1]) >= 0.000005) {
+        setDroneTrail(prev => [...prev.slice(-59), [lat, lng]])
+      }
+    }
+  }
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>

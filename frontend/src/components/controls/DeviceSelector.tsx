@@ -18,20 +18,14 @@ import {
 import { Button } from '@/components/ui/button'
 import { RefreshCw, Camera, Satellite, WifiOff, Wifi, Loader, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { getVideoSource, isServerSourced, needsCameraSelection, getAirUnitVideoPort, setAirUnitVideoPort } from '@/lib/videoSource'
+import { getVideoSource, isServerSourced, needsCameraSelection, getAirUnitVideoPort, setAirUnitVideoPort, specFor } from '@/lib/videoSource'
 import { getServerUrl } from '@/lib/server-url'
 import { visibleInterval } from '@/lib/poll'
-
-const SOURCE_LABELS: Record<string, string> = {
-    air_unit_udp: 'Air unit (UDP) - set in Settings',
-    siyi_rtsp: 'SIYI (RTSP) - set in Settings',
-    rtsp_relay: 'RTSP relay (this machine) - set in Settings',
-    rtsp_camera: 'RTSP as camera - set in Settings',
-}
+import { useHydrated } from '@/hooks/useClientValue'
+import Link from 'next/link'
 
 export function DeviceSelector() {
-    const [mounted, setMounted] = useState(false)
-    useEffect(() => { setMounted(true) }, [])
+    const mounted = useHydrated()
     const {
         cameras, selectedCameraId: camId, setSelectedCameraId: setCamId,
         isLoading: camLoading, scanCameras: scanCams,
@@ -143,7 +137,7 @@ export function DeviceSelector() {
 
                 {!needsCamera ? (
                     <div className="h-8 flex items-center px-2 rounded text-xs font-mono bg-app-surface border border-app-border text-app-text-muted truncate">
-                        {SOURCE_LABELS[videoSource]}
+                        {specFor(videoSource)?.label ?? videoSource} - set in Settings
                     </div>
                 ) : (
                     <Select
@@ -387,7 +381,7 @@ export function DeviceSelector() {
                 )}
                 {sitlNeedsDesktop && (
                     <p className="mt-1.5 text-[10px] font-mono text-app-text-muted leading-relaxed">
-                        SITL requires the HYRAK desktop app - <a href="/" className="underline text-zinc-400 hover:text-zinc-200">download it here</a>, then connect to the PX4 SITL running on your machine.
+                        SITL requires the HYRAK desktop app - <Link href="/" className="underline text-zinc-400 hover:text-zinc-200">download it here</Link>, then connect to the PX4 SITL running on your machine.
                     </p>
                 )}
             </div>

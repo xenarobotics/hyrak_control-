@@ -59,14 +59,29 @@ export function ActionPanel({ s, avoid }: { s: FlightState; avoid: AvoidanceStat
     const [starting, setStarting] = useState(false)
     const wantTakeoff = useRef<number | null>(null)
 
-    useEffect(() => { if (s.indoor) setHeight(INDOOR_HEIGHT) }, [s.indoor])
+    // Indoors: snap the height down on the outdoor -> indoor edge (during
+    // render, not in an effect).
+    const [wasIndoor, setWasIndoor] = useState(false)
+    if (s.indoor !== wasIndoor) {
+        setWasIndoor(s.indoor)
+        if (s.indoor) setHeight(INDOOR_HEIGHT)
+    }
 
-    // Show a refusal for a while, in plain words.
+    // Show a refusal for a while, in plain words. Captured during render when
+    // a new refused result lands; the pending takeoff (a ref) and the timer
+    // are the effect's part.
+    const [seenResult, setSeenResult] = useState(last)
+    if (last !== seenResult) {
+        setSeenResult(last)
+        if (last && last.ok === false) {
+            const why = last.error ?? last.msg
+            setProblem(why ? explain(why) : 'The drone did not accept that. Try again in a moment.')
+            setStarting(false)
+        }
+    }
     useEffect(() => {
         if (!last || last.ok !== false) return
-        const why = (last as { error?: string }).error ?? last.msg
-        setProblem(why ? explain(why) : 'The drone did not accept that. Try again in a moment.')
-        setStarting(false); wantTakeoff.current = null
+        wantTakeoff.current = null
         const id = setTimeout(() => setProblem(null), 10000)
         return () => clearTimeout(id)
     }, [last])

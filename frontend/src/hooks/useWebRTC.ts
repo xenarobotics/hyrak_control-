@@ -38,6 +38,21 @@ async function fetchIceServers(): Promise<RTCIceServer[]> {
     return STUN_ONLY
 }
 
+/** The handful of RTCStats fields the panel reads, across inbound-rtp,
+ *  outbound-rtp and remote-inbound-rtp - the DOM lib types each report as a
+ *  bare RTCStats, so the shape is spelled out here. */
+interface RtpStatsLike {
+    type: string
+    kind?: string
+    timestamp?: number
+    bytesReceived?: number
+    bytesSent?: number
+    framesPerSecond?: number
+    packetsLost?: number
+    jitter?: number
+    roundTripTime?: number
+}
+
 export interface WebRTCStats {
     inputFps: number
     bitrate: number
@@ -77,7 +92,7 @@ export function useWebRTC() {
     const iceGraceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const ICE_GRACE_MS = 5000
 
-    const { setConnectionStatus } = useDroneStore()
+    const setStreamStatus = useDroneStore(s => s.setStreamStatus)
 
     // `keepRelay` distinguishes "tearing down to immediately restart" from
     // "the operator stopped". Releasing the relay on a restart is actively
@@ -228,7 +243,7 @@ export function useWebRTC() {
                 const msg = getLastGstError() ?? (e as Error).message
                 console.error('[air-unit-gst] start failed:', msg)
                 setLastError(msg)
-                setConnectionStatus('error')
+                setStreamStatus('error')
                 return
             }
         }
@@ -259,7 +274,7 @@ export function useWebRTC() {
                 const msg = getLastReceiverError() ?? (e as Error).message
                 console.error('[hyrak-receiver] start failed:', msg)
                 setLastError(msg)
-                setConnectionStatus('error')
+                setStreamStatus('error')
                 return
             }
         }
@@ -270,7 +285,7 @@ export function useWebRTC() {
             if (!isDesktopApp()) {
                 const msg = 'Relay video needs the HYRAK desktop app - a browser tab can\'t run the relay.'
                 setLastError(msg)
-                setConnectionStatus('error')
+                setStreamStatus('error')
                 return
             }
             try {
@@ -304,7 +319,7 @@ export function useWebRTC() {
                 const msg = (e as Error).message
                 console.error('Relay start failed:', msg)
                 setLastError(msg)
-                setConnectionStatus('error')
+                setStreamStatus('error')
                 return
             }
         }
@@ -323,7 +338,7 @@ export function useWebRTC() {
                 const msg = getLastSenderError() ?? (e as Error).message
                 console.error('DataChannel sender start failed:', msg)
                 setLastError(msg)
-                setConnectionStatus('error')
+                setStreamStatus('error')
                 return
             }
         }
@@ -418,7 +433,7 @@ export function useWebRTC() {
             if (stream) {
                 setRemoteStream(stream)
                 setIsStreaming(true)
-                setConnectionStatus('connected')
+                setStreamStatus('connected')
             }
         }
 
@@ -429,7 +444,7 @@ export function useWebRTC() {
                 (pc.iceConnectionState === 'connected' ||
                     pc.iceConnectionState === 'completed')) {
                 setIsStreaming(true)
-                setConnectionStatus('connected')
+                setStreamStatus('connected')
             }
             if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
                 if (iceGraceRef.current) {
@@ -438,14 +453,14 @@ export function useWebRTC() {
                 }
             }
             if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
-                setConnectionStatus('error')
+                setStreamStatus('error')
                 cleanup()
             } else if (pc.iceConnectionState === 'disconnected' && !iceGraceRef.current) {
                 iceGraceRef.current = setTimeout(() => {
                     iceGraceRef.current = null
                     if (pcRef.current === pc && pc.iceConnectionState === 'disconnected') {
                         setLastError('Video connection lost')
-                        setConnectionStatus('error')
+                        setStreamStatus('error')
                         cleanup()
                     }
                 }, ICE_GRACE_MS)
@@ -473,7 +488,7 @@ export function useWebRTC() {
             const msg = relayErr || err?.msg || 'Stream failed to start'
             console.error('Server rejected offer:', msg)
             setLastError(msg)
-            setConnectionStatus('error')
+            setStreamStatus('error')
             cleanup()
         }
 
@@ -506,20 +521,34 @@ export function useWebRTC() {
                 ...(videoSource === 'siyi_rtsp' ? { rtspUrl: getSiyiRtspUrl() } : {}),
                 ...(videoSource === 'air_unit_udp' ? { airUnitVideoPort: getAirUnitVideoPort() } : {}),
             })
-            setConnectionStatus('connecting')
+            setStreamStatus('connecting')
         } catch (e) {
             console.error('WebRTC offer failed:', e)
             // Without a message `pending` stayed true until the 35 s backstop.
             setLastError((e as Error)?.message || 'Could not start the video connection')
             cleanup()
         }
-    }, [cleanup, setConnectionStatus])
+    }, [cleanup, setStreamStatus])
 
     const stopStream = useCallback(() => {
         getSocket().emit('stop_stream')
         cleanup()
-        setConnectionStatus('disconnected')
-    }, [cleanup, setConnectionStatus])
+        setStreamStatus('idle')
+    }, [cleanup, setStreamStatus])
+
+    // Renegotiate on the SAME local producers. A session resume only loses
+    // the peer connection (the server drops media with the socket); the
+    // local gst/receiver/datachannel processes and the relay port are still
+    // fine, and a full stop/start would kill them and get a NEW relay port -
+    // leaving a laptop that is already pushing to the old one talking to
+    // nothing. startStream already does cleanup(true), so this is just
+    // "tell the server, keep everything local".
+    const restartStream = useCallback(async (cameraStream: MediaStream | null) => {
+        getSocket().emit('stop_stream')
+        cleanup(true)
+        setStreamStatus('connecting')
+        await startStream(cameraStream)
+    }, [cleanup, setStreamStatus, startStream])
 
     // Re-apply the saved video settings to a LIVE stream (called from the
     // settings page) - reconfigures the camera track and sender in place,
@@ -560,14 +589,14 @@ export function useWebRTC() {
                 const out: WebRTCStats = {
                     inputFps: 0, bitrate: 0, roundTripTime: 0, jitter: 0, packetLoss: 0
                 }
-                let inbound: any = null
-                let outbound: any = null
-                let remoteIn: any = null
-                reports.forEach((r: any) => {
+                let inbound: RtpStatsLike | null = null
+                let outbound: RtpStatsLike | null = null
+                let remoteIn: RtpStatsLike | null = null
+                for (const r of reports.values() as Iterable<RtpStatsLike>) {
                     if (r.type === 'inbound-rtp' && r.kind === 'video') inbound = r
                     if (r.type === 'outbound-rtp' && r.kind === 'video') outbound = r
                     if (r.type === 'remote-inbound-rtp' && r.kind === 'video') remoteIn = r
-                })
+                }
                 // Overlay streams have no inbound video - report the uplink
                 // instead (fps/bitrate sent, loss/jitter as the server sees it).
                 const src = inbound ?? outbound
@@ -597,5 +626,5 @@ export function useWebRTC() {
 
     useEffect(() => { return () => { cleanup() } }, [cleanup])
 
-    return { remoteStream, localStream, isStreaming, overlayActive, stats, lastError, startStream, stopStream, applyVideoSettings }
+    return { remoteStream, localStream, isStreaming, overlayActive, stats, lastError, startStream, stopStream, restartStream, applyVideoSettings }
 }

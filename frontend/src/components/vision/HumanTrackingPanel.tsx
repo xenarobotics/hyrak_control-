@@ -5,7 +5,7 @@ import { useDroneStore } from '@/store/drone'
 import { useStableById } from '@/lib/panelSmoothing'
 import { getSocket } from '@/lib/socket'
 import {
-    Users, Target, Crosshair, Square, Info,
+    Users, Crosshair, Square, Info,
     ChevronDown, ChevronUp, Mountain, MoveVertical,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -205,7 +205,7 @@ export function HumanTrackingPanel() {
     const handleCloser = () => handleDistanceChange(distanceRatio + DISTANCE_STEP)
     const handleFurther = () => handleDistanceChange(distanceRatio - DISTANCE_STEP)
 
-    const cmd = (cvResults as any)?.drone_command
+    const cmd = cvResults?.drone_command
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -493,7 +493,7 @@ export function HumanTrackingPanel() {
 
             {persons.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {persons.map((p: any) => {
+                    {persons.map((p) => {
                         const isSelected = p.id === selectedId
                         return (
                             <div

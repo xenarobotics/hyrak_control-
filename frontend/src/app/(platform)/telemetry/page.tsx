@@ -828,10 +828,10 @@ function VehicleWorkspace({ v, onUpdate }: { v: VehicleProfile; onUpdate: (p: Pa
                 </Card>
                 <Card title="HARDWARE">
                     <Field label="AIRFRAME TYPE">
-                        <AppSelect value={v.airframe as any} onChange={airframe => onUpdate({ airframe })} options={Object.entries(AIRFRAME_LABELS).map(([k, l]) => ({ value: k as any, label: l }))} />
+                        <AppSelect value={v.airframe} onChange={airframe => onUpdate({ airframe })} options={Object.entries(AIRFRAME_LABELS).map(([k, l]) => ({ value: k, label: l }))} />
                     </Field>
                     <Field label="AUTOPILOT FIRMWARE">
-                        <AppSelect value={v.firmware as any} onChange={firmware => onUpdate({ firmware })} options={[{ value: 'px4', label: 'PX4' }, { value: 'ardupilot', label: 'ArduPilot' }, { value: 'other', label: 'Other / Unknown' }]} />
+                        <AppSelect value={v.firmware} onChange={firmware => onUpdate({ firmware })} options={[{ value: 'px4', label: 'PX4' }, { value: 'ardupilot', label: 'ArduPilot' }, { value: 'other', label: 'Other / Unknown' }]} />
                     </Field>
                 </Card>
             </G2>
@@ -1112,13 +1112,20 @@ function MountOrientation({ connected }: { connected: boolean }) {
     const [rebootNeeded, setRebootNeeded] = useState(false)
     const [error, setError] = useState<string | null>(null)
 
-    useEffect(() => {
+    // Forget the aircraft's values on the edge where the link drops (during
+    // render, so a reconnect never shows the previous aircraft's numbers).
+    const [linked, setLinked] = useState(connected)
+    if (connected !== linked) {
+        setLinked(connected)
         if (!connected) {
             setValues({ SENS_BOARD_ROT: null, CAL_MAG0_ROT: null })
             setDrafts({ SENS_BOARD_ROT: null, CAL_MAG0_ROT: null })
             setRebootNeeded(false)
-            return
         }
+    }
+
+    useEffect(() => {
+        if (!connected) return
         const socket = getSocket()
         const onGet = (r: { key: string; ok: boolean; value: number | null }) => {
             if (r.key !== 'SENS_BOARD_ROT' && r.key !== 'CAL_MAG0_ROT') return
@@ -1270,13 +1277,16 @@ function SensorsWorkspace() {
     // just as authoritative as a health flag, so a run that finished OK
     // paints the card green for the rest of the session (and bridges the
     // second or two before a fresh health message confirms the others).
+    // Both updates happen during render on the transition itself.
     const [doneSession, setDoneSession] = useState<Record<string, boolean>>({})
-    useEffect(() => {
-        if (cal.phase === 'done' && cal.sensor) {
-            setDoneSession(d => d[cal.sensor] ? d : { ...d, [cal.sensor]: true })
-        }
-    }, [cal.phase, cal.sensor])
-    useEffect(() => { if (!connected) setDoneSession({}) }, [connected])
+    if (cal.phase === 'done' && cal.sensor && !doneSession[cal.sensor]) {
+        setDoneSession(d => ({ ...d, [cal.sensor]: true }))
+    }
+    const [calLinked, setCalLinked] = useState(connected)
+    if (connected !== calLinked) {
+        setCalLinked(connected)
+        if (!connected) setDoneSession({})
+    }
 
     // PX4's own health flags, or null until the first health message - the
     // difference between "the autopilot says not calibrated" and "nobody has
@@ -1485,9 +1495,15 @@ function RadioWorkspace() {
     // ── PX4 parameters: the actual configuration ─────────────────────────
     const [params, setParams] = useState<Record<string, number | null>>({})
     const [paramErr, setParamErr] = useState<string | null>(null)
+    // Forget the previous aircraft's values on the link-drop edge (render-time).
+    const [paramsLinked, setParamsLinked] = useState(connected)
+    if (connected !== paramsLinked) {
+        setParamsLinked(connected)
+        if (!connected) setParams({})
+    }
 
     useEffect(() => {
-        if (!connected) { setParams({}); return }
+        if (!connected) return
         const socket = getSocket()
         const keys = new Set([...RC_PARAM_KEYS, ...Array.from({ length: 6 }, (_, i) => `COM_FLTMODE${i + 1}`)])
         const onGet = (r: { key: string; ok: boolean; value: number | null }) => {
@@ -1513,13 +1529,17 @@ function RadioWorkspace() {
     const [channels, setChannels] = useState<number[]>([])
     const [chanCount, setChanCount] = useState(0)
     const [monitor, setMonitor] = useState<{ listening: boolean; port: number } | null>(null)
-    const lastFrameAt = useRef(0)
-    const [, forceTick] = useState(0)
+    // Both as state, not a ref plus Date.now() in render: the live light is a
+    // pure function of when the last frame came and what time it is now.
+    const [lastFrameAt, setLastFrameAt] = useState(0)
+    const [now, setNow] = useState(0)
 
     useEffect(() => {
         const socket = getSocket()
         const onChans = (p: { channels: number[]; count: number }) => {
-            lastFrameAt.current = Date.now()
+            const t = Date.now()
+            setLastFrameAt(t)
+            setNow(t)
             setChannels(p.channels)
             setChanCount(p.count)
         }
@@ -1528,17 +1548,20 @@ function RadioWorkspace() {
         socket.on('rc_monitor_status', onStatus)
         socket.emit('start_rc_monitor')
         // The "live" light must go OUT when frames stop - poll the recency.
-        const t = setInterval(() => forceTick(x => x + 1), 1000)
+        const t = setInterval(() => setNow(Date.now()), 1000)
         return () => { socket.off('rc_channels', onChans); socket.off('rc_monitor_status', onStatus); clearInterval(t) }
     }, [])
 
-    const live = Date.now() - lastFrameAt.current < 3000 && channels.length > 0
+    const live = lastFrameAt > 0 && now - lastFrameAt < 3000 && channels.length > 0
 
     // ── Stick calibration wizard ─────────────────────────────────────────
     const [wiz, setWiz] = useState<WizPhase>('idle')
     const [wizErr, setWizErr] = useState<string | null>(null)
     const ranges = useRef<{ min: number; max: number }[]>([])
     const [trims, setTrims] = useState<number[]>([])
+    // The ranges as they stood when capture finished. The ref accumulates at
+    // the RC frame rate; review renders from this snapshot instead.
+    const [captured, setCaptured] = useState<{ min: number; max: number }[]>([])
     const [writeProgress, setWriteProgress] = useState('')
 
     useEffect(() => {
@@ -1553,6 +1576,7 @@ function RadioWorkspace() {
 
     const startCapture = () => {
         ranges.current = []
+        setCaptured([])
         setTrims([])
         setWizErr(null)
         setWiz('capturing')
@@ -1561,6 +1585,7 @@ function RadioWorkspace() {
         // The position everything is LEFT in becomes the trim - which is why
         // the instruction ends "…finish centred, throttle down".
         setTrims([...channels])
+        setCaptured(ranges.current.map(r => r && { ...r }))
         setWiz('review')
     }
     const writeCalibration = async () => {
@@ -1579,7 +1604,7 @@ function RadioWorkspace() {
         setWriteProgress('')
         setWiz('done')
     }
-    const calRows = () => ranges.current
+    const calRows = () => captured
         .map((r, i) => r ? {
             ch: i + 1, min: r.min, max: r.max,
             trim: Math.max(r.min, Math.min(r.max, trims[i] ?? Math.round((r.min + r.max) / 2))),
@@ -2076,13 +2101,13 @@ function PowerWorkspace({ p, onUpdate }: { p: PowerProfile; onUpdate: (patch: Pa
             <G2>
                 <Card title="PACK CONFIG">
                     <Field label="CELL COUNT (S)">
-                        <AppSelect value={p.cells as any} onChange={cells => onUpdate({ cells })} options={['2','3','4','5','6','8','10','12'].map(v => ({ value: v as any, label: `${v}S  ·  ${(+v*4.2).toFixed(1)}V full` }))} />
+                        <AppSelect value={p.cells} onChange={cells => onUpdate({ cells })} options={['2','3','4','5','6','8','10','12'].map(v => ({ value: v, label: `${v}S  ·  ${(+v*4.2).toFixed(1)}V full` }))} />
                     </Field>
                     <Field label="CAPACITY (mAh)">
                         <AppInput value={p.capacity} onChange={capacity => onUpdate({ capacity })} placeholder="5000" />
                     </Field>
                     <Field label="CRITICAL ACTION" tip="What autopilot does at critical battery level.">
-                        <AppSelect value={p.critAction as any} onChange={critAction => onUpdate({ critAction })} options={[
+                        <AppSelect value={p.critAction} onChange={critAction => onUpdate({ critAction })} options={[
                             { value: 'warn',   label: 'Warning only - pilot decides' },
                             { value: 'land',   label: 'Land immediately' },
                             { value: 'rtl',    label: 'Return to Launch (RTL)' },
@@ -2157,7 +2182,7 @@ function SafetyWorkspace({ s, onUpdate }: { s: SafetyProfile; onUpdate: (p: Part
                     </div>
                     <Card title="FAILSAFE ACTIONS">
                         <Field label="SIGNAL LOSS ACTION" tip="What the autopilot does if RC or telemetry link drops.">
-                            <AppSelect value={s.signalLoss as any} onChange={signalLoss => onUpdate({ signalLoss })} options={[
+                            <AppSelect value={s.signalLoss} onChange={signalLoss => onUpdate({ signalLoss })} options={[
                                 { value: 'rtl',      label: 'Return to Launch (RTL)' },
                                 { value: 'land',     label: 'Land immediately' },
                                 { value: 'hold',     label: 'Hold position (loiter)' },
@@ -2233,7 +2258,7 @@ function FlightWorkspace({ f, onUpdate, rthAlt, maxAlt, maxAltEnabled }: { f: Fl
                 </Card>
                 <Card title="RETURN TO HOME">
                     <Field label="RTH MODE" tip="What the drone does when RTL triggers.">
-                        <AppSelect value={f.rthMode as any} onChange={rthMode => onUpdate({ rthMode })} options={[
+                        <AppSelect value={f.rthMode} onChange={rthMode => onUpdate({ rthMode })} options={[
                             { value: 'ascend',  label: 'Climb to RTH alt → fly home → land' },
                             { value: 'current', label: 'Fly home at current altitude → land' },
                             { value: 'mission', label: 'Finish waypoint → return' },
@@ -2583,10 +2608,33 @@ function ParametersWorkspace() {
             }
         }
 
+        // A socket drop mid-download means params_result never arrives:
+        // without this the spinner spun forever.
+        const onDisconnect = () => {
+            setLoading(false)
+            setFetchError('Connection to HYRAK dropped during the download - fetch again once it reconnects')
+        }
+
         sock.on('params_result',  onResult)
         sock.on('param_set_ack',  onAck)
-        return () => { sock.off('params_result', onResult); sock.off('param_set_ack', onAck) }
+        sock.on('disconnect',     onDisconnect)
+        return () => {
+            sock.off('params_result', onResult)
+            sock.off('param_set_ack', onAck)
+            sock.off('disconnect', onDisconnect)
+        }
     }, [])
+
+    // Backstop for every other way a download can go quiet (the backend
+    // restarting, a dead MAVLink link that never answers).
+    useEffect(() => {
+        if (!loading) return
+        const t = setTimeout(() => {
+            setLoading(false)
+            setFetchError('Parameter download timed out after 60 s')
+        }, 60_000)
+        return () => clearTimeout(t)
+    }, [loading])
 
     const fetchParams = useCallback(() => {
         setFetchError(null)
@@ -3040,7 +3088,7 @@ export default function ConfigPage() {
     // ── Two-finger swipe back interception ────────────────────────────────────
     const viewRef        = useRef(view)
     const navBackRef     = useRef(false)
-    viewRef.current      = view
+    useEffect(() => { viewRef.current = view }, [view])
 
     useEffect(() => {
         if (view === 'workspace') {

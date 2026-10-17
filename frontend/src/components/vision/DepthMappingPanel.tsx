@@ -4,9 +4,9 @@ import { useDroneStore } from '@/store/drone'
 
 export function DepthMappingPanel() {
     const cvResults = useDroneStore(s => s.cvResults)
-    const minD = (cvResults as any)?.min_depth_m ?? 0
-    const maxD = (cvResults as any)?.max_depth_m ?? 0
-    const meanD = (cvResults as any)?.mean_depth_m ?? 0
+    const minD = cvResults?.min_depth_m ?? 0
+    const maxD = cvResults?.max_depth_m ?? 0
+    const meanD = cvResults?.mean_depth_m ?? 0
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

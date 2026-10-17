@@ -12,25 +12,31 @@ import {
     type LocalCommand,
 } from '@/lib/localLink'
 
+/** Wall clock for event handlers (never called during render). */
+const wallClock = () => Date.now()
+
 const RESULT: Record<number, string> = { 0: 'accepted', 1: 'temporarily rejected', 2: 'denied', 3: 'unsupported', 4: 'failed', 5: 'in progress' }
 
 export function LocalLinkPanel() {
-    const [, setTick] = useState(0)
+    // The clock is state, not read during render: ticked by the link's own
+    // events and once a second for the age counter.
+    const [now, setNow] = useState(0)
     const [sent, setSent] = useState<{ cmd: LocalCommand; at: number } | null>(null)
     useEffect(() => {
-        const unsub = subscribeLocal(() => setTick(t => t + 1))
-        const id = setInterval(() => setTick(t => t + 1), 1000)   // age counter
+        const unsub = subscribeLocal(() => setNow(Date.now()))
+        const id = setInterval(() => setNow(Date.now()), 1000)   // age counter
         return () => { unsub(); clearInterval(id) }
     }, [])
 
     if (isCloudUp() || !hasLocalLink()) return null
     const s = getLocalState()
-    const age = s.lastRxMs ? (Date.now() - s.lastRxMs) / 1000 : null
+    const age = s.lastRxMs && now ? (now - s.lastRxMs) / 1000 : null
     const fresh = age !== null && age < 3
     const ack = s.lastAck && sent && s.lastAck.command === 176 && s.lastAck.atMs >= sent.at ? s.lastAck : null
 
     const send = (cmd: LocalCommand) => {
-        if (sendLocalCommand(cmd)) setSent({ cmd, at: Date.now() })
+        const at = wallClock()
+        if (sendLocalCommand(cmd)) { setSent({ cmd, at }); setNow(at) }
     }
 
     return (

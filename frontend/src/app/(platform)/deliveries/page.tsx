@@ -119,7 +119,17 @@ const AUTH = liveAuthHeaders({ 'Content-Type': 'application/json' })
 // Parse a response body that may not be JSON (a proxy's HTML 502, an empty
 // reply). Raw r.json() throws on those, landing every error in the generic
 // "Backend unreachable" catch even though the backend DID answer.
-async function jsonOf(r: Response): Promise<Record<string, any>> {
+/** A live position as /sessions reports it for a session or a fleet drone. */
+type LivePosT = { lat: number; lng: number; alt: number; heading: number; battery: number; mode: string; in_air: boolean }
+type SessionsBody = {
+    sessions: { drone?: { id: string; name?: string } | null; hardware_uid?: string | null; live?: LivePosT | null }[]
+    fleet_drones: { db_id?: string; drone_id?: number; name?: string; live?: LivePosT | null }[]
+}
+
+/** The fields every endpoint here may answer with; the rest are per call
+ *  and typed at the call site through the type argument. */
+interface ApiBody { ok?: boolean; detail?: string; msg?: string }
+async function jsonOf<T extends object = ApiBody>(r: Response): Promise<Partial<T> & ApiBody> {
     try { return await r.json() } catch { return {} }
 }
 
@@ -258,7 +268,7 @@ function OrdersTab() {
     const refresh = useCallback(async () => {
         try {
             const r = await fetch(api(`/tasks${showArchivedRef.current ? '?archived=1' : ''}`))
-            const j = await jsonOf(r)
+            const j = await jsonOf<{ tasks: TaskT[] }>(r)
             setTasks(j.tasks ?? [])
         } catch { /* backend away - keep the last board */ }
         finally { setLoaded(true) }
@@ -285,7 +295,7 @@ function OrdersTab() {
     const pollSessions = useCallback(async () => {
         try {
             const r = await fetch(api('/sessions'))
-            const j = await jsonOf(r)
+            const j = await jsonOf<SessionsBody>(r)
             const live: MapDroneLive[] = []
             const ids = new Set<string>()
             const fids = new Set<string>()
@@ -527,7 +537,7 @@ function OrdersTab() {
                         task_id: task.id, target_status: nextStatus,
                     }),
                 })
-                const j = await jsonOf(r)
+                const j = await jsonOf<{ needs_ack: boolean; zones: { name: string }[] }>(r)
                 if (j.ok) {
                     setStarting(null)
                     refresh()
@@ -556,7 +566,6 @@ function OrdersTab() {
             waypoints,
             ...(ackOrange ? { ack_orange: true } : {}),
         })
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [detail, routeCache, fleetIds, telemetryStatus, refresh])
 
     // What the map highlights: the open order's planned route, if loaded.
@@ -1119,7 +1128,7 @@ function DronesPanel() {
     const [fleetIds, setFleetIds] = useState<Set<string>>(new Set())
     const [connectingFleet, setConnectingFleet] = useState(false)
     const retRef = useRef<ReturnState | null>(null)
-    retRef.current = ret
+    useEffect(() => { retRef.current = ret }, [ret])
     const telemetryStatus = useDroneStore(st => st.telemetryStatus)
 
     const refresh = useCallback(async () => {
@@ -1159,6 +1168,7 @@ function DronesPanel() {
     }, [])
 
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- refresh sets state only after its fetch resolves; the rule does not follow the await
         refresh()
         return visibleInterval(refresh, 5000)
     }, [refresh])
@@ -1205,7 +1215,7 @@ function DronesPanel() {
             const r = await fetch(api(`/drones/${droneId}/return-mission`), {
                 method: 'POST', headers: AUTH,
             })
-            const j = await jsonOf(r)
+            const j = await jsonOf<{ mission: { waypoints: WaypointT[] } }>(r)
             if (!r.ok) { setRet(null); setError(j.detail ?? 'Return planning failed'); return }
             const waypoints = j.mission?.waypoints
             if (!waypoints || waypoints.length < 2) {
@@ -1450,10 +1460,11 @@ function ProfilesTab() {
     const refresh = useCallback(async () => {
         try {
             const r = await fetch(api('/planner/meta'))
-            const j = await jsonOf(r)
+            const j = await jsonOf<{ profiles: FullProfileT[] }>(r)
             setProfiles(j.profiles ?? [])
         } catch { /* transient */ }
     }, [])
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- refresh sets state only after its fetch resolves; the rule does not follow the await
     useEffect(() => { refresh() }, [refresh])
 
     const editFor = (p: FullProfileT) => edits[p.id] ?? {
@@ -1582,6 +1593,7 @@ function PadsTab() {
             setPads((await r.json()).pads ?? [])
         } catch { /* transient */ }
     }, [])
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- refresh sets state only after its fetch resolves; the rule does not follow the await
     useEffect(() => { refresh() }, [refresh])
 
     async function create() {
@@ -1730,6 +1742,7 @@ function KeysTab() {
             setKeys((await r.json()).keys ?? [])
         } catch { /* transient */ }
     }, [])
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- refresh sets state only after its fetch resolves; the rule does not follow the await
     useEffect(() => { refresh() }, [refresh])
 
     async function mint() {
@@ -1738,9 +1751,9 @@ function KeysTab() {
             const r = await fetch(api('/api-keys'), {
                 method: 'POST', headers: AUTH, body: JSON.stringify({ name }),
             })
-            const j = await jsonOf(r)
+            const j = await jsonOf<{ key: string }>(r)
             if (!r.ok) setError(j.detail ?? 'Failed')
-            else { setMinted(j.key); setName(''); refresh() }
+            else { setMinted(j.key ?? null); setName(''); refresh() }
         } catch { setError('Backend unreachable') }
         setBusy(false)
     }

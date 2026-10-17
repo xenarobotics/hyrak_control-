@@ -6,7 +6,7 @@
 // (the desktop shell enables PlatformHEVCDecoderSupport; hardware only), so
 // support is probed once and everything falls back to WebRTC without it.
 import { useEffect, useState } from 'react'
-import { getServerUrl } from '@/lib/server-url'
+import { getServerUrl, LOCAL_API_URL, DEFAULT_API_PORT } from '@/lib/server-url'
 import { getAirUnitVideoPort, getVideoSource } from '@/lib/videoSource'
 
 export const AIR_UNIT_PORT_EVENT = 'hyrak-air-unit-port'
@@ -38,7 +38,7 @@ function disabled(): boolean {
     try { return localStorage.getItem(DISABLE_KEY) === '1' } catch { return false }
 }
 export function setServerHevcDisabled(v: boolean): void {
-    try { v ? localStorage.setItem(DISABLE_KEY, '1') : localStorage.removeItem(DISABLE_KEY) } catch { /* private mode */ }
+    try { if (v) localStorage.setItem(DISABLE_KEY, '1'); else localStorage.removeItem(DISABLE_KEY) } catch { /* private mode */ }
 }
 
 // THE ROUTE MATTERS MORE THAN THE CODEC. The app talks to the backend
@@ -49,7 +49,7 @@ export function setServerHevcDisabled(v: boolean): void {
 // reachable at localhost (the ground-station laptop is also the viewer),
 // the feed is fetched from there directly: localhost is exempt from
 // mixed-content blocking, and CORS already allows the app origin.
-const LOCAL_BASES = ['http://localhost:8001', 'http://127.0.0.1:8001']
+const LOCAL_BASES = [LOCAL_API_URL, `http://127.0.0.1:${DEFAULT_API_PORT}`]
 let feedBase: string | null = null
 let feedBaseProbe: Promise<string> | null = null
 

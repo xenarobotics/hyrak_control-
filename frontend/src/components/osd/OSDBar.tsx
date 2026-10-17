@@ -1,7 +1,7 @@
 'use client'
 import {
     Battery, Satellite, Gauge, Navigation,
-    Compass, Wifi, WifiOff, Shield, ShieldOff, Clock
+    Compass, Wifi, WifiOff, Shield, ShieldOff, Clock, Video
 } from 'lucide-react'
 
 import { useDroneStore } from '@/store/drone'
@@ -13,10 +13,11 @@ import { useFlightTimer } from '@/hooks/useFlightTimer'
 import { connectionColor } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 
-function Pill({ children, className, style }: {
+function Pill({ children, className, style, title }: {
     children: React.ReactNode
     className?: string
     style?: React.CSSProperties
+    title?: string
 }) {
     return (
         <div
@@ -26,6 +27,7 @@ function Pill({ children, className, style }: {
                 className
             )}
             style={style}
+            title={title}
         >
             {children}
         </div>
@@ -33,7 +35,12 @@ function Pill({ children, className, style }: {
 }
 
 export function OSDBar() {
-    const { telemetry, connectionStatus, telemetryStatus } = useDroneStore()
+    // Per-field selectors: a telemetry packet re-renders this bar, but a
+    // cvResults update or an FC message must not.
+    const telemetry = useDroneStore(s => s.telemetry)
+    const connectionStatus = useDroneStore(s => s.connectionStatus)
+    const streamStatus = useDroneStore(s => s.streamStatus)
+    const telemetryStatus = useDroneStore(s => s.telemetryStatus)
     const { elapsed, running } = useFlightTimer()
 
     const alt = telemetry?.position.relative_altitude_m ?? 0
@@ -52,13 +59,26 @@ export function OSDBar() {
 
             {/* Row 1 - status */}
             <div className="flex items-center gap-2 flex-wrap">
-                {/* Connection */}
-                <Pill>
+                {/* Cloud socket - never the video stream, which has its own pill */}
+                <Pill title="Browser to cloud (socket)">
                     <span className={cn('w-2 h-2 rounded-full', connectionColor(connectionStatus))} />
                     <span className="text-muted-foreground">
                         {connectionStatus === 'connected' ? 'ONLINE' : connectionStatus.toUpperCase()}
                     </span>
                 </Pill>
+
+                {/* Video stream - only shown once a stream has been attempted */}
+                {streamStatus !== 'idle' && (
+                    <Pill title="Video stream (WebRTC)">
+                        <Video size={12} className={cn(
+                            streamStatus === 'connected' ? 'text-green-500'
+                                : streamStatus === 'error' ? 'text-red-500' : 'text-yellow-500',
+                        )} />
+                        <span className="text-muted-foreground">
+                            {streamStatus === 'connected' ? 'VIDEO' : streamStatus.toUpperCase()}
+                        </span>
+                    </Pill>
+                )}
 
                 {/* Drone link lost (backend watchdog, ~2 s) - distinct from the
                     socket to the cloud, which the pill above shows */}

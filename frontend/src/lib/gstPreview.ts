@@ -14,7 +14,7 @@
 //
 //   allocateRelay() -> startGstPipeline() -> (caller sends the offer)
 
-import { useEffect, useState } from 'react'
+import { useSyncExternalStore } from 'react'
 import { isDesktopApp, nativeBridge, type BridgeEvent } from '@/lib/nativeBridge'
 import { getAirUnitVideoPort, getGstJitterMs, getGstAccel, getPreviewMaxHeight } from '@/lib/videoSource'
 import type { RelayAllocation } from '@/hooks/useRtspRelayBridge'
@@ -137,13 +137,12 @@ export async function stopGstPipeline(): Promise<void> {
 
 /** Reactive status for components. */
 export function useGstPreview(): GstStatus | null {
-    // Starts null to match server-rendered HTML, then syncs after mount -
-    // same hydration reasoning as the other video hooks.
-    const [status, setStatus] = useState<GstStatus | null>(null)
-    useEffect(() => {
-        setStatus(lastStatus)
-        subscribers.add(setStatus)
-        return () => { subscribers.delete(setStatus) }
-    }, [])
-    return status
+    // null for the server render and hydration, the live status from the
+    // first client render on - same reasoning as the other video hooks.
+    return useSyncExternalStore(subscribeStatus, () => lastStatus, () => null)
+}
+
+function subscribeStatus(onChange: () => void) {
+    subscribers.add(onChange)
+    return () => { subscribers.delete(onChange) }
 }

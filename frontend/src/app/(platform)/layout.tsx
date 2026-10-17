@@ -23,6 +23,7 @@ import { FleetAside } from '@/components/swarm/FleetAside'
 import { StatusBar } from '@/components/layout/StatusBar'
 import { getStatusBarEnabled, STATUSBAR_CHANGE_EVENT } from '@/lib/statusBarSettings'
 import { useAuthGate } from '@/hooks/useAuthGate'
+import { useClientValueOn, useHydrated } from '@/hooks/useClientValue'
 
 const NAV = [
     { href: '/fly',       label: 'Fly',     icon: Radio },
@@ -37,6 +38,8 @@ const NAV = [
 // Mount socket ONCE at layout level - persists across all tab navigation
 function DroneConnection() {
     useDrone()
+    // Persisted swarm flag, read after mount (see store/swarm.ts hydrate).
+    useEffect(() => { useSwarmStore.getState().hydrate() }, [])
     return null
 }
 
@@ -55,7 +58,8 @@ function PlatformNav() {
     const pathname = usePathname()
     const router = useRouter()
     const { isStreaming, stopStream } = useWebRTCContext()
-    const { setMode, setCvResults } = useDroneStore()
+    const setMode = useDroneStore(s => s.setMode)
+    const setCvResults = useDroneStore(s => s.setCvResults)
     const [pendingHref, setPendingHref] = useState<string | null>(null)
 
     function handleNavClick(href: string, e: React.MouseEvent) {
@@ -198,17 +202,10 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
     // until the check passes, so a signed-out tab never hits the server
     // with an empty credential. The landing page (/) stays public.
     const gate = useAuthGate('viewer')
-    const [mounted, setMounted] = useState(false)
-    const [statusBarOn, setStatusBarOn] = useState(false)
+    const mounted = useHydrated()
+    const statusBarOn = useClientValueOn(STATUSBAR_CHANGE_EVENT, getStatusBarEnabled, false)
     const swarmEnabled = useSwarmStore(s => s.enabled)
     const pathname = usePathname()
-    useEffect(() => {
-        setMounted(true)
-        setStatusBarOn(getStatusBarEnabled())
-        const onChange = (e: Event) => setStatusBarOn((e as CustomEvent<boolean>).detail)
-        window.addEventListener(STATUSBAR_CHANGE_EVENT, onChange)
-        return () => window.removeEventListener(STATUSBAR_CHANGE_EVENT, onChange)
-    }, [])
 
     // Fly and Command carry their own status and flight controls - the global
     // bar would only duplicate them (and cover their OSD), so it's shown

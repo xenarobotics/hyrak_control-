@@ -70,11 +70,11 @@ export function Recon3DView() {
     const [showPip, setShowPip] = useState(true)
     // The analyzer publishes engine/tracking state as the mode's results, so
     // the map view can say what is happening instead of looking blank.
-    const cv = useDroneStore(s => s.cvResults) as Record<string, unknown> | null
-    const engineState = String(cv?.engine_state ?? 'starting')
-    const trackState = String(cv?.tracking_state ?? 'n/a')
-    const inputW = Number(cv?.input_w ?? 0)
-    const inputH = Number(cv?.input_h ?? 0)
+    const cv = useDroneStore(s => s.cvResults)
+    const engineState = cv?.engine_state ?? 'starting'
+    const trackState = cv?.tracking_state ?? 'n/a'
+    const inputW = cv?.input_w ?? 0
+    const inputH = cv?.input_h ?? 0
     // Below 1280 wide, small objects will not reconstruct - say so while the
     // scan is still running, not after the user has judged the result.
     const inputDegraded = inputW > 0 && inputW < 1280
@@ -289,7 +289,7 @@ export function Recon3DView() {
                 let head = 'STARTING 3D ENGINE...', sub = 'one moment', color = 'rgba(255,255,255,0.55)'
                 if (engineState === 'failed') {
                     head = '3D ENGINE ERROR'
-                    sub = String(cv?.engine_error ?? 'see server log')
+                    sub = cv?.engine_error ?? 'see server log'
                     color = '#f87171'
                 } else if (engineState === 'running') {
                     if (trackState === 'initializing') {

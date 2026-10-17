@@ -60,7 +60,7 @@ export function ArtificialHorizon({ width = 400, height = 300 }: Props) {
                                     fontSize={10} fill="white" opacity={0.6}
                                     fontFamily="monospace"
                                     stroke="rgba(0,0,0,0.9)" strokeWidth={2.5}
-                                    style={{ paintOrder: 'stroke fill' } as any}
+                                    style={{ paintOrder: 'stroke fill' }}
                                 >
                                     {deg > 0 ? `+${deg}` : deg}
                                 </text>
@@ -106,7 +106,7 @@ export function ArtificialHorizon({ width = 400, height = 300 }: Props) {
                 fontSize={9} fill="rgba(255,255,255,0.45)"
                 fontFamily="monospace" textAnchor="start"
                 stroke="rgba(0,0,0,0.8)" strokeWidth={2}
-                style={{ paintOrder: 'stroke fill' } as any}
+                style={{ paintOrder: 'stroke fill' }}
             >
                 {pitch.toFixed(1)}°
             </text>

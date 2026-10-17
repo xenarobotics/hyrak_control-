@@ -21,6 +21,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useDroneStore } from '@/store/drone'
 import { ScrollText, X, Trash2, ChevronDown, AlertTriangle } from 'lucide-react'
+import { useHydrated } from '@/hooks/useClientValue'
 
 /** MAVSDK's StatusTextType ascends with severity - 0 DEBUG … 7 EMERGENCY -
  *  unlike MAVLink's own SEVERITY enum, which descends. Reading it the wrong
@@ -42,10 +43,12 @@ function timeOf(ts: number): string {
 type Variant = 'bar' | 'floating'
 
 export function FcMessageLog({ variant = 'bar' }: { variant?: Variant }) {
-    const { fcMessages, fcUnread, clearFcMessages, markFcRead } = useDroneStore()
+    const fcMessages = useDroneStore(s => s.fcMessages)
+    const fcUnread = useDroneStore(s => s.fcUnread)
+    const clearFcMessages = useDroneStore(s => s.clearFcMessages)
+    const markFcRead = useDroneStore(s => s.markFcRead)
     const [open, setOpen] = useState(false)
-    const [mounted, setMounted] = useState(false)
-    useEffect(() => { setMounted(true) }, [])
+    const mounted = useHydrated()
 
     const worst = fcMessages.reduce((a, m) => Math.max(a, m.rank), 0)
     const color = fcUnread > 0 ? SEVERITY_COLOR(worst) : undefined

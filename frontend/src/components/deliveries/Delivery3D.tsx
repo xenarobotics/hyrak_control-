@@ -24,6 +24,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { getServerUrl } from '@/lib/server-url'
 import { ZONE_COLORS, type ZoneFeature } from '@/components/admin/zones'
 import type { MapDroneLive, MapPad, MapSelection } from './DeliveryMap'
+import type * as CesiumNS from 'cesium'
+
+/** Cesium reads its asset base from this global before the module loads. */
+type CesiumWindow = Window & { CESIUM_BASE_URL?: string }
 
 const LERP_MS = 3200   // slightly over the telemetry poll period
 
@@ -46,15 +50,15 @@ export default function Delivery3D({ pads, selection, drones, showAirspace }: {
     showAirspace: boolean
 }) {
     const containerRef = useRef<HTMLDivElement>(null)
-    const viewerRef = useRef<any>(null)
-    const CesiumRef = useRef<any>(null)
+    const viewerRef = useRef<CesiumNS.Viewer | null>(null)
+    const CesiumRef = useRef<typeof CesiumNS | null>(null)
     const flownRef = useRef<string>('')
     const routeGenRef = useRef(0)
     const [zones, setZones] = useState<ZoneFeature[]>([])
     const [ready, setReady] = useState(false)          // viewer constructed
     const [terrainGen, setTerrainGen] = useState(0)    // bumps when terrain arrives
     const droneRefs = useRef<Map<string, {
-        entity: any
+        entity: CesiumNS.Entity | null
         from: { lat: number; lng: number; alt: number }
         to: { lat: number; lng: number; alt: number }
         t0: number
@@ -79,7 +83,7 @@ export default function Delivery3D({ pads, selection, drones, showAirspace }: {
             link.href = '/cesium/Widgets/widgets.css'
             document.head.appendChild(link)
         }
-        ;(window as any).CESIUM_BASE_URL = '/cesium/'
+        ;(window as CesiumWindow).CESIUM_BASE_URL = '/cesium/'
 
         warmCesium().then((Cesium) => {
             if (destroyed || !containerRef.current) return
@@ -88,12 +92,12 @@ export default function Delivery3D({ pads, selection, drones, showAirspace }: {
             const ionToken = process.env.NEXT_PUBLIC_CESIUM_ION_TOKEN
             if (ionToken) Cesium.Ion.defaultAccessToken = ionToken
 
-            let baseLayer: any
+            let baseLayer: CesiumNS.ImageryLayer | undefined
             if (ionToken) {
                 try {
-                    baseLayer = (Cesium as any).ImageryLayer.fromProviderAsync(
-                        (Cesium as any).createWorldImageryAsync({
-                            style: (Cesium as any).IonWorldImageryStyle?.AERIAL ?? 0,
+                    baseLayer = Cesium.ImageryLayer.fromProviderAsync(
+                        Cesium.createWorldImageryAsync({
+                            style: Cesium.IonWorldImageryStyle.AERIAL,
                         })
                     )
                 } catch { /* fall through to ArcGIS */ }
@@ -129,7 +133,7 @@ export default function Delivery3D({ pads, selection, drones, showAirspace }: {
                 ? Cesium.createWorldTerrainAsync({ requestVertexNormals: true })
                 : Cesium.ArcGISTiledElevationTerrainProvider.fromUrl(
                     'https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer')
-            terrainReady.then((tp: any) => {
+            terrainReady.then((tp: CesiumNS.TerrainProvider) => {
                 if (destroyed || viewer.isDestroyed?.()) return
                 viewer.terrainProvider = tp
                 terrainCache.clear()   // flat-globe zeros are now wrong
@@ -137,7 +141,7 @@ export default function Delivery3D({ pads, selection, drones, showAirspace }: {
             }).catch(() => { /* flat globe still works */ })
 
             if (ionToken) {
-                Cesium.createOsmBuildingsAsync().then((b: any) => {
+                Cesium.createOsmBuildingsAsync().then((b: CesiumNS.Cesium3DTileset) => {
                     if (!destroyed && !viewer.isDestroyed?.()) {
                         viewer.scene.primitives.add(b)
                     }
@@ -294,8 +298,8 @@ export default function Delivery3D({ pads, selection, drones, showAirspace }: {
             } else {
                 const cartographics = wps.map(w => Cesium.Cartographic.fromDegrees(w.lng, w.lat))
                 Cesium.sampleTerrainMostDetailed(viewer.scene.terrainProvider, cartographics)
-                    .then((sampled: any[]) => {
-                        const ground = sampled.map((c: any) => c.height ?? 0)
+                    .then((sampled: CesiumNS.Cartographic[]) => {
+                        const ground = sampled.map(c => c.height ?? 0)
                         terrainCache.set(cacheKey, ground)
                         commit(ground)
                     })
@@ -337,8 +341,8 @@ export default function Delivery3D({ pads, selection, drones, showAirspace }: {
             const target = { lat: d.lat, lng: d.lng, alt: Math.max(0.5, d.alt ?? 0) }
             const existing = refs.get(d.id)
             if (!existing) {
-                const ref = { entity: null as any, from: target, to: target, t0: performance.now() }
-                const position = new Cesium.CallbackProperty(() => {
+                const ref = { entity: null as CesiumNS.Entity | null, from: target, to: target, t0: performance.now() }
+                const position = new Cesium.CallbackPositionProperty(() => {
                     const k = Math.min(1, (performance.now() - ref.t0) / LERP_MS)
                     const lat = ref.from.lat + (ref.to.lat - ref.from.lat) * k
                     const lng = ref.from.lng + (ref.to.lng - ref.from.lng) * k
@@ -375,15 +379,16 @@ export default function Delivery3D({ pads, selection, drones, showAirspace }: {
                 }
                 existing.to = target
                 existing.t0 = performance.now()
-                existing.entity.label.text = new Cesium.ConstantProperty(
+                const ent = existing.entity
+                if (ent?.label) ent.label.text = new Cesium.ConstantProperty(
                     `${d.name} ${Math.round(d.battery)}%`)
-                existing.entity.point.color = new Cesium.ConstantProperty(
+                if (ent?.point) ent.point.color = new Cesium.ConstantProperty(
                     Cesium.Color.fromCssColorString(d.in_air ? '#fbbf24' : '#34d399'))
             }
         }
         for (const [id, ref] of refs) {
             if (!seen.has(id)) {
-                viewer.entities.remove(ref.entity)
+                if (ref.entity) viewer.entities.remove(ref.entity)
                 refs.delete(id)
             }
         }

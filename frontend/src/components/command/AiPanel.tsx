@@ -5,31 +5,11 @@
 // (lock a person, follow, thresholds...) behave identically here.
 
 import { useDroneStore } from '@/store/drone'
-import { MODES } from '@/components/vision/ModeSelector'
-import { ObjectDetectionPanel } from '@/components/vision/ObjectDetectionPanel'
-import { HumanTrackingPanel } from '@/components/vision/HumanTrackingPanel'
-import { DepthMappingPanel } from '@/components/vision/DepthMappingPanel'
-import { PersonTrackerPanel } from '@/components/vision/PersonTrackerPanel'
-import { EnhancePanel } from '@/components/vision/EnhancePanel'
-import { CrowdManagementPanel } from '@/components/vision/CrowdManagementPanel'
-import { TrafficManagementPanel } from '@/components/vision/TrafficManagementPanel'
-import { VehiclePlateTrackingPanel } from '@/components/vision/VehiclePlateTrackingPanel'
-import { Reconstruction3DPanel } from '@/components/vision/Reconstruction3DPanel'
+import { MODES, panelFor } from '@/components/vision/ModeSelector'
 import { ModulePerformance } from '@/components/vision/ModulePerformance'
 
 function Body({ mode }: { mode: string }) {
-    switch (mode) {
-        case 'object-detection': return <ObjectDetectionPanel />
-        case 'human-tracking': return <HumanTrackingPanel />
-        case 'depth-mapping': return <DepthMappingPanel />
-        case 'person-tracking': return <PersonTrackerPanel />
-        case 'enhance': return <EnhancePanel />
-        case 'crowd-management': return <CrowdManagementPanel />
-        case 'vehicle-plate-tracking': return <VehiclePlateTrackingPanel />
-        case 'traffic-management': return <TrafficManagementPanel />
-        case '3d-reconstruction': return <Reconstruction3DPanel />
-        default: return null
-    }
+    return panelFor(mode)
 }
 
 export function AiPanel({ onStop }: { onStop: () => void }) {

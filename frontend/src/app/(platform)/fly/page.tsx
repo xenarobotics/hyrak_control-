@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import dynamic from 'next/dynamic'
-import { useDroneStore } from '@/store/drone'
 import { useSwarmStore } from '@/store/swarm'
 import { getSocket } from '@/lib/socket'
 import { OSDBar } from '@/components/osd/OSDBar'
@@ -19,6 +18,7 @@ import { Separator } from '@/components/ui/separator'
 import { ChevronRight, ChevronLeft, Radio, Video, Map as MapIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SurfaceCard } from '@/components/layout/SurfaceCard'
+import { useHydrated } from '@/hooks/useClientValue'
 
 // Leaflet touches `window` - no SSR
 const FleetMap = dynamic(() => import('@/components/swarm/FleetMap'), {
@@ -106,7 +106,7 @@ export default function FlyPage() {
     // reaching the JSX on the initial (hydration) render. Without this, the
     // server renders with enabled=false while the client immediately reads
     // enabled=true from sessionStorage, causing a React hydration mismatch.
-    const [mounted, setMounted] = useState(false)
+    const mounted = useHydrated()
     const [mainView, setMainView] = useState<'video' | 'map'>('video')
     const swarmEnabled    = useSwarmStore(s => s.enabled)
     const setSwarmEnabled = useSwarmStore(s => s.setEnabled)
@@ -115,7 +115,6 @@ export default function FlyPage() {
     // so the OSD never shows a stale annotated frame from a previous AI session.
     useEffect(() => {
         getSocket().emit('set_analysis_mode', { mode: 'manual-control' })
-        setMounted(true)
     }, [])
 
     return (
