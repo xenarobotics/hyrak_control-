@@ -42,7 +42,6 @@ import asyncio
 import json
 import logging
 import math
-import os
 import time
 import weakref
 from pathlib import Path
@@ -147,9 +146,9 @@ async def _watch(manager, rec: dict, t: dict, want_mode: tuple[str, ...]) -> Non
             "timed_out": t.get("motion") is None and t.get("mode") is None,
             "telemetry_rates": _rates(manager),
         })
-        _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(_LOG_PATH, "a") as fh:
-            fh.write(json.dumps(rec) + "\n")
+        # Disk I/O off the loop: this coroutine shares it with every
+        # session's telemetry and video (audit B20).
+        await asyncio.to_thread(_append_record, rec)
         logger.info(
             f"LATENCY {rec['path']} {rec['command']}: frame->decision {rec['frame_to_decision_ms']} ms, "
             f"decision->send {rec['decision_to_send_ms']} ms, send->ack {rec['send_to_ack_ms']} ms, "
@@ -226,14 +225,41 @@ def _pct(xs: list[float], p: float) -> float | None:
     return round(xs[min(len(xs) - 1, int(p * len(xs)))], 1)
 
 
-def stats() -> dict:
-    rows = []
-    if _LOG_PATH.exists():
-        for line in _LOG_PATH.read_text().splitlines():
-            try:
-                rows.append(json.loads(line))
-            except Exception:
-                pass
+def _append_record(rec: dict) -> None:
+    _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(_LOG_PATH, "a") as fh:
+        fh.write(json.dumps(rec) + "\n")
+
+
+# stats() reads at most this much of the file, from the end. The file grows
+# for as long as the probe is on; the summary is about recent flights, and an
+# unbounded read of a long-lived log on every GET was a loop stall.
+_STATS_TAIL_BYTES = 4 << 20
+
+
+def _read_tail_rows(path: Path, max_bytes: int = _STATS_TAIL_BYTES) -> list[dict]:
+    rows: list[dict] = []
+    if not path.exists():
+        return rows
+    with open(path, "rb") as fh:
+        fh.seek(0, 2)
+        size = fh.tell()
+        start = max(0, size - max_bytes)
+        fh.seek(start)
+        data = fh.read()
+    if start > 0:
+        # Landed mid-line: drop the partial first record.
+        nl = data.find(b"\n")
+        data = data[nl + 1:] if nl >= 0 else b""
+    for line in data.decode(errors="replace").splitlines():
+        try:
+            rows.append(json.loads(line))
+        except Exception:
+            pass
+    return rows
+
+
+def _summarise(rows: list[dict]) -> dict:
     out: dict = {"enabled": enabled(), "file": str(_LOG_PATH), "records": len(rows), "paths": {}}
     stages = ("frame_to_decision_ms", "decision_to_send_ms", "send_to_ack_ms",
               "send_to_mode_ms", "send_to_motion_ms", "frame_to_motion_ms", "frame_to_mode_ms")
@@ -247,6 +273,16 @@ def stats() -> dict:
                              "min": round(min(xs), 1), "max": round(max(xs), 1)}
         out["paths"][path] = entry
     return out
+
+
+def stats() -> dict:
+    """Synchronous summary; the route uses stats_async so the read is off the loop."""
+    return _summarise(_read_tail_rows(_LOG_PATH))
+
+
+async def stats_async() -> dict:
+    rows = await asyncio.to_thread(_read_tail_rows, _LOG_PATH)
+    return _summarise(rows)
 
 
 # ---- API -------------------------------------------------------------------
@@ -275,4 +311,4 @@ async def probe_toggle(body: _Toggle, x_auth_token: str = Header(None, alias="X-
 
 @router.get("/stats")
 async def probe_stats() -> dict:
-    return stats()
+    return await stats_async()
