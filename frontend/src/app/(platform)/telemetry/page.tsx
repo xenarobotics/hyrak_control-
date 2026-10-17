@@ -2583,10 +2583,33 @@ function ParametersWorkspace() {
             }
         }
 
+        // A socket drop mid-download means params_result never arrives:
+        // without this the spinner spun forever.
+        const onDisconnect = () => {
+            setLoading(false)
+            setFetchError('Connection to HYRAK dropped during the download - fetch again once it reconnects')
+        }
+
         sock.on('params_result',  onResult)
         sock.on('param_set_ack',  onAck)
-        return () => { sock.off('params_result', onResult); sock.off('param_set_ack', onAck) }
+        sock.on('disconnect',     onDisconnect)
+        return () => {
+            sock.off('params_result', onResult)
+            sock.off('param_set_ack', onAck)
+            sock.off('disconnect', onDisconnect)
+        }
     }, [])
+
+    // Backstop for every other way a download can go quiet (the backend
+    // restarting, a dead MAVLink link that never answers).
+    useEffect(() => {
+        if (!loading) return
+        const t = setTimeout(() => {
+            setLoading(false)
+            setFetchError('Parameter download timed out after 60 s')
+        }, 60_000)
+        return () => clearTimeout(t)
+    }, [loading])
 
     const fetchParams = useCallback(() => {
         setFetchError(null)

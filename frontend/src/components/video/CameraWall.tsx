@@ -36,12 +36,15 @@ export function CameraWall({ onClose }: { onClose: () => void }) {
     // Which units are up right now (probed from the actual sockets).
     useEffect(() => {
         let alive = true
-        fetch(`${getServerUrl()}/api/video/mesh-units?max_units=8`).then(r => r.json()).then(j => {
-            if (!alive) return
-            const live = (j.units ?? []).filter((u: MeshUnit) => u.live || u.in_use)
-            setUnits(live)
-            if (!live.length) setStatus('no unit is delivering video')
-        }).catch(() => setStatus('backend unreachable'))
+        fetch(`${getServerUrl()}/api/video/mesh-units?max_units=8`, { signal: AbortSignal.timeout(8000) })
+            .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
+            .then((j: { units?: MeshUnit[] }) => {
+                if (!alive) return
+                const live = (j.units ?? []).filter(u => u.live || u.in_use)
+                setUnits(live)
+                if (!live.length) setStatus('no unit is delivering video')
+            })
+            .catch((e: Error) => { if (alive) setStatus(`backend unreachable (${e.message})`) })
         return () => { alive = false }
     }, [])
 
@@ -59,7 +62,14 @@ export function CameraWall({ onClose }: { onClose: () => void }) {
             const pc = pcRef.current
             if (!pc || closed) return
             midsRef.current = a.mids || {}
-            await pc.setRemoteDescription({ sdp: a.sdp, type: a.type })
+            try {
+                await pc.setRemoteDescription({ sdp: a.sdp, type: a.type })
+            } catch (e) {
+                // An unhandled rejection here left the wall on "connecting..."
+                // with nothing to say why.
+                if (!closed) setStatus(`wall failed: ${(e as Error).message}`)
+                return
+            }
             for (const p of pendingTracks.current.splice(0)) attach(p.mid, p.stream)
             setStatus(`${Object.keys(a.mids || {}).length} feed(s)`)
         }
@@ -71,21 +81,25 @@ export function CameraWall({ onClose }: { onClose: () => void }) {
         socket.on('wall_ice_candidate', onIce)
         socket.on('wall_error', onErr)
         ;(async () => {
-            const ice = await iceServers()
-            if (closed) return
-            const pc = new RTCPeerConnection({ iceServers: ice })
-            pcRef.current = pc
-            for (let i = 0; i < units.length; i++) pc.addTransceiver('video', { direction: 'recvonly' })
-            pc.ontrack = ev => {
-                const mid = ev.transceiver.mid ?? ''
-                const stream = ev.streams[0] ?? new MediaStream([ev.track])
-                attach(mid, stream)
+            try {
+                const ice = await iceServers()
+                if (closed) return
+                const pc = new RTCPeerConnection({ iceServers: ice })
+                pcRef.current = pc
+                for (let i = 0; i < units.length; i++) pc.addTransceiver('video', { direction: 'recvonly' })
+                pc.ontrack = ev => {
+                    const mid = ev.transceiver.mid ?? ''
+                    const stream = ev.streams[0] ?? new MediaStream([ev.track])
+                    attach(mid, stream)
+                }
+                pc.onicecandidate = ev => { if (ev.candidate) socket.emit('wall_ice_candidate', ev.candidate.toJSON()) }
+                const offer = await pc.createOffer()
+                await pc.setLocalDescription(offer)
+                setStatus('connecting...')
+                socket.emit('wall_offer', { sdp: offer.sdp, type: offer.type, ports: units.map(u => u.port), iceServers: ice })
+            } catch (e) {
+                if (!closed) setStatus(`wall failed: ${(e as Error).message}`)
             }
-            pc.onicecandidate = ev => { if (ev.candidate) socket.emit('wall_ice_candidate', ev.candidate.toJSON()) }
-            const offer = await pc.createOffer()
-            await pc.setLocalDescription(offer)
-            setStatus('connecting...')
-            socket.emit('wall_offer', { sdp: offer.sdp, type: offer.type, ports: units.map(u => u.port), iceServers: ice })
         })()
         return () => {
             closed = true

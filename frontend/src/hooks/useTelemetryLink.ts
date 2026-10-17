@@ -54,7 +54,7 @@ export function useTelemetryLink() {
     const [disconnecting, setDisconnecting] = useState(false)
 
     const {
-        telemetryStatus, telemetryError,
+        telemetryStatus, telemetryError, setTelemetryError,
         connectBrowserSerial, connectNativeSerial, connectNativeRf,
         connectLocalRelay, connectRemoteSitl, connectTelemetry, disconnectTelemetry,
     } = useDrone()
@@ -63,6 +63,17 @@ export function useTelemetryLink() {
         setSourceState(v)
         setTelemetrySource(v)
     }, [])
+
+    // Selected radio unplugged: fall back to SITL AND persist it. Changing
+    // only the local state left the dead index in storage, so the next mount
+    // re-selected the missing radio and Connect silently did nothing.
+    const dropMissing = useCallback((prefix: string, present: number) => {
+        const s = getTelemetrySource()
+        if (!s.startsWith(prefix)) return
+        if (Number(s.slice(prefix.length)) < present) return
+        setSource('sitl')
+        setTelemetryError('The selected radio is not present')
+    }, [setSource, setTelemetryError])
 
     const setBaud = useCallback((v: number) => {
         setBaudState(v)
@@ -83,16 +94,14 @@ export function useTelemetryLink() {
     const refreshRadios = useCallback(async () => {
         const list = await listGrantedPorts()
         setRadios(list)
-        // Selected radio unplugged → fall back to SITL rather than leaving a
-        // dead index selected, which connects to nothing and says nothing.
-        setSourceState(s => (s.startsWith('radio-') && !list[Number(s.slice(6))] ? 'sitl' : s))
-    }, [])
+        dropMissing('radio-', list.length)
+    }, [dropMissing])
 
     const refreshNativeRadios = useCallback(async () => {
         const list = await listNativeSerialPorts()
         setNativeRadios(list)
-        setSourceState(s => (s.startsWith('nradio-') && !list[Number(s.slice(7))] ? 'sitl' : s))
-    }, [])
+        dropMissing('nradio-', list.length)
+    }, [dropMissing])
 
     useEffect(() => {
         if (desktop) {
