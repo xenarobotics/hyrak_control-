@@ -21,6 +21,8 @@ import Image from 'next/image'
 import dynamic from 'next/dynamic'
 import { Map as MapIcon, Plane, Shield, FileCheck, X, Search } from 'lucide-react'
 import { connectSocket, getSocket } from '@/lib/socket'
+import { liveAuthHeaders } from '@/lib/auth'
+import { useAuthGate } from '@/hooks/useAuthGate'
 import { getServerUrl } from '@/lib/server-url'
 import type { MapDrone } from '@/components/admin/AdminMap'
 import type { ZoneFeature } from '@/components/admin/zones'
@@ -29,7 +31,8 @@ const AdminMap = dynamic(() => import('@/components/admin/AdminMap'), { ssr: fal
 const ZoneEditor = dynamic(() => import('@/components/admin/ZoneEditor'), { ssr: false })
 const FlightTrackMap = dynamic(() => import('@/components/admin/FlightTrackMap'), { ssr: false })
 
-const TOKEN = process.env.NEXT_PUBLIC_SECRET_TOKEN || 'change_this_to_a_random_string'
+const JSON_AUTH = liveAuthHeaders({ 'Content-Type': 'application/json' })
+const AUTH = liveAuthHeaders()
 
 type DroneRecord = {
     id: string
@@ -135,6 +138,7 @@ function jitter(id: string, v: number): number {
 }
 
 export default function AdminPage() {
+    useAuthGate('admin')
     const [tab, setTab] = useState<Tab>('overview')
     const [sessions, setSessions] = useState<SessionInfo[]>([])
     const [fleetDrones, setFleetDrones] = useState<FleetDroneInfo[]>([])
@@ -190,7 +194,7 @@ export default function AdminPage() {
         const poll = async () => {
             try {
                 const [sRes, dRes] = await Promise.all([
-                    fetch(`${getServerUrl()}/api/sessions`),
+                    fetch(`${getServerUrl()}/api/sessions`, { headers: AUTH }),
                     fetch(`${getServerUrl()}/api/drones`),
                 ])
                 const sData = await sRes.json()
@@ -253,7 +257,7 @@ export default function AdminPage() {
         try {
             await fetch(`${getServerUrl()}/api/permits/${id}/decision`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Auth-Token': TOKEN },
+                headers: JSON_AUTH,
                 body: JSON.stringify({ approve }),
             })
             void refreshPermits()
@@ -344,7 +348,7 @@ export default function AdminPage() {
         try {
             await fetch(`${getServerUrl()}/api/drones/${d.id}`, {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/json', 'X-Auth-Token': TOKEN },
+                headers: JSON_AUTH,
                 body: JSON.stringify({ name }),
             })
         } catch { /* next poll shows the truth either way */ }

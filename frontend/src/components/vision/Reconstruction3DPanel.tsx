@@ -10,11 +10,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useDroneStore } from '@/store/drone'
 import { getServerUrl } from '@/lib/server-url'
+import { liveAuthHeaders } from '@/lib/auth'
 import { visibleInterval } from '@/lib/poll'
 import { Download, RefreshCw, Satellite, Sparkles, Loader } from 'lucide-react'
 
-const TOKEN = process.env.NEXT_PUBLIC_SECRET_TOKEN || ''
-const AUTH = { 'X-Auth-Token': TOKEN, 'Content-Type': 'application/json' }
+const AUTH = liveAuthHeaders({ 'Content-Type': 'application/json' })
 const api = (p: string) => `${getServerUrl()}/api/recon${p}`
 const jsonOf = async (r: Response) => { try { return await r.json() } catch { return {} } }
 

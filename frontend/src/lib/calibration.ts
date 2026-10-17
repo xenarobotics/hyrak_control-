@@ -9,6 +9,7 @@
 // declared here. Declaring "hfov is 1-179" in both languages is how the two
 // drift apart and the form starts accepting values the backend rejects.
 
+import { authHeaders as bearerHeaders } from '@/lib/auth'
 import { getServerUrl } from './server-url'
 
 export interface CalibrationField {
@@ -37,10 +38,7 @@ export interface CalibrationSchema {
 }
 
 function authHeaders(): HeadersInit {
-    return {
-        'X-Auth-Token': process.env.NEXT_PUBLIC_SECRET_TOKEN ?? '',
-        'Content-Type': 'application/json',
-    }
+    return bearerHeaders({ 'Content-Type': 'application/json' })
 }
 
 export async function fetchCalibration(): Promise<CalibrationSchema | null> {

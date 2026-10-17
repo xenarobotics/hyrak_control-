@@ -14,9 +14,11 @@ import 'leaflet/dist/leaflet.css'
 
 import { MAP_LAYERS } from '@/types/mission'
 import { getServerUrl } from '@/lib/server-url'
+import { liveAuthHeaders } from '@/lib/auth'
 import { ZONE_COLORS, zoneRings, type ZoneClass, type ZoneFeature } from '@/components/admin/zones'
 
-const TOKEN = process.env.NEXT_PUBLIC_SECRET_TOKEN || 'change_this_to_a_random_string'
+const JSON_AUTH = liveAuthHeaders({ 'Content-Type': 'application/json' })
+const AUTH = liveAuthHeaders()
 
 const PANEL_STYLE: React.CSSProperties = {
     background: 'rgba(17, 19, 24, .94)',
@@ -76,7 +78,7 @@ export default function ZoneEditor({
         try {
             await fetch(`${getServerUrl()}/api/zones/${editingId}`, {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/json', 'X-Auth-Token': TOKEN },
+                headers: JSON_AUTH,
                 body: JSON.stringify({
                     name: editName,
                     zone_class: editClass,
@@ -110,7 +112,7 @@ export default function ZoneEditor({
         try {
             const res = await fetch(`${getServerUrl()}/api/zones`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Auth-Token': TOKEN },
+                headers: JSON_AUTH,
                 body: JSON.stringify({
                     name: name || undefined,
                     zone_class: zoneClass,
@@ -136,7 +138,7 @@ export default function ZoneEditor({
         try {
             await fetch(`${getServerUrl()}/api/zones/${id}`, {
                 method: 'DELETE',
-                headers: { 'X-Auth-Token': TOKEN },
+                headers: AUTH,
             })
             onChanged()
         } catch { /* poll shows the truth */ }

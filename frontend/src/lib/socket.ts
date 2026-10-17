@@ -1,24 +1,29 @@
 import { io, Socket } from 'socket.io-client'
 import { getServerUrl } from './server-url'
-
-const SECRET_TOKEN = process.env.NEXT_PUBLIC_SECRET_TOKEN || 'change_this_to_a_random_string'
+import { getToken, redirectToLogin } from './auth'
 
 let socket: Socket | null = null
 // The cloud session this page holds. Offered back on every reconnect so a
 // dropped socket reclaims its session - drone link, relay, flight record -
 // instead of the server tearing it all down. Page lifetime only: a reload
-// cannot resume a radio relay that died with the page.
+// cannot resume a radio relay that died with the page. The resume_secret
+// arrives in session_ready and must go back with the id: the id alone is
+// visible in logs and the admin page and does not reclaim a drone.
 let resumeSessionId: string | null = null
+let resumeSecret: string | null = null
 
 export function setResumeSession(id: string | null): void {
     resumeSessionId = id
+    if (!id) resumeSecret = null
 }
 
 export function getSocket(): Socket {
     if (!socket) {
         socket = io(getServerUrl(), {
+            // Re-evaluated on every (re)connect, so a login or a new
+            // session id is picked up without rebuilding the socket.
             auth: (cb: (data: object) => void) =>
-                cb({ token: SECRET_TOKEN, resume_session: resumeSessionId }),
+                cb({ token: getToken() ?? '', resume_session: resumeSessionId, resume_secret: resumeSecret }),
             transports: ['websocket'],
             reconnection: true,
             // Keep trying: the server holds the session for 90 s, and a
@@ -27,6 +32,18 @@ export function getSocket(): Socket {
             reconnectionDelay: 500,
             reconnectionDelayMax: 3000,
             autoConnect: false,
+        })
+        socket.on('session_ready', (data: { session_id?: string; resume_secret?: string }) => {
+            if (data?.resume_secret) resumeSecret = data.resume_secret
+        })
+        // The server refuses the handshake outright when the token is
+        // missing, expired or revoked. Nothing will change by retrying;
+        // go and sign in.
+        socket.on('connect_error', (err: Error) => {
+            if (err?.message === 'unauthorized') {
+                socket?.disconnect()
+                redirectToLogin()
+            }
         })
         // DEV ONLY: a handle for driving the UI from the console.
         //
@@ -54,6 +71,7 @@ export function connectSocket(): void {
 
 export function disconnectSocket(): void {
     resumeSessionId = null
+    resumeSecret = null
     if (socket) {
         socket.disconnect()
         socket = null

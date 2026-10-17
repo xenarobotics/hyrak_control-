@@ -9,6 +9,7 @@
 // and the only dataset in the system with no automatic expiry, so deletion is
 // always explicit and always the operator's decision.
 
+import { authHeaders as bearerHeaders } from '@/lib/auth'
 import { getServerUrl } from './server-url'
 
 export interface GalleryPerson {
@@ -31,7 +32,7 @@ export interface EnrolResult {
 }
 
 function authHeaders(): HeadersInit {
-    return { 'X-Auth-Token': process.env.NEXT_PUBLIC_SECRET_TOKEN ?? '' }
+    return bearerHeaders()
 }
 
 export async function fetchGallery(): Promise<GalleryPerson[]> {

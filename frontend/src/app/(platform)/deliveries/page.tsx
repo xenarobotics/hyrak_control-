@@ -18,6 +18,7 @@ import {
     ChevronsRight, ChevronsLeft, Map as MapIcon, SlidersHorizontal,
 } from 'lucide-react'
 import { getServerUrl } from '@/lib/server-url'
+import { liveAuthHeaders } from '@/lib/auth'
 import { visibleInterval } from '@/lib/poll'
 import { getSocket } from '@/lib/socket'
 import { claimSocket, releaseSocket, socketOwner } from '@/lib/socketClaim'
@@ -48,7 +49,6 @@ const DeliveryMap = dynamic(() => import('@/components/deliveries/DeliveryMap'),
     ),
 })
 
-const TOKEN = process.env.NEXT_PUBLIC_SECRET_TOKEN || ''
 
 // Mirrors backend app/tasks/service.py ALLOWED_NEXT - which buttons an
 // order offers. The backend re-checks every transition; this only decides
@@ -114,7 +114,7 @@ type DroneT = { id: string; name: string; is_simulated: boolean }
 type ProfileT = { id: string; name: string }
 
 function api(path: string) { return `${getServerUrl()}/api${path}` }
-const AUTH = { 'X-Auth-Token': TOKEN, 'Content-Type': 'application/json' }
+const AUTH = liveAuthHeaders({ 'Content-Type': 'application/json' })
 
 // Parse a response body that may not be JSON (a proxy's HTML 502, an empty
 // reply). Raw r.json() throws on those, landing every error in the generic

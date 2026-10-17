@@ -15,8 +15,11 @@ to RATE_HZ and drops whatever it cannot keep up with.
 
 Run (hyrak_sim.sh does this when MODEL=gz_x500_depth):
     GZ_IP=127.0.0.1 GZ_PARTITION=hyrak_demo python3 gz_depth_sensor.py [drone_id|auto]
-Env: HYRAK_API (default http://127.0.0.1:8001), HYRAK_TOKEN (default: the
-repo .env SECRET_TOKEN), DEPTH_TOPICS (comma list), RATE_HZ (default 10).
+Env: HYRAK_API (default http://127.0.0.1:8001), HYRAK_TOKEN (REQUIRED: a
+user bearer token - sign in as an operator and copy the token from
+POST /api/auth/login, or from localStorage hyrak-auth-token in a browser
+that is signed in; see docs/AUTH.md), DEPTH_TOPICS (comma list), RATE_HZ
+(default 10).
 """
 import json
 import os
@@ -24,7 +27,6 @@ import sys
 import threading
 import time
 import urllib.request
-from pathlib import Path
 
 import numpy as np
 
@@ -50,18 +52,13 @@ TOPICS = [t for t in os.environ.get("DEPTH_TOPICS", "").split(",") if t] or [
 
 
 def _token() -> str:
-    tok = os.environ.get("HYRAK_TOKEN")
-    if tok:
-        return tok
-    env = Path(__file__).resolve().parents[1] / ".env"
-    try:
-        for line in env.read_text().splitlines():
-            if line.startswith("SECRET_TOKEN="):
-                return line.split("=", 1)[1].strip().strip('"').strip("'")
-    except Exception:
-        pass
-    # The backend's own default (app/config.py secret_token) when .env sets none.
-    return "dev_token_change_in_production"
+    """The operator's bearer token. There is no fallback: the backend has no
+    shared secret any more, and a wrong token is a 401 on every POST."""
+    tok = os.environ.get("HYRAK_TOKEN", "").strip()
+    if not tok:
+        sys.exit("gz_depth_sensor: set HYRAK_TOKEN to an operator's bearer token "
+                 "(see docs/AUTH.md); the backend no longer has a shared token")
+    return tok
 
 
 TOKEN = _token()
@@ -117,7 +114,7 @@ def worker():
                     "depth": [round(float(x), 2) for x in pooled.ravel()],
                     "source": "depth"}).encode()
                 req = urllib.request.Request(url, data=body, method="POST", headers={
-                    "content-type": "application/json", "X-Auth-Token": TOKEN})
+                    "content-type": "application/json", "Authorization": "Bearer " + TOKEN})
                 with urllib.request.urlopen(req, timeout=1.0) as r:
                     res = json.loads(r.read() or b"{}")
                 _stats["posted"] += 1

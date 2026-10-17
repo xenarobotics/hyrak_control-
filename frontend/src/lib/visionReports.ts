@@ -4,6 +4,7 @@
 // helpers back the "previous sessions" history panel plus the optional
 // manual export/clear actions.
 
+import { authHeaders } from '@/lib/auth'
 import { getServerUrl } from './server-url'
 
 export interface CrowdSessionSummary {
@@ -113,14 +114,13 @@ export async function downloadSessionReport(sessionId: string, kind: 'crowd-repo
 }
 
 // Explicit, operator-triggered - wipes ALL crowd/plate history (not just
-// the current session). Requires the same token other mutating admin
-// actions use (see PersonTrackerPanel.tsx's clear_reference call).
+// the current session). Needs a signed-in operator like every other
+// mutating call.
 export async function clearHistory(kind: 'crowd-history' | 'plate-history'): Promise<boolean> {
     try {
-        const token = process.env.NEXT_PUBLIC_SECRET_TOKEN ?? ''
         const res = await fetch(`${getServerUrl()}/api/vision/${kind}`, {
             method: 'DELETE',
-            headers: { 'X-Auth-Token': token },
+            headers: authHeaders(),
         })
         return res.ok
     } catch (e) {

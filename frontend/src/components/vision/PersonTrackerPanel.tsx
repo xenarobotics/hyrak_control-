@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useDroneStore } from '@/store/drone'
 import { getSocket } from '@/lib/socket'
 import { getServerUrl } from '@/lib/server-url'
+import { authHeaders } from '@/lib/auth'
 import {
     Users, Crosshair, Square, Info, ChevronDown, ChevronUp,
     Upload, CheckCircle, AlertCircle, Loader2, UserX, ScanFace,
@@ -233,7 +234,6 @@ export function PersonTrackerPanel() {
         setUploadError('')
         setFaceThumbnail(null)
 
-        const secretToken = process.env.NEXT_PUBLIC_SECRET_TOKEN ?? ''
         const form = new FormData()
         form.append('file', file)
 
@@ -242,7 +242,7 @@ export function PersonTrackerPanel() {
                 `${getServerUrl()}/api/reference-photo?session_id=${encodeURIComponent(sessionId)}`,
                 {
                     method: 'POST',
-                    headers: { 'X-Auth-Token': secretToken },
+                    headers: authHeaders(),
                     body: form,
                 }
             )
