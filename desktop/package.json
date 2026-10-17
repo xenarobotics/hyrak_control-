@@ -1,12 +1,12 @@
 {
   "name": "hyrak-desktop",
   "version": "0.1.57",
-  "description": "HYRAK desktop app — same site, plus native hardware access (UDP/TCP relays, serial, RTSP) for SITL, swarms, custom air units and multi-camera setups that a browser tab can't reach directly.",
+  "description": "HYRAK desktop app - same site, plus native hardware access (UDP/TCP relays, serial, RTSP) for SITL, swarms, custom air units and multi-camera setups that a browser tab can't reach directly.",
   "author": "Xena Robotics",
   "private": true,
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node build/write-site-url.js && tsc -p tsconfig.json",
     "start": "npm run build && electron .",
     "icons": "python3 build/generate-icon.py && node build/build-icons.js",
     "dist": "npm run build && electron-builder",
@@ -28,9 +28,9 @@
     "werift": "^0.24.1"
   },
   "devDependencies": {
-    "@types/node": "^20.14.0",
-    "electron": "^32.0.0",
-    "electron-builder": "^25.1.8",
+    "@types/node": "^22.0.0",
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3",
     "icon-gen": "^5.0.0",
     "typescript": "^5.5.4"
   },
