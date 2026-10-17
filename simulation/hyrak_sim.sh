@@ -5,6 +5,15 @@
 #   ./hyrak_sim.sh stop       stops ONLY what this script started (PID files)
 #   ./hyrak_sim.sh status
 #
+#   HEADLESS=1 ./hyrak_sim.sh start     no gz GUI (server only; a headless box,
+#                                       or when the GUI's render load drags the
+#                                       real-time factor down)
+#   PX4_DIR=/path/to/PX4-Autopilot      PX4 checkout (default ~/PX4-Autopilot),
+#                                       built with `make px4_sitl_default`
+#   MODEL=gz_x500_depth|gz_x500_indoor  vehicle (default gz_x500_mono_cam)
+#   WORLD=<name>                        world sdf (simulation/worlds first,
+#                                       then PX4's)
+#
 # Everything that bit us is pinned here, in one place:
 #  - GZ_IP=127.0.0.1: gz-transport discovery on loopback, so a WiFi IP change
 #    can no longer break the sim ("Network is unreachable" freeze).
@@ -26,7 +35,9 @@
 #    read by the "Air unit (UDP)" video source. MAVLink -> udp:14540 for the
 #    desktop's plain "SITL" source (reply-to-sender, QGC style) and udp:14600
 #    for "Gazebo sim on server". No v4l2loopback, no browser capture.
-#  - NEVER pattern-kills gz/px4: stop uses the PIDs it recorded.
+#  - NEVER pattern-kills gz/px4/ffmpeg: stop uses the PIDs it recorded, and
+#    the leftover sweep only touches processes whose environment carries
+#    GZ_PARTITION=hyrak_demo (a positive match read from /proc/<pid>/environ).
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PX4="${PX4_DIR:-$HOME/PX4-Autopilot}"
@@ -92,8 +103,20 @@ fi
 export GZ_IP=127.0.0.1 GZ_PARTITION=hyrak_demo DISPLAY="${DISPLAY:-:1}"
 
 _env() {  # PX4's gz_env.sh appends to these, so they must exist under set -u
-    : "${GZ_SIM_RESOURCE_PATH:=}" "${GZ_SIM_SYSTEM_PLUGIN_PATH:=}"
+    : "${GZ_SIM_RESOURCE_PATH:=}" "${GZ_SIM_SYSTEM_PLUGIN_PATH:=}" "${PX4_GZ_WORLDS:=}" "${PX4_GZ_MODELS:=}"
+    # Without a built PX4 checkout this used to die with an unbound-variable
+    # error from set -u (PX4_GZ_WORLDS is set by gz_env.sh). Say what is missing.
+    if [ ! -d "$ROOTFS" ]; then
+        echo "PX4 SITL build not found: $ROOTFS" >&2
+        echo "  set PX4_DIR to your PX4-Autopilot checkout (default ~/PX4-Autopilot)" >&2
+        echo "  and build it once:  cd \$PX4_DIR && make px4_sitl_default" >&2
+        exit 1
+    fi
     cd "$ROOTFS" && { . ./gz_env.sh 2>/dev/null || . ../gz_env.sh; }
+    if [ -z "$PX4_GZ_WORLDS" ]; then
+        echo "PX4's gz_env.sh did not set PX4_GZ_WORLDS (looked in $ROOTFS and its parent); is the SITL build complete?" >&2
+        exit 1
+    fi
     # Our own models/worlds first (x500_indoor, hyrak_indoor_assets); PX4's
     # stay on the path for everything else.
     export GZ_SIM_RESOURCE_PATH="$HERE/models:$HERE/worlds:$GZ_SIM_RESOURCE_PATH"
@@ -151,6 +174,13 @@ start() {
     ../bin/px4-mavlink --instance 1 start -x -u 14601 -o 14600 -t 127.0.0.1 -r 4000000 -f \
         > "$LOGS/px4_mavlink_session.log" 2>&1
     _spawn cam_bridge python3 "$HERE/gz_cam_bridge.py" "$CAM_TOPIC" "$CAM_IN" 10 rtp://127.0.0.1:5600 $CAM_OUT
+    # The bridge's ffmpeg encoder is its child. Record its pid now, so stop
+    # and the sweep can end it by pid instead of by command-line pattern.
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        ff=$(ps -o pid= --ppid "$(cat "$PIDS/cam_bridge")" 2>/dev/null | tr -d ' ' | head -1)
+        [ -n "$ff" ] && { echo "$ff" > "$PIDS/ffmpeg"; break; }
+        sleep 0.5
+    done
     if [ "$MODEL" = "gz_x500_depth" ] || [ "$MODEL" = "gz_x500_indoor" ]; then
         _spawn depth_sensor env WORLD="$WORLD" python3 "$HERE/gz_depth_sensor.py" auto
     fi
@@ -158,7 +188,7 @@ start() {
 }
 
 stop() {
-    for n in depth_sensor cam_bridge px4 gz_gui gz_server; do
+    for n in depth_sensor cam_bridge ffmpeg px4 gz_gui gz_server; do
         if _alive "$n"; then
             pid=$(cat "$PIDS/$n")
             # gz sim ignores SIGTERM: interrupt it like Ctrl-C, then make sure.
@@ -175,19 +205,28 @@ stop() {
 }
 
 _sweep() {
-    pkill -TERM -f "ffmpeg .* rtp://127.0.0.1:5600" 2>/dev/null || true   # the bridge's own encoder
+    # The camera bridge's ffmpeg encoder: by the pid recorded at start, and
+    # only if that pid still is an ffmpeg (pids get reused).
+    if [ -f "$PIDS/ffmpeg" ]; then
+        ff=$(cat "$PIDS/ffmpeg")
+        if [ -n "$ff" ] && [ "$(ps -o comm= -p "$ff" 2>/dev/null)" = "ffmpeg" ]; then
+            kill -TERM "$ff" 2>/dev/null && echo "stopped ffmpeg $ff"
+        fi
+        rm -f "$PIDS/ffmpeg"
+    fi
     # Sweep OUR leftovers only: gz servers running our world file, PX4
     # instance 1, our bridges. A restart once left the previous gz server
     # alive (stale PID file) and PX4 saw sim time jump backwards; another left
     # the previous camera bridge running, so two streams shared udp:5600 and
     # the app decoded neither (2026-09-26 21:23).
     for pid in $(ps -eo pid,args | awk -v w="$WORLD.sdf" '!/bash|awk/ && (index($0, w) && /gz sim/ || /bin\/px4 -i 1 -d/ || /gz_cam_bridge/ || /gz_depth_sensor/) {print $1}'); do
-        # Only OUR partition: the depth benchmark and a second session run the
-        # same world file on their own partitions and must survive a restart.
-        if tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -q "^GZ_PARTITION=" \
-            && ! tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -q "^GZ_PARTITION=$GZ_PARTITION$"; then
-            continue
-        fi
+        # POSITIVE match on OUR partition, read from the process's own
+        # environment: everything start() launches inherits
+        # GZ_PARTITION=hyrak_demo. The depth benchmark (hyrak_bench), a second
+        # session on its own partition, and a hand-started `px4 -i 1` with no
+        # partition at all are not ours and survive a restart. (This used to
+        # kill any px4 -i 1 whose environment merely LACKED GZ_PARTITION.)
+        tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -qx "GZ_PARTITION=$GZ_PARTITION" || continue
         kill -9 "$pid" 2>/dev/null && echo "swept leftover $pid"
     done
 }
