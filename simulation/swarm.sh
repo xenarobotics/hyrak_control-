@@ -19,6 +19,8 @@ set -uo pipefail
 PX4_DIR="${PX4_DIR:-$HOME/PX4-Autopilot}"
 PX4_BIN="$PX4_DIR/build/px4_sitl_default/bin/px4"
 LOG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.logs"
+# One PID file per PX4 instance we started; cmd_stop kills only these.
+PID_DIR="$LOG_DIR/pids"
 MODEL="${PX4_SWARM_MODEL:-gz_x500}"
 
 # Home position — IIT Hyderabad (env-overridable so the fleet can spawn
@@ -65,6 +67,8 @@ start_instance() {
         "${extra_env[@]}" \
         "$PX4_BIN" -i "$i" -d > "$log" 2>&1 &
 
+    mkdir -p "$PID_DIR"
+    echo $! > "$PID_DIR/px4_$i.pid"
     echo "  drone $i  pose=($pose)  udp=$(port_for "$i")  pid=$!  log=$log"
     # Drop the job from bash's table so a later heal-kill of this instance
     # doesn't print a scary "line NN: PID Killed  env PX4_..." message.
@@ -156,22 +160,55 @@ health_pass() {
     done
 }
 
+# Only the processes THIS launcher started, by PID. The previous
+# `pkill -9 -f "gz sim"` killed every Gazebo on the machine: hyrak_sim.sh's
+# demo world, depth_bench's private server and whatever another project
+# was running alongside. PIDs are recorded by start_instance; the PX4
+# instance spawns its own gz server, which we find through its children.
+_swarm_pids() {
+    local pids=() f
+    for f in "$PID_DIR"/px4_*.pid; do
+        [ -f "$f" ] || continue
+        local p; p="$(cat "$f" 2>/dev/null)"
+        [ -n "$p" ] && kill -0 "$p" 2>/dev/null && pids+=("$p")
+    done
+    printf '%s\n' "${pids[@]}"
+}
+
+_descendants() {
+    # All descendants of a PID (the gz server PX4 instance 1 forks lives
+    # here), depth first so children die before parents.
+    local p="$1" c
+    for c in $(pgrep -P "$p" 2>/dev/null); do
+        _descendants "$c"
+        echo "$c"
+    done
+}
+
 cmd_stop() {
     echo "Stopping swarm..."
-    pkill -9 -f "$PX4_BIN" 2>/dev/null
-    pkill -9 -f "gz sim" 2>/dev/null
-    pkill -9 -f "gz-sim" 2>/dev/null
+    local p victims=()
+    for p in $(_swarm_pids); do
+        for c in $(_descendants "$p"); do victims+=("$c"); done
+        victims+=("$p")
+    done
+    if [ ${#victims[@]} -gt 0 ]; then
+        kill -TERM "${victims[@]}" 2>/dev/null
+        local tries=0
+        while [ $tries -lt 20 ]; do
+            local alive=0
+            for p in "${victims[@]}"; do kill -0 "$p" 2>/dev/null && alive=1; done
+            [ $alive = 0 ] && break
+            sleep 0.5
+            tries=$((tries + 1))
+        done
+        kill -KILL "${victims[@]}" 2>/dev/null
+    fi
+    rm -f "$PID_DIR"/px4_*.pid
     # Do NOT pkill mavsdk_server here: those processes belong to the
     # platform backend's fleet links. Killing them leaves the backend with
     # zombie children and a 25 s dead window until its watchdog rebuilds
     # every link ("Uploaded, but start failed: UNAVAILABLE").
-    # Wait until Gazebo is truly gone — a half-dead gz server confuses the
-    # next instance 1 into attaching to a world that vanishes mid-handshake.
-    local tries=0
-    while pgrep -f "gz sim|gz-sim" >/dev/null 2>&1 && [ $tries -lt 20 ]; do
-        sleep 0.5
-        tries=$((tries + 1))
-    done
     sleep 1
     echo "Stopped."
 }

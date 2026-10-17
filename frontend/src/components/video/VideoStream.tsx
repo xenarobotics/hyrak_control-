@@ -72,6 +72,10 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
     // and the pane falls back to the WebRTC track on the next start.
     const serverFeed = useServerFeed(isStreaming && !hevcFailed)
     const serverHevcUrl = serverFeed?.url ?? null
+    // Stable identity: WebCodecsVideo lists onDecodeError in its effect deps,
+    // and this component re-renders every second with stats, so an inline
+    // arrow tore the decoder down and reopened the feed once a second.
+    const onServerFeedFail = useCallback(() => setHevcFailed(true), [])
     const wcUrl = gst?.webcodecs ? gst.previewUrl : (receiver?.previewUrl ?? serverHevcUrl ?? null)
     // The receiver decides between H.265 passthrough and an H.264 transcode at
     // run time, and can change its mind mid-session, so this is read from its
@@ -163,7 +167,7 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
                 <WebCodecsVideo
                     src={wcUrl}
                     codec={wcCodec}
-                    onDecodeError={serverFeed ? () => setHevcFailed(true) : (wcCodec === 'hevc' ? fallbackFromHevc : undefined)}
+                    onDecodeError={serverFeed ? onServerFeedFail : (wcCodec === 'hevc' ? fallbackFromHevc : undefined)}
                     className={aspectRatio === 'fill'
                         ? 'w-full h-full object-cover'
                         : 'h-full object-contain mx-auto'}

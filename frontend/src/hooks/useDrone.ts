@@ -154,8 +154,8 @@ export function useDrone() {
         }
         const onActionResult   = (data: { action: string; ok: boolean; msg?: string; error?: string }) =>
             store.setLastActionResult(data)
-        const onDroneMission   = (data: { waypoints: any[] }) =>
-            store.setDroneMissionOffer(data.waypoints)
+        const onDroneMission   = (data: { waypoints?: any[] }) =>
+            store.setDroneMissionOffer(data?.waypoints ?? null)
         const onFcMessage      = (data: { severity: string; text: string; rank: number; ts: number }) =>
             store.addFcMessage(data)
 
@@ -186,9 +186,10 @@ export function useDrone() {
             // In-flight packets can arrive just after the user disables swarm
             // mode - applying them would resurrect the cleared drone list.
             if (!swarm.enabled) return
-            swarm.updateFleetTelemetry(data.drones)
+            const drones = data?.drones ?? {}
+            swarm.updateFleetTelemetry(drones)
             const active = swarm.activeDroneId
-            const snapshot = active !== null ? data.drones[String(active)] : undefined
+            const snapshot = active !== null ? drones[String(active)] : undefined
             if (swarm.enabled && snapshot) {
                 store.setTelemetry(snapshot)
                 if (useDroneStore.getState().telemetryStatus !== 'connected') {
@@ -246,7 +247,7 @@ export function useDrone() {
         }) => {
             const swarm = useSwarmStore.getState()
             swarm.setScanStatus('done')
-            data.drones.forEach((d) => {
+            ;(data?.drones ?? []).forEach((d) => {
                 swarm.addDrone(d.drone_id, d.name, d.color ?? colorForDrone(d.drone_id))
             })
         }
@@ -304,6 +305,9 @@ export function useDrone() {
         socket.on('swarm_scan_result',     onSwarmScanResult)
 
         return () => {
+            // A pending give-up would otherwise fire fullReset() up to 95 s
+            // later against whatever mounted next.
+            if (giveUpTimer) { clearTimeout(giveUpTimer); giveUpTimer = null }
             socket.off('connect',               onConnect)
             socket.off('disconnect',            onDisconnect)
             socket.off('connect_error',         onConnectError)

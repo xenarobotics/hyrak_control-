@@ -60,6 +60,9 @@ class BaseAnalyzer(ABC):
     #: blank silently gets the global default, which is why it is declared
     #: here rather than left implicit.
     MODE: str = ""
+    #: Consecutive per-frame failures before the loop gives up and reports
+    #: the error as its result (see _process_loop).
+    MAX_CONSECUTIVE_FAILURES: int = 10
 
     def __init__(
         self,
@@ -303,8 +306,25 @@ class BaseAnalyzer(ABC):
                     annotated, meta = await loop.run_in_executor(
                         self.executor, self._analyze_frame_blocking, frame
                     )
+                    self._consecutive_failures = 0
                 except Exception as e:
-                    logger.exception(f"{self.__class__.__name__} error for {client_id[:8]}: {e}")
+                    # A module that throws on every frame used to log a full
+                    # traceback per frame (30/s) while the client saw nothing.
+                    # One traceback, then a counted warning; after a run of
+                    # failures publish the error as the result so the panel
+                    # can show it, and stop until a new frame arrives.
+                    n = self._consecutive_failures = getattr(self, "_consecutive_failures", 0) + 1
+                    if n == 1:
+                        logger.exception(f"{self.__class__.__name__} error for {client_id[:8]}: {e}")
+                    elif n % 30 == 0:
+                        logger.warning(f"{self.__class__.__name__}: {n} consecutive frame failures ({e})")
+                    if n >= self.MAX_CONSECUTIVE_FAILURES and client_id in self._clients:
+                        async with self._clients[client_id]["lock"]:
+                            self._clients[client_id]["latest_result"] = (
+                                frame, {"error": f"{self.__class__.__name__}: {e}",
+                                        "consecutive_failures": n},
+                            )
+                        break
                     await asyncio.sleep(0.01)
                     continue
 

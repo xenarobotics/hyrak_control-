@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, RTCConfiguration, RTCIceServer
 from aiortc.contrib.media import MediaRelay
+from aiortc.mediastreams import MediaStreamError
 from aiortc.sdp import candidate_from_sdp
 
 from app.sessions import observer
@@ -225,11 +226,26 @@ def _attach_video_track(pc, entry, session, vision_pool, session_manager, sio, s
         # No consumer pulls recv() without an outgoing track, so drive it
         # ourselves; exits when the source track ends.
         async def _drive():
+            # The source track ending (relay ffmpeg died, camera unplugged)
+            # is the normal exit; anything else is a bug in the frame path.
+            # Either way the client must hear about it: this used to swallow
+            # everything, so the overlay froze with the PC still "connected"
+            # and no stream_stopped.
+            why = None
             try:
                 while True:
                     await video_track.recv()
-            except Exception:
-                pass
+            except MediaStreamError:
+                why = "video source ended"
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                logger.exception(f"Overlay drive loop failed for {session.session_id[:8]}: {e}")
+                why = f"video pipeline error: {e}"
+            if why and peer_registry.get(entry.pc_id) is entry:
+                session.is_streaming = False
+                await sio.emit("error", {"msg": why}, to=sid)
+                await sio.emit("stream_stopped", {"reason": why}, to=sid)
         entry.drive_task = asyncio.create_task(_drive())
         logger.info(f"Client-overlay pipeline for session {session.session_id[:8]}")
     else:
@@ -536,6 +552,13 @@ def register_webrtc_events(
                 if video_source == "siyi_rtsp":
                     from app.webrtc.rtsp_video_source import open_rtsp_video
                     rtsp_url = data.get("rtspUrl") or "rtsp://192.168.144.25:8554/video1"
+                    # MediaPlayer accepts any ffmpeg protocol or a local
+                    # path; the client string must be an rtsp(s) URL with a
+                    # host, nothing else.
+                    from urllib.parse import urlparse
+                    _u = urlparse(str(rtsp_url))
+                    if _u.scheme not in ("rtsp", "rtsps") or not _u.hostname:
+                        raise ValueError(f"Camera address must be rtsp://host[:port]/path, got {rtsp_url!r}")
                     # Blocking (ffmpeg probes synchronously) - must not run
                     # directly on the event loop, it would freeze every other
                     # session (telemetry, other streams) for up to the timeout.

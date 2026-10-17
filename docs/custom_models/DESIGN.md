@@ -1,0 +1,389 @@
+# Custom Models: design and architecture
+
+Status: DESIGN (2026-10-17). Nothing in this document is built yet.
+Audience: Japesh, and whoever implements phases 1-4.
+
+## 1. What this is
+
+A new tab in the AI modules catalogue, "Custom", where a HYRAK user brings
+their own model or code (bridge-crack detection, dam inspection, plant
+health, a sensor-driven rule, anything) and it runs on the HYRAK servers
+against the drone's live video and telemetry, exactly like the built-in
+modules do. The user's laptop only has a browser and internet; the GPU work
+is ours. Their code can ask the drone to do things (mark a spot, hover,
+orbit, follow, come closer), through a vetted behaviour API, never raw
+MAVLink.
+
+Design goals, in priority order:
+
+1. Safe. User code can never crash the backend, starve another session of
+   GPU, read another user's data, or send an unguarded command to a
+   vehicle.
+2. Seamless. Upload, press Start, see results on the same overlay and panel
+   layout as the built-in modes. No SSH, no Docker knowledge required.
+3. Fast on the GPU. A custom YOLO should run at the same fps as our Objects
+   mode, not at "python script" speed.
+4. Reuses what exists. The frame path, FrameContext (telemetry snapshotted
+   at capture), the latest-frame-drop policy, cv_results, CvOverlayCanvas,
+   the follow controllers, avoidance, failsafes: all of it stays, the custom
+   module is one more `BaseAnalyzer` in the registry.
+
+## 2. How users bring their model: three tiers
+
+Asking every user to write Python is wrong; most inspection customers have
+a trained YOLO or a classifier and nothing else. Asking nobody to write
+code is also wrong; the "sensor based" and "custom logic" cases need it.
+So there are three tiers in one package format, and the UI picks the
+simplest one for what the user has.
+
+| Tier | Who | What they give us | What they configure |
+|---|---|---|---|
+| A. Weights only | Most inspection users | A weights file: Ultralytics `.pt`, ONNX, TorchScript, or a Hugging Face repo id | Dropdowns: task (detect / segment / classify / keypoints), class names, confidence, inference width, behaviour rules |
+| B. Code package | Users with custom logic, sensor fusion, non-standard models | A zip (or git URL) with `hyrak.yaml`, `module.py`, optional `requirements.txt` and weights. Or write `module.py` in the browser editor from a template | Same dropdowns, plus params declared in the manifest (rendered as a form) |
+| C. Container image | Later. Teams that need their own CUDA stack | A Dockerfile / OCI image that speaks the runner protocol | As B |
+
+Tier A is actually a Tier B package we generate for them: we write the
+manifest and pick one of our runner templates (`ultralytics`, `onnx`,
+`hf_pipeline`). This means one runtime, one UI, and a user can "eject" from
+A to B and edit the generated code.
+
+Why not blocks (Scratch-style) or a terminal: blocks cannot express a
+model; a terminal exposes the server and is the opposite of seamless. The
+no-code need is covered by the **behaviour rule builder** (section 6), the
+code need by a real editor. Both are dropdown-driven where the choices are
+finite.
+
+## 3. The package format
+
+```
+my-model.zip
+  hyrak.yaml          required: manifest
+  module.py           required for tier B (tier A: generated)
+  requirements.txt    optional, pip names only (see sandbox limits)
+  weights/            optional: *.pt *.onnx *.engine *.safetensors
+  README.md           optional, shown on the model card
+  samples/            optional: images or a short mp4 for "Test on clip"
+```
+
+`hyrak.yaml`:
+
+```yaml
+hyrak: 1                      # manifest version
+name: Bridge crack detector
+version: 0.3.0
+runner: ultralytics           # ultralytics | onnx | hf_pipeline | python
+entry: module.py:CrackModule  # tier B only; runner: python
+inputs:
+  video: true                 # wants frames
+  telemetry: true             # wants FrameContext.telemetry
+  sensors: [distance_sensor]  # MAVLink message names, optional
+gpu:
+  required: true
+  vram_mb: 1500               # budget; runner is killed above 1.5x
+  precision: fp16             # fp32 | fp16 | int8
+  compile: tensorrt           # none | tensorrt (tier A only, done at upload)
+  width: 640                  # inference width, UI can override
+params:                       # rendered as the module's settings form
+  - key: conf
+    label: Confidence
+    type: float
+    min: 0.05
+    max: 0.95
+    default: 0.35
+  - key: classes
+    label: Classes to report
+    type: multiselect
+    options: [crack, spall, rust, vegetation]
+    default: [crack, spall]
+outputs:
+  overlay: detections         # detections | segmentation | heatmap | text | none
+  metrics: [crack_count, max_crack_width_mm]
+rules:                        # behaviour rules, editable in the UI
+  - when: {class: crack, conf_gt: 0.6, for_frames: 5}
+    do: {action: mark_poi, label: "crack {track_id}", snapshot: true}
+  - when: {class: crack, conf_gt: 0.8, for_frames: 10}
+    do: {action: hover_and_zoom, standoff_m: 3, requires_confirm: true}
+```
+
+Everything the user needs to touch is in this file, and the UI edits it
+through forms; nobody has to hand-write YAML unless they want to.
+
+## 4. The SDK contract (tier B)
+
+A tiny package, `hyrak_sdk`, installed into the runner. The user's class:
+
+```python
+from hyrak_sdk import Module, Frame, Context, Result, Detection, Event
+
+class CrackModule(Module):
+    def setup(self, ctx: Context):
+        # runs once in the runner process, GPU already selected
+        import torch
+        self.model = torch.jit.load(ctx.weights("crack_ts.pt")).to(ctx.device).half().eval()
+
+    def on_frame(self, frame: Frame, ctx: Context) -> Result:
+        # frame.bgr: np.ndarray HxWx3 uint8 (read-only view of shared memory)
+        # frame.captured_at: monotonic seconds, frame.index
+        # ctx.telemetry: dict snapshot taken at capture (same as FrameContext)
+        # ctx.params: current values of the manifest params
+        dets = self.infer(frame.bgr)
+        return Result(
+            detections=[Detection(cls="crack", conf=d.conf, box=d.xyxy_norm, track_id=d.id) for d in dets],
+            metrics={"crack_count": len(dets)},
+            events=[Event("crack_seen", {"id": d.id}) for d in dets if d.conf > 0.8],
+        )
+
+    def on_sensor(self, name: str, msg: dict, ctx: Context): ...   # optional
+    def on_param(self, key: str, value, ctx: Context): ...         # optional
+    def teardown(self): ...                                         # optional
+```
+
+`Result` is the only thing that crosses the boundary. Its fields map 1:1
+onto the existing `cv_results` payload the overlay already draws:
+
+| Result field | cv_results | Drawn by |
+|---|---|---|
+| `detections[{cls, conf, box(norm xyxy), track_id, label}]` | `detections` + `frame_w/h` | existing `drawObjectDetection` |
+| `masks` (RLE) / `heatmap` (uint8 PNG, small) | `overlay_png` | new generic overlay drawer |
+| `text` (list of lines) | `text` | new generic text block |
+| `metrics {name: number}` | `metrics` | generic metrics panel, auto-rendered |
+| `events [{name, data}]` | `events` | rule engine input + event log |
+| `actions [{action, args}]` | not forwarded raw; goes to the behaviour executor | section 6 |
+
+There is deliberately **no** `send_mavlink`, `set_velocity` or socket in the
+SDK. Code that wants the drone to move returns an action; the backend
+decides whether and how.
+
+What `Context` offers: `device` (cuda:0 or cpu), `weights(path)`,
+`params`, `telemetry`, `log(...)` (ends up in the UI log panel),
+`state` (a dict that persists across frames), `tracker()` (our ByteTrack
+wrapper so users get stable ids without writing one), `geometry` (pixel to
+metres helpers from `vision/geometry.py`, given telemetry and camera
+profile).
+
+## 5. Runtime: where the code runs and how frames reach it
+
+### Isolation: a runner process per running model
+
+User code never imports into the FastAPI process. Reasons: a segfault in
+a CUDA kernel or a `while True` takes the whole platform (and every other
+session) down; GPU memory leaks become ours; `requirements.txt` would
+mutate the backend venv; and there is no way to put a CPU/VRAM budget on an
+in-process thread.
+
+```
+ backend (FastAPI, asyncio)                      runner (one process per running model)
+ ─────────────────────────────                   ─────────────────────────────────────────
+ stream_track.py                                  hyrak_runner
+   frame -> BGR ndarray                             loop:
+   analyzer.submit_frame(...)                         wait notify  <── unix socket ──  frame ready (slot k, ctx json)
+         │                                            frame = shm[slot k]   (zero-copy view)
+   CustomModuleProxy(BaseAnalyzer)                    result = module.on_frame(frame, ctx)
+     writes frame -> shm ring (3 slots)               send result json ──> unix socket
+     sends {slot, context} ────────────────────►
+     ◄──────────────────────── {result, timing}
+     latest result cached, dropped if stale
+     results -> cv_results (unchanged path)
+     actions -> BehaviourExecutor
+```
+
+- **Frames**: a `multiprocessing.shared_memory` ring of 3 slots sized to
+  the inference width. The proxy resizes (already done today for every
+  module via inference width) and writes into the next free slot; the
+  runner maps the same segment read-only. One 640x360 BGR frame is 690 kB:
+  a memcpy, not a serialisation. The ZMQ+JPEG path the 3D-scan sidecar
+  uses is the precedent; shared memory is cheaper and lossless.
+- **Backpressure**: same policy as `BaseAnalyzer` today. If the runner is
+  busy, the newest frame overwrites the oldest free slot; the runner only
+  ever sees the latest. Nothing queues.
+- **Control plane**: a Unix domain socket per runner, JSON lines:
+  `hello`, `params`, `sensor`, `frame`, `result`, `log`, `stats`, `stop`.
+- **Supervision**: the backend starts the runner on Start, restarts it up
+  to 3 times on crash (the UI shows "Model crashed, restarting (2/3)"),
+  kills it on Stop, mode switch, session end, VRAM over budget or 10 s
+  without a heartbeat. Exactly the lifecycle `VisionWorkerPool` already
+  has for in-process analyzers, so `register_session` / `unregister_session`
+  are the hooks.
+
+### Sandboxing, by phase
+
+| Phase | Mechanism | Good enough for |
+|---|---|---|
+| 1 | Subprocess in a per-model venv (`uv venv`, cached by requirements hash), wrapped in `bwrap` (available on this host): read-only rootfs, only the package dir and `/dev/shm` segment mounted, `--unshare-net` (no network), GPU device nodes passed through, cgroup limits for CPU and RSS | Japesh's own and trusted customers' models, single server |
+| 2 | Rootless `podman` (installed, 4.9.3) with the NVIDIA CDI spec (`nvidia-container-toolkit` is **not** installed yet; one apt package plus `nvidia-ctk cdi generate`). Same runner protocol; the shm segment and socket are bind-mounted | Untrusted multi-tenant, custom CUDA stacks (tier C) |
+
+Both phases use the same `hyrak_runner` and the same proxy. Phase 1 is a
+few hundred lines and ships first.
+
+### Installing `requirements.txt`
+
+At upload, not at Start. The server resolves and installs into the
+model's venv with `uv` (seconds, cached), with an allowlist (PyPI only, no
+`--index-url`, no `git+`, size cap) and the install log shown in the UI.
+torch / torchvision / ultralytics / onnxruntime-gpu / opencv are
+pre-provisioned in a shared base venv the model venv layers on top of, so
+a typical model installs nothing.
+
+## 6. Behaviour: how custom code moves the drone
+
+Three layers, from safest to most capable. A model declares in its
+manifest which layer it needs; the operator sees that at upload and must
+enable it per session (same place as "Follow" is armed today).
+
+**Layer 0: observe.** Overlays, metrics, events, snapshots, the event log.
+No motion. Default.
+
+**Layer 1: actions from a catalogue.** The runner (or a rule) returns an
+action; the `BehaviourExecutor` in the backend runs it through the
+existing command pipeline with every existing guard (geofence, avoidance
+ceiling, operator HOLD, pilot override latch, link-loss failsafe, rate
+limits). The catalogue:
+
+| Action | What it does | Built on |
+|---|---|---|
+| `mark_poi(label, snapshot)` | Drops a POI at the drone's GPS (and the target's ground point if geometry can solve it), saves a frame | flights DB, `geometry.py` |
+| `alert(level, text)` | Toast and event log; `critical` also pauses the mission (HOLD) | existing HOLD |
+| `record(start/stop)` | Server-side recording of the processed feed | existing recorder |
+| `hover(seconds)` | Pause the mission here | `pause_mission` / `hold` |
+| `orbit(target, radius_m, seconds)` | Circle the detection | PX4 DO_ORBIT via telemetry manager |
+| `follow(track_id)` | Hand the detection to the existing follow controllers (yaw PD, range PD, altitude mode) | `pursuit.py`, `human_tracker` state |
+| `approach(track_id, standoff_m)` | Move toward a detection and stop at a standoff distance, keeping it centred | follow controllers with a range target, avoidance active |
+| `goto_offset(forward_m, right_m, up_m)` | Small relative move, capped | `send_velocity_ned`, capped by manifest `max_move_m` |
+| `resume()` / `rtl()` / `land()` | Mission control | existing actions |
+
+Rules in the manifest map `events`/`detections` to actions with a
+hysteresis (`for_frames`), and the UI builds them with dropdowns: *when*
+[class] [confidence >] [for N frames] *then* [action] [args]
+[ask me first?]. This is the "no-code behaviour" path; it covers "see a
+crack, hover and photograph it", "see a person in the exclusion zone,
+alert and hold", "plant stress index below X, mark POI".
+
+**Layer 2: continuous control (future).** A `velocity_hint(forward, right,
+down, yaw_rate)` per frame, for users who want their own tracker to steer.
+It goes through the same `send_velocity_command` as our follow modes, but
+additionally clamped by a per-model envelope (max speed, max distance from
+the mission corridor, altitude band), and the keep-clear reflex and
+avoidance remain in the loop in front of it. This is exactly what
+human-tracking does internally today; exposing it is mostly the envelope.
+Not in phase 1.
+
+Every action with `requires_confirm: true` (default for anything that
+moves) shows a confirm chip on the video for 10 s; the operator taps it or
+it expires. `mark_poi`, `alert` and `record` never need confirmation.
+
+## 7. Using the GPU fully
+
+What the built-in modules do today and the custom path inherits: lazy
+load, one model in VRAM per session, inference width per mode,
+latest-frame drop, fp16 where the model supports it, result cache so the
+video path never waits for inference.
+
+What the custom path adds:
+
+- **Prepare step at upload** (tier A): export to TensorRT (`ultralytics
+  export format=engine half=True imgsz=<width>`) or ONNX Runtime CUDA EP
+  with fp16; cached per (weights hash, width, precision). On the RTX 4070
+  this is 2-4x over eager PyTorch for YOLO-class models. The user sees
+  "Preparing for GPU (about 2 minutes)" once, then never again.
+- **Benchmark at upload**: run the model on the bundled `samples/` (or our
+  default clip) for 10 s and show *fps, p95 latency, VRAM*. The card shows
+  these numbers; the Start button warns if VRAM would exceed what is free.
+- **Budgets**: `gpu.vram_mb` from the manifest; the supervisor polls
+  `nvidia-smi --query-compute-apps` per runner PID and kills a runner that
+  exceeds 1.5x. One custom model per session; sessions share the GPU
+  time-sliced as they do now. NVIDIA MPS can be enabled later for better
+  concurrent utilisation without code changes.
+- **Width control**: the `width` param is the single biggest lever and is
+  on the panel, defaulting to the manifest value.
+- **CPU side**: resize and colour conversion happen once in the proxy,
+  into the shm slot, so the runner starts inference immediately.
+- **No per-frame allocation**: the runner keeps a pinned input tensor and
+  copies the shm view into it (`torch.from_numpy(view).to(device,
+  non_blocking=True)`).
+
+## 8. UI: the "Custom" tab
+
+In `ModeSelector`, a tile "Custom" opens a sub-view (the first tile that
+has children). Four screens:
+
+1. **Library**: cards for each uploaded model (name, version, runner,
+   fps/VRAM from the benchmark, status: Ready / Preparing / Failed /
+   Running). Start runs the selected model as the session's mode
+   (`custom:<model_id>`). Cards have Edit, Duplicate, Export, Delete.
+2. **Add model** (wizard): choose *Weights file* / *Package zip* /
+   *Git or Hugging Face URL* / *Start from template* (Blank, Detection,
+   Classification, Segmentation, Sensor rule). Weights path asks task
+   and class names with dropdowns, then runs Prepare + Benchmark with a
+   progress panel.
+3. **Editor**: Monaco (same editor as VS Code, loaded from CDN) with
+   `module.py` and `hyrak.yaml` tabs, the manifest form on the right,
+   **Test on clip** (runs the runner against a sample clip or the last
+   recording and shows the overlay in the same video pane), **Logs**
+   (runner stdout, `ctx.log`, crashes), **Rules** (the dropdown builder).
+   Save = new version; the running instance is not touched until Restart.
+4. **Running panel** (the right column on the AI page and the Command
+   dock): auto-generated from the manifest: params form, metrics tiles,
+   event log, action confirm chips, `ModulePerformance` unchanged.
+
+The overlay: if `outputs.overlay` is `detections`, the existing
+`drawObjectDetection` draws it with the model's class colours; `heatmap`
+and `segmentation` get one new generic drawer that composites a PNG the
+runner returns at reduced resolution. `CLICK_TO_SELECT` works for
+detections with `track_id` (click a crack to `follow`/`approach` it).
+
+## 9. Backend surface
+
+- `AnalysisMode` gains one value, `CUSTOM = "custom"`; the model id
+  travels with `set_analysis_mode {mode:"custom", model_id}`. The registry
+  maps it to `CustomModuleProxy`, which the pool instantiates with the
+  model id.
+- REST: `POST /api/models` (multipart zip or weights, or `{url}`),
+  `GET /api/models`, `GET /api/models/{id}`, `PUT /api/models/{id}/files`
+  (editor save), `POST /api/models/{id}/prepare`, `POST
+  /api/models/{id}/test` (clip), `GET /api/models/{id}/logs` (SSE),
+  `DELETE /api/models/{id}`. Socket: `custom_params`, `custom_action_confirm`,
+  `custom_log`, `custom_event`.
+- Storage: `backend/data/models/<id>/{package, venv, engine cache,
+  benchmark.json}`; Postgres table `custom_models` (id, owner, name,
+  version, manifest json, status, benchmark, created). Owner is the
+  session's user once auth exists; until then one shared library.
+- Sensors (`inputs.sensors`): the telemetry manager already receives raw
+  MAVLink; a small fan-out forwards the listed message types to the
+  runner as `sensor` messages. Non-MAVLink sensors (a serial gauge on the
+  client laptop) arrive the same way the Web Serial radio relay does and
+  are out of scope for phase 1.
+
+## 10. Swarm (future work, designed for, not built)
+
+- A model instance per drone (runner per `(model, drone)`), sharing one
+  venv and engine cache.
+- `ctx.fleet` read-only view of other drones' positions; actions carry
+  `drone_id`; a `group` action family (`split_area`, `converge_on(poi)`)
+  built on the existing group commands.
+- Shared `ctx.blackboard` (per-session KV) so instances can hand off a
+  track id.
+
+## 11. Phases
+
+| Phase | Scope | Size |
+|---|---|---|
+| 1 | `hyrak_sdk`, `hyrak_runner`, shm ring + socket, `CustomModuleProxy`, supervisor, bwrap sandbox, per-model venv, tier A (ultralytics + onnx runners) with Prepare and Benchmark, REST + DB, Library + Add-model wizard, detections overlay, metrics panel, Layer 0 behaviour | ~2 weeks |
+| 2 | Editor (Monaco), templates, Test on clip, logs, rule builder, Layer 1 actions (`mark_poi`, `alert`, `hover`, `follow`, `approach`, `orbit`), confirm chips | ~2 weeks |
+| 3 | podman + CDI isolation, `hf_pipeline` runner, segmentation/heatmap overlay, sensor fan-out, MPS | ~1 week |
+| 4 | Layer 2 velocity hints with envelope; swarm instances | later |
+
+The cheap first slice, if you want to see it working before committing:
+phase 1 without the wizard polish, with a YOLO `.pt` dropped into
+`backend/data/models/<id>/` by hand and a hard-coded tile. That is the
+runner, the proxy and the overlay, which is where all the risk is.
+
+## 12. Open decisions
+
+1. Phase 1 sandbox: bwrap subprocess (recommended, works today) vs
+   podman from day one (needs `nvidia-container-toolkit` installed and a
+   reboot-free CDI generate; ~1 hour).
+2. Library scope before auth: one shared library on the server, or
+   per-browser (localStorage id) visibility. Recommend shared until auth
+   lands (auth is already an open item).
+3. Whether tier A should also accept a Roboflow / Hugging Face model id
+   directly (easy for HF; Roboflow needs their SDK and a key).

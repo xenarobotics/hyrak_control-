@@ -251,7 +251,10 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
         # Same background sensing for every analysis mode except Depth
         # mapping, which feeds avoidance itself. The frame is already BGR.
         if _sensing.wants_frame(self.session_id, mode.value):
-            _sensing.submit(self.session_id, img_bgr)
+            # Its own copy: _compose below draws the overlay INTO img_bgr in
+            # place, and the depth sensor runs on another thread, so without
+            # this the depth model could be shown badges and brackets.
+            _sensing.submit(self.session_id, img_bgr.copy())
 
         if analyzer:
             try:

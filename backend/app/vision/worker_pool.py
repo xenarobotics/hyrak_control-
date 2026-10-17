@@ -28,6 +28,12 @@ class VisionWorkerPool:
         self._session_analyzer: Dict[str, BaseAnalyzer]     = {}
         self._session_mode:     Dict[str, AnalysisMode]     = {}
         self._loading:          Dict[str, bool]             = {}
+        # The in-flight load per session, so a mode switch that lands while
+        # a model is still loading waits for it instead of being skipped
+        # (which installed the FIRST mode under the SECOND mode's name).
+        self._load_task:        Dict[str, asyncio.Task]     = {}
+        # Why the last load failed, for the UI's model_status error.
+        self._last_error:       Dict[str, str]              = {}
 
     def load(self):
         """
@@ -65,30 +71,56 @@ class VisionWorkerPool:
             and session_id in self._session_analyzer
         ):
             return
-        asyncio.create_task(self._load_model_for_session(session_id, mode))
+        self._load_task[session_id] = asyncio.create_task(
+            self._load_model_for_session(session_id, mode)
+        )
+
+    def last_error(self, session_id: str) -> Optional[str]:
+        return self._last_error.get(session_id)
+
+    async def _settle_load(self, session_id: str):
+        """Wait for any in-flight load for this session to finish."""
+        task = self._load_task.get(session_id)
+        if task and not task.done():
+            try:
+                await task
+            except Exception:
+                pass
 
     async def switch_mode(
         self, session_id: str, old_mode: AnalysisMode, new_mode: AnalysisMode
-    ):
-        """Unload old model, load new one. Called on set_analysis_mode."""
+    ) -> bool:
+        """Unload old model, load new one. Called on set_analysis_mode.
+        Returns True when the new mode's analyzer is installed (always True
+        for manual control)."""
         if old_mode == new_mode:
-            return
+            return self._session_mode.get(session_id) == new_mode or new_mode == AnalysisMode.MANUAL_CONTROL
+
+        # A load started by the offer (or a previous switch) may still be
+        # running; let it land so the unload below actually removes it.
+        await self._settle_load(session_id)
 
         # Unload current
         await self._unload_session(session_id)
 
         if new_mode == AnalysisMode.MANUAL_CONTROL:
             logger.info(f"Session {session_id[:8]}: switched to manual - no model")
-            return
+            return True
 
         # Load new
-        await self._load_model_for_session(session_id, new_mode)
+        task = asyncio.create_task(self._load_model_for_session(session_id, new_mode))
+        self._load_task[session_id] = task
+        return await task
 
-    async def _load_model_for_session(self, session_id: str, mode: AnalysisMode):
+    async def _load_model_for_session(self, session_id: str, mode: AnalysisMode) -> bool:
         if self._loading.get(session_id):
-            return
+            # Another load is in flight for this session. Wait for it, then
+            # report whether what it installed is what the caller wanted.
+            await self._settle_load(session_id)
+            return self._session_mode.get(session_id) == mode
 
         self._loading[session_id] = True
+        self._last_error.pop(session_id, None)
         logger.info(f"Session {session_id[:8]}: loading {mode.value}...")
 
         try:
@@ -96,7 +128,8 @@ class VisionWorkerPool:
             cls = ANALYZER_REGISTRY.get(mode)
             if not cls:
                 logger.warning(f"No class for mode {mode.value}")
-                return
+                self._last_error[session_id] = f"no module for {mode.value}"
+                return False
 
             # Run blocking model load in thread pool
             loop = asyncio.get_running_loop()
@@ -127,13 +160,18 @@ class VisionWorkerPool:
                     )
 
             logger.info(f"✅ Session {session_id[:8]}: {mode.value} ready")
+            return True
 
         except Exception as e:
             logger.error(f"❌ Failed to load {mode.value} for {session_id[:8]}: {e}")
+            self._last_error[session_id] = str(e) or e.__class__.__name__
+            return False
         finally:
             self._loading[session_id] = False
 
     async def _unload_session(self, session_id: str):
+        await self._settle_load(session_id)
+        self._load_task.pop(session_id, None)
         analyzer = self._session_analyzer.pop(session_id, None)
         self._session_mode.pop(session_id, None)
 

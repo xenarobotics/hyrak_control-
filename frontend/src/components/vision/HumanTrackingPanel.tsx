@@ -132,8 +132,13 @@ const DISTANCE_MAX  = 0.60
 
 export function HumanTrackingPanel() {
     const cvResults = useDroneStore(s => s.cvResults)
-    const [selectedId, setSelectedId] = useState<number | null>(null)
-    const [isTracking, setIsTracking] = useState(false)
+    // Selection and tracking are the SERVER's state, read back from
+    // cv_results (selected_id / tracking) the way CrowdManagementPanel does.
+    // Local copies went stale: a click on the video (CvOverlayCanvas emits
+    // select_person) never enabled Track here, and a remount of this panel
+    // showed "not tracking" while the backend was still flying the follow.
+    const selectedId: number | null = (cvResults as { selected_id?: number | null } | null)?.selected_id ?? null
+    const isTracking: boolean = Boolean((cvResults as { tracking?: boolean } | null)?.tracking)
     const [pdOpen, setPdOpen] = useState(false)
     const [pd, setPd] = useState(PD_DEFAULTS)
     // What Settings -> AI Modules -> FOLLOW TUNING holds. The sliders below
@@ -161,16 +166,6 @@ export function HumanTrackingPanel() {
         return () => { live = false }
     }, [])
 
-    useEffect(() => {
-        const socket = getSocket()
-        socket.on('tracking_status', (d: { active: boolean }) => setIsTracking(d.active))
-        socket.on('person_selected', () => {})
-        return () => {
-            socket.off('tracking_status')
-            socket.off('person_selected')
-        }
-    }, [])
-
     const emitPdParams = useCallback((params: typeof PD_DEFAULTS) => {
         getSocket().emit('set_pd_params', params)
     }, [])
@@ -183,19 +178,16 @@ export function HumanTrackingPanel() {
 
     const handleSelectPerson = (id: number) => {
         if (isTracking) return
-        setSelectedId(id)
         getSocket().emit('select_person', { person_id: id })
     }
 
     const handleStartTracking = () => {
         if (selectedId === null) return
         getSocket().emit('set_tracking', { active: true })
-        setIsTracking(true)
     }
 
     const handleStopTracking = () => {
         getSocket().emit('set_tracking', { active: false })
-        setIsTracking(false)
     }
 
     const handleAltitudeMode = (mode: 'fixed' | 'auto') => {

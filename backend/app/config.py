@@ -43,8 +43,7 @@ class Settings(BaseSettings):
     # Horizontal FOV of the drone's forward camera. Obstacle bearings come
     # straight from it, so a wrong value puts every obstacle at the wrong
     # angle (SIYI A8 ~81, gz x500 mono_cam 99.7, gz x500_depth IMX214 69).
-    # Set CAMERA_HFOV_DEG in .env.
-    camera_hfov_deg: float = Field(default=70.0)
+    # Set CAMERA_HFOV_DEG in .env. Declared once, below with the lens model.
     # A camera on the operator's machine (video source "camera": webcam,
     # USB camera) is a different lens from the drone's. Metric depth models
     # turn their output into metres through the focal length, so using the
@@ -274,7 +273,8 @@ class Settings(BaseSettings):
     # The desktop app pushes MPEG-TS over SRT straight to this host:port -
     # NOT over the HTTP API, so it does NOT travel through the cloudflared
     # tunnel (which proxies HTTP only). This must be a directly reachable
-    # address with UDP 9000-9100 forwarded to the server, otherwise the
+    # address with UDP 3478-3578 forwarded to the server (see
+    # scripts/rebuild-srt-relay.sh), otherwise the
     # relay mode cannot connect and clients must fall back to WebRTC.
     # Empty = fall back to the API hostname, which is usually WRONG behind
     # a tunnel and will be reported to the client as unconfigured.

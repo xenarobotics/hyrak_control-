@@ -8,6 +8,7 @@ import { getSiyiTelemetryTarget, setSiyiTelemetryTarget, DEFAULT_SIYI_TELEMETRY_
 // compact picker - two copies of "which radio is selected" is how the two
 // controls end up disagreeing. See hooks/useTelemetryLink.ts.
 import { useTelemetryLink } from '@/hooks/useTelemetryLink'
+import { BAUD_OPTIONS } from '@/lib/linkSettings'
 import { getRfDownlinkPort, getRfUplinkPort, getRfFanoutPort, setRfFanoutPort, isRfUplinkAuto,
          getRfUplinkHost, setRfUplinkHost, DEFAULT_RF_UPLINK_HOST } from '@/lib/rfBridge'
 import {
@@ -102,7 +103,7 @@ export function DeviceSelector() {
     // for telemetry with a SIYI or HYRAK air-unit feed for video is a normal
     // combination, not a special case.
     const {
-        desktop, radios, nativeRadios, source, setSource, baud, setBaud,
+        desktop, radios, nativeRadios, options, source, setSource, baud, setBaud,
         refreshNativeRadios, addRadio, browserSerialSupported, serialUnavailable,
         selectedIsFc,
         connect: handleConnect, disconnect: handleDisconnect, disconnecting,
@@ -252,22 +253,21 @@ export function DeviceSelector() {
                                 {radio.label}
                             </SelectItem>
                         ))}
-                        <SelectItem value="sitl" className="text-xs font-mono">
-                            SITL
-                        </SelectItem>
-                        {/* Native first: same ground station as local-relay but
-                            with no relay agent to start. Desktop only. */}
-                        {desktop && (
-                            <SelectItem value="air-unit-udp" className="text-xs font-mono">
-                                Air unit (UDP, direct)
-                            </SelectItem>
-                        )}
-                        <SelectItem value="local-relay" className="text-xs font-mono">
-                            Local RF relay (air unit)
-                        </SelectItem>
-                        <SelectItem value="siyi-udp" className="text-xs font-mono">
-                            SIYI ground unit (UDP)
-                        </SelectItem>
+                        {/* The non-radio links come from the hook's single
+                            option list, so this select can never drift from
+                            LinkCluster / the status bar. The hand-written
+                            copy here had lost "Gazebo sim on server"
+                            (udp:14600), which is a separate link from
+                            "SITL" (the desktop relay on udp:14540) and must
+                            stay one: a remote client cannot reach a desktop
+                            SITL through the server-side link. */}
+                        {options
+                            .filter(o => !o.value.startsWith('radio-') && !o.value.startsWith('nradio-'))
+                            .map(o => (
+                                <SelectItem key={o.value} value={o.value} className="text-xs font-mono">
+                                    {o.label}
+                                </SelectItem>
+                            ))}
                     </SelectContent>
                 </Select>
                 {/* Baud only applies to a real serial radio. 57600 is the SiK
@@ -291,7 +291,7 @@ export function DeviceSelector() {
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                                {[57600, 115200, 921600, 38400, 9600].map(b => (
+                                {BAUD_OPTIONS.map(b => (
                                     <SelectItem key={b} value={String(b)} className="text-xs font-mono">
                                         {b}
                                     </SelectItem>

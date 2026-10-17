@@ -64,6 +64,18 @@ export function useWebRTC() {
     // rejection - nothing was listening for it before, so a failed start
     // just silently reverted to idle with zero feedback.
     const [lastError, setLastError] = useState<string | null>(null)
+    // The socket handlers this hook registered, so cleanup can remove exactly
+    // those and nothing else.
+    const handlersRef = useRef<{
+        answer?: (a: { sdp: string; type: RTCSdpType }) => void
+        ice?: (c: RTCIceCandidateInit) => void
+        error?: (e: { msg?: string }) => void
+        stopped?: (d?: { reason?: string }) => void
+    }>({})
+    // ICE 'disconnected' is transient on a WiFi hiccup and usually recovers
+    // by itself; only tear down if it has not come back within this grace.
+    const iceGraceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const ICE_GRACE_MS = 5000
 
     const { setConnectionStatus } = useDroneStore()
 
@@ -85,9 +97,20 @@ export function useWebRTC() {
             pcRef.current = null
         }
         const socket = getSocket()
-        socket.off('answer')
-        socket.off('ice_candidate')
-        socket.off('error')
+        // Only OUR handlers. A bare socket.off('error') removed every 'error'
+        // listener on the page, including useDrone's (the one that un-sticks
+        // a refused telemetry connect) and FollowControls' refusal text -
+        // after the first video start they were gone for good.
+        const h = handlersRef.current
+        if (h.answer) socket.off('answer', h.answer)
+        if (h.ice) socket.off('ice_candidate', h.ice)
+        if (h.error) socket.off('error', h.error)
+        if (h.stopped) socket.off('stream_stopped', h.stopped)
+        handlersRef.current = {}
+        if (iceGraceRef.current) {
+            clearTimeout(iceGraceRef.current)
+            iceGraceRef.current = null
+        }
 
         // Stop local camera tracks
         if (localStreamRef.current) {
@@ -408,11 +431,24 @@ export function useWebRTC() {
                 setIsStreaming(true)
                 setConnectionStatus('connected')
             }
-            if (pc.iceConnectionState === 'failed' ||
-                pc.iceConnectionState === 'disconnected' ||
-                pc.iceConnectionState === 'closed') {
+            if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+                if (iceGraceRef.current) {
+                    clearTimeout(iceGraceRef.current)
+                    iceGraceRef.current = null
+                }
+            }
+            if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
                 setConnectionStatus('error')
                 cleanup()
+            } else if (pc.iceConnectionState === 'disconnected' && !iceGraceRef.current) {
+                iceGraceRef.current = setTimeout(() => {
+                    iceGraceRef.current = null
+                    if (pcRef.current === pc && pc.iceConnectionState === 'disconnected') {
+                        setLastError('Video connection lost')
+                        setConnectionStatus('error')
+                        cleanup()
+                    }
+                }, ICE_GRACE_MS)
             }
         }
 
@@ -441,9 +477,20 @@ export function useWebRTC() {
             cleanup()
         }
 
+        // The server stops a stream on its own when its source dies or the
+        // session is evicted; nothing listened for it, so the button kept
+        // saying Stop and the last boxes stayed on screen.
+        const handleStopped = (d?: { reason?: string }) => {
+            if (pcRef.current !== pc) return
+            if (d?.reason) setLastError(d.reason)
+            cleanup()
+        }
+
         socket.on('answer', handleAnswer)
         socket.on('ice_candidate', handleIce)
         socket.on('error', handleError)
+        socket.on('stream_stopped', handleStopped)
+        handlersRef.current = { answer: handleAnswer, ice: handleIce, error: handleError, stopped: handleStopped }
 
         try {
             const offer = await pc.createOffer()
@@ -462,6 +509,8 @@ export function useWebRTC() {
             setConnectionStatus('connecting')
         } catch (e) {
             console.error('WebRTC offer failed:', e)
+            // Without a message `pending` stayed true until the 35 s backstop.
+            setLastError((e as Error)?.message || 'Could not start the video connection')
             cleanup()
         }
     }, [cleanup, setConnectionStatus])

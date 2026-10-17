@@ -109,7 +109,13 @@ export function WebCodecsVideo({ src, codec: wireCodec = 'h264', className, styl
 
         ;(async () => {
             try {
-                const res = await fetch(src, { signal: abort.signal, cache: 'no-store' })
+                // The server's /api/video/feeds routes start readers and
+                // transcoders, so they are token-gated like every other
+                // mutating /api route; local preview servers ignore it.
+                const res = await fetch(src, {
+                    signal: abort.signal, cache: 'no-store',
+                    headers: { 'X-Auth-Token': process.env.NEXT_PUBLIC_SECRET_TOKEN ?? '' },
+                })
                 if (!res.body) throw new Error('preview stream has no body')
                 const reader = res.body.getReader()
                 let buf = new Uint8Array(0)

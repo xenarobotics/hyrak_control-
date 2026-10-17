@@ -202,21 +202,26 @@ export function PersonTrackerPanel() {
 
     useEffect(() => {
         const socket = getSocket()
-        socket.on('tracking_status', (d: { active: boolean }) => setIsTracking(d.active))
-        socket.on('enrolment_started', (d: { ok: boolean; msg?: string }) => {
+        // Named handlers: a bare socket.off('tracking_status') would also
+        // remove every other listener for the event (useDrone's included).
+        const onTracking = (d: { active: boolean }) => setIsTracking(d.active)
+        const onEnrol = (d: { ok: boolean; msg?: string }) => {
             setEnrolMsg(d.msg ?? null)
             if (d.ok) setEnrolName('')
-        })
-        socket.on('reference_cleared', () => {
+        }
+        const onCleared = () => {
             setUploadState('idle')
             setFaceThumbnail(null)
             setUploadError('')
             setIsTracking(false)
-        })
+        }
+        socket.on('tracking_status', onTracking)
+        socket.on('enrolment_started', onEnrol)
+        socket.on('reference_cleared', onCleared)
         return () => {
-            socket.off('tracking_status')
-            socket.off('enrolment_started')
-            socket.off('reference_cleared')
+            socket.off('tracking_status', onTracking)
+            socket.off('enrolment_started', onEnrol)
+            socket.off('reference_cleared', onCleared)
         }
     }, [])
 

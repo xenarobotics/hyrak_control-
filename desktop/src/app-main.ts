@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, type WebContents } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import path from 'node:path'
 import { bridges } from './bridges/registry'
 import type { BridgeEvent } from './bridges/types'
@@ -56,8 +56,40 @@ const SITE_URL = process.env.HYRAK_SITE_URL || 'https://dev.xenarobotics.com'
 // that choice is already made by the time anyone's running this, so skip
 // straight to Fly instead of showing them the same choice again.
 const START_URL = `${SITE_URL}/fly`
+const SITE_ORIGIN = new URL(SITE_URL).origin
 
 let mainWindow: BrowserWindow | null = null
+
+// The native bridges (ffmpeg, raw UDP, serial) are reachable from the
+// renderer through IPC. Only the HYRAK site may call them: a page the
+// window navigated to, or a popup, inherits the preload and would
+// otherwise be able to drive them too. Both doors are closed below - the
+// window never leaves SITE_ORIGIN, and every handler checks who is asking.
+function isTrustedSender(evt: IpcMainEvent | IpcMainInvokeEvent): boolean {
+    try {
+        const url = evt.senderFrame?.url ?? evt.sender.getURL()
+        return new URL(url).origin === SITE_ORIGIN
+    } catch {
+        return false
+    }
+}
+
+function lockNavigation(win: BrowserWindow) {
+    win.webContents.setWindowOpenHandler(({ url }) => {
+        // Outbound links open in the system browser, never in a window
+        // that carries our preload.
+        if (/^https?:/.test(url)) void shell.openExternal(url)
+        return { action: 'deny' }
+    })
+    win.webContents.on('will-navigate', (event, url) => {
+        let origin = ''
+        try { origin = new URL(url).origin } catch { /* malformed */ }
+        if (origin !== SITE_ORIGIN) {
+            event.preventDefault()
+            if (/^https?:/.test(url)) void shell.openExternal(url)
+        }
+    })
+}
 
 function emitToRenderer(webContents: WebContents) {
     return (event: BridgeEvent) => {
@@ -94,6 +126,7 @@ function createWindow() {
     // The saving was never worth much: this is a small Next.js bundle over
     // a local tunnel, re-fetched once per launch.
     mainWindow.webContents.session.clearCache().catch(() => { /* non-fatal */ })
+    lockNavigation(mainWindow)
     mainWindow.loadURL(START_URL, { extraHeaders: 'pragma: no-cache\n' })
 
     // Ctrl/Cmd+Shift+R — reload ignoring cache, for when the page updates
@@ -132,24 +165,28 @@ function createWindow() {
 ipcMain.handle(
     'hyrak-bridge-start',
     async (evt, kind: string, id: string, config: Record<string, unknown>) => {
+        if (!isTrustedSender(evt)) return { ok: false, error: 'untrusted sender' }
         const bridge = bridges[kind]
         if (!bridge) return { ok: false, error: `unknown bridge: ${kind}` }
         return bridge.start(id, config, emitToRenderer(evt.sender))
     },
 )
 
-ipcMain.handle('hyrak-bridge-stop', async (_evt, kind: string, id: string) => {
+ipcMain.handle('hyrak-bridge-stop', async (evt, kind: string, id: string) => {
+    if (!isTrustedSender(evt)) return
     await bridges[kind]?.stop(id)
 })
 
 ipcMain.on(
     'hyrak-bridge-send',
-    (_evt, kind: string, id: string, data: Uint8Array, meta?: Record<string, unknown>) => {
+    (evt, kind: string, id: string, data: Uint8Array, meta?: Record<string, unknown>) => {
+        if (!isTrustedSender(evt)) return
         bridges[kind]?.send(id, data, meta)
     },
 )
 
-ipcMain.handle('hyrak-bridge-list', async (_evt, kind: string) => {
+ipcMain.handle('hyrak-bridge-list', async (evt, kind: string) => {
+    if (!isTrustedSender(evt)) return []
     return (await bridges[kind]?.list?.()) ?? []
 })
 
@@ -166,7 +203,8 @@ ipcMain.handle('hyrak-bridge-list', async (_evt, kind: string) => {
 // only the conduit for one SDP string in the reverse direction.
 ipcMain.handle(
     'hyrak-webrtc-sender-answer',
-    async (_evt, id: string, sdp: string) => {
+    async (evt, id: string, sdp: string) => {
+        if (!isTrustedSender(evt)) return { ok: false, error: 'untrusted sender' }
         const bridge = bridges['webrtc-sender'] as
             { acceptAnswer?: (id: string, sdp: string) => Promise<{ ok: boolean; error?: string }> }
         if (!bridge?.acceptAnswer) {
@@ -180,7 +218,8 @@ ipcMain.handle(
 // so the renderer cannot answer "is the camera reachable?" on its own — and that
 // question is the one that would have short-circuited most of a debugging
 // session. See netProbe.ts.
-ipcMain.handle('hyrak-net-probe', async (_evt, targets: ProbeTarget[]) => {
+ipcMain.handle('hyrak-net-probe', async (evt, targets: ProbeTarget[]) => {
+    if (!isTrustedSender(evt)) return { addresses: [], results: [], error: 'untrusted sender' }
     try {
         return await probeNetwork(targets ?? [])
     } catch (err) {

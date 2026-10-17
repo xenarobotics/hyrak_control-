@@ -177,7 +177,8 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             await sio.emit("error", {"msg": "No session found"}, to=sid)
             return
 
-        address = data.get("address", "udp://:14540")
+        data = data if isinstance(data, dict) else {}
+        address = str(data.get("address") or "udp://:14540")
         logger.info(f"Session {session.session_id[:8]} connecting telemetry → {address}")
 
         # Switching from a browser radio to another source? Drop the old bridge.
@@ -310,7 +311,16 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         # handler knows: the browser-radio and RF-relay flows say "radio", a
         # direct SITL connect says nothing and gets "local".
         manager.set_link_kind(data.get("link_kind") or "local")
-        connected = await manager.connect(address)
+        # connect() can raise (grpc/OSError: mavsdk_server binary missing,
+        # port refused). Only telemetry_status or error can move the UI off
+        # "connecting", so an escaped exception left it there forever.
+        try:
+            connected = await manager.connect(address)
+        except Exception as e:
+            logger.exception(f"Session {session.session_id[:8]} telemetry connect raised: {e}")
+            await sio.emit("telemetry_status",
+                           {"status": "error", "message": f"Could not connect: {e}"}, to=sid)
+            return
 
         if not connected:
             # SAY WHY, not just that. "Could not connect to udpin://127.0.0.1:59810"
@@ -651,7 +661,15 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                                                   "text": f"Indoor: takeoff capped to {INDOOR_TAKEOFF_MAX_M:g} m"}, to=sid)
             except Exception:
                 pass
-        result = await execute_drone_action(tel, action, data)
+        # execute_drone_action handles ActionError; a gRPC failure (mavsdk_server
+        # died, link torn down concurrently) used to escape here, socket.io
+        # swallowed it, and LAND / emergency stop produced no action_result -
+        # the button just timed out with no text.
+        try:
+            result = await execute_drone_action(tel, action, data)
+        except Exception as e:
+            logger.exception(f"drone_action {action} failed: {e}")
+            result = {"ok": False, "action": action, "error": f"{action} failed: {e}"}
         await sio.emit("action_result", result, to=sid)
 
     @sio.on("set_analysis_mode")
@@ -691,8 +709,16 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                             f"on mode switch → {mode.value}"
                         )
 
-                await vision_pool.switch_mode(session.session_id, old_mode, mode)
-                await sio.emit("model_status", {"status": "ready", "mode": mode.value}, to=sid)
+                ok = await vision_pool.switch_mode(session.session_id, old_mode, mode)
+                if ok or mode == AnalysisMode.MANUAL_CONTROL:
+                    await sio.emit("model_status", {"status": "ready", "mode": mode.value}, to=sid)
+                else:
+                    # Previously "ready" was emitted whatever happened and the
+                    # stream relayed raw video with no boxes and no message.
+                    err = vision_pool.last_error(session.session_id) or "model failed to load"
+                    await sio.emit("model_status", {"status": "error", "mode": mode.value,
+                                                    "error": err}, to=sid)
+                    await sio.emit("error", {"msg": f"{mode.value}: {err}"}, to=sid)
 
             asyncio.create_task(_do_switch())
             logger.info(f"Session {session.session_id[:8]}: switching {old_mode.value} → {mode.value}")
@@ -1304,6 +1330,23 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
         tel = session_manager.get_telemetry(session.session_id)
 
+        # Offboard FIRST, tracker second (the order set_vehicle_tracking
+        # already uses): if the aircraft refuses Offboard the tracker must
+        # not be left computing setpoints with the panel saying "following".
+        if tel and tel.is_connected:
+            if active:
+                ok = await tel.start_offboard()
+                if not ok:
+                    await sio.emit(
+                        "error",
+                        {"msg": "Failed to start Offboard mode - is drone armed and airborne?"},
+                        to=sid
+                    )
+                    await sio.emit("tracking_status", {"active": False}, to=sid)
+                    return
+            else:
+                await tel.stop_offboard()
+
         if vision_pool:
             analyzer = vision_pool.get_for_session(session.session_id)
             # The shared list, not a hand-written tuple. TrafficManager was
@@ -1314,19 +1357,5 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             # emitted no commands. Clicking a person then "did nothing".
             if isinstance(analyzer, _pursuit_analyzers()):
                 analyzer.set_tracking(session.session_id, active)
-
-        # Start/stop Offboard mode on the drone
-        if tel and tel.is_connected:
-            if active:
-                ok = await tel.start_offboard()
-                if not ok:
-                    await sio.emit(
-                        "error",
-                        {"msg": "Failed to start Offboard mode - is drone armed and airborne?"},
-                        to=sid
-                    )
-                    return
-            else:
-                await tel.stop_offboard()
 
         await sio.emit("tracking_status", {"active": active}, to=sid)

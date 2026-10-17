@@ -15,13 +15,27 @@ import select
 import socket
 import time
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Header, HTTPException, Path, Query
 from fastapi.responses import StreamingResponse
+
+from app.config import get_settings
 
 router = APIRouter(prefix="/api/video", tags=["video"])
 
 BASE_PORT = 5600
+MAX_UNITS = 64
 PROBE_S = 0.35
+
+
+def _require_token(token: str | None) -> None:
+    # The feed routes START readers and NVENC transcoders on the server for
+    # whatever port is asked; they were open to anyone who could reach the
+    # tunnel. Same token check as the mutating /api routes.
+    if token != get_settings().secret_token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+
+
+FeedPort = Path(ge=BASE_PORT, le=BASE_PORT + MAX_UNITS)
 
 
 def _probe(max_units: int) -> list[dict]:
@@ -105,7 +119,10 @@ async def mesh_units(max_units: int = Query(8, ge=1, le=64)):
 
 
 @router.get("/feeds/{port}/hevc")
-async def feed_hevc(port: int):
+async def feed_hevc(port: int = FeedPort,
+                    x_auth_token: str | None = Header(None, alias="X-Auth-Token"),
+                    token: str | None = Query(None)):
+    _require_token(x_auth_token or token)
     """The unit's OWN H.265, bit-exact, as framed Annex-B access units:
     [uint32 len][uint8 key][uint32 seq][AU] - the format the app's
     WebCodecsVideo already parses. Starts at a keyframe (VPS/SPS/PPS in-band)
@@ -129,7 +146,10 @@ async def feed_hevc(port: int):
 
 
 @router.get("/feeds/{port}/h264")
-async def feed_h264(port: int):
+async def feed_h264(port: int = FeedPort,
+                    x_auth_token: str | None = Header(None, alias="X-Auth-Token"),
+                    token: str | None = Query(None)):
+    _require_token(x_auth_token or token)
     """The unit's video transcoded ONCE on the GPU to H.264 with the source's
     colour signalling (full-range BT.709) written into the VUI, framed like
     /hevc. For browsers without an HEVC decoder: WebCodecs decodes H.264 in

@@ -264,7 +264,11 @@ class TelemetryManager:
         the fleet drones' servers and vice versa. Empty endpoint = kill all
         (legacy behavior, avoid in swarm mode).
         """
-        pattern = f"mavsdk_server.*{endpoint}" if endpoint else "mavsdk_server"
+        # The endpoint comes from the client's connect payload. It is a
+        # pgrep REGEX, so it is escaped: an unescaped "udp://x|" has an empty
+        # alternative that matches every process this user owns.
+        import re
+        pattern = f"mavsdk_server.*{re.escape(endpoint)}" if endpoint else "mavsdk_server"
         TelemetryManager._kill_mavsdk_by_pattern(pattern)
 
     @staticmethod
@@ -330,6 +334,13 @@ class TelemetryManager:
         if address.startswith("udp://:"):
             port = address.split(":")[-1]
             address = f"udpin://0.0.0.0:{port}"
+
+        # The address reaches a pgrep pattern and mavsdk_server's command
+        # line: only accept the characters a MAVSDK connection URL needs.
+        import re
+        if not re.fullmatch(r"(udpin|udpout|udp|tcpin|tcpout|tcp|serial)://[A-Za-z0-9_.:/\-]+", address):
+            logger.error(f"Refusing malformed telemetry address {address!r}")
+            return False
 
         self._address = address
 
@@ -1274,8 +1285,16 @@ class TelemetryManager:
         MAV_CMD_DO_REPOSITION via action.goto_location(), which PX4 accepts in
         any mode and which interrupts an active mission on its own.
         """
+        # Same ground reference as goto_home: HOME_POSITION arrives at 0.5-1 Hz
+        # and may not have landed yet. Without the fallback the target was
+        # (0 + relative) m AMSL, i.e. underground at any site above sea level.
+        pos = self._snapshot.position
+        ground_amsl = self._snapshot.home_alt or (pos.absolute_altitude_m - pos.relative_altitude_m)
+        if not ground_amsl and not pos.absolute_altitude_m:
+            logger.error("Custom RTL refused: ground altitude unknown (no home or position yet)")
+            return False
         try:
-            absolute_altitude_m = (self._snapshot.home_alt or 0.0) + float(relative_altitude_m)
+            absolute_altitude_m = ground_amsl + float(relative_altitude_m)
             await self._drone.action.goto_location(
                 float(lat), float(lng), float(absolute_altitude_m), float('nan')
             )

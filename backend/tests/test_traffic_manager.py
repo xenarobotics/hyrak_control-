@@ -1366,7 +1366,11 @@ def test_arming_a_person_follow_reaches_the_analyzer():
 
     src = inspect.getsource(telemetry_events.register_telemetry_events)
     handler = src[src.index('@sio.on("set_tracking")'):]
-    handler = handler[:handler.index("# Start/stop Offboard")]
+    # The whole handler, up to the next event registration. (Offboard is now
+    # started BEFORE the analyzer is told, so the old "# Start/stop Offboard"
+    # anchor no longer splits the handler in a meaningful place.)
+    nxt = handler.find("@sio.on(", 1)
+    handler = handler[:nxt] if nxt > 0 else handler
     assert "_pursuit_analyzers()" in handler, \
         "set_tracking uses a hand-written tuple again — traffic will be dropped"
     assert TrafficManager in telemetry_events._pursuit_analyzers()

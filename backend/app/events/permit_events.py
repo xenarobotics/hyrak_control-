@@ -16,7 +16,8 @@ def register_permit_events(sio, session_manager):
         fleet_id = data.get("fleet_drone_id") if isinstance(data, dict) else None
         if fleet_id is not None:
             from app.events.swarm_events import _fleet_db_ids
-            return _fleet_db_ids.get(int(fleet_id))
+            # Keyed by (session_id, drone_id), see swarm_events._fleet_db_ids.
+            return _fleet_db_ids.get((session.session_id, int(fleet_id)))
         return session.drone["id"] if session.drone else None
 
     @sio.on("request_permit")
