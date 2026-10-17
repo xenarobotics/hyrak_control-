@@ -30,9 +30,8 @@ from collections import deque
 
 import numpy as np
 import torch
-from ultralytics import YOLO
 
-from app.vision.base import BaseAnalyzer
+from app.vision.base import BaseAnalyzer, locked_setter
 from app.vision.controllers import (
     KalmanXY, PDController, VelocitySmoother, range_error_ratio,
 )
@@ -148,15 +147,18 @@ class CrowdManager(BaseAnalyzer):
     MODE = "crowd-management"
 
     def __init__(self, **kwargs):
-        super().__init__(executor_workers=2, **kwargs)
+        super().__init__(executor_workers=1, **kwargs)
         settings = get_settings()
         self.device = settings.device
         self.half = self.device == "cuda"
-        self.model = YOLO(settings.default_yolo_model)
-        self.model.to(self.device)
-        # Warm-up so CUDA kernel init doesn't stall the first live frames
+        # Weights shared process-wide (model_cache), wrapper private so the
+        # ByteTrack state behind track(persist=True) stays this session's.
+        self.model = self.acquire_yolo(settings.default_yolo_model, self.device)
+        # Warm-up at the mode's real inference size (1280 here, not 640) so
+        # CUDA kernel init and cuDNN autotune don't stall the first live frames.
+        warm = self.warmup_frame()
         self.model(
-            np.zeros((360, 640, 3), dtype=np.uint8),
+            warm, imgsz=self.imgsz_for(warm),
             device=self.device, half=self.half, verbose=False,
         )
         self._client_state: Dict[str, Dict[str, Any]] = {}
@@ -170,6 +172,7 @@ class CrowdManager(BaseAnalyzer):
         await super().unregister_client(client_id)
         self._client_state.pop(client_id, None)
 
+    @locked_setter
     def set_thresholds(self, client_id: str, light_max: int, moderate_max: int):
         """
         Apply density thresholds to the running session AND persist them.
@@ -378,6 +381,7 @@ class CrowdManager(BaseAnalyzer):
             meta["_pending_admin_alerts"] = pending_alerts
         return frame_bgr, meta
 
+    @locked_setter
     def set_zone_names(self, client_id: str, names: Dict[str, str]) -> None:
         """Operator labels for the grid cells, keyed by cell index as a string."""
         st = self._client_state.get(client_id)
@@ -390,6 +394,7 @@ class CrowdManager(BaseAnalyzer):
 
     # ── Follow one person out of the crowd ────────────────────────────────
 
+    @locked_setter
     def set_selected_person(self, client_id: str, person_id) -> None:
         st = self._client_state.get(client_id)
         if st is None:
@@ -402,6 +407,7 @@ class CrowdManager(BaseAnalyzer):
             st["tracking"] = False
         logger.info(f"Session {client_id[:8]}: crowd follow target -> {person_id}")
 
+    @locked_setter
     def set_tracking(self, client_id: str, active: bool) -> None:
         st = self._client_state.get(client_id)
         if st is None:
@@ -424,6 +430,7 @@ class CrowdManager(BaseAnalyzer):
             f"{'STARTED' if active else 'STOPPED'}"
         )
 
+    @locked_setter
     def set_altitude_mode(self, client_id: str, mode: str) -> None:
         st = self._client_state.get(client_id)
         if st is None or mode not in ("fixed", "auto"):
@@ -439,11 +446,13 @@ class CrowdManager(BaseAnalyzer):
             st["altitude_nudge_v"] = 0.0
             st["dist_pd"].reset()
 
+    @locked_setter
     def set_altitude_nudge(self, client_id: str, velocity: float) -> None:
         st = self._client_state.get(client_id)
         if st is not None:
             st["altitude_nudge_v"] = float(np.clip(velocity, -1.5, 1.5))
 
+    @locked_setter
     def set_tracking_params(self, client_id: str, target_distance_ratio: float) -> None:
         """In Fixed altitude the forward axis reads the frame row, so the ratio
         alone would not reach it - the DIRECTION of change is applied to the

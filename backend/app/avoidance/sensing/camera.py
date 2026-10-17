@@ -87,6 +87,12 @@ def wants_frame(session_id: str, mode_value: str | None) -> bool:
 
 
 def _mapper():
+    """The sensor's DepthMapper. Its network comes from the process-wide
+    model cache (DepthMapper -> depth_models.load_shared), so this is the
+    SAME DA3 a depth-mapping session runs on, not a second 1.3 GB copy
+    (audit V4). This wrapper is kept for the life of the process - the
+    weights stay resident once avoidance has been switched on, which is
+    what warm() is for."""
     global _depth, _depth_failed
     if _depth is None:
         from app.vision.modules.depth_mapper import DepthMapper

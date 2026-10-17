@@ -779,6 +779,33 @@ def test_evidence_is_saved_for_a_single_frame_read():
     assert v.vehicle_path and v.vehicle_path.endswith("_vehicle.jpg")
 
 
+def test_improved_reads_overwrite_one_evidence_pair_per_vehicle(tmp_path):
+    """Audit V12: every improved read used to write a fresh timestamped pair
+    and record only the last path, so the capture directory grew without
+    bound over a long session. One pair per vehicle, overwritten in place,
+    and a superseded path (the vehicle id arrives after the first read) is
+    unlinked rather than orphaned."""
+    import os
+    t = bare_tracker()
+    state = t._client_state["s"]
+    state["capture_dir"] = str(tmp_path)
+    frame = np.full((1080, 1920, 3), 90, np.uint8)
+    crop = frame[300:700, 400:900].copy()
+    v = vehicle(1, 400, 300, 900, 700)
+
+    for _ in range(5):
+        t._save_evidence(frame, crop, _READABLE_BOX, v, state)
+    files = sorted(os.listdir(tmp_path))
+    assert files == ["v00001_plate.jpg", "v00001_vehicle.jpg"], files
+    assert v.crop_path == str(tmp_path / "v00001_plate.jpg")
+
+    v.vehicle_id = "VH-000007"              # identity assigned by a plate match
+    t._save_evidence(frame, crop, _READABLE_BOX, v, state)
+    files = sorted(os.listdir(tmp_path))
+    assert files == ["VH-000007_plate.jpg", "VH-000007_vehicle.jpg"], files
+    assert v.crop_path.endswith("VH-000007_plate.jpg")
+
+
 def test_every_vehicle_gets_a_row_plate_or_not():
     """One row per vehicle, matching vehicle-plate-tracking. Restricting rows
     to confirmed plates left the log silent about most of the traffic actually

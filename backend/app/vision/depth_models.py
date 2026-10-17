@@ -32,6 +32,7 @@ import logging
 import math
 import os
 import sys
+import threading
 import types
 from pathlib import Path
 
@@ -51,18 +52,27 @@ def focal_px(width_px: int, hfov_deg: float) -> float:
 
 
 class HFDepth:
-    """Depth Anything V2 metric (transformers pipeline)."""
+    """Depth Anything V2 metric (transformers pipeline).
 
-    def __init__(self, model_name: str, device: str, fov_correct: bool = False):
-        import torch
-        from PIL import Image
-        from transformers import pipeline
+    `pipe` may be passed in (from the model cache) so several backends share
+    one loaded pipeline; the backend object itself stays per owner."""
+
+    def __init__(self, model_name: str, device: str, fov_correct: bool = False, pipe=None):
         self.name = model_name
         self.kind = "indoor" if "indoor" in model_name.lower() else "outdoor"
         self.fov_correct = fov_correct
+        self.handle = None
+        self._pipe = pipe if pipe is not None else self.load_pipeline(model_name, device)
+
+    @staticmethod
+    def load_pipeline(model_name: str, device: str):
+        import torch
+        from PIL import Image
+        from transformers import pipeline
         dtype = torch.float16 if device == "cuda" else torch.float32
-        self._pipe = pipeline("depth-estimation", model=model_name, device=device, torch_dtype=dtype)
-        self._pipe(Image.new("RGB", (INFER_W, INFER_H)))          # CUDA warm-up
+        pipe = pipeline("depth-estimation", model=model_name, device=device, torch_dtype=dtype)
+        pipe(Image.new("RGB", (INFER_W, INFER_H)))          # CUDA warm-up
+        return pipe
 
     def predict(self, frame_bgr: np.ndarray, hfov_deg: float | None = None) -> np.ndarray:
         import torch
@@ -96,9 +106,34 @@ def _import_da3():
 
 
 class DA3Depth:
-    """Depth Anything 3 metric (canonical output * focal / 300)."""
+    """Depth Anything 3 metric (canonical output * focal / 300).
 
-    def __init__(self, model_name: str, device: str, process_res: int = 504):
+    PRECISION (audit V17). The weights are fp32 but the compute is not:
+    DepthAnything3.forward (api.py) wraps the network in torch.autocast with
+    bf16 on Ampere+ (fp16 otherwise), so an outer autocast here would be a
+    no-op. Halving the WEIGHTS was measured 2026-10-17 on the 4070: 1347 MB
+    -> 683 MB, but the model's own patch-embed conv then fails
+    ("Input type (float) and bias type (c10::BFloat16) should be the same")
+    because DA3 feeds it fp32 outside its autocast region. fp32 weights
+    stay; the 80 ms/frame at 504 px is already the mixed-precision number.
+
+    `module` may be passed in (from the model cache) so a depth session and
+    background obstacle sensing share one network; `last_sky` is per
+    backend. Inference on the shared module is serialised with `lock`.
+    """
+
+    def __init__(self, model_name: str, device: str, process_res: int = 504,
+                 module=None, lock=None):
+        self.name = model_name
+        self.process_res = process_res
+        self.handle = None
+        self.last_sky = None
+        self._lock = lock if lock is not None else threading.RLock()
+        self._model = module if module is not None else self.load_module(model_name, device)
+        self.predict(np.zeros((INFER_H, INFER_W, 3), np.uint8), 70.0)       # warm-up
+
+    @staticmethod
+    def load_module(model_name: str, device: str):
         DepthAnything3 = _import_da3()
         # DA3 logs every inference at INFO; keep the backend log readable.
         logging.getLogger("depth_anything_3").setLevel(logging.WARNING)
@@ -107,15 +142,13 @@ class DA3Depth:
             _dl.setLevel("WARN") if hasattr(_dl, "setLevel") else None
         except Exception:
             pass
-        self.name = model_name
-        self.process_res = process_res
-        self._model = DepthAnything3.from_pretrained(model_name).to(device).eval()
-        self.predict(np.zeros((INFER_H, INFER_W, 3), np.uint8), 70.0)       # warm-up
+        return DepthAnything3.from_pretrained(model_name).to(device).eval()
 
     def predict(self, frame_bgr: np.ndarray, hfov_deg: float | None = None) -> np.ndarray:
         import torch
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        with torch.inference_mode():
+        lock = self.__dict__.setdefault("_lock", threading.RLock())   # __new__-built in tests
+        with lock, torch.inference_mode():
             pred = self._model.inference([rgb], process_res=self.process_res)
         canon = np.asarray(pred.depth[0], dtype=np.float32)
         # Sky mask (0..1), kept for the indoor/outdoor verdict.
@@ -131,7 +164,28 @@ class DA3Depth:
 
 
 def load(model_name: str, device: str, fov_correct: bool = False):
-    """A depth backend for a model id. 'DA3' in the name -> Depth Anything 3."""
+    """A depth backend for a model id, loading its own copy of the network.
+    'DA3' in the name -> Depth Anything 3. The bench tool uses this; the
+    running server uses load_shared."""
     if "da3" in model_name.lower():
         return DA3Depth(model_name, device)
     return HFDepth(model_name, device, fov_correct=fov_correct)
+
+
+def load_shared(model_name: str, device: str, fov_correct: bool = False, cache=None):
+    """Like load(), but the network comes from the process-wide model cache
+    (app/vision/model_cache) so every owner of the same model id on the same
+    device shares one copy. Returns (backend, handle); the owner releases
+    the handle when it is done (BaseAnalyzer.hold does this on stop)."""
+    from app.vision.model_cache import CACHE
+    cache = cache or CACHE
+    if "da3" in model_name.lower():
+        key = ("da3", model_name, str(device), "fp32+autocast")
+        handle = cache.acquire(key, lambda: DA3Depth.load_module(model_name, device))
+        backend = DA3Depth(model_name, device, module=handle.obj, lock=handle.lock)
+    else:
+        key = ("hf-depth", model_name, str(device), "fp16" if device == "cuda" else "fp32")
+        handle = cache.acquire(key, lambda: HFDepth.load_pipeline(model_name, device))
+        backend = HFDepth(model_name, device, fov_correct=fov_correct, pipe=handle.obj)
+    backend.handle = handle
+    return backend, handle

@@ -5,8 +5,10 @@ Key design: submit_frame() is non-blocking.
 The latest frame is always processed, older ones are dropped.
 """
 import asyncio
+import functools
 import logging
 import math
+import threading
 import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
@@ -15,6 +17,51 @@ from typing import Any, Callable, Dict, Optional, Tuple
 import numpy as np
 
 logger = logging.getLogger("verocore.vision.base")
+
+# Rate-limited warnings for the paths that used to be `except: pass`. A
+# callback or bridge that fails on every frame is worth one line per
+# interval, not thirty tracebacks a second and not silence.
+_WARN_INTERVAL_S = 10.0
+_warn_last: Dict[str, float] = {}
+_warn_lock = threading.Lock()
+
+
+def warn_limited(key: str, message: str) -> bool:
+    """logger.warning(message) at most once per _WARN_INTERVAL_S per key.
+    Returns True when it logged."""
+    now = time.monotonic()
+    with _warn_lock:
+        last = _warn_last.get(key, -1e9)
+        if now - last < _WARN_INTERVAL_S:
+            return False
+        _warn_last[key] = now
+    logger.warning(message)
+    return True
+
+
+def relay_latency_s() -> float:
+    """The SRT relay's receiver buffer, as seconds, for submit_frame's
+    source_latency_s: a frame that came through the relay was captured at
+    least this long before it was decoded here."""
+    from app.config import get_settings
+    return float(get_settings().relay_latency_ms) / 1000.0
+
+
+def locked_setter(fn):
+    """Decorator for per-session setters `fn(self, client_id, ...)`.
+
+    Socket handlers call setters on the event loop while the worker thread
+    is inside _analyze_frame_blocking reading the same state dict; without
+    this a half-applied setter (tracking flag flipped, PDs not yet reset)
+    produced one-frame glitches. The setter now waits for the in-flight
+    frame to finish - at most one inference - and the next frame sees the
+    whole change. Audit V11.
+    """
+    @functools.wraps(fn)
+    def wrapper(self, client_id, *args, **kwargs):
+        with self._state_lock(client_id):
+            return fn(self, client_id, *args, **kwargs)
+    return wrapper
 
 
 @dataclass
@@ -39,12 +86,19 @@ class FrameContext:
 
     captured_at is time.monotonic(), never time.time(): a wall-clock step
     from NTP would otherwise manufacture an enormous instantaneous velocity.
+
+    pipeline_latency_s is how long before submit_frame() the frame was
+    captured (transport + decode), when the source could say: a caller that
+    passes captured_at from the stream clock, or a known buffer such as the
+    SRT relay's receiver latency. 0.0 when nothing is known, in which case
+    captured_at is simply the submit time (the old behaviour). Audit V9.
     """
     captured_at: float
     telemetry: Optional[Dict[str, Any]] = None
     frame_index: int = 0
     width: int = 0
     height: int = 0
+    pipeline_latency_s: float = 0.0
 
     def dt_since(self, previous: Optional["FrameContext"]) -> Optional[float]:
         """Seconds since `previous`, or None if not usable as a time base."""
@@ -55,6 +109,20 @@ class FrameContext:
 
 
 class BaseAnalyzer(ABC):
+    """
+    ONE CLIENT PER ANALYZER INSTANCE. The worker pool builds a fresh analyzer
+    for every session (worker_pool._load_model_for_session) and registers
+    exactly one client on it, and the modules rely on that: they read
+    `next(iter(self._client_state))` as "the" session. The client-keyed
+    dicts below are a leftover of an earlier multi-client design, kept
+    because the keys are harmless and the tests use them. Consequently one
+    executor worker is enough - the second thread of the old default of 2
+    never had anything to do (audit V16).
+
+    Model WEIGHTS are shared across instances through app/vision/model_cache;
+    see hold()/acquire_yolo(). Per-session state (ByteTrack, PDs, Kalman) is
+    never shared.
+    """
     #: Mode name from AnalysisMode, set by each subclass. Used to look up
     #: per-mode tuning (currently inference width) - a module that leaves it
     #: blank silently gets the global default, which is why it is declared
@@ -66,7 +134,7 @@ class BaseAnalyzer(ABC):
 
     def __init__(
         self,
-        executor_workers: int = 2,
+        executor_workers: int = 1,
         results_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ):
         self.executor = ThreadPoolExecutor(max_workers=executor_workers)
@@ -81,6 +149,60 @@ class BaseAnalyzer(ABC):
         self._frame_counters: Dict[str, int] = {}
         self._rate_n = 0
         self._rate_t0 = 0.0
+        # Per-client state locks (see _state_lock) and the cache handles of
+        # the models this instance borrowed (see hold).
+        self._state_locks: Dict[str, threading.RLock] = {}
+        self._model_handles: list = []
+
+    # ------------------------------------------------------------------ #
+    # Shared models                                                        #
+    # ------------------------------------------------------------------ #
+
+    def hold(self, handle):
+        """Keep a model_cache Handle for the life of this analyzer; stop()
+        releases it. Returns the handle's object for convenience."""
+        self.__dict__.setdefault("_model_handles", []).append(handle)
+        return handle.obj
+
+    def acquire_yolo(self, weights: str, device: str):
+        """A private ultralytics YOLO wrapper over process-shared weights,
+        released by stop(). See model_cache.shared_yolo."""
+        from app.vision.model_cache import shared_yolo
+        model, handle = shared_yolo(weights, device)
+        self.hold(handle)
+        return model
+
+    def warmup_frame(self) -> np.ndarray:
+        """
+        A zero frame shaped like what this mode will actually infer on, for
+        the constructor warm-up. Warming at 640x360 while the mode runs at
+        1280 (crowd, traffic) or native (plate) left cuDNN's autotune and the
+        letterbox buffers for the real size to the first LIVE frame, after
+        "ready" had been reported (audit V18). Native (width 0) warms at
+        1080p, the largest frame the sources deliver. 16:9 like the cameras.
+        """
+        w = self.inference_width or 1920
+        h = max(32, int(round(w * 9 / 16)))
+        return np.zeros((h, w, 3), dtype=np.uint8)
+
+    # ------------------------------------------------------------------ #
+    # Per-client state lock                                                #
+    # ------------------------------------------------------------------ #
+
+    def _state_lock(self, client_id: str) -> threading.RLock:
+        """
+        The lock guarding this client's mutable state. Held by the worker
+        thread for the whole of _analyze_frame_blocking and by every setter
+        (locked_setter), so a setter never interleaves with a frame. Created
+        on demand so analyzers built with __new__ in tests work too.
+        Re-entrant: setters call each other and modules call their own
+        setters from inside the frame.
+        """
+        locks = self.__dict__.setdefault("_state_locks", {})
+        lock = locks.get(client_id)
+        if lock is None:
+            lock = locks[client_id] = threading.RLock()
+        return lock
 
     # ------------------------------------------------------------------ #
     # Client registration                                                  #
@@ -107,6 +229,7 @@ class BaseAnalyzer(ABC):
         self._clients.pop(client_id, None)
         self._inflight.discard(client_id)
         self._contexts.pop(client_id, None)
+        self.__dict__.setdefault("_state_locks", {}).pop(client_id, None)
         logger.info(f"{self.__class__.__name__}: unregistered {client_id[:8]}")
 
     # ------------------------------------------------------------------ #
@@ -118,6 +241,8 @@ class BaseAnalyzer(ABC):
         client_id: str,
         frame_bgr: np.ndarray,
         telemetry: Optional[Dict[str, Any]] = None,
+        captured_at: Optional[float] = None,
+        source_latency_s: Optional[float] = None,
     ):
         """
         Non-blocking. Stores the latest frame and starts processing
@@ -127,6 +252,15 @@ class BaseAnalyzer(ABC):
         Pass it whenever it is available - it is what lets modules report
         metres instead of pixels. Omitting it is safe: metric outputs are
         then omitted too, rather than computed from a default altitude.
+
+        `captured_at` (time.monotonic() seconds) is when the frame was
+        CAPTURED, if the caller knows - e.g. from the stream's pts mapped to
+        the monotonic clock. Default: now, which is after transport and
+        decode, so the pose looked up for the frame is that much late (150-
+        300 ms on the SRT path). `source_latency_s` is the alternative when
+        only the transport's buffer is known (relay_latency_s() for the
+        relay): captured_at is then now minus that. A captured_at in the
+        future is clamped to now. Audit V9.
         """
         if client_id not in self._clients:
             return
@@ -134,12 +268,17 @@ class BaseAnalyzer(ABC):
         idx = self._frame_counters.get(client_id, 0) + 1
         self._frame_counters[client_id] = idx
         h, w = frame_bgr.shape[:2]
+        now = time.monotonic()
+        if captured_at is None:
+            captured_at = now - (source_latency_s or 0.0)
+        captured_at = min(float(captured_at), now)
         context = FrameContext(
-            captured_at=time.monotonic(),
+            captured_at=captured_at,
             telemetry=telemetry,
             frame_index=idx,
             width=w,
             height=h,
+            pipeline_latency_s=now - captured_at,
         )
 
         # THE ANALYZER GETS ITS OWN COPY OF THE PIXELS.
@@ -180,9 +319,18 @@ class BaseAnalyzer(ABC):
                 asyncio.create_task(self._process_loop(client_id))
 
         try:
-            asyncio.create_task(_schedule())
-        except RuntimeError:
-            pass
+            loop = asyncio.get_running_loop()
+        except RuntimeError as e:
+            # No running loop on this thread: the frame is dropped. Was a
+            # silent pass; a caller on the wrong thread now shows up in
+            # the log instead of as "the AI does nothing".
+            warn_limited(
+                f"submit:{self.__class__.__name__}",
+                f"{self.__class__.__name__}: submit_frame outside the event "
+                f"loop, frame dropped ({e})",
+            )
+            return
+        loop.create_task(_schedule())
 
     # ------------------------------------------------------------------ #
     # Inference resolution                                                 #
@@ -304,7 +452,7 @@ class BaseAnalyzer(ABC):
                 try:
                     loop = asyncio.get_running_loop()
                     annotated, meta = await loop.run_in_executor(
-                        self.executor, self._analyze_frame_blocking, frame
+                        self.executor, self._analyze_locked, client_id, frame
                     )
                     self._consecutive_failures = 0
                 except Exception as e:
@@ -370,10 +518,15 @@ class BaseAnalyzer(ABC):
                         _av_loop.observe_from_session(
                             client_id, obs_list,
                             captured_at=context.captured_at if context is not None else None)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        warn_limited(
+                            f"observe:{client_id}",
+                            f"{self.__class__.__name__} {client_id[:8]}: obstacle "
+                            f"observations not delivered to avoidance ({e!r})",
+                        )
                 if context is not None:
                     meta["frame_index"] = context.frame_index
+                    meta["pipeline_latency_ms"] = round(context.pipeline_latency_s * 1000.0, 1)
                     # How stale the annotation is by the time anyone sees it.
                     # Distinct from analysis_time_ms, which excludes the wait
                     # in the queue behind a slower frame.
@@ -393,12 +546,25 @@ class BaseAnalyzer(ABC):
                         maybe = self._results_callback(meta)
                         if asyncio.iscoroutine(maybe):
                             asyncio.create_task(maybe)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        warn_limited(
+                            f"results_cb:{client_id}",
+                            f"{self.__class__.__name__} {client_id[:8]}: results "
+                            f"callback failed ({e!r}) - the panel is not getting "
+                            f"this session's results",
+                        )
 
                 await asyncio.sleep(0)
         finally:
             self._inflight.discard(client_id)
+
+    def _analyze_locked(
+        self, client_id: str, frame_bgr: np.ndarray
+    ) -> Tuple[np.ndarray, Dict[str, Any]]:
+        """Worker-thread entry: the frame runs under the client's state lock
+        so no setter can change the state halfway through it (V11)."""
+        with self._state_lock(client_id):
+            return self._analyze_frame_blocking(frame_bgr)
 
     # ------------------------------------------------------------------ #
     # Abstract                                                             #
@@ -412,7 +578,25 @@ class BaseAnalyzer(ABC):
         raise NotImplementedError
 
     async def stop(self):
-        try:
-            self.executor.shutdown(wait=False, cancel_futures=True)
-        except Exception:
-            pass
+        """
+        Stop the worker and give the shared models back.
+
+        The executor is shut down WAITING for the in-flight frame, on a
+        thread so the loop is not blocked by it: the old
+        shutdown(wait=False) let the caller clear the CUDA cache while that
+        inference was still using the allocator (audit V10). Only then are
+        the model handles released, so a model is never freed under a
+        frame that is still running on it.
+        """
+        executor = getattr(self, "executor", None)
+        if executor is not None:
+            try:
+                await asyncio.to_thread(executor.shutdown, True, cancel_futures=True)
+            except Exception as e:
+                logger.warning(f"{self.__class__.__name__}: executor shutdown failed ({e!r})")
+        for handle in self.__dict__.get("_model_handles", []):
+            try:
+                handle.release()
+            except Exception as e:
+                logger.warning(f"{self.__class__.__name__}: model release failed ({e!r})")
+        self._model_handles = []

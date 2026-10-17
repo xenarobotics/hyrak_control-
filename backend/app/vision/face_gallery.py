@@ -80,27 +80,25 @@ _face_app_lock = asyncio.Lock()
 
 def _build_face_app():
     """
-    A FaceAnalysis instance for ENROLMENT only, separate from the one each
-    PersonTracker owns.
+    The FaceAnalysis instance for ENROLMENT.
 
     Enrolment happens outside any session (an operator uploading photos), so
-    it cannot borrow a tracker's model - there may not be a tracker running.
-    Providers mirror person_tracker.py, including the HEURISTIC conv search:
-    ORT's default EXHAUSTIVE benchmarks every algorithm on first inference
-    and stalls for seconds.
+    it cannot rely on a tracker running - but it no longer needs to own a
+    second copy of the det + rec sessions either: the process-wide model
+    cache hands back the SAME prepared instance person-tracking and traffic
+    use when one is loaded, and loads it otherwise (audit V4). Held for the
+    life of the process (the gallery is a server-wide facility).
     """
-    import insightface
-    import torch
-    providers = (
-        [("CUDAExecutionProvider", {"cudnn_conv_algo_search": "HEURISTIC"}),
-         "CPUExecutionProvider"]
-        if torch.cuda.is_available()
-        else ["CPUExecutionProvider"]
-    )
-    app = insightface.app.FaceAnalysis(name=EMBED_MODEL_NAME, providers=providers)
-    app.prepare(ctx_id=0 if torch.cuda.is_available() else -1, det_size=(640, 640))
+    from app.config import get_settings
+    from app.vision.model_cache import shared_face_app
+    app, handle = shared_face_app(EMBED_MODEL_NAME, get_settings().device, det_size=(640, 640))
+    global _face_app_handle
+    _face_app_handle = handle
     logger.info(f"Face gallery: enrolment model {EMBED_MODEL_NAME} ready")
     return app
+
+
+_face_app_handle = None
 
 
 async def get_face_app():

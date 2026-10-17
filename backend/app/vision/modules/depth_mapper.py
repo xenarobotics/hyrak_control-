@@ -34,10 +34,16 @@ class DepthMapper(BaseAnalyzer):
         # loads from its source checkout; if that is missing or broken the
         # previous default (V2 metric outdoor) keeps avoidance and the depth
         # mode working, and the log says why.
+        #
+        # The NETWORK is shared through the model cache: a depth-mapping
+        # session and the background obstacle sensor (avoidance/sensing/
+        # camera.py builds its own DepthMapper) used to hold two DA3-Large
+        # copies, 1.3 GB each (audit V4). stop() releases this instance's
+        # reference; the cache keeps the weights for its idle grace.
         from app.vision import depth_models
         try:
             logger.info(f"Loading depth model {self.model_name} on {self.device}...")
-            self.backend = depth_models.load(self.model_name, self.device)
+            self.backend, handle = depth_models.load_shared(self.model_name, self.device)
         except Exception as e:
             fallback = "depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf"
             if self.model_name == fallback:
@@ -45,7 +51,8 @@ class DepthMapper(BaseAnalyzer):
                 raise
             logger.error(f"Depth model {self.model_name} failed to load ({e}) - falling back to {fallback}")
             self.model_name = fallback
-            self.backend = depth_models.load(fallback, self.device)
+            self.backend, handle = depth_models.load_shared(fallback, self.device)
+        self.hold(handle)
         logger.info(f"DepthMapper using {self.model_name.split('/')[-1]} on {self.device.upper()}")
 
     def predict_metric(self, frame_bgr: np.ndarray, hfov_deg: float | None = None) -> np.ndarray:

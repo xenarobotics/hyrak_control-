@@ -10,6 +10,17 @@ from app.avoidance.sensing import camera, person_ruler
 from app.vision import depth_models
 
 
+class _FakeHandle:
+    """What depth_models.load_shared hands back next to a backend: the
+    model-cache handle DepthMapper.hold() keeps and stop() releases."""
+    def __init__(self, obj):
+        self.obj = obj
+        self.released = False
+
+    def release(self):
+        self.released = True
+
+
 def test_focal_from_hfov():
     assert abs(depth_models.focal_px(640, 90.0) - 320.0) < 1e-6
 
@@ -31,12 +42,15 @@ def test_depth_mapper_falls_back_when_da3_is_missing(monkeypatch):
     from app.vision.modules import depth_mapper
     calls = []
 
-    def fake_load(name, device, fov_correct=False):
+    def fake_load(name, device, fov_correct=False, cache=None):
         calls.append(name)
         if "DA3" in name:
             raise ImportError("no checkout")
-        return type("B", (), {"predict": lambda self, f, h: np.ones((10, 10))})()
-    monkeypatch.setattr(depth_models, "load", fake_load)
+        backend = type("B", (), {"predict": lambda self, f, h: np.ones((10, 10))})()
+        return backend, _FakeHandle(backend)
+    # DepthMapper goes through the model cache (load_shared), so that is the
+    # seam to fake; the fallback policy is what this test is about.
+    monkeypatch.setattr(depth_models, "load_shared", fake_load)
     monkeypatch.setattr(depth_mapper.BaseAnalyzer, "__init__", lambda self, **k: None)
     s = depth_mapper.get_settings()
     monkeypatch.setattr(s, "depth_model", "depth-anything/DA3METRIC-LARGE")
@@ -135,8 +149,10 @@ def test_webcam_frames_use_the_webcam_lens(monkeypatch):
 def test_depth_colours_follow_the_scene(monkeypatch):
     from app.vision.modules import depth_mapper
     monkeypatch.setattr(depth_mapper.BaseAnalyzer, "__init__", lambda self, **k: None)
-    monkeypatch.setattr(depth_models, "load",
-                        lambda *a, **k: type("B", (), {"predict": lambda self, f, h: room})())
+    def fake_load(*a, **k):
+        backend = type("B", (), {"predict": lambda self, f, h: room})()
+        return backend, _FakeHandle(backend)
+    monkeypatch.setattr(depth_models, "load_shared", fake_load)
     room = np.tile(np.linspace(0.8, 5.0, 64, dtype=np.float32), (48, 1))    # a 5 m room
     m = depth_mapper.DepthMapper()
     img, meta = m._analyze_frame_blocking(np.zeros((480, 640, 3), np.uint8))
@@ -144,3 +160,49 @@ def test_depth_colours_follow_the_scene(monkeypatch):
     assert lo < 1.2 and 4.5 < hi < 5.5                   # the scale spans the room, not 0.3-60 m
     left, right = img[240, 96].astype(int), img[240, 544].astype(int)
     assert np.linalg.norm(left - right) > 150             # near and far get clearly different colours
+
+
+# -- one DA3 for the depth session and the obstacle sensor (audit V4) ---------
+
+async def test_depth_session_and_avoidance_sensor_share_one_network(monkeypatch):
+    """Two DepthMappers (a depth-mapping session and camera._mapper()) must
+    hold ONE DA3 module through the model cache, and the session releasing
+    its reference must not pull it from under the sensor."""
+    from app.vision import model_cache
+    from app.vision.modules import depth_mapper
+
+    loads = []
+
+    class _Pred:
+        depth = [np.full((280, 504), 30.0, np.float32)]
+        sky = None
+
+    class _Module:
+        def inference(self, imgs, process_res):
+            return _Pred()
+
+    def fake_module(name, device):
+        loads.append(name)
+        return _Module()
+
+    cache = model_cache.ModelCache(grace_s=0)
+    monkeypatch.setattr(model_cache, "CACHE", cache)
+    monkeypatch.setattr(depth_models.DA3Depth, "load_module", staticmethod(fake_module))
+    s = depth_mapper.get_settings()
+    monkeypatch.setattr(s, "depth_model", "depth-anything/DA3METRIC-LARGE")
+    monkeypatch.setattr(camera, "_depth", None)
+    monkeypatch.setattr(camera, "_depth_failed", False)
+
+    session = depth_mapper.DepthMapper()
+    sensor = camera._mapper()
+    assert sensor is not session
+    assert sensor.backend._model is session.backend._model, "two DA3 copies"
+    assert loads == ["depth-anything/DA3METRIC-LARGE"]
+    key = session._model_handles[0].key
+    assert cache.refs(key) == 2
+
+    await session.stop()                   # the depth session ends
+    assert cache.refs(key) == 1 and cache.is_cached(key)
+    assert sensor.predict_metric(np.zeros((360, 640, 3), np.uint8), 70.0).shape == (280, 504)
+    await sensor.stop()
+    assert not cache.is_cached(key)

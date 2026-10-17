@@ -22,7 +22,7 @@ from typing import Any, Dict, Tuple
 import cv2
 import numpy as np
 
-from app.vision.base import BaseAnalyzer
+from app.vision.base import BaseAnalyzer, locked_setter
 
 logger = logging.getLogger("verocore.vision.enhancer")
 
@@ -84,7 +84,7 @@ class Enhancer(BaseAnalyzer):
     MODE = "enhance"
 
     def __init__(self, **kwargs):
-        super().__init__(executor_workers=2, **kwargs)
+        super().__init__(executor_workers=1, **kwargs)
         self._client_params: Dict[str, dict] = {}
         self._client_last_run: Dict[str, float] = {}
         self._client_last_frame: Dict[str, np.ndarray] = {}
@@ -112,6 +112,7 @@ class Enhancer(BaseAnalyzer):
         self._client_last_run.pop(client_id, None)
         self._client_last_frame.pop(client_id, None)
 
+    @locked_setter
     def set_params(self, client_id: str, **params):
         if client_id not in self._client_params:
             return

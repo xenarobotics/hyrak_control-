@@ -1,7 +1,10 @@
 """
 GPU-agnostic vision worker pool - lazy loading.
-Only one model loaded in VRAM at a time per session.
-Models load on first use and unload when switching.
+One analyzer per session; the analyzer's WEIGHTS come from the process-wide
+model cache (app/vision/model_cache), so two sessions in the same mode, or
+a depth session next to avoidance sensing, hold one copy. Analyzers load on
+first use and are stopped when switching; the weights outlive them for the
+cache's idle grace so a switch back does not re-read the checkpoint.
 """
 import asyncio
 import logging
@@ -178,13 +181,18 @@ class VisionWorkerPool:
         if analyzer:
             try:
                 await analyzer.unregister_client(session_id)
+                # Waits (off the loop) for the in-flight inference, then
+                # gives the shared weights back to the model cache.
                 await analyzer.stop()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Session {session_id[:8]}: analyzer stop failed ({e!r})")
 
-        # Free VRAM
+        # Return the activation memory to the driver. On a thread: it is a
+        # device sync, and it used to run on the loop BEFORE the cancelled
+        # inference had finished (audit V10). Weights stay in the model
+        # cache for its idle grace, so a switch back does not reload.
         if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            await asyncio.to_thread(torch.cuda.empty_cache)
             logger.info(f"Session {session_id[:8]}: VRAM cleared - "
                        f"{torch.cuda.memory_allocated(0)/1e9:.2f}GB allocated")
 

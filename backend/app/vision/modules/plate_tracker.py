@@ -60,11 +60,11 @@ from typing import Any, Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 import torch
-from ultralytics import YOLO
 
 from app.config import ROOT_DIR, get_settings
 from app.vision import calibration
-from app.vision.base import BaseAnalyzer
+from app.vision.base import BaseAnalyzer, locked_setter
+from app.vision.recent_ids import RecentIds
 from app.vision.controllers import (
     KalmanXY, PDController, VelocitySmoother, range_error_ratio,
 )
@@ -318,7 +318,7 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         # Unique vehicles this session, by ByteTrack ID. A set, not a
         # counter, because IDs are revisited: the same car re-detected
         # after an occlusion must not count twice.
-        "ids_seen": set(),
+        "ids_seen": RecentIds(),
         "type_counts": {},
         "color_counts": {},
         "peak_in_frame": 0,
@@ -385,7 +385,7 @@ class PlateTracker(BaseAnalyzer):
     MODE = "vehicle-plate-tracking"
 
     def __init__(self, **kwargs):
-        super().__init__(executor_workers=2, **kwargs)
+        super().__init__(executor_workers=1, **kwargs)
         if ALPR is None:
             raise RuntimeError("fast-alpr not installed (add it to pyproject.toml)")
         settings = get_settings()
@@ -393,19 +393,22 @@ class PlateTracker(BaseAnalyzer):
         self.half = self.device == "cuda"
 
         logger.info("Loading fast-alpr...")
-        self.alpr = ALPR(
-            detector_model="yolo-v9-t-384-license-plate-end2end",
-            ocr_model="cct-xs-v2-global-model",
+        # Plate detector + OCR ORT sessions, shared process-wide and warmed
+        # once by the cache loader.
+        from app.vision.model_cache import shared_alpr
+        _alpr, handle = shared_alpr(
+            "yolo-v9-t-384-license-plate-end2end", "cct-xs-v2-global-model", self.device
         )
-        try:
-            self.alpr.predict(np.zeros((384, 384, 3), dtype=np.uint8))
-        except Exception as e:
-            logger.warning(f"fast-alpr warm-up skipped: {e}")
+        self.alpr = self.hold(handle)
 
-        self.vehicle_model = YOLO(settings.default_yolo_model)
-        self.vehicle_model.to(self.device)
+        # Weights shared process-wide (model_cache), wrapper private so the
+        # ByteTrack state behind track(persist=True) stays this session's.
+        self.vehicle_model = self.acquire_yolo(settings.default_yolo_model, self.device)
+        # Warm-up at the mode's real inference size (native here, so 1080p)
+        # so cuDNN autotune does not land on the first live frame.
+        warm = self.warmup_frame()
         self.vehicle_model(
-            np.zeros((360, 640, 3), dtype=np.uint8),
+            warm, imgsz=self.imgsz_for(warm),
             device=self.device, half=self.half, verbose=False,
         )
 
@@ -458,6 +461,7 @@ class PlateTracker(BaseAnalyzer):
 
     # ── Operator control ──────────────────────────────────────────────────
 
+    @locked_setter
     def request_follow(self, client_id: str, track_id: Optional[int]) -> None:
         """Follow a specific vehicle, or None to release."""
         state = self._client_state.get(client_id)
@@ -474,6 +478,7 @@ class PlateTracker(BaseAnalyzer):
         state["follow_request_track_id"] = int(track_id)
         logger.info(f"Session {client_id[:8]}: follow requested for vehicle #{track_id}")
 
+    @locked_setter
     def set_tracking_params(self, client_id: str, target_distance_ratio: float) -> None:
         """
         Adjust the "hold here" distance: target vehicle height as a fraction
@@ -517,6 +522,7 @@ class PlateTracker(BaseAnalyzer):
             state["row_pd"].reset()
         logger.info(f"Session {client_id[:8]}: vehicle follow distance -> {ratio:.2f}")
 
+    @locked_setter
     def set_altitude_mode(self, client_id: str, mode: str) -> None:
         """'fixed' = hold the altitude Offboard started at (nudge buttons still
         apply). 'auto' = altitude PD keeps the vehicle vertically centred.
@@ -542,6 +548,7 @@ class PlateTracker(BaseAnalyzer):
             state["dist_pd"].reset()
         logger.info(f"Session {client_id[:8]}: vehicle altitude mode -> {mode}")
 
+    @locked_setter
     def set_altitude_nudge(self, client_id: str, velocity: float) -> None:
         """Manual altitude velocity for Fixed mode: -ve ascend, +ve descend
         (NED), 0 stop. Sent while the operator holds the button, cleared on
@@ -552,6 +559,7 @@ class PlateTracker(BaseAnalyzer):
             np.clip(velocity, -1.5, 1.5)
         )
 
+    @locked_setter
     def set_tracking(self, client_id: str, active: bool) -> None:
         state = self._client_state.get(client_id)
         if state is None:

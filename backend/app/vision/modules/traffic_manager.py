@@ -62,11 +62,11 @@ from typing import Any, Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 import torch
-from ultralytics import YOLO
 
 from app.config import ROOT_DIR, get_settings
 from app.vision import calibration
-from app.vision.base import BaseAnalyzer
+from app.vision.base import BaseAnalyzer, locked_setter
+from app.vision.recent_ids import RecentIds
 from app.vision.controllers import KalmanXY, PDController, VelocitySmoother
 from app.vision.drawing import draw_badge, draw_ring
 from app.vision.geometry import camera_from_settings, pose_from_telemetry
@@ -497,13 +497,25 @@ class _Vehicle:
         return self.plate or None
 
 
+def _replace_evidence(previous: Optional[str], current: str) -> None:
+    """Unlink the evidence file a vehicle previously pointed at when the new
+    write landed somewhere else (vehicle id assigned or changed)."""
+    if previous and previous != current:
+        try:
+            os.unlink(previous)
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            logger.warning(f"could not remove superseded evidence {previous}: {e}")
+
+
 def _make_state(session_id: str) -> Dict[str, Any]:
     capture_dir = os.path.join(_CAPTURE_ROOT, session_id)
     os.makedirs(capture_dir, exist_ok=True)
     return {
         "capture_dir": capture_dir,
         "vehicles": {},              # track_id -> _Vehicle
-        "ids_seen": set(),           # unique count, by track id
+        "ids_seen": RecentIds(),           # unique count, by track id
         "vehicle_id_seq": 0,
         # plate text -> vehicle_id. What makes re-identification possible: a
         # re-read of the same characters is the same vehicle, not a guess.
@@ -523,7 +535,7 @@ def _make_state(session_id: str) -> Dict[str, Any]:
         # whichever vehicle happens to sort first every frame.
         "ocr_cursor": 0,
         # ── People / crowd / faces ────────────────────────────────────────
-        "person_ids_seen": set(),
+        "person_ids_seen": RecentIds(),
         "peak_people": 0,
         # From the persisted calibration, so an operator's custom values apply
         # from the FIRST frame rather than whenever a socket push happens to
@@ -616,29 +628,32 @@ class TrafficManager(BaseAnalyzer):
     MODE = "traffic-management"
 
     def __init__(self, **kwargs):
-        super().__init__(executor_workers=2, **kwargs)
+        super().__init__(executor_workers=1, **kwargs)
         settings = get_settings()
         self.device = settings.device
         self.half = self.device == "cuda"
 
-        self.model = YOLO(settings.default_yolo_model)
-        self.model.to(self.device)
+        # Weights shared process-wide (model_cache), wrapper private so the
+        # ByteTrack state behind track(persist=True) stays this session's.
+        self.model = self.acquire_yolo(settings.default_yolo_model, self.device)
+        # Warm-up at the mode's real inference size (1280 here, not 640) so
+        # cuDNN autotune does not land on the first live frame.
+        warm = self.warmup_frame()
         self.model(
-            np.zeros((360, 640, 3), dtype=np.uint8),
+            warm, imgsz=self.imgsz_for(warm),
             device=self.device, half=self.half, verbose=False,
         )
 
         # fast-alpr is optional: without it every other analytic in this module
         # still works, so a missing dependency degrades rather than refusing to
-        # load the mode.
+        # load the mode. Shared with vehicle-plate-tracking through the cache.
         self.alpr = None
         try:
-            from fast_alpr import ALPR
-            self.alpr = ALPR(
-                detector_model="yolo-v9-t-384-license-plate-end2end",
-                ocr_model="cct-xs-v2-global-model",
+            from app.vision.model_cache import shared_alpr
+            _alpr, handle = shared_alpr(
+                "yolo-v9-t-384-license-plate-end2end", "cct-xs-v2-global-model", self.device
             )
-            self.alpr.predict(np.zeros((384, 384, 3), dtype=np.uint8))
+            self.alpr = self.hold(handle)
         except Exception as e:
             logger.warning(
                 f"fast-alpr unavailable ({e}) - traffic mode will run without "
@@ -647,22 +662,12 @@ class TrafficManager(BaseAnalyzer):
 
         # Face recognition is likewise optional - without it the other four
         # analytics are unaffected, so a load failure degrades this mode rather
-        # than refusing it.
+        # than refusing it. Shared with person-tracking and the face gallery.
         self.face_app = None
         try:
-            import insightface
-            providers = (
-                [("CUDAExecutionProvider", {"cudnn_conv_algo_search": "HEURISTIC"}),
-                 "CPUExecutionProvider"]
-                if torch.cuda.is_available() else ["CPUExecutionProvider"]
-            )
-            self.face_app = insightface.app.FaceAnalysis(
-                name="buffalo_sc", providers=providers
-            )
-            self.face_app.prepare(
-                ctx_id=0 if torch.cuda.is_available() else -1, det_size=(640, 640)
-            )
-            self.face_app.get(np.zeros((360, 640, 3), dtype=np.uint8))
+            from app.vision.model_cache import shared_face_app
+            _face, handle = shared_face_app("buffalo_sc", self.device, det_size=(640, 640))
+            self.face_app = self.hold(handle)
         except Exception as e:
             logger.warning(
                 f"InsightFace unavailable ({e}) - traffic mode will run without "
@@ -726,6 +731,7 @@ class TrafficManager(BaseAnalyzer):
 
     # ── Operator control ──────────────────────────────────────────────────
 
+    @locked_setter
     def request_follow(self, client_id: str, track_id: Optional[int]) -> None:
         """
         Follow a specific subject - vehicle OR person - or None to release.
@@ -795,6 +801,7 @@ class TrafficManager(BaseAnalyzer):
         state["follow_request_track_id"] = tid
         logger.info(f"Session {client_id[:8]}: adding #{tid} to the group")
 
+    @locked_setter
     def set_multi_follow(self, client_id: str, enabled: bool) -> None:
         """
         Turn group follow on or off for this session.
@@ -824,6 +831,7 @@ class TrafficManager(BaseAnalyzer):
             f"({len(state['follow_members'])} member(s))"
         )
 
+    @locked_setter
     def set_tracking_params(self, client_id: str, target_distance_ratio: float) -> None:
         """
         Adjust the "hold here" distance: target subject height as a fraction of
@@ -864,6 +872,7 @@ class TrafficManager(BaseAnalyzer):
             f"Session {client_id[:8]}: {kind} hold distance -> {ratio:.2f} fill"
         )
 
+    @locked_setter
     def set_altitude_mode(self, client_id: str, mode: str) -> None:
         """'fixed' holds the altitude Offboard started at (nudge still applies);
         'auto' lets the altitude PD keep the subject vertically centred.
@@ -889,6 +898,7 @@ class TrafficManager(BaseAnalyzer):
             state["dist_pd"].reset()
         logger.info(f"Session {client_id[:8]}: altitude mode -> {mode}")
 
+    @locked_setter
     def set_altitude_nudge(self, client_id: str, velocity: float) -> None:
         """Manual altitude velocity for Fixed mode: -ve ascend, +ve descend
         (NED), 0 stop. Held while the operator presses, cleared on release.
@@ -899,6 +909,7 @@ class TrafficManager(BaseAnalyzer):
             np.clip(velocity, -1.5, 1.5)
         )
 
+    @locked_setter
     def set_zone_names(self, client_id: str, names: Dict[str, str]) -> None:
         """Operator labels for the grid cells, keyed by cell index as a string.
         Same contract as crowd_manager so one panel control drives both."""
@@ -910,6 +921,7 @@ class TrafficManager(BaseAnalyzer):
         }
         logger.info(f"Session {client_id[:8]}: {len(st['zone_names'])} zone name(s) set")
 
+    @locked_setter
     def set_thresholds(self, client_id: str, light_max: int, moderate_max: int) -> None:
         """Density band edges, written through to the persisted calibration.
 
@@ -927,6 +939,7 @@ class TrafficManager(BaseAnalyzer):
         calibration.save({"crowd_light_max": lo, "crowd_moderate_max": hi})
         logger.info(f"Session {client_id[:8]}: density thresholds -> {lo}/{hi}")
 
+    @locked_setter
     def set_profile_override(self, client_id: str, subject: str, mode: str) -> None:
         """
         Force an analytic on or off against the geometry, or hand it back to
@@ -951,6 +964,7 @@ class TrafficManager(BaseAnalyzer):
             state["profile_overrides"][subject] = mode
         logger.info(f"Session {client_id[:8]}: profile override {subject} -> {mode}")
 
+    @locked_setter
     def set_tracking(self, client_id: str, active: bool) -> None:
         state = self._client_state.get(client_id)
         if state is None:
@@ -1504,14 +1518,21 @@ class TrafficManager(BaseAnalyzer):
           at. The plate text belongs in the database row, where it sits next to
           its confidence.
         """
-        stamp = datetime.now(timezone.utc).strftime("%H%M%S")
-        base = f"v{vehicle.track_id:05d}_{stamp}"
+        # ONE pair of files per vehicle, overwritten as the read improves -
+        # the same policy as vehicle-plate-tracking. The previous timestamped
+        # names wrote a fresh pair on every improved read and recorded only
+        # the last path, so the orphans were never cleaned up and the capture
+        # directory grew without bound over a long session (audit V12). Named
+        # by the persistent vehicle id (track id when there is none yet); a
+        # vehicle re-identified under an earlier id has its old pair removed.
+        base = vehicle.vehicle_id or f"v{vehicle.track_id:05d}"
 
         plate_crop = crop[max(0, int(box.y1)):int(box.y2),
                           max(0, int(box.x1)):int(box.x2)]
         if plate_crop.size:
             path = os.path.join(state["capture_dir"], f"{base}_plate.jpg")
             cv2.imwrite(path, plate_crop)
+            _replace_evidence(vehicle.crop_path, path)
             vehicle.crop_path = path
 
         x1, y1, x2, y2 = vehicle.box
@@ -1520,6 +1541,7 @@ class TrafficManager(BaseAnalyzer):
         if veh.size:
             path = os.path.join(state["capture_dir"], f"{base}_vehicle.jpg")
             cv2.imwrite(path, veh)
+            _replace_evidence(vehicle.vehicle_path, path)
             vehicle.vehicle_path = path
 
     # ── Analysis ──────────────────────────────────────────────────────────
