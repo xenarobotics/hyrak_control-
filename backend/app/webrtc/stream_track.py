@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Callable, Optional
 import cv2
 import numpy as np
 from aiortc import MediaStreamTrack
-from aiortc.contrib.media import MediaRelay
 from av import VideoFrame
 
 from app.avoidance.sensing import camera as _sensing
@@ -45,8 +44,19 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
         # and draws results itself, so we skip all output composition and
         # no downlink video exists - only cv_results payloads go back.
         self._return_video   = return_video
+        # Last annotated output / meta for the CURRENT mode only. Cleared on
+        # every mode change and whenever the analyzer is away (reloading),
+        # so a mode switch can never show the previous mode's frozen frame
+        # or draw its boxes over the new one (audit V7).
         self._frame_cache:   dict[str, np.ndarray] = {}
         self._meta_cache:    dict[str, dict] = {}
+        self._last_mode:     str | None = None
+        # Drone velocity commands: ONE latest-command slot drained by one
+        # sender task. A create_task per result had no bound, so a stalled
+        # MAVSDK call let tasks pile up at the result rate (audit V15).
+        self._vel_slot:      tuple | None = None
+        self._vel_event      = asyncio.Event()
+        self._vel_task:      asyncio.Task | None = None
         # Pixel work (colour conversion, overlay drawing) runs here, off the
         # event loop - ~6-10ms/frame at 1080p that would otherwise delay
         # drone commands, telemetry and signaling for every session.
@@ -232,31 +242,46 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
             self._returned_at = time.perf_counter()
             return frame
 
+        if mode.value != self._last_mode:
+            self._clear_caches()
+            self._last_mode = mode.value
+
         analyzer = self._vision_pool.get_for_session(self.session_id)
 
         # While a model is (re)loading there's no annotated frame to draw
         # yet - relay the raw frame instead of paying for a wasted
-        # conversion round trip.
-        if analyzer is None and mode.value not in self._frame_cache:
+        # conversion round trip. The caches go too: whatever they hold is
+        # from before the reload and must not come back as the first frames
+        # of the reloaded model.
+        if analyzer is None:
+            self._clear_caches()
             self._maybe_snapshot(None, frame)
             self._returned_at = time.perf_counter()
             return frame
 
         loop = asyncio.get_running_loop()
-        img_bgr = await loop.run_in_executor(
-            self._px_executor, partial(frame.to_ndarray, format="bgr24")
-        )
-        _t = self._lap("to_ndarray", _t)
 
-        # Same background sensing for every analysis mode except Depth
-        # mapping, which feeds avoidance itself. The frame is already BGR.
-        if _sensing.wants_frame(self.session_id, mode.value):
-            # Its own copy: _compose below draws the overlay INTO img_bgr in
-            # place, and the depth sensor runs on another thread, so without
-            # this the depth model could be shown badges and brackets.
-            _sensing.submit(self.session_id, img_bgr.copy())
+        # Client-overlay mode with the analyzer still busy on this session's
+        # previous frame: submit_frame would only replace a frame it has not
+        # looked at yet, so the 6-10 ms BGR conversion (1080p) buys nothing.
+        # Skip both; the result check below still runs so a finished
+        # inference is emitted on time (audit V13). Processed streams always
+        # convert - the frame is composed from img_bgr either way.
+        img_bgr: np.ndarray | None = None
+        if self._return_video or not self._analyzer_busy(analyzer):
+            img_bgr = await loop.run_in_executor(
+                self._px_executor, partial(frame.to_ndarray, format="bgr24")
+            )
+            _t = self._lap("to_ndarray", _t)
 
-        if analyzer:
+            # Same background sensing for every analysis mode except Depth
+            # mapping, which feeds avoidance itself. The frame is already BGR.
+            if _sensing.wants_frame(self.session_id, mode.value):
+                # Its own copy: _compose below draws the overlay INTO img_bgr in
+                # place, and the depth sensor runs on another thread, so without
+                # this the depth model could be shown badges and brackets.
+                _sensing.submit(self.session_id, img_bgr.copy())
+
             try:
                 # Telemetry is snapshotted HERE, next to the frame it belongs
                 # to, and handed down with it. Reading it later - after
@@ -270,117 +295,120 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
                     if tel_mgr and tel_mgr.is_connected else None
                 )
                 analyzer.submit_frame(self.session_id, img_bgr, telemetry=tel_snapshot)
-                result = analyzer.get_latest_result(self.session_id)
             except Exception as e:
-                logger.warning(f"Vision analyzer error (session {self.session_id[:8]}): {e}")
-                result = None
+                logger.warning(f"Vision analyzer submit error (session {self.session_id[:8]}): {e}")
+        else:
+            self._stage_add("submit_skipped", 0.0)
 
-            _t = self._lap("analyzer_io", _t)
+        try:
+            result = analyzer.get_latest_result(self.session_id)
+        except Exception as e:
+            logger.warning(f"Vision analyzer error (session {self.session_id[:8]}): {e}")
+            result = None
 
-            if result:
-                annotated_bgr, meta = result
-                self._frame_cache[mode.value] = annotated_bgr
-                self._meta_cache[mode.value] = meta
+        _t = self._lap("analyzer_io", _t)
 
-                # ── DB persistence (crowd/plate modules queue writes here
-                # since that's where their per-session state lives; this is
-                # the first point back in the event loop to actually do it) ──
-                pending_db = meta.pop("_pending_db", None)
-                if pending_db:
-                    # Vehicle/plate events get the drone's own live GPS at
-                    # capture time - more meaningful than a static camera-ID
-                    # string, and this is the first point back in the event
-                    # loop where session_manager/telemetry are reachable.
-                    if any(ev.get("table") == "plate_event" for ev in pending_db):
-                        tel = self._session_mgr.get_telemetry(self.session_id)
-                        if tel and tel.is_connected:
-                            pos = tel.snapshot.position
-                            for ev in pending_db:
-                                if ev.get("table") == "plate_event":
-                                    ev.setdefault("lat", pos.latitude_deg)
-                                    ev.setdefault("lng", pos.longitude_deg)
-                                    ev.setdefault("alt_m", pos.relative_altitude_m)
-                    from app.vision.persistence import persist_events
-                    asyncio.create_task(persist_events(self.session_id, pending_db))
+        if result:
+            annotated_bgr, meta = result
+            self._frame_cache[mode.value] = annotated_bgr
+            self._meta_cache[mode.value] = meta
 
-                # Live face enrolment: the analyzer captured the shots in its
-                # worker thread; writing them to the gallery needs the event
-                # loop, which is here.
-                enrol = meta.pop("_pending_enrolment", None)
-                if enrol:
-                    asyncio.create_task(
-                        self._enrol_captured(enrol["name"], enrol["paths"])
-                    )
-
-                pending_alerts = meta.pop("_pending_admin_alerts", None)
-                if pending_alerts:
-                    from app.events.admin_events import emit_admin_alert
-                    drone_name = (session.drone or {}).get("name") or f"session {self.session_id[:8]}"
-                    for alert in pending_alerts:
-                        asyncio.create_task(emit_admin_alert(self._session_mgr, {
-                            "session_id": self.session_id, "drone": drone_name,
-                            "ts": time.time(), **alert,
-                        }))
-
-                # ── Send drone command directly to MAVLink ──────────────
-                drone_cmd = meta.get("drone_command")
-                if drone_cmd and drone_cmd.get("type") == "velocity":
+            # ── DB persistence (crowd/plate modules queue writes here
+            # since that's where their per-session state lives; this is
+            # the first point back in the event loop to actually do it) ──
+            pending_db = meta.pop("_pending_db", None)
+            if pending_db:
+                # Vehicle/plate events get the drone's own live GPS at
+                # capture time - more meaningful than a static camera-ID
+                # string, and this is the first point back in the event
+                # loop where session_manager/telemetry are reachable.
+                if any(ev.get("table") == "plate_event" for ev in pending_db):
                     tel = self._session_mgr.get_telemetry(self.session_id)
                     if tel and tel.is_connected:
-                        from app import latency_probe
-                        latency_probe.note_setpoint(
-                            tel, drone_cmd, meta.get("captured_at_mono"), meta.get("decided_at_mono"))
-                        # Obstacle avoidance's follow guard: bends / slows /
-                        # holds the tracker's horizontal command near
-                        # obstacles; yaw and vertical stay the tracker's.
-                        # Pass-through when avoidance is off or on error.
-                        from app.avoidance.core import loop as _av_loop
-                        fwd_g, right_g = _av_loop.guard_follow(
-                            self.session_id,
-                            drone_cmd.get("forward_m_s", 0.0),
-                            drone_cmd.get("right_m_s", 0.0))
-                        asyncio.create_task(
-                            tel.send_velocity_command(
-                                forward_m_s = fwd_g,
-                                right_m_s   = right_g,
-                                down_m_s    = drone_cmd.get("down_m_s",    0.0),
-                                yaw_deg_s   = drone_cmd.get("yaw_deg_s",   0.0),
-                            )
-                        )
+                        pos = tel.snapshot.position
+                        for ev in pending_db:
+                            if ev.get("table") == "plate_event":
+                                ev.setdefault("lat", pos.latitude_deg)
+                                ev.setdefault("lng", pos.longitude_deg)
+                                ev.setdefault("alt_m", pos.relative_altitude_m)
+                from app.vision.persistence import persist_events
+                asyncio.create_task(persist_events(self.session_id, pending_db))
 
-                # ── Emit cv_results to frontend ─────────────────────────
-                # Client-overlay streams draw boxes browser-side from these
-                # payloads, so every fresh result goes out with the frame
-                # size for coordinate scaling. Processed streams only feed
-                # the results panel - 10Hz is plenty there.
-                emit_now = time.time()
-                if self._emit_callback and (
-                    not self._return_video
-                    or (emit_now - self._last_emit_time) > 0.1
-                ):
-                    self._last_emit_time = emit_now
-                    try:
-                        h, w = img_bgr.shape[:2]
-                        stages = self._stage_ms()
-                        payload = {
-                            "mode": mode.value, "session_id": self.session_id,
-                            "frame_w": w, "frame_h": h,
-                            # Server-side truth. The browser cannot derive any
-                            # of this in overlay mode - there is no inbound
-                            # RTP to measure.
-                            "delivered_fps": round(self._fps, 1),
-                            "source_fps": round(self._source_fps, 1),
-                            "pipeline_ms": round(sum(stages.values()), 1),
-                            **meta,
-                        }
-                        asyncio.create_task(self._emit_callback(payload))
-                    except Exception:
-                        pass
+            # Live face enrolment: the analyzer captured the shots in its
+            # worker thread; writing them to the gallery needs the event
+            # loop, which is here.
+            enrol = meta.pop("_pending_enrolment", None)
+            if enrol:
+                asyncio.create_task(
+                    self._enrol_captured(enrol["name"], enrol["paths"])
+                )
+
+            pending_alerts = meta.pop("_pending_admin_alerts", None)
+            if pending_alerts:
+                from app.events.admin_events import emit_admin_alert
+                drone_name = (session.drone or {}).get("name") or f"session {self.session_id[:8]}"
+                for alert in pending_alerts:
+                    asyncio.create_task(emit_admin_alert(self._session_mgr, {
+                        "session_id": self.session_id, "drone": drone_name,
+                        "ts": time.time(), **alert,
+                    }))
+
+            # ── Send drone command directly to MAVLink ──────────────
+            drone_cmd = meta.get("drone_command")
+            if drone_cmd and drone_cmd.get("type") == "velocity":
+                tel = self._session_mgr.get_telemetry(self.session_id)
+                if tel and tel.is_connected:
+                    from app import latency_probe
+                    latency_probe.note_setpoint(
+                        tel, drone_cmd, meta.get("captured_at_mono"), meta.get("decided_at_mono"))
+                    # Obstacle avoidance's follow guard: bends / slows /
+                    # holds the tracker's horizontal command near
+                    # obstacles; yaw and vertical stay the tracker's.
+                    # Pass-through when avoidance is off or on error.
+                    from app.avoidance.core import loop as _av_loop
+                    fwd_g, right_g = _av_loop.guard_follow(
+                        self.session_id,
+                        drone_cmd.get("forward_m_s", 0.0),
+                        drone_cmd.get("right_m_s", 0.0))
+                    self._queue_velocity(tel, dict(
+                        forward_m_s = fwd_g,
+                        right_m_s   = right_g,
+                        down_m_s    = drone_cmd.get("down_m_s",    0.0),
+                        yaw_deg_s   = drone_cmd.get("yaw_deg_s",   0.0),
+                    ))
+
+            # ── Emit cv_results to frontend ─────────────────────────
+            # Client-overlay streams draw boxes browser-side from these
+            # payloads, so every fresh result goes out with the frame
+            # size for coordinate scaling. Processed streams only feed
+            # the results panel - 10Hz is plenty there.
+            emit_now = time.time()
+            if self._emit_callback and (
+                not self._return_video
+                or (emit_now - self._last_emit_time) > 0.1
+            ):
+                self._last_emit_time = emit_now
+                try:
+                    stages = self._stage_ms()
+                    payload = {
+                        "mode": mode.value, "session_id": self.session_id,
+                        "frame_w": frame.width, "frame_h": frame.height,
+                        # Server-side truth. The browser cannot derive any
+                        # of this in overlay mode - there is no inbound
+                        # RTP to measure.
+                        "delivered_fps": round(self._fps, 1),
+                        "source_fps": round(self._source_fps, 1),
+                        "pipeline_ms": round(sum(stages.values()), 1),
+                        **meta,
+                    }
+                    asyncio.create_task(self._emit_callback(payload))
+                except Exception:
+                    pass
 
         if not self._return_video:
             # Nobody watches this track's output - the signaling drive task
             # pulls frames just to keep the pipeline flowing.
-            self._maybe_snapshot(img_bgr)
+            self._maybe_snapshot(img_bgr, frame)
             self._lap("emit_and_persist", _t)
             self._returned_at = time.perf_counter()
             return frame
@@ -397,6 +425,58 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
         out_frame.time_base = frame.time_base
         self._returned_at = time.perf_counter()
         return out_frame
+
+    def _clear_caches(self) -> None:
+        self._frame_cache.clear()
+        self._meta_cache.clear()
+
+    def _analyzer_busy(self, analyzer) -> bool:
+        """Is the analyzer mid-inference for THIS session? Read-only peek at
+        BaseAnalyzer's in-flight set; an analyzer without one is never busy."""
+        inflight = getattr(analyzer, "_inflight", None)
+        if not inflight:
+            return False
+        try:
+            return self.session_id in inflight
+        except TypeError:
+            return False
+
+    # ── Velocity command sender ──────────────────────────────────────────
+    def _queue_velocity(self, tel, kwargs: dict) -> None:
+        """Latest-wins: a newer setpoint replaces one still waiting to be
+        sent. A single task drains the slot, so however slow the MAVSDK
+        call gets there is never more than one in flight per track."""
+        self._vel_slot = (tel, kwargs)
+        self._vel_event.set()
+        if self._vel_task is None or self._vel_task.done():
+            try:
+                self._vel_task = asyncio.get_running_loop().create_task(self._vel_sender())
+            except RuntimeError:
+                self._vel_task = None
+
+    _VEL_SEND_TIMEOUT_S = 0.5
+
+    async def _vel_sender(self) -> None:
+        while True:
+            await self._vel_event.wait()
+            self._vel_event.clear()
+            slot, self._vel_slot = self._vel_slot, None
+            if slot is None:
+                continue
+            tel, kwargs = slot
+            try:
+                await asyncio.wait_for(
+                    tel.send_velocity_command(**kwargs), timeout=self._VEL_SEND_TIMEOUT_S
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"Session {self.session_id[:8]}: velocity command took longer than "
+                    f"{self._VEL_SEND_TIMEOUT_S}s - dropped, the next setpoint supersedes it"
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning(f"Session {self.session_id[:8]}: velocity command failed: {e}")
 
     async def _enrol_captured(self, name: str, paths: list) -> None:
         """Write live-captured shots into the face gallery and tell the
@@ -453,6 +533,18 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
         if (now - self._last_snap_time) < self._SNAP_INTERVAL:
             return
         self._last_snap_time = now
+        # Conversion, resize and JPEG encode all run on the pixel executor:
+        # on the loop they cost every session a few ms per snapshot (audit
+        # V14). Single worker, so snapshots stay in frame order.
+        try:
+            fut = asyncio.get_running_loop().run_in_executor(
+                self._px_executor, self._encode_snapshot, img_bgr, frame
+            )
+        except RuntimeError:
+            return   # executor shut down, or no loop
+        fut.add_done_callback(self._on_snapshot_encoded)
+
+    def _encode_snapshot(self, img_bgr, frame) -> bytes | None:
         if img_bgr is None:
             img_bgr = frame.to_ndarray(format="bgr24")
         h, w = img_bgr.shape[:2]
@@ -461,10 +553,18 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
                 img_bgr, (self._SNAP_WIDTH, int(h * self._SNAP_WIDTH / w))
             )
         ok, buf = cv2.imencode(".jpg", img_bgr, [cv2.IMWRITE_JPEG_QUALITY, 70])
-        if not ok:
+        return buf.tobytes() if ok else None
+
+    def _on_snapshot_encoded(self, fut) -> None:
+        try:
+            jpeg = fut.result()
+        except Exception as e:
+            logger.debug(f"snapshot encode failed: {e}")
+            return
+        if jpeg is None or not self._snapshot_cb:
             return
         try:
-            asyncio.create_task(self._snapshot_cb(self.session_id, buf.tobytes()))
+            asyncio.get_running_loop().create_task(self._snapshot_cb(self.session_id, jpeg))
         except RuntimeError:
             pass
 
@@ -473,6 +573,9 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
             super().stop()
         except Exception:
             pass
+        if self._vel_task is not None and not self._vel_task.done():
+            self._vel_task.cancel()
+        self._vel_slot = None
         try:
             self._px_executor.shutdown(wait=False, cancel_futures=True)
         except Exception:
