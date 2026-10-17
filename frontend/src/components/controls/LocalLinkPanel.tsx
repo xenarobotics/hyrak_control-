@@ -12,6 +12,9 @@ import {
     type LocalCommand,
 } from '@/lib/localLink'
 
+/** Wall clock for event handlers (never called during render). */
+const wallClock = () => Date.now()
+
 const RESULT: Record<number, string> = { 0: 'accepted', 1: 'temporarily rejected', 2: 'denied', 3: 'unsupported', 4: 'failed', 5: 'in progress' }
 
 export function LocalLinkPanel() {
@@ -32,7 +35,7 @@ export function LocalLinkPanel() {
     const ack = s.lastAck && sent && s.lastAck.command === 176 && s.lastAck.atMs >= sent.at ? s.lastAck : null
 
     const send = (cmd: LocalCommand) => {
-        const at = Date.now()
+        const at = wallClock()
         if (sendLocalCommand(cmd)) { setSent({ cmd, at }); setNow(at) }
     }
 

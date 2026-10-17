@@ -148,10 +148,10 @@ export function useStableById<T extends { id: number | string }>(
             if (now - v.lastSeen > holdMs) { seen.current.delete(key); continue }
             out.push({ ...v.item, stale: v.lastSeen !== now })
         }
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- the rows
-        // are a time-stamped hold over an external stream: each payload must
-        // be recorded against the clock (not allowed in render) and published
-        // once, which is exactly one extra render per 12 Hz payload by design.
+        // The rows are a time-stamped hold over an external stream: each payload
+        // must be recorded against the clock (not allowed in render) and
+        // published once - one extra render per 12 Hz payload, by design.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
         setRows(out)
     }, [items, holdMs])
 

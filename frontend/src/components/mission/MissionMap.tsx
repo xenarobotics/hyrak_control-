@@ -88,7 +88,9 @@ function AvoidanceOverlay({ show, reload, home, drone }: {
       } catch { /* overlay stays empty if backend unreachable */ }
     }
     void load()
-    return visibleInterval(load, 1500)   // fast poll so the reroute updates live
+    const stop = visibleInterval(load, 1500)   // fast poll so the reroute updates live
+    // Without this a poll in flight at unmount set state on a dead overlay.
+    return () => { alive = false; stop() }
   }, [show, reload])
   if (!show) return null
   const start = home ?? drone     // mission start = the drone's home / launch point

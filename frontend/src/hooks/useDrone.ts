@@ -351,7 +351,7 @@ export function useDrone() {
     }, [])
 
     const connectTelemetry = useCallback((address: string) => {
-        store.setTelemetryStatus('connecting')
+        useDroneStore.getState().setTelemetryStatus('connecting')
         getSocket().emit('connect_telemetry', { address })
     }, [])
 
@@ -389,21 +389,21 @@ export function useDrone() {
             console.error('Local relay teardown failed', err)
         }
         getSocket().emit('disconnect_telemetry')
-        store.setTelemetryStatus('disconnected')
+        useDroneStore.getState().setTelemetryStatus('disconnected')
     }, [])
 
     // Cloud flow: the radio is on the USER'S device - the browser reads it
     // via Web Serial and relays MAVLink to the backend (lib/browserSerial.ts).
     const connectBrowserSerial = useCallback(async (radio: SerialPortLike, baudRate = 57600) => {
         if (isBrowserSerialActive()) return
-        store.setTelemetryStatus('connecting')
+        useDroneStore.getState().setTelemetryStatus('connecting')
         try {
             await startBrowserSerial(radio, baudRate)
         } catch (err) {
             // Port busy in another app/tab, or radio just unplugged
             console.error('Browser serial connect failed', err)
-            store.setTelemetryError(err instanceof Error ? err.message : 'Could not open the radio port')
-            store.setTelemetryStatus('disconnected')
+            useDroneStore.getState().setTelemetryError(err instanceof Error ? err.message : 'Could not open the radio port')
+            useDroneStore.getState().setTelemetryStatus('disconnected')
         }
     }, [])
 
@@ -413,21 +413,21 @@ export function useDrone() {
     // (see lib/nativeSerialRelay.ts).
     const connectNativeSerial = useCallback(async (path: string, baudRate = DEFAULT_SERIAL_BAUD) => {
         if (isNativeSerialActive()) return
-        store.setTelemetryStatus('connecting')
+        useDroneStore.getState().setTelemetryStatus('connecting')
         // A port that opens but never speaks is the common failure here (baud
         // mismatch, unpaired radios) - report that rather than the backend's
         // generic timeout, same as the SITL bridge does.
         setSerialSilenceHandler((message) => {
-            store.setTelemetryError(message)
-            store.setTelemetryStatus('error')
+            useDroneStore.getState().setTelemetryError(message)
+            useDroneStore.getState().setTelemetryStatus('error')
             void stopNativeSerial()
         })
         try {
             await startNativeSerial(path, baudRate)
         } catch (err) {
             console.error('Native serial connect failed', err)
-            store.setTelemetryError(err instanceof Error ? err.message : 'Could not open the radio port')
-            store.setTelemetryStatus('disconnected')
+            useDroneStore.getState().setTelemetryError(err instanceof Error ? err.message : 'Could not open the radio port')
+            useDroneStore.getState().setTelemetryStatus('disconnected')
         }
     }, [])
 
@@ -437,18 +437,18 @@ export function useDrone() {
     // for the operator to remember to start.
     const connectNativeRf = useCallback(async () => {
         if (isNativeRfRelayActive()) return
-        store.setTelemetryStatus('connecting')
+        useDroneStore.getState().setTelemetryStatus('connecting')
         setRfSilenceHandler((message) => {
-            store.setTelemetryError(message)
-            store.setTelemetryStatus('error')
+            useDroneStore.getState().setTelemetryError(message)
+            useDroneStore.getState().setTelemetryStatus('error')
             void stopNativeRfRelay()
         })
         try {
             await startNativeRfRelay()
         } catch (err) {
             console.error('Native RF relay connect failed', err)
-            store.setTelemetryError(err instanceof Error ? err.message : 'Could not bind the air unit ports')
-            store.setTelemetryStatus('disconnected')
+            useDroneStore.getState().setTelemetryError(err instanceof Error ? err.message : 'Could not bind the air unit ports')
+            useDroneStore.getState().setTelemetryStatus('disconnected')
         }
     }, [])
 
@@ -457,13 +457,13 @@ export function useDrone() {
     // agent re-exposes it as a loopback WebSocket (lib/localRfRelay.ts).
     const connectLocalRelay = useCallback(async (url?: string) => {
         if (isLocalRelayActive()) return
-        store.setTelemetryStatus('connecting')
+        useDroneStore.getState().setTelemetryStatus('connecting')
         try {
             await startLocalRelay(url)
         } catch (err) {
             console.error('Local RF relay connect failed', err)
-            store.setTelemetryError(err instanceof Error ? err.message : 'Could not reach the local relay')
-            store.setTelemetryStatus('disconnected')
+            useDroneStore.getState().setTelemetryError(err instanceof Error ? err.message : 'Could not reach the local relay')
+            useDroneStore.getState().setTelemetryStatus('disconnected')
         }
     }, [])
 
@@ -472,21 +472,21 @@ export function useDrone() {
     // browser path (see lib/remoteSitlRelay.ts).
     const connectRemoteSitl = useCallback(async (port?: number) => {
         if (isRemoteSitlRelayActive()) return
-        store.setTelemetryStatus('connecting')
+        useDroneStore.getState().setTelemetryStatus('connecting')
         // The port binding succeeding tells us nothing about whether SITL is
         // actually sending - report that specific case with its actual causes
         // instead of waiting out the backend's generic mavsdk timeout.
         setSitlSilenceHandler((message) => {
-            store.setTelemetryError(message)
-            store.setTelemetryStatus('error')
+            useDroneStore.getState().setTelemetryError(message)
+            useDroneStore.getState().setTelemetryStatus('error')
             void stopRemoteSitlRelay()
         })
         try {
             await startRemoteSitlRelay(port)
         } catch (err) {
             console.error('SITL bridge connect failed', err)
-            store.setTelemetryError(err instanceof Error ? err.message : 'Could not start the SITL bridge')
-            store.setTelemetryStatus('disconnected')
+            useDroneStore.getState().setTelemetryError(err instanceof Error ? err.message : 'Could not start the SITL bridge')
+            useDroneStore.getState().setTelemetryStatus('disconnected')
         }
     }, [])
 
@@ -508,7 +508,7 @@ export function useDrone() {
         // a 3DR radio that lasts about a second, which is long enough to read
         // as a click that missed. The press itself is the one event we can
         // report instantly, so report it.
-        store.setPendingAction(action)
+        useDroneStore.getState().setPendingAction(action)
         getSocket().emit('drone_action', { action, ...payload })
         // A result that never comes must not leave the button spinning
         // forever - that trades one misleading state for a worse one. Clear
@@ -526,11 +526,11 @@ export function useDrone() {
     const disarm       = useCallback(() => sendAction('disarm'), [sendAction])
     const emergencyStop = useCallback(() => {
         sendAction('emergency_stop')
-        store.setEmergencyConfirm(false)
+        useDroneStore.getState().setEmergencyConfirm(false)
     }, [sendAction])
 
     const setMode = useCallback((mode: string) => {
-        store.setMode(mode as any)
+        useDroneStore.getState().setMode(mode as AnalysisMode)
         getSocket().emit('set_analysis_mode', { mode })
     }, [])
 
