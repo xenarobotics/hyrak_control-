@@ -5,7 +5,7 @@
 // switch) swaps them. Neither view is ever remounted, so the video does not
 // restart when you swap.
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import dynamic from 'next/dynamic'
 import { VideoStream } from '@/components/video/VideoStream'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'

@@ -6,7 +6,6 @@ import {
 } from 'react'
 import { useWebRTC, type WebRTCStats } from '@/hooks/useWebRTC'
 import { useCamera } from '@/hooks/useCamera'
-import { useDroneStore } from '@/store/drone'
 import { getSocket } from '@/lib/socket'
 import { getVideoSource, isServerSourced } from '@/lib/videoSource'
 import { startRtspCameraStream, stopRtspCameraStream } from '@/lib/rtspCameraStream'

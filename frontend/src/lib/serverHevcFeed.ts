@@ -38,7 +38,7 @@ function disabled(): boolean {
     try { return localStorage.getItem(DISABLE_KEY) === '1' } catch { return false }
 }
 export function setServerHevcDisabled(v: boolean): void {
-    try { v ? localStorage.setItem(DISABLE_KEY, '1') : localStorage.removeItem(DISABLE_KEY) } catch { /* private mode */ }
+    try { if (v) localStorage.setItem(DISABLE_KEY, '1'); else localStorage.removeItem(DISABLE_KEY) } catch { /* private mode */ }
 }
 
 // THE ROUTE MATTERS MORE THAN THE CODEC. The app talks to the backend

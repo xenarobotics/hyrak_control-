@@ -566,7 +566,6 @@ function OrdersTab() {
             waypoints,
             ...(ackOrange ? { ack_orange: true } : {}),
         })
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [detail, routeCache, fleetIds, telemetryStatus, refresh])
 
     // What the map highlights: the open order's planned route, if loaded.

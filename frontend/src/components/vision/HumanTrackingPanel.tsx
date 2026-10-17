@@ -5,7 +5,7 @@ import { useDroneStore } from '@/store/drone'
 import { useStableById } from '@/lib/panelSmoothing'
 import { getSocket } from '@/lib/socket'
 import {
-    Users, Target, Crosshair, Square, Info,
+    Users, Crosshair, Square, Info,
     ChevronDown, ChevronUp, Mountain, MoveVertical,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'

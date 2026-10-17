@@ -1,7 +1,6 @@
 'use client'
 
 import { useTheme } from '@/lib/theme'
-import { useState, useEffect } from 'react'
 import { Sun, Moon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useHydrated } from '@/hooks/useClientValue'

@@ -10,7 +10,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useDroneStore } from '@/store/drone'
 import { useResolvedDroneId } from '@/lib/droneId'
-import { getServerUrl } from '@/lib/server-url'
 import { visibleInterval } from '@/lib/poll'
 import { ShieldCheck, ShieldAlert, Shield, TriangleAlert, ChevronDown, ChevronRight } from 'lucide-react'
 import {
@@ -81,7 +80,6 @@ function Row({ label, value, color, hint }: { label: string; value: string; colo
 }
 
 export function AvoidancePanel() {
-    const telemetryStatus = useDroneStore(s => s.telemetryStatus)
     // Resolved by the shared, backed-off resolver (lib/droneId.ts) - this
     // panel and the Command strip used to each poll three endpoints every
     // 1.5 s for as long as no drone was attached.

@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import dynamic from 'next/dynamic'
-import { useDroneStore } from '@/store/drone'
 import { useSwarmStore } from '@/store/swarm'
 import { getSocket } from '@/lib/socket'
 import { OSDBar } from '@/components/osd/OSDBar'

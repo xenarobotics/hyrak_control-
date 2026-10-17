@@ -15,7 +15,7 @@ import { VehiclePlateTrackingPanel } from '@/components/vision/VehiclePlateTrack
 import { Reconstruction3DPanel } from '@/components/vision/Reconstruction3DPanel'
 import {
     ScanSearch, Users, Layers,
-    ShieldAlert, Brain, Target, ScanFace, Sparkles,
+    ShieldAlert, Brain, ScanFace, Sparkles,
     UsersRound, ScanLine, TrafficCone, Box,
 } from 'lucide-react'
 
