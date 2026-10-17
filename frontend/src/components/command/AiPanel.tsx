@@ -9,8 +9,7 @@ import { MODES, panelFor } from '@/components/vision/ModeSelector'
 import { ModulePerformance } from '@/components/vision/ModulePerformance'
 
 function Body({ mode }: { mode: string }) {
-    const Panel = panelFor(mode)
-    return Panel ? <Panel /> : null
+    return panelFor(mode)
 }
 
 export function AiPanel({ onStop }: { onStop: () => void }) {

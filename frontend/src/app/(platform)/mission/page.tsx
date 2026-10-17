@@ -1401,7 +1401,7 @@ export default function MissionPage() {
                 Load it into the planner?
               </p>
               <p className="text-[10px] font-mono mt-1.5" style={{ color: '#6b7280' }}>
-                Choosing "Discard" keeps your current plan unchanged.
+                Choosing &ldquo;Discard&rdquo; keeps your current plan unchanged.
               </p>
             </div>
             <div className="flex gap-2 px-4 pb-4">

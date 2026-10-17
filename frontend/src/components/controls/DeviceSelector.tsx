@@ -21,10 +21,11 @@ import { cn } from '@/lib/utils'
 import { getVideoSource, isServerSourced, needsCameraSelection, getAirUnitVideoPort, setAirUnitVideoPort, specFor } from '@/lib/videoSource'
 import { getServerUrl } from '@/lib/server-url'
 import { visibleInterval } from '@/lib/poll'
+import { useHydrated } from '@/hooks/useClientValue'
+import Link from 'next/link'
 
 export function DeviceSelector() {
-    const [mounted, setMounted] = useState(false)
-    useEffect(() => { setMounted(true) }, [])
+    const mounted = useHydrated()
     const {
         cameras, selectedCameraId: camId, setSelectedCameraId: setCamId,
         isLoading: camLoading, scanCameras: scanCams,
@@ -380,7 +381,7 @@ export function DeviceSelector() {
                 )}
                 {sitlNeedsDesktop && (
                     <p className="mt-1.5 text-[10px] font-mono text-app-text-muted leading-relaxed">
-                        SITL requires the HYRAK desktop app - <a href="/" className="underline text-zinc-400 hover:text-zinc-200">download it here</a>, then connect to the PX4 SITL running on your machine.
+                        SITL requires the HYRAK desktop app - <Link href="/" className="underline text-zinc-400 hover:text-zinc-200">download it here</Link>, then connect to the PX4 SITL running on your machine.
                     </p>
                 )}
             </div>

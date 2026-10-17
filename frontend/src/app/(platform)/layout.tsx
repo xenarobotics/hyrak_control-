@@ -22,6 +22,7 @@ import { useSwarmStore } from '@/store/swarm'
 import { FleetAside } from '@/components/swarm/FleetAside'
 import { StatusBar } from '@/components/layout/StatusBar'
 import { getStatusBarEnabled, STATUSBAR_CHANGE_EVENT } from '@/lib/statusBarSettings'
+import { useClientValueOn, useHydrated } from '@/hooks/useClientValue'
 
 const NAV = [
     { href: '/fly',       label: 'Fly',     icon: Radio },
@@ -195,17 +196,10 @@ function PlatformNav() {
 }
 
 export default function PlatformLayout({ children }: { children: React.ReactNode }) {
-    const [mounted, setMounted] = useState(false)
-    const [statusBarOn, setStatusBarOn] = useState(false)
+    const mounted = useHydrated()
+    const statusBarOn = useClientValueOn(STATUSBAR_CHANGE_EVENT, getStatusBarEnabled, false)
     const swarmEnabled = useSwarmStore(s => s.enabled)
     const pathname = usePathname()
-    useEffect(() => {
-        setMounted(true)
-        setStatusBarOn(getStatusBarEnabled())
-        const onChange = (e: Event) => setStatusBarOn((e as CustomEvent<boolean>).detail)
-        window.addEventListener(STATUSBAR_CHANGE_EVENT, onChange)
-        return () => window.removeEventListener(STATUSBAR_CHANGE_EVENT, onChange)
-    }, [])
 
     // Fly and Command carry their own status and flight controls - the global
     // bar would only duplicate them (and cover their OSD), so it's shown

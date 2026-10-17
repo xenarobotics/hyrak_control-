@@ -17,11 +17,11 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FLIGHT_MODES, modeOptionFor, modeLabel } from '@/lib/flightModes'
+import { useHydrated } from '@/hooks/useClientValue'
 
 export function DroneControls() {
-    const [mounted, setMounted] = useState(false)
+    const mounted = useHydrated()
     const [takeoffAlt, setTakeoffAlt] = useState(5)
-    useEffect(() => { setMounted(true) }, [])
 
     const { arm, disarm, sendAction } = useDrone()
     const telemetry = useDroneStore(s => s.telemetry)

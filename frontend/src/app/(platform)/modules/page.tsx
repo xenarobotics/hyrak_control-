@@ -23,11 +23,12 @@ import { useReceiver, fallbackFromHevc } from '@/lib/hyrakReceiver'
 import { useAttachVideo } from '@/hooks/useAttachVideo'
 import { WebCodecsVideo } from '@/components/video/WebCodecsVideo'
 import { Recon3DView } from '@/components/vision/Recon3DView'
+import { useClientValue } from '@/hooks/useClientValue'
 
 function ResultsPanel() {
     const mode = useDroneStore(s => s.mode)
-    const Panel = panelFor(mode)
-    if (Panel) return <Panel />
+    const panel = panelFor(mode)
+    if (panel) return panel
     return (
         <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -54,8 +55,7 @@ export default function ModulesPage() {
     // reading getVideoSource() straight into the initial state would make
     // the server and client's first render disagree whenever a non-default
     // source is saved, which React flags as a hydration mismatch.
-    const [videoSource, setVideoSource] = useState<VideoSource>('camera')
-    useEffect(() => { setVideoSource(getVideoSource()) }, [])
+    const videoSource = useClientValue<VideoSource>(getVideoSource, 'camera')
     const serverSourced = isServerSourced(videoSource)
     const needsCamera = needsCameraSelection(videoSource)
 
@@ -101,8 +101,9 @@ export default function ModulesPage() {
     // hides frame the AI is still analysing. Fit letterboxes instead so the
     // whole sensor is visible. The overlay canvas is handed the same value:
     // if the two disagree, boxes and clicks land in the wrong place.
-    const [videoFit, setVideoFitState] = useState<VideoFit>('fill')
-    useEffect(() => { setVideoFitState(getVideoFit()) }, [])
+    const savedFit = useClientValue<VideoFit>(getVideoFit, 'fill')
+    const [pickedFit, setVideoFitState] = useState<VideoFit | null>(null)
+    const videoFit = pickedFit ?? savedFit
     const [isFullscreen, setIsFullscreen] = useState(false)
 
     // Attach streams to video elements. Client-overlay feed shows the

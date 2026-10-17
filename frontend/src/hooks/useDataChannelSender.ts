@@ -34,6 +34,7 @@ import {
     type VideoSource,
 } from '@/lib/videoSource'
 import { startAirUnitPreview, stopAirUnitPreview, getAirUnitPreviewActualPort } from '@/lib/airUnitPreview'
+import { useHydrated } from '@/hooks/useClientValue'
 
 export const DC_SENDER_BRIDGE_ID = 'webrtc-dc-sender'
 
@@ -253,11 +254,10 @@ export async function stopDataChannelSender(): Promise<void> {
 /** Live status for the UI. Separate from the imperative start/stop above so
  *  Settings can observe a sender that Fly started. */
 export function useDataChannelSender() {
-    const [mounted, setMounted] = useState(false)
+    const mounted = useHydrated()
     const [status, setStatus] = useState<DataChannelSenderStatus | null>(null)
 
     useEffect(() => {
-        setMounted(true)
         if (!isDesktopApp()) return
         return nativeBridge()?.onEvent((event: BridgeEvent) => {
             if (event.bridge !== 'webrtc-sender' || event.id !== DC_SENDER_BRIDGE_ID) return

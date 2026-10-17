@@ -49,6 +49,7 @@ import { getLiveEdgeDriftMs } from '@/lib/liveEdge'
 import { probeDroneNetwork, explainResult, type ProbeReport } from '@/lib/netProbe'
 import { isDesktopApp, nativeUpdater } from '@/lib/nativeBridge'
 import { useAirUnitVideoBridge } from '@/hooks/useAirUnitVideoBridge'
+import { useClientValue, useHydrated } from '@/hooks/useClientValue'
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
 
@@ -424,12 +425,10 @@ function ShortcutsGroup() {
 // from either place is reflected in both, since it's the same underlying
 // bridge connection.
 function NativeAirUnitVideoRow({ source }: { source: VideoSource }) {
-    const [mounted, setMounted] = useState(false)
+    const mounted = useHydrated()
     const [port, setPort] = useState(5600)
     const [device, setDevice] = useState('/dev/video10')
     const bridge = useAirUnitVideoBridge()
-
-    useEffect(() => { setMounted(true) }, [])
 
     // Always render SOMETHING here rather than silently disappearing -
     // a row that vanishes with no explanation reads as "this feature
@@ -1270,7 +1269,7 @@ function MissionGroup() {
 type UpdateStatus = 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'downloaded' | 'error'
 
 function DesktopUpdateRow() {
-    const [mounted, setMounted]   = useState(false)
+    const mounted = useHydrated()
     const [version, setVersion]   = useState('')
     const [newVersion, setNewVersion] = useState('')
     const [status, setStatus]     = useState<UpdateStatus>('idle')
@@ -1281,7 +1280,6 @@ function DesktopUpdateRow() {
     const [progress, setProgress] = useState<{ percent: number; transferred?: number; total?: number; rate?: number } | null>(null)
 
     useEffect(() => {
-        setMounted(true)
         if (!isDesktopApp()) return
         const updater = nativeUpdater()
         if (!updater) return
@@ -1456,7 +1454,14 @@ function CalibrationRow({ field, onSave, busy }: {
     const [error, setError] = useState('')
 
     // Re-sync when the server sends a new value (another tab, or a reset).
-    useEffect(() => { setDraft(String(field.value)); setError('') }, [field.value])
+    // Adjusted during render rather than in an effect, so the stale draft is
+    // never painted for a frame.
+    const [syncedValue, setSyncedValue] = useState(field.value)
+    if (field.value !== syncedValue) {
+        setSyncedValue(field.value)
+        setDraft(String(field.value))
+        setError('')
+    }
 
     const dirty = draft !== String(field.value)
 
@@ -2006,13 +2011,13 @@ export default function SettingsPage() {
     // the settings groups themselves until after mount sidesteps this for
     // the whole page in one place instead of per-component. The active tab is
     // read the same way, for the same reason.
-    const [mounted, setMounted] = useState(false)
-    const [activeId, setActiveId] = useState(CATEGORIES[0].id)
-    useEffect(() => {
-        setMounted(true)
+    const mounted = useHydrated()
+    const savedTab = useClientValue(() => {
         const saved = ls(TAB_KEY, CATEGORIES[0].id)
-        if (CATEGORIES.some(c => c.id === saved)) setActiveId(saved)
-    }, [])
+        return CATEGORIES.some(c => c.id === saved) ? saved : CATEGORIES[0].id
+    }, CATEGORIES[0].id)
+    const [pickedTab, setActiveId] = useState<string | null>(null)
+    const activeId = pickedTab ?? savedTab
 
     const select = (id: string) => { setActiveId(id); lsSet(TAB_KEY, id) }
     const active = CATEGORIES.find(c => c.id === activeId) ?? CATEGORIES[0]

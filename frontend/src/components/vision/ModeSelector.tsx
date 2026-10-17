@@ -1,6 +1,6 @@
 'use client'
 
-import type { ComponentType } from 'react'
+import { createElement, type ComponentType, type ReactElement } from 'react'
 import { useDrone } from '@/hooks/useDrone'
 import { useDroneStore } from '@/store/drone'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
@@ -115,8 +115,12 @@ const MODE_PANELS: Record<string, ComponentType> = {
     '3d-reconstruction': Reconstruction3DPanel,
 }
 
-export function panelFor(mode: string): ComponentType | null {
-    return MODE_PANELS[mode] ?? null
+/** The results panel element for `mode`, or null when it has none. Returns
+ *  an element rather than the component, so callers never bind a component
+ *  type to a render-time variable (which remounts it on every render). */
+export function panelFor(mode: string): ReactElement | null {
+    const Panel = MODE_PANELS[mode]
+    return Panel ? createElement(Panel) : null
 }
 
 // Modes that are implemented; the rest render as "coming soon".
