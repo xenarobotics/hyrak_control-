@@ -20,7 +20,6 @@ once, and is what an installer endpoint should do anyway - it's also what
 makes a interrupted download resumable.
 """
 import logging
-import os
 import re
 from pathlib import Path
 

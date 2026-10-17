@@ -27,7 +27,44 @@ logger = logging.getLogger("verocore.webrtc.signaling")
 
 # One relay shared across all peers - efficient media routing
 relay = MediaRelay()
-_session_feed_port: dict[str, int] = {}   # session -> shared feed port it holds (feeds.py)
+# Feed-port ownership moved onto PeerEntry.feed_port (peer_registry.py) and is
+# released by PeerRegistry.remove. This mapping is no longer written; it stays
+# only so server.py's disconnect path, which still pops it, keeps importing.
+_session_feed_port: dict[str, int] = {}
+
+_RELAY_SOURCES = ("rtsp_relay", "air_unit_srt", "air_unit_gst", "hyrak_receiver")
+
+
+def _validate_offer(data) -> str | None:
+    """Why this offer cannot be answered, in one sentence for the client, or
+    None when it is well-formed. Checked BEFORE anything is allocated."""
+    if not isinstance(data, dict):
+        return "offer must be an object with sdp and type"
+    sdp, typ = data.get("sdp"), data.get("type")
+    if not isinstance(sdp, str) or not sdp.strip():
+        return "offer is missing sdp"
+    if typ != "offer":
+        return f"offer type must be 'offer', got {typ!r}"
+    servers = data.get("iceServers")
+    if servers is not None:
+        if not isinstance(servers, list):
+            return "iceServers must be a list"
+        for s in servers:
+            if not isinstance(s, dict):
+                return "each iceServers entry must be an object with urls"
+            urls = s.get("urls")
+            if urls is not None and not isinstance(urls, (str, list)):
+                return "iceServers urls must be a string or a list of strings"
+            if isinstance(urls, list) and not all(isinstance(u, str) for u in urls):
+                return "iceServers urls must be a string or a list of strings"
+    port = data.get("airUnitVideoPort")
+    if port is not None:
+        try:
+            if not 1 <= int(port) <= 65535:
+                raise ValueError
+        except (TypeError, ValueError):
+            return f"airUnitVideoPort must be a port number, got {port!r}"
+    return None
 
 
 def _on_link_networks() -> "list[ipaddress.IPv4Network]":
@@ -197,7 +234,8 @@ def _sort_relay_urls(urls) -> list[str]:
     return sorted(urls, key=rank)
 
 
-def _attach_video_track(pc, entry, session, vision_pool, session_manager, sio, sid, source_track, client_overlay):
+def _attach_video_track(pc, entry, peer_registry, session, vision_pool, session_manager, sio, sid,
+                        source_track, client_overlay):
     """Wraps source_track (a browser-relayed camera track, or a server-side
     track like udp_video_source's) in the AI pipeline and either drives it
     internally (client-overlay) or sends the annotated result back to the
@@ -349,13 +387,17 @@ def register_webrtc_events(
         session = session_manager.get_by_socket(sid)
         if not session:
             return {"error": "No session"}
-        if not data or not data.get("sdp"):
+        if not isinstance(data, dict) or not isinstance(data.get("sdp"), str) or not data["sdp"]:
             return {"error": "sdp required"}
 
         from app.webrtc import datachannel_video_source
 
         ingest = datachannel_video_source.allocate(session.session_id)
         pc = RTCPeerConnection()
+        # The ingest keeps the pc: a re-offer closes the previous one here
+        # instead of leaking it, and the state handler below releases the
+        # ingest only while THIS pc is still the one feeding it (audit B18).
+        await ingest.attach_pc(pc)
 
         @pc.on("datachannel")
         def on_datachannel(channel):
@@ -378,7 +420,14 @@ def register_webrtc_events(
                 f"Video DataChannel PC for {session.session_id[:8]}: {pc.connectionState}"
             )
             if pc.connectionState in ("failed", "closed", "disconnected"):
-                await datachannel_video_source.release_async(session.session_id)
+                released = await datachannel_video_source.release_if_owner(
+                    session.session_id, pc
+                )
+                if not released:
+                    # Superseded by a re-offer (or already released): the
+                    # ingest belongs to another pc now; just make sure this
+                    # one is actually closed.
+                    await datachannel_video_source._close_pc(pc)
 
         try:
             await pc.setRemoteDescription(
@@ -389,7 +438,8 @@ def register_webrtc_events(
             logger.error(
                 f"DataChannel video offer failed for {session.session_id[:8]}: {e}"
             )
-            await datachannel_video_source.release_async(session.session_id)
+            if not await datachannel_video_source.release_if_owner(session.session_id, pc):
+                await datachannel_video_source._close_pc(pc)
             return {"error": str(e)}
 
         # The port is returned so the caller can pass it back in the browser's
@@ -417,8 +467,38 @@ def register_webrtc_events(
             await sio.emit("error", {"msg": "No session"}, to=sid)
             return
 
+        # EVERY failure from here on reaches the client as an `error` event.
+        # Before this wrapper, a malformed offer (no dict, no sdp, a string
+        # where an iceServers entry should be) or a failing
+        # setRemoteDescription raised straight out of the handler and emitted
+        # nothing, so the UI sat on "connecting" forever (audit B17).
+        try:
+            problem = _validate_offer(data)
+            if problem:
+                await sio.emit("error", {"msg": problem}, to=sid)
+                return
+            await _handle_offer(sid, session, data)
+        except Exception as e:
+            logger.exception(f"Offer handling error for {sid[:8]}: {e}")
+            await sio.emit("error", {"msg": f"offer failed: {e}"}, to=sid)
+
+    async def _handle_offer(sid, session, data: dict):
+        # A re-offer on the same socket (mode switch, reconnect, a second
+        # Start click) supersedes the previous PeerConnection. Remove it NOW,
+        # before anything is acquired for the new one, so its close can never
+        # be mistaken for the new pc's. Its relay ownership is handed over
+        # rather than released: the desktop is still pushing to that ingest
+        # and the new pc is about to attach to it (audit B5).
+        inherited_relay = False
+        prev = peer_registry.get_by_socket(sid)
+        if prev is not None:
+            inherited_relay = prev.owns_relay
+            prev.owns_relay = False
+            logger.info(f"Re-offer on {sid[:8]}: replacing pc {prev.pc_id[:8]}")
+            await peer_registry.remove(prev.pc_id)
+
         # Build RTCPeerConnection
-        ice_servers = data.get("iceServers", [])
+        ice_servers = data.get("iceServers") or []
         # Only pass the fields aiortc knows - browser dicts can carry extras
         # (credentialType etc.) that would TypeError in the dataclass.
         # aiortc uses only the FIRST turn/turns url it encounters, so sort
@@ -526,23 +606,31 @@ def register_webrtc_events(
                 except Exception as e:
                     logger.debug(f"out stats failed: {e}")
                     return
-        asyncio.create_task(_out_stats())
+        entry.stats_task = asyncio.create_task(_out_stats())
 
         @pc.on("connectionstatechange")
         async def on_state_change():
             logger.info(f"PC {pc_id[:8]} state: {pc.connectionState}")
             if pc.connectionState in ("failed", "closed", "disconnected"):
+                # Only the CURRENT pc for this id may touch session state.
+                # A superseded pc closes AFTER its successor registered, and
+                # everything below is keyed by session: it would unregister
+                # the new pc's vision session and (via the entry) release the
+                # feed port and relay it just acquired.
+                if peer_registry.get(pc_id) is not entry:
+                    return
                 session.is_streaming = False
                 await vision_pool.unregister_session(session.session_id)
+                # Releases the entry's feed port and relay ingest, if it
+                # holds them. No-op for every other video source.
                 await peer_registry.remove(pc_id)
-                # Free the relay listener + its ffmpeg. No-op for every other
-                # video source, so this needs no branch on video_source.
-                from app.webrtc import relay_video_source
-                await relay_video_source.release_async(session.session_id)
-                fp = _session_feed_port.pop(session.session_id, None)
-                if fp is not None:
-                    from app.webrtc import feeds
-                    await feeds.release(fp)
+
+        if inherited_relay and video_source not in _RELAY_SOURCES:
+            # The previous pc was the relay's consumer and the new one is not:
+            # nothing will attach to the listener, so free it as the old pc's
+            # close would have.
+            from app.webrtc import relay_video_source
+            await relay_video_source.release_async(session.session_id)
 
         if server_sourced:
             # No browser video track incoming (the offer only declares a
@@ -565,9 +653,7 @@ def register_webrtc_events(
                     source_track = await asyncio.get_event_loop().run_in_executor(
                         None, open_rtsp_video, rtsp_url
                     )
-                elif video_source in (
-                    "rtsp_relay", "air_unit_srt", "air_unit_gst", "hyrak_receiver",
-                ):
+                elif video_source in _RELAY_SOURCES:
                     # The desktop app is pushing the ORIGINAL bytes to a
                     # listener allocated earlier via
                     # /api/webrtc/video-relay/allocate - nothing to open
@@ -620,6 +706,9 @@ def register_webrtc_events(
                                            "nothing has reached the relay listener yet"),
                             }, to=sid)
 
+                    # From here this pc is the relay's consumer: its removal
+                    # (and nothing else) frees the listener and its ffmpeg.
+                    entry.owns_relay = True
                     reporter = asyncio.create_task(_report_wait())
                     try:
                         source_track = await asyncio.get_event_loop().run_in_executor(
@@ -669,7 +758,7 @@ def register_webrtc_events(
                     from app.webrtc import feeds
                     video_port = int(data.get("airUnitVideoPort") or 5600)
                     source_track = await feeds.acquire(video_port)
-                    _session_feed_port[session.session_id] = video_port
+                    entry.feed_port = video_port
                 # open_air_unit_video's SDP declares the stream format
                 # statically from the SDP text alone, so it "succeeds" the
                 # instant it's opened regardless of whether any real packets
@@ -697,12 +786,8 @@ def register_webrtc_events(
                     )
             except Exception as e:
                 logger.error(f"Server-sourced video open failed ({video_source}): {e}")
-                fp = _session_feed_port.pop(session.session_id, None)
-                if fp is not None:
-                    from app.webrtc import feeds
-                    await feeds.release(fp)
                 msg = str(e)
-                if video_source in ("rtsp_relay", "air_unit_srt", "air_unit_gst"):
+                if video_source in _RELAY_SOURCES:
                     # ffmpeg's own words are far more useful than "no frames
                     # arrived" - it knows whether the SRT handshake was ever
                     # attempted, which distinguishes a blocked UDP path from
@@ -712,7 +797,7 @@ def register_webrtc_events(
                     tail = ingest.stderr_tail() if ingest else ""
                     if tail:
                         msg = f"{msg} - relay listener said: {tail.strip()}"
-                    await relay_video_source.release_async(session.session_id)
+                    # Released by peer_registry.remove below (entry.owns_relay).
                 elif video_source in ("rtsp_datachannel", "air_unit_datachannel"):
                     # The single most useful thing to know here is whether the
                     # client's packets ever arrived. "0 packets" means the
@@ -738,10 +823,13 @@ def register_webrtc_events(
                     # Tearing it down on a browser-side failure is the same
                     # ownership bug that made the relay go black.
                 await sio.emit("error", {"msg": msg}, to=sid)
+                session.is_streaming = False
+                await vision_pool.unregister_session(session.session_id)
+                # Frees the feed port / relay this entry acquired on the way.
                 await peer_registry.remove(pc_id)
                 return
             _attach_video_track(
-                pc, entry, session, vision_pool, session_manager, sio, sid,
+                pc, entry, peer_registry, session, vision_pool, session_manager, sio, sid,
                 source_track, client_overlay,
             )
         else:
@@ -755,7 +843,7 @@ def register_webrtc_events(
                 # camera the backlog grew and glass-to-glass latency crept
                 # 300ms -> 1s+.
                 _attach_video_track(
-                    pc, entry, session, vision_pool, session_manager, sio, sid,
+                    pc, entry, peer_registry, session, vision_pool, session_manager, sio, sid,
                     relay.subscribe(track, buffered=False), client_overlay,
                 )
 
@@ -780,7 +868,10 @@ def register_webrtc_events(
 
         except Exception as e:
             logger.exception(f"Offer handling error: {e}")
+            session.is_streaming = False
+            await vision_pool.unregister_session(session.session_id)
             await peer_registry.remove(pc_id)
+            await sio.emit("error", {"msg": f"WebRTC negotiation failed: {e}"}, to=sid)
 
     from app.webrtc import wall as _wall
     _wall.register(sio)

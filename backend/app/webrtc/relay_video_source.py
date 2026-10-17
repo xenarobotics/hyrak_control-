@@ -103,11 +103,14 @@ DEFAULT_LATENCY_MS = 150
 def _free_port(base: int, limit: int, kind: str) -> int:
     """First port in the range nothing is currently bound to. Racy in
     principle; in practice the caller binds within milliseconds and the
-    ranges are private to this process."""
+    ranges are private to this process.
+
+    No SO_REUSEADDR on the probe: with it, a port another ffmpeg listener
+    (or a dying one) still holds binds "successfully" and is handed out
+    twice, so two sessions' relays fight over one listener."""
     for port in range(base, limit):
         sock_type = socket.SOCK_DGRAM if kind == "udp" else socket.SOCK_STREAM
         with socket.socket(socket.AF_INET, sock_type) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 s.bind(("0.0.0.0", port))
                 return port
@@ -315,6 +318,12 @@ class RelayIngest:
 
 
 _ingests: dict[str, RelayIngest] = {}
+# allocate()/release() run on executor threads (run_in_executor from the
+# socket handlers) as well as the loop; a threading lock, not an asyncio one.
+# It guards the DICT only. Nothing that blocks - spawning ffmpeg, waiting
+# for it to exit - ever runs while it is held, so a slow allocate on one
+# thread cannot stall another session's lookup (or the event loop).
+_ingests_lock = threading.Lock()
 
 
 def allocate(session_id: str, transport: str = "srt", latency_ms: int = DEFAULT_LATENCY_MS) -> RelayIngest:
@@ -330,29 +339,52 @@ def allocate(session_id: str, transport: str = "srt", latency_ms: int = DEFAULT_
 
     An existing, live relay for the same session with the same transport is
     therefore reused as-is. Only a missing or dead one is rebuilt."""
-    existing = _ingests.get(session_id)
+    with _ingests_lock:
+        existing = _ingests.get(session_id)
+        if existing is not None:
+            if _alive(existing) and existing.transport == transport:
+                logger.info(
+                    f"Reusing relay ingest for session {session_id[:8]} "
+                    f"({transport}:{existing.public_port})"
+                )
+                return existing
+            # Dead or wrong transport: unregister now, tear down outside.
+            _ingests.pop(session_id, None)
     if existing is not None:
-        alive = existing.proc is not None and existing.proc.poll() is None
-        if alive and existing.transport == transport:
-            logger.info(
-                f"Reusing relay ingest for session {session_id[:8]} "
-                f"({transport}:{existing.public_port})"
-            )
-            return existing
-        release(session_id)
+        existing.close()
 
     ingest = RelayIngest(session_id, transport=transport, latency_ms=latency_ms)
     ingest.start()
-    _ingests[session_id] = ingest
+    with _ingests_lock:
+        raced = _ingests.get(session_id)
+        if raced is not None and _alive(raced) and raced.transport == transport:
+            # Another allocate for the same session won while ffmpeg was
+            # starting here. Theirs is registered; ours must not leak.
+            loser = ingest
+        else:
+            _ingests[session_id] = ingest
+            loser = raced
+    if loser is not None:
+        loser.close()
+        if loser is ingest:
+            return raced
     return ingest
 
 
+def _alive(ingest: RelayIngest) -> bool:
+    return ingest.proc is not None and ingest.proc.poll() is None
+
+
 def get(session_id: str) -> RelayIngest | None:
+    # Lock-free on purpose: a dict read is atomic under the GIL, and this is
+    # called from the event loop, which must never wait on an allocate.
     return _ingests.get(session_id)
 
 
 def release(session_id: str) -> None:
-    ingest = _ingests.pop(session_id, None)
+    """Blocking (ffmpeg wait up to 3 s): call via release_async from the loop."""
+    with _ingests_lock:
+        ingest = _ingests.pop(session_id, None)
     if ingest:
         ingest.close()
 

@@ -350,7 +350,8 @@ def create_app() -> socketio.ASGIApp:
         # to the peer connection - a client that vanishes without the pc
         # ever changing state would leak both.
         from app.webrtc import relay_video_source
-        relay_video_source.release(session.session_id)
+        # Off the loop: close() waits up to 3 s for ffmpeg to exit.
+        await relay_video_source.release_async(session.session_id)
         # Same reasoning for the DataChannel ingest: it holds a socket and a
         # loopback port owned by the DESKTOP's PeerConnection, not the
         # browser's. Session teardown is the only unambiguous place to free

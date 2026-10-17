@@ -30,16 +30,17 @@ m=video {port} RTP/AVP 96
 a=rtpmap:96 H265/90000
 """
 
-# Keyed by port - the port is user-configurable (Settings), so a single
-# cached path would silently keep serving the old port's SDP after a change.
-_sdp_paths: dict[tuple, str] = {}
-
-
 def _sdp_file(port: int, params: dict[int, bytes] | None = None) -> str:
-    """SDP for the port. `params` (nal_type -> Annex-B VPS/SPS/PPS) become
-    sprop-vps/sps/pps lines so ffmpeg's parser and decoder start from them:
-    the air unit's encoder sends its VPS once per run, so a reader that opens
-    mid-run would otherwise wait for the next sender restart."""
+    """Writes the SDP for the port to a fresh temp file and returns its path.
+    The CALLER removes it once ffmpeg has read it (open_air_unit_video does,
+    in a finally). It used to be cached per (port, params) and never
+    unlinked, so every distinct parameter set left a file in /tmp for the
+    life of the machine.
+
+    `params` (nal_type -> Annex-B VPS/SPS/PPS) become sprop-vps/sps/pps
+    lines so ffmpeg's parser and decoder start from them: the air unit's
+    encoder sends its VPS once per run, so a reader that opens mid-run would
+    otherwise wait for the next sender restart."""
     fmtp = ""
     if params:
         import base64
@@ -52,15 +53,18 @@ def _sdp_file(port: int, params: dict[int, bytes] | None = None) -> str:
                 parts.append(f"{names[t]}={base64.b64encode(nal).decode()}")
         if parts:
             fmtp = "a=fmtp:96 " + ";".join(parts) + "\n"
-    key = (port, fmtp)
-    path = _sdp_paths.get(key)
-    if path is None or not os.path.exists(path):
-        fd, path = tempfile.mkstemp(suffix=".sdp", prefix=f"hyrak_air_unit_{port}_")
-        with os.fdopen(fd, "w") as f:
-            f.write(_SDP_TEMPLATE.format(port=port) + fmtp)
-        _sdp_paths[key] = path
-        logger.info(f"Air-unit SDP written to {path}" + (" (with parameter sets)" if fmtp else ""))
+    fd, path = tempfile.mkstemp(suffix=".sdp", prefix=f"hyrak_air_unit_{port}_")
+    with os.fdopen(fd, "w") as f:
+        f.write(_SDP_TEMPLATE.format(port=port) + fmtp)
+    logger.debug(f"Air-unit SDP written to {path}" + (" (with parameter sets)" if fmtp else ""))
     return path
+
+
+def _remove_sdp(path: str) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
 
 
 def open_air_unit_video(
@@ -74,6 +78,22 @@ def open_air_unit_video(
     async handler. Raises if the stream can't be opened within `timeout`
     seconds (e.g. nothing transmitting on that port yet)."""
     sdp_path = _sdp_file(port)
+    try:
+        player = _open_player(sdp_path, port, timeout, max_delay_us)
+    finally:
+        # ffmpeg reads the SDP synchronously inside MediaPlayer(); nothing
+        # needs the file after that.
+        _remove_sdp(sdp_path)
+    if player.video is None:
+        raise RuntimeError(
+            f"No video stream on udp:{port} - is the air unit transmitting? "
+            f"(communication/start-gs.sh on the ground-station side)"
+        )
+    logger.info(f"Air-unit video opened from udp:{port}")
+    return player.video
+
+
+def _open_player(sdp_path: str, port: int, timeout: float, max_delay_us: int) -> MediaPlayer:
     player = MediaPlayer(
         sdp_path,
         format="sdp",
@@ -104,10 +124,4 @@ def open_air_unit_video(
     # "sdp" is not in aiortc's REAL_TIME_FORMATS either, so this path was
     # paced against PTS exactly like the SRT relay. See live_player.py.
     as_live(player, f"air-unit udp:{port}")
-    if player.video is None:
-        raise RuntimeError(
-            f"No video stream on udp:{port} - is the air unit transmitting? "
-            f"(communication/start-gs.sh on the ground-station side)"
-        )
-    logger.info(f"Air-unit video opened from udp:{port}")
-    return player.video
+    return player
