@@ -3,6 +3,7 @@ import logging
 import subprocess
 import time
 
+from app.auth.socket_guard import require_operator
 from app.sessions.manager import SessionManager
 from app.events.telemetry_events import execute_drone_action
 from app.flights import recorder
@@ -339,6 +340,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
         swarm_relay_bridge.py. Registering the bridge BEFORE scanning is
         what makes scan_swarm_drones route through it instead of trying to
         connect to literal server-local ports."""
+        if not await require_operator(sid, "connect_swarm_relay", data): return
         session = session_manager.get_by_socket(sid)
         if not session:
             await sio.emit("error", {"msg": "No session found"}, to=sid)
@@ -353,6 +355,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
         """One drone_id-tagged MAVLink frame from the browser's local relay
         agent - [drone_id: 1 byte][raw MAVLink bytes]. De-tag and hand to
         that drone's loopback endpoint."""
+        if not await require_operator(sid, "swarm_relay_uplink", data, quiet=True): return
         if not isinstance(data, (bytes, bytearray)) or len(data) < 1:
             return
         session = session_manager.get_by_socket(sid)
@@ -375,6 +378,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
 
         Payload: { count } (drones 1..count) or legacy { port_start, port_end }
         """
+        if not await require_operator(sid, "scan_swarm_drones", data): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return
@@ -509,6 +513,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
         disabling always tears down THIS session's drones (and only this
         session's) - no other client's fleet is affected either way.
         """
+        if not await require_operator(sid, "set_swarm_mode", data): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return
@@ -526,6 +531,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
     @sio.on("connect_swarm_drone")
     async def on_connect_swarm_drone(sid, data):
         """Connect a fleet drone manually. Payload: {drone_id, port, name, color}"""
+        if not await require_operator(sid, "connect_swarm_drone", data): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return
@@ -580,6 +586,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
     @sio.on("disconnect_swarm_drone")
     async def on_disconnect_swarm_drone(sid, data):
         """Disconnect and remove a fleet drone. Payload: {drone_id}"""
+        if not await require_operator(sid, "disconnect_swarm_drone", data): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return
@@ -599,6 +606,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
     @sio.on("swarm_action")
     async def on_swarm_action(sid, data):
         """Run an action on a specific fleet drone. Payload: {drone_id, action, ...params}"""
+        if not await require_operator(sid, "swarm_action", data): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return
@@ -645,6 +653,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
         ids) overrides the id-ascending delay order, so the client can launch
         e.g. the drone with the farthest first waypoint first.
         """
+        if not await require_operator(sid, "swarm_group_action", data): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return
@@ -695,6 +704,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
     @sio.on("swarm_upload_mission")
     async def on_swarm_upload_mission(sid, data):
         """Upload a mission to a specific fleet drone. Payload: {drone_id, waypoints, terrain_follow}"""
+        if not await require_operator(sid, "swarm_upload_mission", data): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return

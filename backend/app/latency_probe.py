@@ -250,8 +250,11 @@ def stats() -> dict:
 
 
 # ---- API -------------------------------------------------------------------
-from fastapi import APIRouter, Header  # noqa: E402
+from fastapi import APIRouter, Depends  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
+
+from app.auth.deps import require_operator  # noqa: E402
+from app.auth.service import AuthUser  # noqa: E402
 
 router = APIRouter(prefix="/api/latency-probe", tags=["latency-probe"])
 
@@ -266,9 +269,7 @@ async def probe_state() -> dict:
 
 
 @router.post("")
-async def probe_toggle(body: _Toggle, x_auth_token: str = Header(None, alias="X-Auth-Token")) -> dict:
-    from app.avoidance.routes import _auth
-    _auth(x_auth_token)
+async def probe_toggle(body: _Toggle, _user: AuthUser = Depends(require_operator)) -> dict:
     set_enabled(body.enabled)
     return {"enabled": enabled(), "file": str(_LOG_PATH)}
 

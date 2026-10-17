@@ -2,6 +2,7 @@ import asyncio
 import time
 import logging
 from app.sessions import observer
+from app.auth.socket_guard import require_operator
 from app.sessions.manager import SessionManager
 from app.telemetry import serial_bridge
 from app.telemetry.rc_monitor import RcChannelMonitor
@@ -172,6 +173,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
     @sio.on("connect_telemetry")
     async def on_connect_telemetry(sid, data):
+        if not await require_operator(sid, "connect_telemetry", data): return
         session = session_manager.get_by_socket(sid)
         if not session:
             await sio.emit("error", {"msg": "No session found"}, to=sid)
@@ -390,6 +392,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         """RF link where telemetry already arrives over UDP (e.g. wfb-ng)
         but on fixed split ports the normal udpin:// 'reply to sender'
         trick can't reach - see app/telemetry/rf_bridge.py for why."""
+        if not await require_operator(sid, "connect_rf_bridge", data): return
         from app.telemetry import rf_bridge
         data = data or {}
         # THE UPLINK HOST IS NOT ALWAYS LOOPBACK, and it was hardcoded to be.
@@ -422,6 +425,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         The browser reads it via the Web Serial API and relays raw MAVLink
         bytes here; a loopback SerialBridge feeds them to this session's
         mavsdk_server exactly as if the radio were local."""
+        if not await require_operator(sid, "connect_browser_serial", data): return
         # The client sets its UI to "connecting" the moment it asks, and ONLY a
         # telemetry_status event can move it off that. Any path out of here
         # that doesn't emit one leaves the operator staring at "connecting"
@@ -487,6 +491,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
     @sio.on("disconnect_telemetry")
     async def on_disconnect_telemetry(sid):
+        if not await require_operator(sid, "disconnect_telemetry", None): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return
@@ -506,6 +511,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
     @sio.on("drone_command")
     async def on_drone_command(sid, data):
+        if not await require_operator(sid, "drone_command", data, quiet=True): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return
@@ -528,6 +534,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
     @sio.on("drone_action")
     async def on_drone_action(sid, data):
+        if not await require_operator(sid, "drone_action", data): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return
@@ -674,6 +681,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
     @sio.on("set_analysis_mode")
     async def on_set_analysis_mode(sid, data):
+        if not await require_operator(sid, "set_analysis_mode", data): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return
@@ -727,6 +735,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
     @sio.on("select_person")
     async def on_select_person(sid, data):
+        if not await require_operator(sid, "select_person", data): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return
@@ -766,6 +775,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
     @sio.on("set_pd_params")
     async def on_set_pd_params(sid, data):
+        if not await require_operator(sid, "set_pd_params", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -785,6 +795,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
     async def on_set_altitude_mode(sid, data):
         """Payload: { mode: 'fixed' | 'auto' }
         fixed = hold current altitude; auto = altitude PD follows person vertically."""
+        if not await require_operator(sid, "set_altitude_mode", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -799,6 +810,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
     async def on_set_altitude_nudge(sid, data):
         """Payload: { velocity: float }  (−=ascend, +=descend, 0=stop).
         Active only in Fixed altitude mode while tracking. Hold button → send velocity; release → send 0."""
+        if not await require_operator(sid, "set_altitude_nudge", data, quiet=True): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -824,6 +836,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         watching vehicle_fill_pct in the panel and nudging this, not a
         number this handler can assume.
         """
+        if not await require_operator(sid, "set_tracking_params", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -845,6 +858,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         validates subject and mode - this handler deliberately does not
         second-guess it, so there is one place the rules live.
         """
+        if not await require_operator(sid, "set_profile_override", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -866,6 +880,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         how this gets used - park over a venue, name the cells once, and every
         alert afterwards says "North Gate" instead of "cell 1".
         """
+        if not await require_operator(sid, "set_zone_names", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -878,6 +893,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         """Payload: { light_max: int, moderate_max: int }. Whole-frame
         density is FOV-dependent - operator-calibrated from the Settings
         page, no universal default is correct."""
+        if not await require_operator(sid, "set_crowd_thresholds", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -891,6 +907,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
     @sio.on("set_enhance_params")
     async def on_set_enhance_params(sid, data):
+        if not await require_operator(sid, "set_enhance_params", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -918,6 +935,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         - terrain_follow=True  → mission_raw.MissionItem with frame=10
           (MAV_FRAME_GLOBAL_TERRAIN_ALT) - requires TERRAIN_ENABLE=1 on the drone.
         """
+        if not await require_operator(sid, "upload_mission", data): return
         try:
             session = session_manager.get_by_socket(sid)
             if not session:
@@ -1031,6 +1049,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         at session start - otherwise someone enrolled mid-session would be
         invisible until the mode was switched away and back.
         """
+        if not await require_operator(sid, "set_gallery_mode", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -1065,6 +1084,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         that vehicle is in frame - locking a track that is not visible would
         commit the aircraft to nothing.
         """
+        if not await require_operator(sid, "set_follow_vehicle", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -1100,6 +1120,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         other modes the same feature would need a second id space to disambiguate
         and would mean something different in each.
         """
+        if not await require_operator(sid, "set_multi_follow", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -1128,6 +1149,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         tracking) has always done both halves; this handler did only the first,
         which is why vehicle follow looked implemented and did nothing.
         """
+        if not await require_operator(sid, "set_vehicle_tracking", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -1166,6 +1188,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         what the recogniser is actually asked to match later - an uploaded
         photo is a different imaging problem and matches less well.
         """
+        if not await require_operator(sid, "enrol_person_live", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -1205,6 +1228,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         Applied on the next face check, not immediately: the person has to be
         identified in frame before there is a body track to follow.
         """
+        if not await require_operator(sid, "set_follow_person", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -1219,6 +1243,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
     @sio.on("clear_reference")
     async def on_clear_reference(sid):
         """Clear the stored face embedding and reset tracking for person-tracking mode."""
+        if not await require_operator(sid, "clear_reference", None): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -1292,6 +1317,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         Payload: {key: str, value: number, param_type: 'int'|'float'}
         Emits param_set_ack: {key, ok, value, error?}
         """
+        if not await require_operator(sid, "set_param", data): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return
@@ -1322,6 +1348,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
     @sio.on("set_tracking")
     async def on_set_tracking(sid, data):
+        if not await require_operator(sid, "set_tracking", data): return
         logger.info(f"🎯 SET_TRACKING received: active={data.get('active')} sid={sid[:8]}")
         session = session_manager.get_by_socket(sid)
         if not session:

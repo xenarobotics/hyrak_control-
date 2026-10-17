@@ -13,10 +13,27 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        populate_by_name=True,
     )
 
     # Server
+    # LEGACY shared token. Since 2026-10-17 every browser and script logs in
+    # as a user (app/auth) and carries a per-user bearer token; this value is
+    # only consulted when legacy_token_enabled is True, and NEVER when it is
+    # still the published default below - that string shipped in the public
+    # JS bundle for months, so it is refused outright.
     secret_token: str = Field(default="dev_token_change_in_production")
+    # AUTH_LEGACY_TOKEN_ENABLED=true re-admits X-Auth-Token / socket
+    # {token: SECRET_TOKEN} as an "operator" while external scripts are
+    # migrated. Off by default: the old path is the vulnerability.
+    legacy_token_enabled: bool = Field(default=False, alias="AUTH_LEGACY_TOKEN_ENABLED")
+    # Bootstrap admin: created (or updated) on startup, and usable even when
+    # the database is down. The hash comes from
+    # `python -m app.auth.cli hash-password`; never put a plaintext here.
+    hyrak_admin_user: str = Field(default="")
+    hyrak_admin_password_hash: str = Field(default="")
+    # User tokens live this long, sliding on use.
+    auth_token_ttl_days: int = Field(default=30)
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=8001)
     log_level: str = Field(default="info")
