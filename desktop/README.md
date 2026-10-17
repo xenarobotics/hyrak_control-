@@ -90,6 +90,21 @@ new file, add one line to `registry.ts`. `app-main.ts`'s IPC wiring and
 `preload.ts`'s exposed API are both written generically over the registry
 - neither needs to change.
 
+## Who may drive the bridges
+
+The bridges run ffmpeg, open raw UDP and serial ports, so only the HYRAK
+site may reach them. `app-main.ts` enforces that two ways (audit I4):
+
+- **IPC sender check**: every bridge handler calls `isTrustedSender`, which
+  compares the sender frame's origin with the site origin.
+- **Navigation lock**: `will-navigate` to any other origin is cancelled and
+  the URL opens in the system browser; `setWindowOpenHandler` denies every
+  popup, so no other page ever runs with the preload.
+
+The window also keeps `contextIsolation: true`, `nodeIntegration: false`,
+`sandbox: true`. Electron is 44.9 (bumped from end-of-life 32 on
+2026-10-17). Installers are not code-signed yet; see `../SECURITY.md`.
+
 ## Linux sandbox (AppImage) - a real gotcha, worth understanding before touching main.ts
 
 First launch of a built AppImage crashed instantly with `FATAL:

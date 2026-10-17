@@ -1,94 +1,129 @@
 # CURRENT_STATE
 
-Last updated: **2026-07-26**. Branch: `main`.
-Desktop version: **0.1.4**. Backend version: `0.1.0`.
+Last updated: **2026-10-18**. Branch: `vision/tracking-overhaul` (all six
+audit fix streams merged). Desktop version: **0.1.57** (Electron 44.9).
+Backend package `verocore-backend` 0.1.0. Alembic head: `e4b7a2c9d013`
+(19 revisions, 22 tables).
+
+Source of truth for open defects: `docs/AUDIT_2026-10-17.md`. This file is
+the summary.
 
 ## Completed
 
-- Three video sources shipped: `camera`, `air_unit_udp`, `siyi_rtsp`.
-- Client-side overlay pipeline (`clientOverlay` → `return_video=False` →
-  `cv_results` JSON → `CvOverlayCanvas`). Halves bandwidth.
-- Cloudflare TURN relay with TLS/TCP-first ordering for UDP-blocking networks.
-- WebRTC latency/bitrate fixes: `buffered=False`, raised aiortc encoder
-  ceilings, per-resolution uplink bitrate, zero playout buffer.
-- **7 vision modules registered** in `__registry__.py`: object detection,
-  human tracking, depth mapping, person tracking, enhance, **crowd
-  management (268 lines)**, **vehicle/plate tracking (410 lines)**.
-  `vision/persistence.py` (202 lines) exists.
-- Postgres layer: zones, permits, flights, flight samples, alembic migrations.
-- Swarm SITL: 10-drone fleet, tag-multiplexed UDP bridge, group commands.
-- Desktop app: 5 native bridges, electron-updater with consent gating,
-  AppImage build + `/releases` publishing.
-- **Desktop 0.1.3** — VAAPI runtime device probe + explicit `-vaapi_device` +
-  automatic software fallback (fixes air-unit video Start failure).
-- **Desktop 0.1.4** — `udp` bridge binds `0.0.0.0`; first-packet `receiving`
-  status; SITL 8s silence diagnostic; guaranteed `telemetry_status` on every
-  telemetry connect failure path.
-- Documentation knowledge base under `docs/` (this session).
+- **Per-user login** (2026-10-17): users with roles viewer / operator /
+  admin, bearer tokens (stored as SHA-256), scrypt passwords, socket auth at
+  connect, one `require_operator` guard on every command event,
+  `require_user(min_role)` on every mutating route, resume bound to user +
+  per-session secret, login rate limits, trusted-proxy client IP, security
+  headers, `hyrak.audit` log. The shared `SECRET_TOKEN` is off by default.
+  See `docs/AUTH.md` and `SECURITY.md`.
+- **Process-wide model cache** (`backend/app/vision/model_cache.py`):
+  YOLO, InsightFace, fast-alpr and DA3 weights are shared across sessions
+  with refcounts and a 60 s idle grace. One DA3 serves depth sessions and the
+  avoidance camera (measured 2680 MB -> 1340 MB torch-allocated). Tracker
+  state stays per session.
+- **Vision pipeline hardening**: per-client state lock between socket
+  setters and the worker thread, awaited stop, `torch.cuda.empty_cache` off
+  the loop, warm-up at each mode's real width, bounded id sets, one evidence
+  pair per vehicle, frame caches cleared on mode change, failing analyzers
+  reported instead of looping tracebacks.
+- **WebRTC**: feed port and relay ownership live on the `PeerEntry`, so a
+  re-offer no longer blacks out the new connection; every offer failure
+  answers with `error`; unbuffered feed proxies; relay ingest lock no longer
+  blocks the event loop; SRT relay listeners require a per-allocation
+  passphrase.
+- **Telemetry / fleet**: fleet `in_air` subscribed (and derived from
+  altitude as a backstop), every telemetry stream retried with backoff,
+  Offboard keepalive (re-sends the last tracker setpoint at 10 Hz, zeroes
+  after 2 s of silence), COMMAND_LONG targets the real autopilot sysid,
+  per-instance fleet connect lock, NaN-safe fleet status, swarm relay bridge
+  follows the session across resume, browser connect never stops the server
+  fleet's manager, recorder arm race closed.
+- **Frontend**: separate VIDEO stream status vs CLOUD (socket) status, login
+  page and auth gate, bearer headers everywhere (no token in the bundle),
+  ESLint 199 errors -> 0 (30 warnings), lazy camera scan, shared drone-id
+  resolver with back-off, typed `cv_results`, runtime API override
+  (`window.__HYRAK_API__`).
+- **Desktop**: Electron 32 -> 44.9, electron-builder 26, IPC sender-origin
+  checks and navigation lock, differential updates on, build-time site URL,
+  scoped ffmpeg reaping. CI deploys all three installers from one Linux job,
+  actions pinned by SHA.
+- **Scripts**: `start.sh` and `simulation/hyrak_sim.sh` kill only the PIDs
+  they recorded and report foreign port holders; logs rotate at 5 MB;
+  `swarm.sh stop` is PID-scoped; `scripts/prune-releases.sh` (dry run by
+  default).
+- **Dependencies**: fastapi 0.143, starlette 1.8, uvicorn 0.54, Pillow 12.3,
+  transformers 4.57. torch 2.4.1 deliberately unchanged.
+- **Earlier and still current** (August-September): 10 video sources
+  including `air_unit_srt`, `air_unit_gst`, DataChannel modes and
+  `hyrak_receiver` (ground decoder); 9 vision modes (object detection, human
+  tracking, depth, person tracking, enhance, crowd, vehicle/plate, traffic,
+  3D reconstruction); obstacle avoidance (cloud reroute + grid / Offboard
+  local planner, depth-camera truth sensor, mono calibration); deliveries
+  stack (planner, orders, `/deliveries` board, `/v1` API); Command tab;
+  link resilience (LINK LOST watchdog, 90 s session resume, PX4 failsafe
+  pre-check); latency probe; mesh camera wall; Postgres layer with zones,
+  permits, flights, face gallery, missions, tasks, avoidance events.
 
 ## In Progress
 
-- **SITL connect failure diagnosis.** Fixes shipped in 0.1.4; root cause
-  **not confirmed**. Awaiting one fact from the client: is SITL running
-  natively, or inside WSL2 / Docker / a VM?
-- **Backend restart pending** — the `telemetry_events.py` change is on disk
-  but not live until `./start.sh` is restarted.
+- **Owner setup for auth** (not code): `alembic upgrade head`, create the
+  first admin, remove `NEXT_PUBLIC_SECRET_TOKEN` from
+  `frontend/.env.local`. Steps in `SECURITY.md`.
+- **Avoidance closed-loop results**: the perception redesign (grid +
+  Offboard local planner) waits on the owner's SITL flights.
 
 ## Blocked
 
 | Item | Blocker |
 |---|---|
-| `air_unit_srt` Phase 2 | WebCodecs HEVC support on client hardware unverified |
-| `air_unit_srt` Phase 1 | SRT port-handshake design decision not made |
-| Windows / macOS installers | v4l2loopback in the video path (resolved by `air_unit_srt`) |
-| Code signing | CSC secrets not configured |
-| CI deploy | `DEPLOY_*` secrets + `DEPLOY_CONFIGURED` not set |
+| Code signing | No certificates / CSC secrets |
+| CI deploy | `DEPLOY_*` secrets not configured |
 | `.deb` packaging | On hold (deliberate) |
-| Login / auth | Not started |
+| User-uploaded models | Design open (`docs/custom_models/DESIGN.md`); needs the torch upgrade or a sandboxed loader first |
+| Real-flight latency number | Needs a real flight with the latency probe on |
 
 ## Known Bugs
 
-See `KNOWN_ISSUES.md` for detail. Summary:
+See `KNOWN_ISSUES.md`. Summary:
 
-1. **SITL "connecting" forever** — mitigated in 0.1.4, root cause unconfirmed.
-2. `air_unit_udp` silently unusable for remote clients (works, but only
-   co-located). Needs relabelling in Settings.
-3. Recording in overlay mode captures raw video without boxes (known nuance,
-   pre-existing).
-4. Six video-source chips will overflow the Settings row once `air_unit_srt`
-   lands.
+1. Many read-only GET routes are still unauthenticated (positions, plate and
+   face history, reports).
+2. A viewer can start a video stream (signaling events have no role check).
+3. TCP / UDP relay transports accept any sender on the allocated port.
+4. Recording in client-overlay mode captures video without boxes.
+5. Mono depth stays advisory until calibrated error is below 15 %.
 
 ## Technical Debt
 
-- **Large untracked surface in git**: `desktop/`, `docs/`, `communication/`,
-  `releases/`, `sitl_relay/`, `crowd_manager.py`, `plate_tracker.py`,
-  `persistence.py`, `udp_video_source.py`, `rtsp_video_source.py`, and ~10
-  frontend `lib/` files. **Single biggest risk in the project.**
-- Duplicated ffmpeg low-latency option block (backend + desktop), synced by
-  comment convention only.
-- `sitl_relay/single_relay.py` — dead, unreferenced. Safe to delete.
-- Remaining `sio.emit("error", ...)` paths not audited for whether they leave
-  the UI in a non-terminal state.
-- A stray `gz sim` process was left running on the server at some point.
-- `happy-mapping-quokka.md` plan says crowd/plate are "not started"; the code
-  says otherwise. Plan is stale — **code is source of truth.**
+- torch 2.4.1 (`torch.load` advisory) held back for DA3 / ultralytics /
+  aiortc compatibility.
+- Duplicated ffmpeg low-latency option block (seven files, no drift test).
+- Duplicated mode-switch / attach logic in `modules/page.tsx` and
+  `command/AiPanel.tsx` (audit F30).
+- Capture-time latency: `submit_frame(captured_at=, source_latency_s=)`
+  exists, but the stream track does not yet stamp frames at capture.
+- Repo-root clutter (untracked): vendored upstream trees, `communication/`,
+  `reconstruction/` data, `frontend/home`, `air_unit_relay.zip`, `logs/`, a
+  `.env.bak.*` file; `releases/` is 13 GB until `prune-releases.sh --apply`
+  is run.
+- `gs_relay_agent.py` (ground-station relay script, not in this repo) still
+  sends the legacy shared token.
 
 ## Immediate Next Tasks
 
-1. **Restart the backend** so the telemetry error-reporting fix goes live.
-2. Get the client's SITL environment answer; confirm or continue the diagnosis.
-3. `git add` + commit the untracked surface.
-4. Decide the SRT port handshake (signaling round trip recommended).
-5. Probe `VideoDecoder.isConfigSupported({codec:'hvc1.1.6.L93.B0'})` on a
-   representative client machine.
+1. Owner: auth setup (above), then decide whether to put Cloudflare Access
+   in front of the tunnel.
+2. Put the remaining read GETs behind `require_viewer`; add role checks to
+   the signaling events.
+3. Move the ground-station relay agent to a bearer token.
+4. Run `scripts/prune-releases.sh --apply`; delete `.env.bak.*`.
+5. SITL flights for the avoidance local planner (owner).
 
 ## Long-term Goals
 
-- `air_unit_srt` end to end: pristine server-side video, one client decode,
-  zero client encodes, sub-60ms pilot view, Windows/macOS support.
-- User-selectable transport modes with per-scenario guidance in Settings.
-- Optional `air_unit_rtp_relay` for LAN/VPN clients.
-- Auto-probe with graceful fallback and a visible "which path is live" status.
-- Auth/login, multi-tenant zones and identity.
-- Session-end ZIP export + purge for crowd/plate data (**verify against
-  `persistence.py` — may already be implemented**).
+- Custom user models (sandboxed sidecar runner, action catalogue).
+- Transport auto-probe with a visible "which path is live" status.
+- Zones / identity / multi-tenant.
+- Signed installers on all three platforms.
+- Measured concurrent-session capacity.

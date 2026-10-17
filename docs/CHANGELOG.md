@@ -7,6 +7,85 @@ backend/frontend changes ship continuously and are dated.
 
 ---
 
+## 2026-10-18 (all - audit fix pass: per-user auth, shared models, WebRTC ownership, fleet in_air, Electron 44)
+
+The 2026-10-17 whole-project audit (`docs/AUDIT_2026-10-17.md`) was followed
+by six fix streams (auth, vision, webrtc, frontend, telemetry, infra), all
+merged into `vision/tracking-overhaul`. Commits `c1e93e8..2884009`.
+
+**Auth (B12, I1, F16, B8).** The shared `SECRET_TOKEN`, which shipped in the
+public JS bundle, is replaced by per-user login: `users` + `auth_tokens`
+tables (alembic `e4b7a2c9d013`), scrypt passwords, 32-byte bearer tokens
+stored as SHA-256 with a 30-day sliding expiry, roles viewer / operator /
+admin. Sockets authenticate at connect; every command event starts with a
+`require_operator` guard; every mutating route takes `require_user`.
+`GET /api/sessions`, `/admin` and zone / permit / API-key writes need admin.
+Resume needs the same user and a per-session `resume_secret`, and now works
+before the old socket's ping timeout. Live sockets re-check their token
+every 60 s and are dropped on revoke / disable / re-role. Login rate limits
+per IP and per username (exponential backoff, not a lock-out), client IP
+from `CF-Connecting-IP` / `X-Forwarded-For` only behind `TRUSTED_PROXIES`.
+Security headers middleware, `hyrak.audit` log. Frontend: `/login`, auth
+gate, bearer headers everywhere. The legacy token path is off unless
+`AUTH_LEGACY_TOKEN_ENABLED`, and the published default is always refused.
+See `docs/AUTH.md`, `SECURITY.md`. Owner setup still needed: `alembic
+upgrade head`, `app.auth.cli create-user <name> --role admin`, remove
+`NEXT_PUBLIC_SECRET_TOKEN` from `frontend/.env.local`.
+
+**Vision (V4, V7, V9-V20).** `vision/model_cache.py`: YOLO, InsightFace,
+fast-alpr and DA3 shared process-wide with refcounts and a 60 s idle grace;
+one DA3 serves depth sessions and avoidance (2680 MB -> 1340 MB
+torch-allocated). Per-client state lock between socket setters and the
+worker thread, awaited stop, `empty_cache` off the loop, warm-up at each
+mode's width, bounded id sets, one evidence pair per vehicle, rate-limited
+warnings instead of silent `except: pass`. `submit_frame` takes
+`captured_at` / `source_latency_s` (callers not yet stamping at capture).
+DA3 stays fp32 weights: it already autocasts internally and halving fails.
+
+**WebRTC (B5, B17, B18, B20, B21, B28, V13-V15).** Feed port and relay
+ownership moved onto `PeerEntry`, released once by `PeerRegistry.remove`; a
+re-offer no longer lets the old connection black out the new one. Every
+offer failure answers with `error`. Unbuffered feed proxies, the relay
+ingest lock no longer held across ffmpeg spawn / teardown, blocking calls
+off the event loop, one velocity sender per track.
+
+**Telemetry / fleet (B1, B7, B11, B13-B16, B23, B26, B27, V8).** Fleet
+profile subscribes `in_air` (and derives it from altitude as a backstop) so
+the dispatcher and reserve RETURN see airborne drones. Every telemetry
+stream restarts with backoff. Offboard keepalive repeats the last tracker
+setpoint at 10 Hz and zeroes after 2 s of silence. COMMAND_LONG targets the
+autopilot's real sysid. Per-instance fleet connect lock, NaN-safe status,
+reserve needs a known battery. Swarm relay bridge follows the session
+across resume; manual connect never stops the server fleet's manager.
+Recorder arm race closed; failsafe cache keyed weakly.
+
+**Frontend (F2, F7, F8, F10, F13, F15, F17-F29, F-lint).** VIDEO stream
+status is its own field next to the CLOUD socket status. ESLint 199 errors
+-> 0. Per-field store selectors, lazy camera scan, one drone-id resolver
+with back-off, typed `cv_results`, runtime API override, radio fallback
+persists, resume renegotiates instead of a full stop/start.
+
+**Infra (I3, I6, I7, I9-I12, I15-I21, I23, I24, I8).** Electron 32 -> 44.9,
+electron-builder 26.15.3. `start.sh` and `hyrak_sim.sh` kill only recorded
+PIDs and stop on a foreign port holder; logs rotate. Local relays
+origin-locked with optional `HYRAK_RELAY_TOKEN`; `sitl_relay/single_relay.py`
+deleted. CI deploys from one Linux job, actions pinned by SHA.
+`.env.example` regenerated from `Settings`. `scripts/prune-releases.sh`.
+Differential updates on, build-time site URL, scoped ffmpeg reaping.
+Dependencies: fastapi 0.143, starlette 1.8, uvicorn 0.54, Pillow 12.3,
+transformers 4.57; torch 2.4.1 deliberately unchanged.
+
+Backend suite 1408 passed after the dependency upgrade. Docs refreshed
+(`CURRENT_STATE`, `ROADMAP`, `KNOWN_ISSUES`, `AI_CONTEXT`, `DATABASE`,
+manifest, handover, overview, video modes); root `SECURITY.md` and
+`CLAUDE.md` added.
+
+Still open: unauthenticated read GETs, signaling events without a role
+check, TCP / UDP relay admission, the ground-station relay agent on the
+legacy token, torch 2.4.1, unsigned installers. See `SECURITY.md`.
+
+---
+
 ## 2026-08-05 (backend — the relay host is now chosen per client)
 
 `allocate_video_relay` returned one fixed address to every client,

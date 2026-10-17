@@ -1,141 +1,124 @@
 # SESSION_HANDOVER
 
-Written 2026-07-26. Read after `AI_CONTEXT.md` and `CURRENT_STATE.md`.
+Written 2026-10-18. Read after the root `CLAUDE.md`, `AI_CONTEXT.md` and
+`CURRENT_STATE.md`.
 
 ## Current objective
 
-Two threads, both open:
+The 2026-10-17 audit fix pass is merged. What is left is mostly the owner's
+setup and the security gaps the pass did not close:
 
-1. **Confirm the SITL connect failure root cause.** Fixes are shipped
-   (desktop 0.1.4) but the cause is **not proven**.
-2. **Implement `air_unit_srt`** — scoped and documented, not started, waiting
-   on two decisions.
+1. **Owner auth setup** (not code): migrate, create the first admin, remove
+   `NEXT_PUBLIC_SECRET_TOKEN` from `frontend/.env.local`. Steps in
+   `SECURITY.md`. Until the first admin exists nobody can sign in.
+2. **Close the remaining auth gaps**: role checks on the read GETs and the
+   video signaling events; the ground-station relay agent on a bearer token.
+3. **Avoidance SITL validation**: the grid + Offboard local planner waits on
+   the owner's flights.
 
 ## Current branch
 
-`main`. **Working tree is dirty with a large untracked surface** — see
-"Warnings". Nothing from this session is committed.
+`vision/tracking-overhaul`. All six fix streams (auth, vision, webrtc,
+frontend, telemetry, infra) merged; last code commit `2884009` (dependency
+upgrades). Not pushed by the doc session.
 
 ## Implementation status
 
-### Finished this session
+### Finished in the 2026-10-17/18 pass
 
-- **Desktop 0.1.3 — air-unit video Start failure fixed and verified.**
-  Root cause: `systemFfmpegWithVaapi()` checked `ffmpeg -hwaccels`, which
-  reports *compile-time* support only, so `mode:'auto'` always took the
-  hardware branch with no `-vaapi_device`. ffmpeg's VAAPI auto-init defaults
-  to the first DRM render node, which on the dev laptop is a
-  firmware-disabled RTX 4070. Reproduced against a synthetic H.265 RTP
-  stream; ffmpeg died instantly with `Failed to initialise VAAPI connection`
-  / `No device available for decoder: device type vaapi needed for codec
-  hevc`. Fixed by probing each `/dev/dri/renderD*` with
-  `-init_hw_device vaapi=va:<node> -f lavfi -i nullsrc`, passing the winner
-  as `-vaapi_device`, and auto-falling back to software if a hardware attempt
-  exits within 4s. `renderD128` = dead NVIDIA, `renderD129` = working AMD
-  iGPU — verified.
-- **Desktop 0.1.4 + backend + frontend — SITL connect fixes.**
-  - `udpBridge.ts` bound `127.0.0.1`, which silently drops any packet not
-    sent to loopback. Verified experimentally. Now binds `0.0.0.0`
-    (overridable via `bindAddress`).
-  - Emits a one-time `receiving: true` status with the sender address on the
-    first packet per port, so "bound but silent" is finally distinguishable
-    from "flowing".
-  - `remoteSitlRelay.ts` arms an 8s silence timer with a specific,
-    actionable message naming the WSL/Docker/VM cause.
-  - `useDrone.ts` now listens for the generic `error` socket event, which
-    previously had **no listener at all** — the defect that produced the
-    literal "stuck on connecting forever" symptom.
-  - `telemetry_events.py` `on_connect_browser_serial` now emits
-    `telemetry_status` on every failure path, including wrapped exceptions.
-- **Documentation knowledge base** under `docs/` and `modules/`.
-- **`docs/video-transport-modes.md`** — the mode matrix and per-scenario
-  guidance.
+See `CHANGELOG.md` (2026-10-18) for the full list. Headlines:
+
+- Per-user login, roles, bearer tokens, socket auth, resume bound to user +
+  secret (`backend/app/auth/`, `docs/AUTH.md`).
+- Process-wide model cache (`backend/app/vision/model_cache.py`).
+- WebRTC peer ownership on re-offer; every offer failure answers.
+- Fleet `in_air`, retrying telemetry subscriptions, Offboard keepalive
+  (re-sends the last setpoint, zeroes after 2 s), real target sysid.
+- Frontend VIDEO vs CLOUD status, ESLint 0 errors.
+- Electron 44.9; `start.sh` / `hyrak_sim.sh` kill only recorded PIDs.
+- fastapi 0.143, starlette 1.8, Pillow 12.3, transformers 4.57; torch
+  2.4.1 unchanged on purpose.
 
 ### Remains
 
-- Backend restart (fix is on disk, not live).
-- SITL root-cause confirmation.
-- `air_unit_srt` Phases 1-3.
-- Commit everything.
+- Items in `KNOWN_ISSUES.md` #13-#19 and the OPEN rows of
+  `AUDIT_2026-10-17.md`.
+- Capture-time stamping for avoidance latency compensation (API exists).
+- Custom models design decisions (`docs/custom_models/DESIGN.md`).
 
 ## Important files
 
 | File | Why |
 |---|---|
-| `desktop/src/bridges/udpBridge.ts` | SITL/swarm transport; the 0.1.4 bind fix |
-| `desktop/src/bridges/airUnitVideoBridge.ts` | Air-unit video; the 0.1.3 VAAPI fix; where the SRT output gets added |
-| `frontend/src/lib/remoteSitlRelay.ts` | SITL relay + new silence diagnostic |
-| `frontend/src/hooks/useDrone.ts` | Connect flows, socket event handlers, status state |
-| `backend/app/events/telemetry_events.py` | All telemetry connect entry points |
-| `backend/app/webrtc/signaling.py` | Video source selection; `client_overlay` gate at ~line 152 |
-| `backend/app/webrtc/udp_video_source.py` | Template for `srt_video_source.py` |
-| `backend/app/telemetry/serial_bridge.py` | Remote-radio-looks-local bridge |
-| `frontend/src/lib/videoSource.ts` | The mode enum users select |
+| `backend/app/server.py` | App factory, socket connect / auth / resume, security headers |
+| `backend/app/auth/` | Login, tokens, roles, `require_user`, `require_operator` socket guard, CLI |
+| `backend/app/events/telemetry_events.py` | Every telemetry connect and command event |
+| `backend/app/telemetry/manager.py` | MAVSDK manager, subscriptions with retry, Offboard keepalive |
+| `backend/app/webrtc/signaling.py`, `peer_registry.py` | Video source selection, PeerEntry ownership |
+| `backend/app/vision/model_cache.py`, `base.py`, `worker_pool.py` | Shared weights, analyzer lifecycle |
+| `backend/app/fleet/service.py`, `tasks/dispatcher.py` | Server fleet and delivery dispatch |
+| `frontend/src/lib/auth.ts`, `api.ts`, `socket.ts` | Token handling and bearer headers |
+| `frontend/src/hooks/useWebRTC.ts`, `useDrone.ts` | Video and telemetry client flows |
+| `desktop/src/app-main.ts` | IPC sender checks, navigation lock |
+| `start.sh` | Launcher; `uv run` syncs the venv to `uv.lock` |
 
 ## Important classes / functions
 
-- `AirUnitVideoBridge` — `vaapiRenderNode()`, `HW_SETUP_WINDOW_MS`, the
-  recursive `launch(hwNode)` with software fallback.
-- `UdpBridge` — per-port `UdpSocketEntry {socket, peer, sawTraffic}`,
-  reply-to-last-sender in `send()`.
-- `MultiModeVideoStreamTrack` (`stream_track.py`) — the single funnel every
+- `require_user(min_role)` (`auth/deps.py`), `require_operator(sid, event,
+  data)` (`auth/socket_guard.py`).
+- `SessionManager.resumable(session_id, user_id, secret)`.
+- `MultiModeVideoStreamTrack` (`stream_track.py`): the single funnel every
   video source passes through.
-- `SerialBridge` — `create()`, `address` (`udpin://127.0.0.1:{port}`),
-  `uplink()`, `datagram_received()`.
-- `TelemetryManager.connect()` — 10s gRPC + 15s heartbeat timeouts.
+- `PeerRegistry.remove`: the only place feed ports and relays are released.
+- `TelemetryManager._run_subscription`: the retry wrapper around every
+  MAVSDK stream.
+- `model_cache.shared_yolo()`, `shared_face_app()`, `shared_alpr()`,
+  `depth_models.load_shared()`.
 
 ## Known blockers
 
-1. **SITL root cause unproven.** Cannot reproduce the client's environment.
-2. **WebCodecs HEVC support unverified** — gates `air_unit_srt` Phase 2.
-3. **SRT port handshake undecided** — gates Phase 1.
+1. First admin not created yet (owner).
+2. Code signing: no certificates.
+3. Avoidance closed-loop results: owner's SITL flights.
 
 ## Recommended next steps
 
-1. Ask Japesh to restart the backend.
-2. Get the answer: is the client's SITL native, or in WSL2/Docker/a VM? If
-   WSL/VM, the 0.1.4 bind fix is very likely the whole answer. If native on
-   the same OS, the loopback bind already worked and the cause is elsewhere —
-   the new 8s message plus whether `receiving` ever appeared will pin it down.
-3. Commit. Consider `.gitignore` entries for `releases/`.
-4. Settle the SRT handshake, then implement Phase 1 (server
-   `srt_video_source.py` + an *additional* client ffmpeg output, leaving the
-   v4l2loopback preview untouched so nothing can regress).
+1. Owner: run the setup in `SECURITY.md`; sign in on the web and the
+   desktop app; check that a viewer account gets `forbidden` on commands.
+2. `require_viewer` on the read GETs; role check on `offer`,
+   `allocate_video_relay`, `datachannel_video_offer`, `wall_offer`.
+3. Move `gs_relay_agent.py` to `HYRAK_TOKEN`; keep the legacy flag off.
+4. `scripts/prune-releases.sh --apply`; delete `.env.bak.*`.
+5. Consider Cloudflare Access in front of the tunnel.
 
 ## Recommended files to read first
 
-1. `docs/AI_CONTEXT.md`
-2. `docs/CURRENT_STATE.md`
-3. this file
-4. `docs/video-transport-modes.md` (video work) or
-   `modules/desktop-bridges/README.md` (transport work)
-5. `docs/ADR/` for rationale
+1. `CLAUDE.md` (root)
+2. `docs/AI_CONTEXT.md`
+3. `docs/CURRENT_STATE.md`
+4. this file
+5. `SECURITY.md`, `docs/AUTH.md`
+6. `docs/AUDIT_2026-10-17.md` for defect IDs
 
 ## Warnings
 
-- **Do not modify `communication/`.** Read-only reference for the wfb-ng
-  ground station.
-- **Never print the socket.io shared secret**
-  (`NEXT_PUBLIC_SECRET_TOKEN` / `secret_token`).
-- **Japesh runs all flight tests himself.** Do not launch autonomous test
-  flights or write throwaway test scripts. Local diagnostic shell commands
-  are fine and were used productively this session.
+- **Do not modify `communication/`.**
+- **Never print tokens or passwords.** Credentials are the owner's to set.
+- **The owner flies all tests.** Never arm, take off or fly.
+- **The backend auto-reloads on any `backend/app/` edit**, which reboots
+  the companion computer. Check `/api/fleet` and live sessions before
+  touching it; never while a drone is airborne.
+- **Never pattern-kill `gz sim`, never run `swarm.sh`.** Kill by PID.
 - **Desktop changes need a `desktop/package.json` version bump before
-  `npm run deploy:local`**, or electron-updater tells clients they're current.
-- **Backend has no useful auto-reload** — ask for a restart.
-- **Do not delete the v4l2loopback path.** It is the only mode that works on
-  UDP-blocking networks (ADR-003). An earlier version of the SRT plan said to
-  delete it; that was corrected.
-- Do not strip the dense "why" comments. Several encode findings that cost
-  days.
+  `npm run deploy:local`.**
+- **Do not delete the `camera` / v4l2loopback path.** It is the only mode
+  that works on UDP-blocking networks (ADR-003).
+- Do not strip the dense "why" comments.
 
 ## Open questions
 
-1. Client's SITL environment (native vs WSL/Docker/VM)?
-2. WebCodecs HEVC availability on client hardware?
-3. SRT port handshake shape?
-4. Does `air_unit_rtp_relay` ship at all, or does `latency=20` SRT cover LAN?
-5. Is the crowd/plate session-end ZIP-export-and-purge flow implemented?
-   `vision/persistence.py` exists — **needs verification** against the plan
-   in `~/.claude/plans/happy-mapping-quokka.md`.
-6. Delete `sitl_relay/single_relay.py`?
+1. Cloudflare Access in front of the tunnel: yes or no?
+2. Should viewers be able to start a video stream at all?
+3. torch upgrade path before custom models ship (DA3 / ultralytics / aiortc
+   regression pass needed).
+4. Does `air_unit_rtp_relay` ship, or does a short-latency SRT cover LAN?

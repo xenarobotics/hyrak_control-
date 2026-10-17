@@ -1,9 +1,12 @@
-# Database — PostgreSQL
+# Database - PostgreSQL
 
 How HYRAK uses Postgres, what lives in it, and what deliberately does not.
 
-Verified against the running instance on 2026-08-01: **PostgreSQL 16.14**,
-database `hyrak`, role `hyrak`, schema `public`, alembic head `bd47308d11f5`.
+Originally verified against the running instance on 2026-08-01:
+**PostgreSQL 16.14**, database `hyrak`, role `hyrak`, schema `public`.
+Schema facts updated from the code on 2026-10-18: **19 alembic revisions,
+linear, head `e4b7a2c9d013`** (users and auth_tokens), **22 application
+tables**. Row counts in §4 are still the 2026-08-01 snapshot.
 
 ---
 
@@ -19,16 +22,16 @@ async def init_db() -> bool:
     try:
         _engine = create_async_engine(settings.database_url, pool_size=5, pool_pre_ping=True)
         async with _engine.connect():
-            pass  # connectivity check only — schema is managed by alembic
+            pass  # connectivity check only - schema is managed by alembic
         _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
         _available = True
     except Exception as e:
         _available = False
-        logger.warning(f"Database unavailable — persistent features disabled: {e}")
+        logger.warning(f"Database unavailable - persistent features disabled: {e}")
     return _available
 ```
 
-Called from `app/server.py:88` with the comment *"non-fatal — flying never
+Called from `app/server.py` (startup) with the comment *"non-fatal - flying never
 depends on the DB"*.
 
 Every consumer then guards on `db_available()` and degrades to `None` / `[]` /
@@ -50,7 +53,7 @@ find try/except around registry or persistence calls at the call site.
 | Server | PostgreSQL 16.14 | local; DSN swap is the only change for Supabase/RDS |
 | Driver | `asyncpg` ≥ 0.29 | async all the way down, no thread pool |
 | ORM | SQLAlchemy ≥ 2.0 | `DeclarativeBase` + `Mapped[]` typed columns |
-| Migrations | alembic ≥ 1.13 | 4 revisions, async `env.py` |
+| Migrations | alembic ≥ 1.13 | 19 revisions, head `e4b7a2c9d013`, async `env.py` |
 | Pool | `pool_size=5`, `pool_pre_ping=True` | pre-ping matters: laptop suspend kills idle conns |
 
 Configured by `DATABASE_URL` in the root `.env`, defaulting in
@@ -61,7 +64,7 @@ Configured by `DATABASE_URL` in the root `.env`, defaulting in
 
 ```python
 # The URL always comes from app settings (.env / DATABASE_URL), never from
-# alembic.ini — one source of truth for app and migrations.
+# alembic.ini - one source of truth for app and migrations.
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
 ```
 
@@ -78,19 +81,21 @@ Equally structural. Three categories are intentionally excluded:
 drone. It dies with the socket, so persisting it would only create rows nobody
 can resume. Note the consequence: `Flight.session_id` and every
 `crowd_*`/`plate_events.session_id` are **plain indexed strings, not foreign
-keys** — there is no `sessions` table for them to reference.
+keys** - there is no `sessions` table for them to reference.
 
 **Live telemetry.** The 1 Hz sample written to `flight_samples` is a
 deliberate downsample of a much faster stream. Nothing writes per-frame.
 
-**Zone geometry at query time.** See §6 — zones are read from Postgres *once*
+**Zone geometry at query time.** See §6 - zones are read from Postgres *once*
 into an in-process spatial index.
 
 ---
 
 ## 4. Schema
 
-Eight application tables, plus alembic's `alembic_version`.
+Twenty-two application tables, plus alembic's `alembic_version`. The
+diagram shows the original core plus the auth tables; the full list with the
+migration that created each is below it.
 
 ```mermaid
 erDiagram
@@ -109,7 +114,7 @@ erDiagram
     flights {
         string   id PK
         string   drone_id FK
-        string   session_id "not a FK — sessions are in-memory"
+        string   session_id "not a FK - sessions are in-memory"
         datetime started_at
         datetime ended_at "NULL while in progress"
         float    duration_s
@@ -135,18 +140,37 @@ erDiagram
         string   id PK
         string   drone_id FK
         string   description
-        json     waypoints "frozen mission"
+        jsonb    waypoints "frozen mission"
         string   mission_hash "sha256, indexed"
-        json     zones "red zones crossed"
+        jsonb    zones "red zones crossed"
         string   status "pending|approved|denied"
         datetime requested_at
         datetime decided_at
+    }
+    users ||--o{ auth_tokens : "signs in with"
+
+    users {
+        string   id PK "uuid4"
+        string   username UK "lower-case"
+        string   password_hash "scrypt$..."
+        string   role "viewer|operator|admin (CHECK)"
+        datetime created_at
+        bool     disabled
+    }
+    auth_tokens {
+        string   id PK
+        string   user_id FK "ON DELETE CASCADE"
+        string   token_hash UK "sha256 hex, never the token"
+        datetime created_at
+        datetime expires_at "30 days, slides on use"
+        datetime last_seen_at
+        string   label
     }
     zones {
         string   id PK
         string   name
         string   zone_class "green|orange|red"
-        json     geometry "GeoJSON Polygon/MultiPolygon"
+        jsonb    geometry "GeoJSON Polygon/MultiPolygon"
         float    floor_m
         float    ceiling_m "NULL = unbounded"
         bool     active
@@ -159,7 +183,7 @@ erDiagram
         int      current_count
         int      peak_count
         string   density_level
-        json     section_counts
+        jsonb    section_counts
     }
     crowd_alerts {
         bigint   id PK
@@ -177,22 +201,41 @@ erDiagram
         string   plate_text "indexed"
         float    ocr_confidence
         string   vehicle_type
-        json     vehicle_box
-        json     plate_box
+        jsonb    vehicle_box
+        jsonb    plate_box
         string   image_path "filesystem pointer"
         float    lat
         float    lng
         float    alt_m
-        float    speed_est_kmh "ESTIMATE — see §5"
+        float    speed_est_kmh "ESTIMATE - see §5"
         datetime first_seen
         datetime last_seen
         datetime created_at
     }
 ```
 
-`zones`, `crowd_*` and `plate_events` are islands — no foreign keys in or out.
+`zones`, `crowd_*` and `plate_events` are islands - no foreign keys in or out.
+All JSON columns are `jsonb` since migration `d8e4f1a2b3c4`.
 
-### Live contents
+All tables, oldest migration first:
+
+| Table | Created by | Purpose |
+|---|---|---|
+| `drones` | `9b063f0fc7ba` | identity by FC hardware UID |
+| `zones`, `flights`, `flight_samples` | `67ececf28608` | airspace, flight history, 1 Hz track |
+| `permits` | `2277079acb06` | red-zone permits |
+| `crowd_snapshots`, `crowd_alerts`, `plate_events` | `bd47308d11f5` | vision output (plate columns extended by 27bf66c11c2c, 8a1f2c4e9b31, c3d7e18b52a9, d5b91c07af42) |
+| `persons`, `person_faces`, `person_sightings` | `419df6cb4f34` | face gallery and match audit trail |
+| `map_features`, `route_profiles`, `missions` | `e7a4f19c3b6d` | mission planner |
+| `pads`, `api_keys`, `tasks`, `task_events` | `f3b8d02a71c5` | delivery orders and the `/v1` API keys (stations / archive: a9c4e17d52b8, c7e2f94a61d3) |
+| `avoidance_events` | `f1a9c3e7b2d4` | obstacle-avoidance state-change log (actions widened by c2d5e8b1f7a3, b7e2c4a9d1f6) |
+| `known_obstacles` | `a3f8c1d9e0b5` | persistent shared hazard map |
+| `users`, `auth_tokens` | `e4b7a2c9d013` | per-user login (see `docs/AUTH.md`) |
+
+`d8e4f1a2b3c4` is the platform-audit batch: JSON -> JSONB, dispatcher
+indexes, status CHECK constraints, `missions.held_takeoff`.
+
+### Live contents (snapshot 2026-08-01, before the planner / delivery / avoidance / auth tables)
 
 | Table | Rows | Purpose |
 |---|---|---|
@@ -200,7 +243,7 @@ erDiagram
 | `crowd_snapshots` | 527 | across 12 distinct sessions |
 | `plate_events` | 43 | one row per vehicle, not per frame |
 | `flights` | 24 | 18 closed, **6 still open** (§8) |
-| `zones` | 8 | 4 red, 4 orange — all Hyderabad, all `(approx)` |
+| `zones` | 8 | 4 red, 4 orange - all Hyderabad, all `(approx)` |
 | `drones` | 6 | 1 real, 5 SITL |
 | `crowd_alerts` | 0 | no sustained-density alert has fired yet |
 | `permits` | 0 | flow built, never exercised |
@@ -217,24 +260,24 @@ three vision tables. Every hot lookup is covered.
 
 ## 5. Table-by-table intent
 
-**`drones` — identity.** Keyed by the flight controller's factory-burned
+**`drones` - identity.** Keyed by the flight controller's factory-burned
 hardware UID, read via MAVLink `AUTOPILOT_VERSION` through the MAVSDK Info
 plugin. The design point, quoting the model: *"a drone's identity is never the
 session's identity."* A browser refresh or radio reconnect maps back to the
 same row. `upsert_seen()` in `app/registry/drones.py` runs on every telemetry
-connect — unknown UID creates `Drone-{last 6 of UID}`, known UID just bumps
+connect - unknown UID creates `Drone-{last 6 of UID}`, known UID just bumps
 `last_seen`. `is_simulated` exists because SITL instances share a dummy UID and
 real fleet views must filter them out.
 
-**`zones` — airspace.** GeoJSON geometry, chosen because it converts cleanly
+**`zones` - airspace.** GeoJSON geometry, chosen because it converts cleanly
 to and from ED-269 / Digital Sky. 3D-aware via `floor_m` / `ceiling_m`
 (metres AGL at the zone), which is what lets the seeded "8–12 km above 60 m"
 band exist as a real constraint rather than a flat circle. Seeded by
 `backend/scripts/seed_hyderabad_zones.py`, which is idempotent (matches by
-name) and labels everything `(approx)` — DGCA Digital Sky is the legal
+name) and labels everything `(approx)` - DGCA Digital Sky is the legal
 authority and has no bulk-download API.
 
-**`flights` + `flight_samples` — history.** A flight is armed → disarmed.
+**`flights` + `flight_samples` - history.** A flight is armed → disarmed.
 `app/flights/recorder.py` receives every telemetry snapshot, no-ops unless
 armed, and writes one sample per second. Distance accumulates by haversine
 between consecutive fixes; `crossed_orange` / `crossed_red` are latched by
@@ -242,18 +285,18 @@ asking the zone engine about each sample, and stop being checked once both are
 true. `end_flight()` is idempotent and also fires on disconnect *"so a dropped
 link never leaves a flight dangling open."*
 
-**`permits` — the red-zone escape hatch.** A blocked mission can be submitted
+**`permits` - the red-zone escape hatch.** A blocked mission can be submitted
 with justification; the waypoint list is **frozen into the row**. After
 approval, an upload passes validation only if it matches those waypoints within
-`1.1e-5` degrees (≈1.1 m) and 0.5 m altitude — enough to absorb float noise,
+`1.1e-5` degrees (≈1.1 m) and 0.5 m altitude - enough to absorb float noise,
 tight enough to reject a real edit. `mission_hash` is a sha256 over waypoints
 rounded to 6 dp for the fast path; `_matches()` is the tolerant fallback.
 
-**`crowd_snapshots` / `crowd_alerts` / `plate_events` — vision output.**
+**`crowd_snapshots` / `crowd_alerts` / `plate_events` - vision output.**
 Written through `app/vision/persistence.py`. Analyzers decide *when* to persist
 inside their blocking `_analyze_frame_blocking` (that is where their per-session
 state lives), queue it onto `meta["_pending_db"]`, and `stream_track.py`'s
-`recv()` — already on the event loop — pops and dispatches it.
+`recv()` - already on the event loop - pops and dispatches it.
 
 Two notes carried in the code that matter operationally:
 
@@ -262,8 +305,18 @@ Two notes carried in the code that matter operationally:
   never present this as enforcement-grade evidence."* It always travels with
   `is_estimate=True`.
 - `plate_events.image_path` points at the filesystem, not a bytea column. So
-  `clear_plate_history()` collects paths, deletes rows, *then* unlinks files —
+  `clear_plate_history()` collects paths, deletes rows, *then* unlinks files -
   a plain `DELETE` in psql would orphan the images.
+
+---
+
+**`users` / `auth_tokens` - who may do what.** One row per person; role
+is `viewer`, `operator` or `admin`, pinned by a CHECK constraint. The
+password is a scrypt hash. A token row stores only the SHA-256 of the bearer
+token, so a database dump does not hand out sessions; deleting a user
+cascades to their tokens. Login works with Postgres down through the
+optional env admin (`HYRAK_ADMIN_USER` / `HYRAK_ADMIN_PASSWORD_HASH`), which
+is the one place the "database is optional" rule needed a special case.
 
 ---
 
@@ -279,12 +332,12 @@ Postgres is the *store*; it is not in the query path. `reload()` pulls every
 The rationale, from the module docstring:
 
 > At the current scale an STRtree over every active zone answers point and path
-> queries in microseconds — no PostGIS needed until zone counts reach the tens
+> queries in microseconds - no PostGIS needed until zone counts reach the tens
 > of thousands.
 
 There is **no PostGIS extension installed**, and none is needed. Red zones also
 get a `geom_eroded` copy (buffered by −5 m) so that skimming a boundary does
-not trigger breach pushback — only a track genuinely inside does.
+not trigger breach pushback - only a track genuinely inside does.
 
 The trade-off: a zone edited directly in SQL is invisible until `reload()`
 runs. The API routes call it after mutations; the seed script tells you to
@@ -297,13 +350,15 @@ restart the backend.
 There is no auto-purge anywhere, and for the vision tables that is a
 *deliberate reversal*. From `persistence.py`:
 
-> Nothing is ever purged silently — that's a deliberate reversal of this
+> Nothing is ever purged silently - that's a deliberate reversal of this
 > feature's first version, which auto-purged on every stop; Japesh wanted a
 > browsable history instead.
 
 Data leaves only two ways: an operator downloads a report (read-only, deletes
 nothing) or explicitly clears history via `DELETE /api/vision/crowd-history` /
-`plate-history`, both behind an `X-Auth-Token` header.
+`plate-history`, both of which need an operator's bearer token. (The read
+side, `GET /api/vision/plate-history` and the report downloads, is still
+unauthenticated; see `SECURITY.md`.)
 
 ---
 
@@ -313,13 +368,15 @@ Not blockers, but real, and better recorded than rediscovered.
 
 **Six flights are permanently open.** `ended_at IS NULL`,
 `samples_count = 0`, yet they hold 1,106 `flight_samples` rows between them
-(213, 212, 211, 157, 157, 156). These are backends killed while armed —
+(213, 212, 211, 157, 157, 156). These are backends killed while armed -
 `end_flight()` never ran, so the summary was never written. That is why the
 `flights.samples_count` total (1,571) disagrees with the actual row count
 (2,677). Any query that sums `samples_count` under-reports by ~41%. A startup
-sweep closing stale open flights would fix it.
+sweep closing stale open flights would fix it. Still not built as of 2026-10-18. (A different
+race, two snapshot tasks on the arm edge both inserting a Flight, was fixed
+in audit B16.)
 
-**JSON columns are `json`, not `jsonb`.** All six — `zones.geometry`,
+**JSON columns were `json`, not `jsonb` - FIXED in `d8e4f1a2b3c4`.** Kept for history: All six - `zones.geometry`,
 `permits.waypoints`, `permits.zones`, `crowd_snapshots.section_counts`,
 `plate_events.vehicle_box` / `plate_box`. SQLAlchemy's generic `JSON` type maps
 to Postgres `json`, which stores raw text: no binary parse, no GIN indexing, no
@@ -327,9 +384,12 @@ containment operators. Nothing today queries *inside* these columns, so it
 costs nothing right now. It would matter the moment you want "which permits
 touch zone X" as SQL.
 
-**No `ON DELETE CASCADE`.** All three foreign keys are `NO ACTION`. Deleting a
+**No `ON DELETE CASCADE` on the flight tables.** The drone / flight / sample
+foreign keys are still `NO ACTION`. (Newer tables do cascade:
+`task_events -> tasks`, `person_faces -> persons`, `auth_tokens -> users`;
+`person_sightings -> persons` is `SET NULL`.) Deleting a
 drone with flights raises a constraint violation; deleting a flight orphans its
-samples. Fine while deletion is not exposed — a trap if it ever is.
+samples. Fine while deletion is not exposed - a trap if it ever is.
 
 **`flight_samples` grows unbounded.** 560 kB from 24 short flights. Linear in
 flight-seconds with no partitioning or expiry. Not urgent at this scale; worth
@@ -343,6 +403,9 @@ a retention policy before a real deployment.
 # apply migrations (from backend/)
 .venv/bin/alembic upgrade head
 
+# first admin after the auth migration (password is prompted)
+.venv/bin/python -m app.auth.cli create-user <name> --role admin
+
 # new migration after editing app/db/models.py
 .venv/bin/alembic revision --autogenerate -m "what changed"
 
@@ -354,7 +417,7 @@ psql "$(grep -m1 '^DATABASE_URL=' ../.env | cut -d= -f2- | sed 's|+asyncpg||')"
 ```
 
 Autogenerate works because `alembic/env.py` imports `Base.metadata` from
-`app/db/models.py` — the models are the source of truth, migrations are
+`app/db/models.py` - the models are the source of truth, migrations are
 derived. Always read a generated migration before applying it; the existing
 ones carry alembic's own *"please adjust!"* banner.
 

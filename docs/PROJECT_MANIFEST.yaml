@@ -1,65 +1,86 @@
-# PROJECT_MANIFEST.yaml — machine-readable project metadata.
-# Generated 2026-07-26. Update via scripts/sync-docs.sh guidance.
+# PROJECT_MANIFEST.yaml - machine-readable project metadata.
+# Updated 2026-10-18. Update via scripts/sync-docs.sh guidance.
 project:
   name: hyrak_control
   product_name: HYRAK
   backend_package_name: verocore-backend
   description: >
-    Cloud drone ground-control and AI-vision platform. The server owns no
-    hardware; clients relay video and MAVLink telemetry from their own machines.
-  repository_branch: main
-  git_tracked: partial   # large untracked surface — see health_check
+    Cloud drone platform where the cloud is the drone's companion computer.
+    The server owns no hardware; clients relay video and MAVLink telemetry
+    from their own machines, the server runs vision, avoidance, planning and
+    fleet control and sends commands back down the same link.
+  repository_branch: vision/tracking-overhaul
+  git_tracked: full   # vendored upstream trees and data dirs at the root are untracked by design
 
 versions:
   backend: "0.1.0"
   frontend: "0.1.0"
-  desktop: "0.1.39"
+  desktop: "0.1.57"
+  electron: "44.9.0"
+  alembic_head: e4b7a2c9d013
 
 deployment_model:
   server:
     role: backend, AI inference, release hosting
     hardware_attached: false
+    public_via: cloudflare tunnel (dev.xenarobotics.com -> :3000, api.xenarobotics.com -> :8001)
   client:
-    role: drone, RF ground unit, telemetry radio
+    role: drone, RF ground unit / ground decoder, telemetry radio
     app: electron desktop (preferred) or browser (reduced capability)
     typical_hardware: "Intel i5 + integrated GPU, limited CPU headroom"
 
+auth:
+  doc: docs/AUTH.md
+  security_doc: SECURITY.md
+  roles: [viewer, operator, admin]
+  token: bearer, 32 random bytes, stored as sha256, 30-day sliding expiry
+  password_hash: scrypt
+  legacy_shared_token: off unless AUTH_LEGACY_TOKEN_ENABLED=true; published default always refused
+
 modules:
   backend:
+    - name: auth
+      path: backend/app/auth
+      files: [service.py, store.py, passwords.py, deps.py, socket_guard.py, routes.py, cli.py, clientip.py, audit.py]
     - name: webrtc
       path: backend/app/webrtc
-      files: [signaling.py, stream_track.py, peer_registry.py, turn.py, udp_video_source.py, rtsp_video_source.py, relay_video_source.py, __init__.py]
+      files: [signaling.py, stream_track.py, peer_registry.py, turn.py, udp_video_source.py, rtsp_video_source.py, relay_video_source.py, datachannel_video_source.py, feeds.py, mesh_units.py, wall.py, live_player.py, __init__.py]
       key_class: MultiModeVideoStreamTrack
     - name: vision
       path: backend/app/vision
-      files: [base.py, drawing.py, persistence.py, worker_pool.py]
-      registered_analyzers: 7
-      analyzer_files: [object_detector.py, human_tracker.py, depth_mapper.py, person_tracker.py, enhancer.py, crowd_manager.py, plate_tracker.py]
+      files: [base.py, model_cache.py, worker_pool.py, depth_models.py, drawing.py, persistence.py, face_gallery.py, recent_ids.py, controllers.py]
+      registered_analyzers: 9
+      analyzer_files: [object_detector.py, human_tracker.py, depth_mapper.py, person_tracker.py, enhancer.py, crowd_manager.py, plate_tracker.py, traffic_manager.py, reconstruction3d.py]
     - name: telemetry
       path: backend/app/telemetry
-      files: [manager.py, serial_bridge.py, rf_bridge.py, gs_relay.py]
+      files: [manager.py, serial_bridge.py, rf_bridge.py, gs_relay.py, swarm_relay_bridge.py, failsafe_check.py, rc_monitor.py, calibration.py]
       key_classes: [TelemetryManager, SerialBridge]
     - name: events
       path: backend/app/events
-      files: [telemetry_events.py, swarm_events.py, admin_events.py]
+      files: [telemetry_events.py, swarm_events.py, admin_events.py, permit_events.py, gs_relay_events.py]
     - name: sessions
       path: backend/app/sessions
-      key_types: [SessionManager, AnalysisMode]
+      key_types: [SessionManager, DroneSession, AnalysisMode]
+    - name: avoidance
+      path: backend/app/avoidance
+      doc: docs/avoidance/README.md
+    - name: fleet_and_deliveries
+      paths: [backend/app/fleet, backend/app/tasks, backend/app/planner]
     - name: other
-      paths: [backend/app/db, backend/app/flights, backend/app/zones, backend/app/permits, backend/app/api, backend/app/registry, backend/app/sandbox, backend/app/utils]
+      paths: [backend/app/db, backend/app/flights, backend/app/zones, backend/app/permits, backend/app/api, backend/app/registry, backend/app/reconstruction, backend/app/sandbox, backend/app/utils]
   frontend:
     - name: lib
       path: frontend/src/lib
-      key_files: [socket.ts, nativeBridge.ts, videoSource.ts, videoSettings.ts, remoteSitlRelay.ts, localSwarmRelay.ts, localRfRelay.ts, rfBridge.ts, browserSerial.ts]
+      key_files: [socket.ts, auth.ts, api.ts, server-url.ts, nativeBridge.ts, videoSource.ts, videoSettings.ts, remoteSitlRelay.ts, localSwarmRelay.ts, localRfRelay.ts, rfBridge.ts, browserSerial.ts, droneId.ts]
     - name: hooks
       path: frontend/src/hooks
-      key_files: [useDrone.ts, useWebRTC.ts, useAirUnitVideoBridge.ts, useCamera.ts]
+      key_files: [useDrone.ts, useWebRTC.ts, useAuthGate.ts, useClientValue.ts, useAirUnitVideoBridge.ts, useCamera.ts, useTelemetryLink.ts]
     - name: components
       path: frontend/src/components
-      key_dirs: [video, vision, controls, osd, updater, layout]
+      key_dirs: [video, vision, controls, osd, command, mission, avoidance, deliveries, swarm, telemetry, updater, layout, admin]
     - name: routes
-      path: frontend/src/app/(platform)
-      routes: [fly, modules, telemetry, settings]
+      path: frontend/src/app
+      routes: ["(platform)/command", "(platform)/fly", "(platform)/mission", "(platform)/deliveries", "(platform)/modules", "(platform)/telemetry", "(platform)/settings", login, admin]
   desktop:
     - name: bridges
       path: desktop/src/bridges
@@ -72,24 +93,31 @@ modules:
       contract: NativeBridge
     - name: shell
       path: desktop/src
-      files: [app-main.ts, main.ts, preload.ts, updater.ts]
+      files: [app-main.ts, main.ts, preload.ts, updater.ts, netProbe.ts, site-url.ts]
+      security: [contextIsolation, sandbox, ipc sender-origin check, navigation lock]
 
 entry_points:
-  backend: backend/app/main.py          # uvicorn "app.server:create_app", factory=True
+  backend: backend/app/main.py          # uvicorn "app.server:create_app", factory=True, reload=True on app/
   backend_app_factory: backend/app/server.py::create_app
   frontend: frontend (next dev / next build)
   desktop: desktop/src/main.ts
-  launcher: start.sh
+  launcher: start.sh                    # backend via `uv run`, frontend, tunnel; kills only recorded PIDs
 
 commands:
   run_all: ./start.sh
+  run_all_prod_frontend: ./start.sh --prod
+  status: ./start.sh status
   frontend_dev: cd frontend && npm run dev
   frontend_build: cd frontend && npm run build
-  frontend_typecheck: cd frontend && node ./node_modules/typescript/bin/tsc --noEmit
+  frontend_typecheck: cd frontend && npx tsc --noEmit -p .
+  frontend_lint: cd frontend && node ./node_modules/eslint/bin/eslint.js src
   desktop_build: cd desktop && npm run build
   desktop_typecheck: cd desktop && npx tsc --noEmit -p tsconfig.json
   desktop_deploy: cd desktop && npm run deploy:local   # BUMP package.json version FIRST
-  backend_syntax_check: cd backend && python3 -m py_compile app/**/*.py
+  backend_tests: cd backend && .venv/bin/python -m pytest -q
+  db_migrate: cd backend && .venv/bin/alembic upgrade head
+  create_admin: cd backend && .venv/bin/python -m app.auth.cli create-user <name> --role admin
+  prune_releases: scripts/prune-releases.sh          # dry run; --apply deletes
   docs_check: ./scripts/sync-docs.sh
 
 services:
@@ -101,10 +129,12 @@ services:
     port: 3000
   - name: postgresql
     port: 5432
-    dsn_default: "postgresql+asyncpg://hyrak:hyrak_dev@127.0.0.1:5432/hyrak"
+    dsn_source: DATABASE_URL in the root .env (see backend/app/config.py)
   - name: mavsdk_server
     gRPC_port: dynamic   # MUST be unique per System(); 50051 default causes drone aliasing
   - name: cloudflare_turn
+    external: true
+  - name: cloudflared
     external: true
 
 ports:
@@ -112,44 +142,55 @@ ports:
   frontend: 3000
   postgres: 5432
   air_unit_video_udp: 5600
-  relay_public_listen: "3478-3578"   # SRT/TCP ingest — NOT through the tunnel; 3478 (STUN port) survives networks that drop 9000
+  mesh_unit_video_udp: "5601-5603"   # keep free; no bitrate commands to mesh units
+  relay_public_listen: "3478-3578"   # SRT/TCP ingest, NOT through the tunnel
   relay_loopback: "5700-5800"        # internal remux hop, loopback only
   mavlink_downlink: 14550
   mavlink_uplink: 14551
   rc_override: 14570
-  sitl_single: 14540
+  sitl_desktop_relay: 14540          # "SITL" link option (client side)
+  sitl_server_gazebo: 14600          # "Gazebo sim on server" link option; never merge with 14540
   sitl_swarm: "14541+"
   px4_sitl_offboard_local: 14580
 
 configuration:
-  backend: backend/app/config.py       # pydantic-settings
+  backend: backend/app/config.py       # pydantic-settings; every field listed in .env.example
   frontend_prefs: localStorage keys prefixed "hyrak-"
+  frontend_auth_token: localStorage "hyrak-auth-token"
   secrets:
-    - name: NEXT_PUBLIC_SECRET_TOKEN
-      location: frontend/.env.local
-      note: "NEVER print or echo the value"
-    - name: secret_token
-      location: backend config.py / .env
+    # Names only. Values are the owner's and never printed or committed.
+    - name: HYRAK_ADMIN_USER / HYRAK_ADMIN_PASSWORD_HASH
+      location: root .env (optional env admin)
+    - name: SECRET_TOKEN
+      location: root .env
+      note: "legacy; ignored unless AUTH_LEGACY_TOKEN_ENABLED=true"
     - name: TURN_KEY_ID / TURN_API_TOKEN
       location: root .env (gitignored)
+    - name: HYRAK_TOKEN
+      location: script environment (operator bearer token)
+  removed:
+    - NEXT_PUBLIC_SECRET_TOKEN         # no longer read; delete from frontend/.env.local
 
 dependencies:
   backend_python: "==3.11.*"
-  backend_key: [fastapi, uvicorn, python-socketio, aiortc, av, mavsdk, pyserial, torch, torchvision, ultralytics, transformers, opencv-contrib-python-headless, insightface, onnxruntime-gpu, fast-alpr, sqlalchemy, asyncpg, alembic, shapely, lapx, timm]
-  frontend_key: [next, react, zustand, socket.io-client, leaflet, react-leaflet, maplibre-gl, cesium, lucide-react, "@base-ui/react", tailwind-merge]
-  desktop_key: [electron-updater, ffmpeg-static, serialport]
-  desktop_dev: [electron@^32.0.0, electron-builder@25.1.8]
+  backend_pinned_in_lock: {fastapi: 0.143.3, starlette: 1.8.0, uvicorn: 0.54.0, pillow: 12.3.0, transformers: 4.57.6, torch: 2.4.1}
+  backend_key: [fastapi, uvicorn, python-socketio, aiortc, av, mavsdk, pymavlink, pyserial, torch, torchvision, ultralytics, transformers, opencv-contrib-python-headless, insightface, onnxruntime-gpu, fast-alpr, sqlalchemy, asyncpg, alembic, shapely, lapx, timm, pyzmq]
+  frontend_key: [next, react, zustand, socket.io-client, leaflet, maplibre-gl, cesium, lucide-react, "@base-ui/react", tailwind-merge]
+  desktop_key: [electron-updater, ffmpeg-static, serialport, werift]
+  desktop_dev: [electron@^44.9.0, electron-builder@^26.15.3]
 
 build:
   desktop:
-    electron: 32.3.3
+    electron: 44.9.0
     asarUnpack: ["node_modules/ffmpeg-static/**"]
     afterPack: build/afterPack.js   # wraps binary with ELECTRON_DISABLE_SANDBOX
+    site_url: build/write-site-url.js writes src/site-url.ts from HYRAK_SITE_URL
     targets:
       linux: { format: AppImage, status: built_and_tested }
-      windows: { format: nsis, status: declared_not_built, blocker: v4l2loopback_in_video_path }
-      macos: { format: dmg, arch: [x64, arm64], status: declared_not_built, blocker: v4l2loopback_in_video_path }
+      windows: { format: nsis, status: built }
+      macos: { format: dmg, arch: [x64, arm64], status: declared_not_built }
     code_signing: not_configured
+    ci: one Linux job deploys all three installers; actions pinned by SHA
 
 deployment:
   publish_provider: generic
@@ -157,51 +198,43 @@ deployment:
   channel: latest
   local_publish_dir: releases/
   served_at: /releases
-  update_mechanism: electron-updater (consent-gated)
+  update_mechanism: electron-updater (consent-gated, differential downloads on)
   discipline:
-    - "frontend changes hot-reload for browser AND desktop users"
-    - "backend has no useful auto-reload — must restart ./start.sh"
+    - "frontend changes hot-reload for browser AND desktop users (not with --prod)"
+    - "backend auto-reloads on any backend/app edit: a companion-computer reboot; never while a drone is airborne"
     - "desktop changes REQUIRE a package.json version bump before deploy:local"
 
 read_only_paths:
-  - communication/       # wfb-ng ground-station reference — never modify
+  - communication/       # wfb-ng ground-station reference, never modify
 
 analysis_modes:
   - manual-control
   - object-detection
   - human-tracking
   - depth-mapping
-  - obstacle-avoidance      # in enum, analyzer not registered
+  - obstacle-avoidance      # in enum, analyzer not registered (avoidance runs in app/avoidance)
   - scenario-assessment     # in enum, analyzer not registered
   - target-identification   # in enum, analyzer not registered
   - person-tracking
   - enhance
   - crowd-management
   - vehicle-plate-tracking
+  - traffic-management
+  - 3d-reconstruction
 
 video_sources:
-  shipped: [camera, air_unit_udp, siyi_rtsp, rtsp_relay, rtsp_camera]
-  planned: [air_unit_srt, air_unit_rtp_relay]
+  shipped: [camera, air_unit_udp, siyi_rtsp, rtsp_relay, rtsp_camera, rtsp_datachannel, air_unit_datachannel, air_unit_srt, air_unit_gst, hyrak_receiver]
+  planned: [air_unit_rtp_relay]   # undecided
   notes:
-    siyi_rtsp: "backend-pulled — dev-only, camera must be reachable from the server (see ADR-008)"
-    rtsp_relay: "client-pulled, -c copy uplink + local preview; needs relay_public_host and forwarded UDP 3478-3578"
+    air_unit_udp: "server binds the port; works only when ground station and server are one machine"
+    siyi_rtsp: "backend-pulled; camera must be reachable from the server (ADR-008)"
+    rtsp_relay: "client-pulled, -c copy uplink + local preview; needs relay_public_host and forwarded 3478-3578"
+    hyrak_receiver: "ground decoder over Ethernet; Windows/Linux/ARM64 from one installer"
 
 health_check:
-  untracked_in_git:
-    - desktop/
-    - docs/
-    - communication/
-    - releases/
-    - sitl_relay/
-    - backend/app/vision/modules/crowd_manager.py
-    - backend/app/vision/modules/plate_tracker.py
-    - backend/app/vision/persistence.py
-    - backend/app/webrtc/udp_video_source.py
-    - backend/app/webrtc/rtsp_video_source.py
-    - frontend/src/lib/ (~10 files)
-  dead_code:
-    - sitl_relay/single_relay.py
+  untracked_at_root: [ADOSMissionControl-main, PX4-Autopilot-main, qgroundcontrol-master, communication/ data, reconstruction/ data, frontend/home, air_unit_relay.zip, logs/, ".env.bak.*"]
+  releases_dir: "13 GB of historical installers; scripts/prune-releases.sh --apply"
   duplicated_logic:
-    - "ffmpeg low-latency option block: udp_video_source.py + airUnitVideoBridge.ts"
-  stale_docs:
-    - "~/.claude/plans/happy-mapping-quokka.md claims crowd/plate not started; code contradicts"
+    - "ffmpeg low-latency option block: seven backend/desktop files, no drift test"
+    - "mode-switch/attach logic: modules/page.tsx and command/AiPanel.tsx (audit F30)"
+  open_security: SECURITY.md "What is still open"
