@@ -3,36 +3,37 @@ import { autoUpdater } from 'electron-updater'
 
 // Consent-gated update flow: the native shell (this app itself) never
 // downloads or installs anything without the user explicitly clicking
-// "Update now" — checking happens automatically on launch, but the actual
+// "Update now" - checking happens automatically on launch, but the actual
 // download and restart-to-install steps both need authorization.
 //
 // This only ever concerns the native shell (a fixed/new bridge, an
-// Electron security patch) — the content layer (frontend/, most of what
+// Electron security patch) - the content layer (frontend/, most of what
 // changes daily) needs no updater at all, since main.ts just loads it live
 // from SITE_URL on every launch.
 
 autoUpdater.autoDownload = false
 autoUpdater.autoInstallOnAppQuit = false
 
-// THE reason downloads appeared to hang forever with no progress.
+// Differential downloads, and the one-line kill switch for them.
 //
 // electron-builder embeds a block map at the tail of the AppImage (hence
-// `blockMapSize` in latest-linux.yml — there is no separate .blockmap file for
+// `blockMapSize` in latest-linux.yml - there is no separate .blockmap file for
 // this target), and electron-updater's differential downloader fetches just
 // those trailing bytes with an HTTP Range request before downloading anything
-// else. The backend serves /releases through Starlette's StaticFiles, which on
-// the pinned version (0.38.6) does NOT honour Range — verified: a ranged
-// request for the last 150 KB returns `HTTP 200` with `content-length:
-// 143165795` and no `accept-ranges` header, i.e. the whole 143 MB file.
+// else. Until 2026-10 the backend served /releases through Starlette's
+// StaticFiles, which did NOT honour Range: a ranged request for the last
+// 150 KB came back as the whole 143 MB file with HTTP 200, the updater sat
+// consuming it as if it were a small blockmap, and `download-progress` does
+// not fire during that phase - a progress bar frozen at 0%, indefinitely.
+// Differential download was therefore switched off.
 //
-// So the updater sat there consuming a 143 MB body it believed was a small
-// blockmap range, and `download-progress` does not fire during that phase —
-// producing a progress bar frozen at 0% with no error, indefinitely.
-//
-// A plain full download needs no Range support and emits progress normally.
-// Differential updates were never actually working here, so nothing is lost;
-// revisit only if /releases gains real Range support.
-autoUpdater.disableDifferentialDownload = true
+// backend/app/api/releases.py now serves /releases itself with real Range
+// support (206 + Accept-Ranges), so differential download is back ON by
+// default: an update fetches only the blocks that changed instead of the
+// whole installer. If a download ever hangs at 0% again, the kill switch is
+// the environment variable below (HYRAK_FULL_DOWNLOAD=1 forces a plain full
+// download, which needs no Range support and reports progress normally).
+autoUpdater.disableDifferentialDownload = process.env.HYRAK_FULL_DOWNLOAD === '1'
 
 // How long quitAndInstall() gets to end this process before we exit ourselves.
 // Long enough for a genuine clean shutdown (bridges stopping, ffmpeg being
@@ -41,7 +42,7 @@ autoUpdater.disableDifferentialDownload = true
 const QUIT_AND_INSTALL_GRACE_MS = 4000
 
 // Set by app-main.ts. Lets the install path stop the bridges without updater.ts
-// importing them — it has no business knowing what a bridge is, and a direct
+// importing them - it has no business knowing what a bridge is, and a direct
 // import would make this module drag the whole bridge registry into scope.
 let teardownForInstall: () => void = () => { /* nothing registered */ }
 export function setInstallTeardown(fn: () => void): void {
@@ -55,7 +56,7 @@ export interface UpdaterEvent {
     // Bytes and rate alongside percent: on a slow link a percentage alone
     // can sit on the same integer for a long time and look frozen, and if
     // the server sends no Content-Length there is no percent to show at all
-    // — transferred bytes still prove the download is moving.
+    // - transferred bytes still prove the download is moving.
     transferred?: number
     total?: number
     bytesPerSecond?: number
@@ -91,7 +92,7 @@ export function registerUpdater(getWebContents: () => WebContents | null) {
         try {
             await autoUpdater.checkForUpdates()
         } catch (err) {
-            // No published feed yet (dev/unpublished build) — not a real
+            // No published feed yet (dev/unpublished build) - not a real
             // error from the user's point of view, just "nothing to check".
             emit({ type: 'error', message: (err as Error).message })
         }
@@ -108,7 +109,7 @@ export function registerUpdater(getWebContents: () => WebContents | null) {
         if (process.platform === 'linux' && !process.env.APPIMAGE) {
             emit({
                 type: 'error',
-                message: 'Self-update needs the packaged AppImage — this build is running unpacked. '
+                message: 'Self-update needs the packaged AppImage - this build is running unpacked. '
                     + 'Download the latest AppImage manually from the releases page.',
             })
             return
@@ -122,14 +123,14 @@ export function registerUpdater(getWebContents: () => WebContents | null) {
 
     ipcMain.handle('hyrak-updater-install', () => {
         // Kill our own bridges first. quitAndInstall() relaunches immediately,
-        // and the new process binds the same ports (udp:5600 for the air unit) —
+        // and the new process binds the same ports (udp:5600 for the air unit) -
         // if this one's sockets are still open when that happens, the fresh
         // instance loses the race and starts up unable to read the video.
         teardownForInstall()
         autoUpdater.quitAndInstall()
         // quitAndInstall() is not guaranteed to end this process. On AppImage it
         // spawns the replacement and calls app.quit(), and app.quit() is
-        // cancellable — a pending before-quit handler, a modal, or a renderer
+        // cancellable - a pending before-quit handler, a modal, or a renderer
         // that never acknowledges leaves the OLD main process running while the
         // NEW one starts. That is exactly how a 0.1.30 instance ended up holding
         // udp:5600 after 0.1.31 was installed, running from an AppImage mount
@@ -138,10 +139,10 @@ export function registerUpdater(getWebContents: () => WebContents | null) {
         // reapStaleInstances() cleans that up at the next launch, but the next
         // launch is precisely the run that needs the port. So also guarantee it
         // here: if we are still alive after the grace period, leave
-        // unconditionally. There is nothing left worth saving at this point —
+        // unconditionally. There is nothing left worth saving at this point -
         // the replacement is already starting.
         const bail = setTimeout(() => {
-            console.warn('quitAndInstall did not end this process — exiting to free the ports')
+            console.warn('quitAndInstall did not end this process - exiting to free the ports')
             app.exit(0)
         }, QUIT_AND_INSTALL_GRACE_MS)
         bail.unref?.()
@@ -151,5 +152,5 @@ export function registerUpdater(getWebContents: () => WebContents | null) {
 }
 
 export function checkForUpdatesOnLaunch() {
-    autoUpdater.checkForUpdates().catch(() => { /* no published feed yet in dev — harmless */ })
+    autoUpdater.checkForUpdates().catch(() => { /* no published feed yet in dev - harmless */ })
 }

@@ -12,7 +12,7 @@ import path from 'node:path'
 // climbing).
 //
 // The visible symptom was ~1s of video latency, and it was misdiagnosed
-// repeatedly as a network problem — the WiFi link was in fact pristine
+// repeatedly as a network problem - the WiFi link was in fact pristine
 // (-33 dBm, 390 Mbit/s carrying 2 Mbit/s of video). A saturated CPU cannot be
 // tuned away downstream: libx264 stops encoding in realtime, so frames queue
 // at the encoder; Chromium's decoder is starved, so <video> buffers more; and
@@ -21,13 +21,13 @@ import path from 'node:path'
 // Three independent failure modes produced those orphans, so there are three
 // defences here, and all of them are needed:
 //
-//   1. Nothing stopped the bridges when the app quit — there was no
+//   1. Nothing stopped the bridges when the app quit - there was no
 //      before-quit handler at all. `killAllTracked()` fixes that.
 //   2. SIGTERM alone was assumed to work. Two of the nine orphans sat at 0%
 //      CPU having ignored it. `killChild()` escalates.
 //   3. If the app is SIGKILLed or crashes, no in-process handler can run at
 //      all. `reapOrphans()` cleans up at the NEXT startup, which is the only
-//      defence that covers that case — and it's the case that actually
+//      defence that covers that case - and it's the case that actually
 //      happened.
 //
 // Why the children don't simply die on their own when the parent goes: ffmpeg
@@ -67,14 +67,14 @@ export function killChild(proc: ChildProcess | null | undefined): void {
             try { proc.kill('SIGKILL') } catch { /* raced with a clean exit */ }
         }
     }, KILL_GRACE_MS)
-    // Don't hold the event loop open purely to escalate a kill — if the app is
+    // Don't hold the event loop open purely to escalate a kill - if the app is
     // shutting down it should be allowed to.
     timer.unref?.()
     proc.once('exit', () => clearTimeout(timer))
 }
 
 /** Kills every tracked child immediately. Called from `before-quit` and, as a
- *  last resort, from `process.on('exit')` — which is synchronous and cannot
+ *  last resort, from `process.on('exit')` - which is synchronous and cannot
  *  wait, hence SIGKILL with no grace period. */
 export function killAllTracked(immediate = false): void {
     for (const proc of tracked) {
@@ -113,7 +113,7 @@ function readProcFile(pid: string, name: string): string | null {
  *
  *  The ppid === 1 test alone is not reliable: under a systemd user session an
  *  orphan is reparented to `systemd --user`, not to init. So instead of
- *  guessing at the new parent's pid, look at what the parent actually IS —
+ *  guessing at the new parent's pid, look at what the parent actually IS -
  *  and treat "not an Electron/HYRAK process" as orphaned. That also makes the
  *  check safe to run while a SIBLING instance is live: its children still
  *  have a real HYRAK parent and are left alone. */
@@ -121,13 +121,13 @@ function isOrphaned(pid: string): boolean {
     const stat = readProcFile(pid, 'stat')
     if (!stat) return false
     // Field 4 is ppid, but the comm field (2) can itself contain spaces or
-    // parentheses — so parse from the LAST ')' rather than splitting naively.
+    // parentheses - so parse from the LAST ')' rather than splitting naively.
     const after = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/)
     const ppid = after[1]
     if (!ppid || ppid === '0') return false
     if (ppid === '1') return true
     const parentCmd = readProcFile(ppid, 'cmdline')
-    if (!parentCmd) return true          // parent vanished — definitely orphaned
+    if (!parentCmd) return true          // parent vanished - definitely orphaned
     return !/HYRAK|electron/i.test(parentCmd)
 }
 
@@ -136,7 +136,7 @@ function isOrphaned(pid: string): boolean {
  *  This is the only defence that survives the app being SIGKILLed or
  *  crashing, because no in-process handler can run in that case. Linux only:
  *  it reads /proc. On other platforms it is a documented no-op rather than a
- *  half-working guess — the leak was observed on Linux, and a wrong process
+ *  half-working guess - the leak was observed on Linux, and a wrong process
  *  match on someone's workstation is worse than no cleanup.
  *
  *  Scoped deliberately narrowly: only processes whose executable is the
@@ -151,7 +151,7 @@ const APP_BIN = 'hyrak-desktop.bin'
 /** Kills app instances left over from a PREVIOUS VERSION after an update.
  *
  *  The observed failure: after "Update & restart", a 0.1.30 main process was
- *  still running while 0.1.31 was the installed version — holding udp:5600 and
+ *  still running while 0.1.31 was the installed version - holding udp:5600 and
  *  making the new instance's video unusable. Its ppid was `systemd --user`
  *  (reparented) and its executable was `/tmp/.mount_HYRAK-AEal2b/…`, a squashfs
  *  mount that no longer appeared in /proc/mounts at all.
@@ -159,13 +159,13 @@ const APP_BIN = 'hyrak-desktop.bin'
  *  That is the precise signature this looks for, and it is unambiguous: an
  *  AppImage's Electron binary lives ONLY inside that per-run mount, so if the
  *  path has gone the AppImage wrapper has already exited and unmounted it. The
- *  process is running from a filesystem that no longer exists — it cannot be
+ *  process is running from a filesystem that no longer exists - it cannot be
  *  anything but a leftover, and it can never be the version the user just
  *  installed.
  *
  *  Deliberately NOT a single-instance lock. Two instances of the CURRENT
  *  version are allowed on purpose (a live mount is never stale, so they are
- *  untouched) — only ghosts of superseded versions are removed.
+ *  untouched) - only ghosts of superseded versions are removed.
  *
  *  Linux/AppImage only; on Windows the NSIS installer replaces the binary in
  *  place and there is no mount to disappear.
@@ -199,7 +199,7 @@ export function reapStaleInstances(): number[] {
         // is noise at best.
         const cmdline = readProcFile(pid, 'cmdline')
         if (cmdline && cmdline.includes('--type=')) continue
-        if (!deleted && fs.existsSync(real)) continue   // live mount — a legitimate sibling
+        if (!deleted && fs.existsSync(real)) continue   // live mount - a legitimate sibling
         try {
             process.kill(Number(pid), 'SIGKILL')
             killed.push(Number(pid))
@@ -213,7 +213,7 @@ export function reapStaleInstances(): number[] {
  *  reapStaleInstances only removes ghosts whose AppImage mount has vanished.
  *  The case it cannot see: the user downloads HYRAK-0.1.40.AppImage next to a
  *  still-running HYRAK-0.1.39.AppImage. The old mount is perfectly healthy, so
- *  the old instance looks like "a legitimate sibling" — while silently holding
+ *  the old instance looks like "a legitimate sibling" - while silently holding
  *  udp:5600, which makes the new version's video dead on arrival, with no
  *  error a non-technical user could act on.
  *
@@ -274,7 +274,7 @@ function compareVersions(a: [number, number, number], b: [number, number, number
     return 0
 }
 
-export function reapOrphans(ffmpegPath: string): number[] {
+export function reapOrphans(ffmpegPath: string, appRoot: string = process.resourcesPath): number[] {
     if (process.platform !== 'linux') return []
     const killed: number[] = []
     let pids: string[]
@@ -285,17 +285,29 @@ export function reapOrphans(ffmpegPath: string): number[] {
     }
     // The AppImage mounts itself under a per-run /tmp/.mount_HYRAK-xxxxxx
     // path, so the previous run's ffmpeg path never matches this run's
-    // string exactly. Match on the stable trailing component instead.
+    // string exactly. Match on the stable trailing component, AND require the
+    // path to be one of OUR app's install locations: the exact binary this
+    // run resolved, anything under this run's resources dir (unpacked and
+    // dev builds), or a previous run's AppImage mount of THIS app (the mount
+    // name is the AppImage filename's first six characters, "HYRAK-"). Any
+    // other Electron app that bundles ffmpeg-static has the same trailing
+    // path and used to be reaped too.
     const marker = path.join('node_modules', 'ffmpeg-static', 'ffmpeg')
+    const appImage = process.env.APPIMAGE ? path.basename(process.env.APPIMAGE).slice(0, 6) : 'HYRAK-'
+    const mountPrefix = `/.mount_${appImage}`
+    const rootDir = appRoot ? path.resolve(appRoot) + path.sep : ''
     for (const pid of pids) {
         if (pid === String(process.pid)) continue
         let exe: string
         try {
-            exe = fs.readlinkSync(path.join('/proc', pid, 'exe'))
+            exe = fs.readlinkSync(path.join('/proc', pid, 'exe')).replace(/ \(deleted\)$/, '')
         } catch {
             continue   // not ours to inspect (permission) or already exited
         }
-        const isOurFfmpeg = exe.endsWith(marker) || exe === ffmpegPath
+        const isOurFfmpeg = exe === ffmpegPath
+            || (exe.endsWith(marker) && (
+                (rootDir !== '' && exe.startsWith(rootDir))
+                || exe.includes(mountPrefix)))
         if (!isOurFfmpeg) continue
         if (!isOrphaned(pid)) continue
         try {
