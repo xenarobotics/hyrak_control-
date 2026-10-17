@@ -65,7 +65,12 @@ def _drone_snapshot() -> dict[str, dict]:
                 by_id[d["db_id"]] = {
                     "id": d["db_id"], "name": d["name"],
                     "lat": lv["lat"], "lng": lv["lng"],
-                    "in_air": bool(lv["in_air"]),
+                    # Belt and braces on top of the fleet's own in_air: an
+                    # aircraft more than 1 m up is airborne whatever the
+                    # EXTENDED_SYS_STATE stream says. Advancing an order on
+                    # a false "landed" is how a drone got marked delivered
+                    # while still over the pad.
+                    "in_air": _airborne(lv.get("in_air"), lv.get("alt")),
                     "battery": lv.get("battery", 0.0) or 0.0,
                 }
     except Exception:
@@ -89,10 +94,23 @@ def _drone_snapshot() -> dict[str, dict]:
             by_id[did] = {
                 "id": did, "name": s.drone.get("name") or "",
                 "lat": lat, "lng": lng,
-                "in_air": bool(snap.flight_mode.is_in_air),
+                "in_air": _airborne(snap.flight_mode.is_in_air,
+                                    getattr(snap.position, "relative_altitude_m", 0.0)),
                 "battery": getattr(snap.battery, "remaining_percent", 0.0) or 0.0,
             }
     return by_id
+
+
+def _airborne(in_air, relative_altitude_m) -> bool:
+    """in_air OR more than 1 m above home. A non-finite or missing altitude
+    counts as 0 (it cannot prove flight), so the stream's own flag decides."""
+    try:
+        alt = float(relative_altitude_m)
+    except (TypeError, ValueError):
+        alt = 0.0
+    if not math.isfinite(alt):
+        alt = 0.0
+    return bool(in_air) or alt > 1.0
 
 
 def _eligible_drones(snapshot: dict[str, dict]) -> list[dict]:

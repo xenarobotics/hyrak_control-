@@ -11,8 +11,10 @@ start missions - with the same zone gate the socket upload path enforces.
 """
 import asyncio
 import logging
+import math
 
 from app.registry import drones as drone_registry
+from app.utils.safe_json import _sanitize
 
 logger = logging.getLogger("verocore.fleet")
 
@@ -21,6 +23,19 @@ _db_ids: dict[int, str] = {}          # instance -> drones.id (uuid)
 _names: dict[int, str] = {}
 _state: dict[int, dict] = {}          # instance -> latest snapshot dict
 _lock = asyncio.Lock()
+# One lock PER INSTANCE, held across a whole connect / rebuild / stale
+# teardown. The watchdog's try_adopt and fly_mission's _rebuild used to race
+# on the same instance: each spawned a fresh mavsdk_server and the other's
+# stop(kill_stale=True) killed it. The global _lock cannot be held across
+# the 10 s connect (it starved the event loop); a per-instance one can.
+_connect_locks: dict[int, asyncio.Lock] = {}
+
+
+def _instance_lock(i: int) -> asyncio.Lock:
+    lock = _connect_locks.get(i)
+    if lock is None:
+        lock = _connect_locks[i] = asyncio.Lock()
+    return lock
 
 # Where each drone's CURRENT mission ends - the deconfliction monitor
 # guards this point while the drone is inbound.
@@ -113,17 +128,26 @@ async def connect_one(i: int, manual: bool = False) -> str:
     """Connect one instance (idempotent). Returns a status string.
     manual=True (an operator's connect/adopt) lifts a DISCONNECT."""
     global _disabled
-    from app.telemetry.manager import TelemetryManager
     if manual:
         _disabled = False
+    async with _instance_lock(i):
+        return await _connect_one_locked(i)
+
+
+async def _connect_one_locked(i: int) -> str:
+    """connect_one's body; the caller holds _instance_lock(i)."""
+    from app.telemetry.manager import TelemetryManager
+    import time
     address = f"udpin://0.0.0.0:{_port_for(i)}"
     async with _lock:
         if i in _managers and _managers[i].is_connected:
             return "already connected"
     # Do the slow part (spawn mavsdk_server + up to a 10 s heartbeat wait)
-    # OUTSIDE the lock. Holding _lock across that await serialized every probe
-    # and blocked the whole fleet for ~10 s per empty port, which starved the
-    # event loop until the HTTP server stopped responding.
+    # OUTSIDE the global lock. Holding _lock across that await serialized
+    # every probe and blocked the whole fleet for ~10 s per empty port, which
+    # starved the event loop until the HTTP server stopped responding. The
+    # per-instance lock the caller holds is what keeps two connects for the
+    # SAME instance from killing each other's fresh mavsdk_server.
     # Distinct sysid per fleet link (201..): browser sessions keep MAVSDK's
     # default 245, so PX4 never confuses the two ground stations' replies.
     manager = TelemetryManager(on_update=_snapshot_cb(i), fleet_mode=True,
@@ -138,8 +162,8 @@ async def connect_one(i: int, manual: bool = False) -> str:
     await manager.start()
     async with _lock:
         if i in _managers and _managers[i].is_connected:
-            # Another task adopted this instance while we were connecting -
-            # drop the duplicate rather than leak a second live link.
+            # Cannot happen while the per-instance lock is held, kept as a
+            # guard: drop the duplicate rather than leak a second live link.
             try:
                 await manager.stop(kill_stale=False)
             except Exception:
@@ -148,6 +172,9 @@ async def connect_one(i: int, manual: bool = False) -> str:
         _managers[i] = manager
         _names[i] = f"Station Drone {i}"
         _adopted.add(i)   # watchdog heals it from now on, whatever its index
+        # A fresh link has no snapshot yet; without this the watchdog's stale
+        # test read the PREVIOUS link's last update and tore the new one down.
+        _last_update[i] = time.monotonic()
     # Register under the FC's real hardware UID whenever it can be read, so a
     # browser session that connects to the SAME aircraft over its own link
     # (air-unit UDP, radio) resolves to the same drone record: one identity,
@@ -201,26 +228,45 @@ async def disconnect_all() -> int:
     return len(managers)
 
 
+def _finite(v, default=0.0) -> float:
+    """A float that is safe to compare and to serialise (NaN/inf -> default)."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return default
+    return f if math.isfinite(f) else default
+
+
+def in_air_from(fm: dict, pos: dict) -> bool:
+    """in_air with a belt-and-braces altitude floor. The EXTENDED_SYS_STATE
+    stream is the honest source; an aircraft reporting more than 1 m above
+    its home is airborne whatever that stream says (or fails to say)."""
+    return bool(fm.get("is_in_air")) or _finite(pos.get("relative_altitude_m")) > 1.0
+
+
 def status() -> list[dict]:
-    """Live view for the board / dispatcher / sessions endpoint."""
+    """Live view for the board / dispatcher / sessions endpoint. Every float
+    in `live` is finite: NaN from an FC with no pack must never reach the
+    reserve check (NaN compares false against everything) or REST JSON (a
+    bare NaN token is not JSON and the browser's parse throws)."""
     out = []
     for i, m in sorted(_managers.items()):
         snap = _state.get(i) or {}
         pos = snap.get("position", {})
         fm = snap.get("flight_mode", {})
-        lat = pos.get("latitude_deg", 0.0)
-        lng = pos.get("longitude_deg", 0.0)
+        lat = _finite(pos.get("latitude_deg", 0.0))
+        lng = _finite(pos.get("longitude_deg", 0.0))
         live = None
         if m.is_connected and (lat or lng) and not _is_stale(i):
-            live = {
+            live = _sanitize({
                 "lat": lat, "lng": lng,
-                "alt": pos.get("relative_altitude_m", 0.0),
+                "alt": _finite(pos.get("relative_altitude_m", 0.0)),
                 "heading": snap.get("heading_deg", 0.0),
                 "armed": bool(fm.get("is_armed")),
-                "in_air": bool(fm.get("is_in_air")),
+                "in_air": in_air_from(fm, pos),
                 "mode": fm.get("mode", "UNKNOWN"),
                 "battery": snap.get("battery", {}).get("remaining_percent", 0.0),
-            }
+            })
         out.append({
             "instance": i,
             "db_id": _db_ids.get(i),
@@ -229,6 +275,17 @@ def status() -> list[dict]:
             "live": live,
         })
     return out
+
+
+def reserve_breached(battery) -> bool:
+    """True only for a KNOWN battery under the reserve. None, NaN, inf and
+    0.0 (SITL with no pack, a stream that has not arrived yet) are unknown,
+    and an unknown battery must not command a RETURN."""
+    try:
+        b = float(battery)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(b) and b > 0.0 and b < RESERVE_PCT
 
 
 def instance_for(db_id: str) -> int | None:
@@ -355,18 +412,21 @@ def live_manager(i: int):
 
 async def _rebuild(i: int):
     """Tear down instance i's manager and reconnect from scratch. Returns
-    the fresh manager, or None if no drone answered."""
-    async with _lock:
-        old = _managers.pop(i, None)
-        _state.pop(i, None)
-    if old is not None:
-        try:
-            await old.stop(kill_stale=True)
-        except Exception:
-            pass
-    if await connect_one(i) == "connected":
-        return _managers.get(i)
-    return None
+    the fresh manager, or None if no drone answered. The per-instance lock
+    is held for the whole teardown + connect so the watchdog cannot adopt
+    (or tear down) this instance halfway through."""
+    async with _instance_lock(i):
+        async with _lock:
+            old = _managers.pop(i, None)
+            _state.pop(i, None)
+        if old is not None:
+            try:
+                await old.stop(kill_stale=True)
+            except Exception:
+                pass
+        if await _connect_one_locked(i) == "connected":
+            return _managers.get(i)
+        return None
 
 
 def _airspace_overhead_busy(i: int) -> bool:
@@ -516,7 +576,7 @@ async def _monitor_cycle() -> None:
         if not lv or not lv["in_air"]:
             _reserve_triggered.discard(i)
             continue
-        if i in _reserve_triggered or lv["battery"] >= RESERVE_PCT:
+        if i in _reserve_triggered or not reserve_breached(lv.get("battery")):
             continue
         _reserve_triggered.add(i)
         mgr = _managers.get(i)
@@ -577,28 +637,31 @@ async def _watchdog_loop() -> None:
 
     async def try_adopt(i: int) -> None:
         async with sem:
-            m = _managers.get(i)
-            if m is not None and m.is_connected:
-                if not _is_stale(i):
-                    _fail_counts.pop(i, None)
+            if _instance_lock(i).locked():
+                return   # a connect/rebuild for this instance is in flight
+            async with _instance_lock(i):
+                m = _managers.get(i)
+                if m is not None and m.is_connected:
+                    if not _is_stale(i):
+                        _fail_counts.pop(i, None)
+                        return
+                    # Telemetry stopped flowing - the mavsdk_server under this
+                    # manager is gone (killed externally, sim restarted...).
+                    # Tear it down and rebuild the link from scratch.
+                    logger.warning(f"Fleet drone {i}: link stale - rebuilding")
+                    async with _lock:
+                        _managers.pop(i, None)
+                        _state.pop(i, None)
+                    try:
+                        await m.stop(kill_stale=True)
+                    except Exception:
+                        pass
+                # An instance that keeps failing is probably an empty port -
+                # retry it every 4th cycle, not every cycle (each attempt costs
+                # a 10 s connect timeout and a throwaway mavsdk_server).
+                if _fail_counts.get(i, 0) >= 3 and _scan_cycle % 4 != 0:
                     return
-                # Telemetry stopped flowing - the mavsdk_server under this
-                # manager is gone (killed externally, sim restarted...).
-                # Tear it down and rebuild the link from scratch.
-                logger.warning(f"Fleet drone {i}: link stale - rebuilding")
-                async with _lock:
-                    _managers.pop(i, None)
-                    _state.pop(i, None)
-                try:
-                    await m.stop(kill_stale=True)
-                except Exception:
-                    pass
-            # An instance that keeps failing is probably an empty port -
-            # retry it every 4th cycle, not every cycle (each attempt costs
-            # a 10 s connect timeout and a throwaway mavsdk_server).
-            if _fail_counts.get(i, 0) >= 3 and _scan_cycle % 4 != 0:
-                return
-            result = await connect_one(i)
+                result = await _connect_one_locked(i)
             if result == "connected":
                 _fail_counts.pop(i, None)
                 logger.info(f"Watchdog adopted fleet drone {i}")
