@@ -140,6 +140,10 @@ async def _execute_drone_action(tel, action: str, data: dict) -> dict:
     return {"action": action, "ok": False, "msg": "Unknown action"}
 
 
+
+_ENHANCE_KEYS = frozenset({"preset", "denoise", "sharpen", "contrast", "saturation",
+                           "brightness", "gamma", "resolution", "ai_upscale", "fps_cap"})
+
 def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=None):
     """
     Registers all Socket.IO events for telemetry, drone commands, and mode switching.
@@ -771,7 +775,6 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 )
                 return
         await sio.emit("person_selected", {"person_id": person_id}, to=sid)
-        await sio.emit("person_selected", {"person_id": person_id}, to=sid)
 
     @sio.on("set_pd_params")
     async def on_set_pd_params(sid, data):
@@ -913,8 +916,12 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             return
         analyzer = vision_pool.get_for_session(session.session_id)
         from app.vision.modules.enhancer import Enhancer
-        if isinstance(analyzer, Enhancer):
-            analyzer.set_params(session.session_id, **data)
+        if isinstance(analyzer, Enhancer) and isinstance(data, dict):
+            # Only the enhancer's own keys, scalar values: the payload comes
+            # straight from the socket and used to be splatted as **kwargs.
+            params = {k: v for k, v in data.items()
+                      if k in _ENHANCE_KEYS and (v is None or isinstance(v, (bool, int, float, str)))}
+            analyzer.set_params(session.session_id, **params)
 
     @sio.on("upload_mission")
     async def on_upload_mission(sid, data):
