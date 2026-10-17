@@ -320,6 +320,9 @@ class RelayIngest:
 _ingests: dict[str, RelayIngest] = {}
 # allocate()/release() run on executor threads (run_in_executor from the
 # socket handlers) as well as the loop; a threading lock, not an asyncio one.
+# It guards the DICT only. Nothing that blocks - spawning ffmpeg, waiting
+# for it to exit - ever runs while it is held, so a slow allocate on one
+# thread cannot stall another session's lookup (or the event loop).
 _ingests_lock = threading.Lock()
 
 
@@ -339,25 +342,43 @@ def allocate(session_id: str, transport: str = "srt", latency_ms: int = DEFAULT_
     with _ingests_lock:
         existing = _ingests.get(session_id)
         if existing is not None:
-            alive = existing.proc is not None and existing.proc.poll() is None
-            if alive and existing.transport == transport:
+            if _alive(existing) and existing.transport == transport:
                 logger.info(
                     f"Reusing relay ingest for session {session_id[:8]} "
                     f"({transport}:{existing.public_port})"
                 )
                 return existing
+            # Dead or wrong transport: unregister now, tear down outside.
             _ingests.pop(session_id, None)
-            existing.close()
+    if existing is not None:
+        existing.close()
 
-        ingest = RelayIngest(session_id, transport=transport, latency_ms=latency_ms)
-        ingest.start()
-        _ingests[session_id] = ingest
-        return ingest
+    ingest = RelayIngest(session_id, transport=transport, latency_ms=latency_ms)
+    ingest.start()
+    with _ingests_lock:
+        raced = _ingests.get(session_id)
+        if raced is not None and _alive(raced) and raced.transport == transport:
+            # Another allocate for the same session won while ffmpeg was
+            # starting here. Theirs is registered; ours must not leak.
+            loser = ingest
+        else:
+            _ingests[session_id] = ingest
+            loser = raced
+    if loser is not None:
+        loser.close()
+        if loser is ingest:
+            return raced
+    return ingest
+
+
+def _alive(ingest: RelayIngest) -> bool:
+    return ingest.proc is not None and ingest.proc.poll() is None
 
 
 def get(session_id: str) -> RelayIngest | None:
-    with _ingests_lock:
-        return _ingests.get(session_id)
+    # Lock-free on purpose: a dict read is atomic under the GIL, and this is
+    # called from the event loop, which must never wait on an allocate.
+    return _ingests.get(session_id)
 
 
 def release(session_id: str) -> None:

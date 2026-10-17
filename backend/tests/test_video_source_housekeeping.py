@@ -90,3 +90,89 @@ def test_sdp_carries_parameter_sets():
     finally:
         uvs._remove_sdp(path)
     assert not os.path.exists(path)
+
+
+# --------------------------------------------------------------------------- #
+# The ingest lock guards the dict only: ffmpeg spawn and teardown run outside  #
+# it, so a slow allocate never stalls get() on the event loop.                 #
+# --------------------------------------------------------------------------- #
+
+class _FakeIngest:
+    """Stands in for RelayIngest: records whether the module lock was held
+    while the blocking calls ran, and can hold start() open on demand."""
+    gate = None            # threading.Event: start() waits on it when set
+    started_locked = []
+    closed_locked = []
+
+    def __init__(self, session_id, transport="srt", latency_ms=0):
+        self.session_id, self.transport = session_id, transport
+        self.public_port = 3478
+        self.proc = None
+        self.closed = False
+
+    def start(self):
+        _FakeIngest.started_locked.append(rvs._ingests_lock.locked())
+        if _FakeIngest.gate is not None:
+            _FakeIngest.gate.wait(5.0)
+        self.proc = type("P", (), {"poll": staticmethod(lambda: None)})()
+
+    def close(self):
+        _FakeIngest.closed_locked.append(rvs._ingests_lock.locked())
+        self.closed = True
+        self.proc = type("P", (), {"poll": staticmethod(lambda: 0)})()
+
+
+@pytest.fixture
+def fake_ingests(monkeypatch):
+    monkeypatch.setattr(rvs, "RelayIngest", _FakeIngest)
+    monkeypatch.setattr(rvs, "_ingests", {})
+    _FakeIngest.gate = None
+    _FakeIngest.started_locked.clear()
+    _FakeIngest.closed_locked.clear()
+    yield
+
+
+def test_allocate_blocks_outside_the_lock_and_get_never_waits(fake_ingests):
+    _FakeIngest.gate = threading.Event()
+    worker = threading.Thread(target=rvs.allocate, args=("slow-session",), daemon=True)
+    worker.start()
+    # allocate is now parked inside start(); the lock must be free.
+    for _ in range(50):
+        if _FakeIngest.started_locked:
+            break
+        threading.Event().wait(0.01)
+    assert _FakeIngest.started_locked == [False]
+    assert rvs._ingests_lock.acquire(timeout=0.2), "lock held across ffmpeg spawn"
+    rvs._ingests_lock.release()
+    assert rvs.get("other-session") is None          # does not block
+    _FakeIngest.gate.set()
+    worker.join(2.0)
+    assert rvs.get("slow-session") is not None
+
+
+def test_dead_ingest_is_closed_outside_the_lock_and_replaced(fake_ingests):
+    first = rvs.allocate("s1", transport="srt")
+    first.close()                                    # ffmpeg died
+    _FakeIngest.closed_locked.clear()
+    second = rvs.allocate("s1", transport="srt")
+    assert second is not first and rvs.get("s1") is second
+    assert _FakeIngest.closed_locked == [False]
+    assert rvs.allocate("s1", transport="srt") is second, "live ingest is reused"
+    rvs.release("s1")
+    assert rvs.get("s1") is None and second.closed
+
+
+def test_concurrent_allocates_for_one_session_keep_a_single_ingest(fake_ingests):
+    _FakeIngest.gate = threading.Event()
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(rvs.allocate("race")), daemon=True)
+               for _ in range(2)]
+    for t in threads:
+        t.start()
+    threading.Event().wait(0.05)
+    _FakeIngest.gate.set()
+    for t in threads:
+        t.join(2.0)
+    assert len(results) == 2 and results[0] is results[1]
+    assert rvs.get("race") is results[0] and not results[0].closed
+    assert len(rvs._ingests) == 1
