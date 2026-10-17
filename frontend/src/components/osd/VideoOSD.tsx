@@ -90,7 +90,7 @@ function RollArc({ roll }: { roll: number }) {
 }
 
 export function VideoOSD({ stats }: Props) {
-    const { telemetry } = useDroneStore()
+    const telemetry = useDroneStore(s => s.telemetry)
     const { elapsed, running } = useFlightTimer()
     const { config, updateWidget, setPreset } = useOSDConfig()
 

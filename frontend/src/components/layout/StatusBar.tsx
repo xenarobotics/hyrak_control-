@@ -90,7 +90,12 @@ function BarButton({ onClick, disabled, color, title, children }: {
 }
 
 export function StatusBar() {
-    const { telemetry, telemetryStatus, mode, cvResults, lastActionResult, pendingAction } = useDroneStore()
+    const telemetry = useDroneStore(s => s.telemetry)
+    const telemetryStatus = useDroneStore(s => s.telemetryStatus)
+    const mode = useDroneStore(s => s.mode)
+    const cvResults = useDroneStore(s => s.cvResults)
+    const lastActionResult = useDroneStore(s => s.lastActionResult)
+    const pendingAction = useDroneStore(s => s.pendingAction)
     const { sendAction, arm, disarm } = useDrone()
     const { isStreaming, stats } = useWebRTCContext()
     const online = useOnlineStatus()

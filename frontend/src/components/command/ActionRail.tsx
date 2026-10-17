@@ -55,7 +55,10 @@ const INDOOR_TAKEOFF_M = 1.5, INDOOR_TAKEOFF_MAX_M = 2      // backend caps at 2
 
 export function ActionRail({ avoid }: { avoid?: AvoidanceStatus | null }) {
     const { sendAction, arm, disarm, emergencyStop } = useDrone()
-    const { telemetry: t, telemetryStatus, pendingAction, lastActionResult } = useDroneStore()
+    const t = useDroneStore(s => s.telemetry)
+    const telemetryStatus = useDroneStore(s => s.telemetryStatus)
+    const pendingAction = useDroneStore(s => s.pendingAction)
+    const lastActionResult = useDroneStore(s => s.lastActionResult)
     const indoor = avoid?.env === 'indoor'
     const [alt, setAlt] = useState(10)
     // Indoors the 10 m default meets the ceiling: drop to 1.5 m and cap at 2.

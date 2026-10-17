@@ -24,7 +24,10 @@ export function DroneControls() {
     useEffect(() => { setMounted(true) }, [])
 
     const { arm, disarm, sendAction } = useDrone()
-    const { telemetry, telemetryStatus, pendingAction, lastActionResult } = useDroneStore()
+    const telemetry = useDroneStore(s => s.telemetry)
+    const telemetryStatus = useDroneStore(s => s.telemetryStatus)
+    const pendingAction = useDroneStore(s => s.pendingAction)
+    const lastActionResult = useDroneStore(s => s.lastActionResult)
     const [modeError, setModeError] = useState<string | null>(null)
     const swarmEnabled = useSwarmStore(s => s.enabled)
     const selectedIds  = useSwarmStore(s => s.selectedIds)

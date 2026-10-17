@@ -42,7 +42,10 @@ function timeOf(ts: number): string {
 type Variant = 'bar' | 'floating'
 
 export function FcMessageLog({ variant = 'bar' }: { variant?: Variant }) {
-    const { fcMessages, fcUnread, clearFcMessages, markFcRead } = useDroneStore()
+    const fcMessages = useDroneStore(s => s.fcMessages)
+    const fcUnread = useDroneStore(s => s.fcUnread)
+    const clearFcMessages = useDroneStore(s => s.clearFcMessages)
+    const markFcRead = useDroneStore(s => s.markFcRead)
     const [open, setOpen] = useState(false)
     const [mounted, setMounted] = useState(false)
     useEffect(() => { setMounted(true) }, [])

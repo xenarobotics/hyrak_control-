@@ -3,10 +3,23 @@ import type { TelemetrySnapshot } from '@/types/telemetry'
 import type {
     AnalysisMode,
     ConnectionStatus,
+    StreamStatus,
     TelemetryStatus,
     SessionInfo,
 } from '@/types/session'
 import type { CVResult } from '@/types/vision'
+
+/** One waypoint as the backend reports it after reading the aircraft's
+ *  stored mission on connect - the wire shape, not the planner's. */
+export interface DroneMissionWaypoint {
+    lat: number
+    lng: number
+    altitude?: number
+    speed?: number
+    hold_time?: number
+    type?: string
+    yaw?: number | null
+}
 
 export interface MissionUploadResult {
     ok: boolean
@@ -60,7 +73,13 @@ export interface RcTakeoverReport {
 
 interface DroneStore {
     // Connection
+    /** The browser's socket.io link to the cloud. Owned by useDrone and
+     *  nothing else - the video hook used to write it too, so stopping a
+     *  stream showed DISCONNECTED while the socket was perfectly up. */
     connectionStatus: ConnectionStatus
+    /** The WebRTC video stream, owned by useWebRTC. Separate from the socket
+     *  on purpose: video can be idle or failed while the cloud is connected. */
+    streamStatus: StreamStatus
     telemetryStatus: TelemetryStatus
     // Why the last connect attempt failed - shown under the Connect button
     // so a failed connect never ends as a silent spinner-stop.
@@ -76,7 +95,7 @@ interface DroneStore {
     // Mission feedback
     missionUploadResult: MissionUploadResult | null
     lastActionResult: ActionResult | null
-    droneMissionOffer: any[] | null   // waypoints downloaded from drone on connect
+    droneMissionOffer: DroneMissionWaypoint[] | null   // waypoints downloaded from drone on connect
 
     /** The command that has been sent and not yet answered, so a button can
      *  say ARMING… the instant it is pressed. Without this the UI shows
@@ -101,6 +120,7 @@ interface DroneStore {
     clearFcMessages: () => void
     markFcRead: () => void
     setConnectionStatus: (s: ConnectionStatus) => void
+    setStreamStatus: (s: StreamStatus) => void
     setTelemetryStatus: (s: TelemetryStatus) => void
     setTelemetryError: (msg: string | null) => void
     setSession: (s: SessionInfo | null) => void
@@ -111,7 +131,7 @@ interface DroneStore {
     setCvResults: (r: CVResult | null) => void
     setMissionUploadResult: (r: MissionUploadResult | null) => void
     setLastActionResult: (r: ActionResult | null) => void
-    setDroneMissionOffer: (wps: any[] | null) => void
+    setDroneMissionOffer: (wps: DroneMissionWaypoint[] | null) => void
     reset: () => void
 }
 
@@ -141,6 +161,7 @@ const defaultTelemetry: TelemetrySnapshot = {
 
 export const useDroneStore = create<DroneStore>((set) => ({
     connectionStatus: 'disconnected',
+    streamStatus: 'idle',
     telemetryStatus: 'disconnected',
     telemetryError: null,
     session: null,
@@ -157,6 +178,7 @@ export const useDroneStore = create<DroneStore>((set) => ({
     isEmergencyConfirm: false,
 
     setConnectionStatus: (s) => set({ connectionStatus: s }),
+    setStreamStatus: (s) => set({ streamStatus: s }),
     // Starting a new attempt or connecting successfully clears the stale error.
     setTelemetryStatus: (s) => set(state => ({
         telemetryStatus: s,
@@ -213,6 +235,7 @@ export const useDroneStore = create<DroneStore>((set) => ({
     markFcRead: () => set({ fcUnread: 0 }),
     reset: () => set({
         connectionStatus: 'disconnected',
+        streamStatus: 'idle',
         telemetryStatus: 'disconnected',
         telemetryError: null,
         session: null,

@@ -36,6 +36,8 @@ const NAV = [
 // Mount socket ONCE at layout level - persists across all tab navigation
 function DroneConnection() {
     useDrone()
+    // Persisted swarm flag, read after mount (see store/swarm.ts hydrate).
+    useEffect(() => { useSwarmStore.getState().hydrate() }, [])
     return null
 }
 
@@ -54,7 +56,8 @@ function PlatformNav() {
     const pathname = usePathname()
     const router = useRouter()
     const { isStreaming, stopStream } = useWebRTCContext()
-    const { setMode, setCvResults } = useDroneStore()
+    const setMode = useDroneStore(s => s.setMode)
+    const setCvResults = useDroneStore(s => s.setCvResults)
     const [pendingHref, setPendingHref] = useState<string | null>(null)
 
     function handleNavClick(href: string, e: React.MouseEvent) {

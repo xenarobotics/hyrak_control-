@@ -4,7 +4,7 @@
 // is the aircraft doing, is avoidance watching. Built for a glance, not for
 // reading - the details live in the dock.
 
-import { Battery, Cloud, Navigation, Radio, Satellite, ShieldCheck, Timer } from 'lucide-react'
+import { Battery, Cloud, Navigation, Radio, Satellite, ShieldCheck, Timer, Video } from 'lucide-react'
 import { useDroneStore } from '@/store/drone'
 import { useFlightTimer } from '@/hooks/useFlightTimer'
 import type { AvoidanceStatus } from '@/lib/avoidance'
@@ -28,7 +28,10 @@ function Cell({ icon, label, value, color, title }: {
 }
 
 export function StatusStrip({ avoid }: { avoid: AvoidanceStatus | null }) {
-    const { telemetry: t, connectionStatus, telemetryStatus } = useDroneStore()
+    const t = useDroneStore(s => s.telemetry)
+    const connectionStatus = useDroneStore(s => s.connectionStatus)
+    const streamStatus = useDroneStore(s => s.streamStatus)
+    const telemetryStatus = useDroneStore(s => s.telemetryStatus)
     const { elapsed } = useFlightTimer()
     const cloudOk = connectionStatus === 'connected'
     const droneOk = telemetryStatus === 'connected' && t?.link_ok !== false
@@ -49,6 +52,12 @@ export function StatusStrip({ avoid }: { avoid: AvoidanceStatus | null }) {
             <Cell icon={<Cloud size={13} />} value={cloudOk ? 'CLOUD' : connectionStatus.toUpperCase()}
                 color={cloudOk ? '#4ade80' : connectionStatus === 'reconnecting' ? '#fbbf24' : '#f87171'}
                 title="Browser to cloud (socket)" />
+            {streamStatus !== 'idle' && (
+                <Cell icon={<Video size={13} />}
+                    value={streamStatus === 'connected' ? 'VIDEO' : streamStatus.toUpperCase()}
+                    color={streamStatus === 'connected' ? '#4ade80' : streamStatus === 'connecting' ? '#fbbf24' : '#f87171'}
+                    title="Video stream (WebRTC)" />
+            )}
             <Cell icon={<Radio size={13} />}
                 value={droneOk ? 'LINK' : t?.link_ok === false ? `LOST ${Math.round(t.link_lost_s ?? 0)}s` : 'NO LINK'}
                 color={droneOk ? '#4ade80' : '#f87171'} title="Cloud to aircraft (MAVLink)" />
