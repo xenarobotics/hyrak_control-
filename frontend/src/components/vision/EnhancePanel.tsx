@@ -103,7 +103,7 @@ function ParamSlider({
 }
 
 export function EnhancePanel() {
-    const cvResults = useDroneStore(s => s.cvResults) as any
+    const cvResults = useDroneStore(s => s.cvResults)
     const [params, setParams] = useState<EnhanceParams>(DEFAULTS)
 
     const inputRes = cvResults?.input_resolution ?? '-'

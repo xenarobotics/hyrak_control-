@@ -835,7 +835,6 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
     // Source frame size, shared between the render loop and the pointer
     // handlers so a click is mapped with the same dimensions it was drawn at.
     const sourceSize = useRef({ W: 1280, H: 720 })
-    const lastPayload = useRef<CVResult | null>(null)
 
     useEffect(() => {
         if (!cvResults) return
@@ -845,7 +844,6 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
                 field, cvResults[field as keyof CVResult] as never,
             )
         }
-        lastPayload.current = cvResults
     }, [cvResults, mode])
 
     // Switching modes must not carry tracks across - the lists mean different

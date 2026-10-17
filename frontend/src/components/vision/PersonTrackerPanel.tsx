@@ -144,24 +144,24 @@ export function PersonTrackerPanel() {
 
     const fileInputRef = useRef<HTMLInputElement>(null)
 
-    const persons = (cvResults as any)?.persons ?? []
-    const personCount = (cvResults as any)?.person_count ?? 0
-    const targetId = (cvResults as any)?.target_id ?? null
-    const similarity = (cvResults as any)?.similarity ?? 0
-    const faceConfirmed = (cvResults as any)?.face_confirmed ?? false
-    const searching = (cvResults as any)?.searching ?? false
-    const cmd = (cvResults as any)?.drone_command
+    const persons = cvResults?.persons ?? []
+    const personCount = cvResults?.person_count ?? 0
+    const targetId = cvResults?.target_id ?? null
+    const similarity = cvResults?.similarity ?? 0
+    const faceConfirmed = cvResults?.face_confirmed ?? false
+    const searching = cvResults?.searching ?? false
+    const cmd = cvResults?.drone_command
     // Gallery mode + pursuit state, from the backend's meta.
-    const personName = (cvResults as any)?.person_name ?? null
-    const personId = (cvResults as any)?.person_id ?? null
-    const galleryMargin = (cvResults as any)?.gallery_margin ?? null
+    const personName = cvResults?.person_name ?? null
+    const personId = cvResults?.person_id ?? null
+    const galleryMargin = cvResults?.gallery_margin ?? null
     // EVERY identified person in frame, not only the followed one.
-    const identities = (cvResults as any)?.identities ?? []
-    const lockManual = (cvResults as any)?.lock_manual ?? false
-    const lockState = (cvResults as any)?.lock_state ?? 'idle'
-    const lockMessage = (cvResults as any)?.lock_message ?? ''
-    const elevate = (cvResults as any)?.elevate ?? null
-    const capture = (cvResults as any)?.capture ?? null
+    const identities = cvResults?.identities ?? []
+    const lockManual = cvResults?.lock_manual ?? false
+    const lockState = cvResults?.lock_state ?? 'idle'
+    const lockMessage = cvResults?.lock_message ?? ''
+    const elevate = cvResults?.elevate ?? null
+    const capture = cvResults?.capture ?? null
 
     // Tracking used to be gated on an uploaded reference photo alone, which
     // meant tapping somebody on the video could never actually start a

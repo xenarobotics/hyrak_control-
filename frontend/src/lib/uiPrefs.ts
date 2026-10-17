@@ -29,14 +29,24 @@ const FONT_KEY = 'hyrak-ui-font'
 const ZOOM_KEY = 'hyrak-ui-zoom'
 const TEXTSIZE_KEY = 'hyrak-ui-textsize'
 
+// Every localStorage access is wrapped: a private window, cleared site data
+// or a blocked storage policy throws, and a preference read must never take
+// the page down with it.
+function readKey(key: string): string | null {
+    try { return localStorage.getItem(key) } catch { return null }
+}
+function writeKey(key: string, value: string) {
+    try { localStorage.setItem(key, value) } catch { /* not critical */ }
+}
+
 export function getUiFont(): UiFont {
     if (typeof window === 'undefined') return 'default'
-    const v = localStorage.getItem(FONT_KEY)
+    const v = readKey(FONT_KEY)
     return (UI_FONTS.some(f => f.value === v) ? v : 'default') as UiFont
 }
 
 export function setUiFont(font: UiFont) {
-    localStorage.setItem(FONT_KEY, font)
+    writeKey(FONT_KEY, font)
     applyUiFont(font)
 }
 
@@ -48,12 +58,12 @@ export function applyUiFont(font: UiFont) {
 
 export function getUiZoom(): number {
     if (typeof window === 'undefined') return 100
-    const v = Number(localStorage.getItem(ZOOM_KEY))
+    const v = Number(readKey(ZOOM_KEY))
     return UI_ZOOMS.includes(v as (typeof UI_ZOOMS)[number]) ? v : 100
 }
 
 export function setUiZoom(pct: number) {
-    localStorage.setItem(ZOOM_KEY, String(pct))
+    writeKey(ZOOM_KEY, String(pct))
     applyUiZoom(pct)
 }
 
@@ -66,12 +76,12 @@ export function applyUiZoom(pct: number) {
 
 export function getUiTextSize(): UiTextSize {
     if (typeof window === 'undefined') return 'default'
-    const v = localStorage.getItem(TEXTSIZE_KEY)
+    const v = readKey(TEXTSIZE_KEY)
     return (UI_TEXT_SIZES.some(t => t.value === v) ? v : 'default') as UiTextSize
 }
 
 export function setUiTextSize(size: UiTextSize) {
-    localStorage.setItem(TEXTSIZE_KEY, size)
+    writeKey(TEXTSIZE_KEY, size)
     applyUiTextSize(size)
 }
 
@@ -93,10 +103,10 @@ export const UI_MODE_EVENT = 'hyrak-ui-mode-change'
 
 export function getUiMode(): UiMode {
     if (typeof window === 'undefined') return 'dev'
-    return localStorage.getItem(MODE_KEY) === 'normal' ? 'normal' : 'dev'
+    return readKey(MODE_KEY) === 'normal' ? 'normal' : 'dev'
 }
 
 export function setUiMode(mode: UiMode) {
-    try { localStorage.setItem(MODE_KEY, mode) } catch { /* not critical */ }
+    writeKey(MODE_KEY, mode)
     window.dispatchEvent(new CustomEvent(UI_MODE_EVENT, { detail: mode }))
 }

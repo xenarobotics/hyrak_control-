@@ -205,7 +205,7 @@ export function HumanTrackingPanel() {
     const handleCloser = () => handleDistanceChange(distanceRatio + DISTANCE_STEP)
     const handleFurther = () => handleDistanceChange(distanceRatio - DISTANCE_STEP)
 
-    const cmd = (cvResults as any)?.drone_command
+    const cmd = cvResults?.drone_command
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
