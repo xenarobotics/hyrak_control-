@@ -25,9 +25,8 @@ from typing import Any, Dict, Optional, Tuple
 import cv2
 import numpy as np
 import torch
-from ultralytics import YOLO
 
-from app.vision.base import BaseAnalyzer
+from app.vision.base import BaseAnalyzer, locked_setter
 from app.vision.drawing import draw_brackets
 from app.vision.tracker_config import make_bytetrack_cfg
 from app.vision.controllers import (
@@ -301,41 +300,28 @@ class PersonTracker(BaseAnalyzer):
     MODE = "person-tracking"
 
     def __init__(self, **kwargs):
-        super().__init__(executor_workers=2, **kwargs)
+        super().__init__(executor_workers=1, **kwargs)
         settings = get_settings()
         self.device = settings.device
 
-        self.model = YOLO(settings.default_yolo_model)
-        self.model.to(self.device)
+        # Weights shared process-wide (model_cache), wrapper private so the
+        # ByteTrack state behind track(persist=True) stays this session's.
+        self.model = self.acquire_yolo(settings.default_yolo_model, self.device)
         self.half = self.device == "cuda"
-        # Warm-up so CUDA kernel init doesn't stall the first live frames
+        # Warm-up at the mode's real inference size so CUDA kernel init and
+        # cuDNN autotune don't stall the first live frames.
+        warm = self.warmup_frame()
         self.model(
-            np.zeros((360, 640, 3), dtype=np.uint8),
+            warm, imgsz=self.imgsz_for(warm),
             device=self.device, half=self.half, verbose=False,
         )
 
-        import insightface
-        providers = (
-            # HEURISTIC instead of the ORT default EXHAUSTIVE: exhaustive
-            # cuDNN algo search benchmarks every conv algorithm on the first
-            # inference, freezing the pipeline for seconds mid-stream.
-            [("CUDAExecutionProvider", {"cudnn_conv_algo_search": "HEURISTIC"}),
-             "CPUExecutionProvider"]
-            if torch.cuda.is_available()
-            else ["CPUExecutionProvider"]
-        )
-        self.face_app = insightface.app.FaceAnalysis(name="buffalo_sc", providers=providers)
-        ctx_id = 0 if torch.cuda.is_available() else -1
-        self.face_app.prepare(ctx_id=ctx_id, det_size=(640, 640))
-        # Warm up both face models at load so first-inference CUDA/cuDNN
-        # init doesn't stall the live stream at the first face check.
-        self.face_app.get(np.zeros((360, 640, 3), dtype=np.uint8))
-        try:
-            rec = self.face_app.models.get("recognition")
-            if rec is not None:
-                rec.get_feat(np.zeros((112, 112, 3), dtype=np.uint8))
-        except Exception:
-            pass
+        # InsightFace det + rec ORT sessions, shared process-wide and warmed
+        # by the cache loader (HEURISTIC conv search, both models exercised
+        # once). The same instance serves the face gallery's enrolment.
+        from app.vision.model_cache import shared_face_app
+        face_app, handle = shared_face_app("buffalo_sc", self.device, det_size=(640, 640))
+        self.face_app = self.hold(handle)
 
         self._client_state: Dict[str, Dict[str, Any]] = {}
         # Installed by set_gallery() once a session starts; None until then,
@@ -392,6 +378,7 @@ class PersonTracker(BaseAnalyzer):
                 f"{gallery.person_count} person(s)"
             )
 
+    @locked_setter
     def set_gallery_mode(self, client_id: str, enabled: bool) -> None:
         """
         Turn database matching on or off for one session.
@@ -743,6 +730,7 @@ class PersonTracker(BaseAnalyzer):
             f"(operator selected)"
         )
 
+    @locked_setter
     def request_follow(self, client_id: str, person_id: Optional[str]) -> None:
         """
         Ask to follow a specific enrolled person, or None to release and let
@@ -796,6 +784,7 @@ class PersonTracker(BaseAnalyzer):
             "track_id":    int(person["id"]),
         })
 
+    @locked_setter
     def set_reference_embedding(self, client_id: str, embedding: np.ndarray):
         if client_id not in self._client_state:
             return
@@ -811,6 +800,7 @@ class PersonTracker(BaseAnalyzer):
         state["kalman"].reset()
         logger.info(f"Session {client_id[:8]}: reference embedding stored")
 
+    @locked_setter
     def clear_reference(self, client_id: str):
         if client_id not in self._client_state:
             return
@@ -832,6 +822,7 @@ class PersonTracker(BaseAnalyzer):
         state["dist_pd"].reset()
         logger.info(f"Session {client_id[:8]}: reference cleared")
 
+    @locked_setter
     def set_tracking(self, client_id: str, active: bool):
         if client_id not in self._client_state:
             return
@@ -852,6 +843,7 @@ class PersonTracker(BaseAnalyzer):
         state["target_row"] = None
         logger.info(f"Session {client_id[:8]}: tracking {'STARTED' if active else 'STOPPED'}")
 
+    @locked_setter
     def set_pd_params(self, client_id: str, kp: float, kd: float,
                       max_output: float, deadband: float):
         """Backward-compatible hook: updates yaw PD gains only."""
@@ -863,6 +855,7 @@ class PersonTracker(BaseAnalyzer):
         pd.max_output = min(max_output, 55.0)
         pd.deadband = deadband
 
+    @locked_setter
     def set_altitude_mode(self, client_id: str, mode: str):
         """'fixed' = hold current altitude (down_m_s=0). 'auto' = altitude PD active."""
         if client_id not in self._client_state or mode not in ("fixed", "auto"):
@@ -879,6 +872,7 @@ class PersonTracker(BaseAnalyzer):
             state["dist_pd"].reset()
         logger.info(f"Session {client_id[:8]}: altitude mode → {mode}")
 
+    @locked_setter
     def set_tracking_params(self, client_id: str, target_distance_ratio: float):
         """Adjust target follow distance.
         0.15 → far (~8-10 m), 0.25 → default (~5-6 m), 0.40 → close (~2-3 m).
@@ -903,6 +897,7 @@ class PersonTracker(BaseAnalyzer):
             state["row_pd"].reset()
         logger.info(f"Session {client_id[:8]}: distance ratio → {ratio:.2f}")
 
+    @locked_setter
     def set_altitude_nudge(self, client_id: str, velocity: float):
         """Set manual altitude velocity for Fixed mode.
         -ve = ascend, +ve = descend (NED). 0 = stop. Cleared on tracking stop."""

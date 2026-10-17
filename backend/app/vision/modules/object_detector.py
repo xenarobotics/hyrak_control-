@@ -2,7 +2,6 @@ import logging
 from typing import Any, Dict, Tuple
 import numpy as np
 import torch
-from ultralytics import YOLO
 
 from app.vision.base import BaseAnalyzer
 from app.vision.drawing import draw_brackets, draw_badge
@@ -17,16 +16,18 @@ class ObjectDetector(BaseAnalyzer):
     MODE = "object-detection"
 
     def __init__(self, **kwargs):
-        super().__init__(executor_workers=2, **kwargs)
+        super().__init__(executor_workers=1, **kwargs)
         settings = get_settings()
         self.device = settings.device
 
         logger.info(f"Loading YOLO on {self.device}...")
-        self.model = YOLO(settings.default_yolo_model)
-        self.model.to(self.device)
-        # Warm-up so CUDA kernel init doesn't stall the first live frames
+        # Weights shared process-wide (model_cache), wrapper private.
+        self.model = self.acquire_yolo(settings.default_yolo_model, self.device)
+        # Warm-up at the mode's real inference size so CUDA kernel init and
+        # cuDNN autotune don't stall the first live frames.
+        warm = self.warmup_frame()
         self.model(
-            np.zeros((360, 640, 3), dtype=np.uint8),
+            warm, imgsz=self.imgsz_for(warm),
             device=self.device, half=self.device == "cuda", verbose=False,
         )
         logger.info(f"✅ ObjectDetector ready on {self.device.upper()}")

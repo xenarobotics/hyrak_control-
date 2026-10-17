@@ -5,9 +5,8 @@ from typing import Any, Dict, Tuple
 import cv2
 import numpy as np
 import torch
-from ultralytics import YOLO
 
-from app.vision.base import BaseAnalyzer
+from app.vision.base import BaseAnalyzer, locked_setter
 from app.vision.drawing import draw_brackets, draw_badge
 from app.vision.tracker_config import make_bytetrack_cfg
 from app.vision.controllers import (
@@ -152,15 +151,18 @@ class HumanTracker(BaseAnalyzer):
     MODE = "human-tracking"
 
     def __init__(self, **kwargs):
-        super().__init__(executor_workers=2, **kwargs)
+        super().__init__(executor_workers=1, **kwargs)
         settings = get_settings()
         self.device = settings.device
-        self.model = YOLO(settings.default_yolo_model)
-        self.model.to(self.device)
+        # Weights shared process-wide (model_cache), wrapper private so the
+        # ByteTrack state behind track(persist=True) stays this session's.
+        self.model = self.acquire_yolo(settings.default_yolo_model, self.device)
         self.half = self.device == "cuda"
-        # Warm-up so CUDA kernel init doesn't stall the first live frames
+        # Warm-up at the mode's real inference size so CUDA kernel init and
+        # cuDNN autotune don't stall the first live frames.
+        warm = self.warmup_frame()
         self.model(
-            np.zeros((360, 640, 3), dtype=np.uint8),
+            warm, imgsz=self.imgsz_for(warm),
             device=self.device, half=self.half, verbose=False,
         )
         self._client_state: Dict[str, Dict[str, Any]] = {}
@@ -174,6 +176,7 @@ class HumanTracker(BaseAnalyzer):
         await super().unregister_client(client_id)
         self._client_state.pop(client_id, None)
 
+    @locked_setter
     def set_selected_person(self, client_id: str, person_id: int):
         if client_id not in self._client_state:
             return
@@ -185,6 +188,7 @@ class HumanTracker(BaseAnalyzer):
         state["kalman"].reset()
         logger.info(f"Session {client_id[:8]}: selected person #{person_id}")
 
+    @locked_setter
     def set_tracking(self, client_id: str, active: bool):
         if client_id not in self._client_state:
             return
@@ -206,6 +210,7 @@ class HumanTracker(BaseAnalyzer):
         state["target_row"] = None
         logger.info(f"Session {client_id[:8]}: tracking {'STARTED' if active else 'STOPPED'}")
 
+    @locked_setter
     def set_pd_params(self, client_id: str, kp: float, kd: float,
                       max_output: float, deadband: float):
         """Backward-compatible hook: updates yaw PD gains only."""
@@ -218,6 +223,7 @@ class HumanTracker(BaseAnalyzer):
         pd.deadband = deadband
         logger.info(f"Session {client_id[:8]}: yaw PD kp={kp} kd={kd}")
 
+    @locked_setter
     def set_altitude_mode(self, client_id: str, mode: str):
         """'fixed' = hold current altitude (down_m_s=0). 'auto' = altitude PD active."""
         if client_id not in self._client_state or mode not in ("fixed", "auto"):
@@ -237,6 +243,7 @@ class HumanTracker(BaseAnalyzer):
             state["dist_pd"].reset()
         logger.info(f"Session {client_id[:8]}: altitude mode → {mode}")
 
+    @locked_setter
     def set_tracking_params(self, client_id: str, target_distance_ratio: float):
         """Adjust target follow distance.
         0.15 → far (~8-10 m), 0.25 → default (~5-6 m), 0.40 → close (~2-3 m).
@@ -266,6 +273,7 @@ class HumanTracker(BaseAnalyzer):
             logger.info(f"Session {client_id[:8]}: target row → {state['target_row']:.2f}")
         logger.info(f"Session {client_id[:8]}: distance ratio → {ratio:.2f}")
 
+    @locked_setter
     def set_altitude_nudge(self, client_id: str, velocity: float):
         """Set a manual altitude velocity for Fixed mode.
         -ve = ascend, +ve = descend (NED convention). 0 = stop.
