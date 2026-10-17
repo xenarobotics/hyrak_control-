@@ -47,6 +47,16 @@ TOKEN_CACHE_S = 60.0
 TOUCH_INTERVAL_S = 300.0
 LOGIN_MAX_FAILURES = 5
 LOGIN_WINDOW_S = 15 * 60
+# Per-USERNAME failures do not hard-lock the account (an attacker spraying
+# a known operator name from many addresses would lock the operator out of
+# their own aircraft). After LOGIN_MAX_FAILURES the next attempt must wait
+# an exponentially growing delay, capped, that resets on success or after
+# LOGIN_WINDOW_S of quiet. The per-IP limit stays a hard lock: that is the
+# attacker's side of the connection.
+USERNAME_BACKOFF_BASE_S = 2.0
+USERNAME_BACKOFF_MAX_S = 120.0
+# How often a live socket's token is re-checked against the store.
+SOCKET_REVALIDATE_S = TOKEN_CACHE_S
 LEGACY_USER_ID = "legacy-token"
 
 
@@ -104,6 +114,7 @@ def reset_for_tests() -> None:
     _memory = MemoryStore()
     _token_cache.clear()
     _failures.clear()
+    _revocation_listeners.clear()
 
 
 # ── Token cache ───────────────────────────────────────────────────────────
@@ -140,6 +151,25 @@ def drop_cached_user(user_id: str) -> None:
         _token_cache.pop(h, None)
 
 
+# Called with a user id whenever that user's access changes (tokens
+# revoked, role changed, disabled, deleted). server.py registers one that
+# disconnects every live socket of that user, so a revocation takes effect
+# on the next packet, not on the next page load.
+_revocation_listeners: list = []
+
+
+def on_user_revoked(callback) -> None:
+    _revocation_listeners.append(callback)
+
+
+async def _notify_revoked(user_id: str) -> None:
+    for cb in list(_revocation_listeners):
+        try:
+            await cb(user_id)
+        except Exception as e:
+            logger.warning(f"auth: revocation listener failed: {e}")
+
+
 # ── Login rate limit ──────────────────────────────────────────────────────
 
 _failures: dict[str, deque] = {}
@@ -152,10 +182,25 @@ def _prune(key: str, now: float) -> deque:
     return q
 
 
-def _limited(username: str, ip: str) -> bool:
+def username_backoff_s(username: str, now: float | None = None) -> float:
+    """Seconds this username must still wait before another attempt."""
+    now = time.monotonic() if now is None else now
+    q = _prune(f"u:{username}", now)
+    n = len(q)
+    if n < LOGIN_MAX_FAILURES:
+        return 0.0
+    delay = min(USERNAME_BACKOFF_BASE_S * (2 ** (n - LOGIN_MAX_FAILURES)), USERNAME_BACKOFF_MAX_S)
+    return max(0.0, q[-1] + delay - now)
+
+
+def _limited(username: str, ip: str) -> float | None:
+    """None when the attempt may proceed, else the seconds to wait (0 means
+    the per-IP hard lock, i.e. the rest of the window)."""
     now = time.monotonic()
-    return (len(_prune(f"u:{username}", now)) >= LOGIN_MAX_FAILURES
-            or len(_prune(f"ip:{ip}", now)) >= LOGIN_MAX_FAILURES)
+    if len(_prune(f"ip:{ip}", now)) >= LOGIN_MAX_FAILURES:
+        return 0.0
+    wait = username_backoff_s(username, now)
+    return wait if wait > 0 else None
 
 
 def _record_failure(username: str, ip: str) -> None:
@@ -242,15 +287,21 @@ async def update_user(user_id: str, *, role: str | None = None, disabled: bool |
         fields["password_hash"] = hash_password(password)
     if not fields:
         return await _find_user_by_id(user_id)
+    # Both stores, always: the env admin lives in memory AND in the DB, and
+    # a demotion or disable that only reached one of them would still let
+    # the other answer with the old role after a DB flap.
     out = None
     if _db_up():
         out = await _db.update_user(user_id, **fields)
-    if out is None:
-        out = await _memory.update_user(user_id, **fields)
+    mem = await _memory.update_user(user_id, **fields)
+    out = out or mem
     if out is not None:
         drop_cached_user(user_id)
         if fields.get("disabled") or "password_hash" in fields:
             await revoke_all(user_id)
+        else:
+            # Role change: live sockets must pick the new role up now.
+            await _notify_revoked(user_id)
     return out
 
 
@@ -260,6 +311,8 @@ async def delete_user(user_id: str) -> bool:
         ok = await _db.delete_user(user_id)
     ok = (await _memory.delete_user(user_id)) or ok
     drop_cached_user(user_id)
+    if ok:
+        await _notify_revoked(user_id)
     return ok
 
 
@@ -291,9 +344,12 @@ async def login(username: str, password: str, ip: str, label: str = "") -> tuple
         _record_failure(username or "-", ip)
         logger.warning(f"auth: login failed (malformed) ip={ip}")
         raise AuthError("Invalid username or password")
-    if _limited(username, ip):
-        logger.warning(f"auth: login rate-limited user={username} ip={ip}")
-        raise RateLimited("Too many attempts. Try again in 15 minutes.")
+    wait = _limited(username, ip)
+    if wait is not None:
+        logger.warning(f"auth: login rate-limited user={username} ip={ip} wait={wait:.0f}s")
+        if wait > 0:
+            raise RateLimited(f"Too many attempts. Try again in {int(wait) + 1} seconds.")
+        raise RateLimited("Too many attempts from this address. Try again in 15 minutes.")
 
     user = await _find_user(username)
     # Always run the hash, even for an unknown user, so the response time
@@ -347,6 +403,7 @@ async def revoke_all(user_id: str) -> int:
             n += await _db.delete_tokens_for_user(user_id)
         except Exception as e:
             logger.warning(f"auth: revoke_all failed: {e}")
+    await _notify_revoked(user_id)
     return n
 
 
@@ -356,7 +413,14 @@ async def verify_token(token: str | None) -> AuthUser | None:
     was down)."""
     if not token or not isinstance(token, str) or len(token) > 512:
         return None
-    h = hash_token(token)
+    return await verify_token_hash(hash_token(token))
+
+
+async def verify_token_hash(h: str | None) -> AuthUser | None:
+    """verify_token for callers that hold only the SHA-256 (live sockets):
+    same cache, same stores, same answer."""
+    if not h:
+        return None
     cached = _cache_get(h)
     if cached is not None:
         await _maybe_touch(h)
@@ -476,6 +540,15 @@ async def bootstrap() -> None:
         else:
             rec = UserRecord(id=str(uuid.uuid4()), username=username,
                              password_hash=pw_hash, role="admin")
+            # An admin who was disabled through the API stays disabled: the
+            # env entry refreshes the password and role, it is not a reset.
+            existing = await _find_user(username)
+            if existing is not None:
+                rec.id = existing.id
+                rec.disabled = existing.disabled
+                if existing.disabled:
+                    logger.warning(f"auth: env admin '{username}' is disabled in the user store "
+                                   "and stays disabled")
             try:
                 rec = await upsert_user_record(rec, memory_only=not _db_up())
                 if _db_up():

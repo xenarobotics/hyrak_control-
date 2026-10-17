@@ -25,6 +25,7 @@ from app.events.gs_relay_events import register_gs_relay_events
 from app.api.routes import router
 from app.auth import service as auth_service
 from app.auth import socket_guard
+from app.auth.clientip import client_ip_from
 from app.auth.routes import router as auth_router
 
 logger = logging.getLogger("verocore.server")
@@ -186,6 +187,8 @@ def create_app() -> socketio.ASGIApp:
         if user is None:
             logger.warning(f"Rejected {sid[:8]} - not signed in")
             raise socketio.exceptions.ConnectionRefusedError("unauthorized")
+        # Legacy shared-token sockets have no per-user token to re-check.
+        token_hash = auth_service.hash_token(token) if user.id != auth_service.LEGACY_USER_ID else None
 
         # A socket that dropped and came back reclaims its session - drone
         # link, radio relay, flight record, avoidance - instead of starting
@@ -207,6 +210,13 @@ def create_app() -> socketio.ASGIApp:
                             f"superseded by {sid[:8]} before its timeout")
             prior.detached_at = None
             prior.socket_id = sid
+            # The user re-authenticated just now: their CURRENT role and
+            # token are what the session carries from here, not the ones
+            # from the original connect.
+            prior.username = user.username
+            prior.role = user.role
+            prior.token_hash = token_hash
+            prior.auth_checked_at = time.monotonic()
             for alias in list(prior.sid_aliases):
                 await sio.enter_room(sid, alias)
             prior.sid_aliases.append(sid)
@@ -235,16 +245,17 @@ def create_app() -> socketio.ASGIApp:
         session.user_id = user.id
         session.username = user.username
         session.role = user.role
+        session.token_hash = token_hash
+        session.auth_checked_at = time.monotonic()
         session.resume_secret = secrets.token_urlsafe(32)
         logger.info(f"Connected {sid[:8]} ({user.username}/{user.role}) → session {session.session_id[:8]}")
 
         # Approximate client location for the admin map. Through the tunnel
-        # the socket peer is localhost - the real IP is in CF-Connecting-IP.
-        ip = (
-            environ.get("HTTP_CF_CONNECTING_IP")
-            or (environ.get("HTTP_X_FORWARDED_FOR") or "").split(",")[0].strip()
-            or environ.get("REMOTE_ADDR")
-        )
+        # the socket peer is localhost - the real IP is in CF-Connecting-IP,
+        # believed only when the peer is a trusted proxy (app/auth/clientip).
+        ip = client_ip_from(environ.get("REMOTE_ADDR"),
+                            environ.get("HTTP_CF_CONNECTING_IP"),
+                            environ.get("HTTP_X_FORWARDED_FOR"))
         session.client_ip = ip
 
         async def _resolve_location():
@@ -356,6 +367,21 @@ def create_app() -> socketio.ASGIApp:
     # Register event handlers                                              #
     # ------------------------------------------------------------------ #
     socket_guard.configure(sio, session_manager)
+
+    async def _disconnect_user_sockets(user_id: str):
+        """A revoked, disabled, deleted or re-roled user loses every live
+        socket now. The session is parked like any other drop (the drone
+        link keeps running for the grace period); a still-valid token
+        resumes it with the fresh role, a revoked one cannot."""
+        for s in list(session_manager.all_sessions()):
+            if s.user_id == user_id and s.socket_id and s.detached_at is None:
+                logger.info(f"Session {s.session_id[:8]} ({s.username}): access changed - "
+                            f"disconnecting {s.socket_id[:8]}")
+                try:
+                    await sio.disconnect(s.socket_id)
+                except Exception:
+                    pass
+    auth_service.on_user_revoked(_disconnect_user_sockets)
     register_telemetry_events(sio, session_manager, vision_pool)
     register_swarm_events(sio, session_manager)
     register_admin_events(sio, session_manager)

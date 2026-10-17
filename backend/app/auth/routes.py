@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.auth import service
+from app.auth.clientip import client_ip_from
 from app.auth.deps import bearer_of, require_admin, require_viewer
 from app.auth.service import AuthError, AuthUser, RateLimited
 from app.auth.store import ROLES
@@ -17,12 +18,8 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 def client_ip(request: Request) -> str:
     h = request.headers
-    return (
-        h.get("cf-connecting-ip")
-        or (h.get("x-forwarded-for") or "").split(",")[0].strip()
-        or (request.client.host if request.client else "")
-        or "-"
-    )
+    return client_ip_from(request.client.host if request.client else None,
+                          h.get("cf-connecting-ip"), h.get("x-forwarded-for"))
 
 
 class LoginBody(BaseModel):

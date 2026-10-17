@@ -79,6 +79,12 @@ class DroneSession:
     role: Optional[str]       = None
     resume_secret: Optional[str] = None
     superseded_sids: list     = field(default_factory=list)
+    # SHA-256 of the bearer token this socket connected with (None for the
+    # legacy shared token), and when the guard last re-checked it: a token
+    # revoked or a role changed mid-session is enforced on the next command,
+    # not on the next page load.
+    token_hash: Optional[str] = None
+    auth_checked_at: float    = 0.0
 
     # Swarm fleet: drone_id → TelemetryManager (populated when swarm mode is used)
     fleet: dict               = field(default_factory=dict)
