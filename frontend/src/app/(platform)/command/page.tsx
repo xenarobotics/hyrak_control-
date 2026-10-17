@@ -45,6 +45,7 @@ import { MissionBar } from '@/components/command/MissionBar'
 import { ObstacleRadar, DepthStrip } from '@/components/command/ObstacleRadar'
 import { useAvoidanceLive } from '@/components/command/useAvoidanceLive'
 import { useUiMode } from '@/hooks/useUiMode'
+import { useClientValue, useHydrated } from '@/hooks/useClientValue'
 import { SimpleCommand } from '@/components/simple/SimpleCommand'
 import { IndoorNavCard } from '@/components/command/IndoorNavCard'
 import { AiDrawer } from '@/components/command/AiDrawer'
@@ -104,7 +105,13 @@ function loadLayout(): Layout {
     } catch { /* storage unavailable */ }
     return DEFAULT
 }
+// Read once per page load and kept in step by saveLayout, so the hydration-
+// safe read below always gets the same object until the layout changes.
+let cachedLayout: Layout | null = null
+const savedLayout = (): Layout => (cachedLayout ??= loadLayout())
+
 function saveLayout(l: Layout) {
+    cachedLayout = l
     try { localStorage.setItem(STORE_KEY, JSON.stringify(l)) } catch { /* not critical */ }
 }
 
@@ -170,8 +177,16 @@ export default function CommandPage() {
 }
 
 function DevCommand() {
-    const [mounted, setMounted] = useState(false)
-    const [layout, setLayout] = useState<Layout>(DEFAULT)
+    const mounted = useHydrated()
+    // The saved layout comes in hydration-safely; the first change made here
+    // forks it into local state (and saveLayout keeps the cache in step).
+    const saved = useClientValue(savedLayout, DEFAULT)
+    const [own, setOwn] = useState<Layout | null>(null)
+    const layout = own ?? saved
+    // Updaters only ever run in the browser, where savedLayout() is the real
+    // stored layout - so this stays stable and never forks from DEFAULT.
+    const setLayout = useCallback(
+        (f: (prev: Layout) => Layout) => setOwn(prev => f(prev ?? savedLayout())), [])
     const [wallOn, setWallOn] = useState(false)
     const [drag, setDrag] = useState<{ view: View; x: number; y: number } | null>(null)
     const [drawerOpen, setDrawerOpen] = useState(false)
@@ -190,33 +205,30 @@ function DevCommand() {
         if (useDroneStore.getState().mode === 'manual-control') {
             getSocket().emit('set_analysis_mode', { mode: 'manual-control' })
         }
-        setLayout(loadLayout())
-        setMounted(true)
     }, [])
 
     const update = useCallback((patch: Partial<Layout>) => {
         setLayout(prev => { const next = { ...prev, ...patch }; saveLayout(next); return next })
-    }, [])
+    }, [setLayout])
     // `v` becomes the main view; the old main view takes v's PiP corner.
     const makeBig = useCallback((v: View) => setLayout(prev => {
         if (prev.big === v) return prev
         const next = { ...prev, big: v, corners: { ...prev.corners, [prev.big]: prev.corners[v] } }
         saveLayout(next); return next
-    }), [])
+    }), [setLayout])
     const swap = useCallback(() => setLayout(prev => {
         const v: View = prev.big === 'map' ? 'video' : 'map'
         const next = { ...prev, big: v, corners: { ...prev.corners, [prev.big]: prev.corners[v] } }
         saveLayout(next); return next
-    }), [])
+    }), [setLayout])
 
     // The AI view exists only while a module runs; if it was the main view
     // when the module stopped, the video takes over.
-    useEffect(() => {
-        if (mounted && !ai.running && layout.big === 'ai') makeBig('video')
-    }, [mounted, ai.running, layout.big, makeBig])
+    // Adjusted during render: an effect would paint one frame of the empty AI view.
+    if (mounted && !ai.running && layout.big === 'ai') makeBig('video')
     const toggleDock = useCallback(() => setLayout(prev => {
         const next = { ...prev, dockHidden: !prev.dockHidden }; saveLayout(next); return next
-    }), [])
+    }), [setLayout])
 
     // 3D chase camera follows the aircraft while it is shown here; the
     // Mission tab's own setting is put back on the way out.
