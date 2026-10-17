@@ -969,3 +969,61 @@ class PersonSighting(Base):
             "alt_m": self.alt_m,
             "image_path": self.image_path,
         }
+
+
+# ── Users and bearer tokens (app/auth) ───────────────────────────────────
+
+
+class User(Base):
+    """
+    One person who can sign in. The password is a scrypt hash (see
+    app/auth/passwords.py); the role is the whole permission model:
+    viewer < operator < admin, compared by rank, never by string.
+    """
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(200))
+    role: Mapped[str] = mapped_column(String(16), default="viewer")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    disabled: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    __table_args__ = (
+        CheckConstraint("role IN ('admin', 'operator', 'viewer')", name="ck_users_role"),
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "username": self.username,
+            "role": self.role,
+            "disabled": self.disabled,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class AuthToken(Base):
+    """
+    A signed-in browser or script. Only the SHA-256 of the bearer token is
+    stored, exactly like api_keys: a database dump cannot be replayed.
+    expires_at slides forward on use; last_seen_at is for the admin's
+    "is this still in use" question.
+    """
+    __tablename__ = "auth_tokens"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    label: Mapped[str] = mapped_column(String(120), default="")

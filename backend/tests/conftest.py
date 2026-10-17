@@ -36,3 +36,25 @@ def isolated_calibration(tmp_path, monkeypatch):
     calibration._cache = None
     yield
     calibration._cache = None
+
+
+@pytest.fixture
+def auth_headers(monkeypatch):
+    """Bearer headers for a throwaway user of the given role, with the auth
+    store forced in-memory (no database): `auth_headers("operator")`."""
+    import asyncio
+    from app.auth import service
+
+    monkeypatch.setattr(service, "_db_up", lambda: False)
+    service.reset_for_tests()
+
+    def _make(role: str = "operator") -> dict:
+        async def _mint():
+            await service.create_user(f"test-{role}", "test-password-123", role, memory_only=True)
+            token, _user, _exp = await service.login(f"test-{role}", "test-password-123", "127.0.0.1")
+            return token
+        token = asyncio.run(_mint())
+        return {"Authorization": f"Bearer {token}"}
+
+    yield _make
+    service.reset_for_tests()

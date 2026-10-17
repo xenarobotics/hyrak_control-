@@ -3,10 +3,12 @@
 Quick verification tool: an admin socket announces itself with admin_hello
 (so it doesn't show up as a client in the session list), then joins/leaves
 watch-<session_id> rooms to receive that session's admin_telemetry and
-admin_frame mirrors. No credentials beyond the normal socket token for now.
+admin_frame mirrors. Both require the socket's signed-in user to hold the
+admin role (app/auth) - the shared-token era is over.
 """
 import logging
 
+from app.auth.socket_guard import require_admin
 from app.sessions import observer
 from app.sessions.manager import SessionManager
 
@@ -40,6 +42,7 @@ def register_admin_events(sio, session_manager: SessionManager):
 
     @sio.on("admin_hello")
     async def on_admin_hello(sid, data=None):
+        if not await require_admin(sid, "admin_hello", data): return
         session = session_manager.get_by_socket(sid)
         if session:
             session.is_admin = True
@@ -47,6 +50,7 @@ def register_admin_events(sio, session_manager: SessionManager):
 
     @sio.on("watch_session")
     async def on_watch_session(sid, data):
+        if not await require_admin(sid, "watch_session", data): return
         session_id = (data or {}).get("session_id")
         if not session_id or not session_manager.get(session_id):
             await sio.emit("error", {"msg": "Session not found"}, to=sid)

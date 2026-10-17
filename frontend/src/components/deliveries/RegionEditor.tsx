@@ -15,8 +15,8 @@ import 'leaflet/dist/leaflet.css'
 
 import { MAP_LAYERS } from '@/types/mission'
 import { getServerUrl } from '@/lib/server-url'
+import { liveAuthHeaders } from '@/lib/auth'
 
-const TOKEN = process.env.NEXT_PUBLIC_SECRET_TOKEN || ''
 
 export const CATEGORY_COLORS: Record<string, string> = {
     road: '#94a3b8', water: '#38bdf8', forest: '#22c55e', open_field: '#a3e635',
@@ -81,7 +81,7 @@ export default function RegionEditor() {
     const [filter, setFilter] = useState('')
 
     const api = (p: string) => `${getServerUrl()}/api${p}`
-    const AUTH = { 'X-Auth-Token': TOKEN, 'Content-Type': 'application/json' }
+    const AUTH = liveAuthHeaders({ 'Content-Type': 'application/json' })
 
     const refresh = useCallback(async () => {
         try {

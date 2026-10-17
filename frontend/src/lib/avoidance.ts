@@ -2,9 +2,9 @@
 // separate calls on purpose - the trust ladder runs detection advisory-only
 // before it ever commands the aircraft.
 import { getServerUrl } from '@/lib/server-url'
+import { liveAuthHeaders } from '@/lib/auth'
 
-const TOKEN = process.env.NEXT_PUBLIC_SECRET_TOKEN || ''
-const AUTH = { 'X-Auth-Token': TOKEN, 'Content-Type': 'application/json' }
+const AUTH = liveAuthHeaders({ 'Content-Type': 'application/json' })
 const api = (p: string) => `${getServerUrl()}/api/avoidance${p}`
 
 export interface AvoidanceParams {

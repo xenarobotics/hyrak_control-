@@ -21,6 +21,7 @@
 //   [uint32 length][uint8 keyframe][uint32 sequence][Annex-B access unit]
 
 import { useEffect, useRef, useState } from 'react'
+import { authHeaders } from '@/lib/auth'
 import { codecString } from '@/lib/codecString'
 
 const HEADER_BYTES = 9
@@ -110,11 +111,11 @@ export function WebCodecsVideo({ src, codec: wireCodec = 'h264', className, styl
         ;(async () => {
             try {
                 // The server's /api/video/feeds routes start readers and
-                // transcoders, so they are token-gated like every other
-                // mutating /api route; local preview servers ignore it.
+                // transcoders, so they need the operator's bearer token like
+                // every other mutating /api route; local preview servers ignore it.
                 const res = await fetch(src, {
                     signal: abort.signal, cache: 'no-store',
-                    headers: { 'X-Auth-Token': process.env.NEXT_PUBLIC_SECRET_TOKEN ?? '' },
+                    headers: authHeaders(),
                 })
                 if (!res.body) throw new Error('preview stream has no body')
                 const reader = res.body.getReader()

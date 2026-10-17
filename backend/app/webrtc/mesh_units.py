@@ -15,9 +15,11 @@ import select
 import socket
 import time
 
-from fastapi import APIRouter, Header, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.responses import StreamingResponse
 
+from app.auth.deps import require_operator
+from app.auth.service import AuthUser
 from app.config import get_settings
 
 router = APIRouter(prefix="/api/video", tags=["video"])
@@ -27,15 +29,10 @@ MAX_UNITS = 64
 PROBE_S = 0.35
 
 
-def _require_token(token: str | None) -> None:
-    # The feed routes START readers and NVENC transcoders on the server for
-    # whatever port is asked; they were open to anyone who could reach the
-    # tunnel. Same token as the mutating /api routes, header only (never a
-    # query string: those end up in proxy and tunnel logs).
-    import hmac
-    expected = get_settings().secret_token or ""
-    if not expected or not token or not hmac.compare_digest(token, expected):
-        raise HTTPException(status_code=403, detail="Invalid token")
+# The feed routes START readers and NVENC transcoders on the server for
+# whatever port is asked; they were open to anyone who could reach the
+# tunnel. They now need a signed-in operator's bearer token, header only
+# (never a query string: those end up in proxy and tunnel logs).
 
 
 FeedPort = Path(ge=BASE_PORT, le=BASE_PORT + MAX_UNITS)
@@ -123,8 +120,7 @@ async def mesh_units(max_units: int = Query(8, ge=1, le=64)):
 
 @router.get("/feeds/{port}/hevc")
 async def feed_hevc(port: int = FeedPort,
-                    x_auth_token: str | None = Header(None, alias="X-Auth-Token")):
-    _require_token(x_auth_token)
+                    _user: AuthUser = Depends(require_operator)):
     """The unit's OWN H.265, bit-exact, as framed Annex-B access units:
     [uint32 len][uint8 key][uint32 seq][AU] - the format the app's
     WebCodecsVideo already parses. Starts at a keyframe (VPS/SPS/PPS in-band)
@@ -149,8 +145,7 @@ async def feed_hevc(port: int = FeedPort,
 
 @router.get("/feeds/{port}/h264")
 async def feed_h264(port: int = FeedPort,
-                    x_auth_token: str | None = Header(None, alias="X-Auth-Token")):
-    _require_token(x_auth_token)
+                    _user: AuthUser = Depends(require_operator)):
     """The unit's video transcoded ONCE on the GPU to H.264 with the source's
     colour signalling (full-range BT.709) written into the VUI, framed like
     /hevc. For browsers without an HEVC decoder: WebCodecs decodes H.264 in

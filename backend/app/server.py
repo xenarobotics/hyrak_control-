@@ -1,9 +1,11 @@
 import asyncio
+import secrets
 import time
 import logging
 import socketio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.releases import register_releases_routes
 from app.config import get_settings
@@ -21,8 +23,27 @@ from app.events.permit_events import register_permit_events
 from app.webrtc.signaling import register_webrtc_events
 from app.events.gs_relay_events import register_gs_relay_events
 from app.api.routes import router
+from app.auth import service as auth_service
+from app.auth import socket_guard
+from app.auth.routes import router as auth_router
 
 logger = logging.getLogger("verocore.server")
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Browser hardening on every HTTP response. The API serves JSON and a
+    few file downloads - nothing here is meant to be framed or sniffed."""
+
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        h = response.headers
+        h.setdefault("X-Content-Type-Options", "nosniff")
+        h.setdefault("X-Frame-Options", "DENY")
+        h.setdefault("Referrer-Policy", "no-referrer")
+        h.setdefault("Permissions-Policy",
+                     "camera=(self), microphone=(self), geolocation=(self), "
+                     "serial=(self), usb=(self), payment=()")
+        return response
 
 
 def create_app() -> socketio.ASGIApp:
@@ -33,6 +54,11 @@ def create_app() -> socketio.ASGIApp:
     # FastAPI                                                              #
     # ------------------------------------------------------------------ #
     fastapi_app = FastAPI(title="Verocore Platform", version="0.1.0")
+    # Explicit allow-list only - never "*" (allow_credentials would be
+    # refused by browsers, and a wildcard would let any site call the API
+    # with a stolen token). Middleware order: CORS must be the OUTERMOST so
+    # its headers land on every response, including the security ones.
+    fastapi_app.add_middleware(SecurityHeadersMiddleware)
     fastapi_app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
@@ -40,6 +66,7 @@ def create_app() -> socketio.ASGIApp:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    fastapi_app.include_router(auth_router)
     fastapi_app.include_router(router)
     from app.api.public import router as public_router
     fastapi_app.include_router(public_router)
@@ -106,6 +133,7 @@ def create_app() -> socketio.ASGIApp:
     async def on_startup():
         from app.db import init_db
         await init_db()  # non-fatal - flying never depends on the DB
+        await auth_service.bootstrap()
         from app.zones import engine as zone_engine
         await zone_engine.reload()
         from app.planner import features as feature_engine
@@ -145,20 +173,38 @@ def create_app() -> socketio.ASGIApp:
     # ------------------------------------------------------------------ #
     # Socket.IO lifecycle                                                  #
     # ------------------------------------------------------------------ #
+    # Socket ids whose session was handed to a newer socket (resume before
+    # the old one's ping timeout, audit B8). Their eventual disconnect must
+    # not park or tear down the session the new socket now owns.
+    _superseded_sids: set = set()
+
     @sio.event
     async def connect(sid, environ, auth):
-        token = (auth or {}).get("token")
-        if token != settings.secret_token:
-            logger.warning(f"Rejected {sid[:8]} - bad token")
-            return False
+        auth = auth or {}
+        token = auth.get("token")
+        user = await auth_service.authenticate(token)
+        if user is None:
+            logger.warning(f"Rejected {sid[:8]} - not signed in")
+            raise socketio.exceptions.ConnectionRefusedError("unauthorized")
 
         # A socket that dropped and came back reclaims its session - drone
         # link, radio relay, flight record, avoidance - instead of starting
-        # over. Only a session that is waiting for its client can be taken.
-        resume_id = (auth or {}).get("resume_session")
-        prior = session_manager.get(resume_id) if resume_id else None
-        if prior is not None and prior.detached_at is not None:
-            gone = time.monotonic() - prior.detached_at
+        # over. Bound to the SAME USER and to the per-session resume_secret
+        # handed out in session_ready: a session id alone (visible in logs,
+        # the admin page, the URL bar) must not be enough to take over a
+        # drone. Allowed whether or not the old socket has been noticed as
+        # gone yet - a client that reconnects inside the ping timeout used to
+        # get a fresh session while the old one tore its drone link down
+        # 90 s later (audit B8).
+        prior = session_manager.resumable(
+            auth.get("resume_session"), user.id, auth.get("resume_secret"))
+        if prior is not None:
+            gone = (time.monotonic() - prior.detached_at) if prior.detached_at is not None else 0.0
+            if prior.detached_at is None and prior.socket_id and prior.socket_id != sid:
+                _superseded_sids.add(prior.socket_id)
+                prior.superseded_sids.append(prior.socket_id)
+                logger.info(f"Session {prior.session_id[:8]}: socket {prior.socket_id[:8]} "
+                            f"superseded by {sid[:8]} before its timeout")
             prior.detached_at = None
             prior.socket_id = sid
             for alias in list(prior.sid_aliases):
@@ -167,7 +213,8 @@ def create_app() -> socketio.ASGIApp:
             task = _expiry_tasks.pop(prior.session_id, None)
             if task is not None:
                 task.cancel()
-            logger.info(f"Resumed session {prior.session_id[:8]} on {sid[:8]} after {gone:.1f}s away")
+            logger.info(f"Resumed session {prior.session_id[:8]} on {sid[:8]} for "
+                        f"{user.username} after {gone:.1f}s away")
 
             async def _send_resumed():
                 await asyncio.sleep(0.05)
@@ -177,13 +224,19 @@ def create_app() -> socketio.ASGIApp:
                     "max_sessions": settings.max_concurrent_sessions,
                     "resumed": True, "away_s": round(gone, 1),
                     "telemetry_connected": bool(prior.telemetry_connected),
+                    "resume_secret": prior.resume_secret,
+                    "user": user.public(),
                 }, to=sid)
             asyncio.create_task(_send_resumed())
             return True
 
         session = session_manager.create(socket_id=sid)
         session.sid_aliases.append(sid)
-        logger.info(f"Connected {sid[:8]} → session {session.session_id[:8]}")
+        session.user_id = user.id
+        session.username = user.username
+        session.role = user.role
+        session.resume_secret = secrets.token_urlsafe(32)
+        logger.info(f"Connected {sid[:8]} ({user.username}/{user.role}) → session {session.session_id[:8]}")
 
         # Approximate client location for the admin map. Through the tunnel
         # the socket peer is localhost - the real IP is in CF-Connecting-IP.
@@ -209,6 +262,8 @@ def create_app() -> socketio.ASGIApp:
                     "device":     settings.device,
                     "gpu_count":  settings.gpu_count,
                     "max_sessions": settings.max_concurrent_sessions,
+                    "resume_secret": session.resume_secret,
+                    "user": user.public(),
                 },
                 to=sid,
             )
@@ -217,6 +272,18 @@ def create_app() -> socketio.ASGIApp:
 
     @sio.event
     async def disconnect(sid):
+        if sid in _superseded_sids:
+            # The session already moved to a newer socket; this is the old
+            # one's late goodbye. Its peer entry and observer rooms are
+            # still its own to drop, but the session is not parked.
+            _superseded_sids.discard(sid)
+            entry = peer_registry.get_by_socket(sid)
+            if entry:
+                await peer_registry.remove(entry.pc_id)
+            from app.sessions import observer as _obs
+            _obs.drop_sid(sid)
+            logger.info(f"Disconnected superseded socket {sid[:8]} (session kept)")
+            return
         entry = peer_registry.get_by_socket(sid)
         if entry:
             await peer_registry.remove(entry.pc_id)
@@ -288,6 +355,7 @@ def create_app() -> socketio.ASGIApp:
     # ------------------------------------------------------------------ #
     # Register event handlers                                              #
     # ------------------------------------------------------------------ #
+    socket_guard.configure(sio, session_manager)
     register_telemetry_events(sio, session_manager, vision_pool)
     register_swarm_events(sio, session_manager)
     register_admin_events(sio, session_manager)

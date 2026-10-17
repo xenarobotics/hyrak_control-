@@ -488,7 +488,7 @@ def test_person_ruler_rejects_implausible_scales():
     assert scale is None and "not a usable" in why
 
 
-def test_depth_scan_route_rejects_absurd_and_stale_bodies():
+def test_depth_scan_route_rejects_absurd_and_stale_bodies(auth_headers):
     """Sensing#6: max_range 1e9 walked rays for 3e9 steps; NaN hfov -> 500."""
     from fastapi.testclient import TestClient
     from fastapi import FastAPI
@@ -499,8 +499,7 @@ def test_depth_scan_route_rejects_absurd_and_stale_bodies():
     h.add(LAT0, LNG0, 10.0, 0.0, t=time.monotonic())
     app = FastAPI(); app.include_router(routes.router)
     cl = TestClient(app)
-    from app.config import get_settings
-    hdr = {"X-Auth-Token": get_settings().secret_token}
+    hdr = auth_headers("operator")
     body = {"captured_wall": time.time(), "hfov_deg": 73.0, "vfov_deg": 58.0, "rows": 2, "cols": 2,
             "depth": [5.0] * 4, "max_range_m": 1e9}
     assert cl.post("/api/avoidance/scan-route/depth_scan", json=body, headers=hdr).status_code == 400

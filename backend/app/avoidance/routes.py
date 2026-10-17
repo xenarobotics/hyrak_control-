@@ -1,14 +1,17 @@
 """/api/avoidance/* - control + telemetry for the obstacle-avoidance layer.
 
-Mutating routes are token-guarded like the rest of the platform. `observe` is
+Mutating routes require a signed-in operator (app/auth) like the rest of
+the platform. `observe` is
 how any sensor (and the SITL test harness) pushes a body-frame reading;
 `decide` runs one decision tick against an explicit pose/goal - used by the
 SITL harness and the frontend until the live telemetry loop is wired.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from app.auth.deps import require_operator
+from app.auth.service import AuthUser
 from app.config import get_settings
 from app.avoidance.core import controller as avoidance
 from app.avoidance.sensing import registry as sensor_registry
@@ -22,9 +25,6 @@ _stale_logged = -1e9
 router = APIRouter(prefix="/api/avoidance", tags=["avoidance"])
 
 
-def _auth(token: str | None) -> None:
-    if token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
 
 
 @router.get("/status")
@@ -45,8 +45,7 @@ async def drone_status(drone_id: str):
 
 @router.post("/{drone_id}/enable")
 async def set_enabled(drone_id: str, body: dict,
-                      x_auth_token: str = Header(None, alias="X-Auth-Token")):
-    _auth(x_auth_token)
+                      _user: AuthUser = Depends(require_operator)):
     c = avoidance.controller(drone_id)
     params = body.get("params") or {}
     for k, v in params.items():
@@ -66,11 +65,10 @@ async def set_enabled(drone_id: str, body: dict,
 
 @router.post("/{drone_id}/arm")
 async def set_armed(drone_id: str, body: dict,
-                    x_auth_token: str = Header(None, alias="X-Auth-Token")):
+                    _user: AuthUser = Depends(require_operator)):
     """Allow (or forbid) avoidance to COMMAND this drone. Arming requires
     detection already enabled - the deliberate second step of the trust
     ladder, separate from turning detection on."""
-    _auth(x_auth_token)
     c = avoidance.controller(drone_id)
     c.set_armed(bool(body.get("armed")))
     avoidance.persist_state()
@@ -85,10 +83,9 @@ async def drone_events(drone_id: str, limit: int = 100):
 
 @router.post("/{drone_id}/observe")
 async def observe(drone_id: str, body: dict,
-                  x_auth_token: str = Header(None, alias="X-Auth-Token")):
+                  _user: AuthUser = Depends(require_operator)):
     """Push one body-frame obstacle reading. Any sensor source uses this; the
     SITL harness uses it to inject a virtual obstacle."""
-    _auth(x_auth_token)
     try:
         obs = ObstacleObservation(
             bearing_deg=float(body["bearing_deg"]),
@@ -118,7 +115,7 @@ def _resolve_drone(drone_id: str):
 
 @router.post("/{drone_id}/depth_scan")
 async def depth_scan(drone_id: str, body: dict,
-                     x_auth_token: str = Header(None, alias="X-Auth-Token")):
+                     _user: AuthUser = Depends(require_operator)):
     """A pooled depth image from a range sensor (the sim's depth camera via
     simulation/gz_depth_sensor.py, or a real stereo/ToF camera).
     body: {captured_wall: unix time of capture, hfov_deg, vfov_deg, rows, cols,
@@ -126,7 +123,6 @@ async def depth_scan(drone_id: str, body: dict,
                    <= 0 = no data, >= max_range_m = nothing within range],
            max_range_m, cam_pitch_deg?, source?: "depth"}
     The scan is placed with the aircraft's pose AT captured_wall."""
-    _auth(x_auth_token)
     import time as _time
     import numpy as np
     from app.avoidance.mapping import pose_history
@@ -172,11 +168,10 @@ async def depth_scan(drone_id: str, body: dict,
 
 @router.post("/{drone_id}/decide")
 async def decide(drone_id: str, body: dict,
-                 x_auth_token: str = Header(None, alias="X-Auth-Token")):
+                 _user: AuthUser = Depends(require_operator)):
     """Run one decision tick against an explicit pose (and optional goal).
     body: {pose:{lat,lng,heading_deg,alt_m}, goal?:{lat,lng},
            cruise_alt_m?, speed_m_s?}"""
-    _auth(x_auth_token)
     p = body.get("pose") or {}
     try:
         pose = Pose(lat=float(p["lat"]), lng=float(p["lng"]),
@@ -226,9 +221,8 @@ async def known_hazards():
 
 @router.post("/hazards")
 async def add_hazard(body: dict,
-                     x_auth_token: str = Header(None, alias="X-Auth-Token")):
+                     _user: AuthUser = Depends(require_operator)):
     """Operator-marked hazard - manually pin a known obstacle on the map."""
-    _auth(x_auth_token)
     from app.avoidance.mapping import hazards as hazard_db
     try:
         lat, lng = float(body["lat"]), float(body["lng"])
@@ -242,8 +236,7 @@ async def add_hazard(body: dict,
 
 
 @router.post("/hazards/clear")
-async def clear_hazards(x_auth_token: str = Header(None, alias="X-Auth-Token")):
-    _auth(x_auth_token)
+async def clear_hazards(_user: AuthUser = Depends(require_operator)):
     from app.avoidance.mapping import hazards as hazard_db
     return {"removed": await hazard_db.clear()}
 
@@ -255,8 +248,7 @@ async def get_sensors(drone_id: str):
 
 @router.post("/{drone_id}/sensors")
 async def set_sensors(drone_id: str, body: dict,
-                      x_auth_token: str = Header(None, alias="X-Auth-Token")):
-    _auth(x_auth_token)
+                      _user: AuthUser = Depends(require_operator)):
     specs = body.get("sensors")
     if not isinstance(specs, list):
         raise HTTPException(status_code=400, detail="sensors must be a list")
@@ -266,11 +258,10 @@ async def set_sensors(drone_id: str, body: dict,
 # -- person-ruler depth calibration (sensing/person_ruler.py) ---------------
 @router.post("/{drone_id}/calibrate_person")
 async def calibrate_person(drone_id: str, body: dict,
-                           x_auth_token: str = Header(None, alias="X-Auth-Token")):
+                           _user: AuthUser = Depends(require_operator)):
     """Start (or {cancel: true}) a person-ruler run for the camera feeding
     this drone's avoidance. Body: {height_m?: 1.70}. Needs avoidance
     Detection on and the video streaming."""
-    _auth(x_auth_token)
     from app.avoidance.sensing import person_ruler
     c = _resolve_drone(drone_id)
     if body.get("cancel"):

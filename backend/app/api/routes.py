@@ -9,10 +9,13 @@ import os
 import zipfile
 from datetime import datetime
 from typing import List
-from fastapi import APIRouter, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, ValidationError, field_validator
 import cv2
 import numpy as np
+from app.auth.deps import require_admin, require_operator, require_viewer
+from app.auth.service import AuthUser
 from app.config import get_settings
 
 logger = logging.getLogger("verocore.api")
@@ -23,6 +26,115 @@ settings = get_settings()
 # Key: "lat5_lng5" (5 decimal places ≈ 1.1m precision)
 # Value: elevation in metres above WGS84 ellipsoid
 _terrain_cache: dict[str, float] = {}
+# Hard cap on points per /terrain/elevation call - the upstream API is a
+# shared public service and one request used to be able to ask for anything.
+TERRAIN_MAX_POINTS = 500
+
+
+# ── Numeric body validation (audit B30) ─────────────────────────────────────
+#
+# These routes take `body: dict` on purpose (the planner and zone editors
+# send loosely-shaped JSON), but the numeric fields used to go straight
+# through float(): a string like "abc" or "nan" became a 500, and "" became
+# whatever float("") raised. The models below pin exactly those fields;
+# everything else in the body is still read by hand. "" and null both mean
+# "not set" so an empty form field clears the value instead of exploding.
+
+
+def _blank_to_none(v):
+    return None if v in ("", None) else v
+
+
+class _Nums(BaseModel):
+    model_config = {"extra": "ignore"}
+
+
+class ZoneNumbers(_Nums):
+    floor_m: float | None = None
+    ceiling_m: float | None = None
+
+    @field_validator("floor_m", "ceiling_m", mode="before")
+    @classmethod
+    def _blank(cls, v):
+        return _blank_to_none(v)
+
+    @field_validator("floor_m", "ceiling_m")
+    @classmethod
+    def _finite(cls, v):
+        if v is not None and not (math.isfinite(v) and -500.0 <= v <= 10000.0):
+            raise ValueError("must be a finite altitude in metres (-500..10000)")
+        return v
+
+
+class ProfileNumbers(_Nums):
+    default_alt_m: float | None = None
+    default_speed_m_s: float | None = None
+
+    @field_validator("default_alt_m", "default_speed_m_s", mode="before")
+    @classmethod
+    def _blank(cls, v):
+        return _blank_to_none(v)
+
+    @field_validator("default_alt_m")
+    @classmethod
+    def _alt(cls, v):
+        if v is not None and not (math.isfinite(v) and 0.0 < v <= 500.0):
+            raise ValueError("default_alt_m must be within 0-500 m")
+        return v
+
+    @field_validator("default_speed_m_s")
+    @classmethod
+    def _speed(cls, v):
+        if v is not None and not (math.isfinite(v) and 0.0 < v <= 50.0):
+            raise ValueError("default_speed_m_s must be within 0-50 m/s")
+        return v
+
+
+class PlanNumbers(_Nums):
+    altitude_m: float | None = None
+    speed_m_s: float | None = None
+
+    @field_validator("altitude_m", "speed_m_s", mode="before")
+    @classmethod
+    def _blank(cls, v):
+        return _blank_to_none(v)
+
+
+class PadCoords(_Nums):
+    lat: float | None = None
+    lng: float | None = None
+
+    @field_validator("lat", "lng", mode="before")
+    @classmethod
+    def _blank(cls, v):
+        return _blank_to_none(v)
+
+    @field_validator("lat")
+    @classmethod
+    def _lat(cls, v):
+        if v is not None and not (math.isfinite(v) and -90.0 <= v <= 90.0):
+            raise ValueError("lat must be within -90..90")
+        return v
+
+    @field_validator("lng")
+    @classmethod
+    def _lng(cls, v):
+        if v is not None and not (math.isfinite(v) and -180.0 <= v <= 180.0):
+            raise ValueError("lng must be within -180..180")
+        return v
+
+
+def _validate(model, body):
+    """Validate the numeric fields of a loose body; 400 with the field and
+    reason on failure, never a 500."""
+    try:
+        return model.model_validate(body if isinstance(body, dict) else {})
+    except ValidationError as e:
+        errs = "; ".join(
+            f"{'.'.join(str(x) for x in err.get('loc', ()))}: {err.get('msg')}"
+            for err in e.errors()
+        )
+        raise HTTPException(status_code=400, detail=errs or "invalid body")
 
 
 @router.get("/health")
@@ -46,9 +158,10 @@ async def ice_servers():
 
 
 @router.get("/sessions")
-async def get_sessions(request: Request):
+async def get_sessions(request: Request, _user: AuthUser = Depends(require_admin)):
     """Live client sessions for the /admin observer page (admin sockets
-    themselves are excluded)."""
+    themselves are excluded). Admin only: it lists client IPs and drone
+    positions."""
     sm = request.app.state.session_manager
     sessions = []
     for s in sm.all_sessions():
@@ -131,11 +244,9 @@ async def get_zones():
 @router.post("/zones")
 async def create_zone(
     body: dict,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_admin),
 ):
     """Create a zone. body: {name, zone_class, geometry, floor_m?, ceiling_m?}"""
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     zone_class = body.get("zone_class")
     if zone_class not in ("green", "orange", "red"):
         raise HTTPException(status_code=400, detail="zone_class must be green/orange/red")
@@ -150,6 +261,7 @@ async def create_zone(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Bad geometry: {e}")
 
+    nums = _validate(ZoneNumbers, body)
     from app.db import db_available, get_session
     from app.db.models import Zone
     from app.zones import engine as zone_engine
@@ -159,8 +271,8 @@ async def create_zone(
         name=(body.get("name") or f"{zone_class} zone").strip()[:120],
         zone_class=zone_class,
         geometry=geometry,
-        floor_m=float(body.get("floor_m") or 0.0),
-        ceiling_m=float(body["ceiling_m"]) if body.get("ceiling_m") not in (None, "") else None,
+        floor_m=nums.floor_m if nums.floor_m is not None else 0.0,
+        ceiling_m=nums.ceiling_m,
     )
     async with get_session() as db:
         db.add(zone)
@@ -175,12 +287,11 @@ async def create_zone(
 async def patch_zone(
     zone_id: str,
     body: dict,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_admin),
 ):
     """Edit zone properties: name, zone_class, floor_m, ceiling_m, active.
     (Geometry changes = delete + redraw.)"""
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
+    nums = _validate(ZoneNumbers, body)
     from sqlalchemy import select
     from app.db import db_available, get_session
     from app.db.models import Zone
@@ -200,11 +311,9 @@ async def patch_zone(
                 raise HTTPException(status_code=400, detail="bad zone_class")
             zone.zone_class = body["zone_class"]
         if "floor_m" in body:
-            zone.floor_m = float(body["floor_m"] or 0.0)
+            zone.floor_m = nums.floor_m if nums.floor_m is not None else 0.0
         if "ceiling_m" in body:
-            zone.ceiling_m = (
-                float(body["ceiling_m"]) if body["ceiling_m"] not in (None, "") else None
-            )
+            zone.ceiling_m = nums.ceiling_m
         if "active" in body:
             zone.active = bool(body["active"])
         await db.commit()
@@ -216,10 +325,8 @@ async def patch_zone(
 @router.delete("/zones/{zone_id}")
 async def delete_zone(
     zone_id: str,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_admin),
 ):
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from sqlalchemy import delete as sa_delete
     from app.db import db_available, get_session
     from app.db.models import Zone
@@ -301,11 +408,9 @@ async def get_map_features():
 @router.post("/map-features")
 async def create_map_feature(
     body: dict,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """Create a land-use feature. body: {name, category, geometry}"""
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.planner import CATEGORIES
     from app.planner import features as feature_engine
     category = body.get("category")
@@ -337,11 +442,9 @@ async def create_map_feature(
 async def patch_map_feature(
     feature_id: str,
     body: dict,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """Edit name/category/active. (Geometry changes = delete + redraw.)"""
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from sqlalchemy import select
     from app.planner import CATEGORIES
     from app.planner import features as feature_engine
@@ -372,10 +475,8 @@ async def patch_map_feature(
 @router.delete("/map-features/{feature_id}")
 async def delete_map_feature(
     feature_id: str,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from sqlalchemy import delete as sa_delete
     from app.planner import features as feature_engine
     from app.db import db_available, get_session
@@ -392,12 +493,10 @@ async def delete_map_feature(
 @router.post("/route-profiles")
 async def create_route_profile(
     body: dict,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """Create a custom route profile. body: {name, description?, rules,
     default_alt_m?, default_speed_m_s?}"""
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.planner import profiles as profile_mod
     from app.db import db_available, get_session
     from app.db.models import RouteProfile
@@ -408,14 +507,15 @@ async def create_route_profile(
     ok, err = profile_mod.validate_rules(rules)
     if not ok:
         raise HTTPException(status_code=400, detail=err)
+    nums = _validate(ProfileNumbers, body)
     if not db_available():
         raise HTTPException(status_code=503, detail="Database offline")
     profile = RouteProfile(
         name=name[:120],
         description=str(body.get("description") or "")[:500],
         rules=rules,
-        default_alt_m=float(body.get("default_alt_m") or 60.0),
-        default_speed_m_s=float(body.get("default_speed_m_s") or 8.0),
+        default_alt_m=nums.default_alt_m if nums.default_alt_m is not None else 60.0,
+        default_speed_m_s=nums.default_speed_m_s if nums.default_speed_m_s is not None else 8.0,
     )
     async with get_session() as db:
         db.add(profile)
@@ -431,11 +531,10 @@ async def create_route_profile(
 async def patch_route_profile(
     profile_id: str,
     body: dict,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """Tune a profile (builtin ones included - tuning is the point)."""
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
+    nums = _validate(ProfileNumbers, body)
     from sqlalchemy import select
     from app.planner import profiles as profile_mod
     from app.db import db_available, get_session
@@ -458,9 +557,11 @@ async def patch_route_profile(
                 raise HTTPException(status_code=400, detail=err)
             profile.rules = body["rules"]
         if "default_alt_m" in body:
-            profile.default_alt_m = float(body["default_alt_m"] or 60.0)
+            profile.default_alt_m = nums.default_alt_m if nums.default_alt_m is not None else 60.0
         if "default_speed_m_s" in body:
-            profile.default_speed_m_s = float(body["default_speed_m_s"] or 8.0)
+            profile.default_speed_m_s = (
+                nums.default_speed_m_s if nums.default_speed_m_s is not None else 8.0
+            )
         if "active" in body and not profile.builtin:
             profile.active = bool(body["active"])
         await db.commit()
@@ -471,10 +572,8 @@ async def patch_route_profile(
 @router.delete("/route-profiles/{profile_id}")
 async def delete_route_profile(
     profile_id: str,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from sqlalchemy import select
     from app.db import db_available, get_session
     from app.db.models import RouteProfile
@@ -496,7 +595,7 @@ async def delete_route_profile(
 @router.post("/missions/plan")
 async def plan_mission(
     body: dict,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """
     Generate (and record) a mission path.
@@ -514,8 +613,6 @@ async def plan_mission(
     on failure); `mission` is the DB record, null when save=false or the DB
     is offline - the plan itself never depends on the database.
     """
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     import asyncio as _asyncio
     from datetime import datetime as _dt
     from app.planner import engine as planner_engine
@@ -558,8 +655,9 @@ async def plan_mission(
 
     # 10 m is the platform's intended cruise; the old 60 m silent default was
     # a six-fold overshoot. Guard against NaN/inf and nonsensical magnitudes.
-    alt = float(body.get("altitude_m") or (profile or {}).get("default_alt_m") or 10.0)
-    speed = float(body.get("speed_m_s") or (profile or {}).get("default_speed_m_s") or 8.0)
+    nums = _validate(PlanNumbers, body)
+    alt = float(nums.altitude_m or (profile or {}).get("default_alt_m") or 10.0)
+    speed = float(nums.speed_m_s or (profile or {}).get("default_speed_m_s") or 8.0)
     if not (_math.isfinite(alt) and 0.0 < alt <= 500.0):
         raise HTTPException(status_code=400, detail="altitude_m must be within 0-500 m")
     if not (_math.isfinite(speed) and 0.0 < speed <= 50.0):
@@ -616,12 +714,10 @@ async def get_mission(mission_id: str):
 async def patch_mission(
     mission_id: str,
     body: dict,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """Advance the mission lifecycle: {status: uploaded|flying|completed|
     aborted|failed, drone_id?}. Illegal transitions are refused."""
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.planner import service as mission_service
     status = body.get("status")
     if status not in mission_service.STATUSES:
@@ -655,20 +751,18 @@ async def get_pads():
 @router.post("/pads")
 async def create_pad(
     body: dict,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """body: {name, lat, lng, notes?}"""
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.db import db_available, get_session
     from app.db.models import Pad
     name = str(body.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="name required")
-    try:
-        lat, lng = float(body["lat"]), float(body["lng"])
-    except (KeyError, TypeError, ValueError):
+    coords = _validate(PadCoords, body)
+    if coords.lat is None or coords.lng is None:
         raise HTTPException(status_code=400, detail="lat and lng required")
+    lat, lng = coords.lat, coords.lng
     if not db_available():
         raise HTTPException(status_code=503, detail="Database offline")
     kind = str(body.get("kind") or "pad")
@@ -690,10 +784,9 @@ async def create_pad(
 async def patch_pad(
     pad_id: str,
     body: dict,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
+    coords = _validate(PadCoords, body)
     from sqlalchemy import select
     from app.db import db_available, get_session
     from app.db.models import Pad
@@ -707,10 +800,10 @@ async def patch_pad(
             raise HTTPException(status_code=404, detail="Pad not found")
         if "name" in body and str(body["name"]).strip():
             pad.name = str(body["name"]).strip()[:120]
-        if "lat" in body:
-            pad.lat = float(body["lat"])
-        if "lng" in body:
-            pad.lng = float(body["lng"])
+        if "lat" in body and coords.lat is not None:
+            pad.lat = coords.lat
+        if "lng" in body and coords.lng is not None:
+            pad.lng = coords.lng
         if "notes" in body:
             pad.notes = str(body["notes"] or "")[:500]
         if "active" in body:
@@ -723,12 +816,10 @@ async def patch_pad(
 @router.delete("/pads/{pad_id}")
 async def delete_pad(
     pad_id: str,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """Retire, don't destroy: tasks reference pads, so a pad with history
     is deactivated instead of deleted."""
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from sqlalchemy import delete as sa_delete, select
     from app.db import db_available, get_session
     from app.db.models import Pad, Task
@@ -758,10 +849,8 @@ async def delete_pad(
 
 @router.get("/api-keys")
 async def get_api_keys(
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_admin),
 ):
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.tasks import auth as key_auth
     return {"keys": await key_auth.list_keys()}
 
@@ -769,11 +858,9 @@ async def get_api_keys(
 @router.post("/api-keys")
 async def create_api_key(
     body: dict,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_admin),
 ):
     """Mint a client key. The plaintext appears in THIS response only."""
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.tasks import auth as key_auth
     minted = await key_auth.mint(str(body.get("name") or ""))
     if minted is None:
@@ -785,11 +872,9 @@ async def create_api_key(
 async def patch_api_key(
     key_id: str,
     body: dict,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_admin),
 ):
     """{active: bool} - revoke or restore a client key."""
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.tasks import auth as key_auth
     record = await key_auth.set_active(key_id, bool(body.get("active", False)))
     if record is None:
@@ -816,11 +901,9 @@ async def get_task(ref: str):
 @router.post("/tasks")
 async def create_task_operator(
     body: dict,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """Board-created order (no client key). Same body as POST /v1/tasks."""
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from datetime import datetime as _dt
     from app.tasks import service as task_service
     payload = body.get("payload") or {}
@@ -872,13 +955,11 @@ def _live_drone_position(sm, drone_id: str) -> tuple[float, float] | None:
 async def plan_return_mission(
     drone_id: str,
     request: Request,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """Plan the drone's flight home: live position -> nearest active
     station. Returns the mission (with waypoints) for the operator to
     upload - nothing is flown from here."""
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.tasks import service as task_service
     pos = _live_drone_position(request.app.state.session_manager, drone_id)
     if pos is None:
@@ -911,13 +992,11 @@ async def get_fleet_status():
 @router.post("/fleet/connect")
 async def connect_fleet(
     body: dict,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """Connect SITL fleet instances 1..count to the SERVER (not a browser
     session) - they stay online for the dispatcher regardless of who has
     the dashboard open. body: {count}"""
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.fleet import service as fleet_service
     try:
         count = max(1, min(int(body.get("count") or 5), 20))
@@ -929,10 +1008,8 @@ async def connect_fleet(
 
 @router.post("/fleet/disconnect")
 async def disconnect_fleet(
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.fleet import service as fleet_service
     n = await fleet_service.disconnect_all()
     return {"disconnected": n}
@@ -941,13 +1018,11 @@ async def disconnect_fleet(
 @router.post("/fleet/adopt")
 async def fleet_adopt(
     body: dict,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """Manually adopt one drone into the server fleet by MAVLink UDP port
     (e.g. a new SITL instance, or a real air unit's telemetry ingress).
     body: {port} or {instance}. The watchdog keeps it alive afterwards."""
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.fleet import service as fleet_service
     try:
         if body.get("instance"):
@@ -971,7 +1046,7 @@ async def fleet_adopt(
 async def fleet_fly_mission(
     drone_db_id: str,
     body: dict,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """Upload + arm + start a mission on a server-fleet drone. Same zone
     gate as the socket path: red blocks (permit-aware), orange requires
@@ -983,8 +1058,6 @@ async def fleet_fly_mission(
     separate status PATCH, and a lost or reordered second call left the order
     saying one thing while the aircraft did another. Both are optional - a
     return-to-station fly carries no order."""
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.fleet import service as fleet_service
     ok, detail = await fleet_service.fly_mission(
         drone_db_id, body.get("waypoints") or [],
@@ -1011,12 +1084,10 @@ async def patch_task(
     task_id: str,
     body: dict,
     request: Request,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """Advance the order lifecycle ({status, note?, drone_id?}) or shelve
     it ({archived: bool} - closed orders only)."""
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.tasks import service as task_service
     if "archived" in body and not body.get("status"):
         task, err = await task_service.set_archived(task_id, bool(body["archived"]))
@@ -1046,11 +1117,9 @@ async def patch_task(
 @router.delete("/tasks/{task_id}")
 async def delete_task(
     task_id: str,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """Permanently delete a CLOSED order (its flights stay in history)."""
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.tasks import service as task_service
     ok, err = await task_service.delete_task(task_id)
     if not ok:
@@ -1061,10 +1130,8 @@ async def delete_task(
 @router.post("/tasks/{task_id}/replan")
 async def replan_task(
     task_id: str,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.tasks import service as task_service
     task, err = await task_service.replan(task_id)
     if task is None:
@@ -1142,22 +1209,27 @@ async def download_crowd_report(session_id: str):
     from app.vision.persistence import export_crowd_report
     report = await export_crowd_report(session_id)
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        snap_csv = io.StringIO()
-        w = csv.DictWriter(snap_csv, fieldnames=[
-            "t", "current_count", "peak_count", "density_level", "section_counts",
-        ])
-        w.writeheader()
-        w.writerows(report["snapshots"])
-        zf.writestr("crowd_snapshots.csv", snap_csv.getvalue())
+    def _build() -> io.BytesIO:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            snap_csv = io.StringIO()
+            w = csv.DictWriter(snap_csv, fieldnames=[
+                "t", "current_count", "peak_count", "density_level", "section_counts",
+            ])
+            w.writeheader()
+            w.writerows(report["snapshots"])
+            zf.writestr("crowd_snapshots.csv", snap_csv.getvalue())
 
-        alert_csv = io.StringIO()
-        w = csv.DictWriter(alert_csv, fieldnames=["t", "level", "section_idx", "count", "message"])
-        w.writeheader()
-        w.writerows(report["alerts"])
-        zf.writestr("crowd_alerts.csv", alert_csv.getvalue())
-    buf.seek(0)
+            alert_csv = io.StringIO()
+            w = csv.DictWriter(alert_csv, fieldnames=["t", "level", "section_idx", "count", "message"])
+            w.writeheader()
+            w.writerows(report["alerts"])
+            zf.writestr("crowd_alerts.csv", alert_csv.getvalue())
+        buf.seek(0)
+        return buf
+
+    # Compression and file reads off the event loop (audit B20).
+    buf = await asyncio.to_thread(_build)
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M")
     return StreamingResponse(
@@ -1200,45 +1272,50 @@ async def download_plate_report(session_id: str):
     from app.vision.persistence import export_plate_report
     events = await export_plate_report(session_id)
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        rows_csv = io.StringIO()
-        # One row per VEHICLE, with the plate filled in where one was read.
-        #
-        # THE EVIDENCE TRAVELS WITH THE READING. A 40px single-frame guess and
-        # a 300px plate three frames agreed on are both legitimate rows, and
-        # they are not equally trustworthy - so width, agreement count and
-        # grammar all come along, and `plate_grade` collapses them into the one
-        # column a reviewer can actually sort and filter a session on. Deriving
-        # the grade HERE rather than storing it keeps the raw numbers
-        # authoritative: the thresholds can be argued with afterwards, which
-        # they could not be if only the verdict had been kept.
-        fieldnames = [
-            "vehicle_id", "track_id", "plate_text", "plate_grade",
-            "ocr_confidence", "plate_px_w", "plate_votes", "plate_grammar_ok",
-            "vehicle_type", "vehicle_color", "vehicle_color_conf",
-            "speed_est_kmh", "heading_deg", "against_flow",
-            "lat", "lng", "alt_m",
-            "first_seen", "last_seen", "image_path", "vehicle_image_path",
-        ]
-        w = csv.DictWriter(rows_csv, fieldnames=fieldnames, extrasaction="ignore")
-        w.writeheader()
-        for ev in events:
-            row = dict(ev)
-            row["plate_grade"] = _plate_grade(ev)
-            # Both images, in separate folders so a reviewer can flip through
-            # the car photos without the plate crops interleaved.
-            for field, folder in (("image_path", "plates"),
-                                  ("vehicle_image_path", "vehicles")):
-                path = ev.get(field)
-                if path and os.path.exists(path):
-                    row[field] = f"{folder}/{os.path.basename(path)}"
-                    zf.write(path, arcname=row[field])
-                else:
-                    row[field] = ""
-            w.writerow(row)
-        zf.writestr("vehicle_log.csv", rows_csv.getvalue())
-    buf.seek(0)
+    def _build() -> io.BytesIO:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            rows_csv = io.StringIO()
+            # One row per VEHICLE, with the plate filled in where one was read.
+            #
+            # THE EVIDENCE TRAVELS WITH THE READING. A 40px single-frame guess and
+            # a 300px plate three frames agreed on are both legitimate rows, and
+            # they are not equally trustworthy - so width, agreement count and
+            # grammar all come along, and `plate_grade` collapses them into the one
+            # column a reviewer can actually sort and filter a session on. Deriving
+            # the grade HERE rather than storing it keeps the raw numbers
+            # authoritative: the thresholds can be argued with afterwards, which
+            # they could not be if only the verdict had been kept.
+            fieldnames = [
+                "vehicle_id", "track_id", "plate_text", "plate_grade",
+                "ocr_confidence", "plate_px_w", "plate_votes", "plate_grammar_ok",
+                "vehicle_type", "vehicle_color", "vehicle_color_conf",
+                "speed_est_kmh", "heading_deg", "against_flow",
+                "lat", "lng", "alt_m",
+                "first_seen", "last_seen", "image_path", "vehicle_image_path",
+            ]
+            w = csv.DictWriter(rows_csv, fieldnames=fieldnames, extrasaction="ignore")
+            w.writeheader()
+            for ev in events:
+                row = dict(ev)
+                row["plate_grade"] = _plate_grade(ev)
+                # Both images, in separate folders so a reviewer can flip through
+                # the car photos without the plate crops interleaved.
+                for field, folder in (("image_path", "plates"),
+                                      ("vehicle_image_path", "vehicles")):
+                    path = ev.get(field)
+                    if path and os.path.exists(path):
+                        row[field] = f"{folder}/{os.path.basename(path)}"
+                        zf.write(path, arcname=row[field])
+                    else:
+                        row[field] = ""
+                w.writerow(row)
+            zf.writestr("vehicle_log.csv", rows_csv.getvalue())
+        buf.seek(0)
+        return buf
+
+    # Hundreds of JPEG reads plus deflate - off the event loop (audit B20).
+    buf = await asyncio.to_thread(_build)
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M")
     return StreamingResponse(
@@ -1270,18 +1347,14 @@ async def plate_history_image(event_id: str):
 
 
 @router.delete("/vision/crowd-history")
-async def clear_crowd_history_route(x_auth_token: str = Header(None, alias="X-Auth-Token")):
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
+async def clear_crowd_history_route(_user: AuthUser = Depends(require_operator)):
     from app.vision.persistence import clear_crowd_history
     await clear_crowd_history()
     return {"cleared": True}
 
 
 @router.delete("/vision/plate-history")
-async def clear_plate_history_route(x_auth_token: str = Header(None, alias="X-Auth-Token")):
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
+async def clear_plate_history_route(_user: AuthUser = Depends(require_operator)):
     from app.vision.persistence import clear_plate_history
     await clear_plate_history()
     return {"cleared": True}
@@ -1305,7 +1378,7 @@ async def get_calibration():
 @router.put("/vision/calibration")
 async def put_calibration(
     updates: dict,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """
     Save a partial calibration update.
@@ -1324,9 +1397,6 @@ async def put_calibration(
                         aircraft's behaviour mid-manoeuvre with nobody having
                         touched a control.
     """
-    settings = get_settings()
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.vision import calibration
     try:
         calibration.save(updates)
@@ -1337,11 +1407,8 @@ async def put_calibration(
 
 
 @router.delete("/vision/calibration")
-async def reset_calibration(x_auth_token: str = Header(None, alias="X-Auth-Token")):
+async def reset_calibration(_user: AuthUser = Depends(require_operator)):
     """Drop every override and fall back to the deploy-time defaults."""
-    settings = get_settings()
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.vision import calibration
     calibration.reset()
     return {"reset": True, **calibration.schema()}
@@ -1354,8 +1421,8 @@ async def reset_calibration(x_auth_token: str = Header(None, alias="X-Auth-Token
 # that person. This adds the other way in - a persistent database of known
 # people that the tracker can match against with nobody selecting a target.
 #
-# Every mutating route is token-gated. This is durable biometric data, and it
-# is the one dataset in this system with no automatic expiry.
+# Every mutating route needs a signed-in operator. This is durable biometric
+# data, and it is the one dataset in this system with no automatic expiry.
 
 
 @router.get("/vision/face-gallery")
@@ -1370,7 +1437,7 @@ async def face_gallery_enrol(
     name:  str = Query(..., min_length=1, max_length=120),
     notes: str = Query(""),
     files: list[UploadFile] = File(...),
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """
     Enrol one person from uploaded photos.
@@ -1383,10 +1450,6 @@ async def face_gallery_enrol(
     recognition working and not, and the operator needs to know which file to
     re-shoot.
     """
-    settings = get_settings()
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
-
     import os
     import tempfile
     from app.vision.persistence import enrol_person_images
@@ -1427,18 +1490,14 @@ async def face_gallery_enrol(
 @router.post("/vision/face-gallery/enrol-folder")
 async def face_gallery_enrol_folder(
     path: str = Query(..., description="Folder laid out as <root>/<person name>/<images>"),
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """
     Enrol a whole `<root>/<person name>/<image>` tree in one call - the layout
     of the provided sample set, so it needs no reshuffling.
 
-    Server-side path, so it is token-gated like every other mutation here.
+    Server-side path, so it needs an operator like every other mutation here.
     """
-    settings = get_settings()
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
-
     import os
     if not os.path.isdir(path):
         raise HTTPException(status_code=400, detail=f"Not a directory: {path}")
@@ -1470,13 +1529,10 @@ async def face_gallery_enrol_folder(
 async def face_gallery_set_active(
     person_id: str,
     active: bool = Query(...),
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """Take someone out of matching without destroying the enrolment - for
     investigating a match that keeps misfiring."""
-    settings = get_settings()
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.vision.persistence import set_person_active
     if not await set_person_active(person_id, active):
         raise HTTPException(status_code=404, detail="Person not found")
@@ -1486,12 +1542,9 @@ async def face_gallery_set_active(
 @router.delete("/vision/face-gallery/{person_id}")
 async def face_gallery_delete_person(
     person_id: str,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """Erase a person, their embeddings, and their stored photos."""
-    settings = get_settings()
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.vision.persistence import delete_person
     if not await delete_person(person_id):
         raise HTTPException(status_code=404, detail="Person not found")
@@ -1499,16 +1552,13 @@ async def face_gallery_delete_person(
 
 
 @router.delete("/vision/face-gallery")
-async def face_gallery_clear(x_auth_token: str = Header(None, alias="X-Auth-Token")):
+async def face_gallery_clear(_user: AuthUser = Depends(require_operator)):
     """
     Erase the entire gallery - every identity and every stored photo.
 
     The explicit deletion path this data category requires, since nothing here
     is ever purged automatically.
     """
-    settings = get_settings()
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.vision.persistence import clear_face_gallery
     await clear_face_gallery()
     return {"cleared": True}
@@ -1527,11 +1577,8 @@ async def face_gallery_sightings(
 @router.delete("/vision/sightings")
 async def face_gallery_clear_sightings(
     session_id: str | None = Query(None),
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
-    settings = get_settings()
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.vision.persistence import clear_sightings
     await clear_sightings(session_id=session_id)
     return {"cleared": True, "session_id": session_id}
@@ -1550,10 +1597,8 @@ async def get_permits(status: str = Query(None)):
 async def decide_permit(
     permit_id: str,
     body: dict,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_admin),
 ):
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
     from app.permits import service
     decided = await service.decide(permit_id, bool(body.get("approve")))
     if decided is None:
@@ -1597,11 +1642,9 @@ async def get_flight(flight_id: str):
 async def patch_drone(
     drone_id: str,
     body: dict,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
-    """Rename a drone. Auth: same X-Auth-Token as other write endpoints."""
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
+    """Rename a drone (operator)."""
     name = (body.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="name required")
@@ -1617,7 +1660,7 @@ async def upload_reference_photo(
     request:    Request,
     file:       UploadFile = File(...),
     session_id: str        = Query(..., description="Session ID from session_ready event"),
-    x_auth_token: str      = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """
     Accept a reference photo, extract the face embedding via InsightFace,
@@ -1626,16 +1669,15 @@ async def upload_reference_photo(
     Returns a base64 JPEG thumbnail of the detected face so the frontend
     can show a preview confirming which face was registered.
 
-    Auth: pass the same NEXT_PUBLIC_SECRET_TOKEN as X-Auth-Token header.
+    Auth: a signed-in operator's bearer token.
     """
-    settings = get_settings()
-    if x_auth_token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
-
     # ── Decode image ──────────────────────────────────────────────────────
     data = await file.read()
+    if len(data) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image too large (20 MB max)")
     img_array = np.frombuffer(data, np.uint8)
-    img_bgr   = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+    # Decoding a multi-megapixel JPEG blocks for tens of ms (audit B20).
+    img_bgr   = await asyncio.to_thread(cv2.imdecode, img_array, cv2.IMREAD_COLOR)
     if img_bgr is None:
         raise HTTPException(status_code=400, detail="Could not decode image - use JPEG or PNG")
 
@@ -1706,6 +1748,7 @@ async def upload_reference_photo(
 async def get_terrain_elevation(
     lats: str = Query(..., description="Comma-separated latitudes"),
     lngs: str = Query(..., description="Comma-separated longitudes"),
+    _user: AuthUser = Depends(require_viewer),
 ):
     """
     Returns terrain elevation (metres MSL) for a list of lat/lng points.
@@ -1741,6 +1784,13 @@ async def get_terrain_elevation(
     if len(lat_list) != len(lng_list):
         raise HTTPException(status_code=400,
                             detail="lat and lng lists must have equal length")
+    if len(lat_list) > TERRAIN_MAX_POINTS:
+        raise HTTPException(status_code=400,
+                            detail=f"At most {TERRAIN_MAX_POINTS} points per request")
+    for lat, lng in zip(lat_list, lng_list):
+        if not (math.isfinite(lat) and math.isfinite(lng)
+                and -90.0 <= lat <= 90.0 and -180.0 <= lng <= 180.0):
+            raise HTTPException(status_code=400, detail="Invalid lat/lng values")
 
     results: list[dict] = []
     uncached_indices: list[int] = []
@@ -1766,17 +1816,23 @@ async def get_terrain_elevation(
                 if resp.status_code == 200:
                     data = resp.json()
                     for j, item in enumerate(data.get("results", [])):
-                        elev = item.get("elevation", 0) or 0
+                        if j >= len(uncached_indices):
+                            break
+                        elev = item.get("elevation")
+                        if not isinstance(elev, (int, float)) or not math.isfinite(elev):
+                            continue
                         idx = uncached_indices[j]
                         lat, lng = lat_list[idx], lng_list[idx]
                         key = f"{lat:.5f}_{lng:.5f}"
-                        _terrain_cache[key] = elev
-                        results[idx]["elevation"] = elev
+                        _terrain_cache[key] = float(elev)
+                        results[idx]["elevation"] = float(elev)
+                else:
+                    logger.warning(f"Terrain elevation upstream returned {resp.status_code}")
         except Exception as e:
             logger.warning(f"Terrain elevation fetch failed: {e}")
-            # Return 0 for failed lookups - drone should fallback to home altitude
-            for idx in uncached_indices:
-                if results[idx]["elevation"] is None:
-                    results[idx]["elevation"] = 0
 
+    # A point the upstream could not answer stays null. It used to be
+    # reported as 0 m, which is sea level, not "unknown" - a terrain-follow
+    # mission over a 600 m plateau would have been planned 600 m into the
+    # ground. The caller decides how to fall back (home altitude).
     return {"points": results, "source": "SRTM via open-elevation"}

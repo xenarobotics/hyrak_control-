@@ -22,6 +22,7 @@ import { useSwarmStore } from '@/store/swarm'
 import { FleetAside } from '@/components/swarm/FleetAside'
 import { StatusBar } from '@/components/layout/StatusBar'
 import { getStatusBarEnabled, STATUSBAR_CHANGE_EVENT } from '@/lib/statusBarSettings'
+import { useAuthGate } from '@/hooks/useAuthGate'
 
 const NAV = [
     { href: '/fly',       label: 'Fly',     icon: Radio },
@@ -192,6 +193,11 @@ function PlatformNav() {
 }
 
 export default function PlatformLayout({ children }: { children: React.ReactNode }) {
+    // Every platform page is behind the login: no token, or a token the
+    // server no longer accepts, goes to /login. The socket is not opened
+    // until the check passes, so a signed-out tab never hits the server
+    // with an empty credential. The landing page (/) stays public.
+    const gate = useAuthGate('viewer')
     const [mounted, setMounted] = useState(false)
     const [statusBarOn, setStatusBarOn] = useState(false)
     const swarmEnabled = useSwarmStore(s => s.enabled)
@@ -210,6 +216,15 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
     const ownBar = ['/fly', '/command'].some(p => pathname === p || pathname.startsWith(p + '/'))
     const [uiMode] = useUiMode()
     const showStatusBar = mounted && statusBarOn && !ownBar && uiMode !== 'normal'
+
+    if (gate !== 'ok') {
+        return (
+            <div className="flex h-full items-center justify-center"
+                style={{ background: 'hsl(var(--app-bg))', color: 'hsl(var(--app-text-muted))' }}>
+                <span style={{ fontSize: 11, fontFamily: 'monospace', letterSpacing: '0.12em' }}>CHECKING SIGN-IN</span>
+            </div>
+        )
+    }
 
     return (
         <TooltipProvider>

@@ -68,5 +68,17 @@ class DroneSession:
     # excluded from the client list and never own a drone.
     is_admin: bool            = False
 
+    # Who is behind this socket (stamped at connect from the bearer token,
+    # app/auth). role is the whole permission check for command events:
+    # viewer < operator < admin. resume_secret is handed to the client in
+    # session_ready and must come back with resume_session - a session id
+    # alone never reclaims a drone. superseded_sids: sockets this session
+    # left behind when the client reconnected before their timeout.
+    user_id: Optional[str]    = None
+    username: Optional[str]   = None
+    role: Optional[str]       = None
+    resume_secret: Optional[str] = None
+    superseded_sids: list     = field(default_factory=list)
+
     # Swarm fleet: drone_id → TelemetryManager (populated when swarm mode is used)
     fleet: dict               = field(default_factory=dict)

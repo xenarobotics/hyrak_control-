@@ -3,10 +3,13 @@
 The frontend NEVER talks to the sidecar port: everything (control, status,
 MJPEG feeds, downloads) proxies through here, so the deployed app works
 wherever the backend is reachable and the sidecar stays loopback-only.
-Mutating routes carry the same X-Auth-Token gate as the rest of the API.
+Mutating routes require a signed-in operator (app/auth) like the rest of the API.
 """
 import httpx
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from app.auth.deps import require_operator
+from app.auth.service import AuthUser
 from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
@@ -15,11 +18,6 @@ from app.reconstruction import service
 settings = get_settings()
 
 router = APIRouter(prefix="/api/recon")
-
-
-def _auth(token: str | None) -> None:
-    if token != settings.secret_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
 
 
 @router.get("/engine")
@@ -32,14 +30,13 @@ async def engine_state() -> dict:
 @router.post("/options")
 async def set_options(
     body: dict,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """Scan options for the NEXT Start Analysis: {preset?, imu_fuse?,
     mavlink_url?}. The scan itself starts through the normal analysis flow
     (Start Analysis with the session's configured video source) - there is
     deliberately no source choice here: the camera is wherever the user is,
     never on this server."""
-    _auth(x_auth_token)
     try:
         return service.set_options(body)
     except ValueError as e:
@@ -48,12 +45,11 @@ async def set_options(
 
 @router.post("/session/stop")
 async def stop_session(
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """End the capture session (auto-exports). The engine process stays up.
     Normally the scan ends by stopping the analysis; this is the manual
     escape hatch."""
-    _auth(x_auth_token)
     code, out = await service.forward("POST", "/stop")
     if code >= 400:
         raise HTTPException(status_code=code, detail=out.get("detail", "stop failed"))
@@ -62,10 +58,9 @@ async def stop_session(
 
 @router.post("/session/export")
 async def export_now(
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """Export the current map without ending the session."""
-    _auth(x_auth_token)
     code, out = await service.forward("POST", "/export", timeout=120.0)
     if code >= 400:
         raise HTTPException(status_code=code, detail=out.get("detail", "export failed"))
@@ -74,11 +69,10 @@ async def export_now(
 
 @router.post("/engine/shutdown")
 async def engine_shutdown(
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """Stop the sidecar process entirely (frees its GPU memory)."""
     import asyncio
-    _auth(x_auth_token)
     await asyncio.to_thread(service.shutdown_engine)
     return {"ok": True}
 
@@ -86,7 +80,7 @@ async def engine_shutdown(
 @router.post("/scan_session")
 async def scan_session(
     body: dict,
-    x_auth_token: str = Header(None, alias="X-Auth-Token"),
+    _user: AuthUser = Depends(require_operator),
 ):
     """Re-process a stored session offline (photogrammetry, best quality).
 
@@ -96,7 +90,6 @@ async def scan_session(
     just-stopped live scan, and it clears in a minute.
     """
     import asyncio
-    _auth(x_auth_token)
     if not await asyncio.to_thread(service.healthy):
         ok, msg = await asyncio.to_thread(service.ensure_engine_idle)
         if not ok:

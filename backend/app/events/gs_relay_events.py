@@ -14,7 +14,7 @@ telemetry ultimately reads from.
 """
 import logging
 
-from app.config import get_settings
+from app.auth import service as auth_service
 from app.telemetry import gs_relay, rf_bridge
 
 logger = logging.getLogger("verocore.events.gs_relay")
@@ -23,7 +23,6 @@ NAMESPACE = "/gs-relay"
 
 
 def register_gs_relay_events(sio):
-    settings = get_settings()
 
     async def _uplink_sink(data: bytes) -> None:
         sid = gs_relay.get_active()
@@ -32,9 +31,14 @@ def register_gs_relay_events(sio):
 
     @sio.event(namespace=NAMESPACE)
     async def connect(sid, environ, auth):
+        # The agent is a script on the ground-station laptop: it signs in
+        # like a browser and carries an operator's bearer token (HYRAK_TOKEN
+        # on its side). The legacy shared token still works while
+        # AUTH_LEGACY_TOKEN_ENABLED is on.
         token = (auth or {}).get("token")
-        if token != settings.secret_token:
-            logger.warning(f"Rejected gs-relay agent {sid[:8]} - bad token")
+        user = await auth_service.authenticate(token)
+        if user is None or not user.has_role("operator"):
+            logger.warning(f"Rejected gs-relay agent {sid[:8]} - not signed in as an operator")
             return False
         gs_relay.set_active(sid)
         bridge = await rf_bridge.ensure_started()

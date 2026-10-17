@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 import logging
 from typing import Optional
 from app.sessions.models import DroneSession, AnalysisMode
@@ -64,6 +65,30 @@ class SessionManager:
             logger.info(f"Last swarm session left - stopped {stopped} fleet drone(s)")
 
         logger.info(f"Session destroyed: {session_id[:8]}")
+
+    def resumable(self, session_id: Optional[str], user_id: Optional[str],
+                  resume_secret: Optional[str]) -> Optional[DroneSession]:
+        """The session a returning socket may reclaim, or None.
+
+        Three things must hold: the session still exists (it was not torn
+        down after the 90 s grace), the SAME user is asking, and the caller
+        knows the per-session resume_secret handed out in session_ready.
+        Whether the old socket has already been noticed as gone does not
+        matter (audit B8): a client reconnecting inside the ping timeout
+        simply supersedes its previous socket.
+        """
+        if not session_id or not user_id or not resume_secret:
+            return None
+        prior = self._sessions.get(session_id)
+        if prior is None:
+            return None
+        if prior.user_id != user_id:
+            logger.warning(f"Resume of {session_id[:8]} refused: different user")
+            return None
+        if not prior.resume_secret or not hmac.compare_digest(str(resume_secret), str(prior.resume_secret)):
+            logger.warning(f"Resume of {session_id[:8]} refused: bad resume_secret")
+            return None
+        return prior
 
     def get_by_socket(self, socket_id: str) -> Optional[DroneSession]:
         for s in self._sessions.values():
