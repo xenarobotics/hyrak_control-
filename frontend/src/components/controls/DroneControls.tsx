@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 
 import { useDrone } from '@/hooks/useDrone'
-import { useDroneStore, type RcTakeoverReport } from '@/store/drone'
+import { useDroneStore, type RcTakeoverReport, type ActionResult } from '@/store/drone'
 import { useSwarmStore } from '@/store/swarm'
 import { Button } from '@/components/ui/button'
 import {
@@ -28,7 +28,6 @@ export function DroneControls() {
     const telemetryStatus = useDroneStore(s => s.telemetryStatus)
     const pendingAction = useDroneStore(s => s.pendingAction)
     const lastActionResult = useDroneStore(s => s.lastActionResult)
-    const [modeError, setModeError] = useState<string | null>(null)
     const swarmEnabled = useSwarmStore(s => s.enabled)
     const selectedIds  = useSwarmStore(s => s.selectedIds)
     const drones       = useSwarmStore(s => s.drones)
@@ -43,13 +42,18 @@ export function DroneControls() {
 
     const modePending = pendingAction?.action === 'set_mode'
 
+    // Derived from the latest set_mode result; a later success clears it and
+    // the timer dismisses that particular refusal after 12 s.
+    const [modeDismissed, setModeDismissed] = useState<ActionResult | null>(null)
+    const modeRefusal = lastActionResult?.action === 'set_mode' && !lastActionResult.ok ? lastActionResult : null
+    const modeError = modeRefusal && modeRefusal !== modeDismissed
+        ? (modeRefusal.error || modeRefusal.msg || 'The drone did not change mode')
+        : null
     useEffect(() => {
-        if (!lastActionResult || lastActionResult.action !== 'set_mode') return
-        if (lastActionResult.ok) { setModeError(null); return }
-        setModeError(lastActionResult.error || lastActionResult.msg || 'The drone did not change mode')
-        const t = setTimeout(() => setModeError(null), 12000)
+        if (!modeRefusal) return
+        const t = setTimeout(() => setModeDismissed(modeRefusal), 12000)
         return () => clearTimeout(t)
-    }, [lastActionResult])
+    }, [modeRefusal])
 
     // WHO IS FLYING is a different question from WHICH MODE, and only the
     // second was ever on screen. They agree right up until the moment they
@@ -63,12 +67,15 @@ export function DroneControls() {
     // parameters on the ground, which is the only place the answer is cheap.
     // Runs on request, not automatically: it downloads the full parameter
     // table, which is seconds on SITL and half a minute on a 3DR radio.
+    // The last report stays up while other commands come and go, so it is
+    // captured during render when a new rc_takeover_check result lands.
     const [rcReport, setRcReport] = useState<RcTakeoverReport | null>(null)
-    const rcPending = pendingAction?.action === 'rc_takeover_check'
-    useEffect(() => {
-        if (lastActionResult?.action !== 'rc_takeover_check') return
+    const [rcSeen, setRcSeen] = useState<ActionResult | null>(null)
+    if (lastActionResult?.action === 'rc_takeover_check' && lastActionResult !== rcSeen) {
+        setRcSeen(lastActionResult)
         setRcReport(lastActionResult.report ?? null)
-    }, [lastActionResult])
+    }
+    const rcPending = pendingAction?.action === 'rc_takeover_check'
 
     const armed = telemetry?.flight_mode?.is_armed ?? false
     // Sent, not yet acknowledged. On a 3DR radio that gap is about a second,

@@ -122,7 +122,13 @@ export function FollowControls({
     }, [])
 
     const [dist, setDist] = useState(targetRatio ?? 0.22)
-    useEffect(() => { if (targetRatio != null) setDist(targetRatio) }, [targetRatio])
+    // Follow the backend's value when it reports a new one (during render,
+    // so the slider never paints the stale value for a frame).
+    const [syncedRatio, setSyncedRatio] = useState(targetRatio)
+    if (targetRatio !== syncedRatio) {
+        setSyncedRatio(targetRatio)
+        if (targetRatio != null) setDist(targetRatio)
+    }
 
     // Vehicles and people arm through different events: vehicle follow has its
     // own handler because it must also start Offboard for a mode the shared

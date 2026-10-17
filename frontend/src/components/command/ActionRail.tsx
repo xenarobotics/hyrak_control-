@@ -13,7 +13,7 @@
 import { useEffect, useState } from 'react'
 import { ArrowDownToLine, CirclePause, Home, Loader2, Minus, OctagonX, Play, Plus, Power, RotateCcw, Rocket } from 'lucide-react'
 import { useDrone } from '@/hooks/useDrone'
-import { useDroneStore } from '@/store/drone'
+import { useDroneStore, type ActionResult } from '@/store/drone'
 import type { AvoidanceStatus } from '@/lib/avoidance'
 import { actingFloorM } from './avoidFloor'
 
@@ -62,12 +62,23 @@ export function ActionRail({ avoid }: { avoid?: AvoidanceStatus | null }) {
     const indoor = avoid?.env === 'indoor'
     const [alt, setAlt] = useState(10)
     // Indoors the 10 m default meets the ceiling: drop to 1.5 m and cap at 2.
-    useEffect(() => { if (indoor) setAlt(a => Math.min(a, INDOOR_TAKEOFF_M)) }, [indoor])
+    // Adjusted during render on the outdoor -> indoor edge, not in an effect.
+    const [wasIndoor, setWasIndoor] = useState(false)
+    if (indoor !== wasIndoor) {
+        setWasIndoor(indoor)
+        if (indoor) setAlt(a => Math.min(a, INDOOR_TAKEOFF_M))
+    }
     const altMax = indoor ? INDOOR_TAKEOFF_MAX_M : 120
     const floor = actingFloorM(avoid ?? null)
     const belowFloor = floor != null && alt < floor
     const [killArmed, setKillArmed] = useState(false)
-    const [flash, setFlash] = useState<string | null>(null)
+    // The aircraft's answer, shown for a moment: derived from the latest
+    // result until the timer dismisses that particular result.
+    const [flashDismissed, setFlashDismissed] = useState<ActionResult | null>(null)
+    const flash = lastActionResult && lastActionResult !== flashDismissed && lastActionResult.ok === false
+        ? `${(lastActionResult.action ?? '').replace(/_/g, ' ').toUpperCase()} refused${
+            (lastActionResult.error ?? lastActionResult.msg) ? `: ${lastActionResult.error ?? lastActionResult.msg}` : ''}`
+        : null
 
     useEffect(() => {
         if (!killArmed) return
@@ -75,12 +86,9 @@ export function ActionRail({ avoid }: { avoid?: AvoidanceStatus | null }) {
         return () => clearTimeout(id)
     }, [killArmed])
 
-    useEffect(() => {                 // show the aircraft's answer for a moment
+    useEffect(() => {
         if (!lastActionResult) return
-        const r = lastActionResult as { action?: string; ok?: boolean; error?: string; msg?: string }
-        const why = r.error ?? r.msg
-        setFlash(r.ok === false ? `${(r.action ?? '').replace(/_/g, ' ').toUpperCase()} refused${why ? `: ${why}` : ''}` : null)
-        const id = setTimeout(() => setFlash(null), 6000)
+        const id = setTimeout(() => setFlashDismissed(lastActionResult), 6000)
         return () => clearTimeout(id)
     }, [lastActionResult])
 
