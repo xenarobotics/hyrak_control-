@@ -9,6 +9,7 @@
 // and how wide it dodges, and the last things it did.
 import { useCallback, useEffect, useState } from 'react'
 import { useDroneStore } from '@/store/drone'
+import { useResolvedDroneId } from '@/lib/droneId'
 import { getServerUrl } from '@/lib/server-url'
 import { visibleInterval } from '@/lib/poll'
 import { ShieldCheck, ShieldAlert, Shield, TriangleAlert, ChevronDown, ChevronRight } from 'lucide-react'
@@ -80,9 +81,11 @@ function Row({ label, value, color, hint }: { label: string; value: string; colo
 }
 
 export function AvoidancePanel() {
-    const sessionId = useDroneStore(s => s.session?.session_id)
     const telemetryStatus = useDroneStore(s => s.telemetryStatus)
-    const [droneId, setDroneId] = useState<string | null>(null)
+    // Resolved by the shared, backed-off resolver (lib/droneId.ts) - this
+    // panel and the Command strip used to each poll three endpoints every
+    // 1.5 s for as long as no drone was attached.
+    const droneId = useResolvedDroneId()
     const [status, setStatus] = useState<AvoidanceStatus | null>(null)
     const [events, setEvents] = useState<AvoidanceEvent[]>([])
     const [confirmArm, setConfirmArm] = useState(false)
@@ -90,32 +93,6 @@ export function AvoidancePanel() {
     const [showTuning, setShowTuning] = useState(false)
     const [draft, setDraft] = useState<Partial<AvoidanceParams>>({})
     const [note, setNote] = useState<string | null>(null)
-
-    // Resolve THIS session's drone. The identity arrives a few seconds AFTER
-    // telemetry connects (the FC's UID is read asynchronously), so this is
-    // polled until it resolves, and re-run whenever the link state changes -
-    // a one-shot lookup at session creation stayed at "connect a drone"
-    // forever. Falls back to the fleet's single drone (sim, station drone).
-    useEffect(() => {
-        let alive = true
-        const resolve = async () => {
-            try {
-                const j = await fetch(`${getServerUrl()}/api/sessions`).then(r => r.json())
-                const mine = (j.sessions ?? []).find((s: { session_id?: string }) => s.session_id === sessionId)
-                if (mine?.drone?.id) { if (alive) setDroneId(mine.drone.id); return }
-                const f = await fetch(`${getServerUrl()}/api/fleet`).then(r => r.json())
-                const fleet = (f.fleet ?? []).filter((d: { connected?: boolean }) => d.connected)
-                if (fleet.length === 1) { if (alive) setDroneId(fleet[0].db_id); return }
-                // Last resort: the one drone that has avoidance configured.
-                const a = await fetch(`${getServerUrl()}/api/avoidance/status`).then(r => r.json())
-                const ds = (a.drones ?? []) as { drone_id: string; enabled: boolean }[]
-                if (alive) setDroneId(ds.length === 1 ? ds[0].drone_id : null)
-            } catch { /* backend away */ }
-        }
-        resolve()
-        const stop = visibleInterval(resolve, 1500)
-        return () => { alive = false; stop() }
-    }, [sessionId, telemetryStatus])
 
     const refresh = useCallback(async () => {
         if (!droneId) return
@@ -176,7 +153,7 @@ export function AvoidancePanel() {
     // Any sensor streaming counts, exactly like the takeoff interlock: with the
     // sim's depth camera running, the mono path is switched off on purpose.
     const camOk = !!status?.sensors?.some(s => s.status === 'ok')
-    const goal = (status as (AvoidanceStatus & { goal?: [number, number] | null }) | null)?.goal ?? null
+    const goal = status?.goal ?? null
     const p = status?.params
 
     return (

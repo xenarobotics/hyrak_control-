@@ -67,6 +67,8 @@ export interface AvoidanceStatus {
     guarding?: boolean         // the follow guard is bending / holding that command now
     pose_rate_hz?: number
     planner?: { reason: string; speed_m_s: number; free_m: number | null; ttc_s: number | null; heading_deg: number | null } | null
+    /** The waypoint avoidance is steering toward, [lat, lng], while rerouting. */
+    goal?: [number, number] | null
     mono_calibration?: { scale: number | null; fits: number; rejected: number; error_pct_p50: number | null; error_pct_p90: number | null } | null
 }
 

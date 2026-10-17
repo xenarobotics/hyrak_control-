@@ -9,11 +9,11 @@ import { startRemoteSitlRelay, stopRemoteSitlRelay, isRemoteSitlRelayActive, set
 import { startNativeSerial, stopNativeSerial, isNativeSerialActive, setSerialSilenceHandler, DEFAULT_SERIAL_BAUD } from '@/lib/nativeSerialRelay'
 import { startNativeRfRelay, stopNativeRfRelay, isNativeRfRelayActive, setRfSilenceHandler } from '@/lib/nativeRfRelay'
 import { stopSiyiTelemetry, isSiyiTelemetryActive } from '@/lib/siyiTelemetryRelay'
-import { useDroneStore } from '@/store/drone'
+import { useDroneStore, type DroneMissionWaypoint } from '@/store/drone'
 import { useSwarmStore } from '@/store/swarm'
 import { colorForDrone, FLEET_SCAN_COUNT } from '@/lib/fleet'
 import type { TelemetrySnapshot } from '@/types/telemetry'
-import type { SessionInfo } from '@/types/session'
+import type { AnalysisMode, BoundDrone, SessionInfo, TelemetryStatus } from '@/types/session'
 import type { CVResult } from '@/types/vision'
 
 // Slightly past the server's SESSION_GRACE_S (90 s): after this the session is gone anyway.
@@ -93,10 +93,15 @@ export function useDrone() {
                 getSocket().emit('scan_swarm_drones', { count: FLEET_SCAN_COUNT })
             }
         }
-        const onTelStatus      = (data: { status: string; message?: string }) => {
-            store.setTelemetryStatus(data.status as any)
+        const onTelStatus      = (data: { status: TelemetryStatus; message?: string }) => {
+            store.setTelemetryStatus(data.status)
             if (data.status === 'error') {
                 store.setTelemetryError(data.message || 'Connection failed')
+            }
+            // The bound drone goes with the link.
+            if (data.status === 'disconnected' || data.status === 'error') {
+                const s = useDroneStore.getState().session
+                if (s?.drone) store.setSession({ ...s, drone: null, hardware_uid: null })
             }
             // Link gone (disconnect, takeover, failed connect) → release the
             // local radio so the user can reconnect cleanly. No-op otherwise.
@@ -128,8 +133,14 @@ export function useDrone() {
             store.setTelemetry(data)
         }
 
+        // The FC's UID is read asynchronously after connect; this is how the
+        // session learns which registry drone it is flying (lib/droneId.ts).
+        const onDroneIdentity  = (data: { hardware_uid?: string | null; drone?: BoundDrone | null }) => {
+            const s = useDroneStore.getState().session
+            if (s) store.setSession({ ...s, drone: data.drone ?? null, hardware_uid: data.hardware_uid ?? null })
+        }
         const onCvResults      = (data: CVResult) => store.setCvResults(data)
-        const onModeChanged    = (data: { mode: string }) => store.setMode(data.mode as any)
+        const onModeChanged    = (data: { mode: AnalysisMode }) => store.setMode(data.mode)
         const onModelStatus    = (data: { status: string; mode: string }) =>
             store.setModelLoading(data.status === 'loading')
         const onTrackingStatus = (_data: { active: boolean }) => { /* handled in panel */ }
@@ -154,7 +165,7 @@ export function useDrone() {
         }
         const onActionResult   = (data: { action: string; ok: boolean; msg?: string; error?: string }) =>
             store.setLastActionResult(data)
-        const onDroneMission   = (data: { waypoints?: any[] }) =>
+        const onDroneMission   = (data: { waypoints?: DroneMissionWaypoint[] }) =>
             store.setDroneMissionOffer(data?.waypoints ?? null)
         const onFcMessage      = (data: { severity: string; text: string; rank: number; ts: number }) =>
             store.addFcMessage(data)
@@ -285,6 +296,7 @@ export function useDrone() {
         socket.on('session_ready',         onSessionReady)
         socket.on('error',                 onServerError)
         socket.on('telemetry_status',      onTelStatus)
+        socket.on('drone_identity',        onDroneIdentity)
         socket.on('telemetry_update',      onTelUpdate)
         socket.on('cv_results',            onCvResults)
         socket.on('mode_changed',          onModeChanged)
@@ -314,6 +326,7 @@ export function useDrone() {
             socket.off('session_ready',         onSessionReady)
             socket.off('error',                 onServerError)
             socket.off('telemetry_status',      onTelStatus)
+            socket.off('drone_identity',        onDroneIdentity)
             socket.off('telemetry_update',      onTelUpdate)
             socket.off('cv_results',            onCvResults)
             socket.off('mode_changed',          onModeChanged)
