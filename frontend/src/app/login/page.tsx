@@ -30,8 +30,14 @@ function safeNext(raw: string | null): string {
     let url: URL
     try { url = new URL(raw, window.location.origin) } catch { return FALLBACK_NEXT }
     if (url.origin !== window.location.origin) return FALLBACK_NEXT
-    if (url.pathname.startsWith('/login')) return FALLBACK_NEXT
-    return url.pathname + url.search + url.hash
+    // Validate what we will actually navigate to, not only the input: the
+    // URL parser normalises, so rebuild a single-slash path and check again.
+    const out = '/' + url.pathname.replace(/^\/+/, '') + url.search + url.hash
+    if (!out.startsWith('/') || out.startsWith('//') || out.includes('\\')) return FALLBACK_NEXT
+    // eslint-disable-next-line no-control-regex
+    if (/[\u0000-\u001f\u007f]/.test(out)) return FALLBACK_NEXT
+    if (out === '/login' || out.startsWith('/login/') || out.startsWith('/login?') || out.startsWith('/login#')) return FALLBACK_NEXT
+    return out
 }
 
 function LoginForm() {
