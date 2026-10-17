@@ -455,8 +455,11 @@ def test_a_raising_calibration_feed_cannot_kill_the_refusal_reasons():
 
     class _Tel:
         async def status_text(self):
-            for t in ("[cal] progress <10>", "Arming denied: Compass not calibrated"):
-                yield _Status(t)
+            for text in ("[cal] progress <10>", "Arming denied: Compass not calibrated"):
+                yield _Status(text)
+            # The stream ending is the link ending: stop the manager, or
+            # the subscription (which now restarts dead streams) reopens it.
+            t._running = False
 
     t = _mgr()
     t._calibration = _Bomb()

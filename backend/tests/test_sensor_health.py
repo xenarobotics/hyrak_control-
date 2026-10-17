@@ -64,6 +64,9 @@ async def test_the_autopilot_flags_land_on_the_snapshot():
     class _Tel:
         async def health(self):
             yield _Health(mag_ok=False)
+            # The stream ending is the link ending: stop the manager, or
+            # the subscription (which now restarts dead streams) reopens it.
+            t._running = False
 
     t._drone = type("D", (), {"telemetry": _Tel()})()
     t._running = True
@@ -87,6 +90,9 @@ async def test_a_flag_flip_is_pushed_immediately_and_repeats_are_not():
         async def health(self):
             for h in (_Health(mag_ok=False), _Health(mag_ok=False), _Health(mag_ok=True)):
                 yield h
+            # The stream ending is the link ending: stop the manager, or
+            # the subscription (which now restarts dead streams) reopens it.
+            t._running = False
 
     t._drone = type("D", (), {"telemetry": _Tel()})()
     t._running = True

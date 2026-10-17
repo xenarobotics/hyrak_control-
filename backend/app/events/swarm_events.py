@@ -133,6 +133,40 @@ def cleanup_session_fleet_state(session_id: str) -> None:
         task.cancel()
 
 
+#: Scan bounds. 20 is what connect() accepts and what the colour table covers;
+#: a port range is capped to the same width so a bad payload cannot spawn
+#: hundreds of mavsdk_servers.
+SCAN_MAX_DRONES = 20
+SCAN_PORT_MIN, SCAN_PORT_MAX = 1024, 65535
+
+
+def scan_ports_from(data: dict) -> list[int]:
+    """The ports a scan request asks for, clamped. {count} -> drones
+    1..count (1..SCAN_MAX_DRONES); legacy {port_start, port_end} -> that
+    range, at most SCAN_MAX_DRONES wide and inside the unprivileged range.
+    Raises ValueError/TypeError on a request that cannot be made sane."""
+    data = data or {}
+    count = data.get("count")
+    if count:
+        n = max(1, min(SCAN_MAX_DRONES, int(count)))
+        return [port_for_drone(i) for i in range(1, n + 1)]
+    start = int(data.get("port_start", 14541))
+    end = int(data.get("port_end", 14543))
+    if not (SCAN_PORT_MIN <= start <= SCAN_PORT_MAX):
+        raise ValueError(f"port_start {start} out of range")
+    end = max(start, min(end, SCAN_PORT_MAX, start + SCAN_MAX_DRONES - 1))
+    return list(range(start, end + 1))
+
+
+def _server_fleet_owns(drone_id: int) -> bool:
+    """Is instance `drone_id` a live link in the SERVER delivery fleet?"""
+    try:
+        from app.fleet import service as fleet_service
+        return fleet_service.live_manager(drone_id) is not None
+    except Exception:
+        return False
+
+
 async def _server_alive_for_port(port: int) -> bool:
     """True if a mavsdk_server process bound to this MAVLink port is running.
     Matches the bare ':{port}' rather than a specific host so this works
@@ -345,9 +379,16 @@ def register_swarm_events(sio, session_manager: SessionManager):
         if not session:
             await sio.emit("error", {"msg": "No session found"}, to=sid)
             return
-        bridge = swarm_relay_bridge.SwarmRelayBridge(sio, sid)
-        swarm_relay_bridge.register_bridge(session.session_id, bridge)
-        logger.info(f"Session {session.session_id[:8]}: swarm relay bridge registered")
+        # Keyed by session and resolving the socket at emit time, so a
+        # resumed session's downlink follows it to the new sid. A re-announce
+        # keeps the existing bridge: its endpoints are what the fleet's
+        # mavsdk_servers are bound to.
+        bridge = swarm_relay_bridge.register_bridge(
+            session.session_id,
+            swarm_relay_bridge.SwarmRelayBridge(sio, session.session_id, session_manager),
+        )
+        logger.info(f"Session {session.session_id[:8]}: swarm relay bridge registered "
+                    f"({len(bridge._drones)} endpoint(s) kept)")
         await sio.emit("swarm_relay_status", {"connected": True}, to=sid)
 
     @sio.on("swarm_relay_uplink")
@@ -392,16 +433,32 @@ def register_swarm_events(sio, session_manager: SessionManager):
             await _run_scan(sid, session, data)
 
     async def _run_scan(sid, session, data):
-        count = data.get("count")
-        if count:
-            ports = [port_for_drone(i) for i in range(1, int(count) + 1)]
-        else:
-            port_start = int(data.get("port_start", 14541))
-            port_end   = int(data.get("port_end",   14543))
-            ports      = list(range(port_start, port_end + 1))
+        try:
+            ports = scan_ports_from(data)
+        except (TypeError, ValueError) as e:
+            await sio.emit("swarm_scan_result", {"drones": [], "found": 0,
+                                                 "error": f"Bad scan request: {e}"}, to=sid)
+            return
 
         await sio.emit("swarm_scan_started", {"ports": ports}, to=sid)
         logger.info(f"Scanning {len(ports)} ports for SITL drones: {ports[0]}-{ports[-1]}")
+        found_drones: list[dict] = []
+        error: str | None = None
+        try:
+            found_drones = await _scan(sid, session, ports)
+        except Exception as e:
+            # The result is emitted in the finally below either way: a scan
+            # that raised used to leave the UI spinner going forever.
+            logger.error(f"Swarm scan failed: {e}")
+            error = str(e)
+        finally:
+            payload = {"drones": found_drones, "found": len(found_drones)}
+            if error:
+                payload["error"] = error
+            await sio.emit("swarm_scan_result", payload, to=sid)
+            logger.info(f"Scan done: {len(found_drones)} drone(s) connected")
+
+    async def _scan(sid, session, ports: list[int]) -> list[dict]:
 
         # This session is now a fleet user. Mark it and start its emitter up
         # front so telemetry is flowing as soon as the first drone attaches.
@@ -430,7 +487,16 @@ def register_swarm_events(sio, session_manager: SessionManager):
             entry    = {"port": port, "drone_id": drone_id, "name": name, "color": color}
 
             async with sem:
-                existing = session_manager.get_fleet_drone(session.session_id, drone_id)
+                if not relay and _server_fleet_owns(drone_id):
+                    # The SERVER delivery fleet holds this port. A scan used
+                    # to kill its mavsdk_server (kill_stale on the same
+                    # endpoint) and adopt the drone into a browser session.
+                    logger.info(f"Scan: instance {drone_id} belongs to the server fleet - skipped")
+                    return None
+                # The session's OWN manager only - never the server fleet's
+                # (get_fleet_drone falls through to it, and it must not be
+                # stopped from here).
+                existing = session_manager.own_fleet_drone(session.session_id, drone_id)
                 if existing:
                     # Check the manager's ACTUAL bound port, not the scan's
                     # candidate port - those differ once bridged (the real
@@ -498,13 +564,7 @@ def register_swarm_events(sio, session_manager: SessionManager):
                 return None
 
         results = await asyncio.gather(*(scan_port(p) for p in ports))
-        found_drones = sorted((e for e in results if e), key=lambda e: e["drone_id"])
-
-        await sio.emit("swarm_scan_result", {
-            "drones": found_drones,
-            "found":  len(found_drones),
-        }, to=sid)
-        logger.info(f"Scan done: {len(found_drones)} drone(s) connected")
+        return sorted((e for e in results if e), key=lambda e: e["drone_id"])
 
     @sio.on("set_swarm_mode")
     async def on_set_swarm_mode(sid, data):
@@ -550,9 +610,25 @@ def register_swarm_events(sio, session_manager: SessionManager):
             address = f"udpin://127.0.0.1:{bridge_port}"
         else:
             address = f"udpin://0.0.0.0:{port}"
+            if _server_fleet_owns(drone_id):
+                # The SERVER delivery fleet owns this instance. Connecting
+                # here used to look that manager up through get_fleet_drone
+                # and stop it with kill_stale - a delivery drone's link
+                # taken down from an unrelated browser tab. Refuse.
+                msg = (f"Drone {drone_id} is a server fleet drone - command it from the "
+                       f"fleet board, it cannot be connected from a session")
+                await sio.emit("error", {"msg": msg}, to=sid)
+                await sio.emit("swarm_drone_status", {
+                    "drone_id": drone_id, "connected": False, "name": name, "error": msg,
+                }, to=sid)
+                logger.warning(f"Refused manual connect to server fleet instance {drone_id} "
+                               f"from session {session.session_id[:8]}")
+                return
 
-        # Stop any previous manager for this id (kill is scoped to its own port)
-        existing = session_manager.get_fleet_drone(session.session_id, drone_id)
+        # Stop any previous manager THIS SESSION holds for this id (kill is
+        # scoped to its own port). pop, never get_fleet_drone: that falls
+        # through to the server fleet's manager and must never be stopped here.
+        existing = session_manager.pop_fleet_drone(session.session_id, drone_id)
         if existing:
             await existing.stop(kill_stale=True)
 

@@ -77,6 +77,9 @@ async def test_arming_pushes_the_moment_it_changes_and_not_on_every_repeat():
         async def armed(self):
             for v in (False, False, True, True, True, False):
                 yield v
+            # The stream ending is the link ending: stop the manager, or
+            # the subscription (which now restarts dead streams) reopens it.
+            t._running = False
 
     t._drone = type("D", (), {"telemetry": _Tel()})()
     t._running = True
@@ -103,6 +106,9 @@ async def test_the_flight_mode_name_is_compared_not_the_enum_object():
         async def flight_mode(self):
             for n in ("HOLD", "HOLD", "MISSION"):
                 yield _Mode(n)
+            # The stream ending is the link ending: stop the manager, or
+            # the subscription (which now restarts dead streams) reopens it.
+            t._running = False
 
     t._drone = type("D", (), {"telemetry": _Tel()})()
     t._running = True

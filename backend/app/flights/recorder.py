@@ -32,13 +32,13 @@ async def on_snapshot(session_id: str, drone_id: str | None, snap: dict) -> None
 
     try:
         if armed and state is None:
-            flight = Flight(drone_id=drone_id, session_id=session_id)
-            async with get_session() as db:
-                db.add(flight)
-                await db.commit()
-                fid = flight.id
-            _active[session_id] = {
-                "flight_id": fid,
+            # CLAIM THE SLOT BEFORE THE FIRST AWAIT. Snapshots arrive as
+            # independent tasks, and on the arm edge two of them used to
+            # both see state None, both insert a Flight, and the loser's
+            # row stayed in_progress forever. The placeholder is synchronous;
+            # every snapshot that lands during the insert sees it and waits.
+            state = _active[session_id] = {
+                "flight_id": None,
                 "started": time.time(),
                 "last_sample": 0.0,
                 "max_alt": 0.0,
@@ -48,8 +48,22 @@ async def on_snapshot(session_id: str, drone_id: str | None, snap: dict) -> None
                 "crossed_orange": False,
                 "crossed_red": False,
             }
+            flight = Flight(drone_id=drone_id, session_id=session_id)
+            try:
+                async with get_session() as db:
+                    db.add(flight)
+                    await db.commit()
+                    fid = flight.id
+            except Exception:
+                # The insert failed: release the slot so the next snapshot
+                # tries again instead of recording into a flight with no row.
+                if _active.get(session_id) is state:
+                    _active.pop(session_id, None)
+                raise
+            if _active.get(session_id) is not state:
+                return   # ended (disarmed / disconnected) during the insert
+            state["flight_id"] = fid
             logger.info(f"Flight started: {fid[:8]} (drone {drone_id[:8]})")
-            state = _active[session_id]
 
         if state is None:
             return
@@ -57,6 +71,9 @@ async def on_snapshot(session_id: str, drone_id: str | None, snap: dict) -> None
         if not armed:
             await end_flight(session_id)
             return
+
+        if state["flight_id"] is None:
+            return   # another task is still inserting the Flight row
 
         now = time.time()
         if (now - state["last_sample"]) < _SAMPLE_INTERVAL:
@@ -97,8 +114,8 @@ async def on_snapshot(session_id: str, drone_id: str | None, snap: dict) -> None
 async def end_flight(session_id: str) -> None:
     """Finalise the session's open flight, if any. Idempotent."""
     state = _active.pop(session_id, None)
-    if state is None or not db_available():
-        return
+    if state is None or not db_available() or state.get("flight_id") is None:
+        return   # nothing recorded (or the row was still being inserted)
     try:
         from sqlalchemy import select
         async with get_session() as db:

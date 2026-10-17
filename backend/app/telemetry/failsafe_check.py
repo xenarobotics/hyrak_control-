@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import weakref
 
 logger = logging.getLogger("verocore.failsafe_check")
 
@@ -37,7 +38,9 @@ OBL = {0: "Position", 1: "Altitude", 2: "Manual", 3: "Return", 4: "Land", 5: "Ho
        6: "Terminate", 7: "Disarm"}
 CACHE_S = 120.0
 
-_cache: dict[int, tuple[float, dict]] = {}     # id(manager) -> (when, params)
+# manager -> (when, params). Weak keys: an id(manager) key was never evicted
+# and CPython reuses ids, so a new link could inherit a dead link's values.
+_cache: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 
 
 def evaluate(p: dict, mission_max_alt_m: float | None = None,
@@ -88,8 +91,11 @@ def evaluate(p: dict, mission_max_alt_m: float | None = None,
 async def read_params(manager, force: bool = False) -> dict:
     """The failsafe parameters, cached per link for CACHE_S (they do not change
     mid-flight unless someone edits them, and reading costs a round trip each)."""
-    key = id(manager)
-    hit = _cache.get(key)
+    key = manager
+    try:
+        hit = _cache.get(key)
+    except TypeError:          # unhashable / non-weakrefable test double
+        hit = None
     if hit and not force and time.monotonic() - hit[0] < CACHE_S:
         return hit[1]
     out: dict = {}
@@ -106,7 +112,10 @@ async def read_params(manager, force: bool = False) -> dict:
     except asyncio.TimeoutError:
         pass
     if out:
-        _cache[key] = (time.monotonic(), out)
+        try:
+            _cache[key] = (time.monotonic(), out)
+        except TypeError:
+            pass
     return out
 
 

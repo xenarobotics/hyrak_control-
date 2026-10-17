@@ -19,6 +19,12 @@ direct udpin://0.0.0.0:{port} it uses when SITL runs on this same machine.
 One bridge per session - each client's swarm is entirely their own, and a
 drone_id only needs to be unique WITHIN a session (see the per-session
 fleet storage in sessions/manager.py and swarm_events.py).
+
+The bridge is keyed by SESSION, not socket: a session survives a socket
+reconnect (resume_session), and the downlink must follow the session to its
+new socket id. Emitting to the sid captured at creation was the "telemetry
+works, every command times out after a resume" failure - the uplink arrived
+on the new socket while every reply went to the dead one.
 """
 
 import asyncio
@@ -78,10 +84,22 @@ class _DroneEndpoint(asyncio.DatagramProtocol):
 
 
 class SwarmRelayBridge:
-    def __init__(self, sio, socket_id: str):
+    def __init__(self, sio, session_id: str, session_manager=None):
         self._sio = sio
-        self._socket_id = socket_id
+        self.session_id = session_id
+        # Resolves the session's CURRENT socket id at emit time. None keeps
+        # the legacy behaviour for callers that pass a socket id as
+        # session_id (there are none in-tree; tests build bridges directly).
+        self._session_manager = session_manager
         self._drones: dict[int, _DroneEndpoint] = {}
+        self._warned_no_socket = False
+
+    def current_socket_id(self) -> Optional[str]:
+        sm = self._session_manager
+        if sm is None:
+            return self.session_id
+        session = sm.get(self.session_id)
+        return session.socket_id if session else None
 
     async def get_or_create_port(self, drone_id: int) -> int:
         """Loopback port THIS drone's TelemetryManager should connect to -
@@ -105,9 +123,18 @@ class SwarmRelayBridge:
             ep.uplink(data)
 
     def _emit_downlink(self, drone_id: int, data: bytes) -> None:
+        sid = self.current_socket_id()
+        if not sid:
+            # Session gone or between sockets: drop rather than emit into
+            # a dead sid. Said once, not once per MAVLink frame.
+            if not self._warned_no_socket:
+                self._warned_no_socket = True
+                logger.info(f"Swarm relay {self.session_id[:8]}: no live socket, dropping downlink")
+            return
+        self._warned_no_socket = False
         frame = bytes([drone_id & 0xFF]) + data
         asyncio.create_task(
-            self._sio.emit("swarm_relay_downlink", frame, to=self._socket_id)
+            self._sio.emit("swarm_relay_downlink", frame, to=sid)
         )
 
     def close_drone(self, drone_id: int) -> None:
@@ -121,9 +148,22 @@ class SwarmRelayBridge:
         self._drones.clear()
 
 
-def register_bridge(session_id: str, bridge: SwarmRelayBridge) -> None:
-    close_bridge(session_id)
+def register_bridge(session_id: str, bridge: SwarmRelayBridge) -> SwarmRelayBridge:
+    """Register the session's bridge and return the bridge IN USE.
+
+    A session that re-announces its relay (page reload, socket resume) keeps
+    the bridge it already has: its loopback endpoints are what the fleet's
+    mavsdk_servers are bound to, and closing them under live managers was a
+    silent link kill. The caller must use the returned bridge.
+    """
+    existing = _bridges.get(session_id)
+    if existing is not None:
+        existing._sio = bridge._sio
+        if bridge._session_manager is not None:
+            existing._session_manager = bridge._session_manager
+        return existing
     _bridges[session_id] = bridge
+    return bridge
 
 
 def get_bridge(session_id: str) -> Optional[SwarmRelayBridge]:

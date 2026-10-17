@@ -499,10 +499,15 @@ def _wd_manager(offboard_active=True, connected=True):
     t._offboard_hold_alt = None
     t._last_velocity_cmd_t = 0.0
     t._offboard_stale = False
+    t._last_sp = None
     # Nobody has taken the aircraft. send_velocity_command refuses outright
     # while a pilot has it (see test_pilot_handover), so the watchdog tests
     # have to say which case they are — these are all "the app still holds it".
     t._pilot_override_mode = None
+    # The real zero threshold is 2 s (a slow analyzer must not be braked
+    # between two results). The tests exercise the same state machine with a
+    # shorter window so the suite does not spend 2 s per case waiting.
+    t._OFFBOARD_STALE_AFTER_S = 0.5
     return t
 
 
@@ -622,12 +627,77 @@ async def test_the_watchdog_survives_a_failing_send():
 
 
 @pytest.mark.asyncio
-async def test_the_watchdog_fires_well_inside_px4s_own_failsafe_window():
-    """It has to act before PX4's offboard-loss timeout does, or PX4's failsafe
-    decides instead of us — and on many airframes that decision is LAND."""
+async def test_the_last_command_is_repeated_between_vision_results():
+    """THE COMMAND-RATE FLOOR. A vision result rate is not a command rate:
+    plate mode at a busy junction can go longer between two results than
+    PX4's offboard-loss timeout, and the old 0.5 s zero put a brake setpoint
+    between every pair of live commands. Between results the LAST command is
+    repeated at 10 Hz, so PX4 always sees a continuous, consistent stream."""
+    t = _wd_manager()
+    await t.send_velocity_command(forward_m_s=2.5, yaw_deg_s=40.0)
+    await _run_watchdog_for(t, 0.35)             # inside the stale window
+    sent = t._drone.offboard.sent
+    assert len(sent) >= 3, f"only {len(sent)} setpoints in 0.35 s - no keep-alive"
+    assert all(s[0] == 2.5 and s[3] == 40.0 for s in sent), sent
+    assert (0.0, 0.0, 0.0, 0.0) not in sent, "a brake was interleaved with live commands"
+    assert t._offboard_stale is False
+
+
+@pytest.mark.asyncio
+async def test_the_keepalive_re_anchors_nothing_and_keeps_the_altitude_hold_live():
+    """A repeated command must not re-anchor the altitude hold (that is the
+    caller's explicit vertical command doing that), and a repeated command
+    with no vertical component still carries the hold correction."""
+    t = _wd_manager()
+    t._offboard_hold_alt = 20.0
+    t._snapshot.position.relative_altitude_m = 21.0   # 1 m high -> push down
+    await t.send_velocity_command(forward_m_s=1.0)
+    await _run_watchdog_for(t, 0.25)
+    for s in t._drone.offboard.sent:
+        assert s[2] > 0.0, "the repeated command dropped the altitude-hold correction"
+    assert t._offboard_hold_alt == 20.0
+
+
+@pytest.mark.asyncio
+async def test_a_pilot_takeover_silences_the_keepalive():
+    """The latch is the whole point: once a human has the aircraft, NOTHING
+    this app repeats reaches it - not even the last tracker command."""
+    t = _wd_manager()
+    await t.send_velocity_command(forward_m_s=2.5)
+    before = len(t._drone.offboard.sent)
+    t._pilot_override_mode = "POSCTL"
+    await _run_watchdog_for(t, 0.3)
+    assert len(t._drone.offboard.sent) == before
+
+
+@pytest.mark.asyncio
+async def test_stop_offboard_forgets_the_last_command():
+    """After stop_offboard nothing is left to repeat: a later Offboard
+    session must not start by replaying a chase from the previous one."""
+    t = _wd_manager()
+
+    class _Stoppable(_RecordingOffboard):
+        async def stop(self):
+            pass
+
+    t._drone.offboard = _Stoppable()
+    t._claim_next_mode_change = lambda: None
+    await t.send_velocity_command(forward_m_s=2.5)
+    assert t._last_sp is not None
+    await t.stop_offboard()
+    assert t._last_sp is None and t._last_velocity_cmd_t == 0.0
+
+
+def test_the_keepalive_runs_well_inside_px4s_own_failsafe_window():
+    """PX4's COM_OF_LOSS_T defaults to 1 s and failsafe_check warns under
+    0.5 s. The re-send PERIOD is what keeps the stream alive between vision
+    results, so it must sit well inside that window; the zero threshold is a
+    separate, slower decision: long enough that a slow analyzer is not braked
+    between results, short enough that a dead one costs metres, not a flight."""
     from app.telemetry.manager import TelemetryManager
 
-    assert TelemetryManager._OFFBOARD_STALE_AFTER_S <= 0.6
+    assert TelemetryManager._OFFBOARD_WATCHDOG_PERIOD_S <= 0.2
+    assert 1.0 <= TelemetryManager._OFFBOARD_STALE_AFTER_S <= 3.0
     assert (
         TelemetryManager._OFFBOARD_WATCHDOG_PERIOD_S
         < TelemetryManager._OFFBOARD_STALE_AFTER_S
