@@ -18,16 +18,9 @@ import {
 import { Button } from '@/components/ui/button'
 import { RefreshCw, Camera, Satellite, WifiOff, Wifi, Loader, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { getVideoSource, isServerSourced, needsCameraSelection, getAirUnitVideoPort, setAirUnitVideoPort } from '@/lib/videoSource'
+import { getVideoSource, isServerSourced, needsCameraSelection, getAirUnitVideoPort, setAirUnitVideoPort, specFor } from '@/lib/videoSource'
 import { getServerUrl } from '@/lib/server-url'
 import { visibleInterval } from '@/lib/poll'
-
-const SOURCE_LABELS: Record<string, string> = {
-    air_unit_udp: 'Air unit (UDP) - set in Settings',
-    siyi_rtsp: 'SIYI (RTSP) - set in Settings',
-    rtsp_relay: 'RTSP relay (this machine) - set in Settings',
-    rtsp_camera: 'RTSP as camera - set in Settings',
-}
 
 export function DeviceSelector() {
     const [mounted, setMounted] = useState(false)
@@ -143,7 +136,7 @@ export function DeviceSelector() {
 
                 {!needsCamera ? (
                     <div className="h-8 flex items-center px-2 rounded text-xs font-mono bg-app-surface border border-app-border text-app-text-muted truncate">
-                        {SOURCE_LABELS[videoSource]}
+                        {specFor(videoSource)?.label ?? videoSource} - set in Settings
                     </div>
                 ) : (
                     <Select

@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { videoConstraints } from '@/lib/videoSettings'
+import { getVideoSource, needsCameraSelection } from '@/lib/videoSource'
 
 export interface CameraDevice {
     deviceId: string
@@ -14,8 +15,12 @@ export function useCamera() {
     const [stream, setStream] = useState<MediaStream | null>(null)
     const [permissionGranted, setPermission] = useState<boolean | null>(null)
     const [isLoading, setIsLoading] = useState(false)
+    // Whether a scan has run at all - lets Start proceed on a fresh page
+    // (it scans first) while a scan that found nothing still disables it.
+    const [scanned, setScanned] = useState(false)
+    const streamRef = useRef<MediaStream | null>(null)
 
-    const scan = useCallback(async () => {
+    const scan = useCallback(async (): Promise<CameraDevice[]> => {
         setIsLoading(true)
         try {
             // Request permission first - this populates device labels
@@ -32,25 +37,34 @@ export function useCamera() {
                 }))
 
             setCameras(videoDevices)
-
             // Auto-select first if nothing selected yet
-            if (videoDevices.length > 0 && !selectedId) {
-                setSelectedId(videoDevices[0].deviceId)
+            if (videoDevices.length > 0) {
+                setSelectedId(prev => prev || videoDevices[0].deviceId)
             }
+            return videoDevices
         } catch {
             setPermission(false)
+            return []
         } finally {
+            setScanned(true)
             setIsLoading(false)
         }
-    }, [selectedId])
+    }, [])
 
-    // Scan on mount
-    useEffect(() => { scan() }, [])
+    // Scan on mount ONLY for a webcam source. getUserMedia prompts and lights
+    // the camera LED, and it ran on every route for every setup - including
+    // server-sourced ones with no browser camera in the picture at all. For
+    // webcam sources the list is wanted up front so the picker has something
+    // to show; everyone else scans on the first Start or the refresh button.
+    useEffect(() => {
+        if (needsCameraSelection(getVideoSource())) void scan()
+    }, [scan])
 
     const startStream = useCallback(async (deviceId: string) => {
         // Stop existing stream first
-        if (stream) {
-            stream.getTracks().forEach(t => t.stop())
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(t => t.stop())
+            streamRef.current = null
             setStream(null)
         }
         try {
@@ -62,6 +76,7 @@ export function useCamera() {
                 video: videoConstraints(deviceId),
                 audio: false,
             })
+            streamRef.current = newStream
             setStream(newStream)
             setSelectedId(deviceId)
             return newStream
@@ -69,14 +84,15 @@ export function useCamera() {
             console.error('Camera start failed:', e)
             return null
         }
-    }, [stream])
+    }, [])
 
     const stopStream = useCallback(() => {
-        if (stream) {
-            stream.getTracks().forEach(t => t.stop())
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(t => t.stop())
+            streamRef.current = null
             setStream(null)
         }
-    }, [stream])
+    }, [])
 
     return {
         cameras,
@@ -85,6 +101,7 @@ export function useCamera() {
         stream,
         permissionGranted,
         isLoading,
+        scanned,
         scan,
         startStream,
         stopStream,

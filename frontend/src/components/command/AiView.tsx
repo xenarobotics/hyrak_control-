@@ -8,8 +8,8 @@
 //   processed stream       the server's annotated video (remoteStream) - depth
 //                          and enhance always, and any feed that cannot overlay
 //   3D scan                the live reconstruction view
-// Mirrors the video-attach logic of app/(platform)/modules/page.tsx; keep the
-// two in step.
+// The video-attach rule is shared with app/(platform)/modules/page.tsx via
+// hooks/useAttachVideo.ts.
 
 import { useEffect, useRef, useState } from 'react'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
@@ -18,11 +18,10 @@ import { CvOverlayCanvas } from '@/components/vision/CvOverlayCanvas'
 import { Recon3DView } from '@/components/vision/Recon3DView'
 import { WebCodecsVideo } from '@/components/video/WebCodecsVideo'
 import { getVideoFit, type VideoFit } from '@/lib/videoSettings'
-import { getLiveEdgeClamp } from '@/lib/videoSource'
 import { useAirUnitPreview } from '@/lib/airUnitPreview'
 import { useGstPreview } from '@/lib/gstPreview'
 import { useReceiver, fallbackFromHevc } from '@/lib/hyrakReceiver'
-import { clampToLiveEdge } from '@/lib/liveEdge'
+import { useAttachVideo } from '@/hooks/useAttachVideo'
 import { useServerFeed } from '@/lib/serverHevcFeed'
 
 export function AiView() {
@@ -46,18 +45,10 @@ export function AiView() {
         : null
     const wcCodec = gst?.webcodecs ? 'h264' : (receiver?.codec ?? serverFeed?.codec ?? 'h264')
 
-    useEffect(() => {
-        const el = videoRef.current
-        if (!el) return
-        if (wcUrl) { el.removeAttribute('src'); el.srcObject = null; return }
-        if (overlayActive && localPreviewUrl && !localStream) {
-            el.srcObject = null
-            if (el.src !== localPreviewUrl) el.src = localPreviewUrl
-            return (gst?.previewUrl || getLiveEdgeClamp()) ? clampToLiveEdge(el) : undefined
-        }
-        el.removeAttribute('src')
-        el.srcObject = overlayActive ? localStream : remoteStream
-    }, [overlayActive, localStream, remoteStream, localPreviewUrl, gst?.previewUrl, wcUrl])
+    useAttachVideo(videoRef, {
+        wcUrl, overlayActive, localPreviewUrl, localStream, remoteStream,
+        forceLiveEdge: !!gst?.previewUrl,
+    })
 
     const objectFit = fit === 'fit' ? 'contain' : 'cover'
     return (

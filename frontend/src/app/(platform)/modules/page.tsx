@@ -5,15 +5,7 @@ import { useDroneStore } from '@/store/drone'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { useScreenWakeLock } from '@/hooks/useScreenWakeLock'
 import { getSocket } from '@/lib/socket'
-import { ModeSelector } from '@/components/vision/ModeSelector'
-import { ObjectDetectionPanel } from '@/components/vision/ObjectDetectionPanel'
-import { HumanTrackingPanel } from '@/components/vision/HumanTrackingPanel'
-import { DepthMappingPanel } from '@/components/vision/DepthMappingPanel'
-import { PersonTrackerPanel } from '@/components/vision/PersonTrackerPanel'
-import { EnhancePanel } from '@/components/vision/EnhancePanel'
-import { CrowdManagementPanel } from '@/components/vision/CrowdManagementPanel'
-import { TrafficManagementPanel } from '@/components/vision/TrafficManagementPanel'
-import { VehiclePlateTrackingPanel } from '@/components/vision/VehiclePlateTrackingPanel'
+import { ModeSelector, panelFor } from '@/components/vision/ModeSelector'
 import { CvOverlayCanvas } from '@/components/vision/CvOverlayCanvas'
 import { getVideoFit, setVideoFit, type VideoFit } from '@/lib/videoSettings'
 import { ModulePerformance } from '@/components/vision/ModulePerformance'
@@ -24,57 +16,34 @@ import {
     ChevronDown, ChevronUp, Maximize, Minimize, Expand, Shrink, Ratio, Crop
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { getVideoSource, isServerSourced, needsCameraSelection, getLiveEdgeClamp, type VideoSource } from '@/lib/videoSource'
+import { getVideoSource, isServerSourced, needsCameraSelection, specFor, type VideoSource } from '@/lib/videoSource'
 import { useAirUnitPreview } from '@/lib/airUnitPreview'
 import { useGstPreview } from '@/lib/gstPreview'
 import { useReceiver, fallbackFromHevc } from '@/lib/hyrakReceiver'
-import { clampToLiveEdge } from '@/lib/liveEdge'
+import { useAttachVideo } from '@/hooks/useAttachVideo'
 import { WebCodecsVideo } from '@/components/video/WebCodecsVideo'
-import { Reconstruction3DPanel } from '@/components/vision/Reconstruction3DPanel'
 import { Recon3DView } from '@/components/vision/Recon3DView'
-
-const SOURCE_LABELS: Record<string, string> = {
-    air_unit_udp: 'Air unit (UDP) - set in Settings',
-    siyi_rtsp: 'SIYI (RTSP) - set in Settings',
-    rtsp_relay: 'RTSP relay (this machine) - set in Settings',
-    rtsp_camera: 'RTSP as camera - set in Settings',
-    air_unit_datachannel: 'Air unit (DataChannel) - set in Settings',
-    rtsp_datachannel: 'RTSP (DataChannel) - set in Settings',
-    air_unit_srt: 'Air unit (SRT relay) - set in Settings',
-    air_unit_gst: 'Air unit (GStreamer) - set in Settings',
-    hyrak_receiver: 'HYRAK Receiver (ground decoder) - set in Settings',
-}
 
 function ResultsPanel() {
     const mode = useDroneStore(s => s.mode)
-    switch (mode) {
-        case 'object-detection': return <ObjectDetectionPanel />
-        case 'human-tracking': return <HumanTrackingPanel />
-        case 'depth-mapping': return <DepthMappingPanel />
-        case 'person-tracking': return <PersonTrackerPanel />
-        case 'enhance': return <EnhancePanel />
-        case 'crowd-management': return <CrowdManagementPanel />
-        case 'vehicle-plate-tracking': return <VehiclePlateTrackingPanel />
-        case 'traffic-management': return <TrafficManagementPanel />
-        case '3d-reconstruction': return <Reconstruction3DPanel />
-        default:
-            return (
-                <div style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    height: 100, color: 'hsl(var(--app-text-muted))',
-                    fontSize: 12, fontFamily: 'monospace', textAlign: 'center',
-                }}>
-                    Select a vision mode to see results
-                </div>
-            )
-    }
+    const Panel = panelFor(mode)
+    if (Panel) return <Panel />
+    return (
+        <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            height: 100, color: 'hsl(var(--app-text-muted))',
+            fontSize: 12, fontFamily: 'monospace', textAlign: 'center',
+        }}>
+            Select a vision mode to see results
+        </div>
+    )
 }
 
 export default function ModulesPage() {
     const {
         remoteStream, localStream,
         isStreaming, overlayActive, isLoading, startPhase, startDetail, modelLoading, lastError,
-        cameras, selectedCameraId, setSelectedCameraId,
+        cameras, selectedCameraId, setSelectedCameraId, camerasScanned,
         startStream, stopStream,
     } = useWebRTCContext()
 
@@ -162,21 +131,14 @@ export default function ModulesPage() {
     // Read from the receiver's status, not assumed: it chooses H.265
     // passthrough or an H.264 transcode per machine, and can change mid-session.
     const wcCodec = gst?.webcodecs ? 'h264' : (receiver?.codec ?? 'h264')
-    useEffect(() => {
-        const el = remoteVideoRef.current
-        if (!el) return
-        if (wcUrl) { el.removeAttribute('src'); el.srcObject = null; return }
-        if (overlayActive && localPreviewUrl && !localStream) {
-            el.srcObject = null
-            if (el.src !== localPreviewUrl) el.src = localPreviewUrl
-            // Same live-edge drain as the fly tab - a progressive stream in a
-            // <video> otherwise settles a few hundred ms behind live.
-            // Forced on for the GStreamer preview - see VideoStream.tsx.
-            return (gst?.previewUrl || getLiveEdgeClamp()) ? clampToLiveEdge(el) : undefined
-        }
-        el.removeAttribute('src')
-        el.srcObject = overlayActive ? localStream : remoteStream
-    }, [overlayActive, localStream, remoteStream, localPreviewUrl, gst?.previewUrl, wcUrl])
+    // Shared with the Command window's AI view - one attach rule, not two.
+    useAttachVideo(remoteVideoRef, {
+        wcUrl, overlayActive, localPreviewUrl, localStream, remoteStream,
+        forceLiveEdge: !!gst?.previewUrl,
+    })
+    // The local preview URL is on src= and the WebCodecs path has no <video>:
+    // neither has a MediaStream for the recorder to capture.
+    const previewOnSrc = !!wcUrl || (overlayActive && !!localPreviewUrl && !localStream)
 
     useEffect(() => {
         const handler = () => setIsFullscreen(!!document.fullscreenElement)
@@ -238,7 +200,7 @@ export default function ModulesPage() {
                                     background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
                                     color: 'hsl(var(--app-text-muted))',
                                 }}>
-                                    {SOURCE_LABELS[videoSource]}
+                                    {specFor(videoSource)?.label ?? videoSource} - set in Settings
                                 </div>
                             </div>
                         ) : (
@@ -277,7 +239,7 @@ export default function ModulesPage() {
                                 variant={isStreaming ? 'destructive' : 'default'}
                                 className="w-full font-mono text-xs gap-2"
                                 onClick={isStreaming ? stopStream : startStream}
-                                disabled={isLoading || (needsCamera && !selectedCameraId && !isStreaming)}
+                                disabled={isLoading || (needsCamera && camerasScanned && !selectedCameraId && !isStreaming)}
                             >
                                 {isLoading
                                     ? <><Loader size={12} className="animate-spin" />
@@ -429,7 +391,9 @@ export default function ModulesPage() {
                         padding: '8px 10px',
                         background: 'linear-gradient(to top, rgba(0,0,0,0.7), transparent)',
                     }}>
-                        <RecordingControls videoRef={remoteVideoRef} isStreaming={isStreaming} />
+                        {previewOnSrc
+                            ? <span />
+                            : <RecordingControls videoRef={remoteVideoRef} isStreaming={isStreaming} />}
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                             <Button size="sm" variant="outline" className="h-7 px-2 text-[10px]"
                                 title={videoFit === 'fit'
@@ -442,10 +406,14 @@ export default function ModulesPage() {
                                 {videoFit === 'fit' ? <><Ratio size={12} /> Fit</> : <><Crop size={12} /> Fill</>}
                             </Button>
                             <Button size="sm" variant="outline" className="h-7 w-7 p-0"
+                                aria-label={maximized ? 'Restore video size' : 'Maximize video'}
+                                title={maximized ? 'Restore video size' : 'Maximize video'}
                                 onClick={() => setMaximized(m => !m)}>
                                 {maximized ? <Minimize size={13} /> : <Maximize size={13} />}
                             </Button>
                             <Button size="sm" variant="outline" className="h-7 w-7 p-0"
+                                aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+                                title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
                                 onClick={handleFullscreen}>
                                 {isFullscreen ? <Shrink size={13} /> : <Expand size={13} />}
                             </Button>
