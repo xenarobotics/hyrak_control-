@@ -40,6 +40,10 @@ curl -s -X POST http://localhost:8001/api/auth/login \
 # -> {"token": "...", "user": {...}, "expires_at": "..."}
 ```
 
+## Revocation on live sockets
+
+The role stamped on a session at connect is not trusted forever. The socket guard re-checks the session's token hash every 60 s (through the service's cache, so it costs nothing in the common case) and refreshes the role; a token that no longer verifies disconnects the socket. Revoking tokens, disabling, deleting, re-roling or changing the password of a user also disconnects every live socket of that user immediately (the session is parked like any other drop; a still-valid token resumes it with the fresh role, a revoked one cannot). Resume always re-stamps the role from the freshly authenticated user.
+
 ## Session resume
 
 A socket that drops and comes back sends `resume_session` and `resume_secret`. The server hands the session back only if it still exists, the same `user_id` is asking, and the secret matches (constant-time compare). It no longer matters whether the old socket has been noticed as gone: a client reconnecting inside the ping timeout supersedes its old socket, whose late disconnect is then ignored (audit B8).
@@ -86,7 +90,9 @@ Generate a real value with `python3 -c "import secrets; print(secrets.token_urls
 
 ## Login protection
 
-* 5 failed attempts per username **and** per client IP in 15 minutes lock that name / address out for the window (HTTP 429). Client IP is `CF-Connecting-IP`, then `X-Forwarded-For`, then the socket peer.
+* Per client IP: 5 failures in 15 minutes lock that address out for the window (HTTP 429).
+* Per username: after 5 failures each further attempt must wait an exponentially growing delay (2 s, 4 s, 8 s ... capped at 120 s), reset by a success or 15 minutes of quiet. Deliberately not a hard lock: an attacker spraying a known operator name from many addresses must not lock the operator out of their aircraft.
+* Client IP is `CF-Connecting-IP`, then `X-Forwarded-For`, but only when the socket peer is in `TRUSTED_PROXIES` (default loopback, where cloudflared runs); otherwise the socket peer itself.
 * The username / password check runs scrypt even for an unknown user, so timing does not reveal whether a name exists; the error text is the same either way.
 * Every success and failure is logged with the IP; passwords are never logged.
 

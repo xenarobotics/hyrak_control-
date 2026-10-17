@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     hyrak_admin_password_hash: str = Field(default="")
     # User tokens live this long, sliding on use.
     auth_token_ttl_days: int = Field(default=30)
+    # Reverse proxies whose CF-Connecting-IP / X-Forwarded-For headers are
+    # believed (comma-separated IPs or CIDRs). Default: loopback only, which
+    # is where cloudflared and a local nginx sit. Anything else talking to
+    # the port directly is identified by its socket address.
+    trusted_proxies: str = Field(default="127.0.0.1,::1")
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=8001)
     log_level: str = Field(default="info")

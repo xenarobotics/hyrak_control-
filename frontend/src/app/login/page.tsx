@@ -16,10 +16,22 @@ const INPUT: React.CSSProperties = {
     color: 'hsl(var(--app-text))', outline: 'none',
 }
 
+const FALLBACK_NEXT = '/fly'
+
 function safeNext(raw: string | null): string {
-    // Only same-origin paths: a `next` of https://evil.example must not win.
-    if (!raw || !raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/login')) return '/fly'
-    return raw
+    // Only a same-origin path may win. A prefix test is not enough:
+    // "/\\evil.com" is read as a host by browsers, and control characters
+    // can split or hide the real target. Parse it against our origin and
+    // insist the result stays there.
+    if (!raw || typeof window === 'undefined') return FALLBACK_NEXT
+    // eslint-disable-next-line no-control-regex
+    if (/[\\\u0000-\u001f\u007f]/.test(raw)) return FALLBACK_NEXT
+    if (!raw.startsWith('/') || raw.startsWith('//')) return FALLBACK_NEXT
+    let url: URL
+    try { url = new URL(raw, window.location.origin) } catch { return FALLBACK_NEXT }
+    if (url.origin !== window.location.origin) return FALLBACK_NEXT
+    if (url.pathname.startsWith('/login')) return FALLBACK_NEXT
+    return url.pathname + url.search + url.hash
 }
 
 function LoginForm() {

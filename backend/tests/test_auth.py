@@ -245,3 +245,120 @@ async def test_socket_guard_blocks_viewers_and_audits_operators(caplog):
     line = [r.getMessage() for r in caplog.records if r.name == "hyrak.audit"][-1]
     assert line == f"audit user=olga role=operator session={o.session_id[:8]} event=drone_action drone=3"
     assert await socket_guard.require_admin("op-sock", "admin_hello") is False
+
+
+# ── revocation reaches live sockets ──────────────────────────────────────
+
+async def test_socket_guard_revalidates_and_disconnects_revoked_tokens():
+    from app.auth import socket_guard
+    from app.sessions.manager import SessionManager
+
+    disconnected = []
+
+    class FakeSio:
+        async def emit(self, *a, **k): pass
+        async def disconnect(self, sid): disconnected.append(sid)
+
+    sm = SessionManager()
+    socket_guard.configure(FakeSio(), sm)
+    rec = await _user("gina", "operator")
+    token, user, _ = await service.login("gina", "correct-horse-battery", "127.0.0.1")
+    s = sm.create(socket_id="gina-sock")
+    s.user_id, s.username, s.role = user.id, "gina", "operator"
+    s.token_hash = service.hash_token(token)
+    s.auth_checked_at = 0.0                                   # force a re-check
+    assert await socket_guard.require_operator("gina-sock", "drone_action") is True
+    assert s.auth_checked_at > 0
+
+    # Demotion: the next (stale) check refreshes the role and refuses.
+    await service.update_user(rec.id, role="viewer")
+    s.auth_checked_at = 0.0
+    assert await socket_guard.require_operator("gina-sock", "drone_action") is False
+    assert s.role == "viewer" and not disconnected
+
+    # Revocation: the socket is dropped.
+    await service.update_user(rec.id, role="operator")
+    s.auth_checked_at = 0.0
+    assert await socket_guard.require_operator("gina-sock", "drone_action") is True
+    await service.revoke_all(rec.id)
+    s.auth_checked_at = 0.0
+    assert await socket_guard.require_operator("gina-sock", "drone_action") is False
+    assert disconnected == ["gina-sock"] and s.role is None
+
+
+async def test_revocation_listener_fires_on_every_access_change():
+    seen = []
+
+    async def listener(user_id): seen.append(user_id)
+    service.on_user_revoked(listener)
+    rec = await _user("hank", "operator")
+    await service.update_user(rec.id, role="viewer")          # re-role
+    await service.update_user(rec.id, disabled=True)          # disable -> revoke_all
+    await service.update_user(rec.id, password="another-password-1")
+    await service.delete_user(rec.id)
+    assert seen.count(rec.id) >= 4
+
+
+async def test_update_user_reaches_memory_store_when_db_also_answers(monkeypatch):
+    """Finding 4: a user present in both stores must change in both."""
+    rec = await _user("iris", "operator")
+    calls = []
+
+    class FakeDb:
+        async def update_user(self, user_id, **fields):
+            calls.append(fields)
+            return rec                                        # DB "succeeds"
+        async def delete_tokens_for_user(self, user_id): return 0
+    monkeypatch.setattr(service, "_db_up", lambda: True)
+    monkeypatch.setattr(service, "_db", FakeDb())
+    await service.update_user(rec.id, role="viewer", disabled=True)
+    assert calls == [{"role": "viewer", "disabled": True}]
+    mem = await service.memory_store().get_user_by_id(rec.id)
+    assert mem.role == "viewer" and mem.disabled is True
+
+
+async def test_bootstrap_keeps_disabled_env_admin_disabled(monkeypatch):
+    from app.config import get_settings
+    settings = get_settings()
+    rec = await _user("root", "admin", password="correct-horse-battery")
+    await service.update_user(rec.id, disabled=True)
+    monkeypatch.setattr(settings, "hyrak_admin_user", "root")
+    monkeypatch.setattr(settings, "hyrak_admin_password_hash", hash_password("new-env-password"))
+    await service.bootstrap()
+    after = await service.memory_store().get_user_by_username("root")
+    assert after.id == rec.id and after.disabled is True
+    with pytest.raises(service.AuthError):
+        await service.login("root", "new-env-password", "127.0.0.1")
+
+
+# ── username backoff, trusted proxies ─────────────────────────────────────
+
+async def test_username_backoff_grows_and_does_not_hard_lock(monkeypatch):
+    await _user("jo")
+    for i in range(service.LOGIN_MAX_FAILURES):
+        with pytest.raises(service.AuthError):
+            await service.login("jo", "wrong-password-here", f"10.1.0.{i}")
+    wait = service.username_backoff_s("jo")
+    assert 0 < wait <= service.USERNAME_BACKOFF_BASE_S
+    with pytest.raises(service.RateLimited) as e:
+        await service.login("jo", "correct-horse-battery", "10.1.0.99")
+    assert "seconds" in str(e.value)
+    # Once the delay has elapsed the real operator gets in; a success resets.
+    clock = {"t": time.monotonic() + service.USERNAME_BACKOFF_MAX_S}
+    monkeypatch.setattr(service.time, "monotonic", lambda: clock["t"])
+    token, _, _ = await service.login("jo", "correct-horse-battery", "10.1.0.99")
+    assert token and service.username_backoff_s("jo") == 0.0
+
+
+def test_client_ip_honours_proxy_headers_only_from_trusted_peers(monkeypatch):
+    from app.auth import clientip
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "trusted_proxies", "127.0.0.1,::1,10.8.0.0/24")
+    assert clientip.client_ip_from("127.0.0.1", "203.0.113.9", None) == "203.0.113.9"
+    assert clientip.client_ip_from("127.0.0.1", None, "198.51.100.4, 10.0.0.1") == "198.51.100.4"
+    assert clientip.client_ip_from("10.8.0.17", "203.0.113.9", None) == "203.0.113.9"
+    # An untrusted peer's headers are ignored.
+    assert clientip.client_ip_from("192.168.1.50", "203.0.113.9", "1.2.3.4") == "192.168.1.50"
+    assert clientip.client_ip_from(None, "203.0.113.9", None) == "-"
+    monkeypatch.setattr(get_settings(), "trusted_proxies", "")
+    assert clientip.client_ip_from("127.0.0.1", "203.0.113.9", None) == "127.0.0.1"
