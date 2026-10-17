@@ -8,6 +8,7 @@ import type {
     SessionInfo,
 } from '@/types/session'
 import type { CVResult } from '@/types/vision'
+import type { WaypointType } from '@/types/mission'
 
 /** One waypoint as the backend reports it after reading the aircraft's
  *  stored mission on connect - the wire shape, not the planner's. */
@@ -17,7 +18,7 @@ export interface DroneMissionWaypoint {
     altitude?: number
     speed?: number
     hold_time?: number
-    type?: string
+    type?: WaypointType
     yaw?: number | null
 }
 

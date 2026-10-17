@@ -94,6 +94,13 @@ function fmtTime(s: number): string {
 
 // ── Page ────────────────────────────────────────────────────────────────────
 
+/** One QGroundControl .plan SimpleItem, as far as the importer reads it. */
+interface PlanItem {
+  command: number
+  /** [hold, accept radius, pass radius, yaw, lat, lng, alt] */
+  params: (number | null)[]
+}
+
 export default function MissionPage() {
   const waypoints        = useMissionStore(s => s.waypoints)
   const stats            = useMissionStore(s => s.stats)
@@ -172,6 +179,9 @@ export default function MissionPage() {
   // home position for the arrival check, and the land confirmation targets
   // exactly these drones even if the tick boxes change meanwhile.
   const returningIdsRef = useRef<number[]>([])
+  // How many are returning, as state - the ref drives the effects, this
+  // drives the dialog text (refs are not read during render).
+  const [returningCount, setReturningCount] = useState(0)
   const fileRef = useRef<HTMLInputElement>(null)
 
   // Close popovers on outside click
@@ -222,8 +232,14 @@ export default function MissionPage() {
 
   // Refresh permits whenever the drone (re)connects or the active fleet drone
   // changes - identity is resolved shortly after connect, so retry with delay.
+  // Cleared on the edge where the link drops, during render.
+  const [permitsLinked, setPermitsLinked] = useState(telStatus === 'connected')
+  if ((telStatus === 'connected') !== permitsLinked) {
+    setPermitsLinked(telStatus === 'connected')
+    if (telStatus !== 'connected') setApprovedPermits([])
+  }
   useEffect(() => {
-    if (telStatus !== 'connected') { setApprovedPermits([]); return }
+    if (telStatus !== 'connected') return
     getSocket().emit('list_my_permits', permitScope())
     const t = setTimeout(() => getSocket().emit('list_my_permits', permitScope()), 4000)
     return () => clearTimeout(t)
@@ -246,6 +262,9 @@ export default function MissionPage() {
   // Auto-dismiss upload toast after 4s; clear loading state when result arrives
   useEffect(() => {
     if (!missionUploadResult) return
+    // The upload result is a one-shot event from the store that drives the zone/permit dialogs
+    // and is cleared afterwards; consuming it must happen after commit, not during render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
     setIsUploading(false)
 
     // Dialog flows below only belong to uploads THIS page initiated
@@ -309,12 +328,14 @@ export default function MissionPage() {
     return () => clearTimeout(t)
   }, [missionUploadResult, setMissionUploadResult, terrainFollow, markPlanUploaded, permitScope])
 
-  // wasMissionRef: tracks whether drone has entered MISSION mode this session.
+  // wasMission: tracks whether drone has entered MISSION mode this session.
   // Reset when waypoints change so a re-uploaded mission shows "Start" not "Resume".
-  const wasMissionRef = useRef(false)
-  useEffect(() => {
-    wasMissionRef.current = false
-  }, [waypoints])
+  const [wasMission, setWasMission] = useState(false)
+  const [wasMissionFor, setWasMissionFor] = useState(waypoints)
+  if (waypoints !== wasMissionFor) {
+    setWasMissionFor(waypoints)
+    setWasMission(false)
+  }
 
   // One-time migration: older persisted sessions may still have an explicit
   // 'rtl'-type entry in the waypoints array (added by the old "Add RTL"
@@ -345,10 +366,14 @@ export default function MissionPage() {
         id => !swarmDrones[id]?.telemetry?.flight_mode?.is_armed
       )
       if (allDown) {
+        // RTL land confirmation is a state machine stepped by telemetry transitions. Rewriting it as
+        // derived state changes a safety flow that has to be re-verified in flight, so it stays an effect.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
         setRtlLandConfirmVisible(false)
         setRtlReturning(false)
         rtlDismissedRef.current = false
         returningIdsRef.current = []
+        setReturningCount(0)
       }
       return
     }
@@ -408,6 +433,9 @@ export default function MissionPage() {
       rtl_home: 'RTL failed - check drone connection',
     }
     if (!lastActionResult.ok && FAILURE_MSG[lastActionResult.action]) {
+      // Consumes the one-shot action result from the store and clears it (a store write, which is
+      // not allowed during render).
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
       setUploadError(FAILURE_MSG[lastActionResult.action])
     }
     setLastActionResult(null)
@@ -432,23 +460,20 @@ export default function MissionPage() {
 
   // Mission state from flight mode - more reliable than index alone:
   //   MISSION mode  → drone is actively executing waypoints
-  //   index >= 0, wasMissionRef set, not MISSION → actually paused mid-mission
-  //   index >= 0 but wasMissionRef false → just uploaded, show "Start" not "Resume"
+  //   index >= 0, wasMission set, not MISSION → actually paused mid-mission
+  //   index >= 0 but wasMission false → just uploaded, show "Start" not "Resume"
   //   mission_finished → drone reached the last waypoint; treat as neither
   //   executing nor paused so the status strip clears and the toolbar reverts to "Start"
   const missionCurrentIndex = telemetry?.mission_current_index ?? -1
   const missionFinished     = telemetry?.mission_finished ?? false
   const missionExecuting    = flightMode === 'MISSION' && !missionFinished
-  // Latch the ref the moment we see MISSION mode (runs synchronously during render)
-  if (missionExecuting) wasMissionRef.current = true
-  const missionPaused       = !missionExecuting && !missionFinished && missionCurrentIndex >= 0 && wasMissionRef.current && flightMode !== 'UNKNOWN'
+  // Latch the moment we see MISSION mode (adjusted during render), and drop
+  // the latch once a mission finishes so the next upload+start cycle shows
+  // "Start" rather than treating it as a resume.
+  if (missionExecuting && !wasMission) setWasMission(true)
+  if (missionFinished && wasMission) setWasMission(false)
+  const missionPaused       = !missionExecuting && !missionFinished && missionCurrentIndex >= 0 && wasMission && flightMode !== 'UNKNOWN'
   const missionInProgress   = missionExecuting
-
-  // Once a mission finishes, drop the "was executing" latch so the next
-  // upload+start cycle shows "Start" rather than treating it as a resume.
-  useEffect(() => {
-    if (missionFinished) wasMissionRef.current = false
-  }, [missionFinished])
 
   // Reset follow when leaving the mission page entirely (e.g. navigating to settings)
   useEffect(() => () => { setFollowDrone(false) }, [setFollowDrone])
@@ -485,8 +510,8 @@ export default function MissionPage() {
         const data = JSON.parse(reader.result as string)
         if (data.mission?.items) {
           const wps: Waypoint[] = data.mission.items
-            .filter((it: any) => [16, 21, 22].includes(it.command))
-            .map((it: any, i: number) => {
+            .filter((it: PlanItem) => [16, 21, 22].includes(it.command))
+            .map((it: PlanItem, i: number) => {
               const [hold, , , yaw, lat, lng, alt] = it.params
               return {
                 id: `imp_${Date.now()}_${i}`,
@@ -526,7 +551,7 @@ export default function MissionPage() {
       ...(terrainFollow ? { terrainAltitude: true } : {}),
     }))
     const plan = {
-      fileType: 'Plan', groundStation: 'Verocore', version: 1,
+      fileType: 'Plan', groundStation: 'HYRAK', version: 1,
       mission: {
         cruiseSpeed: 15,
         hoverSpeed: waypoints[0]?.speed ?? 5,
@@ -539,9 +564,13 @@ export default function MissionPage() {
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
     a.download = `mission_${new Date().toISOString().slice(0, 10)}.plan`
+    document.body.appendChild(a)   // Safari ignores a click on a detached anchor
     a.click()
-    URL.revokeObjectURL(a.href)
-  }, [waypoints])
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(a.href), 10_000)
+    // terrainFollow was missing: an export after toggling terrain follow
+    // wrote the frame from before the toggle.
+  }, [waypoints, terrainFollow])
 
   // ── Upload to drone ───────────────────────────────────────────────────
   const handleUpload = useCallback(() => {
@@ -801,8 +830,8 @@ export default function MissionPage() {
             {/* Body */}
             <div className="px-4 py-4 space-y-3">
               <p className="text-[11px] font-mono" style={{ color: '#d1d5db' }}>
-                {swarmEnabled && returningIdsRef.current.length > 1
-                  ? `${returningIdsRef.current.length} drones have reached their home positions. Confirm the areas are clear before allowing them to land.`
+                {swarmEnabled && returningCount > 1
+                  ? `${returningCount} drones have reached their home positions. Confirm the areas are clear before allowing them to land.`
                   : 'Drone has reached the landing zone. Confirm the area is clear before allowing it to land.'}
               </p>
               <ul className="space-y-1.5 pt-1">
@@ -848,7 +877,7 @@ export default function MissionPage() {
                 className="flex-1 py-2 rounded-lg text-[11px] font-mono font-bold flex items-center justify-center gap-1.5"
                 style={{ background: 'rgba(192,132,252,.25)', color: '#e9d5ff', border: '1px solid rgba(192,132,252,.4)' }}
               >
-                <Home size={13} /> Ground Clear - Land{swarmEnabled && returningIdsRef.current.length > 1 ? ` (${returningIdsRef.current.length})` : ''}
+                <Home size={13} /> Ground Clear - Land{swarmEnabled && returningCount > 1 ? ` (${returningCount})` : ''}
               </button>
             </div>
           </div>
@@ -1106,6 +1135,7 @@ export default function MissionPage() {
                     return
                   }
                   returningIdsRef.current = targets
+                  setReturningCount(targets.length)
                   sendAction('rtl_home', {})
                   rtlDismissedRef.current = false
                   setFleetRtlArrived({ n: 0, total: targets.length })
@@ -1414,7 +1444,7 @@ export default function MissionPage() {
               </button>
               <button
                 onClick={() => {
-                  const wps = droneMissionOffer.map((wp: any, i: number) => ({
+                  const wps = droneMissionOffer.map((wp, i) => ({
                     id: `drone_${Date.now()}_${i}`,
                     lat: wp.lat, lng: wp.lng,
                     altitude: wp.altitude ?? 10,
