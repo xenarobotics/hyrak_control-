@@ -268,7 +268,9 @@ class TelemetryManager:
         # pgrep REGEX, so it is escaped: an unescaped "udp://x|" has an empty
         # alternative that matches every process this user owns.
         import re
-        pattern = f"mavsdk_server.*{re.escape(endpoint)}" if endpoint else "mavsdk_server"
+        # Anchored at the end of the token so "0.0.0.0:1454" cannot match a
+        # server on ":14540".
+        pattern = f"mavsdk_server.*{re.escape(endpoint)}( |$)" if endpoint else "mavsdk_server"
         TelemetryManager._kill_mavsdk_by_pattern(pattern)
 
     @staticmethod
