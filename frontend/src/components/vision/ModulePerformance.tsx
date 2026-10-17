@@ -25,6 +25,7 @@ import { useReceiver } from '@/lib/hyrakReceiver'
 import { useMedian, useEasedNumber } from '@/lib/panelSmoothing'
 import { getVideoSource, isServerSourced } from '@/lib/videoSource'
 import { Activity, Cpu, Gauge, Timer, Wifi } from 'lucide-react'
+import { useClientValue } from '@/hooks/useClientValue'
 
 function Metric({
     icon, label, value, unit, tone = 'normal', title,
@@ -79,7 +80,7 @@ function useLocalPaintFps(active: boolean): number {
     const frames = useRef(0)
 
     useEffect(() => {
-        if (!active) { setFps(0); return }
+        if (!active) return
         // The WebCodecs renderer bumps this on every paint.
         const w = window as unknown as { __hyrakPaintCount?: number }
         let last = w.__hyrakPaintCount ?? 0
@@ -92,7 +93,7 @@ function useLocalPaintFps(active: boolean): number {
         return () => clearInterval(id)
     }, [active])
 
-    return fps
+    return active ? fps : 0
 }
 
 export function ModulePerformance() {
@@ -101,8 +102,7 @@ export function ModulePerformance() {
     const gst = useGstPreview()
     const receiver = useReceiver()
 
-    const [source, setSource] = useState<string>('camera')
-    useEffect(() => { setSource(getVideoSource()) }, [])
+    const source = useClientValue(getVideoSource, 'camera')
 
     // Either local-preview producer counts: both paint to the same canvas
     // and increment the same __hyrakPaintCount.

@@ -6,8 +6,8 @@
 // Toggled from Settings → "Status bar" (frontend/src/lib/statusBarSettings.ts),
 // default on.
 
-import { useEffect, useRef, useState } from 'react'
-import { useDroneStore } from '@/store/drone'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useDroneStore, type ActionResult } from '@/store/drone'
 import { useDrone } from '@/hooks/useDrone'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import {
@@ -20,6 +20,7 @@ import { FLIGHT_MODES, modeOptionFor, modeLabel } from '@/lib/flightModes'
 import { FcMessageLog } from '@/components/layout/FcMessageLog'
 import { StatusBarLinks } from '@/components/layout/StatusBarLinks'
 import { getStatusBarLinksEnabled, STATUSBAR_LINKS_CHANGE_EVENT } from '@/lib/statusBarSettings'
+import { useClientValueOn } from '@/hooks/useClientValue'
 
 // Altitude is only genuinely unavailable when a tracking loop is ACTIVELY
 // driving it - that is, Follow is armed AND the mode is on Auto altitude.
@@ -31,20 +32,16 @@ import { getStatusBarLinksEnabled, STATUSBAR_LINKS_CHANGE_EVENT } from '@/lib/st
 // tab took away manual altitude for the rest of the flight, which is not what
 // the lock was for.
 
+function subscribeOnline(onChange: () => void) {
+    window.addEventListener('online', onChange)
+    window.addEventListener('offline', onChange)
+    return () => {
+        window.removeEventListener('online', onChange)
+        window.removeEventListener('offline', onChange)
+    }
+}
 function useOnlineStatus(): boolean {
-    const [online, setOnline] = useState(true)
-    useEffect(() => {
-        setOnline(navigator.onLine)
-        const on = () => setOnline(true)
-        const off = () => setOnline(false)
-        window.addEventListener('online', on)
-        window.addEventListener('offline', off)
-        return () => {
-            window.removeEventListener('online', on)
-            window.removeEventListener('offline', off)
-        }
-    }, [])
-    return online
+    return useSyncExternalStore(subscribeOnline, () => navigator.onLine, () => true)
 }
 
 function Chip({ children, title }: { children: React.ReactNode; title?: string }) {
@@ -104,21 +101,13 @@ export function StatusBar() {
     // not exist while the server renders this. The event keeps a bar that is
     // already mounted in step with the Settings toggle, which is the same
     // problem the bar's own toggle already solves this way.
-    const [linksOn, setLinksOn] = useState(false)
-    useEffect(() => {
-        setLinksOn(getStatusBarLinksEnabled())
-        const onChange = (e: Event) => setLinksOn(Boolean((e as CustomEvent<boolean>).detail))
-        window.addEventListener(STATUSBAR_LINKS_CHANGE_EVENT, onChange)
-        return () => window.removeEventListener(STATUSBAR_LINKS_CHANGE_EVENT, onChange)
-    }, [])
+    const linksOn = useClientValueOn(STATUSBAR_LINKS_CHANGE_EVENT, getStatusBarLinksEnabled, false)
 
     const [altInput, setAltInput] = useState('')
     const [killConfirm, setKillConfirm] = useState(false)
     // Brief 'sent' confirmation after an altitude command.
     const [altSent, setAltSent] = useState<number | null>(null)
-    const [altError, setAltError] = useState<string | null>(null)
     // The autopilot's own reason for refusing whatever was last pressed.
-    const [refusal, setRefusal] = useState<{ action: string; reason: string } | null>(null)
     const altSentTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     const killTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     useEffect(() => () => { if (killTimer.current) clearTimeout(killTimer.current) }, [])
@@ -160,7 +149,7 @@ export function StatusBar() {
         if (!Number.isFinite(v)) return
         if (inAir ? !canSetAlt : !canTakeoff) return
         const altitude = Math.min(120, Math.max(1, v))
-        setAltError(null)
+        if (altRefusal) setAltDismissed(altRefusal)
         sendAction(inAir ? 'set_altitude' : 'takeoff', { altitude })
         // Confirm the command left, so typing a number and getting no visible
         // response is never ambiguous. Pressing Enter previously did nothing
@@ -179,17 +168,21 @@ export function StatusBar() {
     // was indistinguishable from success, and the only symptom left was a
     // drone that did not move. That is precisely "I type a number and nothing
     // changes".
+    // Derived from the result rather than copied into state: the message is
+    // a function of the latest refused altitude result until it is dismissed
+    // (by the timer below, or by a newer result replacing it).
+    const altRefusal = lastActionResult && !lastActionResult.ok
+        && (lastActionResult.action === 'set_altitude' || lastActionResult.action === 'takeoff')
+        ? lastActionResult : null
+    const [altDismissed, setAltDismissed] = useState<ActionResult | null>(null)
+    const altError = altRefusal && altRefusal !== altDismissed
+        ? (altRefusal.action === 'takeoff' ? 'takeoff refused' : 'altitude refused')
+        : null
     useEffect(() => {
-        if (!lastActionResult) return
-        if (lastActionResult.action !== 'set_altitude'
-            && lastActionResult.action !== 'takeoff') return
-        if (lastActionResult.ok) return
-        setAltSent(null)
-        setAltError(lastActionResult.action === 'takeoff'
-            ? 'takeoff refused' : 'altitude refused')
-        const t = setTimeout(() => setAltError(null), 6000)
+        if (!altRefusal) return
+        const t = setTimeout(() => setAltDismissed(altRefusal), 6000)
         return () => clearTimeout(t)
-    }, [lastActionResult])
+    }, [altRefusal])
 
     // "COMMANDS ARE NOT REACHING THE DRONE" IS USUALLY THE DRONE SAYING NO.
     //
@@ -200,14 +193,17 @@ export function StatusBar() {
     // works. The autopilot names the cause ("Arming denied: ...", "Preflight
     // Fail: Compass not calibrated"); it is now carried on action_result.error
     // and shown here, beside the button that was pressed.
+    const refused = lastActionResult && !lastActionResult.ok
+        && (lastActionResult.error || lastActionResult.msg) ? lastActionResult : null
+    const [refusalDismissed, setRefusalDismissed] = useState<ActionResult | null>(null)
+    const refusal = refused && refused !== refusalDismissed
+        ? { action: refused.action, reason: (refused.error || refused.msg) as string }
+        : null
     useEffect(() => {
-        if (!lastActionResult || lastActionResult.ok) return
-        const reason = lastActionResult.error || lastActionResult.msg
-        if (!reason) return
-        setRefusal({ action: lastActionResult.action, reason })
-        const t = setTimeout(() => setRefusal(null), 12000)
+        if (!refused) return
+        const t = setTimeout(() => setRefusalDismissed(refused), 12000)
         return () => clearTimeout(t)
-    }, [lastActionResult])
+    }, [refused])
 
     // Confirm-then-kill, same idea as EmergencyStop.tsx, but auto-cancels
     // after 4s so a stray tap can't leave an armed confirm state sitting

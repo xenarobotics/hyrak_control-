@@ -194,6 +194,21 @@ export default function WaypointEditor() {
     )
   }
 
+  const index = wp ? waypoints.findIndex(w => w.id === wp.id) : -1
+
+  // Auto-heading: compute the bearing from this waypoint toward the next one
+  // (or the incoming bearing for the last waypoint). Shown when autoHeading is on.
+  // Computed before the "no waypoint" return below: a hook after a conditional
+  // return breaks the rules of hooks.
+  const autoYaw = useMemo(() => {
+    if (!autoHeading || !wp) return null
+    const next = waypoints[index + 1]
+    if (next) return computeBearing(wp.lat, wp.lng, next.lat, next.lng)
+    const prev = waypoints[index - 1]
+    if (prev) return computeBearing(prev.lat, prev.lng, wp.lat, wp.lng)
+    return null
+  }, [autoHeading, wp, waypoints, index])
+
   if (!wp) {
     return (
       <div className="flex items-center justify-center h-full px-4">
@@ -204,19 +219,7 @@ export default function WaypointEditor() {
     )
   }
 
-  const index = waypoints.findIndex(w => w.id === wp.id)
   const meta = WP_META[wp.type]
-
-  // Auto-heading: compute the bearing from this waypoint toward the next one
-  // (or the incoming bearing for the last waypoint). Shown when autoHeading is on.
-  const autoYaw = useMemo(() => {
-    if (!autoHeading) return null
-    const next = waypoints[index + 1]
-    if (next) return computeBearing(wp.lat, wp.lng, next.lat, next.lng)
-    const prev = waypoints[index - 1]
-    if (prev) return computeBearing(prev.lat, prev.lng, wp.lat, wp.lng)
-    return null
-  }, [autoHeading, wp, waypoints, index])
   // 'rtl' is excluded - RTL is edited via its own separate panel entry now
   const typeOptions: WaypointType[] = ['takeoff', 'waypoint', 'loiter', 'land']
 

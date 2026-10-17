@@ -11,7 +11,8 @@
 // The video-attach rule is shared with app/(platform)/modules/page.tsx via
 // hooks/useAttachVideo.ts.
 
-import { useEffect, useRef, useState } from 'react'
+import { useRef } from 'react'
+import { useClientValue } from '@/hooks/useClientValue'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { useDroneStore } from '@/store/drone'
 import { CvOverlayCanvas } from '@/components/vision/CvOverlayCanvas'
@@ -27,8 +28,7 @@ import { useServerFeed } from '@/lib/serverHevcFeed'
 export function AiView() {
     const { localStream, remoteStream, isStreaming, overlayActive } = useWebRTCContext()
     const mode = useDroneStore(s => s.mode)
-    const [fit, setFit] = useState<VideoFit>('fill')
-    useEffect(() => { setFit(getVideoFit()) }, [])
+    const fit: VideoFit = useClientValue(getVideoFit, 'fill')
     const videoRef = useRef<HTMLVideoElement | null>(null)
 
     const airUnitPreviewUrl = useAirUnitPreview()

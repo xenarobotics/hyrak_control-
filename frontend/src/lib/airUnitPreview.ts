@@ -25,7 +25,7 @@
 // this preview needs its own third copy, previewFanoutPort, because it is a
 // second listener with the same one-port-one-listener constraint.
 
-import { useEffect, useState } from 'react'
+import { useSyncExternalStore } from 'react'
 import { isDesktopApp, nativeBridge, type BridgeEvent } from '@/lib/nativeBridge'
 import { getAirUnitVideoPort, getAirUnitFanoutPort, getPreviewMaxHeight } from '@/lib/videoSource'
 
@@ -156,13 +156,12 @@ export async function stopAirUnitPreview(): Promise<void> {
 
 /** Reactive view of the preview URL for components. */
 export function useAirUnitPreview(): string | null {
-    // Starts null to match server-rendered HTML (same hydration reasoning as
-    // VideoStream's serverSourced state), then syncs after mount.
-    const [url, setUrl] = useState<string | null>(null)
-    useEffect(() => {
-        setUrl(previewUrl)
-        subscribers.add(setUrl)
-        return () => { subscribers.delete(setUrl) }
-    }, [])
-    return url
+    // null for the server render and hydration (the HTML has no preview), the
+    // live value from the first client render on.
+    return useSyncExternalStore(subscribePreview, () => previewUrl, () => null)
+}
+
+function subscribePreview(onChange: () => void) {
+    subscribers.add(onChange)
+    return () => { subscribers.delete(onChange) }
 }

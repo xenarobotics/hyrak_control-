@@ -26,6 +26,7 @@ import {
 } from '@/lib/videoSource'
 import { isDesktopApp } from '@/lib/nativeBridge'
 import { Camera, Satellite, Plug, PlugZap, Loader, RefreshCw, Plus } from 'lucide-react'
+import { useClientValue } from '@/hooks/useClientValue'
 
 const selectStyle: React.CSSProperties = {
     height: 26, maxWidth: 150, padding: '0 6px', borderRadius: 7,
@@ -79,10 +80,12 @@ export function StatusBarLinks() {
         isStreaming, startStream, stopStream,
     } = useWebRTCContext()
 
-    // Read on mount rather than during render: getVideoSource touches
-    // localStorage, which does not exist while the server renders this.
-    const [videoSource, setVideoSourceState] = useState<VideoSource>('camera')
-    useEffect(() => { setVideoSourceState(getVideoSource()) }, [])
+    // getVideoSource touches localStorage, which does not exist while the
+    // server renders this - read hydration-safely.
+    // A pick made here overrides the stored value for this component's life.
+    const savedSource: VideoSource = useClientValue(getVideoSource, 'camera')
+    const [pickedSource, setVideoSourceState] = useState<VideoSource | null>(null)
+    const videoSource = pickedSource ?? savedSource
 
     // CHANGING THE SOURCE OF A RUNNING STREAM MEANS RESTARTING IT. Nothing
     // reads these values after a stream has started - the source decides what

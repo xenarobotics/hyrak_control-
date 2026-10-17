@@ -16,6 +16,7 @@ import { useGstPreview } from '@/lib/gstPreview'
 import { useReceiver, fallbackFromHevc } from '@/lib/hyrakReceiver'
 import { clampToLiveEdge } from '@/lib/liveEdge'
 import { WebCodecsVideo } from './WebCodecsVideo'
+import { useClientValue } from '@/hooks/useClientValue'
 
 // 'fit' shows the WHOLE frame at the source's own aspect, letterboxed -
 // distinct from the fixed presets, which force an aspect the camera may not
@@ -40,17 +41,11 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
     } = useWebRTCContext()
 
     // Server-sourced feeds (air-unit UDP, SIYI RTSP) need no browser camera
-    // at all. Starts false (matches the server-rendered HTML, which has no
-    // localStorage to read) and is set for real after mount - reading
-    // getVideoSource() straight into the initial state would make the
-    // server and client's first render disagree whenever a non-default
-    // source is saved, which React flags as a hydration mismatch.
-    const [serverSourced, setServerSourced] = useState(false)
-    const [needsCamera, setNeedsCamera] = useState(false)
-    useEffect(() => {
-        setServerSourced(isServerSourced(getVideoSource()))
-        setNeedsCamera(needsCameraSelection(getVideoSource()))
-    }, [])
+    // at all. Read hydration-safely: the server has no localStorage, so its
+    // render (and the hydrating one) sees the default source.
+    const videoSource = useClientValue(getVideoSource, 'camera')
+    const serverSourced = isServerSourced(videoSource)
+    const needsCamera = needsCameraSelection(videoSource)
 
     // Relay mode serves the operator a local preview straight off the same
     // ffmpeg that feeds the server, so the picture on this screen never

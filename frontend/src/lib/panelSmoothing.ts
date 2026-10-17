@@ -27,12 +27,9 @@ export function useThrottled<T>(value: T, ms = 320): T {
     useEffect(() => {
         pending.current = value
         const now = Date.now()
+        // Always via the timer, even when the window has already elapsed
+        // (wait = 0): publishing from the effect itself is a render cascade.
         const wait = Math.max(0, ms - (now - last.current))
-        if (wait === 0) {
-            last.current = now
-            setShown(value)
-            return
-        }
         if (timer.current) clearTimeout(timer.current)
         timer.current = setTimeout(() => {
             last.current = Date.now()
@@ -151,6 +148,10 @@ export function useStableById<T extends { id: number | string }>(
             if (now - v.lastSeen > holdMs) { seen.current.delete(key); continue }
             out.push({ ...v.item, stale: v.lastSeen !== now })
         }
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- the rows
+        // are a time-stamped hold over an external stream: each payload must
+        // be recorded against the clock (not allowed in render) and published
+        // once, which is exactly one extra render per 12 Hz payload by design.
         setRows(out)
     }, [items, holdMs])
 

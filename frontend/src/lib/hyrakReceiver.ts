@@ -25,7 +25,7 @@
 //
 //   allocateRelay() -> startReceiver() -> (caller sends the offer)
 
-import { useEffect, useState } from 'react'
+import { useSyncExternalStore } from 'react'
 import { isDesktopApp, nativeBridge, type BridgeEvent } from '@/lib/nativeBridge'
 import { canDecodeHevc } from '@/lib/codecString'
 import { startHyrakRegistration } from '@/lib/hyrakRegister'
@@ -263,13 +263,12 @@ export async function stopReceiver(): Promise<void> {
 
 /** Reactive status for components. */
 export function useReceiver(): ReceiverStatus | null {
-    // Starts null to match server-rendered HTML, then syncs after mount - same
-    // hydration reasoning as the other video hooks.
-    const [status, setStatus] = useState<ReceiverStatus | null>(null)
-    useEffect(() => {
-        setStatus(lastStatus)
-        subscribers.add(setStatus)
-        return () => { subscribers.delete(setStatus) }
-    }, [])
-    return status
+    // null for the server render and hydration, the live status from the
+    // first client render on - same reasoning as the other video hooks.
+    return useSyncExternalStore(subscribeStatus, () => lastStatus, () => null)
+}
+
+function subscribeStatus(onChange: () => void) {
+    subscribers.add(onChange)
+    return () => { subscribers.delete(onChange) }
 }
