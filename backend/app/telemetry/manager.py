@@ -23,8 +23,6 @@ from app.config import get_settings
 from mavsdk import System
 from mavsdk.action import ActionError
 from mavsdk.offboard import (
-    OffboardError,
-    AttitudeRate,
     VelocityBodyYawspeed,
     VelocityNedYaw,
 )
@@ -39,7 +37,6 @@ from app.telemetry.schemas import (
     VelocityData,
     BatteryData,
     GPSData,
-    FlightModeData,
     SensorHealthData,
     RcStatusData,
     DroneCommand,
@@ -95,6 +92,12 @@ class TelemetryManager:
     # Max rate at which we push snapshots to the frontend (Hz)
     _EMIT_RATE_HZ       = 10  # primary drone
     _FLEET_EMIT_RATE_HZ = 3   # fleet drones - lower to avoid overwhelming mavsdk_server queue
+
+    # Class-level defaults for the fields __init__ sets below, so a manager
+    # assembled without __init__ (the test doubles) still has them.
+    _last_sp: Optional[tuple] = None
+    _target_sysid: int = 1
+    _target_sysid_learned: bool = False
 
     def __init__(self, on_update: Optional[Callable[[dict], None]] = None, fleet_mode: bool = False,
                  on_fc_message: Optional[Callable[[dict], None]] = None,
@@ -164,6 +167,16 @@ class TelemetryManager:
         # velocity is not one that stopped being given them.
         self._last_velocity_cmd_t: float = 0.0
         self._offboard_stale: bool = False
+        # The last setpoint the commanding loop gave us, re-sent by the
+        # Offboard watchdog at 10 Hz between commands so PX4 always sees a
+        # continuous stream: ("body", forward, right, down, yaw_deg_s) or
+        # ("ned", north, east, down, yaw_deg). None = nothing to repeat.
+        self._last_sp: Optional[tuple] = None
+        # The vehicle's MAVLink system id, learned from its first HEARTBEAT.
+        # COMMAND_LONG sent through mavlink_direct is addressed to it; 1 is
+        # PX4's default and the fallback until the heartbeat is seen.
+        self._target_sysid: int = 1
+        self._target_sysid_learned: bool = False
         self._address: str = ""
         self._grpc_port: Optional[int] = None  # unique per drone - see connect()
         self._last_emit: float = 0.0  # monotonic time of last _emit() push
@@ -437,6 +450,10 @@ class TelemetryManager:
                 ("position", self._drone.telemetry.set_rate_position, 1.0),
                 ("attitude", self._drone.telemetry.set_rate_attitude_euler, 2.0),
                 ("battery",  self._drone.telemetry.set_rate_battery,  0.2),
+                # EXTENDED_SYS_STATE is a 2-byte payload and it is the only
+                # honest source of in_air for the dispatcher and the fleet
+                # reserve guard (see start()).
+                ("in_air",   self._drone.telemetry.set_rate_in_air,   1.0),
             ]
         else:
             # WHAT DESERVES BANDWIDTH AND WHAT DOES NOT.
@@ -582,6 +599,11 @@ class TelemetryManager:
                 asyncio.create_task(self._subscribe_attitude(),    name="fleet_attitude"),
                 asyncio.create_task(self._subscribe_armed(),       name="fleet_armed"),
                 asyncio.create_task(self._subscribe_flight_mode(), name="fleet_mode"),
+                # in_air: without it every fleet snapshot said "landed", so
+                # the dispatcher advanced orders while the drone was still
+                # airborne and the reserve RETURN never fired. One 2-byte
+                # EXTENDED_SYS_STATE at 1 Hz.
+                asyncio.create_task(self._subscribe_in_air(),      name="fleet_inair"),
                 asyncio.create_task(self._subscribe_battery(),     name="fleet_battery"),
                 # Mission progress is event-driven (only fires on waypoint
                 # changes) - negligible cost, and fleet surveys need per-drone
@@ -590,6 +612,7 @@ class TelemetryManager:
                 asyncio.create_task(self._command_loop(),          name="fleet_cmd"),
                 asyncio.create_task(self._offboard_watchdog(),      name="fleet_ob_watchdog"),
                 asyncio.create_task(self._link_watch(),             name="fleet_link_watch"),
+                asyncio.create_task(self._learn_target_sysid(),    name="fleet_sysid"),
             ]
         else:
             self._tasks = [
@@ -601,7 +624,6 @@ class TelemetryManager:
                 asyncio.create_task(self._subscribe_flight_mode(),     name="tel_mode"),
                 asyncio.create_task(self._subscribe_armed(),           name="tel_armed"),
                 asyncio.create_task(self._subscribe_in_air(),          name="tel_inair"),
-                asyncio.create_task(self._subscribe_wind(),            name="tel_wind"),
                 asyncio.create_task(self._subscribe_home(),            name="tel_home"),
                 asyncio.create_task(self._subscribe_health(),          name="tel_health"),
                 asyncio.create_task(self._subscribe_rc_status(),       name="tel_rc"),
@@ -615,6 +637,9 @@ class TelemetryManager:
                 # loop still working - see _offboard_watchdog.
                 asyncio.create_task(self._offboard_watchdog(),          name="tel_ob_watchdog"),
                 asyncio.create_task(self._link_watch(),                 name="tel_link_watch"),
+                # One-shot: reads the autopilot's sysid off its first
+                # HEARTBEAT so COMMAND_LONG is addressed to the real vehicle.
+                asyncio.create_task(self._learn_target_sysid(),        name="tel_sysid"),
             ]
 
         logger.info(f"Telemetry started - {len(self._tasks)} tasks ({'fleet' if self._fleet_mode else 'primary'})")
@@ -647,8 +672,47 @@ class TelemetryManager:
     # Each one is an infinite async loop that updates _snapshot           #
     # ------------------------------------------------------------------ #
 
+    #: First retry delay after a subscription stream dies; doubles up to
+    #: _SUBSCRIBE_RETRY_MAX_S, and resets once a stream has run healthily.
+    _SUBSCRIBE_RETRY_S = 1.0
+    _SUBSCRIBE_RETRY_MAX_S = 10.0
+    #: A stream that lived this long before failing was healthy; the next
+    #: retry starts from the short delay again.
+    _SUBSCRIBE_HEALTHY_S = 30.0
+
+    async def _run_subscription(self, label: str, stream) -> None:
+        """Run one telemetry stream, and RESTART it when it dies.
+
+        Every subscription used to end for good on its first non-cancel
+        exception: one gRPC hiccup on the position stream and the map froze
+        for the rest of the flight while link_ok stayed true, because the
+        attitude stream (a separate task) was still arriving. A stream that
+        ends on its own (mavsdk_server closed it) is restarted the same way.
+        """
+        delay = self._SUBSCRIBE_RETRY_S
+        while self._running:
+            t0 = time.monotonic()
+            try:
+                await stream()
+                if not self._running:
+                    return
+                logger.warning(f"{label} subscription ended - restarting in {delay:.0f}s")
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                if not self._running:
+                    return
+                logger.error(f"{label} subscription error: {e} - restarting in {delay:.0f}s")
+            if time.monotonic() - t0 >= self._SUBSCRIBE_HEALTHY_S:
+                delay = self._SUBSCRIBE_RETRY_S
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                return
+            delay = min(delay * 2, self._SUBSCRIBE_RETRY_MAX_S)
+
     async def _subscribe_attitude(self):
-        try:
+        async def _stream():
             async for att in self._drone.telemetry.attitude_euler():
                 if not self._running:
                     break
@@ -664,13 +728,10 @@ class TelemetryManager:
                 self._count("attitude")
                 self._notify_pose()
                 self._emit()
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Attitude subscription error: {e}")
+        await self._run_subscription("Attitude", _stream)
 
     async def _subscribe_position(self):
-        try:
+        async def _stream():
             async for pos in self._drone.telemetry.position():
                 if not self._running:
                     break
@@ -683,13 +744,10 @@ class TelemetryManager:
                 self._count("position")
                 self._notify_pose()
                 self._emit()
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Position subscription error: {e}")
+        await self._run_subscription("Position", _stream)
 
     async def _subscribe_velocity(self):
-        try:
+        async def _stream():
             async for vel in self._drone.telemetry.velocity_ned():
                 if not self._running:
                     break
@@ -703,15 +761,12 @@ class TelemetryManager:
                     math.sqrt(vel.north_m_s**2 + vel.east_m_s**2), 2
                 )
                 self._emit()
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Velocity subscription error: {e}")
+        await self._run_subscription("Velocity", _stream)
 
     async def _subscribe_local_position(self):
         """PX4's local NED position - the pose source for GPS-denied
         (indoor) navigation. Started on demand by boost_pose_rates."""
-        try:
+        async def _stream():
             async for pv in self._drone.telemetry.position_velocity_ned():
                 if not self._running:
                     break
@@ -721,26 +776,20 @@ class TelemetryManager:
                     down_m=round(p.down_m, 3), valid=True, t=time.monotonic())
                 self._count("local_position")
                 self._notify_pose()
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Local position subscription error: {e}")
+        await self._run_subscription("Local position", _stream)
 
     async def _subscribe_rangefinder(self):
         """Downward distance sensor (height above the floor indoors)."""
-        try:
+        async def _stream():
             async for ds in self._drone.telemetry.distance_sensor():
                 if not self._running:
                     break
                 d = ds.current_distance_m
                 self._snapshot.rangefinder_m = round(d, 2) if d == d and d > 0 else None
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.debug(f"Rangefinder subscription error: {e}")
+        await self._run_subscription("Rangefinder", _stream)
 
     async def _subscribe_battery(self):
-        try:
+        async def _stream():
             async for bat in self._drone.telemetry.battery():
                 if not self._running:
                     break
@@ -749,13 +798,10 @@ class TelemetryManager:
                     remaining_percent=round(bat.remaining_percent, 1),
                 )
                 self._emit()
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Battery subscription error: {e}")
+        await self._run_subscription("Battery", _stream)
 
     async def _subscribe_gps(self):
-        try:
+        async def _stream():
             async for gps in self._drone.telemetry.gps_info():
                 if not self._running:
                     break
@@ -765,30 +811,27 @@ class TelemetryManager:
                     seen=True,
                 )
                 self._emit()
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"GPS subscription error: {e}")
+        await self._run_subscription("GPS", _stream)
 
     async def _subscribe_flight_mode(self):
-        try:
+        async def _stream():
             async for mode in self._drone.telemetry.flight_mode():
                 if not self._running:
                     break
                 name = str(mode).replace("FlightMode.", "")
-                self._last_rx_t = time.monotonic()     # heartbeat-derived: the link is alive
+                # Deliberately NOT counted as link life: flight_mode is a
+                # cached, change-driven stream and can re-emit while the
+                # position and attitude streams are frozen - the link watch
+                # counts only real position/attitude arrivals (_count).
                 changed = self._snapshot.flight_mode.mode != name
                 self._snapshot.flight_mode.mode = name
                 if changed:
                     self._check_offboard_departure(name)
                 self._emit(force=changed)
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Flight mode subscription error: {e}")
+        await self._run_subscription("Flight mode", _stream)
 
     async def _subscribe_armed(self):
-        try:
+        async def _stream():
             async for armed in self._drone.telemetry.armed():
                 if not self._running:
                     break
@@ -802,28 +845,22 @@ class TelemetryManager:
                     # for a reason that stopped being true when the props did.
                     self._clear_pilot_override()
                 self._emit(force=changed)
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Armed subscription error: {e}")
+        await self._run_subscription("Armed", _stream)
 
     async def _subscribe_in_air(self):
-        try:
+        async def _stream():
             async for in_air in self._drone.telemetry.in_air():
                 if not self._running:
                     break
                 changed = self._snapshot.flight_mode.is_in_air != in_air
                 self._snapshot.flight_mode.is_in_air = in_air
                 self._emit(force=changed)
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"In-air subscription error: {e}")
+        await self._run_subscription("In-air", _stream)
 
     async def _subscribe_status_text(self):
         """The autopilot's own words. Event-driven - there is no rate to set,
         and it costs nothing on the link until the FC has something to say."""
-        try:
+        async def _stream():
             async for st in self._drone.telemetry.status_text():
                 if not self._running:
                     break
@@ -867,10 +904,47 @@ class TelemetryManager:
                     logger.warning(f"FC: {sev}: {text}")
                 else:
                     logger.info(f"FC: {text}")
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Status text subscription error: {e}")
+        await self._run_subscription("Status text", _stream)
+
+    #: MAV_COMP_ID_AUTOPILOT1 - the flight controller's own component id.
+    _COMP_AUTOPILOT = 1
+
+    async def _learn_target_sysid(self):
+        """Read the vehicle's system id off its first HEARTBEAT, then stop.
+
+        COMMAND_LONG through mavlink_direct carries its own target_system,
+        and it was hardcoded to 1: a vehicle configured with any other
+        MAV_SYS_ID silently ignored direct takeoff and DO_SET_MODE. Only the
+        autopilot component counts - our own heartbeats, QGC's and another
+        ground station's all pass through the same stream.
+        """
+        delay = self._SUBSCRIBE_RETRY_S
+        while self._running and not self._target_sysid_learned:
+            try:
+                async for msg in self._drone.mavlink_direct.message("HEARTBEAT"):
+                    if not self._running:
+                        return
+                    if int(msg.component_id) != self._COMP_AUTOPILOT:
+                        continue
+                    sysid = int(msg.system_id)
+                    if sysid <= 0 or sysid == self._sysid:
+                        continue
+                    self._target_sysid = sysid
+                    self._target_sysid_learned = True
+                    if sysid != 1:
+                        logger.info(f"Vehicle system id is {sysid} (not PX4's default 1)")
+                    return
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                if not self._running:
+                    return
+                logger.debug(f"Heartbeat sysid read failed: {e} - retrying in {delay:.0f}s")
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                return
+            delay = min(delay * 2, self._SUBSCRIBE_RETRY_MAX_S)
 
     @staticmethod
     def _severity_rank(sev: str) -> int:
@@ -917,30 +991,10 @@ class TelemetryManager:
                 return found
         return fallback
 
-    async def _subscribe_wind(self):
-        """
-        Wind velocity estimated by PX4 EKF2 from GPS + IMU.
-        No extra sensor needed - available on all PX4 multirotors.
-        MAVLink: WIND_COV message. MAVSDK: telemetry.fixedwing_metrics()
-        works for multirotors too (PX4 always runs EKF2 wind estimation).
-        """
-        try:
-            async for metrics in self._drone.telemetry.fixedwing_metrics():
-                if not self._running:
-                    break
-                # airspeed_m_s comes from EKF2 on multirotors when airspeed sensor absent
-                # Use velocity NED vs groundspeed to infer wind - or use raw if available
-                # MAVSDK doesn't expose WIND_COV directly; use best available
-                # We approximate: wind = GPS groundspeed direction vs airspeed
-                # For now store zeros - actual wind needs raw MAVLink WIND_COV
-                # This subscription keeps the slot open for future raw MAVLink support
-                self._snapshot.wind_north_m_s = 0.0
-                self._snapshot.wind_east_m_s = 0.0
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            # Not all PX4 builds expose this - fail silently
-            pass
+    # No wind subscription: fixedwing_metrics() was opened only to write
+    # zeros into wind_north_m_s/wind_east_m_s. The fields stay zeroed
+    # until a raw WIND_COV reader exists; a stream that costs a gRPC
+    # subscription and link bandwidth to deliver a constant is not kept.
 
     async def _subscribe_home(self):
         """
@@ -948,7 +1002,7 @@ class TelemetryManager:
         Set automatically by PX4 on first arm or can be set manually.
         MAVSDK: telemetry.home()
         """
-        try:
+        async def _stream():
             async for home in self._drone.telemetry.home():
                 if not self._running:
                     break
@@ -956,10 +1010,7 @@ class TelemetryManager:
                 self._snapshot.home_lng = home.longitude_deg
                 self._snapshot.home_alt = round(home.absolute_altitude_m, 2)
                 self._emit()
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Home position subscription error: {e}")
+        await self._run_subscription("Home position", _stream)
 
     async def _subscribe_health(self):
         """The autopilot's own per-sensor verdict - the same flags QGC shows.
@@ -970,7 +1021,7 @@ class TelemetryManager:
         reboots and does not depend on what the data happens to read.
         Event-driven on change, like flight mode.
         """
-        try:
+        async def _stream():
             async for h in self._drone.telemetry.health():
                 if not self._running:
                     break
@@ -991,16 +1042,13 @@ class TelemetryManager:
                 # are rare enough that rate-limiting them away could delay
                 # that repaint by seconds.
                 self._emit(force=changed)
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Health subscription error: {e}")
+        await self._run_subscription("Health", _stream)
 
     async def _subscribe_rc_status(self):
         """RC receiver state, from the autopilot's side of the link - the
         Radio page's "is the transmitter actually reaching the aircraft"
         light. Event-driven on change, like health."""
-        try:
+        async def _stream():
             async for rc in self._drone.telemetry.rc_status():
                 if not self._running:
                     break
@@ -1017,10 +1065,7 @@ class TelemetryManager:
                 changed = new != self._snapshot.rc
                 self._snapshot.rc = new
                 self._emit(force=changed)
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"RC status subscription error: {e}")
+        await self._run_subscription("RC status", _stream)
 
     async def _subscribe_mission_progress(self):
         """
@@ -1550,7 +1595,7 @@ class TelemetryManager:
         try:
             from mavsdk.mavlink_direct import MavlinkMessage
             fields = json.dumps({
-                "target_system": 1,
+                "target_system": self._target_sysid,
                 "target_component": 1,
                 "command": self._MAV_CMD_NAV_TAKEOFF,
                 "confirmation": 0,
@@ -1564,7 +1609,7 @@ class TelemetryManager:
             })
             await asyncio.wait_for(
                 self._drone.mavlink_direct.send_message(
-                    MavlinkMessage("COMMAND_LONG", 0, 0, 1, 1, fields)
+                    MavlinkMessage("COMMAND_LONG", 0, 0, self._target_sysid, 1, fields)
                 ),
                 timeout=5.0,
             )
@@ -1971,6 +2016,7 @@ class TelemetryManager:
         self._offboard_active = False
         self._offboard_hold_alt = None
         self._last_velocity_cmd_t = 0.0
+        self._last_sp = None
         self._offboard_stale = False
         self._pilot_override_mode = mode_name
         self._snapshot.offboard_active = False
@@ -2198,6 +2244,7 @@ class TelemetryManager:
             # Cleared so the next Offboard session starts with no command
             # history rather than inheriting this one's last timestamp.
             self._last_velocity_cmd_t = 0.0
+            self._last_sp = None
             self._offboard_stale = False
             logger.info("Offboard stopped - returning to HOLD")
             return True
@@ -2219,21 +2266,36 @@ class TelemetryManager:
     # It commands zero, not nothing: continuing to stream a zero setpoint holds
     # the aircraft in Offboard and under our control, whereas going silent hands
     # it to PX4's offboard-loss failsafe (COM_OBL_ACT, LAND on many airframes).
-    _OFFBOARD_STALE_AFTER_S = 0.5
-    _OFFBOARD_WATCHDOG_PERIOD_S = 0.2
+    #
+    # It is also the COMMAND-RATE FLOOR. The trackers command once per vision
+    # result, and a result rate is not a command rate: plate mode at a busy
+    # junction can take longer than PX4's offboard-loss timeout between two
+    # results, and zeroing at 0.5 s put brake setpoints between every pair of
+    # live commands. So between commands the LAST command is repeated at 10 Hz,
+    # and only after _OFFBOARD_STALE_AFTER_S of silence does the stream fall to
+    # zero. 2 s is long enough for a slow analyzer and short enough that a dead
+    # one costs a few metres, not a flight.
+    _OFFBOARD_STALE_AFTER_S = 2.0
+    _OFFBOARD_WATCHDOG_PERIOD_S = 0.1
 
     async def _offboard_watchdog(self):
-        """Zeroes the velocity setpoint if the commanding loop goes quiet."""
+        """Repeats the last setpoint between commands; zeroes it once the
+        commanding loop has gone quiet for _OFFBOARD_STALE_AFTER_S."""
         while True:
             try:
                 await asyncio.sleep(self._OFFBOARD_WATCHDOG_PERIOD_S)
                 if not (self._offboard_active and self._connected):
                     continue
+                if self._pilot_override_mode is not None:
+                    continue   # the pilot has the aircraft: nothing goes out
                 last = self._last_velocity_cmd_t
                 if last <= 0.0:
                     continue
                 idle = time.monotonic() - last
+                if idle < self._OFFBOARD_WATCHDOG_PERIOD_S:
+                    continue   # the loop itself just sent one
                 if idle < self._OFFBOARD_STALE_AFTER_S:
+                    await self._resend_last_setpoint()
                     continue
                 if not self._offboard_stale:
                     self._offboard_stale = True
@@ -2248,6 +2310,24 @@ class TelemetryManager:
                 raise
             except Exception as e:
                 logger.warning(f"Offboard watchdog: {e}")
+
+    async def _resend_last_setpoint(self) -> None:
+        """Repeat the commanding loop's last setpoint, with the altitude-hold
+        correction recomputed for a body command so the hold stays live."""
+        sp = self._last_sp
+        if sp is None:
+            return
+        if sp[0] == "body":
+            _, forward, right, down, yaw = sp
+            await self._send_velocity_body(
+                forward, right, self._alt_hold_down(down, track=False), yaw)
+        else:
+            _, north, east, down, yaw = sp
+            try:
+                await self._drone.offboard.set_velocity_ned(
+                    VelocityNedYaw(north, east, down, yaw))
+            except Exception as e:
+                logger.warning(f"NED setpoint re-send failed: {e}")
 
     # Altitude-hold gain for the offboard vertical correction below -
     # tuned conservatively since it's fighting tracking-loop noise, not a setpoint.
@@ -2362,6 +2442,7 @@ class TelemetryManager:
             return
         self._last_velocity_cmd_t = time.monotonic()
         self._last_ned_sp = (float(north_m_s), float(east_m_s), float(down_m_s), float(yaw_deg))
+        self._last_sp = ("ned",) + self._last_ned_sp
         if self._offboard_stale:
             self._offboard_stale = False
         try:
@@ -2378,6 +2459,7 @@ class TelemetryManager:
         self._snapshot.offboard_active = False
         self._offboard_hold_alt = None
         self._last_velocity_cmd_t = 0.0
+        self._last_sp = None
         self._offboard_stale = False
 
     @_claims_mode_change
@@ -2463,26 +2545,37 @@ class TelemetryManager:
         # commanding loop is alive, and the watchdog is there to catch a loop
         # that has gone silent, not one whose sends are failing.
         self._last_velocity_cmd_t = time.monotonic()
+        self._last_sp = ("body", float(forward_m_s), float(right_m_s),
+                         float(down_m_s), float(yaw_deg_s))
         if self._offboard_stale:
             self._offboard_stale = False
             logger.info("Velocity setpoints resumed")
-        effective_down_m_s = float(down_m_s)
-        if self._offboard_hold_alt is not None:
-            if down_m_s != 0.0:
-                # Caller is explicitly controlling altitude (nudge button or Auto PD).
-                # Track the hold target to current altitude so that when the command
-                # ends (velocity → 0) the drone holds the NEW height instead of
-                # snapping back to wherever it was when offboard started.
-                self._offboard_hold_alt = self._snapshot.position.relative_altitude_m
-            else:
-                # Fixed mode, no explicit altitude command - apply P-hold correction
-                # to keep the drone at the altitude it was at when tracking started.
-                alt_error_m = self._snapshot.position.relative_altitude_m - self._offboard_hold_alt
-                correction = max(-self._ALT_HOLD_MAX_MS, min(self._ALT_HOLD_MAX_MS, self._ALT_HOLD_KP * alt_error_m))
-                effective_down_m_s += correction
         await self._send_velocity_body(
-            forward_m_s, right_m_s, effective_down_m_s, yaw_deg_s
+            forward_m_s, right_m_s, self._alt_hold_down(float(down_m_s), track=True),
+            yaw_deg_s
         )
+
+    def _alt_hold_down(self, down_m_s: float, track: bool) -> float:
+        """The vertical velocity actually sent for a body command.
+
+        With a hold altitude set and no explicit vertical command, a P
+        correction keeps the aircraft at the altitude tracking started at.
+        `track`: an explicit vertical command from the caller moves the hold
+        target to the current altitude, so when the command ends the aircraft
+        holds the NEW height instead of snapping back. The watchdog's
+        re-sends pass track=False - repeating a command must not keep
+        re-anchoring the hold.
+        """
+        if self._offboard_hold_alt is None:
+            return down_m_s
+        if down_m_s != 0.0:
+            if track:
+                self._offboard_hold_alt = self._snapshot.position.relative_altitude_m
+            return down_m_s
+        alt_error_m = self._snapshot.position.relative_altitude_m - self._offboard_hold_alt
+        correction = max(-self._ALT_HOLD_MAX_MS,
+                         min(self._ALT_HOLD_MAX_MS, self._ALT_HOLD_KP * alt_error_m))
+        return down_m_s + correction
 
     async def _send_velocity_body(self, forward, right, down, yaw):
         """The raw MAVSDK send, with no altitude-hold correction and no
@@ -2629,7 +2722,7 @@ class TelemetryManager:
         try:
             from mavsdk.mavlink_direct import MavlinkMessage
             fields = json.dumps({
-                "target_system": 1, "target_component": 1,
+                "target_system": self._target_sysid, "target_component": 1,
                 "command": self._MAV_CMD_DO_SET_MODE, "confirmation": 0,
                 "param1": float(self._MAV_MODE_FLAG_CUSTOM_MODE_ENABLED),
                 "param2": float(main), "param3": float(sub),
@@ -2637,7 +2730,7 @@ class TelemetryManager:
             })
             await asyncio.wait_for(
                 self._drone.mavlink_direct.send_message(
-                    MavlinkMessage("COMMAND_LONG", 0, 0, 1, 1, fields)
+                    MavlinkMessage("COMMAND_LONG", 0, 0, self._target_sysid, 1, fields)
                 ),
                 timeout=5.0,
             )
