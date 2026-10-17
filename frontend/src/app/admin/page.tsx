@@ -227,6 +227,7 @@ export default function AdminPage() {
         } catch { /* keep last */ }
     }, [])
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- refresh sets state only after its fetch resolves; the rule does not follow the await
         void refreshZones()
         const id = setInterval(refreshZones, 30000)
         return () => clearInterval(id)
@@ -243,6 +244,7 @@ export default function AdminPage() {
         } catch { /* keep last */ }
     }, [])
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- refresh sets state only after its fetch resolves; the rule does not follow the await
         void refreshPermits()
         if (tab !== 'permits') return
         const id = setInterval(refreshPermits, 5000)
@@ -268,10 +270,17 @@ export default function AdminPage() {
             setFlights(data.flights ?? [])
         } catch { /* keep last */ }
     }, [])
-    useEffect(() => {
+    // The previous drone's flights are cleared on the selection edge, during
+    // render, so they never show under the new drone's name.
+    const [flightsFor, setFlightsFor] = useState(selectedDroneId)
+    if (selectedDroneId !== flightsFor) {
+        setFlightsFor(selectedDroneId)
         setFlights([])
         setFlightDetail(null)
+    }
+    useEffect(() => {
         if (!selectedDroneId) return
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- refresh sets state only after its fetch resolves; the rule does not follow the await
         void refreshFlights(selectedDroneId)
         const id = setInterval(() => void refreshFlights(selectedDroneId), 10000)
         return () => clearInterval(id)
@@ -298,6 +307,7 @@ export default function AdminPage() {
             : !sessions.some(s => s.session_id === selected)
         if (gone) {
             selectedRef.current = null
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- kept beside the ref reset, which must happen after commit; fires once per vanished session
             setSelected(null)
             setTelem(null)
         }
@@ -368,6 +378,7 @@ export default function AdminPage() {
     // Keep the watch in sync with the drone selected in the DRONES tab
     useEffect(() => {
         if (tab !== 'drones') return
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- watch() subscribes the socket (an external system) and resets the view state with it
         watch(selectedDroneSession?.session_id ?? null)
     }, [tab, selectedDroneSession?.session_id, watch])
 
