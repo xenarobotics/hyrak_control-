@@ -78,6 +78,12 @@ class DataChannelIngest:
         self.packets = 0
         self.bytes = 0
         self.closed = False
+        # The desktop's PeerConnection currently feeding this ingest. Kept
+        # HERE, not in a closure, so a re-offer can close the old one and so
+        # only the CURRENT pc's failure tears the ingest down (audit B18):
+        # the old pc going "closed" after a re-offer used to release the
+        # ingest the new pc shared, by session_id.
+        self.pc = None
         # SOCK_DGRAM to 127.0.0.1 - connect() once so every send skips route
         # lookup, which matters at thousands of packets/second.
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -117,6 +123,8 @@ class DataChannelIngest:
         }
 
     def close(self) -> None:
+        """Closes the socket. The PeerConnection is async and is closed by
+        release_async(); sync callers get it scheduled on the running loop."""
         if self.closed:
             return
         self.closed = True
@@ -124,10 +132,35 @@ class DataChannelIngest:
             self._sock.close()
         except OSError:
             pass
+        pc, self.pc = self.pc, None
+        if pc is not None:
+            try:
+                asyncio.get_running_loop().create_task(_close_pc(pc))
+            except RuntimeError:
+                logger.warning(
+                    f"DataChannel ingest for {self.session_id[:8]}: no running loop, "
+                    f"PeerConnection left for GC"
+                )
         logger.info(
             f"DataChannel ingest closed for {self.session_id[:8]} "
             f"({self.packets} packets, {self.bytes / 1e6:.1f} MB)"
         )
+
+    async def attach_pc(self, pc) -> None:
+        """Make `pc` the ingest's feeder, closing whichever one came before.
+        A re-offer (reconnect, second Start click) keeps the same loopback
+        port - the browser is reading it - but must not leave the old
+        PeerConnection open and feeding alongside the new one."""
+        old, self.pc = self.pc, pc
+        if old is not None and old is not pc:
+            await _close_pc(old)
+
+
+async def _close_pc(pc) -> None:
+    try:
+        await pc.close()
+    except Exception as e:
+        logger.debug(f"DataChannel pc close failed: {e}")
 
 
 _ingests: dict[str, DataChannelIngest] = {}
@@ -159,4 +192,22 @@ def release(session_id: str) -> None:
 
 
 async def release_async(session_id: str) -> None:
-    await asyncio.get_event_loop().run_in_executor(None, release, session_id)
+    """Release with the PeerConnection closed and awaited, not just scheduled."""
+    ingest = _ingests.pop(session_id, None)
+    if ingest is None:
+        return
+    pc, ingest.pc = ingest.pc, None
+    if pc is not None:
+        await _close_pc(pc)
+    ingest.close()
+
+
+async def release_if_owner(session_id: str, pc) -> bool:
+    """Release the session's ingest only if `pc` is the one feeding it.
+    The hook for a pc's own state handler: a superseded pc going "closed"
+    must not take down the ingest its successor is using."""
+    ingest = _ingests.get(session_id)
+    if ingest is None or ingest.pc is not pc:
+        return False
+    await release_async(session_id)
+    return True

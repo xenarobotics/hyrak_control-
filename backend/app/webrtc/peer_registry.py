@@ -1,6 +1,14 @@
 """
 Tracks all active WebRTC PeerConnections.
 Keyed by pc_id (uuid), linked to session_id.
+
+OWNERSHIP LIVES ON THE ENTRY. The shared feed port (feeds.py) and the relay
+ingest (relay_video_source.py) used to be keyed by session, and released by
+whichever PeerConnection happened to change state. A re-offer on the same
+socket then had two entries for one session, and the OLD pc closing released
+the port and the ffmpeg listener the NEW pc had just attached to: black video
+and a leaked port (audit B5). Now the entry that acquired a resource is the
+only thing that can release it, and that happens exactly once, in remove().
 """
 import asyncio
 import logging
@@ -23,6 +31,13 @@ class PeerEntry:
     # Client-overlay streams have no outgoing track; this task pulls
     # frames through the pipeline instead.
     drive_task: Optional[asyncio.Task] = None
+    # The 10 s outbound-stats logger for this pc; cancelled with the entry.
+    stats_task: Optional[asyncio.Task] = None
+    # Shared feed port (feeds.acquire) this pc holds one ref on, if any.
+    feed_port: Optional[int] = None
+    # True when this pc is the consumer of the session's relay ingest
+    # (relay_video_source). Transferred, not duplicated, on a re-offer.
+    owns_relay: bool = False
 
 
 class PeerRegistry:
@@ -54,6 +69,8 @@ class PeerRegistry:
             return
         if entry.drive_task:
             entry.drive_task.cancel()
+        if entry.stats_task:
+            entry.stats_task.cancel()
         for track in entry.tracks:
             try:
                 track.stop()
@@ -63,7 +80,26 @@ class PeerRegistry:
             await entry.pc.close()
         except Exception:
             pass
+        await self._release_resources(entry)
         logger.info(f"Peer removed: {pc_id[:8]}")
+
+    async def _release_resources(self, entry: PeerEntry) -> None:
+        """Free what THIS entry acquired - never anything keyed by session
+        that another entry may be using."""
+        fp, entry.feed_port = entry.feed_port, None
+        if fp is not None:
+            try:
+                from app.webrtc import feeds
+                await feeds.release(fp)
+            except Exception as e:
+                logger.warning(f"Peer {entry.pc_id[:8]}: feed udp:{fp} release failed: {e}")
+        if entry.owns_relay:
+            entry.owns_relay = False
+            try:
+                from app.webrtc import relay_video_source
+                await relay_video_source.release_async(entry.session_id)
+            except Exception as e:
+                logger.warning(f"Peer {entry.pc_id[:8]}: relay release failed: {e}")
 
     @property
     def count(self) -> int:
