@@ -1,26 +1,37 @@
 name: Desktop release
 
 # electron-builder can't reliably cross-compile a Windows .exe or macOS
-# .dmg from Linux — each platform's installer has to be built ON that
-# platform. This matrix does exactly that: one job per OS, each building
-# its own installer, then uploading it (via rsync over SSH) straight into
-# the backend's own releases/ folder — served at /releases by
-# backend/app/server.py, no GitHub Releases involved. desktop/package.json
+# .dmg from Linux - each platform's installer has to be built ON that
+# platform. The build matrix does exactly that: one job per OS, each
+# building its own installer and uploading it as a workflow artifact. A
+# final Linux job then downloads all three and copies them (rsync over
+# SSH) into the backend's own releases/ folder, served at /releases by
+# backend/app/server.py; no GitHub Releases involved. desktop/package.json
 # uses electron-builder's "generic" publish provider specifically because
 # it does no uploading itself; this workflow owns that step instead.
+#
+# The deploy is a separate job on purpose: the rsync action it used to call
+# (burnett01/rsync-deployments) is a Docker container action, and container
+# actions only run on Linux runners, so the windows/macos legs of the matrix
+# could never deploy. Plain rsync + ssh on an ubuntu runner has no such limit.
+#
+# Third-party and first-party actions are pinned by commit SHA (the tag is
+# kept in a comment): a tag can be moved, a SHA cannot.
 #
 # Triggers on pushing a version tag, e.g.:
 #   git tag desktop-v0.1.0 && git push origin desktop-v0.1.0
 #
 # Needs these repo secrets pointing at the actual server before this can
-# deploy anything (unset today — configure once, in GitHub repo Settings →
-# Secrets and variables → Actions):
-#   DEPLOY_HOST     — server hostname/IP
-#   DEPLOY_USER     — SSH user
-#   DEPLOY_SSH_KEY  — private key with access to that user
-#   DEPLOY_PATH     — absolute path to the backend's releases_dir on the
+# deploy anything (configure once, in GitHub repo Settings -> Secrets and
+# variables -> Actions), plus the repo variable DEPLOY_CONFIGURED=true:
+#   DEPLOY_HOST     - server hostname/IP
+#   DEPLOY_USER     - SSH user
+#   DEPLOY_SSH_KEY  - private key with access to that user
+#   DEPLOY_PATH     - absolute path to the backend's releases_dir on the
 #                     server (see backend/app/config.py's releases_dir,
 #                     default "<repo root>/releases")
+#   DEPLOY_KNOWN_HOSTS (optional) - the server's `ssh-keyscan` line(s); when
+#                     unset the host key is accepted on first contact.
 
 on:
   push:
@@ -39,13 +50,13 @@ jobs:
       run:
         working-directory: desktop
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           node-version: 20
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
         with:
           python-version: '3.x'
 
@@ -59,33 +70,17 @@ jobs:
       - name: Build + write electron-updater manifests
         run: npm run release
         env:
-          # electron-builder still wants SOME publish target reachable to
-          # validate config even with the generic provider (which does no
-          # actual upload) — GH_TOKEN isn't used for anything here, this
-          # var name is just what electron-builder's CI detection checks.
+          # Code signing, when certificates exist (desktop/README.md).
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          # The site the installed app opens. Unset = the dev tunnel
+          # (desktop/src/site-url.ts default); set the repo variable to
+          # ship installers that point at production.
+          HYRAK_SITE_URL: ${{ vars.HYRAK_SITE_URL }}
 
-      - name: Deploy to server
-        if: ${{ vars.DEPLOY_CONFIGURED == 'true' }}
-        uses: burnett01/rsync-deployments@7.0.1
-        with:
-          switches: -avz --include='*.exe' --include='*.dmg' --include='*.AppImage' --include='*.blockmap' --include='latest*.yml' --exclude='*'
-          path: desktop/release/
-          remote_path: ${{ secrets.DEPLOY_PATH }}
-          remote_host: ${{ secrets.DEPLOY_HOST }}
-          remote_user: ${{ secrets.DEPLOY_USER }}
-          remote_key: ${{ secrets.DEPLOY_SSH_KEY }}
-
-      - name: Deploy step skipped
-        if: ${{ vars.DEPLOY_CONFIGURED != 'true' }}
-        run: |
-          echo "Deploy secrets not configured yet (DEPLOY_HOST/DEPLOY_USER/DEPLOY_SSH_KEY/DEPLOY_PATH)."
-          echo "Set them as repo secrets, then set the repo variable DEPLOY_CONFIGURED=true, to enable the upload step above."
-          echo "Built artifacts are still available as this job's workflow artifact for manual upload in the meantime."
-
-      - uses: actions/upload-artifact@v4
-        if: ${{ vars.DEPLOY_CONFIGURED != 'true' }}
+      # Always uploaded: the deploy job below consumes these, and when deploy
+      # is not configured they are the manual-upload stand-in.
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: hyrak-desktop-${{ matrix.os }}
           path: |
@@ -94,4 +89,55 @@ jobs:
             desktop/release/*.AppImage
             desktop/release/*.blockmap
             desktop/release/latest*.yml
-          if-no-files-found: ignore
+          if-no-files-found: error
+          retention-days: 14
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy step skipped
+        if: ${{ vars.DEPLOY_CONFIGURED != 'true' }}
+        run: |
+          echo "Deploy secrets not configured yet (DEPLOY_HOST/DEPLOY_USER/DEPLOY_SSH_KEY/DEPLOY_PATH)."
+          echo "Set them as repo secrets, then set the repo variable DEPLOY_CONFIGURED=true, to enable the upload."
+          echo "Each platform's installer is attached to this run as a workflow artifact for manual upload in the meantime."
+
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        if: ${{ vars.DEPLOY_CONFIGURED == 'true' }}
+        with:
+          pattern: hyrak-desktop-*
+          merge-multiple: true
+          path: release
+
+      - name: Install rsync + ssh key
+        if: ${{ vars.DEPLOY_CONFIGURED == 'true' }}
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq rsync openssh-client
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "$DEPLOY_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$DEPLOY_KNOWN_HOSTS" >> ~/.ssh/known_hosts
+          else
+            ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          fi
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy to server
+        if: ${{ vars.DEPLOY_CONFIGURED == 'true' }}
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          ls -la release
+          rsync -avz \
+            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes" \
+            --include='*.exe' --include='*.dmg' --include='*.AppImage' \
+            --include='*.blockmap' --include='latest*.yml' --exclude='*' \
+            release/ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
