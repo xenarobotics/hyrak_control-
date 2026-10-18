@@ -23,6 +23,13 @@ Rules (docs/AUTH.md "URL tickets"):
 * On every use the issuing token is verified again (verify_token_hash: a
   logout, a revoked token, a disabled account or a lower role all count
   now), so a ticket never outlives the access it was minted from.
+* A `local` ticket (asked for by the frontend's localhost feed shortcut,
+  lib/serverHevcFeed.ts) is honoured only on a direct loopback connection
+  with no proxy headers. The shortcut cannot prove who listens on the
+  viewer's localhost (the health instance id is public), so a ticket handed
+  to an impostor there must not be replayable through the public tunnel:
+  cloudflared also connects from loopback, but always adds
+  CF-Connecting-IP, which disqualifies it.
 """
 from __future__ import annotations
 
@@ -54,6 +61,7 @@ class Ticket:
     token_hash: str
     path: str
     expires: float          # _now() clock
+    local: bool = False     # loopback-only, see the module docstring
 
 
 _tickets: "OrderedDict[str, Ticket]" = OrderedDict()
@@ -74,13 +82,26 @@ def _prune(now: float) -> None:
         _tickets.popitem(last=False)          # oldest first
 
 
-def issue(user_id: str, token_hash: str, path: str) -> tuple[str, float]:
+_LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+_PROXY_HEADERS = ("cf-connecting-ip", "x-forwarded-for", "forwarded", "x-real-ip")
+
+
+def is_direct_loopback(request: Request) -> bool:
+    """The request came straight from this machine, not through a proxy
+    (cloudflared, nginx) that happens to run here."""
+    host = request.client.host if request.client else None
+    if host not in _LOOPBACK:
+        return False
+    return not any(request.headers.get(h) for h in _PROXY_HEADERS)
+
+
+def issue(user_id: str, token_hash: str, path: str, *, local: bool = False) -> tuple[str, float]:
     """A new ticket and its expiry as unix seconds."""
     now = _now()
     _prune(now)
     ticket = secrets.token_urlsafe(32)
     _tickets[_hash(ticket)] = Ticket(user_id=user_id, token_hash=token_hash,
-                                     path=path, expires=now + TICKET_TTL_S)
+                                     path=path, expires=now + TICKET_TTL_S, local=local)
     return ticket, time.time() + TICKET_TTL_S
 
 
@@ -129,6 +150,8 @@ def require_user_or_ticket(min_role: str, template: str):
             user = await authenticate(bearer_of(authorization), x_auth_token)
         else:
             t = lookup(ticket, path)
+            if t is not None and t.local and not is_direct_loopback(request):
+                t = None
             user = await verify_token_hash(t.token_hash) if t is not None else None
             if user is not None and user.id != t.user_id:
                 user = None

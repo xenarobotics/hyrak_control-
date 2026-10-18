@@ -91,9 +91,12 @@ export async function ticketedUrl(path: string, base: string = getServerUrl()): 
  *  or null when refused. Also the way to reach a protected stream on a
  *  host other than the API base: the bearer never leaves the API base, a
  *  ticket is limited to one path for 60 s. */
-export async function urlTicket(path: string): Promise<string | null> {
+export async function urlTicket(path: string, opts: { local?: boolean } = {}): Promise<string | null> {
+    // local: the ticket is honoured only on a direct loopback connection to
+    // the backend, so one handed to an impostor on the viewer's localhost
+    // cannot be replayed through the public API (backend url_tickets.py).
     const { ok, data } = await apiJson<{ ticket?: string }>('/api/auth/url-ticket', {
-        method: 'POST', json: { path },
+        method: 'POST', json: { path, local: !!opts.local },
     })
     return ok && data.ticket ? data.ticket : null
 }

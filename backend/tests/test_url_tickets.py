@@ -190,3 +190,21 @@ def test_the_map_is_bounded(monkeypatch):
         url_tickets.issue("u", "h", f"/api/p{i}")
     assert len(url_tickets._tickets) <= 10
     url_tickets.reset_for_tests()
+
+
+async def test_local_ticket_only_on_direct_loopback(cl):
+    """A ticket minted for the localhost feed shortcut works on a direct
+    loopback connection only: not from another host, and not through a
+    proxy on this machine (cloudflared adds CF-Connecting-IP)."""
+    from app.server import create_app
+    _, t = await account("lv", "viewer")
+    r = cl.post("/api/auth/url-ticket", headers=hdr(t), json={"path": DEPTH, "local": True})
+    tk = r.json()["ticket"]
+    assert cl.get(f"{DEPTH}?ticket={tk}").status_code == 401             # peer "testclient"
+    lo = TestClient(create_app().other_asgi_app, client=("127.0.0.1", 50000))
+    assert lo.get(f"{DEPTH}?ticket={tk}").status_code == 200
+    assert lo.get(f"{DEPTH}?ticket={tk}", headers={"CF-Connecting-IP": "203.0.113.9"}).status_code == 401
+    assert lo.get(f"{DEPTH}?ticket={tk}", headers={"X-Forwarded-For": "203.0.113.9"}).status_code == 401
+    # An ordinary ticket still works from anywhere.
+    plain = ticket_for(cl, t, DEPTH)
+    assert cl.get(f"{DEPTH}?ticket={plain}").status_code == 200

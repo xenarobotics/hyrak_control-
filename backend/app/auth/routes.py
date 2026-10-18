@@ -172,6 +172,8 @@ async def revoke_my_other_sessions(authorization: str | None = Header(None),
 
 class UrlTicketBody(BaseModel):
     path: str = Field(max_length=512)
+    # Loopback-only ticket for the frontend's localhost feed shortcut.
+    local: bool = False
 
 
 @router.post("/url-ticket")
@@ -194,7 +196,8 @@ async def url_ticket(body: UrlTicketBody,
         raise HTTPException(status_code=404, detail="That path does not accept URL tickets")
     if not user.has_role(min_role):
         raise HTTPException(status_code=403, detail=f"Requires the {min_role} role")
-    ticket, expires_at = url_tickets.issue(user.id, service.hash_token(token), body.path)
+    ticket, expires_at = url_tickets.issue(user.id, service.hash_token(token), body.path,
+                                           local=body.local)
     return {"ticket": ticket, "expires_at": expires_at}
 
 

@@ -270,7 +270,7 @@ async function authorisedStreamUrl(src: string): Promise<string> {
     let u: URL
     try { u = new URL(src) } catch { return src }
     if (!u.pathname.startsWith('/api/video/feeds/')) return src
-    const ticket = await urlTicket(u.pathname)
+    const ticket = await urlTicket(u.pathname, { local: true })
     if (ticket) u.searchParams.set('ticket', ticket)
     return u.toString()
 }
