@@ -223,8 +223,10 @@ picture with the most findings.
 * `GET /{id}` -> `{model}`, the full card plus `versions` (newest first)
   and `details` (inspect and test result, failure).
 * `PATCH /{id}` `{name, description, labels, task, threshold, alert:
-  {label, min_score, cooldown_s?} | null}`; a changed task re-checks the
-  newest version.
+  {label, min_score, cooldown_s?} | null, classes_shown: [names] | null,
+  tiling: off|auto|2x2|3x3}`; a changed task re-checks the newest
+  version. Cards carry `threshold`, `classes_shown` and `tiling` (the
+  catalogue card too, from the snapshot).
 * `DELETE /{id}`, `GET /{id}/preview?version=` (bearer, or a URL ticket
   for this path), `POST /{id}/retest`, `POST /{id}/publish {published,
   version?}` (founders).
@@ -337,6 +339,48 @@ with `view` on the workspace (premium or not); Add still needs
   private repos are refused (`hf_not_found`) even when it could read them.
 * Licence notes: AGPL ("Free to try; commercial use needs an Ultralytics
   licence or AGPL compliance.") and cc-by-nc ("Non-commercial use only.").
+
+**Settings** (`feat/cm-settings`). Three run settings plus the task, in
+`models.settings` (no migration): `threshold` (0.01-0.99, default 0.25),
+`classes_shown` (null = all; a non-empty list of class names, deduplicated;
+a class renamed through `labels` stays shown, followed by position) and
+`tiling` (`off` default, `auto`, `2x2`, `3x3`).
+
+* Live: a PATCH puts the run settings (and renamed labels, for that
+  version only) in `runtime.set_live(model_id, ...)`; the owning
+  workspace's analyzers read them on their next frame, with no runner
+  restart. Catalogue runs keep the published snapshot, which now also
+  pins `classes_shown` and `tiling`.
+* Shown classes: the analyzer passes their class ids to the runner (a
+  classifier's top 10 is then taken among them) and drops any other name
+  before `objects`, `detections`, counts and the alert rule.
+* Tiling (detect only; a classifier ignores it): the runner message is
+  `("infer", h, w, c, threshold, {tiling, classes})`. The frame plus an
+  n x n grid of tiles overlapping by 20% (`runner.tile_grid`, the last
+  row and column flush with the edge), each letterboxed to the model's
+  input; one `session.run` for all of them when the batch axis is
+  dynamic (a model that refuses a real batch falls back to a loop for
+  good), else one per tile. Boxes go back to frame pixels and merge with
+  class-wise NMS at IoU 0.5 (`runner.merge_detections`). `auto` tiles
+  2x2 on frames wider than 1280 px. A 2x2 frame is 5 model passes, 3x3
+  is 10; `infer_ms` is the whole frame, and the analyzer's latest-frame
+  policy drops frames while a slow one runs, so tiling never queues.
+  Known limit: an object cut by a tile edge can add a partial box next to
+  the full-frame one when their IoU is under 0.5.
+* `cv_results` adds `threshold`, `classes_shown`, `tiling` (what ran on
+  the frame: `off`, `2x2`, `3x3`), and a tally since the model started on
+  the session: `run_frames`, `run_counts {name: {peak, frames}}` (detect:
+  most at once and frames seen; classify: frames as the top answer).
+* UI: the model panel has a Settings section (What it does, Sensitivity
+  slider "Show a box when the model is at least N% sure" with a live
+  hint, Only show these classes with search and Show all, Find small
+  objects with Auto / 2x2 / 3x3 and a speed estimate from the test).
+  Changes save on their own (the slider after a 400 ms pause) with a small
+  "Saved"; viewers see the values as text. Add's Confirm step has the same
+  three under a closed "More options". The results panel shows chips
+  ("35% sure", "79 of 80 classes", "Tiling 2x2 - about 11 fps") that open
+  the panel at that setting, and a per-class table (Now, Most at once) or,
+  for a classifier, how often each answer was on top.
 
 **Measured** (RTX 4070 laptop): Ultralytics YOLOv8n exported to ONNX
 (opset 17) inspects as `yolov8`, 80 COCO names, tests at about 8 ms
