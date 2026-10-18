@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -8,23 +8,26 @@ import { ThemeToggle } from '@/components/controls/ThemeToggle'
 import { ZoneBanner } from '@/components/controls/ZoneBanner'
 import { UpdatePrompt } from '@/components/updater/UpdatePrompt'
 import { LocalLinkPanel } from '@/components/controls/LocalLinkPanel'
-import { useDrone } from '@/hooks/useDrone'
+import { useDrone, disconnectTelemetryLink } from '@/hooks/useDrone'
 import { WebRTCProvider } from '@/contexts/WebRTCContext'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { useDroneStore } from '@/store/drone'
 import { getSocket } from '@/lib/socket'
 import { cn } from '@/lib/utils'
 import Image from 'next/image'
-import { Radio, Map, Bot, Package, SlidersHorizontal, Settings, AlertTriangle, LayoutDashboard } from 'lucide-react'
+import { Radio, Map, Bot, Package, SlidersHorizontal, Settings, AlertTriangle, LayoutDashboard, Building2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useUiMode } from '@/hooks/useUiMode'
 import { useSwarmStore } from '@/store/swarm'
 import { FleetAside } from '@/components/swarm/FleetAside'
 import { StatusBar } from '@/components/layout/StatusBar'
 import { getStatusBarEnabled, STATUSBAR_CHANGE_EVENT } from '@/lib/statusBarSettings'
-import { useAuthGate } from '@/hooks/useAuthGate'
+import { useAuthGate, hasConsoleAccess } from '@/hooks/useAuthGate'
 import { useClientValueOn, useHydrated } from '@/hooks/useClientValue'
 import { WorkspaceSwitcher } from '@/components/layout/WorkspaceSwitcher'
+import { CommandRefusalBanner } from '@/components/controls/CommandRefusalBanner'
+import { useAccess } from '@/hooks/useAccess'
+import { onWorkspaceSwitch } from '@/lib/workspaceSwitch'
 
 const NAV = [
     { href: '/fly',       label: 'Fly',     icon: Radio },
@@ -36,11 +39,49 @@ const NAV = [
     { href: '/settings',  label: 'Settings', icon: Settings },
 ]
 
+// Pages a customer-only account never opens (docs/ACCESS_MODEL.md section
+// 8a): missions and deliveries stay staff-only in phase 2a.
+const STAFF_ONLY_PATHS = ['/mission', '/deliveries']
+const isStaffOnlyPath = (path: string) => STAFF_ONLY_PATHS.some(p => path === p || path.startsWith(p + '/'))
+
 // Mount socket ONCE at layout level - persists across all tab navigation
 function DroneConnection() {
     useDrone()
+    const { isCustomer } = useAccess()
     // Persisted swarm flag, read after mount (see store/swarm.ts hydrate).
-    useEffect(() => { useSwarmStore.getState().hydrate() }, [])
+    // Swarm and the fleet are staff-only: a customer never turns it on, even
+    // when this tab last held a staff session.
+    useEffect(() => { if (!isCustomer) useSwarmStore.getState().hydrate() }, [isCustomer])
+    return null
+}
+
+// A customer's session belongs to one workspace, so switching ends it
+// (lib/workspaceSwitch): stop the stream and release the drone link first,
+// so nothing keeps feeding the old session while the socket reconnects.
+function WorkspaceSwitchTeardown() {
+    const { isStreaming, stopStream } = useWebRTCContext()
+    const live = useRef({ isStreaming, stopStream })
+    useEffect(() => { live.current = { isStreaming, stopStream } }, [isStreaming, stopStream])
+    useEffect(() => onWorkspaceSwitch(async () => {
+        if (live.current.isStreaming) live.current.stopStream()
+        const st = useDroneStore.getState()
+        if (st.mode !== 'manual-control') {
+            getSocket().emit('set_analysis_mode', { mode: 'manual-control' })
+            st.setMode('manual-control')
+        }
+        st.setCvResults(null)
+        if (st.telemetryStatus !== 'disconnected') await disconnectTelemetryLink()
+    }), [])
+    return null
+}
+
+// Customer-only accounts with live access open only the session pages.
+function StaffOnlyPathGuard() {
+    const { isCustomer } = useAccess()
+    const pathname = usePathname()
+    const router = useRouter()
+    const blocked = isCustomer && isStaffOnlyPath(pathname)
+    useEffect(() => { if (blocked) router.replace('/command') }, [blocked, router])
     return null
 }
 
@@ -52,10 +93,46 @@ const NAV_NORMAL = [
     { href: '/settings', label: 'Settings', icon: Settings },
 ]
 
+// Customer-only accounts (docs/ACCESS_MODEL.md section 8a): Fly, AI, Config
+// and Settings in both modes, never Plan, Mission or Deliver.
+const NAV_NORMAL_CUSTOMER = [
+    { href: '/command',   label: 'Fly',      icon: Radio },
+    { href: '/modules',   label: 'AI',       icon: Bot },
+    { href: '/telemetry', label: 'Config',   icon: SlidersHorizontal },
+    { href: '/settings',  label: 'Settings', icon: Settings },
+]
+const NAV_CUSTOMER = NAV.filter(n => !isStaffOnlyPath(n.href))
+
+function navFor(normal: boolean, customer: boolean) {
+    if (customer) return normal ? NAV_NORMAL_CUSTOMER : NAV_CUSTOMER
+    return normal ? NAV_NORMAL : NAV
+}
+
+// The console entry point, for whoever can open /admin: staff (the HYRAK
+// console) and customer owners and admins (the organization console). Its
+// own tab, as the console page asks: a founder's console marks its socket
+// session as admin, which must never be this flying tab's session.
+function ConsoleLink({ normal }: { normal: boolean }) {
+    const { user } = useAccess()
+    if (!user || !hasConsoleAccess(user)) return null
+    return (
+        <a href="/admin" target="_blank" rel="noopener" title="Console (opens in a new tab)"
+            className={cn(
+                'flex flex-col items-center rounded-lg transition-colors',
+                normal ? 'gap-1.5 w-20 py-3' : 'gap-1 w-12 py-2 text-xs text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800',
+            )}
+            style={normal ? { color: 'var(--s-ink)' } : undefined}>
+            <Building2 size={normal ? 22 : 18} />
+            <span className={normal ? 'text-[14px] font-bold' : 'text-[10px] font-mono'}>Console</span>
+        </a>
+    )
+}
+
 function PlatformNav() {
     const [uiMode] = useUiMode()
     const normal = uiMode === 'normal'
-    const nav = normal ? NAV_NORMAL : NAV
+    const { isCustomer } = useAccess()
+    const nav = navFor(normal, isCustomer)
     const pathname = usePathname()
     const router = useRouter()
     const { isStreaming, stopStream } = useWebRTCContext()
@@ -130,11 +207,10 @@ function PlatformNav() {
                     )
                 })}
 
-                {!normal && (
-                    <div className="mt-auto">
-                        <ThemeToggle />
-                    </div>
-                )}
+                <div className="mt-auto flex flex-col items-center gap-1">
+                    <ConsoleLink normal={normal} />
+                    {!normal && <ThemeToggle />}
+                </div>
             </aside>
 
             {/* Navigation guard popup */}
@@ -204,10 +280,14 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
     // server no longer accepts, goes to /login. The socket is not opened
     // until the check passes, so a signed-out tab never hits the server
     // with an empty credential. The landing page (/) stays public.
-    const gate = useAuthGate('viewer')
+    //
+    // Customer-only accounts get in when they can view a workspace (docs/
+    // ACCESS_MODEL.md section 8a); without one they go to /account.
+    const gate = useAuthGate('live')
     const mounted = useHydrated()
     const statusBarOn = useClientValueOn(STATUSBAR_CHANGE_EVENT, getStatusBarEnabled, false)
     const swarmEnabled = useSwarmStore(s => s.enabled)
+    const { isCustomer } = useAccess()
     const pathname = usePathname()
 
     // Fly and Command carry their own status and flight controls - the global
@@ -229,7 +309,9 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
     return (
         <TooltipProvider>
             <DroneConnection />
+            <StaffOnlyPathGuard />
             <WebRTCProvider>
+                <WorkspaceSwitchTeardown />
                 <div
                     className="flex h-full overflow-hidden"
                     style={{ background: 'hsl(var(--app-bg))', color: 'hsl(var(--app-text))' }}
@@ -241,12 +323,15 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
                     <div className="flex flex-col flex-1 overflow-hidden">
                         {showStatusBar && <StatusBar />}
                         <ZoneBanner />
+                        <CommandRefusalBanner />
                         <main className="flex-1 overflow-hidden p-3 md:p-4"
                             style={uiMode === 'normal' ? { background: '#F4F7FB' } : undefined}>
-                            {children}
+                            {/* A staff-only page never renders for a customer,
+                                not even for the frame before the redirect. */}
+                            {isCustomer && isStaffOnlyPath(pathname) ? null : children}
                         </main>
                     </div>
-                    {mounted && swarmEnabled && <FleetAside />}
+                    {mounted && swarmEnabled && !isCustomer && <FleetAside />}
                 </div>
                 <UpdatePrompt />
                 <LocalLinkPanel />

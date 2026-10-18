@@ -19,6 +19,7 @@ import { ChevronRight, ChevronLeft, Radio, Video, Map as MapIcon } from 'lucide-
 import { cn } from '@/lib/utils'
 import { SurfaceCard } from '@/components/layout/SurfaceCard'
 import { useHydrated } from '@/hooks/useClientValue'
+import { useAccess } from '@/hooks/useAccess'
 
 // Leaflet touches `window` - no SSR
 const FleetMap = dynamic(() => import('@/components/swarm/FleetMap'), {
@@ -110,6 +111,8 @@ export default function FlyPage() {
     const [mainView, setMainView] = useState<'video' | 'map'>('video')
     const swarmEnabled    = useSwarmStore(s => s.enabled)
     const setSwarmEnabled = useSwarmStore(s => s.setEnabled)
+    // Swarm and the fleet are staff-only (docs/ACCESS_MODEL.md section 8a).
+    const { isCustomer } = useAccess()
 
     // Whenever the user lands on the Fly tab, reset the backend to raw-feed mode
     // so the OSD never shows a stale annotated frame from a previous AI session.
@@ -206,7 +209,7 @@ export default function FlyPage() {
                             ) : (
                                 <DeviceSelector />
                             )}
-                            <div
+                            {!isCustomer && <div
                                 className="flex items-center justify-between pt-2 mt-1 border-t"
                                 style={{ borderColor: 'hsl(var(--app-border))' }}
                             >
@@ -232,7 +235,7 @@ export default function FlyPage() {
                                         mounted && swarmEnabled ? 'translate-x-[21px]' : 'translate-x-[3px]'
                                     )} />
                                 </button>
-                            </div>
+                            </div>}
                         </SurfaceCard>
 
                         <SurfaceCard title="FLIGHT CONTROLS">
