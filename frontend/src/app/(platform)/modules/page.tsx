@@ -393,6 +393,9 @@ export default function ModulesPage() {
                         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                         padding: '8px 10px',
                         background: 'linear-gradient(to top, rgba(0,0,0,0.7), transparent)',
+                        // Over the video, whatever the page palette (Normal
+                        // mode's navy ink would vanish on black).
+                        color: '#e4e4e7',
                     }}>
                         {previewOnSrc
                             ? <span />

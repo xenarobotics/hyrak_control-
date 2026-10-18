@@ -195,6 +195,7 @@
   width: var(--cm-icon); height: var(--cm-icon); border-radius: var(--cm-radius-sm);
   display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
+.normal .iconTile svg { filter: brightness(0.62) saturate(1.5); }
 .cardMain { min-width: 0; display: flex; flex-direction: column; gap: 3px; text-align: left; }
 .cardOpen {
   all: unset; cursor: pointer; min-width: 0; display: flex; flex-direction: column; gap: 3px;

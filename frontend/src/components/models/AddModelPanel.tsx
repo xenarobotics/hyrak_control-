@@ -363,7 +363,9 @@ function AddFlow({ open, onOpenChange, workspaceId, onSaved }: {
     } else if (stage === 'confirm') {
         foot = (
             <>
-                <span className={s.help} style={{ flex: 1 }}>The check keeps running if you close this.</span>
+                <span className={s.help} style={{ flex: 1 }}>
+                    {earlyFailure ? 'This file cannot run as it is. Fix it with the step above.' : 'The check keeps running if you close this.'}
+                </span>
                 {!earlyFailure && filled && (
                     <button type="button" className={cn(s.btn, s.primary)} onClick={toTest} aria-busy={busy || undefined}>
                         {busy ? <Loader size={13} className="animate-spin motion-reduce:animate-none" aria-hidden /> : null}

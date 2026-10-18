@@ -73,7 +73,7 @@ export function ModelLibrary(p: LibraryProps) {
 
     const card = (e: LibraryEntry) => (
         <ModelCard key={e.key} entry={e} running={p.runningMode === e.mode}
-            starting={p.startingMode === e.mode} canRun={p.canRun}
+            starting={p.startingMode === e.mode} canRun={p.canRun} canManage={p.canManage}
             onRun={() => p.onRun(e)} onStop={p.onStop}
             onOpen={e.model ? () => p.onOpen(e) : undefined}
             highlight={p.highlightKey === e.key} />
@@ -164,8 +164,8 @@ export function ModelLibrary(p: LibraryProps) {
     )
 }
 
-function ModelCard({ entry: e, running, starting, canRun, onRun, onStop, onOpen, highlight }: {
-    entry: LibraryEntry; running: boolean; starting: boolean; canRun: boolean
+function ModelCard({ entry: e, running, starting, canRun, canManage, onRun, onStop, onOpen, highlight }: {
+    entry: LibraryEntry; running: boolean; starting: boolean; canRun: boolean; canManage: boolean
     onRun: () => void; onStop: () => void; onOpen?: () => void; highlight?: boolean
 }) {
     const Icon = e.icon
@@ -206,7 +206,7 @@ function ModelCard({ entry: e, running, starting, canRun, onRun, onStop, onOpen,
                     </button>
                 ))}
                 {e.status === 'failed' && onOpen && (
-                    <button type="button" className={s.btn} onClick={onOpen}>See how to fix</button>
+                    <button type="button" className={s.btn} onClick={onOpen}>{canManage && e.group === 'ours' ? 'See how to fix' : 'See details'}</button>
                 )}
                 {onOpen && <ChevronRight size={16} className={s.chev} aria-hidden />}
             </div>
