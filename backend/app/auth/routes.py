@@ -187,6 +187,7 @@ class AcceptBody(BaseModel):
     email: str | None = Field(default=None, max_length=254)
     password: str | None = Field(default=None, max_length=1024)
     username: str | None = Field(default=None, max_length=64)
+    label: str = Field(default="", max_length=120)
 
 
 @router.post("/invites/{token}/accept")
@@ -197,7 +198,7 @@ async def accept_invite(token: str, request: Request, body: AcceptBody | None = 
     try:
         return await ws_service.accept_invite(
             token, user, ip=client_ip(request),
-            label=(request.headers.get("user-agent") or "")[:120],
+            label=((body.label if body else "") or request.headers.get("user-agent") or "")[:120],
             display_name=body.display_name, email=body.email, password=body.password,
             username=body.username)
     except Exception as e:

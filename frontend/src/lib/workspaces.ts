@@ -11,7 +11,7 @@
  * wrong current password must not sign the person out.
  */
 import { apiFetch } from './api'
-import { authHeaders, type AuthUser } from './auth'
+import { authHeaders, deviceLabel, type AuthUser } from './auth'
 import { getServerUrl } from './server-url'
 import type { GeoPolygon, MemberRole, Membership, WorkspaceInfo, WorkspaceKind, ZoneLayer } from './access'
 import type { ZoneClass, ZoneFeature } from '@/components/admin/zones'
@@ -183,7 +183,7 @@ export const acceptInviteSignedIn = (token: string) =>
 
 /** Signed out: creates the account and returns a session like login does. */
 export const acceptInviteSignUp = (token: string, body: { display_name: string; email: string; password: string; username?: string }) =>
-    call<IssuedSession>(`/api/auth/invites/${tok(token)}/accept`, { method: 'POST', json: body }, 'soft')
+    call<IssuedSession>(`/api/auth/invites/${tok(token)}/accept`, { method: 'POST', json: { ...body, label: deviceLabel() } }, 'soft')
 
 export const resetPassword = (token: string, password: string) =>
     call<unknown>(`/api/auth/reset/${tok(token)}`, { method: 'POST', json: { password } }, 'soft')
