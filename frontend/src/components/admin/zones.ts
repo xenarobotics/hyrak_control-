@@ -1,5 +1,7 @@
 // Shared zone types/helpers - SSR-safe (no leaflet imports).
 
+import type { GeoPolygon, ZoneLayer } from '@/lib/access'
+
 export type ZoneClass = 'green' | 'orange' | 'red'
 
 export type ZoneFeature = {
@@ -12,6 +14,10 @@ export type ZoneFeature = {
         floor_m: number
         ceiling_m: number | null
         active: boolean
+        // Access model (docs/ACCESS_MODEL.md section 3). Absent on an older
+        // server, where every zone is effectively regulatory.
+        layer?: ZoneLayer
+        workspace_id?: string | null
     }
 }
 
@@ -23,12 +29,33 @@ export const ZONE_COLORS: Record<ZoneClass, string> = {
 
 // GeoJSON is (lng, lat); leaflet wants (lat, lng). Returns rings.
 export function zoneRings(f: ZoneFeature): [number, number][][] {
+    return geoRings(f.geometry)
+}
+
+export function geoRings(g: { type: string; coordinates: unknown } | null | undefined): [number, number][][] {
+    if (!g) return []
     const swap = (ring: number[][]) => ring.map(([lng, lat]) => [lat, lng] as [number, number])
-    if (f.geometry.type === 'Polygon') {
-        return (f.geometry.coordinates as number[][][]).map(swap)
+    if (g.type === 'Polygon') {
+        return (g.coordinates as number[][][]).map(swap)
     }
-    if (f.geometry.type === 'MultiPolygon') {
-        return (f.geometry.coordinates as number[][][][]).flatMap(poly => poly.map(swap))
+    if (g.type === 'MultiPolygon') {
+        return (g.coordinates as number[][][][]).flatMap(poly => poly.map(swap))
     }
     return []
+}
+
+/** Clicked (lat, lng) vertices -> a closed GeoJSON polygon. */
+export function polygonFromPoints(points: [number, number][]): GeoPolygon {
+    const ring = [...points.map(([lat, lng]) => [lng, lat]), [points[0][1], points[0][0]]]
+    return { type: 'Polygon', coordinates: [ring] }
+}
+
+/** The outer ring of a polygon as editable (lat, lng) vertices, unclosed. */
+export function pointsFromPolygon(g: GeoPolygon | null | undefined): [number, number][] {
+    const ring = geoRings(g)[0] ?? []
+    if (ring.length > 1) {
+        const [a, b] = [ring[0], ring[ring.length - 1]]
+        if (a[0] === b[0] && a[1] === b[1]) return ring.slice(0, -1)
+    }
+    return ring
 }

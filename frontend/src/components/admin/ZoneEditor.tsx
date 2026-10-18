@@ -4,6 +4,14 @@
 // map, pick a class (green/orange/red), name it, save. Zones persist in
 // Postgres and feed the backend zone engine that mission validation and
 // flight enforcement run against. Import with next/dynamic({ ssr: false }).
+//
+// Zones come in layers (docs/ACCESS_MODEL.md section 3). Every active zone
+// applies to every drone; the layer only decides who may edit it:
+// regulatory (founders, anywhere), area (airspace managers and workspace
+// managers, inside their area) and site (workspace owners/admins, inside
+// the operating area). The caller's editable area is outlined while
+// drawing, and the server's refusal (403 not allowed, 409 outside the area)
+// is shown as it said it.
 
 import { useCallback, useEffect, useState } from 'react'
 import {
@@ -13,12 +21,43 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
 import { MAP_LAYERS } from '@/types/mission'
-import { getServerUrl } from '@/lib/server-url'
-import { liveAuthHeaders } from '@/lib/auth'
-import { ZONE_COLORS, zoneRings, type ZoneClass, type ZoneFeature } from '@/components/admin/zones'
+import { useAccess } from '@/hooks/useAccess'
+import {
+    LAYER_LABELS, ZONE_LAYER_PERM, editableArea, hasPerm, platformOf, type GeoPolygon, type ZoneLayer,
+} from '@/lib/access'
+import { createZone, deleteZone, updateZone, type ApiResult } from '@/lib/workspaces'
+import {
+    ZONE_COLORS, geoRings, polygonFromPoints, zoneRings, type ZoneClass, type ZoneFeature,
+} from '@/components/admin/zones'
 
-const JSON_AUTH = liveAuthHeaders({ 'Content-Type': 'application/json' })
-const AUTH = liveAuthHeaders()
+const LAYERS: ZoneLayer[] = ['regulatory', 'area', 'site']
+const LAYER_WEIGHT: Record<ZoneLayer, number> = { regulatory: 2, area: 1.5, site: 1 }
+
+type Failure = { title: string; text: string }
+
+/** A refusal worded by the server, headed by what kind of refusal it was. */
+function failure(r: ApiResult<unknown>, action: string): Failure | null {
+    if (r.ok) return null
+    const title = r.status === 403 ? 'NOT ALLOWED'
+        : r.status === 409 ? 'REJECTED - OUTSIDE YOUR AREA OR A RULE CONFLICT'
+        : `${action} FAILED`
+    return { title, text: r.error }
+}
+
+function FailureBox({ f, onClose }: { f: Failure | null; onClose?: () => void }) {
+    if (!f) return null
+    return (
+        <div role="alert" className="border border-red-800/70 bg-red-500/5 rounded p-2 space-y-1">
+            <div className="flex items-center gap-2 text-[9px] tracking-widest text-red-400">
+                {f.title}
+                {onClose && (
+                    <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-200" aria-label="Dismiss">x</button>
+                )}
+            </div>
+            <div className="text-[10px] text-red-200/90 leading-relaxed">{f.text}</div>
+        </div>
+    )
+}
 
 const PANEL_STYLE: React.CSSProperties = {
     background: 'rgba(17, 19, 24, .94)',
@@ -29,6 +68,18 @@ const PANEL_STYLE: React.CSSProperties = {
 
 function ClickCapture({ onClick }: { onClick: (lat: number, lng: number) => void }) {
     useMapEvents({ click: e => onClick(e.latlng.lat, e.latlng.lng) })
+    return null
+}
+
+// Fly to the caller's editable area when drawing starts or the target changes.
+function FlyToArea({ area, k }: { area: GeoPolygon | null; k: string }) {
+    const map = useMap()
+    useEffect(() => {
+        const rings = geoRings(area)
+        if (!k || rings.length === 0) return
+        map.flyToBounds(L.latLngBounds(rings.flat()), { padding: [60, 60], duration: 0.6 })
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [k, map])
     return null
 }
 
@@ -50,7 +101,8 @@ export default function ZoneEditor({
     zones: ZoneFeature[]
     onChanged: () => void
 }) {
-    const layer = MAP_LAYERS.find(l => l.key === 'satellite') ?? MAP_LAYERS[0]
+    const tiles = MAP_LAYERS.find(l => l.key === 'satellite') ?? MAP_LAYERS[0]
+    const { isFounder, workspaces, memberships } = useAccess()
     const [drawing, setDrawing] = useState(false)
     const [points, setPoints] = useState<[number, number][]>([])
     const [zoneClass, setZoneClass] = useState<ZoneClass>('red')
@@ -64,6 +116,33 @@ export default function ZoneEditor({
     const [editClass, setEditClass] = useState<ZoneClass>('red')
     const [editCeiling, setEditCeiling] = useState('')
     const [editActive, setEditActive] = useState(true)
+    const [pickedLayer, setPickedLayer] = useState<ZoneLayer | null>(null)
+    const [pickedWs, setPickedWs] = useState('')
+    const [saveFailure, setSaveFailure] = useState<Failure | null>(null)
+    const [listFailure, setListFailure] = useState<Failure | null>(null)
+
+    // Which layers this person may draw on, and on which workspaces. An older
+    // server without workspaces leaves founders (compat admin) with the
+    // regulatory layer only, sent without a workspace.
+    const platform = platformOf(workspaces)
+    const workspacesFor = (l: ZoneLayer) => l === 'regulatory'
+        ? (platform ? [platform] : [])
+        : workspaces.filter(w => isFounder || hasPerm(w, ZONE_LAYER_PERM[l]))
+    const layerOptions = LAYERS.filter(l => l === 'regulatory' ? isFounder : workspacesFor(l).length > 0)
+    const drawLayer = pickedLayer && layerOptions.includes(pickedLayer) ? pickedLayer : layerOptions[0] ?? null
+    const wsOptions = drawLayer ? workspacesFor(drawLayer) : []
+    const drawWs = wsOptions.find(w => w.id === pickedWs) ?? wsOptions[0] ?? null
+    const area = drawLayer ? editableArea(drawWs, drawLayer, memberships, workspaces) : null
+    const wsName = (id: string | null | undefined) => workspaces.find(w => w.id === id)?.name
+
+    const canEdit = (z: ZoneFeature) => {
+        if (isFounder) return true
+        const l = z.properties.layer ?? 'regulatory'
+        if (l === 'regulatory') return false
+        // Airspace managers edit area zones on any workspace, inside their area.
+        if (l === 'area' && memberships.some(m => m.role === 'airspace')) return true
+        return workspaces.some(w => w.id === z.properties.workspace_id && hasPerm(w, ZONE_LAYER_PERM[l]))
+    }
 
     const startEdit = (z: ZoneFeature) => {
         setEditingId(z.properties.id)
@@ -75,20 +154,16 @@ export default function ZoneEditor({
 
     const saveEdit = async () => {
         if (!editingId) return
-        try {
-            await fetch(`${getServerUrl()}/api/zones/${editingId}`, {
-                method: 'PATCH',
-                headers: JSON_AUTH,
-                body: JSON.stringify({
-                    name: editName,
-                    zone_class: editClass,
-                    ceiling_m: editCeiling !== '' ? Number(editCeiling) : null,
-                    active: editActive,
-                }),
-            })
-            setEditingId(null)
-            onChanged()
-        } catch { /* poll shows the truth */ }
+        setListFailure(null)
+        const r = await updateZone(editingId, {
+            name: editName,
+            zone_class: editClass,
+            ceiling_m: editCeiling !== '' ? Number(editCeiling) : null,
+            active: editActive,
+        })
+        if (!r.ok) { setListFailure(failure(r, 'SAVE')); return }
+        setEditingId(null)
+        onChanged()
     }
 
     const addPoint = useCallback((lat: number, lng: number) => {
@@ -101,47 +176,34 @@ export default function ZoneEditor({
         setName('')
         setCeiling('')
         setError(null)
+        setSaveFailure(null)
     }
 
     const save = async () => {
         if (points.length < 3) return
         setSaving(true)
         setError(null)
-        // GeoJSON ring: (lng, lat), closed
-        const ring = [...points.map(([lat, lng]) => [lng, lat]), [points[0][1], points[0][0]]]
-        try {
-            const res = await fetch(`${getServerUrl()}/api/zones`, {
-                method: 'POST',
-                headers: JSON_AUTH,
-                body: JSON.stringify({
-                    name: name || undefined,
-                    zone_class: zoneClass,
-                    geometry: { type: 'Polygon', coordinates: [ring] },
-                    ceiling_m: ceiling !== '' ? Number(ceiling) : undefined,
-                }),
-            })
-            if (!res.ok) {
-                const d = await res.json().catch(() => ({}))
-                throw new Error(d.detail ?? `HTTP ${res.status}`)
-            }
-            reset()
-            onChanged()
-        } catch (e) {
-            setError(e instanceof Error ? e.message : 'Save failed')
-        } finally {
-            setSaving(false)
-        }
+        setSaveFailure(null)
+        const r = await createZone({
+            name: name || undefined,
+            zone_class: zoneClass,
+            geometry: polygonFromPoints(points),
+            ceiling_m: ceiling !== '' ? Number(ceiling) : undefined,
+            layer: drawLayer ?? undefined,
+            workspace_id: drawWs?.id,
+        })
+        setSaving(false)
+        if (!r.ok) { setSaveFailure(failure(r, 'SAVE')); return }
+        reset()
+        onChanged()
     }
 
-    const remove = async (id: string) => {
-        if (!window.confirm('Delete this zone?')) return
-        try {
-            await fetch(`${getServerUrl()}/api/zones/${id}`, {
-                method: 'DELETE',
-                headers: AUTH,
-            })
-            onChanged()
-        } catch { /* poll shows the truth */ }
+    const remove = async (z: ZoneFeature) => {
+        if (!window.confirm(`Delete the zone "${z.properties.name}"?`)) return
+        setListFailure(null)
+        const r = await deleteZone(z.properties.id)
+        if (!r.ok) { setListFailure(failure(r, 'DELETE')); return }
+        onChanged()
     }
 
     return (
@@ -153,9 +215,16 @@ export default function ZoneEditor({
                 zoomControl={false}
                 attributionControl={false}
             >
-                <TileLayer url={layer.url} maxNativeZoom={layer.maxNativeZoom} maxZoom={layer.maxZoom} />
+                <TileLayer url={tiles.url} maxNativeZoom={tiles.maxNativeZoom} maxZoom={tiles.maxZoom} />
                 {drawing && <ClickCapture onClick={addPoint} />}
                 <FlyToZone zone={focusZone} />
+                <FlyToArea area={area} k={drawing ? `${drawLayer}-${drawWs?.id ?? ''}` : ''} />
+
+                {/* Where this person may draw the selected layer */}
+                {drawing && area && (
+                    <Polygon positions={geoRings(area)} interactive={false}
+                        pathOptions={{ color: '#22d3ee', weight: 2, dashArray: '4 6', fillOpacity: 0.04 }} />
+                )}
 
                 {zones.filter(z => z.properties.active).map(z => (
                     <Polygon
@@ -163,12 +232,13 @@ export default function ZoneEditor({
                         positions={zoneRings(z)}
                         pathOptions={{
                             color: ZONE_COLORS[z.properties.zone_class],
-                            weight: 1.5,
+                            weight: LAYER_WEIGHT[z.properties.layer ?? 'regulatory'],
                             fillOpacity: 0.18,
                         }}
                     >
                         <Tooltip sticky>
                             {z.properties.name} - {z.properties.zone_class.toUpperCase()}
+                            {z.properties.layer && ` - ${LAYER_LABELS[z.properties.layer].toUpperCase()}`}
                         </Tooltip>
                     </Polygon>
                 ))}
@@ -210,13 +280,20 @@ export default function ZoneEditor({
 
                 {!drawing ? (
                     <>
-                        <div className="p-2">
-                            <button
-                                onClick={() => setDrawing(true)}
-                                className="w-full py-2 rounded border border-cyan-700 text-xs text-cyan-400 hover:border-cyan-500"
-                            >
-                                + DRAW NEW ZONE
-                            </button>
+                        <div className="p-2 space-y-2">
+                            {layerOptions.length > 0 ? (
+                                <button
+                                    onClick={() => setDrawing(true)}
+                                    className="w-full py-2 rounded border border-cyan-700 text-xs text-cyan-400 hover:border-cyan-500"
+                                >
+                                    + DRAW NEW ZONE
+                                </button>
+                            ) : (
+                                <div className="text-[10px] text-zinc-500">
+                                    You can see every zone, but none of your roles edits zones.
+                                </div>
+                            )}
+                            <FailureBox f={listFailure} onClose={() => setListFailure(null)} />
                         </div>
                         <div className="flex-1 overflow-y-auto p-2 pt-0 space-y-2">
                             {zones.length === 0 && (
@@ -293,21 +370,28 @@ export default function ZoneEditor({
                                                 }>
                                                     {z.properties.name}
                                                 </span>
-                                                <button
-                                                    onClick={e => { e.stopPropagation(); startEdit(z) }}
-                                                    className="ml-auto text-[10px] text-zinc-600 hover:text-cyan-400"
-                                                >
-                                                    EDIT
-                                                </button>
-                                                <button
-                                                    onClick={e => { e.stopPropagation(); void remove(z.properties.id) }}
-                                                    className="text-[10px] text-zinc-600 hover:text-red-400"
-                                                >
-                                                    DELETE
-                                                </button>
+                                                {canEdit(z) && (
+                                                    <>
+                                                        <button
+                                                            onClick={e => { e.stopPropagation(); startEdit(z) }}
+                                                            className="ml-auto text-[10px] text-zinc-600 hover:text-cyan-400"
+                                                        >
+                                                            EDIT
+                                                        </button>
+                                                        <button
+                                                            onClick={e => { e.stopPropagation(); void remove(z) }}
+                                                            className="text-[10px] text-zinc-600 hover:text-red-400"
+                                                        >
+                                                            DELETE
+                                                        </button>
+                                                    </>
+                                                )}
                                             </div>
                                             <div className="mt-1 text-[9px] text-zinc-600">
                                                 {z.properties.zone_class.toUpperCase()}
+                                                {z.properties.layer && ` · ${LAYER_LABELS[z.properties.layer].toUpperCase()}`}
+                                                {wsName(z.properties.workspace_id) && z.properties.layer !== 'regulatory' &&
+                                                    ` · ${wsName(z.properties.workspace_id)}`}
                                                 {z.properties.ceiling_m != null &&
                                                     ` · up to ${z.properties.ceiling_m} m`}
                                                 {!z.properties.active && ' · INACTIVE'}
@@ -319,7 +403,50 @@ export default function ZoneEditor({
                         </div>
                     </>
                 ) : (
-                    <div className="p-3 space-y-3 text-xs">
+                    <div className="p-3 space-y-3 text-xs overflow-y-auto">
+                        <div className="space-y-1">
+                            <div className="text-[9px] tracking-widest text-zinc-500">LAYER</div>
+                            <div className="flex gap-1.5">
+                                {layerOptions.map(l => (
+                                    <button
+                                        key={l}
+                                        onClick={() => { setPickedLayer(l); setSaveFailure(null) }}
+                                        aria-pressed={drawLayer === l}
+                                        className={'flex-1 py-1.5 rounded border text-[10px] uppercase transition-colors ' +
+                                            (drawLayer === l
+                                                ? 'border-cyan-500 text-cyan-400 bg-cyan-500/10'
+                                                : 'border-zinc-700 text-zinc-500 hover:border-zinc-500')}
+                                    >
+                                        {LAYER_LABELS[l]}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {drawLayer !== 'regulatory' && wsOptions.length > 0 && (
+                            <div className="space-y-1">
+                                <label htmlFor="zone-ws" className="block text-[9px] tracking-widest text-zinc-500">WORKSPACE</label>
+                                <select
+                                    id="zone-ws"
+                                    value={drawWs?.id ?? ''}
+                                    onChange={e => { setPickedWs(e.target.value); setSaveFailure(null) }}
+                                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200 outline-none"
+                                >
+                                    {wsOptions.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                                </select>
+                            </div>
+                        )}
+
+                        <div className="text-[10px] text-zinc-500 leading-relaxed">
+                            {drawLayer === 'regulatory'
+                                ? 'Regulatory zones can go anywhere and apply to every drone.'
+                                : area
+                                    ? 'Draw inside the dashed cyan outline - your editable area. The server refuses anything outside it.'
+                                    : drawWs
+                                        ? `${drawWs.name} has no operating area yet, so the server has nothing to check this against and may refuse it.`
+                                        : 'Pick a workspace.'}
+                        </div>
+
                         <div className="text-[10px] text-zinc-500">
                             Click the map to add vertices ({points.length} placed
                             {points.length < 3 ? `, need ${3 - points.length} more` : ''})
@@ -356,6 +483,7 @@ export default function ZoneEditor({
                         />
 
                         {error && <div className="text-[10px] text-red-400">{error}</div>}
+                        <FailureBox f={saveFailure} />
 
                         <div className="flex gap-2">
                             <button
