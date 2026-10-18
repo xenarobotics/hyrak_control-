@@ -19,9 +19,10 @@ Modes (docs/custom_models/DESIGN.md section 0, "Lifecycle"):
             boxes. stdout: {"ok": true, "result": {...}} or a failure.
   serve     argv: --fd N; stdin: the same spec as test plus "shm" (path of a
             frame buffer file) and "shm_size". Loads once, then answers
-            ("infer", h, w, threshold) messages on the inherited socket with
-            ("ok", result) / ("err", code, detail). Frames arrive through
-            the shared buffer, results through the socket.
+            ("infer", h, w, c, threshold, options?) messages on the inherited
+            socket with ("ok", result) / ("err", code, detail). Frames arrive
+            through the shared buffer, results through the socket. Options:
+            {"tiling": "off|auto|2x2|3x3", "classes": [class ids] | null}.
 
 Failure codes are stable strings; the backend turns them into plain words
 and a fix (app/models_custom/errors.py). `detail` is technical and goes
@@ -48,6 +49,13 @@ IMAGENET_STD = [0.229, 0.224, 0.225]
 NMS_IOU = 0.45
 MAX_DETECTIONS = 300
 TOP_K = 10
+# Small-object tiling: tiles overlap by this share of a tile, boxes found in
+# several tiles (and the full-frame pass) merge at this IoU, per class.
+TILE_OVERLAP = 0.2
+TILE_MERGE_IOU = 0.5
+TILINGS = {"off": 1, "2x2": 2, "3x3": 3}
+# "auto" tiles 2x2 when the frame is wider than this.
+AUTO_TILE_ABOVE_W = 1280
 
 
 class Fail(Exception):
@@ -513,6 +521,9 @@ class Model:
         self.std = np.array(pre["std"], dtype=np.float32) if pre.get("std") else None
         self.dtype = {"float32": np.float32, "float16": np.float16, "uint8": np.uint8}[self.inp["dtype"]]
         self.out_names = [o.name for o in self.sess.get_outputs()]
+        # Tiles go through in one call when the batch axis is dynamic; a
+        # model that says so but then refuses a batch is looped instead.
+        self.batch_ok = not isinstance((self.inp.get("shape") or [1])[0], int)
 
     # pre ------------------------------------------------------------------
     def preprocess(self, frame_bgr):
@@ -554,37 +565,92 @@ class Model:
         return x, geo
 
     # run ------------------------------------------------------------------
-    def run(self, frame_bgr, threshold: float = 0.25) -> dict:
+    def _feed(self, x):
         np = self.np
-        x, geo = self.preprocess(frame_bgr)
+        feed = {self.inp["name"]: x}
+        if self.inp.get("mask"):
+            hw = self.inp["mask"].get("hw") or (x.shape[2:4] if self.inp["layout"] == "nchw"
+                                                 else x.shape[1:3])
+            feed[self.inp["mask"]["name"]] = np.ones((x.shape[0], *hw), dtype=self.inp["mask"]["dtype"])
+        return feed
+
+    def _session_run(self, x) -> list:
+        """One session.run on a batch: the raw outputs, in out_names order."""
+        np = self.np
         try:
-            feed = {self.inp["name"]: x}
-            if self.inp.get("mask"):
-                hw = self.inp["mask"].get("hw") or (x.shape[2:4] if self.inp["layout"] == "nchw"
-                                                     else x.shape[1:3])
-                feed[self.inp["mask"]["name"]] = np.ones((1, *hw), dtype=self.inp["mask"]["dtype"])
-            outs = self.sess.run(None, feed)
+            outs = self.sess.run(None, self._feed(x))
         except Exception as e:
             text = f"{type(e).__name__}: {e}"
             raise Fail("out_of_memory" if "memory" in text.lower() else "run_failed", text[:2000])
-        named = dict(zip(self.out_names, outs))
-        for v in named.values():
+        for v in outs:
             if isinstance(v, np.ndarray) and v.dtype.kind == "f" and not np.isfinite(v).all():
                 raise Fail("bad_output", "NaN or infinite values in the output")
-        if self.task == "classify":
-            return self._classify(named[self.head["output"]])
-        return self._detect(named, geo, float(threshold))
+        return outs
 
-    def _classify(self, out) -> dict:
+    def _forward(self, xs: list) -> list:
+        """Run a list of preprocessed inputs (batch 1 each): batched in one
+        call when the model allows it, else one call each. A list of
+        {output name: array with batch 1}, one per input."""
+        np = self.np
+        n = len(xs)
+        if n > 1 and self.batch_ok:
+            try:
+                outs = self._session_run(np.concatenate(xs, axis=0))
+                if all(isinstance(v, np.ndarray) and v.ndim and v.shape[0] == n for v in outs):
+                    return [{name: v[b:b + 1] for name, v in zip(self.out_names, outs)}
+                            for b in range(n)]
+            except Fail as e:
+                if e.code == "bad_output":
+                    raise
+            self.batch_ok = False          # declared dynamic, but not really: loop from now on
+        return [dict(zip(self.out_names, self._session_run(x))) for x in xs]
+
+    def run(self, frame_bgr, threshold: float = 0.25, options: dict | None = None) -> dict:
+        np = self.np
+        options = options or {}
+        allowed = options.get("classes")
+        allowed = None if allowed is None else np.asarray(sorted({int(c) for c in allowed}), dtype=np.int64)
+        if self.task == "classify":
+            x, _ = self.preprocess(frame_bgr)
+            named = self._forward([x])[0]
+            return self._classify(named[self.head["output"]], allowed)
+        fh, fw = frame_bgr.shape[:2]
+        n = tiles_for(options.get("tiling"), fw)
+        thr = float(threshold)
+        if n <= 1:
+            x, geo = self.preprocess(frame_bgr)
+            named = self._forward([x])[0]
+            return self._detect(named, geo, thr, allowed)
+        # Small objects: the full frame plus n x n overlapping tiles, each at
+        # the model's own input size, boxes mapped back and merged.
+        boxes = [(0, 0, fw, fh)] + tile_grid(fw, fh, n)
+        xs, geos = [], []
+        for x0, y0, x1, y1 in boxes:
+            x, geo = self.preprocess(np.ascontiguousarray(frame_bgr[y0:y1, x0:x1]))
+            xs.append(x)
+            geos.append(geo)
+        found = []
+        for (x0, y0, _, _), named, geo in zip(boxes, self._forward(xs), geos):
+            for d in self._detect(named, geo, thr, allowed)["detections"]:
+                b = d["box"]
+                found.append({**d, "box": [b[0] + x0, b[1] + y0, b[2] + x0, b[3] + y0]})
+        return {"task": "detect", "detections": merge_detections(found),
+                "tiling": f"{n}x{n}", "tiles": len(boxes)}
+
+    def _classify(self, out, allowed=None) -> dict:
         np = self.np
         v = np.asarray(out, dtype=np.float32).reshape(-1)
         if not (v.min() >= 0.0 and v.max() <= 1.0 and abs(float(v.sum()) - 1.0) < 0.02):
             e = np.exp(v - v.max())
             v = e / e.sum()
-        idx = np.argsort(-v)[:TOP_K]
+        idx = np.argsort(-v)
+        if allowed is not None:
+            # Only the classes the user shows; the top K among those.
+            idx = idx[np.isin(idx, allowed)]
+        idx = idx[:TOP_K]
         return {"task": "classify", "top": [{"class_id": int(i), "score": float(v[i])} for i in idx]}
 
-    def _detect(self, named, geo, thr) -> dict:
+    def _detect(self, named, geo, thr, allowed=None) -> dict:
         np = self.np
         head = self.head
         layout = head["layout"]
@@ -599,7 +665,8 @@ class Model:
             cls = probs.argmax(axis=1)
             scores = probs[np.arange(len(cls)), cls]
             xyxy = _cxcywh_to_xyxy(np, boxes)
-            return self._finish(xyxy, scores, cls, geo, thr, normalized=True, nms=False)
+            return self._finish(xyxy, scores, cls, geo, thr, normalized=True, nms=False,
+                                allowed=allowed)
         out = np.asarray(named[head["output"]], dtype=np.float32)[0]
         if layout == "yolov8":
             out = out.T
@@ -611,24 +678,30 @@ class Model:
             scores = probs[np.arange(len(cls)), cls]
             xyxy = _cxcywh_to_xyxy(np, out[:, :4])
             return self._finish(xyxy, scores, cls, geo, thr,
-                                normalized=layout == "rtdetr", nms=layout != "rtdetr")
+                                normalized=layout == "rtdetr", nms=layout != "rtdetr",
+                                allowed=allowed)
         if layout == "yolov5":
             probs = out[:, 5:] * out[:, 4:5]
             cls = probs.argmax(axis=1)
             scores = probs[np.arange(len(cls)), cls]
             xyxy = _cxcywh_to_xyxy(np, out[:, :4])
-            return self._finish(xyxy, scores, cls, geo, thr, normalized=False, nms=True)
+            return self._finish(xyxy, scores, cls, geo, thr, normalized=False, nms=True,
+                                allowed=allowed)
         if layout == "e2e":
             xyxy = out[:, :4]
             scores = out[:, 4]
             cls = out[:, 5].astype(np.int64)
-            return self._finish(xyxy, scores, cls, geo, thr, normalized=False, nms=False)
+            return self._finish(xyxy, scores, cls, geo, thr, normalized=False, nms=False,
+                                allowed=allowed)
         raise Fail("unknown_layout", layout)
 
-    def _finish(self, xyxy, scores, cls, geo, thr, *, normalized: bool, nms: bool) -> dict:
+    def _finish(self, xyxy, scores, cls, geo, thr, *, normalized: bool, nms: bool,
+                allowed=None) -> dict:
         import cv2
         np = self.np
         keep = scores >= thr
+        if allowed is not None:
+            keep &= np.isin(cls, allowed)
         xyxy, scores, cls = xyxy[keep], scores[keep], cls[keep]
         if len(scores) > 3000:
             top = np.argsort(-scores)[:3000]
@@ -661,6 +734,54 @@ class Model:
             dets.append({"class_id": int(cls[i]), "score": round(float(scores[i]), 4),
                          "box": [x1, y1, x2, y2]})
         return {"task": "detect", "detections": dets}
+
+
+def tiles_for(tiling, frame_w: int) -> int:
+    """Tiles per side for a tiling setting: off 1, 2x2 2, 3x3 3, auto 2 on
+    frames wider than AUTO_TILE_ABOVE_W, else 1."""
+    if tiling == "auto":
+        return 2 if frame_w > AUTO_TILE_ABOVE_W else 1
+    return TILINGS.get(str(tiling or "off"), 1)
+
+
+def tile_grid(fw: int, fh: int, n: int, overlap: float = TILE_OVERLAP) -> list:
+    """n x n tiles (x0, y0, x1, y1) covering the frame, neighbours
+    overlapping by `overlap` of a tile, the last row and column flush with
+    the frame's edge."""
+    import math
+
+    def axis(size):
+        if n <= 1:
+            return [(0, size)]
+        t = min(size, int(math.ceil(size / (n - (n - 1) * overlap))))
+        stride = (size - t) / (n - 1)
+        return [(int(round(i * stride)), int(round(i * stride)) + t) for i in range(n)]
+
+    return [(x0, y0, x1, y1) for y0, y1 in axis(fh) for x0, x1 in axis(fw)]
+
+
+def _iou(a, b) -> float:
+    ix = max(0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    if inter <= 0:
+        return 0.0
+    ua = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / ua if ua > 0 else 0.0
+
+
+def merge_detections(dets: list, iou: float = TILE_MERGE_IOU, limit: int = MAX_DETECTIONS) -> list:
+    """Class-wise NMS over boxes from several tiles and the full frame:
+    highest score first, a box overlapping a kept box of its class at `iou`
+    or more is the same object and dropped."""
+    kept: list = []
+    for d in sorted(dets, key=lambda d: -d["score"]):
+        if any(k["class_id"] == d["class_id"] and _iou(k["box"], d["box"]) >= iou for k in kept):
+            continue
+        kept.append(d)
+        if len(kept) >= limit:
+            break
+    return kept
 
 
 def _cxcywh_to_xyxy(np, b):
@@ -795,11 +916,12 @@ def serve(req: dict, fd: int) -> None:
         if msg[0] != "infer":
             continue
         _, h, w, c, thr = msg[:5]
+        opts = msg[5] if len(msg) > 5 and isinstance(msg[5], dict) else None
         try:
             n = int(h) * int(w) * int(c)
             frame = np.frombuffer(buf, dtype=np.uint8, count=n).reshape(int(h), int(w), int(c))
             t0 = time.perf_counter()
-            res = model.run(frame, float(thr))
+            res = model.run(frame, float(thr), opts)
             res["infer_ms"] = round((time.perf_counter() - t0) * 1000.0, 2)
             conn.send(("ok", res))
         except Fail as e:

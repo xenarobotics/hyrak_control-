@@ -93,3 +93,54 @@ NAMES3 = "{0: 'person', 1: 'crack', 2: 'car'}"
 def ultra_meta(task="detect", names=NAMES3, imgsz="[64, 64]"):
     return {"author": "Ultralytics", "task": task, "names": names, "imgsz": imgsz,
             "description": "Ultralytics YOLOv8n model"}
+
+
+NAMES_SPOT = "{0: 'spot', 1: 'other'}"
+
+
+def make_spot_model(path, *, batch="batch", size=64, patch=8):
+    """A detector that really looks: its one anchor is a `patch` px box at
+    the centre of the input, scored by how bright the input's centre patch
+    is (mean of the scaled pixels, 1.0 for white). A small white square far
+    from the frame's centre is only found once a tile puts it in the middle.
+    Output [B, 4+2, 8] (yolov8 layout, classes spot and other); `batch`
+    "batch" makes the batch axis dynamic, 1 fixes it."""
+    lo, hi = size // 2 - patch // 2, size // 2 + patch // 2
+    inits = [
+        numpy_helper.from_array(np.array([lo, lo], np.int64), "starts"),
+        numpy_helper.from_array(np.array([hi, hi], np.int64), "ends"),
+        numpy_helper.from_array(np.array([2, 3], np.int64), "axes"),
+        numpy_helper.from_array(np.array([-1, 1, 1], np.int64), "shape3"),
+    ]
+    const = np.zeros((1, 6, 8), np.float32)
+    const[0, :4, 0] = [size / 2, size / 2, patch, patch]
+    mask = np.zeros((1, 6, 8), np.float32)
+    mask[0, 4, 0] = 1.0
+    inits += [numpy_helper.from_array(const, "box_const"), numpy_helper.from_array(mask, "score_mask")]
+    nodes = [
+        helper.make_node("Slice", ["images", "starts", "ends", "axes"], ["centre"]),
+        helper.make_node("ReduceMean", ["centre"], ["bright"], axes=[1, 2, 3], keepdims=1),
+        helper.make_node("Reshape", ["bright", "shape3"], ["bright3"]),
+        helper.make_node("Mul", ["bright3", "score_mask"], ["scores"]),
+        helper.make_node("Add", ["box_const", "scores"], ["output0"]),
+    ]
+    graph = helper.make_graph(
+        nodes, "spot",
+        [helper.make_tensor_value_info("images", TensorProto.FLOAT, [batch, 3, size, size])],
+        [helper.make_tensor_value_info("output0", TensorProto.FLOAT, [batch, 6, 8])],
+        initializer=inits)
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)],
+                              producer_name="hyrak-tests")
+    model.ir_version = 8
+    for k, v in ultra_meta(names=NAMES_SPOT, imgsz=f"[{size}, {size}]").items():
+        model.metadata_props.append(onnx.StringStringEntryProto(key=k, value=v))
+    onnx.save_model(model, str(path))
+    return path
+
+
+def spot_frame(w=256, h=256, at=(71, 71), side=16):
+    """A black frame with one white `side` px square centred at `at`."""
+    f = np.zeros((h, w, 3), np.uint8)
+    x, y = at
+    f[y - side // 2:y + side // 2, x - side // 2:x + side // 2] = 255
+    return f

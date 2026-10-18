@@ -49,6 +49,17 @@ logger = logging.getLogger("verocore.models")
 FEATURE = "custom_models"
 TASKS = ("detect", "classify")
 DEFAULT_THRESHOLD = 0.25
+TILINGS = ("off", "auto", "2x2", "3x3")
+
+
+def _run_settings(st: dict) -> dict:
+    """The settings a run uses, with their defaults: sensitivity, the shown
+    classes (None = all), tiling and the alert rule."""
+    shown = st.get("classes_shown")
+    return {"threshold": float(st.get("threshold", DEFAULT_THRESHOLD)),
+            "classes_shown": list(shown) if isinstance(shown, list) else None,
+            "tiling": st.get("tiling") if st.get("tiling") in TILINGS else "off",
+            "alert": st.get("alert")}
 PREMIUM_REASON = ("Adding your own models is a premium feature. Ask HYRAK to turn on Custom "
                   "models for this workspace.")
 
@@ -219,6 +230,8 @@ def card(rec: ModelRecord, versions: list[VersionRecord], *, kind: Optional[str]
         "current_version": rec.current_version,
         "latest_version": latest.n if latest else None,
         "threshold": float(st.get("threshold", DEFAULT_THRESHOLD)),
+        "classes_shown": _run_settings(st)["classes_shown"],
+        "tiling": _run_settings(st)["tiling"],
         "alert": st.get("alert"),
         "created_by": rec.created_by,
         "created_at": model_store.public_dt(rec.created_at),
@@ -243,6 +256,8 @@ def catalogue_card(rec: ModelRecord) -> dict:
         "status": "ready", "runnable": True, "published": True,
         "labels": list(snap.get("labels") or []),
         "threshold": float(snap.get("threshold", DEFAULT_THRESHOLD)),
+        "classes_shown": _run_settings(snap)["classes_shown"],
+        "tiling": _run_settings(snap)["tiling"],
         "version": {"n": rec.published_version, "latency_ms": latency,
                     "fps": round(1000.0 / latency, 1) if latency else None,
                     "gpu_mem_mb": snap.get("gpu_mem_mb"), "provider": snap.get("provider"),
@@ -747,6 +762,22 @@ async def patch_model(actor, model_id: str, body: dict, *, ip: str = "") -> dict
         settings["threshold"] = t
     if "alert" in body:
         settings["alert"] = _valid_alert(body["alert"])
+    if "tiling" in body and body["tiling"] is not None:
+        if body["tiling"] not in TILINGS:
+            raise _refuse(400, "bad_request", reason="tiling is off, auto, 2x2 or 3x3")
+        settings["tiling"] = body["tiling"]
+    if "classes_shown" in body:
+        shown = body["classes_shown"]
+        if shown is not None:
+            if not isinstance(shown, list) or len(shown) > 5000 or not all(
+                    isinstance(x, str) and 0 < len(x.strip()) <= 64 for x in shown):
+                raise _refuse(400, "bad_request",
+                              reason="classes_shown is null or a list of class names")
+            if not shown:
+                raise _refuse(400, "bad_request",
+                              reason="classes_shown needs at least one class (null shows all)")
+            shown = list(dict.fromkeys(x.strip() for x in shown))
+        settings["classes_shown"] = shown
     if "task" in body and body["task"] is not None:
         if body["task"] not in TASKS:
             raise _refuse(400, "bad_request", reason="task is detect or classify")
@@ -762,8 +793,17 @@ async def patch_model(actor, model_id: str, body: dict, *, ip: str = "") -> dict
             raise _refuse(400, "bad_request",
                           reason="labels is a list of names, each 1 to 64 characters")
         labels = [x.strip() for x in labels]
-        settings["labels"] = labels
+        old = list(settings.get("labels") or [])
         n = rec.current_version or await _latest_n(model_id)
+        if not old and n:
+            v = await store.get_version(model_id, n)
+            old = list((v.labels if v else None) or [])
+        settings["labels"] = labels
+        shown = settings.get("classes_shown")
+        if isinstance(shown, list) and old and "classes_shown" not in body:
+            # A renamed class stays shown: follow it by position.
+            renamed = {a: b for a, b in zip(old, labels)}
+            settings["classes_shown"] = list(dict.fromkeys(renamed.get(x, x) for x in shown))
         if n:
             v = await store.get_version(model_id, n)
             if v is not None:
@@ -777,6 +817,12 @@ async def patch_model(actor, model_id: str, body: dict, *, ip: str = "") -> dict
     if fields:
         rec = await store.update_model(model_id, **fields)
         await _audit(actor, "model.update", rec, ip, fields=sorted(body))
+        # Sessions already running it pick the new settings up next frame.
+        live = {**(runtime.live(model_id) or {}), **_run_settings(rec.settings or {})}
+        if "labels" in body and body["labels"] is not None:
+            live["labels"] = list(settings["labels"])
+            live["labels_version"] = rec.current_version or await _latest_n(model_id)
+        runtime.set_live(model_id, live)
     if recheck:
         n = await _latest_n(model_id)
         if n:
@@ -843,6 +889,8 @@ async def publish(actor, model_id: str, published: bool, *, version: Optional[in
         snap = {"files": files, "version": n, "name": rec.name, "description": rec.description,
                 "task": v.task or rec.task, "labels": list(v.labels or []),
                 "threshold": float(st.get("threshold", DEFAULT_THRESHOLD)),
+                "classes_shown": _run_settings(st)["classes_shown"],
+                "tiling": _run_settings(st)["tiling"],
                 "spec": v.details, "sha256": v.sha256, "latency_ms": v.latency_ms,
                 "gpu_mem_mb": v.gpu_mem_mb, "provider": test.get("provider"),
                 "input_shape": v.input_shape, "preview": preview,
@@ -868,6 +916,7 @@ async def delete_model(actor, model_id: str, *, ip: str = "") -> None:
         t.cancel()
     await notify.stop_sessions_running(model_id, describe("model_removed")[0])
     await asyncio.to_thread(runtime.pool().stop_model, model_id)
+    runtime.set_live(model_id, None)
     await model_store.write_store().delete_model(model_id)
     _steps.pop(model_id, None)
     try:
@@ -951,10 +1000,12 @@ async def resolve_run(session, model_id: str):
     files = dict((v.details or {}).get("files") or {})
     if v.sha256:
         files[storage.MODEL_FILE] = v.sha256          # the hash taken on receipt wins
+    run = _run_settings(st)
     spec = runtime.RunSpec(workspace_id=ws_id, model_id=rec.id, version=v.n,
                            model_path=str(path), spec=v.details, name=rec.name,
-                           threshold=float(st.get("threshold", DEFAULT_THRESHOLD)),
-                           alert=st.get("alert"), labels=list(v.labels or []), files=files)
+                           threshold=run["threshold"], alert=run["alert"],
+                           labels=list(v.labels or []), files=files,
+                           classes_shown=run["classes_shown"], tiling=run["tiling"])
     return CustomModelMode(spec)
 
 
@@ -975,6 +1026,8 @@ def _catalogue_mode(rec: ModelRecord, ws_id: str):
                            model_path=str(path), spec=snap["spec"],
                            name=snap.get("name") or rec.name,
                            threshold=float(snap.get("threshold", DEFAULT_THRESHOLD)),
+                           classes_shown=_run_settings(snap)["classes_shown"],
+                           tiling=_run_settings(snap)["tiling"],
                            alert=None, labels=list(snap.get("labels") or []),
                            files=dict(snap["files"]), via_catalogue=True)
     return CustomModelMode(spec)

@@ -131,6 +131,9 @@ class PatchBody(BaseModel):
     task: Optional[str] = None
     threshold: Optional[float] = None
     alert: Optional[dict] = None             # explicit null removes it
+    # Only these class names show (explicit null: all of them).
+    classes_shown: Optional[list[str]] = Field(default=None, max_length=5000)
+    tiling: Optional[str] = Field(default=None, max_length=8)   # off | auto | 2x2 | 3x3
 
 
 @router.patch("/{model_id}")

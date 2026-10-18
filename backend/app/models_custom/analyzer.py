@@ -13,9 +13,19 @@ the `cv_results` shape the overlay already draws for object detection:
               top_class, top_score, and
               empty objects / detections so every panel stays happy
 
-plus model_id, model_name, model_version and task. A runner that crashed
+plus model_id, model_name, model_version, task, infer_ms (the whole
+frame, every tile included), threshold, tiling ("off", "2x2", "3x3": what
+ran on this frame, "auto" resolved), classes_shown (null or the names) and
+the run's tally since the model started on this session: run_frames and
+run_counts {name: {peak, frames}} (detect: the most seen at once and the
+frames it was in; classify: the frames it was the top answer). A runner that crashed
 or is restarting gives an `error` (plain words) and no detections for that
 frame; the video keeps flowing.
+
+Settings: the sensitivity (threshold), the shown classes and tiling come
+from the RunSpec, and for the owning workspace's own runs from
+runtime.live(model_id) when a PATCH changed them since, so a change applies
+on the next frame. Hidden classes are dropped before counts and alerts.
 
 Alerts: a model may carry one rule, {label, min_score, cooldown_s}. When a
 detection (or the top class) matches, the session gets a `model_alert`
@@ -111,12 +121,46 @@ class CustomModelAnalyzer(BaseAnalyzer):
         self.hold(handle)
         self.runner = runner
         self._last_alert = 0.0
+        self._run_frames = 0
+        self._run_counts: Dict[str, Dict[str, int]] = {}
         logger.info(f"CustomModelAnalyzer: {spec.name or spec.model_id[:8]} v{spec.version} "
                     f"({self.task}) on {runner.provider}")
 
     # ------------------------------------------------------------------ #
     def _label(self, class_id: int) -> str:
         return self.labels[class_id] if 0 <= class_id < len(self.labels) else f"class {class_id}"
+
+    def _settings(self) -> Dict[str, Any]:
+        """This frame's settings: the spec's, with the owning workspace's
+        live edits on top (catalogue runs keep the published snapshot)."""
+        out = {"threshold": self.spec.threshold, "classes_shown": self.spec.classes_shown,
+               "tiling": self.spec.tiling or "off", "alert": self.spec.alert}
+        if not self.spec.via_catalogue:
+            live = runtime.live(self.spec.model_id)
+            if live:
+                out.update({k: live[k] for k in out if k in live})
+                if live.get("labels") and live.get("labels_version") == self.spec.version:
+                    self.labels = list(live["labels"])     # renamed while running
+        return out
+
+    def _class_ids(self, shown) -> Any:
+        if shown is None:
+            return None
+        names = {str(n).lower() for n in shown}
+        return [i for i, label in enumerate(self.labels) if label.lower() in names]
+
+    def _tally(self, meta: Dict[str, Any], names) -> None:
+        """Per-class counts over the run: peak at once and frames seen."""
+        self._run_frames += 1
+        now: Dict[str, int] = {}
+        for n in names:
+            now[n] = now.get(n, 0) + 1
+        for n, c in now.items():
+            t = self._run_counts.setdefault(n, {"peak": 0, "frames": 0})
+            t["peak"] = max(t["peak"], c)
+            t["frames"] += 1
+        meta["run_frames"] = self._run_frames
+        meta["run_counts"] = {n: dict(t) for n, t in self._run_counts.items()}
 
     def _base_meta(self) -> Dict[str, Any]:
         return {"model_id": self.spec.model_id, "model_name": self.spec.name,
@@ -131,8 +175,13 @@ class CustomModelAnalyzer(BaseAnalyzer):
             import cv2
             scale = min(runtime.MAX_W / w, runtime.MAX_H / h)
             frame = cv2.resize(frame_bgr, (max(1, int(w * scale)), max(1, int(h * scale))))
+        st = self._settings()
+        shown = st["classes_shown"]
+        allow = None if shown is None else {str(n).lower() for n in shown}
+        meta.update({"threshold": st["threshold"], "classes_shown": shown})
         try:
-            res = self.runner.infer(np.ascontiguousarray(frame), self.spec.threshold)
+            res = self.runner.infer(np.ascontiguousarray(frame), st["threshold"],
+                                    {"tiling": st["tiling"], "classes": self._class_ids(shown)})
         except runtime.RunnerError as e:
             f = runtime.as_failure(e)
             msg = describe(f.code, f.extra)[0]
@@ -143,20 +192,26 @@ class CustomModelAnalyzer(BaseAnalyzer):
             meta.update({"error": msg, "runner": e.code})
             return frame_bgr, meta
         meta["infer_ms"] = res.get("infer_ms")
+        meta["tiling"] = res.get("tiling", "off")
         inv = 1.0 / scale
         if res.get("task") == "classify":
             classes = [{"name": self._label(t["class_id"]), "score": round(float(t["score"]), 4)}
                        for t in res.get("top", [])]
+            if allow is not None:
+                classes = [c for c in classes if c["name"].lower() in allow]
             meta["classes"] = classes
             meta["predictions"] = classes          # the frontend's name for the same list
             meta["top_class"] = classes[0]["name"] if classes else None
             meta["top_score"] = classes[0]["score"] if classes else None
             hits = [(c["name"], c["score"], None) for c in classes[:1]]
+            self._tally(meta, [classes[0]["name"]] if classes else [])
         else:
             counts: Dict[str, int] = {}
             dets = []
             for d in res.get("detections", []):
                 name = self._label(int(d["class_id"]))
+                if allow is not None and name.lower() not in allow:
+                    continue
                 counts[name] = counts.get(name, 0) + 1
                 x1, y1, x2, y2 = d["box"]
                 dets.append({"name": name, "score": round(float(d["score"]), 4),
@@ -165,11 +220,12 @@ class CustomModelAnalyzer(BaseAnalyzer):
                          "person_count": counts.get("person", 0),
                          "total_count": sum(counts.values())})
             hits = [(d["name"], d["score"], d["box"]) for d in dets]
-        self._check_alert(meta, hits)
+            self._tally(meta, [d["name"] for d in dets])
+        self._check_alert(meta, hits, st["alert"])
         return frame_bgr, meta
 
-    def _check_alert(self, meta: Dict[str, Any], hits) -> None:
-        rule = self.spec.alert or {}
+    def _check_alert(self, meta: Dict[str, Any], hits, rule=None) -> None:
+        rule = rule or {}
         label = str(rule.get("label") or "").strip().lower()
         if not label:
             return
