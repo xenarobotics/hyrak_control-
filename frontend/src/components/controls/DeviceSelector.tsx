@@ -8,7 +8,8 @@ import { getSiyiTelemetryTarget, setSiyiTelemetryTarget, DEFAULT_SIYI_TELEMETRY_
 // The link selection itself lives in a hook, shared with the status bar's
 // compact picker - two copies of "which radio is selected" is how the two
 // controls end up disagreeing. See hooks/useTelemetryLink.ts.
-import { useTelemetryLink } from '@/hooks/useTelemetryLink'
+import { useTelemetryLink, CLOUD_SIM_LINK } from '@/hooks/useTelemetryLink'
+import { CloudSimNote } from '@/components/controls/CloudSimNote'
 import { BAUD_OPTIONS } from '@/lib/linkSettings'
 import { getRfDownlinkPort, getRfUplinkPort, getRfFanoutPort, setRfFanoutPort, isRfUplinkAuto,
          getRfUplinkHost, setRfUplinkHost, DEFAULT_RF_UPLINK_HOST } from '@/lib/rfBridge'
@@ -264,7 +265,7 @@ export function DeviceSelector() {
                         {options
                             .filter(o => !o.value.startsWith('radio-') && !o.value.startsWith('nradio-'))
                             .map(o => (
-                                <SelectItem key={o.value} value={o.value} className="text-xs font-mono">
+                                <SelectItem key={o.value} value={o.value} disabled={o.disabled} className="text-xs font-mono">
                                     {o.label}
                                 </SelectItem>
                             ))}
@@ -361,6 +362,10 @@ export function DeviceSelector() {
                                 : `0 = off. Set a port (e.g. ${getRfDownlinkPort() + 2}) to let QGroundControl watch the same telemetry alongside HYRAK.`}
                         </p>
                     </>
+                )}
+                {source === CLOUD_SIM_LINK && (
+                    <CloudSimNote entitled={!options.find(o => o.value === CLOUD_SIM_LINK)?.disabled}
+                        className="mt-1.5 text-[10px] font-mono text-app-text-muted leading-relaxed" />
                 )}
                 {source === 'local-relay' && (
                     <input

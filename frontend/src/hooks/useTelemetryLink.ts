@@ -28,7 +28,8 @@ import {
 // for SITL instances and adopted the session's port as a phantom drone.
 export const SERVER_SITL_ADDRESS = 'udp://:14600'
 import { useDrone } from '@/hooks/useDrone'
-import { useAccess } from '@/hooks/useAccess'
+import { useAccess, useActiveWorkspace } from '@/hooks/useAccess'
+import { requestCloudSimStatus, startCloudSim, stopCloudSim, useCloudSimStore } from '@/store/cloudSim'
 import { getLocalRelayUrl } from '@/lib/localRfRelay'
 import { getSiyiTelemetryTarget, startSiyiTelemetry } from '@/lib/siyiTelemetryRelay'
 import { isDesktopApp } from '@/lib/nativeBridge'
@@ -43,7 +44,17 @@ import {
 export interface LinkOption {
     value: string
     label: string
+    /** Shown but not selectable, with the reason as a note. */
+    disabled?: boolean
+    note?: string
 }
+
+/** The server-launched per-session simulator (docs/ACCESS_MODEL.md 8b).
+ *  A premium extra, below the desktop "SITL" link, which stays the default
+ *  way to fly a simulator. Never merged with 'sitl' or 'sitl-server'. */
+export const CLOUD_SIM_LINK = 'cloud-sim'
+export const CLOUD_SIM_PREMIUM_NOTE = 'Premium feature, not enabled for this workspace. Your own PX4 / Gazebo connects free through the SITL link.'
+
 
 export function useTelemetryLink() {
     const desktop = isDesktopApp()
@@ -57,6 +68,13 @@ export function useTelemetryLink() {
     const source = isCustomer && STAFF_ONLY_LINKS.includes(storedSource) ? DEFAULT_TELEMETRY_SOURCE : storedSource
     const [baud, setBaudState] = useState(() => getTelemetryBaud())
     const [disconnecting, setDisconnecting] = useState(false)
+    // Cloud simulator entitlement: staff always; a customer workspace only
+    // with the cloud_sim feature (the server's status is the authority).
+    const { workspace } = useActiveWorkspace()
+    const simStatus = useCloudSimStore(st => st.status)
+    const cloudSimEntitled = !isCustomer || (simStatus?.entitled ?? workspace?.features?.cloud_sim === true)
+    const cloudSimEnabled = simStatus?.enabled ?? true
+    useEffect(() => { requestCloudSimStatus() }, [])
 
     const {
         telemetryStatus, telemetryError, setTelemetryError,
@@ -161,6 +179,11 @@ export function useTelemetryLink() {
             void startSiyiTelemetry(getSiyiTelemetryTarget())
             return
         }
+        if (source === CLOUD_SIM_LINK) {
+            // The server starts the sim and links this session when it is up.
+            startCloudSim()
+            return
+        }
         if (source === 'sitl-server') {
             // The SITL runs on the SAME machine as the backend (dev box, demo
             // sim): let the server bind it directly. No desktop relay, no
@@ -175,8 +198,12 @@ export function useTelemetryLink() {
 
     const disconnect = useCallback(async () => {
         setDisconnecting(true)
-        try { await disconnectTelemetry() } finally { setDisconnecting(false) }
-    }, [disconnectTelemetry])
+        try {
+            await disconnectTelemetry()
+            // The cloud sim is the link: releasing it ends the sim too.
+            if (source === CLOUD_SIM_LINK) stopCloudSim()
+        } finally { setDisconnecting(false) }
+    }, [disconnectTelemetry, source])
 
     /** Every link this shell can offer, in the order DeviceSelector shows
      *  them. One list so the bar and the Fly panel cannot offer different
@@ -189,6 +216,14 @@ export function useTelemetryLink() {
         // sitl is the desktop relay of the client's own SITL on udp:14540.
         { value: 'sitl-server', label: 'Gazebo sim on server (udp:14600)' },
         { value: 'sitl', label: 'SITL' },
+        // Below SITL on purpose: SITL (the customer's own simulator through
+        // the desktop app) is the default; the cloud sim is a premium extra.
+        ...(cloudSimEnabled ? [{
+            value: CLOUD_SIM_LINK,
+            label: 'Cloud simulator (premium)',
+            disabled: !cloudSimEntitled,
+            note: cloudSimEntitled ? undefined : CLOUD_SIM_PREMIUM_NOTE,
+        }] : []),
         // Native first: same ground station as local-relay but with no relay
         // agent to start. Desktop only.
         ...(desktop ? [{ value: 'air-unit-udp', label: 'Air unit (UDP, direct)' }] : []),

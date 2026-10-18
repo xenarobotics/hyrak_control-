@@ -5,7 +5,8 @@
 // connection it will use, with a plain "Change" list for the rare case.
 
 import { useState } from 'react'
-import { useTelemetryLink } from '@/hooks/useTelemetryLink'
+import { useTelemetryLink, CLOUD_SIM_LINK } from '@/hooks/useTelemetryLink'
+import { CloudSimNote } from '@/components/controls/CloudSimNote'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { useDroneStore } from '@/store/drone'
 import { getVideoSource, setVideoSource, needsCameraSelection, VIDEO_SOURCES, videoSourcesFor, type VideoSource } from '@/lib/videoSource'
@@ -28,15 +29,16 @@ function Step({ n, done, title, children }: { n: number; done: boolean; title: s
 }
 
 function Choice<T extends string>({ value, options, onPick, onClose }: {
-    value: T; options: { value: T; label: string }[]; onPick: (v: T) => void; onClose: () => void
+    value: T; options: { value: T; label: string; disabled?: boolean; note?: string }[]; onPick: (v: T) => void; onClose: () => void
 }) {
     return (
         <div className="flex flex-col gap-1.5 rounded-xl border p-2" style={{ borderColor: 'var(--s-line)', background: 'var(--s-panel)' }}>
             {options.map(o => (
-                <button key={o.value} type="button" onClick={() => { onPick(o.value); onClose() }}
-                    className="min-h-[48px] rounded-lg px-3 text-left text-[16px]"
+                <button key={o.value} type="button" disabled={o.disabled} onClick={() => { onPick(o.value); onClose() }}
+                    className="min-h-[48px] rounded-lg px-3 text-left text-[16px] disabled:opacity-50"
                     style={o.value === value ? { background: 'var(--s-blue-soft)', fontWeight: 700 } : {}}>
                     {o.label}
+                    {o.note && <span className="block text-[13px]" style={{ color: 'var(--s-ink-2)' }}>{o.note}</span>}
                 </button>
             ))}
             <button type="button" onClick={onClose} className="min-h-[44px] text-[15px]" style={{ color: 'var(--s-ink-2)' }}>Close</button>
@@ -82,6 +84,10 @@ export function SetupPanel() {
                             <button type="button" className="underline underline-offset-4 inline-flex items-center min-h-[44px] px-1" onClick={() => setPick(pick === 'drone' ? null : 'drone')}>Change connection</button>
                         </p>
                         {pick === 'drone' && <Choice value={source} options={options} onPick={setSource} onClose={() => setPick(null)} />}
+                        {source === CLOUD_SIM_LINK && (
+                            <CloudSimNote entitled={!options.find(o => o.value === CLOUD_SIM_LINK)?.disabled}
+                                className="text-[14px]" />
+                        )}
                         {sitlNeedsDesktop && <p className="text-[14px]" style={{ color: '#7A140D' }}>This connection needs the HYRAK desktop app.</p>}
                         {telemetryError && <p className="text-[14px]" style={{ color: '#7A140D' }}>{telemetryError}</p>}
                     </>
