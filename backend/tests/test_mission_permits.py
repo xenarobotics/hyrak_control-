@@ -148,10 +148,11 @@ def test_staff_keep_todays_access():
 
 # ── Permit rules (pure) ───────────────────────────────────────────────────
 
-RED = {"id": "red1", "name": "Lab", "zone_class": "red", "permission_required": True}
-RED2 = {"id": "red2", "name": "Tower", "zone_class": "red", "permission_required": True}
-ORANGE = {"id": "or1", "name": "Hostel", "zone_class": "orange", "permission_required": True}
-NOFLY = {"id": "nf", "name": "Airport", "zone_class": "red", "permission_required": False}
+ALT = {"floor_m": 0.0, "ceiling_m": None}
+RED = {"id": "red1", "name": "Lab", "zone_class": "red", "permission_required": True, **ALT}
+RED2 = {"id": "red2", "name": "Tower", "zone_class": "red", "permission_required": True, **ALT}
+ORANGE = {"id": "or1", "name": "Hostel", "zone_class": "orange", "permission_required": True, **ALT}
+NOFLY = {"id": "nf", "name": "Airport", "zone_class": "red", "permission_required": False, **ALT}
 
 # A red zone over (17.590-17.592, 78.120-78.122) and an orange one next to it.
 ZONES = [
@@ -538,9 +539,56 @@ def test_a_class_raised_after_approval_is_not_exempted():
     assert permits.honoured_zone_ids(p, {"or1": {"zone_class": "orange"}}) == {"or1"}
     assert permits.honoured_zone_ids(p, {"or1": {"zone_class": "red",
                                                  "permission_required": True}}) == set()
-    # Relaxed (or gone) is no reason to exempt either: a deleted zone flags nothing.
-    assert permits.honoured_zone_ids(p, {"or1": {"zone_class": "green"}}) == {"or1"}
+    # Any other class counts as a different zone; a deleted one flags nothing.
+    assert permits.honoured_zone_ids(p, {"or1": {"zone_class": "green"}}) == set()
     assert permits.honoured_zone_ids(p, {}) == set()
+
+
+def test_an_altitude_change_ends_the_exemption():
+    p = permit()
+    assert permits.honoured_zone_ids(p, {"red1": {"zone_class": "red", "floor_m": 0.0,
+                                                  "ceiling_m": None}}) == {"red1"}
+    assert permits.honoured_zone_ids(p, {"red1": {"zone_class": "red", "floor_m": 5.0,
+                                                  "ceiling_m": None}}) == set()
+    assert permits.honoured_zone_ids(p, {"red1": {"zone_class": "red", "floor_m": 0.0,
+                                                  "ceiling_m": 120.0}}) == set()
+    # A permit that never recorded altitudes (approved before 8b) exempts nothing.
+    legacy = permit(zones=[{"id": "red1", "name": "Lab", "zone_class": "red"}])
+    assert permits.honoured_zone_ids(legacy, {"red1": {"zone_class": "red", "floor_m": 0.0,
+                                                       "ceiling_m": None}}) == set()
+
+
+async def test_a_zone_edit_is_refused_when_its_permits_cannot_be_superseded(live, monkeypatch):
+    from app.auth import service as auth_service
+    w = await world(live)
+    ft = w.founder[1]
+    z = live.cl.post("/api/zones", headers={"Authorization": f"Bearer {ft}"}, json={
+        "name": "Lab", "zone_class": "red", "geometry": box(78.120, 17.590, 78.122, 17.592)})
+    assert z.status_code == 200, z.text
+    zid = z.json()["zone"]["properties"]["id"]
+
+    async def broken(zone_id, reason):
+        raise ConnectionError("db down")
+    monkeypatch.setattr(permits, "supersede_for_zone", broken)
+    r = live.cl.patch(f"/api/zones/{zid}", headers={"Authorization": f"Bearer {ft}"},
+                      json={"floor_m": 5})
+    assert r.status_code == 503 and "not changed" in r.json()["detail"]
+    assert auth_service.memory_store()._zones[zid].floor_m == 0.0
+    # An edit that changes nothing a permit approved goes through.
+    r = live.cl.patch(f"/api/zones/{zid}", headers={"Authorization": f"Bearer {ft}"},
+                      json={"name": "Lab 2"})
+    assert r.status_code == 200
+    # And once permits can be superseded, the edit lands.
+    calls = []
+
+    async def fine(zone_id, reason):
+        calls.append((zone_id, reason))
+        return []
+    monkeypatch.setattr(permits, "supersede_for_zone", fine)
+    r = live.cl.patch(f"/api/zones/{zid}", headers={"Authorization": f"Bearer {ft}"},
+                      json={"floor_m": 5})
+    assert r.status_code == 200 and calls and "floor_m" in calls[0][1]
+    assert auth_service.memory_store()._zones[zid].floor_m == 5.0
 
 
 async def test_gate_and_monitor_use_the_live_zone(stored, monkeypatch):

@@ -756,11 +756,20 @@ async def patch_zone(actor: AuthUser, zone_id: str, fields: dict, *, ip: str) ->
                         "permission_required")}
     if not changes:
         return z.to_feature()
+    # Permits first: if they cannot be superseded the edit is refused, so a
+    # stricter zone is never saved while permits approved against the old
+    # one still count. (Superseded and then a failed zone write leaves the
+    # zone as it was and the permits gone: safe.)
+    superseded = await _supersede_permits(z, changes)
     out = await store.update_zone(zone_id, **changes, updated_by=actor.id, updated_at=utcnow())
     await audit.record(store, actor, "zone.update", workspace_id=out.workspace_id,
                        target_type="zone", target_id=zone_id,
                        detail={k: v for k, v in changes.items()}, ip=ip)
-    await _supersede_permits(store, actor, z, changes, ip=ip)
+    for p in superseded:
+        await audit.record(store, actor, "permit.supersede", workspace_id=p["workspace_id"],
+                           target_type="permit", target_id=p["id"],
+                           detail={"zone_id": z.id, "zone": z.name,
+                                   "changed": _permit_relevant_changes(z, changes)}, ip=ip)
     return out.to_feature()
 
 
@@ -771,27 +780,24 @@ async def patch_zone(actor: AuthUser, zone_id: str, fields: dict, *, ip: str) ->
 _PERMIT_RELEVANT = ("zone_class", "permission_required", "floor_m", "ceiling_m")
 
 
-async def _supersede_permits(store, actor: AuthUser, before: ZoneRecord, changes: dict, *,
-                             ip: str) -> None:
-    changed = [k for k in _PERMIT_RELEVANT
-               if k in changes and changes[k] != getattr(before, k)]
+def _permit_relevant_changes(before: ZoneRecord, changes: dict) -> list[str]:
+    return [k for k in _PERMIT_RELEVANT if k in changes and changes[k] != getattr(before, k)]
+
+
+async def _supersede_permits(before: ZoneRecord, changes: dict) -> list[dict]:
+    """Supersede the approved permits naming this zone when the edit changes
+    what they approved. Raises Refused(503) when that cannot be done."""
+    changed = _permit_relevant_changes(before, changes)
     if not changed:
-        return
+        return []
     from app.permits import service as permit_service
     reason = f"zone {before.name} changed ({', '.join(changed)})"
     try:
-        superseded = await permit_service.supersede_for_zone(before.id, reason)
+        return await permit_service.supersede_for_zone(before.id, reason)
     except Exception as e:
-        # The permits stay approved in the table, but the evaluation-time
-        # check (permits.honoured_zone_ids) still refuses a zone that became
-        # stricter, so this is not a silent pass.
-        logger.error(f"zone {before.id}: could not supersede its permits: {e}")
-        return
-    for p in superseded:
-        await audit.record(store, actor, "permit.supersede", workspace_id=p["workspace_id"],
-                           target_type="permit", target_id=p["id"],
-                           detail={"zone_id": before.id, "zone": before.name, "changed": changed},
-                           ip=ip)
+        logger.error(f"zone {before.id}: could not supersede its permits, edit refused: {e}")
+        raise Refused(503, "The zone was not changed: the permits approved for it could not be "
+                           "withdrawn just now (database error). Try again shortly.")
 
 
 async def delete_zone(actor: AuthUser, zone_id: str, *, ip: str) -> None:

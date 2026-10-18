@@ -18,11 +18,13 @@ in-flight zone monitor, only while it is approved, inside its window, for
 a drone currently assigned to its workspace, and only for the zones it
 names (a red zone drawn after approval is not covered).
 
-Zones change. A permit records each zone's class (refreshed at approval);
-editing a zone's class, permission_required or altitudes marks every
-approved permit naming it `superseded` (supersede_for_zone, audited), and
-at use a zone is exempted only while the live zone is no stricter than
-recorded and still admits a permit (honoured_zone_ids).
+Zones change. A permit records each zone's class and altitudes (refreshed
+at approval); editing a zone's class, permission_required or altitudes
+first marks every approved permit naming it `superseded` (supersede_for_zone,
+audited; the edit is refused if that fails), and at use a zone is exempted
+only while the live zone still has exactly the recorded class and altitudes
+and still admits a permit (honoured_zone_ids). A permit approved before
+these were recorded therefore exempts nothing and has to be asked again.
 
 Who decides: anyone with `permits.approve` covering the restricted airspace
 the flight uses (perms.check_area over the flight's footprint inside the
@@ -178,11 +180,23 @@ def _live(ids, live: Optional[dict]) -> dict:
     return zone_engine.zone_info(ids)
 
 
+def _same_alt(live, recorded) -> bool:
+    if isinstance(recorded, str):          # never recorded
+        return False
+    if live is None or recorded is None:
+        return live is None and recorded is None
+    try:
+        return abs(float(live) - float(recorded)) < 1e-6
+    except (TypeError, ValueError):
+        return False
+
+
 def honoured_zone_ids(p: dict, live: Optional[dict] = None) -> set:
     """The zones this permit still exempts, judged against the live zones
-    (`live`: {id: {zone_class, permission_required}}, default the engine).
-    Never one that is now red without permission_required, nor one whose
-    class is stricter than the class recorded on the permit. A zone no
+    (`live`: {id: {zone_class, permission_required, floor_m, ceiling_m}},
+    default the engine). Never one that is now red without
+    permission_required, nor one whose class or altitudes differ from what
+    the permit recorded (a missing record counts as different). A zone no
     longer loaded (deleted, inactive) exempts nothing because nothing
     flags it."""
     recorded = {z.get("id"): z for z in (p.get("zones") or []) if isinstance(z, dict)}
@@ -194,7 +208,10 @@ def honoured_zone_ids(p: dict, live: Optional[dict] = None) -> set:
             continue
         if now["zone_class"] == "red" and not now.get("permission_required", True):
             continue
-        if _SEVERITY.get(now["zone_class"], 2) > _SEVERITY.get(rec.get("zone_class"), 0):
+        if now["zone_class"] != rec.get("zone_class"):
+            continue
+        if not (_same_alt(now.get("floor_m") or 0.0, rec.get("floor_m", "missing"))
+                and _same_alt(now.get("ceiling_m"), rec.get("ceiling_m", "missing"))):
             continue
         out.add(zid)
     return out

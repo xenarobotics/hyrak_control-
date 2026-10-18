@@ -94,7 +94,8 @@ def snapshot() -> list[dict]:
 def _public(z: dict) -> dict:
     """A zone as checks report it."""
     return {"id": z["id"], "name": z["name"], "zone_class": z["zone_class"],
-            "permission_required": z.get("permission_required", True)}
+            "permission_required": z.get("permission_required", True),
+            "floor_m": z.get("floor_m") or 0.0, "ceiling_m": z.get("ceiling_m")}
 
 
 def geometries(ids) -> dict:
@@ -106,13 +107,15 @@ def geometries(ids) -> dict:
 
 
 def zone_info(ids) -> dict:
-    """{zone id: {zone_class, permission_required}} for the loaded (active)
-    zones among `ids` - the live state permits are checked against."""
+    """{zone id: {zone_class, permission_required, floor_m, ceiling_m}} for
+    the loaded (active) zones among `ids` - the live state permits are
+    checked against."""
     want = set(ids)
     with _lock:
         zones = _zones
     return {z["id"]: {"zone_class": z["zone_class"],
-                      "permission_required": z.get("permission_required", True)}
+                      "permission_required": z.get("permission_required", True),
+                      "floor_m": z.get("floor_m") or 0.0, "ceiling_m": z.get("ceiling_m")}
             for z in zones if z["id"] in want}
 
 

@@ -162,8 +162,13 @@ def clean_waypoints(raw) -> list[dict]:
             yaw = float(yaw) if yaw is not None and math.isfinite(float(yaw)) else None
         except (TypeError, ValueError):
             yaw = None
+        try:
+            turn = float(w.get("turn_radius", w.get("turnRadius", 0.0)) or 0.0)
+        except (TypeError, ValueError):
+            turn = 0.0
+        turn = min(max(turn, 0.0), 500.0) if math.isfinite(turn) else 0.0
         out.append({"lat": lat, "lng": lng, "altitude": alt, "speed": speed,
-                    "hold_time": hold, "type": typ, "yaw": yaw})
+                    "hold_time": hold, "type": typ, "yaw": yaw, "turn_radius": turn})
     return out
 
 
