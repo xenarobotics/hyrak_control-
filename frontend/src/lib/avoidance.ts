@@ -85,7 +85,13 @@ export interface AvoidanceEvent {
     fused_distance_m: number | null
 }
 
-async function j<T>(r: Response): Promise<T> { return r.json() as Promise<T> }
+// Throws on an error answer, like getStatus: a 403 body ({detail}) handed
+// back as data crashed the Command map for customers (avoidance is staff-only
+// in phase 2a, docs/ACCESS_MODEL.md 8a).
+async function j<T>(r: Response): Promise<T> {
+    if (!r.ok) throw new Error(`avoidance HTTP ${r.status}`)
+    return r.json() as Promise<T>
+}
 
 export async function getStatus(droneId: string): Promise<AvoidanceStatus> {
     // Throws on an error answer: callers keep their last good status rather
