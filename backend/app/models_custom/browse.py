@@ -169,7 +169,7 @@ SIZE_LOOKUPS = 3                                    # model_info calls per searc
 EXPAND = ["siblings", "likes", "downloads", "lastModified", "cardData", "gated", "private",
           "pipeline_tag", "usedStorage", "tags"]
 
-REASON_GATED = "Gated or private"
+REASON_GATED = "Gated - needs approval on Hugging Face"
 REASON_SEGMENT = "Segmentation - coming soon"
 REASON_PT = "Only PyTorch .pt files - supported after the HYRAK sandbox update"
 REASON_WEIGHTS = "Only PyTorch or safetensors weights - supported after the HYRAK sandbox update"
@@ -193,12 +193,17 @@ def suggest_file(paths: list) -> Optional[str]:
 
 
 def _list_models(search: str, pipeline_tag: str, limit: int, timeout: float) -> list:
-    """huggingface_hub list_models, newest-popular first. Replaced in tests."""
+    """huggingface_hub list_models, most downloaded first. Replaced in tests.
+
+    Always ANONYMOUS (token=False): the listing is exactly what the public
+    sees, so the owner's HF_TOKEN can never put the owner's private repos in
+    a client's results. The token is only used for calls on one named repo
+    (inspect, download, sizes), which refuse private repos anyway."""
     from huggingface_hub import HfApi
-    api = HfApi(endpoint=get_settings().custom_models_hf_endpoint, token=hf.token())
+    api = HfApi(endpoint=get_settings().custom_models_hf_endpoint, token=False)
     # list_models takes no timeout; huggingface_hub's default request timeout applies.
     return list(api.list_models(search=search or None, pipeline_tag=pipeline_tag, sort="downloads",
-                                direction=-1, limit=limit, expand=EXPAND, token=hf.token()))
+                                direction=-1, limit=limit, expand=EXPAND, token=False))
 
 
 def _license_of(m) -> Optional[str]:
@@ -241,7 +246,7 @@ def _card(m, pipeline: str, limit_bytes: int) -> dict:
         "_size": getattr(m, "used_storage", None) or getattr(m, "usedStorage", None),
     }
     lower = [f.lower() for f in files]
-    if getattr(m, "private", False) or getattr(m, "gated", False):
+    if getattr(m, "gated", False):
         card["reason"] = REASON_GATED
     elif task == "segment":
         card["reason"] = REASON_SEGMENT
@@ -347,7 +352,12 @@ async def search(user_id: str, q: str, task: str, page: int) -> dict:
             raise hf._map_hub_error(e)
         more = more or len(rows) > per[p]
         start = per[p] - per[p] // page
-        cards += [_card(m, p, limit_bytes) for m in rows[start:per[p]]]
+        for m in rows[start:per[p]]:
+            # Second layer behind the anonymous listing: a private repo is
+            # never turned into a card (nor cached).
+            if getattr(m, "private", False):
+                continue
+            cards.append(_card(m, p, limit_bytes))
     seen, unique = set(), []
     for c in cards:
         if c["repo"] not in seen:

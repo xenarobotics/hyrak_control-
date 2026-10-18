@@ -9,7 +9,9 @@ Hugging Face: public model repos only, pinned to a commit.
     weights file when the repo has one beside it, and config.json /
     preprocessor_config.json / a labels.txt (small files only).
   * Anonymous unless the owner set HF_TOKEN (higher rate limits); either
-    way a private or gated repo is refused with a message. The token is
+    way a private or gated repo is refused with a message, so the token
+    never lets a client import the owner's private repos. The browser's
+    search listing (browse.py) is always anonymous. The token is
     never logged. Every request has a timeout, and the download stops as
     soon as it passes the size limit.
   * HTTP 429 from the Hub becomes `hf_rate_limited` everywhere (inspect,
@@ -135,6 +137,8 @@ async def resolve(repo: str) -> RepoInfo:
         raise ModelFailure("hf_unreachable", f"no answer in {timeout:.0f} s")
     except Exception as e:
         raise _map_hub_error(e)
+    # Private repos are refused even when HF_TOKEN could read them: a client
+    # must never import the owner's private models through the owner's token.
     if getattr(info, "private", False):
         raise ModelFailure("hf_not_found", f"{repo} is private")
     if getattr(info, "gated", False):

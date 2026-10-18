@@ -130,6 +130,7 @@ async def test_search_cards_reasons_and_order(env, monkeypatch):
             hub_model("acme/gated", ["model.onnx"], downloads=8000, gated="manual"),
             hub_model("acme/weights", ["model.safetensors"], downloads=7000, license="cc-by-nc-4.0"),
             hub_model("acme/huge", ["big.onnx"], downloads=40, used=10 * 1024 ** 3),
+            hub_model("owner/secret", ["model.onnx"], downloads=1_000_000, private=True),
         ],
         "image-classification": [hub_model("acme/fire-cls", ["fire.onnx"], pipeline="image-classification",
                                            downloads=60)],
@@ -156,7 +157,8 @@ async def test_search_cards_reasons_and_order(env, monkeypatch):
     assert by["acme/fire-cls"]["task"] == "classify"
     assert by["ultra/yolo-pt"]["reason"] == browse.REASON_PT
     assert by["ultra/yolo-pt"]["license_note"].startswith("Free to try")
-    assert by["acme/gated"]["reason"] == "Gated or private"
+    assert by["acme/gated"]["reason"] == "Gated - needs approval on Hugging Face"
+    assert "owner/secret" not in by                                         # private: never listed
     assert by["acme/weights"]["reason"] == browse.REASON_WEIGHTS
     assert by["acme/weights"]["license_note"] == "Non-commercial use only."
     assert by["acme/seg"]["reason"] == "Segmentation - coming soon" and by["acme/seg"]["task"] == "segment"
@@ -299,3 +301,46 @@ def test_hf_token_is_optional_and_secret(monkeypatch):
     monkeypatch.setattr(s, "hf_token", SecretStr("hf_secret_123"))
     assert hf.token() == "hf_secret_123"
     assert "hf_secret_123" not in repr(s) and "hf_secret_123" not in str(s.model_dump())
+
+
+async def test_private_repos_are_refused_even_with_a_token(env, onnx_files, monkeypatch):
+    """With HF_TOKEN the Hub would serve the owner's private repos; a client
+    must not inspect or import one through it."""
+    w = await world(env)
+    await feature(env, w, w.iith["id"])
+    monkeypatch.setattr(get_settings(), "hf_token", SecretStr("hf_secret_123"))
+    calls = fake_hub(monkeypatch, {"model.onnx": onnx_files.detect.read_bytes()})
+    real = hf._model_info
+
+    def private_info(repo, timeout):
+        info = real(repo, timeout)
+        info.private = True
+        return info
+    monkeypatch.setattr(hf, "_model_info", private_info)
+    r = await env.api.get(f"/api/models/huggingface/inspect?repo=owner/secret&workspace_id={w.iith['id']}",
+                          headers=hdr(w.olga[1]))
+    assert r.status_code == 400 and r.json()["detail"]["code"] == "hf_not_found"
+    r = await env.api.post("/api/models/huggingface", headers=hdr(w.olga[1]),
+                           json={"workspace_id": w.iith["id"], "repo": "owner/secret"})
+    assert r.json()["detail"]["code"] == "hf_not_found"
+    assert calls == []                                                      # nothing downloaded
+    lib = ok(await env.api.get(f"/api/models?workspace_id={w.iith['id']}", headers=hdr(w.olga[1])))
+    assert lib["workspace"] == []
+
+
+def test_search_lists_anonymously_even_with_a_token(monkeypatch):
+    """The Hub listing never carries the owner's HF_TOKEN."""
+    import huggingface_hub
+    seen = []
+
+    class FakeApi:
+        def __init__(self, endpoint=None, token=None):
+            seen.append(("init", token))
+
+        def list_models(self, **kw):
+            seen.append(("list", kw.get("token")))
+            return []
+    monkeypatch.setattr(huggingface_hub, "HfApi", FakeApi)
+    monkeypatch.setattr(get_settings(), "hf_token", SecretStr("hf_secret_123"))
+    assert browse._list_models("fire", "object-detection", 5, 5) == []
+    assert seen == [("init", False), ("list", False)]
