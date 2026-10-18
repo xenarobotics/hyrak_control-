@@ -1521,7 +1521,11 @@ async def _list_flights(workspace_ids, *, limit: int = 30, drone_id: str | None 
     except Exception as e:
         logger.warning(f"flight list failed: {e}")
         return []
-    return [{**f.to_dict(), "drone_name": name} for f, name in rows]
+    # Detections on the map recorded during each flight (app/mapdetect).
+    from app.mapdetect.store import counts_for_flights
+    counts = await counts_for_flights([f.id for f, _ in rows])
+    return [{**f.to_dict(), "drone_name": name, "sightings": counts.get(f.id, 0)}
+            for f, name in rows]
 
 
 async def _flight_in_scope(flight_id: str, user: AuthUser):

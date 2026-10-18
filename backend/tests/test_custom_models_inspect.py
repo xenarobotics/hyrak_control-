@@ -315,7 +315,8 @@ def test_migration_chain_and_sql():
     script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
     rev = script.get_revision("d1e2f3a4b5c6")
     assert rev.down_revision == "a7d3e9b1c4f2"
-    assert script.get_heads() == ["d1e2f3a4b5c6"]
+    # Later migrations build on it (e2f3a4b5c6d7: map_sightings).
+    assert len(script.get_heads()) == 1
     up = _alembic_sql("upgrade", "a7d3e9b1c4f2:d1e2f3a4b5c6")
     assert "CREATE TABLE models (" in up and "CREATE TABLE model_versions (" in up
     assert "FOREIGN KEY(workspace_id) REFERENCES workspaces (id) ON DELETE CASCADE" in up
