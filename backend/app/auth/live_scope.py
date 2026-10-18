@@ -137,15 +137,22 @@ def stamp(session, user, scope: SessionScope) -> None:
 # ── Drones ────────────────────────────────────────────────────────────────
 
 # How the current telemetry link was opened, as far as drone access cares.
-# Only SIM_LINK is simulator-type: a direct udp address that the server
-# dials on a staff connect_telemetry (the Gazebo sim on this server,
-# udp:14600). Every client-side relay (connect_browser_serial: Web Serial,
+# Two kinds are simulator-type: SIM_LINK, a direct udp address that the
+# server dials on a staff connect_telemetry (the Gazebo sim on this server,
+# udp:14600), and CLOUD_SIM_LINK below. Every client-side relay (connect_browser_serial: Web Serial,
 # the desktop's SITL / serial / RF / SIYI relays) and the RF bridge are
 # never simulator-type, whatever address MAVSDK sees.
 SIM_LINK = "server_udp"
 DIRECT_LINK = "server_direct"      # connect_telemetry to tcp / serial / anything not udp
 RELAY_LINK = "client_relay"        # connect_browser_serial
 RF_LINK = "rf_bridge"              # connect_rf_bridge
+# The session's own cloud simulator (docs/ACCESS_MODEL.md 8b): a PX4 the
+# SERVER launched for this session, on a loopback address the server chose.
+# Simulator-type for customers too, because nothing about it comes from the
+# client: not the address, not the process, not the identity (a synthetic
+# "cloudsim-..." UID the server assigns; a real FC's UID is hex).
+CLOUD_SIM_LINK = "cloud_sim"
+CLOUD_SIM_UID_PREFIX = "cloudsim-"
 
 
 def link_kind_for(origin: str, address: str, *, has_bridge: bool) -> str:
@@ -155,6 +162,8 @@ def link_kind_for(origin: str, address: str, *, has_bridge: bool) -> str:
         return RELAY_LINK
     if origin == "connect_rf_bridge":
         return RF_LINK
+    if origin == "start_cloud_sim":
+        return CLOUD_SIM_LINK
     if origin == "connect_telemetry" and address.startswith("udp") and not has_bridge:
         return SIM_LINK
     return DIRECT_LINK
@@ -166,7 +175,8 @@ async def drone_fly_allowed(session, drone: Optional[dict]) -> Optional[bool]:
 
     The ownership check is skipped only for a simulated drone: the registry
     record carries the stored is_simulated flag AND the session's current
-    link is simulator-type (session.link_simulated, SIM_LINK). Either alone
+    link is simulator-type (session.link_simulated: SIM_LINK for staff,
+    CLOUD_SIM_LINK for the session's own cloud simulator). Either alone
     is not enough: a real drone on a WiFi UDP link is a udp link too, and a
     SITL UID repeats across instances. Records first seen through a
     customer's link are never stored as simulated (identify_drone)."""
@@ -223,10 +233,16 @@ async def identify_drone(session, hardware_uid: str, *, link_kind: str) -> Optio
     reaches one (connect_telemetry is staff-only), and the staff check is
     repeated here so a customer can never launder a real drone into
     "simulated": their desktop SITL is claimed by their own workspace like
-    any new drone."""
+    any new drone.
+
+    The one exception for customers is CLOUD_SIM_LINK: the cloud simulator
+    the server launched for this session, identified by the synthetic UID
+    the server gave it (never read from the link). It is stored simulated
+    and unclaimed like the staff Gazebo sim."""
     from app.registry import drones as drone_registry
 
-    sim_link = link_kind == SIM_LINK and bool(getattr(session, "is_staff", False))
+    sim_link = ((link_kind == SIM_LINK and bool(getattr(session, "is_staff", False)))
+                or (link_kind == CLOUD_SIM_LINK and hardware_uid.startswith(CLOUD_SIM_UID_PREFIX)))
     claim = None if sim_link else session.workspace_id
     session.link_simulated = sim_link
     drone = await drone_registry.upsert_seen(hardware_uid, is_simulated=sim_link,

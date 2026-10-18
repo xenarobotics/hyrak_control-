@@ -167,7 +167,7 @@ export function LinkCluster({ avoid }: { avoid: AvoidanceStatus | null }) {
                                     : <Mini onClick={() => { void refreshRadios() }} title="Re-scan radios"><RefreshCw size={11} /></Mini>} />
                         {isConnected && <p className="px-2 pb-1 text-[10px] text-amber-300/90">Disconnect to change the link.</p>}
                         {options.map(o => (
-                            <Item key={o.value} active={o.value === source} label={o.label} disabled={isConnected}
+                            <Item key={o.value} active={o.value === source} label={o.label} sub={o.note} disabled={isConnected || o.disabled}
                                 onClick={() => { setSource(o.value); setMenu(null) }} />
                         ))}
                         <p className="px-2 pt-1.5 pb-1 text-[9.5px] text-zinc-500">Relay URL, baud and uplink host: SETUP tab.</p>

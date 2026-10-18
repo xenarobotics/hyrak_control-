@@ -42,6 +42,8 @@ export interface WorkspaceInfo {
     perms: Perm[]
     inherited: boolean
     disabled?: boolean
+    /** Paid extras a founder switched on, e.g. { cloud_sim: true }. */
+    features?: Record<string, boolean>
 }
 
 export const ROLE_LABELS: Record<MemberRole, string> = {

@@ -1087,6 +1087,10 @@ class Workspace(Base):
     path: Mapped[str] = mapped_column(String(400))
     operating_area: Mapped[Optional[dict]] = mapped_column(JSONB_COL, nullable=True)
     disabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    # Paid extras switched on per workspace by a founder, e.g.
+    # {"cloud_sim": true} (docs/ACCESS_MODEL.md 8b). Absent key = off.
+    features: Mapped[dict] = mapped_column(JSONB_COL, nullable=False, default=dict,
+                                           server_default=text("'{}'"))
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

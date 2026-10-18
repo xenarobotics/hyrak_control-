@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 import time
 import logging
 from app.sessions import observer
@@ -192,12 +193,14 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         if not await require_operator(sid, "connect_telemetry", data): return
         await _connect_telemetry(sid, data, origin="connect_telemetry")
 
-    async def _connect_telemetry(sid, data, *, origin: str):
+    async def _connect_telemetry(sid, data, *, origin: str, identity: str | None = None):
         """The connect flow itself, for an address the caller has already
-        vetted: connect_telemetry's (staff), the RF bridge's (staff), or the
-        session's own loopback bridge (connect_browser_serial). `origin`
-        names the calling handler, never the client: it decides whether the
-        link can count as a simulator (live_scope.link_kind_for)."""
+        vetted: connect_telemetry's (staff), the RF bridge's (staff), the
+        session's own loopback bridge (connect_browser_serial), or the
+        session's own cloud simulator (start_cloud_sim). `origin` names the
+        calling handler, never the client: it decides whether the link can
+        count as a simulator (live_scope.link_kind_for). `identity` is a
+        server-assigned UID used instead of the FC's (the cloud sim's)."""
         session = session_manager.get_by_socket(sid)
         if not session:
             await sio.emit("error", {"msg": "No session found"}, to=sid)
@@ -394,7 +397,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             both arrive as loopback udp."""
             from app.auth import live_scope
 
-            uid = await manager.get_hardware_uid()
+            uid = identity or await manager.get_hardware_uid()
             session.hardware_uid = uid
             if uid:
                 kind = live_scope.link_kind_for(
@@ -539,6 +542,11 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         session = session_manager.get_by_socket(sid)
         if not session:
             return
+        await _release_link(session, sid)
+
+    async def _release_link(session, sid):
+        """Drop the session's telemetry link: disconnect_telemetry, and the
+        cloud sim when it stops under a linked session."""
         tel = session_manager.get_telemetry(session.session_id)
         if tel:
             await tel.stop()
@@ -1443,3 +1451,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 analyzer.set_tracking(session.session_id, active)
 
         await sio.emit("tracking_status", {"active": active}, to=sid)
+    # The connect and release flows, for the cloud simulator's events
+    # (app/events/cloud_sim_events.py), which open and drop the session's
+    # link to a server-launched sim the same way.
+    return SimpleNamespace(connect=_connect_telemetry, release=_release_link)

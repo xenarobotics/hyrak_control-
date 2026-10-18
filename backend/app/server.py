@@ -22,6 +22,7 @@ from app.events.admin_events import register_admin_events, set_sio
 from app.events.permit_events import register_permit_events
 from app.webrtc.signaling import register_webrtc_events
 from app.events.gs_relay_events import register_gs_relay_events
+from app.events.cloud_sim_events import register_cloud_sim_events
 from app.api.routes import router
 from app.auth import service as auth_service
 from app.auth import live_scope, socket_guard
@@ -29,6 +30,11 @@ from app.auth.clientip import client_ip_from
 from app.auth.routes import router as auth_router
 
 logger = logging.getLogger("verocore.server")
+
+# How long a session whose socket dropped is held for the client to resume
+# it (drone link, relay, cloud sim and all) before it is torn down. Module
+# level so a test can shorten it.
+SESSION_GRACE_S = 90.0
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -112,7 +118,6 @@ def create_app() -> socketio.ASGIApp:
         json=safe_json,
     )
     set_sio(sio)
-    SESSION_GRACE_S = 90.0
     _expiry_tasks: dict = {}
 
     # ------------------------------------------------------------------ #
@@ -157,9 +162,17 @@ def create_app() -> socketio.ASGIApp:
         avoidance_loop.start(session_manager)
         from app import loop_stall
         loop_stall.start()
+        # Cloud SITL: end what a previous run left behind (marker-matched
+        # processes only), then watch for idle and crashed instances.
+        from app.sim import manager as sim_manager
+        sim_manager.get_manager().warn_if_exposed()
+        await sim_manager.get_manager().cleanup_orphans()
+        sim_manager.get_manager().start_background()
 
     @fastapi_app.on_event("shutdown")
     async def on_shutdown():
+        from app.sim import manager as sim_manager
+        await sim_manager.get_manager().shutdown()
         from app.tasks import dispatcher
         dispatcher.stop()
         from app.avoidance.core import loop as avoidance_loop
@@ -377,6 +390,12 @@ def create_app() -> socketio.ASGIApp:
         client has not come back within SESSION_GRACE_S."""
         from app.sessions import observer
         from app.telemetry.serial_bridge import close_bridge
+        # The session's cloud simulator ends with it (docs/ACCESS_MODEL.md 8b).
+        from app.sim import manager as sim_manager
+        try:
+            await sim_manager.get_manager().stop_for_session(session.session_id, "session_ended")
+        except Exception as e:
+            logger.error(f"Session {session.session_id[:8]}: cloud sim stop failed: {e}")
         close_bridge(session.session_id)
         close_swarm_relay_bridge(session.session_id)
         from app.flights import recorder
@@ -421,7 +440,8 @@ def create_app() -> socketio.ASGIApp:
                 except Exception:
                     pass
     auth_service.on_user_revoked(_disconnect_user_sockets)
-    register_telemetry_events(sio, session_manager, vision_pool)
+    telemetry_links = register_telemetry_events(sio, session_manager, vision_pool)
+    register_cloud_sim_events(sio, session_manager, telemetry_links)
     register_swarm_events(sio, session_manager)
     register_admin_events(sio, session_manager)
     register_permit_events(sio, session_manager)

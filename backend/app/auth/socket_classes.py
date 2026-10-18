@@ -49,6 +49,13 @@ EVENTS: dict[str, str] = {
     "fetch_params": SESSION_VIEW,
     "get_param": SESSION_VIEW,
 
+    # ── the session's own cloud simulator (8b, premium) ─────────────────
+    # The server picks the ports, launches the process and links the
+    # session to it; the client sends at most an airframe and a home.
+    "start_cloud_sim": SESSION_COMMAND,   # plus the workspace's cloud_sim feature (staff: always)
+    "stop_cloud_sim": SESSION_VIEW,       # stopping your own sim, like disconnect_telemetry
+    "cloud_sim_status": SESSION_VIEW,
+
     # ── commands to the session's drone ─────────────────────────────────
     "drone_action": SESSION_COMMAND,
     "drone_command": SESSION_COMMAND,
