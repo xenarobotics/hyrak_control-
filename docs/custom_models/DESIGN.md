@@ -290,6 +290,42 @@ classifier adds `predictions` (alias `classes`) `[{name, score}]`,
 consoles that can see the workspace. Nothing sets `drone_command`: step 1
 has no drone actions and nothing for a takeover to stop.
 
+**Browse** (`feat/hf-browse`, `models_custom/browse.py`). Open to anyone
+with `view` on the workspace (premium or not); Add still needs
+`models.manage` and the feature.
+
+* `GET /huggingface/recommended?workspace_id=` -> `{workspace_id, premium,
+  can_manage, categories: [{name, models: [{repo, file, name, category,
+  task, what, license, license_note, classes_preview, fps, verified_at,
+  url, added: model_id|null}]}]}`, from `models_custom/recommended.json`
+  (validated at startup; a broken file logs and serves nothing). Categories
+  in a fixed order: Drone and aerial view, Fire and safety, Roads and
+  vehicles, Construction and people, Agriculture and nature, General
+  purpose.
+* `GET /huggingface/search?q=&task=all|detect|classify&page=&workspace_id=`
+  -> `{workspace_id, premium, can_manage, query, task, page (1-4),
+  has_more, cached, results: [{repo, name, url, task
+  (detect|classify|segment), downloads, likes, updated, license,
+  license_note, onnx_files, suggested_file, runnable, reason, added}]}`.
+  One anonymous `list_models` call per pipeline tag (object-detection,
+  image-classification, plus image-segmentation for `all`) with `expand`;
+  private rows dropped; at most 3 `model_info` calls to size repos whose
+  storage passes the limit. Runnable first, then by downloads. Reasons:
+  "Only PyTorch .pt files - supported after the HYRAK sandbox update",
+  "Only PyTorch or safetensors weights - ...", "No ONNX file in this
+  repo", "Gated - needs approval on Hugging Face", "Segmentation - coming
+  soon", "Too large". Cached per (query, task, page) for
+  `CUSTOM_MODELS_HF_SEARCH_CACHE_S` (600, 256 entries); uncached searches
+  limited to `CUSTOM_MODELS_HF_SEARCHES_PER_MINUTE` (20) per user
+  (`search_rate_limited`, 429).
+* HTTP 429 from the Hub is `hf_rate_limited` (429) on inspect, download
+  and search, and starts a 30 s cooldown with no Hub calls.
+* `HF_TOKEN` (optional, SecretStr) is sent on single-repo calls (inspect,
+  sizes, download) for higher limits; never on the search listing, and
+  private repos are refused (`hf_not_found`) even when it could read them.
+* Licence notes: AGPL ("Free to try; commercial use needs an Ultralytics
+  licence or AGPL compliance.") and cc-by-nc ("Non-commercial use only.").
+
 **Measured** (RTX 4070 laptop): Ultralytics YOLOv8n exported to ONNX
 (opset 17) inspects as `yolov8`, 80 COCO names, tests at about 8 ms
 (about 125 fps) and 228 MB GPU memory, finds the bus and four people in
