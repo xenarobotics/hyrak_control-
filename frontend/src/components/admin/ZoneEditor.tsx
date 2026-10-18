@@ -108,6 +108,8 @@ export default function ZoneEditor({
     const [zoneClass, setZoneClass] = useState<ZoneClass>('red')
     const [name, setName] = useState('')
     const [ceiling, setCeiling] = useState('')
+    // Red only: no permit can ever be requested for it (an airport, say).
+    const [prohibited, setProhibited] = useState(false)
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [focusZone, setFocusZone] = useState<ZoneFeature | null>(null)
@@ -116,6 +118,7 @@ export default function ZoneEditor({
     const [editClass, setEditClass] = useState<ZoneClass>('red')
     const [editCeiling, setEditCeiling] = useState('')
     const [editActive, setEditActive] = useState(true)
+    const [editProhibited, setEditProhibited] = useState(false)
     const [pickedLayer, setPickedLayer] = useState<ZoneLayer | null>(null)
     const [pickedWs, setPickedWs] = useState('')
     const [saveFailure, setSaveFailure] = useState<Failure | null>(null)
@@ -150,6 +153,7 @@ export default function ZoneEditor({
         setEditClass(z.properties.zone_class)
         setEditCeiling(z.properties.ceiling_m != null ? String(z.properties.ceiling_m) : '')
         setEditActive(z.properties.active)
+        setEditProhibited(z.properties.permission_required === false)
     }
 
     const saveEdit = async () => {
@@ -160,6 +164,7 @@ export default function ZoneEditor({
             zone_class: editClass,
             ceiling_m: editCeiling !== '' ? Number(editCeiling) : null,
             active: editActive,
+            permission_required: !(editClass === 'red' && editProhibited),
         })
         if (!r.ok) { setListFailure(failure(r, 'SAVE')); return }
         setEditingId(null)
@@ -175,6 +180,7 @@ export default function ZoneEditor({
         setPoints([])
         setName('')
         setCeiling('')
+        setProhibited(false)
         setError(null)
         setSaveFailure(null)
     }
@@ -189,6 +195,7 @@ export default function ZoneEditor({
             zone_class: zoneClass,
             geometry: polygonFromPoints(points),
             ceiling_m: ceiling !== '' ? Number(ceiling) : undefined,
+            permission_required: !(zoneClass === 'red' && prohibited),
             layer: drawLayer ?? undefined,
             workspace_id: drawWs?.id,
         })
@@ -346,6 +353,14 @@ export default function ZoneEditor({
                                                     ACTIVE
                                                 </label>
                                             </div>
+                                            {editClass === 'red' && (
+                                                <label className="flex items-center gap-1 text-[9px] text-zinc-400"
+                                                    title="Changing this withdraws the permits approved for this zone">
+                                                    <input type="checkbox" checked={editProhibited}
+                                                        onChange={e => setEditProhibited(e.target.checked)} />
+                                                    PROHIBITED - NO PERMITS
+                                                </label>
+                                            )}
                                             <div className="flex gap-2">
                                                 <button onClick={() => void saveEdit()}
                                                     className="flex-1 py-1 rounded border border-emerald-700 text-[10px] text-emerald-400 hover:border-emerald-500">
@@ -394,6 +409,8 @@ export default function ZoneEditor({
                                                     ` · ${wsName(z.properties.workspace_id)}`}
                                                 {z.properties.ceiling_m != null &&
                                                     ` · up to ${z.properties.ceiling_m} m`}
+                                                {z.properties.zone_class === 'red' && z.properties.permission_required === false &&
+                                                    ' · NO PERMITS'}
                                                 {!z.properties.active && ' · INACTIVE'}
                                             </div>
                                         </>
@@ -481,6 +498,13 @@ export default function ZoneEditor({
                             placeholder="ceiling m AGL (optional - blank = all altitudes)"
                             className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200 outline-none placeholder:text-zinc-600"
                         />
+                        {zoneClass === 'red' && (
+                            <label className="flex items-start gap-2 text-[10px] text-zinc-400">
+                                <input type="checkbox" checked={prohibited} onChange={e => setProhibited(e.target.checked)} className="mt-0.5" />
+                                <span>Prohibited: no permit can be requested (otherwise pilots may ask
+                                    to cross it, and reviewers for this area decide).</span>
+                            </label>
+                        )}
 
                         {error && <div className="text-[10px] text-red-400">{error}</div>}
                         <FailureBox f={saveFailure} />

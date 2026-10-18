@@ -525,6 +525,7 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
   const activeFleetId      = useSwarmStore(s => s.activeDroneId)
   const fleetPlans         = useMissionStore(s => s.plans)
   const activePlanKey      = useMissionStore(s => s.activePlanKey)
+  const { isCustomer }     = useAccess()
 
   // RTL is a separate, non-mission control (see rtlPosition in the mission
   // store) - never part of the orderable/flown path. Defensive filter in case
@@ -759,8 +760,9 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
       })}
     </MapContainer>
 
-      {/* Avoidance overlay control - toggle visibility, legend, click-to-pin */}
-      {!compact && <div style={{
+      {/* Avoidance overlay control - toggle visibility, legend, click-to-pin.
+          Avoidance is staff-only (docs/ACCESS_MODEL.md 8a). */}
+      {!compact && !isCustomer && <div style={{
         position: 'absolute', bottom: 12, left: 12, zIndex: 1000,
         background: 'rgba(10,12,18,0.82)', backdropFilter: 'blur(6px)',
         border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8,

@@ -275,6 +275,8 @@ export interface ZoneBody {
     active?: boolean
     layer?: ZoneLayer
     workspace_id?: string | null
+    /** Red zones: false = prohibited, no permit can be requested (8b). */
+    permission_required?: boolean
 }
 
 export const createZone = (body: ZoneBody) =>

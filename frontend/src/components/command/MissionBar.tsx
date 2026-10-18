@@ -13,6 +13,8 @@
 //           latest message - the lines that used to float over the video.
 
 import { useMemo } from 'react'
+import Link from 'next/link'
+import { useUiMode } from '@/hooks/useUiMode'
 import { useDroneStore } from '@/store/drone'
 import { useMissionStore } from '@/store/mission'
 import type { AvoidanceStatus } from '@/lib/avoidance'
@@ -51,6 +53,8 @@ export function MissionBar({ avoid }: { avoid: AvoidanceStatus | null }) {
     const plan = useMissionStore(s => s.waypoints)
     const last = msgs.length ? msgs[msgs.length - 1] : null
     const floor = actingFloorM(avoid)
+    // Normal mode names the Mission tab "Plan".
+    const normal = useUiMode()[0] === 'normal'
 
     const geo = useMemo(() => {
         const cum = [0]
@@ -156,7 +160,10 @@ export function MissionBar({ avoid }: { avoid: AvoidanceStatus | null }) {
                     </>
                 ) : (
                     <div className="h-full flex items-center text-[11px] text-zinc-500">
-                        Plan and upload a mission on the Mission tab - its altitude profile shows here.</div>
+                        <span>Plan and upload a mission on the{' '}
+                            <Link href="/mission" className="text-zinc-300 underline underline-offset-2 hover:text-white">
+                                {normal ? 'Plan' : 'Mission'} tab</Link>
+                            {' '}- its altitude profile shows here.</span></div>
                 )}
             </div>
 

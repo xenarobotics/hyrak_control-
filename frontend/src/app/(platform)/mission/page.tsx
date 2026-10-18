@@ -1,7 +1,8 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
+import Link from 'next/link'
 import { useMissionStore, planKeyForDrone, planSignature } from '@/store/mission'
 import { expandWaypointsWithTurnRadius, type UploadWp } from '@/lib/uploadPath'
 import FleetMissionPanel from '@/components/mission/FleetMissionPanel'
@@ -15,6 +16,11 @@ import { AvoidancePanel } from '@/components/avoidance/AvoidancePanel'
 import { ShieldCheck } from 'lucide-react'
 import WaypointEditor from '@/components/mission/WaypointEditor'
 import SurveyPlanner from '@/components/mission/SurveyPlanner'
+import MissionLibrary, { type LoadedPlan } from '@/components/mission/MissionLibrary'
+import AltitudeProfile from '@/components/mission/AltitudeProfile'
+import { AirspaceStrip, PermitRequestDialog, PermitsPanel } from '@/components/mission/Airspace'
+import { useAccess, useActiveWorkspace } from '@/hooks/useAccess'
+import { fromWire, planningAccess, type Permit } from '@/lib/planning'
 import { getSocket } from '@/lib/socket'
 import { cn } from '@/lib/utils'
 import {
@@ -24,7 +30,7 @@ import {
   Route, Clock, ArrowUpDown, Gauge, Box, Square, Waves,
   PlayCircle, PauseCircle, Check, AlertTriangle, Battery, Wind,
   Navigation, Home, Loader2, WifiOff,
-  Compass, Crosshair, ChevronDown,
+  Compass, Crosshair, ChevronDown, FolderOpen, Eye, LineChart,
 } from 'lucide-react'
 
 // Leaflet accesses `window` - no SSR
@@ -128,6 +134,25 @@ export default function MissionPage() {
   const setDefaultSpd    = useMissionStore(s => s.setDefaultSpeed)
   const getRtlWaypoint   = useMissionStore(s => s.getRtlWaypoint)
   const { connectTelemetry, sendAction } = useDrone()
+
+  // ── Whose plans, and what this account may do with them ───────────────
+  // (docs/ACCESS_MODEL.md 8b). A customer's live session belongs to one
+  // workspace; staff sessions land on HYRAK. Viewers get read-only plans.
+  const { isCustomer } = useAccess()
+  const { workspace: activeWorkspace } = useActiveWorkspace()
+  const liveSession  = useDroneStore(s => s.session)
+  const planWorkspaceId = liveSession?.workspace_id ?? (isCustomer ? activeWorkspace?.id ?? null : null)
+  const { canPlan, canFly } = planningAccess(activeWorkspace, isCustomer ? liveSession?.perms ?? null : null)
+  const readOnly = !canPlan
+  const boundDrone = liveSession?.drone ?? null
+  const [loadedPlan, setLoadedPlan] = useState<LoadedPlan | null>(null)
+  const [showLibrary, setShowLibrary] = useState(false)
+  const [showPermitList, setShowPermitList] = useState(false)
+  const [showProfile, setShowProfile] = useState(false)
+  // The permit request dialog: open with the refusal that prompted it (if
+  // any) and the exact waypoints it is for.
+  const [permitAsk, setPermitAsk] = useState<{ reason: string | null; path: UploadWp[] } | null>(null)
+  const [airspaceNonce, setAirspaceNonce] = useState(0)
   const telStatus              = useDroneStore(s => s.telemetryStatus)
   const telemetry              = useDroneStore(s => s.telemetry)
   const swarmEnabled           = useSwarmStore(s => s.enabled)
@@ -220,8 +245,8 @@ export default function MissionPage() {
       setTimeout(() => setUploadError(null), 7000)
       if (r.ok) socket.emit('list_my_permits', permitScope())
     }
-    const onMyPermits = (d: { permits: MyPermit[] }) =>
-      setApprovedPermits((d.permits ?? []).filter(p => p.status === 'approved'))
+    const onMyPermits = (d: { permits: (MyPermit & { in_window?: boolean })[] }) =>
+      setApprovedPermits((d.permits ?? []).filter(p => p.status === 'approved' && p.in_window !== false))
     socket.on('permit_result', onPermitResult)
     socket.on('my_permits', onMyPermits)
     return () => {
@@ -238,8 +263,10 @@ export default function MissionPage() {
     setPermitsLinked(telStatus === 'connected')
     if (telStatus !== 'connected') setApprovedPermits([])
   }
+  // Socket permits are the staff fleet's (swarm mode); a single drone's
+  // permits go through REST (PermitsPanel), customers' included.
   useEffect(() => {
-    if (telStatus !== 'connected') return
+    if (telStatus !== 'connected' || !swarmEnabled) return
     getSocket().emit('list_my_permits', permitScope())
     const t = setTimeout(() => getSocket().emit('list_my_permits', permitScope()), 4000)
     return () => clearTimeout(t)
@@ -272,7 +299,18 @@ export default function MissionPage() {
     // their results here too (for the active drone) but run their own dialogs.
     const pageInitiated = pendingUploadRef.current !== null
 
-    // Red-zone block with a permit path: offer to apply for permission
+    // Red-zone block with a permit path: offer to apply for permission.
+    // A single drone asks over REST with a time window (the dialog); the
+    // staff fleet keeps its socket request.
+    if (missionUploadResult.blocked === 'red' && missionUploadResult.can_request
+        && lastUploadRef.current && pageInitiated && !useSwarmStore.getState().enabled) {
+      const msg = missionUploadResult.msg
+      setMissionUploadResult(null)
+      pendingUploadRef.current = null
+      if (canPlan) setPermitAsk({ reason: msg, path: lastUploadRef.current })
+      else setUploadError(`${msg}. Ask a pilot of this workspace to request a permit.`)
+      return
+    }
     if (missionUploadResult.blocked === 'red' && missionUploadResult.can_request
         && lastUploadRef.current && pageInitiated) {
       const msg = missionUploadResult.msg
@@ -326,7 +364,7 @@ export default function MissionPage() {
     const t = setTimeout(() => setMissionUploadResult(null),
       missionUploadResult.blocked === 'red' ? 7000 : 4000)
     return () => clearTimeout(t)
-  }, [missionUploadResult, setMissionUploadResult, terrainFollow, markPlanUploaded, permitScope])
+  }, [missionUploadResult, setMissionUploadResult, terrainFollow, markPlanUploaded, permitScope, canPlan])
 
   // wasMission: tracks whether drone has entered MISSION mode this session.
   // Reset when waypoints change so a re-uploaded mission shows "Start" not "Resume".
@@ -572,6 +610,17 @@ export default function MissionPage() {
     // wrote the frame from before the toggle.
   }, [waypoints, terrainFollow])
 
+  // The plan exactly as it would be uploaded (turn radii expanded): what the
+  // airspace check and a permit request are about.
+  const uploadPath = useMemo(() => expandWaypointsWithTurnRadius(waypoints, autoHeading),
+    [waypoints, autoHeading])
+
+  const loadPermitPlan = useCallback((p: Permit) => {
+    importWaypoints(fromWire(p.waypoints ?? [], `permit_${p.id.slice(0, 8)}`))
+    setLoadedPlan(null)
+    setShowPermitList(false)
+  }, [importWaypoints])
+
   // ── Upload to drone ───────────────────────────────────────────────────
   const handleUpload = useCallback(() => {
     if (waypoints.length === 0) return
@@ -616,13 +665,13 @@ export default function MissionPage() {
       style={{ borderColor: 'hsl(var(--app-border))' }}>
 
       {/* Full-bleed map - 2D or 3D */}
-      {mapView === '3d' ? <MissionMap3D /> : <MissionMap />}
+      {mapView === '3d' ? <MissionMap3D readOnly={readOnly} /> : <MissionMap readOnly={readOnly} />}
 
       {/* Hidden file input */}
       <input ref={fileRef} type="file" accept=".plan,.json" className="hidden" onChange={onFileChange} />
 
       {/* ── Fleet mission console (swarm mode, general missions) ──────── */}
-      <FleetMissionPanel leftOffset={leftOpen ? 'calc(224px + 24px)' : '12px'} />
+      {!isCustomer && <FleetMissionPanel leftOffset={leftOpen ? 'calc(224px + 24px)' : '12px'} />}
 
       {/* ── Upload error toast (not connected etc.) ──────────────────── */}
       {uploadError && (
@@ -640,8 +689,8 @@ export default function MissionPage() {
         </div>
       )}
 
-      {/* ── Obstacle avoidance (same panel as the Fly tab) ─────────────── */}
-      <div className="absolute bottom-16 left-3 z-[2400] font-mono">
+      {/* ── Obstacle avoidance (same panel as the Fly tab; staff only) ──── */}
+      {!isCustomer && <div className="absolute bottom-16 left-3 z-[2400] font-mono">
         {showAvoidPanel && (
           <div className="mb-2 w-72 rounded-xl border p-3"
             style={{ background: 'rgba(17, 19, 24, .94)', backdropFilter: 'blur(12px)', borderColor: 'rgba(255, 255, 255, .08)' }}>
@@ -654,7 +703,53 @@ export default function MissionPage() {
           title="Obstacle avoidance: detection, steering, response, tuning">
           <ShieldCheck size={12} /> AVOIDANCE
         </button>
-      </div>
+      </div>}
+
+      {/* ── Airspace check + altitude profile (above the stats bar) ─────── */}
+      {!(rtlReturning && swarmEnabled) && (
+        <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[1100] flex flex-col items-center gap-2 w-[min(640px,calc(100%-32px))]">
+          {showProfile && (
+            <Panel className="w-full px-3 py-2">
+              <AltitudeProfile waypoints={waypoints} />
+            </Panel>
+          )}
+          {!swarmEnabled && (
+            <AirspaceStrip workspaceId={planWorkspaceId} droneId={boundDrone?.id ?? null}
+              path={uploadPath} canPlan={canPlan} nonce={airspaceNonce}
+              onRequest={() => setPermitAsk({ reason: null, path: uploadPath })}
+              onShowPermits={() => { setShowLibrary(false); setShowPermitList(v => !v) }} />
+          )}
+        </div>
+      )}
+
+      {/* ── Saved missions / permits popovers (under the toolbar) ─────── */}
+      {(showLibrary || showPermitList) && (
+        <div className={`absolute ${toastTop} left-1/2 -translate-x-1/2 z-[2600]`}>
+          {showLibrary && (
+            <MissionLibrary workspaceId={planWorkspaceId} canPlan={canPlan}
+              droneId={boundDrone?.id ?? null} loaded={loadedPlan} onLoaded={setLoadedPlan}
+              onClose={() => setShowLibrary(false)} />
+          )}
+          {showPermitList && (
+            <PermitsPanel workspaceId={planWorkspaceId} canPlan={canPlan} nonce={airspaceNonce}
+              onLoad={loadPermitPlan} onChanged={() => setAirspaceNonce(n => n + 1)}
+              onClose={() => setShowPermitList(false)} />
+          )}
+        </div>
+      )}
+
+      {permitAsk && (
+        <PermitRequestDialog workspaceId={planWorkspaceId} droneId={boundDrone?.id ?? null}
+          droneName={boundDrone?.name ?? null} path={permitAsk.path} missionId={loadedPlan?.id ?? null}
+          reason={permitAsk.reason}
+          onClose={() => setPermitAsk(null)}
+          onSent={() => {
+            setPermitAsk(null)
+            setAirspaceNonce(n => n + 1)
+            setShowLibrary(false)
+            setShowPermitList(true)
+          }} />
+      )}
 
       {/* ── Approved red-zone mission profiles ─────────────────────────── */}
       {approvedPermits.length > 0 && (
@@ -887,8 +982,16 @@ export default function MissionPage() {
       {/* ── Top centre toolbar - shifts down when mission status strip is visible ── */}
       <div className={`absolute ${toolbarTop} z-[2000] flex items-center gap-2 flex-wrap justify-center transition-all duration-200`}
         style={{ left: leftOpen ? 'calc(224px + 24px)' : '24px', right: rightOpen ? 'calc(224px + 24px)' : '24px' }}>
+        {readOnly && (
+          <Panel className="flex items-center gap-1.5 px-3 py-2" style={{ borderColor: 'rgba(251,191,36,.35)' }}>
+            <Eye size={12} color="#fbbf24" />
+            <span className="text-[10px] font-mono font-bold" style={{ color: '#fcd34d' }}>View only</span>
+            <span className="text-[9px] font-mono text-gray-400">your role cannot change plans</span>
+          </Panel>
+        )}
+
         {/* Default altitude & speed */}
-        <Panel className="flex items-center gap-3 px-3 py-2">
+        {!readOnly && <Panel className="flex items-center gap-3 px-3 py-2">
           <label className="flex items-center gap-1.5">
             <ArrowUpDown size={12} color="#9ca3af" />
             <span className="text-[9px] font-mono font-bold text-gray-400">ALT</span>
@@ -912,7 +1015,7 @@ export default function MissionPage() {
             />
             <span className="text-[9px] font-mono text-gray-500">m/s</span>
           </label>
-        </Panel>
+        </Panel>}
 
         {/* 2D / 3D toggle */}
         <Panel className="flex items-center rounded-lg overflow-hidden p-0">
@@ -1078,6 +1181,14 @@ export default function MissionPage() {
             <div className="w-1.5 h-1.5 rounded-full" style={{ background: activeDrone.connected ? activeDrone.color : '#71717a' }} />
             {activeDrone.name}
           </div>
+        ) : !isConnected && isCustomer ? (
+          // Customers connect their own drone (radio / desktop relay) from
+          // the link controls on the Fly / Command view.
+          <Link href="/command"
+            className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-[10px] font-mono font-bold"
+            style={{ background: 'rgba(17,19,24,.94)', border: '1px solid rgba(255,255,255,.1)', color: '#d1d5db' }}>
+            <WifiOff size={11} /> No drone connected - connect one
+          </Link>
         ) : !isConnected ? (
           <button
             onClick={() => telStatus !== 'connecting' && connectTelemetry(sitlAddress)}
@@ -1098,11 +1209,13 @@ export default function MissionPage() {
 
         {/* Actions */}
         <Panel className="flex items-center gap-1 px-2 py-1.5">
-          <ToolBtn icon={<FileUp size={13} />}  label="Import" onClick={handleImport} />
+          <ToolBtn icon={<FolderOpen size={13} />} label={loadedPlan ? `Plans: ${loadedPlan.name.slice(0, 16)}` : 'Plans'}
+            onClick={() => { setShowPermitList(false); setShowLibrary(v => !v) }} />
+          {!readOnly && <ToolBtn icon={<FileUp size={13} />}  label="Import" onClick={handleImport} />}
           <ToolBtn icon={<FileDown size={13} />} label="Export" onClick={handleExport} disabled={waypoints.length === 0} />
           <div className="w-px h-5 mx-0.5 bg-gray-700" />
           {/* Set takeoff at drone's current position */}
-          {isConnected && telemetry?.position && telemetry.position.latitude_deg !== 0 && (
+          {!readOnly && isConnected && telemetry?.position && telemetry.position.latitude_deg !== 0 && (
             <ToolBtn
               icon={<Navigation size={13} />}
               label="Takeoff Here"
@@ -1122,7 +1235,7 @@ export default function MissionPage() {
               RTL point set in the waypoint panel (defaults to takeoff position).
               Fleet mode: every ticked drone flies to ITS OWN home instead - a
               shared point would stack the whole fleet on one spot. */}
-          {isConnected && (
+          {isConnected && canFly && (
             <ToolBtn
               icon={<Home size={13} />}
               label="RTL"
@@ -1152,7 +1265,7 @@ export default function MissionPage() {
             />
           )}
           <div className="w-px h-5 mx-0.5 bg-gray-700" />
-          <div className="relative">
+          {canFly && <div className="relative">
             <ToolBtn
               icon={isUploading
                 ? <Loader2 size={13} className="animate-spin" />
@@ -1168,8 +1281,9 @@ export default function MissionPage() {
                 style={{ background: '#4ade80', borderColor: '#0a0a0a' }}
               />
             )}
-          </div>
-          <ToolBtn
+          </div>}
+          {/* Pause stays for anyone holding the link (a safety action). */}
+          {(canFly || missionExecuting) && <ToolBtn
             icon={missionExecuting ? <PauseCircle size={13} /> : <PlayCircle size={13} />}
             label={missionExecuting ? 'Pause' : missionPaused ? 'Resume' : 'Start'}
             onClick={() => {
@@ -1182,12 +1296,12 @@ export default function MissionPage() {
             }}
             disabled={waypoints.length === 0 || !isConnected}
             accent
-          />
-          <div className="w-px h-5 mx-0.5 bg-gray-700" />
-          <ToolBtn
-            icon={<Trash2 size={13} />} label="Clear" onClick={clearMission}
+          />}
+          {!readOnly && <div className="w-px h-5 mx-0.5 bg-gray-700" />}
+          {!readOnly && <ToolBtn
+            icon={<Trash2 size={13} />} label="Clear" onClick={() => { clearMission(); setLoadedPlan(null) }}
             disabled={waypoints.length === 0} danger
-          />
+          />}
         </Panel>
       </div>
 
@@ -1216,8 +1330,13 @@ export default function MissionPage() {
                 </span>
               </div>
             </div>
+            {loadedPlan && (
+              <p className="px-3 -mt-1 pb-1 text-[9px] font-mono truncate" style={{ color: '#93c5fd' }} title="Opened from the saved missions">
+                {loadedPlan.name}
+              </p>
+            )}
             <div className="flex-1 overflow-y-auto px-1.5 pb-2">
-              <WaypointPanel />
+              <WaypointPanel readOnly={readOnly} />
             </div>
             {/* Settings section */}
             <div className="px-3 py-2 border-t" style={{ borderColor: 'rgba(255,255,255,.08)' }}>
@@ -1243,9 +1362,9 @@ export default function MissionPage() {
               </div>
             </div>
             {/* Survey planner at bottom of left panel */}
-            <div className="px-2 pb-2 pt-1 border-t" style={{ borderColor: 'rgba(255,255,255,.08)' }}>
+            {!readOnly && <div className="px-2 pb-2 pt-1 border-t" style={{ borderColor: 'rgba(255,255,255,.08)' }}>
               <SurveyPlanner />
-            </div>
+            </div>}
           </Panel>
         )}
       </div>
@@ -1276,7 +1395,10 @@ export default function MissionPage() {
               </p>
             </div>
             <div className="flex-1 overflow-y-auto px-2 pb-3">
-              <WaypointEditor />
+              {/* Viewers inspect a waypoint; every field is disabled. */}
+              <fieldset disabled={readOnly} className="min-w-0 border-0 p-0 m-0">
+                <WaypointEditor />
+              </fieldset>
             </div>
           </Panel>
         )}
@@ -1499,6 +1621,13 @@ export default function MissionPage() {
 
         <div className="w-px h-6 bg-gray-700" />
 
+        <button onClick={() => setShowProfile(v => !v)} title="Altitude profile"
+          aria-pressed={showProfile}
+          className="flex items-center gap-1 px-2 py-1 rounded-md text-[9px] font-mono font-bold"
+          style={{ background: showProfile ? 'rgba(59,130,246,.25)' : 'rgba(255,255,255,.06)', color: showProfile ? '#93c5fd' : '#9ca3af' }}>
+          <LineChart size={11} /> Profile
+        </button>
+        <div className="w-px h-6 bg-gray-700" />
         <Stat icon={<MapIcon size={12} />}      label="Waypoints" value={String(missionStats.waypointCount)} />
         <div className="w-px h-6 bg-gray-700" />
         <Stat icon={<Route size={12} />}        label="Distance"  value={fmtDist(missionStats.totalDistanceM)} />
