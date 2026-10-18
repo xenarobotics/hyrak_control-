@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic import Field, SecretStr
 from functools import lru_cache
 from pathlib import Path
 import torch
@@ -456,10 +456,18 @@ class Settings(BaseSettings):
     custom_models_inspect_timeout_s: float = Field(default=120.0)
     custom_models_test_timeout_s: float = Field(default=240.0)
     custom_models_parallel_checks: int = Field(default=1)
-    # Hugging Face: public repos only, no token is ever sent.
+    # Hugging Face: public repos only.
     custom_models_hf_endpoint: str = Field(default="https://huggingface.co")
     custom_models_hf_timeout_s: float = Field(default=20.0)
     custom_models_hf_download_timeout_s: float = Field(default=900.0)
+    # Optional Hugging Face token (HF_TOKEN in .env) for higher rate limits on
+    # Hub calls. Empty by default. Public repos only either way; it is a
+    # SecretStr so it never shows in a log or a settings dump.
+    hf_token: SecretStr = Field(default=SecretStr(""), alias="HF_TOKEN")
+    # Model browser search: answers cached per query, uncached searches
+    # limited per user.
+    custom_models_hf_search_cache_s: float = Field(default=600.0)
+    custom_models_hf_searches_per_minute: int = Field(default=20)
     # Runners: one process per running model and workspace.
     custom_models_use_gpu: bool = Field(default=True)
     custom_models_max_runners: int = Field(default=4)

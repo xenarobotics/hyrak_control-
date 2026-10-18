@@ -178,6 +178,8 @@ def create_app() -> socketio.ASGIApp:
         sim_manager.get_manager().start_background()
         # Custom models: re-run checks a restart interrupted.
         from app.models_custom import service as model_service
+        from app.models_custom import browse as model_browse
+        model_browse.load_recommended()
         try:
             await model_service.recover()
         except Exception as e:

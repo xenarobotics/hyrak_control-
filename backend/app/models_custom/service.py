@@ -39,7 +39,7 @@ from app.auth import audit, perms
 from app.auth import service as auth
 from app.auth.store import PLATFORM_WORKSPACE_ID
 from app.config import get_settings
-from app.models_custom import catalogue, checks, hf, notify, runtime, storage
+from app.models_custom import browse, catalogue, checks, hf, notify, runtime, storage
 from app.models_custom import store as model_store
 from app.models_custom.errors import ModelFailure, check_filename, describe
 from app.models_custom.store import ModelRecord, VersionRecord
@@ -488,6 +488,34 @@ async def create_hf(actor, *, workspace_id: Optional[str], repo_text: str,
     _steps[rec.id] = "downloading"         # the check pushes it
     _start_check(rec.id, n, fetch=fetch)
     return await _card(rec)
+
+
+# ── Browsing (recommended list and Hugging Face search) ─────────────────
+# Open to everyone who can view the workspace, premium or not, so people
+# see what they would get; adding still goes through _may_add.
+
+async def _browse_context(actor, workspace_id: Optional[str]):
+    ms, tree, ws = await _workspace(actor, workspace_id)
+    added: dict = {}
+    for rec in await model_store.read_store().list_models(ws.id):
+        if rec.source == "huggingface" and rec.hf_repo:
+            added.setdefault((rec.hf_repo, rec.hf_file), rec.id)
+            added.setdefault((rec.hf_repo, None), rec.id)
+    head = {"workspace_id": ws.id, "premium": entitlement(actor, ms, ws),
+            "can_manage": _can(actor, ms, ws, perms.MODELS_MANAGE)}
+    return head, added
+
+
+async def hf_recommended(actor, workspace_id: Optional[str]) -> dict:
+    head, added = await _browse_context(actor, workspace_id)
+    return {**head, "categories": browse.grouped(browse.recommended(), added)}
+
+
+async def hf_search(actor, workspace_id: Optional[str], q: str, task: str, page: int) -> dict:
+    head, added = await _browse_context(actor, workspace_id)
+    answer = await browse.search(actor.id, q, task, page)
+    results = [{**c, "added": added.get((c["repo"], None))} for c in answer["results"]]
+    return {**head, **answer, "results": results}
 
 
 # ── The check ─────────────────────────────────────────────────────────────

@@ -1,13 +1,14 @@
 'use client'
 
 // The AI tab's model library (Pattern 1, List / Index): heading, one line,
-// Add model in the header; a filter (All, HYRAK models, Our models) and a
+// Add model in the header (Browse models for roles that cannot add; both
+// open the same panel on HYRAK's recommendations); a filter (All, HYRAK models, Our models) and a
 // search in the toolbar; then one framed list of model cards. Each card has
 // an icon, a plain name, one line, a status chip and Run. Clicking a model
 // of ours (or a catalogue model) opens its detail slide-over.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, Eye, Lock, Play, Plus, Search, Square, Upload, Wand2, CheckCircle2 } from 'lucide-react'
+import { ChevronRight, Compass, Eye, Play, Plus, Search, Square, Upload, Wand2, CheckCircle2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { LibraryEntry } from './useModelLibrary'
 import { css as s, StatusChip, Callout } from './ui'
@@ -85,7 +86,7 @@ export function ModelLibrary(p: LibraryProps) {
             {p.loading && ours.length === 0 ? <CardSkeleton /> : ours.map(card)}
             {!p.loading && !p.loadError && ours.length === 0 && !q && (
                 <OursEmpty compact={filter === 'all'} canManage={p.canManage}
-                    premiumEnabled={p.premiumEnabled} onAdd={p.onAdd} />
+                    onAdd={p.onAdd} />
             )}
         </>
     )
@@ -98,11 +99,15 @@ export function ModelLibrary(p: LibraryProps) {
                         <h2 id="cm-lib-title" className={s.title}>Models</h2>
                         <p className={s.muted}>Pick a model and press Run. It watches the live video and marks what it finds.</p>
                     </div>
-                    {showAdd && (
-                        <button type="button" className={cn(s.btn, p.premiumEnabled && s.primary)} onClick={p.onAdd}
-                            title={p.premiumEnabled ? 'Add a model of your own' : 'Custom models are a premium feature'}>
-                            {p.premiumEnabled ? <Plus size={14} aria-hidden /> : <Lock size={13} aria-hidden />}
-                            Add model
+                    {showAdd ? (
+                        <button type="button" className={cn(s.btn, s.primary)} onClick={p.onAdd}
+                            title="Pick a recommended model, search Hugging Face, or upload your own">
+                            <Plus size={14} aria-hidden /> Add model
+                        </button>
+                    ) : (
+                        <button type="button" className={s.btn} onClick={p.onAdd}
+                            title="See the models HYRAK recommends and search Hugging Face">
+                            <Compass size={14} aria-hidden /> Browse models
                         </button>
                     )}
                 </div>
@@ -232,8 +237,8 @@ function CardSkeleton() {
 
 /** "Our models" with nothing in it: one sentence, the action, and three
  *  steps in text and icons. In the All view a slimmer version. */
-function OursEmpty({ compact, canManage, premiumEnabled, onAdd }: {
-    compact: boolean; canManage: boolean; premiumEnabled: boolean; onAdd: () => void
+function OursEmpty({ compact, canManage, onAdd }: {
+    compact: boolean; canManage: boolean; onAdd: () => void
 }) {
     return (
         <div className={cn(s.inset, s.empty)} style={compact ? { padding: '14px 14px' } : undefined}>
@@ -243,18 +248,19 @@ function OursEmpty({ compact, canManage, premiumEnabled, onAdd }: {
             </p>
             {!compact && (
                 <ol className={s.howto} aria-label="How adding a model works">
-                    <li><span><Upload size={14} aria-hidden /></span>Drop an .onnx file or paste a Hugging Face link</li>
+                    <li><span><Upload size={14} aria-hidden /></span>Pick a recommended model, search Hugging Face, or drop an .onnx file</li>
                     <li><span><Wand2 size={14} aria-hidden /></span>Check what it finds and give it a name</li>
                     <li><span><CheckCircle2 size={14} aria-hidden /></span>HYRAK tests it, then it is ready to run</li>
                 </ol>
             )}
             {canManage ? (
-                <button type="button" className={cn(s.btn, premiumEnabled && s.primary)} onClick={onAdd}>
-                    {premiumEnabled ? <Plus size={14} aria-hidden /> : <Lock size={13} aria-hidden />}
-                    Add your first model
+                <button type="button" className={cn(s.btn, s.primary)} onClick={onAdd}>
+                    <Plus size={14} aria-hidden /> Add your first model
                 </button>
             ) : (
-                <p className={s.muted}>Ask a workspace admin to add one.</p>
+                <button type="button" className={s.btn} onClick={onAdd}>
+                    <Compass size={14} aria-hidden /> Browse models
+                </button>
             )}
         </div>
     )
