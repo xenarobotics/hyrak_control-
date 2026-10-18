@@ -42,7 +42,7 @@ from app.models_custom.errors import ModelFailure
 
 
 @pytest.fixture
-def env(live, tmp_path, monkeypatch):
+def env(live, tmp_path, monkeypatch):  # noqa: F811
     s = get_settings()
     monkeypatch.setattr(s, "hyrak_data_dir", tmp_path / "data")
     monkeypatch.setattr(s, "custom_models_use_gpu", False)
@@ -107,7 +107,8 @@ async def test_library_shape_and_premium_lock(env):
     assert "object-detection" in ids and "manual-control" not in ids
     assert "3d-reconstruction" not in ids                      # staff-only mode
     obj = next(m for m in lib["hyrak"] if m["id"] == "object-detection")
-    assert obj == {"id": "object-detection", "kind": "builtin", "run_mode": "object-detection",
+    assert obj == {"id": "object-detection", "kind": "builtin", "mode": "object-detection",
+                   "run_mode": "object-detection",
                    "name": "Objects", "description": obj["description"], "icon": "scan-search",
                    "task": "detect", "status": "ready", "runnable": True, "staff_only": False}
     assert lib["workspace"] == [] and lib["can_manage"] and lib["can_run"] and not lib["can_publish"]
@@ -190,10 +191,11 @@ async def test_upload_checks_and_becomes_ready(env, onnx_files):
     assert m["kind"] == "uploaded" and m["runnable"] is False
     await service.wait_for_checks()
     steps = [p["step"] for p in pushes(env, m["id"])]
-    assert steps == ["received", "inspecting", "testing", "ready"]
+    assert steps == ["received", "inspecting", "testing", "done"]
+    assert [p["progress"] for p in pushes(env, m["id"])] == [0.1, 0.4, 0.7, 1.0]
     last = pushes(env, m["id"])[-1]
-    assert set(last) == {"id", "workspace_id", "version", "status", "step", "error", "hint",
-                         "detail", "current_version"}
+    assert set(last) == {"id", "workspace_id", "version", "status", "step", "progress", "error",
+                         "hint", "detail", "current_version"}
     assert last["status"] == "ready" and last["version"] == 1 and last["current_version"] == 1
     # Only the model's workspace hears about it.
     to = {t for e, d, t in env.rec.emitted if e == "model_status" and "id" in d}
@@ -238,7 +240,7 @@ async def test_a_bad_model_says_what_to_do_and_a_bad_version_keeps_the_old(env, 
     await service.wait_for_checks()
     m = ok(await env.api.get(f"/api/models/{good['id']}", headers=hdr(w.olga[1])))["model"]
     assert m["status"] == "failed" and m["current_version"] == 1 and m["runnable"]
-    assert m["latest_version"] == 2 and [v["status"] for v in m["versions"]] == ["ready", "failed"]
+    assert m["latest_version"] == 2 and [v["status"] for v in m["versions"]] == ["failed", "ready"]
     # A good v3 takes over.
     ok(await upload(env, w.olga[1], w.iith["id"], onnx_files.detect, model_id=good["id"]))
     await service.wait_for_checks()
@@ -283,15 +285,18 @@ async def test_patch_retest_publish_delete(env, onnx_files):
     cat = [c for c in lib["hyrak"] if c["kind"] == "catalogue"]
     assert [c["id"] for c in cat] == [m["id"]] and lib["workspace"] == []
     assert ok(await env.api.get(url, headers=hdr(sky_owner)))["model"]["kind"] == "catalogue"
+    assert lib["workspace"] == []
     assert (await env.api.get(f"{url}/preview", headers=hdr(sky_owner))).status_code == 200
     assert (await env.api.patch(url, headers=hdr(sky_owner), json={"name": "x"})).status_code == 404
     lib = ok(await env.api.get(f"/api/models?workspace_id={w.iith['id']}", headers=hdr(w.olga[1])))
     assert [c["kind"] for c in lib["hyrak"]].count("catalogue") == 0     # not twice
     assert lib["workspace"][0]["published"] is True
 
-    # Delete: rows and files go.
+    # Delete: a published model needs a founder; then rows and files go.
     assert (await env.api.delete(url, headers=hdr(w.pat[1]))).status_code == 403
-    ok(await env.api.delete(url, headers=hdr(w.olga[1])))
+    r = await env.api.delete(url, headers=hdr(w.olga[1]))
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "published_locked"
+    ok(await env.api.delete(url, headers=hdr(w.founder[1])))
     assert (await env.api.get(url, headers=hdr(w.olga[1]))).status_code == 404
     assert not storage.model_dir(w.iith["id"], m["id"]).exists()
 
@@ -356,7 +361,7 @@ async def test_hf_inspect_and_import(env, onnx_files, monkeypatch):
     assert r["repo"] == "acme/cracks" and r["sha"] == SHA and r["ok"]
     assert [f["path"] for f in r["onnx_files"]] == ["onnx/model.onnx", "onnx/model_fp16.onnx"]
     assert r["suggested_file"] == "onnx/model.onnx" and r["labels"] == ["person", "crack", "car"]
-    assert r["license"] == "apache-2.0"
+    assert r["license"] == "apache-2.0" and r["task"] == "detect"
     # A customer without the feature cannot use it as a fetcher.
     assert (await env.api.get("/api/models/huggingface/inspect?repo=acme/cracks",
                               headers=hdr(w.pat[1]))).status_code == 403
@@ -371,7 +376,7 @@ async def test_hf_inspect_and_import(env, onnx_files, monkeypatch):
     m = ok(await env.api.get(f"/api/models/{m['id']}", headers=hdr(w.olga[1])))["model"]
     assert m["status"] == "ready", m
     assert [p["step"] for p in pushes(env, m["id"])] == ["downloading", "inspecting", "testing",
-                                                         "ready"]
+                                                         "done"]
     fetched = sorted(u.split(f"/resolve/{SHA}/", 1)[1] for u in calls)
     assert fetched == ["config.json", "onnx/model_fp16.onnx"]        # nothing else
     assert all(SHA in u for u in calls)                              # pinned to the commit
@@ -495,6 +500,7 @@ async def test_analyzer_results_shape_alerts_and_shared_runners(env, onnx_files)
     assert meta["objects"] == {"crack": 1} and meta["total_count"] == 1 and meta["person_count"] == 0
     assert meta["model_id"] == m["id"] and meta["task"] == "detect" and meta["model_version"] == 1
     assert meta["alert"]["label"] == "crack" and meta["alert"]["score"] == 0.9
+    assert meta["alert_hits"] == [{"label": "crack", "score": 0.9}]
     assert meta["_pending_model_alerts"] and meta["_pending_admin_alerts"][0]["source"] == "custom_model"
     _, meta2 = await asyncio.to_thread(a._analyze_frame_blocking, frame)
     assert "alert" not in meta2                                          # cooldown
@@ -537,6 +543,7 @@ async def test_classifier_results_and_busy_limit(env, onnx_files, monkeypatch):
     _, meta = await asyncio.to_thread(a._analyze_frame_blocking, np.zeros((240, 320, 3), np.uint8))
     assert meta["task"] == "classify" and meta["top_class"] == "crack"
     assert meta["classes"][0] == {"name": "crack", "score": pytest.approx(0.7)}
+    assert meta["predictions"] == meta["classes"]
     assert meta["detections"] == [] and meta["objects"] == {}
     monkeypatch.setattr(get_settings(), "custom_models_max_runners", 1)
     other = await service.resolve_run(sess(w.iith["id"]), m["id"])
@@ -556,3 +563,103 @@ async def test_a_model_that_dies_on_load_fails_cleanly(env, onnx_files, tmp_path
     while runtime.pool().get(spec.key) is not None and time.monotonic() - t0 < 2:
         await asyncio.sleep(0.05)
     assert runtime.pool().get(spec.key) is None                     # nothing left holding it
+
+
+# ── the catalogue: reduced cards, pinned versions ────────────────────────
+
+CATALOGUE_KEYS = {"id", "kind", "run_mode", "name", "description", "icon", "task", "status",
+                  "runnable", "published", "labels", "threshold", "version"}
+
+
+async def sky_owner(env, w, name="skyowner"):
+    _, token = await account(name)
+    ok(env.cl.post(f"/api/workspaces/{w.sky['id']}/members", headers=hdr(w.founder[1]),
+                   json={"login": name, "role": "owner"}))
+    return token
+
+
+async def test_catalogue_readers_get_a_reduced_card(env, onnx_files):
+    w = await world(env)
+    m = await ready_model(env, w, onnx_files.detect)
+    # A failed v2 exists too: it must not show through.
+    ok(await upload(env, w.olga[1], w.iith["id"], onnx_files.custom, model_id=m["id"]))
+    await service.wait_for_checks()
+    ok(await env.api.post(f"/api/models/{m['id']}/publish", headers=hdr(w.founder[1])))
+    sky = await sky_owner(env, w)
+    lib = ok(await env.api.get(f"/api/models?workspace_id={w.sky['id']}", headers=hdr(sky)))
+    card = next(c for c in lib["hyrak"] if c["kind"] == "catalogue")
+    got = ok(await env.api.get(f"/api/models/{m['id']}", headers=hdr(sky)))["model"]
+    for c in (card, got):
+        assert set(c) == CATALOGUE_KEYS
+        assert set(c["version"]) == {"n", "latency_ms", "fps", "gpu_mem_mb", "provider",
+                                     "input_shape", "preview"}
+        assert c["version"]["n"] == 1 and c["version"]["preview"] is True
+        assert c["labels"] == ["person", "crack", "car"] and c["task"] == "detect"
+        text = repr(c)
+        for leak in (w.iith["id"], w.olga[0].id, "custom_ops", "com.acme", "sha256"):
+            assert leak not in text
+    assert (await env.api.get(f"/api/models/{m['id']}/preview", headers=hdr(sky))).status_code == 200
+    r = await env.api.get(f"/api/models/{m['id']}/preview?version=2", headers=hdr(sky))
+    assert r.status_code == 404
+    # The owner still sees the whole card, with the pin.
+    own = ok(await env.api.get(f"/api/models/{m['id']}", headers=hdr(w.olga[1])))["model"]
+    assert own["published_version"] == 1 and len(own["versions"]) == 2 and own["details"]
+
+
+async def test_the_catalogue_is_pinned_to_what_the_founder_published(env, onnx_files, tmp_path):
+    w = await world(env)
+    m = await ready_model(env, w, onnx_files.detect)
+    url = f"/api/models/{m['id']}"
+    r = await env.api.post(f"{url}/publish", headers=hdr(w.founder[1]), json={"version": 7})
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "not_ready"
+    ok(await env.api.post(f"{url}/publish", headers=hdr(w.founder[1])))
+    sky = await sky_owner(env, w)
+
+    # The workspace changes its own copy: name, labels, threshold, a new
+    # version with other class names, a retest.
+    ok(await env.api.patch(url, headers=hdr(w.olga[1]), json={
+        "name": "Renamed", "labels": ["x", "y", "z"], "threshold": 0.8}))
+    other = make_model(tmp_path / "v2.onnx", {"output0": yolov8_output()},
+                       metadata=ultra_meta(names="{0: 'a', 1: 'b', 2: 'c'}"))
+    ok(await upload(env, w.olga[1], w.iith["id"], other, model_id=m["id"]))
+    await service.wait_for_checks()
+    ok(await env.api.post(f"{url}/retest", headers=hdr(w.olga[1])))
+    await service.wait_for_checks()
+    own = ok(await env.api.get(url, headers=hdr(w.olga[1])))["model"]
+    assert own["current_version"] == 2 and own["name"] == "Renamed" and own["published_version"] == 1
+
+    # Catalogue users see and run exactly what was published.
+    cat = ok(await env.api.get(url, headers=hdr(sky)))["model"]
+    assert cat["name"] == "Crack finder" and cat["labels"] == ["person", "crack", "car"]
+    assert cat["threshold"] == 0.25 and cat["version"]["n"] == 1
+    mode = await service.resolve_run(sess(w.sky["id"]), m["id"])
+    assert mode.spec.version == 1 and mode.spec.labels == ["person", "crack", "car"]
+    assert mode.spec.threshold == 0.25 and mode.spec.alert is None and mode.spec.name == "Crack finder"
+    mine = await service.resolve_run(sess(w.iith["id"]), m["id"])
+    # (the workspace's own label names stick to later versions of its copy)
+    assert mine.spec.version == 2 and mine.spec.labels == ["x", "y", "z"]
+    # A task override in the workspace re-checks its own copy only.
+    ok(await env.api.patch(url, headers=hdr(w.olga[1]), json={"task": "classify"}))
+    await service.wait_for_checks()
+    mode = await service.resolve_run(sess(w.sky["id"]), m["id"])
+    assert mode.spec.spec["task"] == "detect" and mode.spec.version == 1
+
+    # Without the feature the owner runs the catalogue pin, not its copy.
+    await feature(env, w, w.iith["id"], on=False)
+    pinned = await service.resolve_run(sess(w.iith["id"]), m["id"])
+    assert pinned.spec.version == 1 and pinned.spec.labels == ["person", "crack", "car"]
+    await feature(env, w, w.iith["id"], on=True)
+
+    # Only a founder moves the pin (v2 failed its task re-check; set back, it passes).
+    r = await env.api.post(f"{url}/publish", headers=hdr(w.olga[1]), json={"version": 2})
+    assert r.status_code == 403
+    ok(await env.api.patch(url, headers=hdr(w.olga[1]), json={"task": "detect"}))
+    await service.wait_for_checks()
+    ok(await env.api.post(f"{url}/publish", headers=hdr(w.founder[1]), json={"version": 2}))
+    cat = ok(await env.api.get(url, headers=hdr(sky)))["model"]
+    assert cat["version"]["n"] == 2 and cat["name"] == "Renamed" and cat["labels"] == ["x", "y", "z"]
+    # Taking it out of the catalogue hides it again.
+    ok(await env.api.post(f"{url}/publish", headers=hdr(w.founder[1]), json={"published": False}))
+    assert (await env.api.get(url, headers=hdr(sky))).status_code == 404
+    with pytest.raises(ModelFailure):
+        await service.resolve_run(sess(w.sky["id"]), m["id"])

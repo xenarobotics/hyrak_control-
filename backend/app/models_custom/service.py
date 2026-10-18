@@ -9,7 +9,14 @@ memberships, like the workspace routes:
   * listing and reading a workspace's models: `view` on it (else 404);
   * adding, editing, retesting, deleting: `models.manage`, plus the
     workspace's `custom_models` feature for adding (HYRAK staff always);
-  * publishing to the HYRAK catalogue: founders;
+  * publishing to the HYRAK catalogue: founders. Publishing PINS one
+    version: a snapshot of its name, description, task, labels, threshold
+    and inspect spec (`catalogue`), and a copy of its preview, taken when
+    the founder publishes. Other workspaces see a reduced card built only
+    from that snapshot and run exactly that version with that spec. The
+    owning workspace keeps editing, re-uploading and retesting its own
+    copy (its own view only); nothing it does reaches the catalogue until
+    a founder publishes again. Deleting a published model needs a founder;
   * running (resolve_run, from set_analysis_mode): `models.run` on the
     session's workspace, and the model is that workspace's own (feature
     on, or a staff session) or a published catalogue model.
@@ -134,9 +141,13 @@ async def _readable(actor, model_id: str):
     ws = tree.get(rec.workspace_id)
     if ws is not None and _can(actor, ms, ws, perms.VIEW):
         return rec, ms, ws
-    if rec.published and rec.current_version is not None:
+    if _in_catalogue(rec):
         return rec, ms, None
     raise _refuse(**NOT_FOUND)
+
+
+def _in_catalogue(rec: ModelRecord) -> bool:
+    return bool(rec.published and rec.published_version and rec.catalogue)
 
 
 async def _audit(actor, action: str, rec: ModelRecord, ip: str, **detail) -> None:
@@ -196,6 +207,7 @@ def card(rec: ModelRecord, versions: list[VersionRecord], *, kind: Optional[str]
         "error": rec.error or None, "hint": rec.error_hint or None,
         "runnable": rec.current_version is not None,
         "published": rec.published,
+        "published_version": rec.published_version,
         "workspace_id": rec.workspace_id,
         "source": rec.source,
         "hf": ({"repo": rec.hf_repo, "revision": rec.hf_revision, "file": rec.hf_file,
@@ -211,9 +223,30 @@ def card(rec: ModelRecord, versions: list[VersionRecord], *, kind: Optional[str]
         "updated_at": model_store.public_dt(rec.updated_at),
     }
     if full:
-        out["versions"] = [_version_public(v) for v in versions]
+        out["versions"] = [_version_public(v) for v in reversed(versions)]   # newest first
         out["details"] = _details(latest)
     return out
+
+
+def catalogue_card(rec: ModelRecord) -> dict:
+    """What another workspace sees of a published model: only the pinned
+    snapshot. No workspace, author, version history, failures or inspect
+    details."""
+    snap = rec.catalogue or {}
+    latency = snap.get("latency_ms")
+    return {
+        "id": rec.id, "kind": "catalogue", "run_mode": f"custom:{rec.id}",
+        "name": snap.get("name") or rec.name, "description": snap.get("description") or "",
+        "icon": _ICONS.get(snap.get("task"), "box"), "task": snap.get("task") or None,
+        "status": "ready", "runnable": True, "published": True,
+        "labels": list(snap.get("labels") or []),
+        "threshold": float(snap.get("threshold", DEFAULT_THRESHOLD)),
+        "version": {"n": rec.published_version, "latency_ms": latency,
+                    "fps": round(1000.0 / latency, 1) if latency else None,
+                    "gpu_mem_mb": snap.get("gpu_mem_mb"), "provider": snap.get("provider"),
+                    "input_shape": snap.get("input_shape"),
+                    "preview": bool(snap.get("preview"))},
+    }
 
 
 async def _card(rec: ModelRecord, **kw) -> dict:
@@ -228,10 +261,9 @@ async def library(actor, workspace_id: Optional[str]) -> dict:
     staff = _is_staff(actor, ms)
     hyrak = catalogue.builtin_entries(staff=staff)
     for rec in await store.list_published():
-        if rec.workspace_id == ws.id or rec.current_version is None:
+        if rec.workspace_id == ws.id or not _in_catalogue(rec):
             continue
-        c = await _card(rec, kind="catalogue")
-        hyrak.append(c)
+        hyrak.append(catalogue_card(rec))
     own = [await _card(rec) for rec in await store.list_models(ws.id)]
     return {"workspace_id": ws.id, "hyrak": hyrak, "workspace": own,
             "premium": entitlement(actor, ms, ws),
@@ -244,17 +276,23 @@ async def library(actor, workspace_id: Optional[str]) -> dict:
 
 async def get_model(actor, model_id: str) -> dict:
     rec, ms, ws = await _readable(actor, model_id)
-    return await _card(rec, kind=None if ws is not None else "catalogue", full=True)
+    if ws is None:
+        return catalogue_card(rec)
+    return await _card(rec, full=True)
 
 
 async def preview_file(actor, model_id: str, version: Optional[int] = None) -> Path:
     rec, ms, ws = await _readable(actor, model_id)
+    if ws is None:
+        # Catalogue readers: the preview copied when the founder published.
+        path = _catalogue_dir(rec) / storage.PREVIEW_FILE
+        if version not in (None, rec.published_version) or not path.is_file():
+            raise _refuse(404, "not_found", "no preview")
+        return path
     n = version or rec.current_version
     if n is None:
         versions = await model_store.read_store().list_versions(rec.id)
         n = versions[-1].n if versions else None
-    if ws is None and n != rec.current_version:
-        raise _refuse(**NOT_FOUND)        # catalogue readers see the published version only
     v = await model_store.read_store().get_version(rec.id, n) if n else None
     if v is None or not v.preview_path:
         raise _refuse(404, "not_found", "no preview")
@@ -381,6 +419,8 @@ async def hf_inspect(actor, repo_text: str, workspace_id: Optional[str] = None) 
     return {
         "repo": repo, "sha": info.sha, "url": f"https://huggingface.co/{repo}",
         "pipeline_tag": info.pipeline_tag or None, "library": info.library or None,
+        "task": {"object-detection": "detect",
+                 "image-classification": "classify"}.get(info.pipeline_tag),
         "license": info.license or None,
         "onnx_files": [{"path": f.path, "size_bytes": f.size,
                         "too_large": bool(f.size and f.size > limit)} for f in files],
@@ -523,7 +563,7 @@ async def check_version(model_id: str, n: int, *, fetch: Optional[dict] = None) 
             fields.update(status="ready", error="", error_hint="")
         rec = await store.update_model(model_id, **fields) if fields else rec
         _steps.pop(model_id, None)
-        await notify.model_status(rec, step="ready", version=n)
+        await notify.model_status(rec, step="done", version=n)
         logger.info(f"Model {rec.name} ({model_id[:8]}) v{n} ready: {info['task']}, "
                     f"{result.get('latency_ms')} ms on {result.get('provider')}")
     except asyncio.CancelledError:
@@ -564,7 +604,7 @@ async def _fail(model_id: str, n: int, f: ModelFailure) -> None:
         rec = await store.update_model(model_id, **fields)
     _steps.pop(model_id, None)
     logger.info(f"Model {model_id[:8]} v{n} failed: {f.code} {f.detail[:200]}")
-    await notify.model_status(rec, step="failed", version=n, error=msg, hint=hint, detail=f.detail)
+    await notify.model_status(rec, step="done", version=n, error=msg, hint=hint, detail=f.detail)
 
 
 async def recover() -> int:
@@ -633,7 +673,9 @@ async def patch_model(actor, model_id: str, body: dict, *, ip: str = "") -> dict
     if "task" in body and body["task"] is not None:
         if body["task"] not in TASKS:
             raise _refuse(400, "bad_request", reason="task is detect or classify")
-        if body["task"] != rec.task:
+        # Compared with what the last check was told (a failed override
+        # leaves the model's own task as it was).
+        if body["task"] != (settings.get("task") or rec.task):
             settings["task"] = body["task"]
             recheck = True
     if "labels" in body and body["labels"] is not None:
@@ -692,16 +734,51 @@ async def retest(actor, model_id: str, *, ip: str = "") -> dict:
     return await _card(rec, full=True)
 
 
-async def publish(actor, model_id: str, published: bool, *, ip: str = "") -> dict:
+def _catalogue_dir(rec: ModelRecord) -> Path:
+    return storage.model_dir(rec.workspace_id, rec.id) / "catalogue"
+
+
+async def publish(actor, model_id: str, published: bool, *, version: Optional[int] = None,
+                  ip: str = "") -> dict:
+    """Founders: pin `version` (default: the current one) in the catalogue,
+    or take the model out. Publishing again moves the pin and refreshes the
+    snapshot; catalogue sessions on the old pin are put back on manual."""
     rec, ms, tree, ws = await _manageable(actor, model_id)
     if not perms.is_founder(ms):
         raise _refuse(403, "founders_only")
-    if published and rec.current_version is None:
-        raise _refuse(409, "not_ready")
     store = model_store.write_store()
-    rec = await store.update_model(model_id, published=bool(published))
-    await _audit(actor, "model.publish" if published else "model.unpublish", rec, ip)
+    old_pin = rec.published_version if rec.published else None
     if not published:
+        rec = await store.update_model(model_id, published=False, published_version=None,
+                                       catalogue=None)
+        storage.remove_tree(_catalogue_dir(rec))
+        await _audit(actor, "model.unpublish", rec, ip, version=old_pin)
+    else:
+        n = version or rec.current_version
+        v = await store.get_version(model_id, n) if n else None
+        path = storage.version_dir(rec.workspace_id, model_id, n) / storage.MODEL_FILE if n else None
+        if v is None or v.status != "ready" or not v.details or not path.is_file():
+            raise _refuse(409, "not_ready")
+        test = (v.details or {}).get("test") or {}
+        st = rec.settings or {}
+        cdir = _catalogue_dir(rec)
+        preview = False
+        src = storage.version_dir(rec.workspace_id, model_id, n) / storage.PREVIEW_FILE
+        if src.is_file():
+            await asyncio.to_thread(storage.write_bytes_atomic, cdir / storage.PREVIEW_FILE,
+                                    src.read_bytes())
+            preview = True
+        snap = {"version": n, "name": rec.name, "description": rec.description,
+                "task": v.task or rec.task, "labels": list(v.labels or []),
+                "threshold": float(st.get("threshold", DEFAULT_THRESHOLD)),
+                "spec": v.details, "sha256": v.sha256, "latency_ms": v.latency_ms,
+                "gpu_mem_mb": v.gpu_mem_mb, "provider": test.get("provider"),
+                "input_shape": v.input_shape, "preview": preview,
+                "published_by": actor.id, "published_at": model_store.public_dt(model_store.utcnow())}
+        rec = await store.update_model(model_id, published=True, published_version=n,
+                                       catalogue=snap)
+        await _audit(actor, "model.publish", rec, ip, version=n, previous=old_pin)
+    if old_pin is not None and (not published or old_pin != rec.published_version):
         await notify.stop_sessions_running(model_id, describe("model_removed")[0],
                                            except_workspace=rec.workspace_id)
     return await _card(rec, full=True)
@@ -709,6 +786,8 @@ async def publish(actor, model_id: str, published: bool, *, ip: str = "") -> dic
 
 async def delete_model(actor, model_id: str, *, ip: str = "") -> None:
     rec, ms, tree, ws = await _manageable(actor, model_id)
+    if rec.published and not perms.is_founder(ms):
+        raise _refuse(409, "published_locked")
     for t in list(_tasks.get(model_id, ())):
         t.cancel()
     await notify.stop_sessions_running(model_id, describe("model_removed")[0])
@@ -750,13 +829,18 @@ async def resolve_run(session, model_id: str):
     except Exception as e:
         raise _refuse(503, "storage_failed", str(e)[:200])
     ws_id = session.workspace_id or PLATFORM_WORKSPACE_ID
-    if rec is None or (rec.workspace_id != ws_id and not rec.published):
+    if rec is None or (rec.workspace_id != ws_id and not _in_catalogue(rec)):
         raise _refuse(**NOT_FOUND)
-    if rec.workspace_id == ws_id and not rec.published and not session.is_staff and not legacy:
+    own = rec.workspace_id == ws_id
+    if own and not session.is_staff and not legacy:
         tree = await _tree()
         ws = tree.get(ws_id)
         if ws is None or ws.disabled or not ws.has_feature(FEATURE):
-            raise _refuse(403, "not_entitled")
+            if not _in_catalogue(rec):
+                raise _refuse(403, "not_entitled")
+            own = False                  # without the feature: the catalogue's pin
+    if not own:
+        return _catalogue_mode(rec, ws_id)
     if rec.current_version is None:
         raise _refuse(409, "not_ready")
     v = await model_store.read_store().get_version(rec.id, rec.current_version)
@@ -768,6 +852,24 @@ async def resolve_run(session, model_id: str):
                            model_path=str(path), spec=v.details, name=rec.name,
                            threshold=float(st.get("threshold", DEFAULT_THRESHOLD)),
                            alert=st.get("alert"), labels=list(v.labels or []))
+    return CustomModelMode(spec)
+
+
+def _catalogue_mode(rec: ModelRecord, ws_id: str):
+    """The pinned catalogue version, run with the snapshot's spec, labels
+    and threshold, never the owning workspace's later edits. No alert rule:
+    alerts are the owning workspace's."""
+    from app.models_custom.analyzer import CustomModelMode
+    snap = rec.catalogue or {}
+    n = rec.published_version
+    path = storage.version_dir(rec.workspace_id, rec.id, n) / storage.MODEL_FILE
+    if not n or not snap.get("spec") or not path.is_file():
+        raise _refuse(409, "not_ready")
+    spec = runtime.RunSpec(workspace_id=ws_id, model_id=rec.id, version=n,
+                           model_path=str(path), spec=snap["spec"],
+                           name=snap.get("name") or rec.name,
+                           threshold=float(snap.get("threshold", DEFAULT_THRESHOLD)),
+                           alert=None, labels=list(snap.get("labels") or []))
     return CustomModelMode(spec)
 
 

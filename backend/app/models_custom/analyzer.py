@@ -9,7 +9,8 @@ the `cv_results` shape the overlay already draws for object detection:
 
     detect    objects {name: count}, detections [{name, box, score}],
               person_count, total_count
-    classify  classes [{name, score}] (top 5), top_class, top_score, and
+    classify  predictions (alias classes) [{name, score}] (top 5),
+              top_class, top_score, and
               empty objects / detections so every panel stays happy
 
 plus model_id, model_name, model_version and task. A runner that crashed
@@ -18,7 +19,8 @@ frame; the video keeps flowing.
 
 Alerts: a model may carry one rule, {label, min_score, cooldown_s}. When a
 detection (or the top class) matches, the session gets a `model_alert`
-socket event and the cv_results frame carries it as `alert`; staff
+socket event and the cv_results frame carries it as `alert` and
+`alert_hits [{label, score}]`; staff
 consoles watching the workspace get it through the existing admin_alert
 path. At most one per cooldown per session.
 
@@ -146,6 +148,7 @@ class CustomModelAnalyzer(BaseAnalyzer):
             classes = [{"name": self._label(t["class_id"]), "score": round(float(t["score"]), 4)}
                        for t in res.get("top", [])]
             meta["classes"] = classes
+            meta["predictions"] = classes          # the frontend's name for the same list
             meta["top_class"] = classes[0]["name"] if classes else None
             meta["top_score"] = classes[0]["score"] if classes else None
             hits = [(c["name"], c["score"], None) for c in classes[:1]]
@@ -187,6 +190,7 @@ class CustomModelAnalyzer(BaseAnalyzer):
         alert = {"model_id": self.spec.model_id, "model_name": self.spec.name, "label": name,
                  "score": score, "box": box, "ts": now, "message": message}
         meta["alert"] = alert
+        meta["alert_hits"] = [{"label": name, "score": score}]
         meta["_pending_model_alerts"] = [alert]
         meta["_pending_admin_alerts"] = [{"level": "warning", "message": message,
                                           "source": "custom_model",

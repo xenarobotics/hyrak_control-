@@ -142,11 +142,12 @@ async def retest(model_id: str, request: Request, user: AuthUser = Depends(requi
 
 class PublishBody(BaseModel):
     published: bool = True
+    version: Optional[int] = None            # the version to pin; default: the current one
 
 
 @router.post("/{model_id}/publish")
 async def publish(model_id: str, request: Request, body: Optional[PublishBody] = None,
                   user: AuthUser = Depends(require_signed_in)):
-    published = True if body is None else body.published
-    return {"model": await _run(service.publish(user, model_id, published,
-                                                ip=client_ip(request)))}
+    body = body or PublishBody()
+    return {"model": await _run(service.publish(user, model_id, body.published,
+                                                version=body.version, ip=client_ip(request)))}

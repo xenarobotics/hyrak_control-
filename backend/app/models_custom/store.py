@@ -40,6 +40,8 @@ class ModelRecord:
     error_hint: str = ""
     current_version: Optional[int] = None   # the newest READY version: the one that runs
     published: bool = False
+    published_version: Optional[int] = None   # the catalogue's pinned version
+    catalogue: Optional[dict] = None          # the snapshot other workspaces see and run
     settings: dict = field(default_factory=dict)
     created_by: Optional[str] = None
     created_at: datetime = field(default_factory=utcnow)

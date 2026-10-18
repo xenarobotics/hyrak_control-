@@ -46,7 +46,7 @@ def builtin_entries(*, staff: bool) -> list[dict]:
             continue
         name, desc, icon, task = BUILTIN[mode]
         out.append({
-            "id": mode, "kind": "builtin", "run_mode": mode, "name": name,
+            "id": mode, "kind": "builtin", "mode": mode, "run_mode": mode, "name": name,
             "description": desc, "icon": icon, "task": task, "status": "ready",
             "runnable": True, "staff_only": staff_only,
         })

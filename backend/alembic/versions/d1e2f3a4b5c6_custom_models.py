@@ -4,7 +4,10 @@ docs/custom_models/DESIGN.md section 0 (step 1): a workspace's model
 library. `models` is one card (an uploaded ONNX file or a public Hugging
 Face repo pinned to a commit), `model_versions` one received file of it
 with what its check found. Both go with their workspace (cascade); the
-files themselves live under HYRAK_DATA_DIR, not in the database.
+files themselves live under HYRAK_DATA_DIR, not in the database. A
+published model is pinned: `published_version` and the `catalogue`
+snapshot are what other workspaces see and run, and only a founder sets
+or moves them.
 
 Revision ID: d1e2f3a4b5c6
 Revises: a7d3e9b1c4f2
@@ -40,6 +43,8 @@ def upgrade() -> None:
         sa.Column("error_hint", sa.String(length=500), nullable=False, server_default=""),
         sa.Column("current_version", sa.Integer(), nullable=True),
         sa.Column("published", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("published_version", sa.Integer(), nullable=True),
+        sa.Column("catalogue", JSONB(), nullable=True),
         sa.Column("settings", JSONB(), nullable=False, server_default=sa.text("'{}'")),
         sa.Column("created_by", sa.String(length=36), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),

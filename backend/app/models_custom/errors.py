@@ -180,6 +180,9 @@ KNOWN_FAILURES: dict[str, tuple[str, str]] = {
     "bad_request": (
         "Something in the request was not valid: {reason}.",
         "Check the values and try again."),
+    "published_locked": (
+        "This model is in the HYRAK catalogue, so other workspaces depend on it.",
+        "Ask a HYRAK founder to take it out of the catalogue first."),
     "model_removed": (
         "The model you were running was removed or is no longer available here.",
         "Pick another model."),

@@ -313,6 +313,7 @@ def test_migration_chain_and_sql():
     assert "FOREIGN KEY(model_id) REFERENCES models (id) ON DELETE CASCADE" in up
     assert "CONSTRAINT uq_model_versions_model_n UNIQUE (model_id, n)" in up
     assert "CREATE INDEX ix_models_workspace_id ON models (workspace_id)" in up
+    assert "published_version INTEGER," in up and "catalogue JSONB," in up
     down = _alembic_sql("downgrade", "d1e2f3a4b5c6:a7d3e9b1c4f2")
     assert "DROP TABLE model_versions" in down and "DROP TABLE models" in down
     assert down.index("DROP TABLE model_versions") < down.index("DROP TABLE models")

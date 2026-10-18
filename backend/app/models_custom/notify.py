@@ -1,9 +1,11 @@
 """
 Socket pushes for the model library, and the hooks into live sessions.
 
-  * `model_status {id, workspace_id, version, status, step, error, hint}`
-    goes to every live socket of the model's workspace whenever a check
-    moves on (received, downloading, inspecting, testing, ready, failed).
+  * `model_status {id, workspace_id, version, status, step, progress,
+    error, hint, detail, current_version}` goes to every live socket of the
+    model's workspace whenever a check moves on (step: received,
+    downloading, inspecting, testing, done; `status` says whether done
+    means ready or failed; `progress` 0 to 1).
     The event name is shared with the AI-mode loading status
     (`{status: loading|ready|error, mode}`); a library push always carries
     `id`, a mode push never does.
@@ -42,10 +44,15 @@ def _workspace_sockets(workspace_id: str) -> list[str]:
     return out
 
 
+# Rough share of a check done when each step starts, for a progress bar.
+PROGRESS = {"received": 0.1, "downloading": 0.1, "inspecting": 0.4, "testing": 0.7, "done": 1.0}
+
+
 async def model_status(rec, *, step: str, version: Optional[int] = None,
                        error: str = "", hint: str = "", detail: str = "") -> dict:
     payload = {"id": rec.id, "workspace_id": rec.workspace_id, "version": version,
-               "status": rec.status, "step": step, "error": error or None,
+               "status": rec.status, "step": step, "progress": PROGRESS.get(step),
+               "error": error or None,
                "hint": hint or None, "detail": detail or None,
                "current_version": rec.current_version}
     if _sio is None:

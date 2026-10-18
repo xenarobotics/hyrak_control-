@@ -1336,7 +1336,7 @@ class CustomModel(Base):
     `error` and `error_hint` describe the newest version, so a failed
     re-upload says what is wrong while the previous version keeps running.
     `published` puts it in the HYRAK catalogue (founders only), visible to
-    every workspace. `settings` holds the run options: score threshold and
+    every workspace, pinned to `published_version` (see below). `settings` holds the run options: score threshold and
     the optional alert rule.
     """
     __tablename__ = "models"
@@ -1359,6 +1359,12 @@ class CustomModel(Base):
     current_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     published: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"),
                                             index=True)
+    # The catalogue is pinned: a founder publishes ONE version, and what
+    # other workspaces see and run (name, labels, task, threshold, the
+    # inspect spec) is the snapshot taken then, in `catalogue`. The owning
+    # workspace keeps editing its own copy; only a founder moves the pin.
+    published_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    catalogue: Mapped[Optional[dict]] = mapped_column(JSONB_COL, nullable=True)
     settings: Mapped[dict] = mapped_column(JSONB_COL, nullable=False, default=dict,
                                            server_default=text("'{}'"))
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
