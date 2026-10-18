@@ -86,9 +86,11 @@ EVENTS: dict[str, str] = {
     "wall_offer": STAFF,              # mesh unit feeds on server ports
     "wall_ice_candidate": STAFF,
     "wall_close": STAFF,
-    "admin_hello": STAFF,
-    "watch_session": STAFF,           # another session's telemetry and video
+    "admin_hello": STAFF,             # console observer, scoped to the workspaces it can view
+    "watch_session": STAFF,           # another session's telemetry and video (view only)
     "unwatch_session": STAFF,
+    "takeover_session": STAFF,        # + sessions.takeover on the target session's workspace
+    "release_session": STAFF,
     "request_permit": STAFF,
     "list_my_permits": STAFF,
     "connect_swarm_relay": STAFF,
@@ -122,6 +124,17 @@ DRONE_EVENTS = frozenset({
     "set_multi_follow", "select_person", "set_pd_params", "set_altitude_mode",
     "set_altitude_nudge", "set_tracking_params",
 })
+
+# Session commands a staff console socket may route to ANOTHER session's
+# drone by naming `target_session` (docs/ACCESS_MODEL.md 8b "Takeover"):
+# hold / return / land as quick actions, anything while it holds the
+# takeover. Everything else stays bound to the caller's own session.
+ROUTABLE_EVENTS = frozenset({"drone_action", "drone_command"})
+
+# What a session in TAKEOVER may no longer send: every session command
+# except relinking its own radio (connect_browser_serial), safety actions
+# included - staff own the decision while they hold control.
+TAKEOVER_EXEMPT = frozenset({"connect_browser_serial"})
 
 # drone_action names that are never refused for a session holding the
 # drone's link, whoever owns the drone and whatever the session's perms

@@ -70,6 +70,7 @@ MATRIX = {
     "zones.regulatory":    (1, 0, 0, 0, 0, 0, 0),
     "staff.manage":        (1, 0, 0, 0, 0, 0, 0),
     "accounts":            (1, 0, 0, 0, 0, 0, 0),
+    "sessions.takeover":   (1, 0, 1, 0, 0, 0, 0),
 }
 ORDER = ("founder", "airspace", "manager", "owner", "admin", "pilot", "viewer")
 

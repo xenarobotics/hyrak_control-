@@ -95,6 +95,7 @@ Checks in code are on permissions, never on role names.
 | workspace.delete | x | | | x | | | |
 | zones.regulatory | x | | | | | | |
 | staff.manage, accounts | x | | | | | | |
+| sessions.takeover (take control of a live session, 8b) | x | | x | | | | |
 
 ### Who may grant what
 

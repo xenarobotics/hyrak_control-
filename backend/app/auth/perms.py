@@ -94,12 +94,16 @@ WORKSPACE_DELETE = "workspace.delete"
 ZONES_REGULATORY = "zones.regulatory"
 STAFF_MANAGE = "staff.manage"
 ACCOUNTS = "accounts"
+# Take control of a live customer session's drone (docs/ACCESS_MODEL.md 8b
+# "Takeover"). Founders and managers only for now; a permission, not a role
+# check, so it can later be extended to customer owners or admins.
+SESSIONS_TAKEOVER = "sessions.takeover"
 
 ALL_PERMS = frozenset({
     VIEW, FLY, PLAN, MODELS_RUN, MODELS_MANAGE, DRONES_MANAGE, MEMBERS_MANAGE,
     CHILDREN_MANAGE, ZONES_SITE, ZONES_AREA, PERMITS_APPROVE,
     WORKSPACE_OPERATING_AREA, AUDIT_VIEW, WORKSPACE_DELETE, ZONES_REGULATORY,
-    STAFF_MANAGE, ACCOUNTS,
+    STAFF_MANAGE, ACCOUNTS, SESSIONS_TAKEOVER,
 })
 
 # Permissions that only hold inside a geographic area.
@@ -113,7 +117,8 @@ _ADMIN = _RUN | {MODELS_MANAGE, DRONES_MANAGE, MEMBERS_MANAGE, CHILDREN_MANAGE,
 ROLE_PERMS: dict[str, frozenset[str]] = {
     FOUNDER: ALL_PERMS,
     AIRSPACE: frozenset({ZONES_AREA, PERMITS_APPROVE}),
-    MANAGER: _ADMIN | {ZONES_AREA, PERMITS_APPROVE, WORKSPACE_OPERATING_AREA},
+    MANAGER: _ADMIN | {ZONES_AREA, PERMITS_APPROVE, WORKSPACE_OPERATING_AREA,
+                       SESSIONS_TAKEOVER},
     OWNER: _ADMIN | {WORKSPACE_DELETE},
     ADMIN: _ADMIN,
     PILOT: _RUN,
