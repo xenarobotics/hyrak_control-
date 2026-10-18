@@ -5,14 +5,14 @@ import { useDroneStore } from '@/store/drone'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { useScreenWakeLock } from '@/hooks/useScreenWakeLock'
 import { getSocket } from '@/lib/socket'
-import { ModeSelector, panelFor } from '@/components/vision/ModeSelector'
+import { panelFor } from '@/components/vision/ModeSelector'
 import { CvOverlayCanvas } from '@/components/vision/CvOverlayCanvas'
 import { getVideoFit, setVideoFit, type VideoFit } from '@/lib/videoSettings'
 import { ModulePerformance } from '@/components/vision/ModulePerformance'
 import { RecordingControls } from '@/components/video/RecordingControls'
 import { Button } from '@/components/ui/button'
 import {
-    Video, VideoOff, Loader,
+    VideoOff, Loader, Square,
     ChevronDown, ChevronUp, Maximize, Minimize, Expand, Shrink, Ratio, Crop
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -24,29 +24,33 @@ import { useAttachVideo } from '@/hooks/useAttachVideo'
 import { WebCodecsVideo } from '@/components/video/WebCodecsVideo'
 import { Recon3DView } from '@/components/vision/Recon3DView'
 import { useClientValue } from '@/hooks/useClientValue'
+import { useUiMode } from '@/hooks/useUiMode'
 import { ViewOnlyFence } from '@/components/layout/ViewOnly'
+import { useDrone } from '@/hooks/useDrone'
+import { useAiModule } from '@/components/command/useAiModule'
+import { ModelLibrary } from '@/components/models/ModelLibrary'
+import { AddModelPanel } from '@/components/models/AddModelPanel'
+import { ModelDetailPanel } from '@/components/models/ModelDetailPanel'
+import { CustomResultsPanel } from '@/components/models/CustomResultsPanel'
+import { useModelAccess, useModelLibrary, useModeName, type LibraryEntry } from '@/components/models/useModelLibrary'
+import { css, Callout, useCmClass } from '@/components/models/ui'
+import { customMode, isCustomMode, type CustomModel } from '@/lib/models'
 
 function ResultsPanel() {
     const mode = useDroneStore(s => s.mode)
-    const panel = panelFor(mode)
-    if (panel) return panel
-    return (
-        <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            height: 100, color: 'hsl(var(--app-text-muted))',
-            fontSize: 12, fontFamily: 'monospace', textAlign: 'center',
-        }}>
-            Select a vision mode to see results
-        </div>
-    )
+    if (isCustomMode(mode)) return <CustomResultsPanel mode={mode} />
+    return panelFor(mode)
 }
+
+/** Why Run could not start the video, with the way out. */
+type RunHelp = { title: string; body: string; settings?: boolean } | null
 
 export default function ModulesPage() {
     const {
         remoteStream, localStream,
         isStreaming, overlayActive, isLoading, startPhase, startDetail, modelLoading, lastError,
         cameras, selectedCameraId, setSelectedCameraId, camerasScanned,
-        startStream, stopStream,
+        stopStream,
     } = useWebRTCContext()
 
     // Server-sourced modes (air-unit UDP, SIYI RTSP) have no browser camera
@@ -95,8 +99,8 @@ export default function ModulesPage() {
     }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
     const containerRef = useRef<HTMLDivElement | null>(null)
-    const [statsOpen, setStatsOpen] = useState(true)
-    const [modesOpen, setModesOpen] = useState(true)
+    // Performance is a Dev-mode diagnostic; it starts folded.
+    const [statsOpen, setStatsOpen] = useState(false)
     const [maximized, setMaximized] = useState(false)
     // Fill (cover) crops a 4:3 / 16:10 camera to fit a 16:9 panel - which
     // hides frame the AI is still analysing. Fit letterboxes instead so the
@@ -156,138 +160,131 @@ export default function ModulesPage() {
         }
     }, [])
 
+    const [uiMode] = useUiMode()
+    const { root, normal } = useCmClass()
+    const { setMode: sendMode } = useDrone()
+    const ai = useAiModule()
+    const lib = useModelLibrary()
+    const access = useModelAccess()
+    const modeName = useModeName(mode)
+    const [runHelp, setRunHelp] = useState<RunHelp>(null)
+    const [addOpen, setAddOpen] = useState(false)
+    const [detail, setDetail] = useState<{ id: string; open: boolean } | null>(null)
+    const [highlight, setHighlight] = useState<string | null>(null)
+    const [toast, setToast] = useState<string | null>(null)
+    const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const flash = useCallback((text: string) => {
+        setToast(text)
+        if (toastTimer.current) clearTimeout(toastTimer.current)
+        toastTimer.current = setTimeout(() => setToast(null), 4000)
+    }, [])
+    useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current) }, [])
+
+    // Run = the Command window's path: set the mode, and start (or restart)
+    // the video around it. When there is no camera to start, say so and how
+    // to fix it instead of pressing on into a silent failure.
+    const runMode = useCallback((m: string) => {
+        if (needsCamera && camerasScanned && cameras.length === 0) {
+            setRunHelp({
+                title: 'No camera found',
+                body: "Plug in a camera and allow camera access, or pick your drone's video as the source in Settings.",
+                settings: true,
+            })
+            return
+        }
+        if (needsCamera && !selectedCameraId) {
+            setRunHelp({ title: 'Choose a camera first', body: 'Pick a camera in the Video list above the picture, then press Run again.' })
+            return
+        }
+        setRunHelp(null)
+        ai.start(m)
+    }, [needsCamera, camerasScanned, cameras.length, selectedCameraId, ai])
+    const onRun = useCallback((e: LibraryEntry) => runMode(e.mode), [runMode])
+    const onStop = useCallback(() => {
+        stopStream()
+        sendMode('manual-control')
+        setCvResults(null)
+    }, [stopStream, sendMode, setCvResults])
+    const running = mode !== 'manual-control' && (isStreaming || isLoading) ? mode : 'manual-control'
+    const starting = isLoading && mode !== 'manual-control' ? mode : null
+
+    const detailEntry = detail ? lib.entries.find(e => e.model?.id === detail.id) ?? null : null
+
     return (
-        <div style={{ display: 'flex', height: '100%', gap: 10, overflow: 'hidden' }}>
+        <div className={cn(root, css.page, normal && 'hy-simple')}>
+            <aside className={css.pageAside} aria-label="Model library">
+                <ModelLibrary
+                    entries={lib.entries}
+                    loading={lib.loading}
+                    loadError={lib.loadError}
+                    onRetryLoad={() => void lib.reload()}
+                    runningMode={running}
+                    startingMode={starting}
+                    canRun={access.canRun}
+                    canManage={access.canManage}
+                    premiumEnabled={lib.premium.enabled}
+                    onRun={onRun}
+                    onStop={onStop}
+                    onAdd={() => setAddOpen(true)}
+                    onOpen={e => e.model && setDetail({ id: e.model.id, open: true })}
+                    highlightKey={highlight}
+                />
+            </aside>
 
-            {/* LEFT - mode selector */}
-            <div style={{
-                width: modesOpen ? 190 : 36, flexShrink: 0,
-                transition: 'width 0.2s',
-                display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden',
-            }}>
-                <button
-                    onClick={() => setModesOpen(o => !o)}
-                    style={{
-                        display: 'flex', alignItems: 'center',
-                        justifyContent: modesOpen ? 'space-between' : 'center',
-                        padding: '7px 10px', borderRadius: 10,
-                        background: 'hsl(var(--app-surface))',
-                        border: '1px solid hsl(var(--app-border))',
-                        cursor: 'pointer', color: 'hsl(var(--app-text-muted))',
-                        fontSize: 10, fontFamily: 'monospace', whiteSpace: 'nowrap',
-                    }}
-                >
-                    {modesOpen && <span>AI MODES</span>}
-                    {modesOpen ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
-                </button>
+            <div className={css.pageMain}>
+                <div className={cn(css.panel, css.videoBar)}>
+                    <span className={css.label}>Video</span>
+                    {serverSourced ? (
+                        <span className={css.muted} style={{ flex: 1, minWidth: 0 }}>
+                            {specFor(videoSource)?.label ?? videoSource} - change it in <a href="/settings" className={css.link}>Settings</a>
+                        </span>
+                    ) : (
+                        <select
+                            className={css.input}
+                            style={{ flex: 1, minWidth: 0, maxWidth: 320 }}
+                            aria-label="Camera"
+                            value={selectedCameraId}
+                            onChange={e => { setSelectedCameraId(e.target.value); setRunHelp(null) }}
+                            disabled={isStreaming}
+                        >
+                            {cameras.length === 0 && <option value="">{camerasScanned ? 'No cameras found' : 'Looking for cameras...'}</option>}
+                            {cameras.map(c => (
+                                <option key={c.deviceId} value={c.deviceId}>{c.label}</option>
+                            ))}
+                        </select>
+                    )}
+                    <span style={{ flex: serverSourced ? 0 : 1 }} />
+                    {isLoading && (
+                        <span className={css.muted} role="status" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            <Loader size={13} className="animate-spin motion-reduce:animate-none" aria-hidden />
+                            {startPhase === 'model' ? `Loading ${modeName}` : 'Starting video'}
+                        </span>
+                    )}
+                    {(isStreaming || isLoading) && (
+                        <ViewOnlyFence note={false}>
+                            <button type="button" className={css.btn} onClick={onStop}>
+                                <Square size={12} aria-hidden /> Stop {mode !== 'manual-control' ? modeName : 'video'}
+                            </button>
+                        </ViewOnlyFence>
+                    )}
+                </div>
 
-                {modesOpen && (
-                    <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        {/* Mode buttons - disabled while streaming */}
-                        <div style={{ opacity: isStreaming ? 0.5 : 1, pointerEvents: isStreaming ? 'none' : 'auto' }}>
-                            {/* Starting a module is a command: viewers watch only. */}
-                            <ViewOnlyFence><ModeSelector /></ViewOnlyFence>
-                        </div>
-
-                        {/* Camera selector - not applicable to server-sourced feeds */}
-                        {serverSourced ? (
-                            <div style={{ padding: '0 2px' }}>
-                                <p style={{
-                                    fontSize: 10, color: 'hsl(var(--app-text-muted))',
-                                    fontFamily: 'monospace', marginBottom: 6,
-                                }}>
-                                    VIDEO SOURCE
-                                </p>
-                                <div style={{
-                                    padding: '6px 8px', borderRadius: 8, fontSize: 11, fontFamily: 'monospace',
-                                    background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
-                                    color: 'hsl(var(--app-text-muted))',
-                                }}>
-                                    {specFor(videoSource)?.label ?? videoSource} - set in Settings
-                                </div>
-                            </div>
-                        ) : (
-                            <div style={{ padding: '0 2px' }}>
-                                <p style={{
-                                    fontSize: 10, color: 'hsl(var(--app-text-muted))',
-                                    fontFamily: 'monospace', marginBottom: 6,
-                                }}>
-                                    CAMERA
-                                </p>
-                                <select
-                                    value={selectedCameraId}
-                                    onChange={e => setSelectedCameraId(e.target.value)}
-                                    disabled={isStreaming}
-                                    style={{
-                                        width: '100%', padding: '6px 8px', borderRadius: 8,
-                                        background: 'hsl(var(--app-surface-2))',
-                                        border: '1px solid hsl(var(--app-border))',
-                                        color: 'hsl(var(--app-text))',
-                                        fontSize: 11, fontFamily: 'monospace',
-                                        opacity: isStreaming ? 0.5 : 1,
-                                    }}
-                                >
-                                    {cameras.length === 0 && <option value="">No cameras found</option>}
-                                    {cameras.map(c => (
-                                        <option key={c.deviceId} value={c.deviceId}>{c.label}</option>
-                                    ))}
-                                </select>
-                            </div>
-                        )}
-
-                        {/* Start/Stop */}
-                        <div style={{ padding: '0 2px' }}>
-                            <Button
-                                size="sm"
-                                variant={isStreaming ? 'destructive' : 'default'}
-                                className="w-full font-mono text-xs gap-2"
-                                onClick={isStreaming ? stopStream : startStream}
-                                disabled={isLoading || (needsCamera && camerasScanned && !selectedCameraId && !isStreaming)}
-                            >
-                                {isLoading
-                                    ? <><Loader size={12} className="animate-spin" />
-                                        {startPhase === 'model' ? 'Loading model...' : 'Connecting...'}</>
-                                    : isStreaming
-                                        ? <><VideoOff size={12} /> Stop</>
-                                        : <><Video size={12} /> Start Analysis</>
-                                }
-                            </Button>
-                        </div>
-
-                        {/* What the connect is blocked on. Without this the
-                            operator watches "Connecting" for 25s and learns
-                            nothing - and blames whichever mode they picked,
-                            because the wait is the same for all of them. */}
-                        {startDetail && !isStreaming && (
-                            <div style={{
-                                padding: '6px 10px', borderRadius: 8,
-                                background: 'rgba(251,191,36,0.10)',
-                                border: '1px solid rgba(251,191,36,0.35)',
-                                fontSize: 10, fontFamily: 'monospace', color: '#fbbf24',
-                                lineHeight: 1.5, wordBreak: 'break-word',
-                            }}>
-                                {startDetail}
-                            </div>
-                        )}
-
-                        {/* Model loading */}
-                        {modelLoading && (
-                            <div style={{
-                                padding: '6px 10px', borderRadius: 8,
-                                background: '#E6F1FB18', border: '1px solid #85B7EB',
-                                display: 'flex', alignItems: 'center', gap: 6,
-                                fontSize: 10, fontFamily: 'monospace', color: '#60a5fa',
-                            }}>
-                                <Loader size={10} className="animate-spin" />
-                                Loading {mode.replace(/-/g, ' ')}...
-                            </div>
-                        )}
-                    </div>
+                {runHelp && (
+                    <Callout tone="warn" title={runHelp.title}
+                        actions={<>
+                            {runHelp.settings && <a href="/settings" className={css.btn}>Open video settings</a>}
+                            <button type="button" className={css.btn} onClick={() => setRunHelp(null)}>Dismiss</button>
+                        </>}>
+                        {runHelp.body}
+                    </Callout>
                 )}
-            </div>
 
-            {/* CENTER - processed video, NO OSD */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
+                {/* What the connect is blocked on, so the wait is explained
+                    instead of blamed on the model that was picked. */}
+                {startDetail && !isStreaming && (
+                    <Callout tone="warn">{startDetail}</Callout>
+                )}
+
                 <div
                     ref={containerRef}
                     className={cn(
@@ -331,16 +328,19 @@ export default function ModulesPage() {
                     {isStreaming && mode === '3d-reconstruction' && <Recon3DView />}
 
                     {!isStreaming && !isLoading && (
-                        <div style={{
-                            position: 'absolute', inset: 0,
-                            display: 'flex', flexDirection: 'column',
-                            alignItems: 'center', justifyContent: 'center', gap: 10,
-                            color: 'rgba(255,255,255,0.3)',
-                        }}>
-                            <VideoOff size={36} strokeWidth={1.5} />
-                            <p style={{ fontFamily: 'monospace', fontSize: 12, letterSpacing: 2 }}>NO VIDEO</p>
-                            {lastError && (
-                                <p style={{ fontFamily: 'monospace', fontSize: 11, color: '#f87171', textAlign: 'center', maxWidth: 280, padding: '0 12px' }}>{lastError}</p>
+                        <div className={css.idle}>
+                            <VideoOff size={36} strokeWidth={1.5} aria-hidden />
+                            {lastError ? (
+                                <>
+                                    <strong>The video did not start</strong>
+                                    <p style={{ color: '#fca5a5' }}>{lastError}</p>
+                                    <p>Check the video source above, then press Run on a model again.</p>
+                                </>
+                            ) : (
+                                <>
+                                    <strong>No video yet</strong>
+                                    <p>Press Run on a model. The video starts by itself and the model marks what it finds.</p>
+                                </>
                             )}
                         </div>
                     )}
@@ -359,7 +359,7 @@ export default function ModulesPage() {
                             }}>
                                 <Loader size={28} className="animate-spin" style={{ color: '#60a5fa' }} />
                                 <p style={{ fontSize: 12 }}>
-                                    Loading {mode.replace(/-/g, ' ')}...
+                                    Loading {modeName}...
                                 </p>
                             </div>
                         </div>
@@ -424,69 +424,92 @@ export default function ModulesPage() {
                     </div>
                 </div>
 
-                {/* Stats */}
-                <div style={{
-                    borderRadius: 10, flexShrink: 0,
-                    background: 'hsl(var(--app-surface))',
-                    border: '1px solid hsl(var(--app-border))',
-                    overflow: 'hidden',
-                }}>
-                    <button
-                        onClick={() => setStatsOpen(o => !o)}
-                        style={{
-                            width: '100%', display: 'flex', alignItems: 'center',
-                            justifyContent: 'space-between', padding: '7px 12px',
-                            background: 'none', border: 'none', cursor: 'pointer',
-                            color: 'hsl(var(--app-text-muted))', fontSize: 10, fontFamily: 'monospace',
-                            borderBottom: statsOpen ? '1px solid hsl(var(--app-border))' : 'none',
-                        }}
-                    >
-                        <span>PERFORMANCE</span>
-                        {statsOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                    </button>
-                    {statsOpen && (
-                        <div style={{ padding: '10px 12px' }}>
-                            {/* Every row here used to come from pc.getStats(), which
-                                reports NOTHING in overlay mode - no video crosses the
-                                PeerConnection, so FPS/bitrate/RTT/jitter/loss all sat
-                                at zero permanently and looked like a broken feed.
-                                ModulePerformance sources each figure from wherever the
-                                video actually is. */}
-                            <ModulePerformance />
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            {/* RIGHT - results */}
-            <div style={{
-                width: 250, flexShrink: 0,
-                borderRadius: 12,
-                background: 'hsl(var(--app-surface))',
-                border: '1px solid hsl(var(--app-border))',
-                padding: '12px 14px',
-                display: 'flex', flexDirection: 'column', gap: 10, overflow: 'hidden',
-            }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <p style={{
-                        fontSize: 10, fontFamily: 'monospace',
-                        letterSpacing: '0.08em', textTransform: 'uppercase',
-                        color: 'hsl(var(--app-text-muted))',
+                {/* Performance: a Dev-mode diagnostic. */}
+                {uiMode === 'dev' && (
+                    <div style={{
+                        borderRadius: 10, flexShrink: 0,
+                        background: 'hsl(var(--app-surface))',
+                        border: '1px solid hsl(var(--app-border))',
+                        overflow: 'hidden',
                     }}>
-                        {mode.replace(/-/g, ' ').toUpperCase()}
-                    </p>
-                    {cvResults && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontFamily: 'monospace', color: '#4ade80' }}>
-                            <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#4ade80' }} />
-                            LIVE
-                        </div>
-                    )}
-                </div>
-                <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-                    <ViewOnlyFence note={false}><ResultsPanel /></ViewOnlyFence>
-                </div>
+                        <button
+                            type="button"
+                            aria-expanded={statsOpen}
+                            onClick={() => setStatsOpen(o => !o)}
+                            style={{
+                                width: '100%', display: 'flex', alignItems: 'center',
+                                justifyContent: 'space-between', padding: '7px 12px',
+                                background: 'none', border: 'none', cursor: 'pointer',
+                                color: 'hsl(var(--app-text-muted))', fontSize: 10, fontFamily: 'monospace',
+                                borderBottom: statsOpen ? '1px solid hsl(var(--app-border))' : 'none',
+                            }}
+                        >
+                            <span>PERFORMANCE</span>
+                            {statsOpen ? <ChevronUp size={12} aria-hidden /> : <ChevronDown size={12} aria-hidden />}
+                        </button>
+                        {statsOpen && (
+                            <div style={{ padding: '10px 12px' }}>
+                                {/* Every row here used to come from pc.getStats(), which
+                                    reports NOTHING in overlay mode - no video crosses the
+                                    PeerConnection, so FPS/bitrate/RTT/jitter/loss all sat
+                                    at zero permanently and looked like a broken feed.
+                                    ModulePerformance sources each figure from wherever the
+                                    video actually is. */}
+                                <ModulePerformance />
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
 
+            {mode !== 'manual-control' && (
+                <section className={cn(css.panel, css.pageResults)} data-active="true" aria-label="Results">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                        <span className={css.label} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modeName}</span>
+                        {cvResults && (
+                            <span className={cn(css.chip, css.chipOk)}><span className={css.dot} aria-hidden />Live</span>
+                        )}
+                    </div>
+                    <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+                        <ViewOnlyFence note={false}><ResultsPanel /></ViewOnlyFence>
+                    </div>
+                </section>
+            )}
+
+            <AddModelPanel
+                open={addOpen}
+                onOpenChange={setAddOpen}
+                premium={lib.premium}
+                workspaceId={access.workspace?.id ?? null}
+                workspaceName={access.workspace?.name ?? null}
+                onSaved={(m: CustomModel) => {
+                    void lib.reload()
+                    setHighlight(`ours:${m.id}`)
+                    setTimeout(() => setHighlight(null), 2500)
+                    flash(`${m.name} is ready. Press Run to use it.`)
+                }}
+            />
+
+            {detail && (
+                <ModelDetailPanel
+                    key={detail.id}
+                    modelId={detail.id}
+                    open={detail.open}
+                    onOpenChange={o => setDetail(d => d && { ...d, open: o })}
+                    editable={access.canManage && detailEntry?.group === 'ours'}
+                    canPublish={access.canPublish && detailEntry?.group === 'ours'}
+                    canRun={access.canRun}
+                    running={running === customMode(detail.id)}
+                    onRun={m => { setDetail(d => d && { ...d, open: false }); runMode(customMode(m.id)) }}
+                    onDeleted={name => {
+                        if (mode === customMode(detail.id)) onStop()
+                        setDetail(d => d && { ...d, open: false })
+                        flash(`Deleted model "${name}".`)
+                    }}
+                />
+            )}
+
+            {toast && <div className={css.toast} role="status">{toast}</div>}
         </div>
     )
 }
