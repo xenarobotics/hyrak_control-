@@ -38,12 +38,13 @@ import threading
 import time
 from dataclasses import dataclass, field
 from multiprocessing.connection import Connection
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
 
 from app.config import get_settings
-from app.models_custom import checks
+from app.models_custom import checks, storage
 from app.models_custom.errors import ModelFailure
 
 logger = logging.getLogger("verocore.models.runtime")
@@ -69,10 +70,15 @@ class RunSpec:
     threshold: float = 0.25
     alert: Optional[dict] = None
     labels: list = field(default_factory=list)
+    # sha256 of each file next to model_path, checked before every start.
+    files: dict = field(default_factory=dict)
+    # Run from the HYRAK catalogue's pinned copy (not the workspace's own).
+    via_catalogue: bool = False
 
     @property
     def key(self) -> tuple:
-        return (self.workspace_id, self.model_id, self.version)
+        return (self.workspace_id, self.model_id, self.version,
+                "catalogue" if self.via_catalogue else "own")
 
 
 class RunnerError(Exception):
@@ -126,6 +132,13 @@ class Runner:
 
     def _start_locked(self) -> None:
         s = get_settings()
+        # The file must still be the one that was checked (or published).
+        bad = storage.verify_files(Path(self.spec.model_path).parent, self.spec.files)
+        if not self.spec.files or bad:
+            self.state = "failed"
+            self.last_error = RunnerError("file_changed", ", ".join(bad) or "no recorded hash")
+            logger.error(f"Runner {self.spec.model_id[:8]}: refused, files changed: {bad}")
+            raise self.last_error
         fd, path = tempfile.mkstemp(prefix="hyrak-frame-", dir=_shm_dir())
         os.ftruncate(fd, SHM_SIZE)
         self._buf = mmap.mmap(fd, SHM_SIZE)
@@ -378,7 +391,7 @@ class RunnerPool:
 
     def status(self) -> list[dict]:
         with self._lock:
-            return [{"workspace_id": k[0], "model_id": k[1], "version": k[2],
+            return [{"workspace_id": k[0], "model_id": k[1], "version": k[2], "via": k[3],
                      "sessions": self._refs.get(k, 0), "state": r.state, "pid": r.pid,
                      "provider": r.provider, "frames": r.frames}
                     for k, r in self._runners.items()]

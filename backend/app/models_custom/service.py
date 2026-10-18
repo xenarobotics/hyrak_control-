@@ -285,7 +285,7 @@ async def preview_file(actor, model_id: str, version: Optional[int] = None) -> P
     rec, ms, ws = await _readable(actor, model_id)
     if ws is None:
         # Catalogue readers: the preview copied when the founder published.
-        path = _catalogue_dir(rec) / storage.PREVIEW_FILE
+        path = storage.catalogue_dir(rec.id, rec.published_version) / storage.PREVIEW_FILE
         if version not in (None, rec.published_version) or not path.is_file():
             raise _refuse(404, "not_found", "no preview")
         return path
@@ -345,9 +345,9 @@ async def create_upload(actor, *, workspace_id: Optional[str], filename: str, re
     check_filename(filename)
     store = model_store.write_store()
     mid = existing.id if existing else str(uuid.uuid4())
-    n = await store.next_version_n(mid) if existing else 1
-    vdir = storage.version_dir(ws.id, mid, n)
-    w = storage.AtomicWriter(vdir / storage.MODEL_FILE, limit=storage.limit_bytes())
+    # 1. Receive into a staging folder of our own.
+    stage = storage.staging_dir(ws.id, mid)
+    w = storage.AtomicWriter(stage / storage.MODEL_FILE, limit=storage.limit_bytes())
     try:
         while True:
             chunk = await read_chunk()
@@ -357,29 +357,41 @@ async def create_upload(actor, *, workspace_id: Optional[str], filename: str, re
         if w.size == 0:
             raise _refuse(400, "empty_file")
         sha, size = await asyncio.to_thread(w.commit)
-    except storage.TooLarge:
-        w.abort()
-        _cleanup_version(ws.id, mid, n, existing is None)
-        raise _refuse(413, "too_large", f"{filename}", limit_mb=get_settings().custom_models_max_mb)
-    except ModelFailure:
-        w.abort()
-        _cleanup_version(ws.id, mid, n, existing is None)
-        raise
     except Exception as e:
         w.abort()
-        _cleanup_version(ws.id, mid, n, existing is None)
+        _discard(stage, ws.id, mid, existing is None)
+        if isinstance(e, storage.TooLarge):
+            raise _refuse(413, "too_large", f"{filename}",
+                          limit_mb=get_settings().custom_models_max_mb)
+        if isinstance(e, ModelFailure):
+            raise
         logger.error(f"model upload not stored: {e!r}")
         raise _refuse(500, "storage_failed", str(e)[:300])
-    if existing is None:
-        rec = ModelRecord(id=mid, workspace_id=ws.id,
-                          name=_clean_name(name, Path(filename).stem or "My model"),
-                          source="upload", description=str(description or "")[:500],
-                          created_by=actor.id, settings={"threshold": DEFAULT_THRESHOLD})
-        rec = await store.create_model(rec)
-    else:
-        rec = await store.update_model(mid, status="checking", error="", error_hint="")
-    await store.add_version(VersionRecord(id=str(uuid.uuid4()), model_id=mid, n=n, sha256=sha,
-                                          size_bytes=size, file_name=Path(filename).name[:300]))
+    # 2. Reserve the version row, 3. move the folder into place: v<n> is
+    # never written into twice, whoever else uploads at the same time.
+    created = None
+    try:
+        if existing is None:
+            created = await store.create_model(ModelRecord(
+                id=mid, workspace_id=ws.id,
+                name=_clean_name(name, Path(filename).stem or "My model"),
+                source="upload", description=str(description or "")[:500],
+                created_by=actor.id, settings={"threshold": DEFAULT_THRESHOLD}))
+        n = await _reserve_version(store, mid, sha256=sha, size_bytes=size,
+                                   file_name=Path(filename).name[:300])
+        try:
+            storage.place_dir(stage, storage.version_dir(ws.id, mid, n))
+        except Exception:
+            await store.delete_version(mid, n)
+            raise
+    except Exception as e:
+        _discard(stage, ws.id, mid, False)
+        if created is not None:
+            await store.delete_model(mid)
+            _discard(None, ws.id, mid, True)
+        logger.error(f"model upload not placed: {e!r}")
+        raise _refuse(500, "storage_failed", str(e)[:300])
+    rec = created or await store.update_model(mid, status="checking", error="", error_hint="")
     await _audit(actor, "model.version" if existing else "model.create", rec, ip,
                  source="upload", version=n, sha256=sha, size_bytes=size)
     _steps[mid] = "received"
@@ -388,10 +400,24 @@ async def create_upload(actor, *, workspace_id: Optional[str], filename: str, re
     return await _card(rec)
 
 
-def _cleanup_version(workspace_id: str, model_id: str, n: int, whole_model: bool) -> None:
+async def _reserve_version(store, model_id: str, **fields) -> int:
+    for _ in range(20):
+        n = await store.next_version_n(model_id)
+        try:
+            await store.add_version(VersionRecord(id=str(uuid.uuid4()), model_id=model_id, n=n,
+                                                  **fields))
+            return n
+        except model_store.VersionTaken:
+            await asyncio.sleep(0)
+    raise _refuse(409, "storage_failed", "could not reserve a version number")
+
+
+def _discard(stage: Optional[Path], workspace_id: str, model_id: str, whole_model: bool) -> None:
     try:
-        storage.remove_tree(storage.model_dir(workspace_id, model_id) if whole_model
-                            else storage.version_dir(workspace_id, model_id, n))
+        if stage is not None:
+            storage.remove_tree(stage)
+        if whole_model:
+            storage.remove_tree(storage.model_dir(workspace_id, model_id))
     except Exception:
         pass
 
@@ -450,13 +476,10 @@ async def create_hf(actor, *, workspace_id: Optional[str], repo_text: str,
         default = repo.split("/", 1)[1]
         rec = await _new_record(actor, ws, name=_clean_name(name, default), source="huggingface",
                                 **hf_fields)
-        n = 1
     else:
-        n = await store.next_version_n(existing.id)
         rec = await store.update_model(existing.id, status="checking", error="", error_hint="",
                                        source="huggingface", **hf_fields)
-    await store.add_version(VersionRecord(id=str(uuid.uuid4()), model_id=rec.id, n=n,
-                                          file_name=f.path[:300], hf_revision=info.sha))
+    n = await _reserve_version(store, rec.id, file_name=f.path[:300], hf_revision=info.sha)
     await _audit(actor, "model.version" if existing else "model.create", rec, ip,
                  source="huggingface", repo=repo, revision=info.sha, file=f.path, version=n)
     fetch = {"repo": repo, "sha": info.sha, "file": f.path, "extra": extra}
@@ -524,12 +547,20 @@ async def check_version(model_id: str, n: int, *, fetch: Optional[dict] = None) 
         if fetch:
             await _step(model_id, n, "downloading")
             limit = storage.limit_bytes()
-            sha, size = await hf.download(fetch["repo"], fetch["sha"], fetch["file"], model_path,
-                                          limit=limit)
+            stage = storage.staging_dir(rec.workspace_id, model_id)
+            try:
+                sha, size = await hf.download(fetch["repo"], fetch["sha"], fetch["file"],
+                                              stage / storage.MODEL_FILE, limit=limit)
+                for repo_path, local in fetch.get("extra") or []:
+                    await hf.download(fetch["repo"], fetch["sha"], repo_path,
+                                      storage.safe_child(stage, local), limit=limit)
+                if vdir.exists():
+                    storage.fill_missing(stage, vdir)      # a retest re-fetching lost files
+                else:
+                    storage.place_dir(stage, vdir)
+            finally:
+                storage.remove_tree(stage) if stage.exists() else None
             await store.update_version(model_id, n, sha256=sha, size_bytes=size)
-            for repo_path, local in fetch.get("extra") or []:
-                await hf.download(fetch["repo"], fetch["sha"], repo_path,
-                                  storage.safe_child(vdir, local), limit=limit)
         if not model_path.is_file():
             raise ModelFailure("storage_failed", "the model file is missing")
         await _step(model_id, n, "inspecting")
@@ -548,10 +579,14 @@ async def check_version(model_id: str, n: int, *, fetch: Optional[dict] = None) 
         if incoming.is_file():
             os.replace(incoming, vdir / storage.PREVIEW_FILE)
             preview = str(vdir / storage.PREVIEW_FILE)
+        files = await asyncio.to_thread(storage.hash_files, vdir)
+        v = await store.get_version(model_id, n)
+        if v is not None and v.sha256 and files.get(storage.MODEL_FILE) != v.sha256:
+            raise ModelFailure("file_changed", "model.onnx differs from the received file")
         await store.update_version(model_id, n, status="ready", error="", error_hint="",
                                    latency_ms=result.get("latency_ms"),
                                    gpu_mem_mb=result.get("gpu_mem_mb"), preview_path=preview,
-                                   details={**info, "test": result})
+                                   details={**info, "test": result, "files": files})
         rec = await store.get_model(model_id)
         if rec is None:
             return
@@ -734,10 +769,6 @@ async def retest(actor, model_id: str, *, ip: str = "") -> dict:
     return await _card(rec, full=True)
 
 
-def _catalogue_dir(rec: ModelRecord) -> Path:
-    return storage.model_dir(rec.workspace_id, rec.id) / "catalogue"
-
-
 async def publish(actor, model_id: str, published: bool, *, version: Optional[int] = None,
                   ip: str = "") -> dict:
     """Founders: pin `version` (default: the current one) in the catalogue,
@@ -751,7 +782,6 @@ async def publish(actor, model_id: str, published: bool, *, version: Optional[in
     if not published:
         rec = await store.update_model(model_id, published=False, published_version=None,
                                        catalogue=None)
-        storage.remove_tree(_catalogue_dir(rec))
         await _audit(actor, "model.unpublish", rec, ip, version=old_pin)
     else:
         n = version or rec.current_version
@@ -761,14 +791,14 @@ async def publish(actor, model_id: str, published: bool, *, version: Optional[in
             raise _refuse(409, "not_ready")
         test = (v.details or {}).get("test") or {}
         st = rec.settings or {}
-        cdir = _catalogue_dir(rec)
-        preview = False
-        src = storage.version_dir(rec.workspace_id, model_id, n) / storage.PREVIEW_FILE
-        if src.is_file():
-            await asyncio.to_thread(storage.write_bytes_atomic, cdir / storage.PREVIEW_FILE,
-                                    src.read_bytes())
-            preview = True
-        snap = {"version": n, "name": rec.name, "description": rec.description,
+        src = storage.version_dir(rec.workspace_id, model_id, n)
+        # The catalogue's own copy, checked against the hash taken on receipt.
+        files = await asyncio.to_thread(storage.copy_to_catalogue, src, model_id, n)
+        if not v.sha256 or files.get(storage.MODEL_FILE) != v.sha256:
+            storage.remove_tree(storage.catalogue_dir(model_id, n))
+            raise _refuse(409, "file_changed")
+        preview = (storage.catalogue_dir(model_id, n) / storage.PREVIEW_FILE).is_file()
+        snap = {"files": files, "version": n, "name": rec.name, "description": rec.description,
                 "task": v.task or rec.task, "labels": list(v.labels or []),
                 "threshold": float(st.get("threshold", DEFAULT_THRESHOLD)),
                 "spec": v.details, "sha256": v.sha256, "latency_ms": v.latency_ms,
@@ -778,9 +808,13 @@ async def publish(actor, model_id: str, published: bool, *, version: Optional[in
         rec = await store.update_model(model_id, published=True, published_version=n,
                                        catalogue=snap)
         await _audit(actor, "model.publish", rec, ip, version=n, previous=old_pin)
-    if old_pin is not None and (not published or old_pin != rec.published_version):
+    if old_pin is not None:
+        # Every session on the catalogue path (the owning workspace's too)
+        # goes back to manual; a re-selection runs the new pin.
         await notify.stop_sessions_running(model_id, describe("model_removed")[0],
-                                           except_workspace=rec.workspace_id)
+                                           via_catalogue=True)
+        if not published or old_pin != rec.published_version:
+            storage.remove_tree(storage.catalogue_dir(model_id, old_pin))
     return await _card(rec, full=True)
 
 
@@ -796,19 +830,43 @@ async def delete_model(actor, model_id: str, *, ip: str = "") -> None:
     _steps.pop(model_id, None)
     try:
         storage.remove_tree(storage.model_dir(rec.workspace_id, model_id))
+        storage.remove_tree(storage.catalogue_model_dir(model_id))
     except Exception as e:
         logger.warning(f"model files of {model_id[:8]} not removed: {e}")
     await _audit(actor, "model.delete", rec, ip)
 
 
+async def published_count(workspace_id: str) -> int:
+    """Published models a workspace owns: a blocker for deleting it unless
+    a founder does (workspaces.service.delete_workspace)."""
+    try:
+        return sum(1 for r in await model_store.read_store().list_models(workspace_id)
+                   if r.published)
+    except Exception:
+        return 0
+
+
+async def feature_revoked(workspace_id: str) -> int:
+    """A founder switched custom_models off: the workspace's customer
+    sessions running its OWN models go back to manual (catalogue models
+    and staff sessions keep running)."""
+    return await notify.stop_sessions_running(
+        None, describe("not_entitled")[0], via_catalogue=False, workspace_id=workspace_id,
+        skip_staff=True)
+
+
 async def workspace_deleted(workspace_id: str) -> None:
-    """The workspace is gone: its rows cascaded, now its runners and files."""
+    """The workspace is gone: its rows cascaded, now its runners and files.
+    A founder may delete a workspace that owns published models: they
+    leave the catalogue with it (their rows cascade), every session running
+    them goes back to manual, and the catalogue copies are removed."""
     try:
         store = model_store.read_store()
         recs = await store.list_models(workspace_id)
         for rec in recs:
             await notify.stop_sessions_running(rec.id, describe("model_removed")[0])
             await asyncio.to_thread(runtime.pool().stop_model, rec.id)
+            storage.remove_tree(storage.catalogue_model_dir(rec.id))
         await store.delete_workspace(workspace_id)
     except Exception as e:
         logger.warning(f"models of deleted workspace {workspace_id[:8]}: {e}")
@@ -848,28 +906,35 @@ async def resolve_run(session, model_id: str):
     if v is None or v.status != "ready" or not v.details or not path.is_file():
         raise _refuse(409, "not_ready")
     st = rec.settings or {}
+    files = dict((v.details or {}).get("files") or {})
+    if v.sha256:
+        files[storage.MODEL_FILE] = v.sha256          # the hash taken on receipt wins
     spec = runtime.RunSpec(workspace_id=ws_id, model_id=rec.id, version=v.n,
                            model_path=str(path), spec=v.details, name=rec.name,
                            threshold=float(st.get("threshold", DEFAULT_THRESHOLD)),
-                           alert=st.get("alert"), labels=list(v.labels or []))
+                           alert=st.get("alert"), labels=list(v.labels or []), files=files)
     return CustomModelMode(spec)
 
 
 def _catalogue_mode(rec: ModelRecord, ws_id: str):
-    """The pinned catalogue version, run with the snapshot's spec, labels
-    and threshold, never the owning workspace's later edits. No alert rule:
-    alerts are the owning workspace's."""
+    """The pinned catalogue version, run from the catalogue's own copy of
+    its files (hash-checked before every start) with the snapshot's spec,
+    labels and threshold, never the owning workspace's later edits or
+    files. No alert rule: alerts are the owning workspace's."""
     from app.models_custom.analyzer import CustomModelMode
     snap = rec.catalogue or {}
     n = rec.published_version
-    path = storage.version_dir(rec.workspace_id, rec.id, n) / storage.MODEL_FILE
-    if not n or not snap.get("spec") or not path.is_file():
+    if not n or not snap.get("spec") or not snap.get("files"):
+        raise _refuse(409, "not_ready")
+    path = storage.catalogue_dir(rec.id, n) / storage.MODEL_FILE
+    if not path.is_file():
         raise _refuse(409, "not_ready")
     spec = runtime.RunSpec(workspace_id=ws_id, model_id=rec.id, version=n,
                            model_path=str(path), spec=snap["spec"],
                            name=snap.get("name") or rec.name,
                            threshold=float(snap.get("threshold", DEFAULT_THRESHOLD)),
-                           alert=None, labels=list(snap.get("labels") or []))
+                           alert=None, labels=list(snap.get("labels") or []),
+                           files=dict(snap["files"]), via_catalogue=True)
     return CustomModelMode(spec)
 
 

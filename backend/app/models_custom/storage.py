@@ -8,9 +8,16 @@ Where custom model files live on disk.
         preprocessor_config.json
         preview.jpg           the test run's picture
 
-Files arrive in a temporary name inside the version folder and are renamed
-into place, so a reader never sees half a file. Ids are checked to be plain
-ids before they become path parts.
+    <hyrak_data_dir>/catalogue/<model_id>/v<n>/
+        the HYRAK catalogue's own copy of a published version (model file,
+        companions, preview), made when a founder publishes. No workspace
+        writes here; catalogue sessions run from it.
+
+A version folder is never written into twice: files arrive in a unique
+staging folder (`.incoming-<random>` beside the versions) and the whole
+folder is renamed into place only when v<n> does not exist yet. Every
+copy's sha256 is recorded and checked again before a runner starts. Ids
+are checked to be plain ids before they become path parts.
 """
 from __future__ import annotations
 
@@ -53,6 +60,93 @@ def model_dir(workspace_id: str, model_id: str) -> Path:
 
 def version_dir(workspace_id: str, model_id: str, n: int) -> Path:
     return model_dir(workspace_id, model_id) / f"v{int(n)}"
+
+
+def staging_dir(workspace_id: str, model_id: str) -> Path:
+    d = model_dir(workspace_id, model_id) / f".incoming-{os.urandom(8).hex()}"
+    d.mkdir(parents=True)
+    return d
+
+
+def catalogue_dir(model_id: str, n: int) -> Path:
+    return root() / "catalogue" / _safe(model_id) / f"v{int(n)}"
+
+
+def catalogue_model_dir(model_id: str) -> Path:
+    return root() / "catalogue" / _safe(model_id)
+
+
+class VersionExists(Exception):
+    pass
+
+
+def place_dir(src: Path, dest: Path) -> None:
+    """Rename a finished staging folder to `dest`, which must not exist yet
+    (never overwrite a version folder)."""
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        raise VersionExists(str(dest))
+    os.rename(src, dest)          # same filesystem: atomic; fails if dest appeared meanwhile
+
+
+def fill_missing(src: Path, dest: Path) -> None:
+    """Move the files of `src` into an existing `dest`, only where `dest` has
+    no file of that name yet (a hard link fails rather than overwrite)."""
+    for f in Path(src).iterdir():
+        if not f.is_file():
+            continue
+        try:
+            os.link(f, Path(dest) / f.name)
+        except FileExistsError:
+            pass
+    shutil.rmtree(src, ignore_errors=True)
+
+
+# What travels with a model file: everything but the preview and staging leftovers.
+def model_files(d: Path) -> list[Path]:
+    return sorted(p for p in Path(d).iterdir()
+                  if p.is_file() and not p.name.startswith(".") and p.name != PREVIEW_FILE)
+
+
+def hash_files(d: Path) -> dict:
+    return {p.name: sha256_of(p) for p in model_files(d)}
+
+
+def verify_files(d: Path, expected: dict) -> list[str]:
+    """Names whose content differs from `expected` (or is missing)."""
+    bad = []
+    for name, sha in (expected or {}).items():
+        p = Path(d) / name
+        if not p.is_file() or sha256_of(p) != sha:
+            bad.append(name)
+    return bad
+
+
+def copy_to_catalogue(src: Path, model_id: str, n: int) -> dict:
+    """The catalogue's own copy of a version folder; returns the copied
+    files' hashes (the preview is copied, not hashed). Replaces an earlier
+    copy of the same version, which only the catalogue writes."""
+    base = catalogue_model_dir(model_id)
+    base.mkdir(parents=True, exist_ok=True)
+    tmp = base / f".incoming-{os.urandom(8).hex()}"
+    tmp.mkdir()
+    try:
+        for p in model_files(src):
+            shutil.copy2(p, tmp / p.name)
+        if (Path(src) / PREVIEW_FILE).is_file():
+            shutil.copy2(Path(src) / PREVIEW_FILE, tmp / PREVIEW_FILE)
+        files = hash_files(tmp)
+        dest = catalogue_dir(model_id, n)
+        if dest.exists():
+            old = base / f".old-{os.urandom(8).hex()}"
+            os.rename(dest, old)
+            shutil.rmtree(old, ignore_errors=True)
+        os.rename(tmp, dest)
+        return files
+    except Exception:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
 
 
 def safe_child(base: Path, rel: str) -> Path:

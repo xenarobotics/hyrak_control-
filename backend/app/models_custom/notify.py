@@ -77,20 +77,30 @@ async def model_alert(session_id: str, payload: dict) -> None:
         logger.debug(f"model_alert to {session_id[:8]} failed: {e}")
 
 
-async def stop_sessions_running(model_id: str, reason: str, *,
-                                except_workspace: Optional[str] = None) -> int:
-    """Put every session running `model_id` back on manual control (except
-    sessions of `except_workspace`, which keep their own model). Returns how
-    many were switched."""
+async def stop_sessions_running(model_id: Optional[str], reason: str, *,
+                                via_catalogue: Optional[bool] = None,
+                                workspace_id: Optional[str] = None,
+                                skip_staff: bool = False) -> int:
+    """Put sessions running a custom model back on manual control: those
+    running `model_id` (None: any custom model), only on the catalogue path
+    or only on their own copy when `via_catalogue` says so, only in
+    `workspace_id` when given. Returns how many were switched."""
     if _session_manager is None:
         return 0
     from app.sessions.models import AnalysisMode
     n = 0
     for s in list(_session_manager.all_sessions()):
         mode = s.mode
-        if getattr(mode, "model_id", None) != model_id:
+        spec = getattr(mode, "spec", None)
+        if spec is None or not hasattr(mode, "model_id"):
             continue
-        if except_workspace is not None and s.workspace_id == except_workspace:
+        if model_id is not None and mode.model_id != model_id:
+            continue
+        if via_catalogue is not None and bool(spec.via_catalogue) != via_catalogue:
+            continue
+        if workspace_id is not None and s.workspace_id != workspace_id:
+            continue
+        if skip_staff and s.is_staff:
             continue
         _session_manager.set_mode(s.session_id, AnalysisMode.MANUAL_CONTROL)
         if _vision_pool is not None:

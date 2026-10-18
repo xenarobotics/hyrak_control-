@@ -225,6 +225,7 @@ async def patch_workspace(actor: AuthUser, workspace_id: str, *, name=None,
                 or not all(isinstance(v, bool) for v in features.values()):
             raise Refused(400, f"features takes true/false for: {', '.join(sorted(FEATURES))}")
         fields["features"] = {**(ws.features or {}), **features}
+        revoked = ws.has_feature("custom_models") and features.get("custom_models") is False
     if not fields:
         return _describe(ms, ws)
     out = await store.update_workspace(workspace_id, **fields)
@@ -234,6 +235,10 @@ async def patch_workspace(actor: AuthUser, workspace_id: str, *, name=None,
     if "disabled" in fields:
         # Access to the whole subtree just changed for everyone in it.
         await _drop_subtree_caches(store, tree, ws)
+    if "features" in fields and revoked:
+        # Its own custom models stop running now, not at the next selection.
+        from app.models_custom import service as model_service
+        await model_service.feature_revoked(workspace_id)
     tree = await _tree(store)
     return _describe(ms, tree.get(out.id) or out)
 
@@ -254,6 +259,14 @@ async def delete_workspace(actor: AuthUser, workspace_id: str, *, ip: str) -> No
         raise Refused(403, "Deleting a workspace needs the owner role")
     usage = await store.workspace_usage(workspace_id)
     blockers = [f"{n} {what}" for what, n in usage.items() if n]
+    # Models in the HYRAK catalogue: other workspaces run them, so only a
+    # founder deletes the workspace that owns them (they leave the
+    # catalogue with it; app/models_custom/service.workspace_deleted).
+    from app.models_custom import service as model_service
+    published = await model_service.published_count(workspace_id)
+    if published and not perms.is_founder(ms):
+        blockers.append(f"{published} model{'s' if published != 1 else ''} in the HYRAK "
+                        "catalogue (a founder must unpublish them)")
     if blockers:
         raise Refused(409, "Workspace still has " + ", ".join(blockers)
                       + ". Move or delete them first.")

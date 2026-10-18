@@ -663,3 +663,145 @@ async def test_the_catalogue_is_pinned_to_what_the_founder_published(env, onnx_f
     assert (await env.api.get(url, headers=hdr(sky))).status_code == 404
     with pytest.raises(ModelFailure):
         await service.resolve_run(sess(w.sky["id"]), m["id"])
+
+
+# ── the catalogue's own copy, version folders, deletes, stopping ─────────
+
+async def select(env, sid, model_id):
+    """set_analysis_mode on the real handler, waiting for the load."""
+    await env.sio.handlers["/"]["set_analysis_mode"](sid, {"mode": f"custom:{model_id}"})
+    for _ in range(200):
+        last = env.rec.of("model_status", sid)
+        if last and last[-1].get("mode") == f"custom:{model_id}" and last[-1]["status"] != "loading":
+            return last[-1]
+        await asyncio.sleep(0.05)
+    raise AssertionError("model did not load")
+
+
+async def test_catalogue_runs_from_its_own_hash_checked_copy(env, onnx_files):
+    w = await world(env)
+    m = await ready_model(env, w, onnx_files.detect)
+    ok(await env.api.post(f"/api/models/{m['id']}/publish", headers=hdr(w.founder[1])))
+    copy_dir = storage.catalogue_dir(m["id"], 1)
+    own_file = storage.version_dir(w.iith["id"], m["id"], 1) / "model.onnx"
+    assert (copy_dir / "model.onnx").read_bytes() == own_file.read_bytes()
+    assert (copy_dir / "preview.jpg").is_file()
+    mode = await service.resolve_run(sess(w.sky["id"]), m["id"])
+    assert mode.spec.via_catalogue and Path(mode.spec.model_path).parent == copy_dir
+    assert set(mode.spec.files) == {"model.onnx"}
+
+    # The owning workspace's file changes: the catalogue does not care, the
+    # workspace's own run is refused before a runner starts.
+    own_file.write_bytes(own_file.read_bytes() + b"\0")
+    a = await asyncio.to_thread(mode.build_analyzer)
+    await a.stop()
+    mine = await service.resolve_run(sess(w.iith["id"]), m["id"])
+    assert not mine.spec.via_catalogue and mine.spec.key != mode.spec.key
+    with pytest.raises(RuntimeError) as e:
+        await asyncio.to_thread(mine.build_analyzer)
+    assert "not the one that was checked" in str(e.value)
+
+    # And the catalogue copy itself is checked too.
+    runtime.pool().stop_all()
+    (copy_dir / "model.onnx").write_bytes(b"tampered")
+    with pytest.raises(RuntimeError) as e:
+        await asyncio.to_thread((await service.resolve_run(sess(w.sky["id"]), m["id"])).build_analyzer)
+    assert "not the one that was checked" in str(e.value)
+
+
+async def test_a_version_folder_is_never_written_twice(env, onnx_files):
+    w = await world(env)
+    m = await ready_model(env, w, onnx_files.detect)
+    v1 = storage.version_dir(w.iith["id"], m["id"], 1) / "model.onnx"
+    before = v1.read_bytes()
+    # Something already sits where v2 would go: the upload is refused and
+    # leaves no row and no staging behind.
+    squatter = storage.version_dir(w.iith["id"], m["id"], 2)
+    squatter.mkdir()
+    (squatter / "model.onnx").write_bytes(b"not ours")
+    r = await upload(env, w.olga[1], w.iith["id"], onnx_files.classify, model_id=m["id"])
+    assert r.status_code == 500 and r.json()["detail"]["code"] == "storage_failed"
+    assert (squatter / "model.onnx").read_bytes() == b"not ours" and v1.read_bytes() == before
+    got = ok(await env.api.get(f"/api/models/{m['id']}", headers=hdr(w.olga[1])))["model"]
+    assert [v["n"] for v in got["versions"]] == [1]
+    assert not list(storage.model_dir(w.iith["id"], m["id"]).glob(".incoming-*"))
+    # Version numbers are reserved in the store: a taken number moves on.
+    store = model_store.write_store()
+    with pytest.raises(model_store.VersionTaken):
+        await store.add_version(model_store.VersionRecord(id="x", model_id=m["id"], n=1))
+    await store.add_version(model_store.VersionRecord(id="y", model_id=m["id"], n=2))
+    assert await service._reserve_version(store, m["id"]) == 3
+
+
+async def test_deleting_a_workspace_with_published_models_needs_a_founder(env, onnx_files):
+    w = await world(env)
+    f = w.founder[1]
+    solo = ok(env.cl.post("/api/workspaces", headers=hdr(f),
+                          json={"name": "Solo", "kind": "organization"}))["workspace"]
+    _, owner = await account("soloowner")
+    ok(env.cl.post(f"/api/workspaces/{solo['id']}/members", headers=hdr(f),
+                   json={"login": "soloowner", "role": "owner"}))
+    await feature(env, w, solo["id"])
+    m = ok(await upload(env, owner, solo["id"], onnx_files.detect))["model"]
+    await service.wait_for_checks()
+    ok(await env.api.post(f"/api/models/{m['id']}/publish", headers=hdr(f)))
+    r = await env.api.delete(f"/api/workspaces/{solo['id']}", headers=hdr(owner))
+    assert r.status_code == 409 and "HYRAK catalogue" in r.json()["detail"]
+    ok(await env.api.delete(f"/api/workspaces/{solo['id']}", headers=hdr(f)))
+    assert not storage.catalogue_model_dir(m["id"]).exists()
+    assert not storage.workspace_dir(solo["id"]).exists()
+    lib = ok(await env.api.get(f"/api/models?workspace_id={w.iith['id']}", headers=hdr(w.olga[1])))
+    assert m["id"] not in [c["id"] for c in lib["hyrak"]]
+    # Without published models an owner deletes as before.
+    plain = ok(env.cl.post("/api/workspaces", headers=hdr(f),
+                           json={"name": "Plain", "kind": "organization"}))["workspace"]
+    ok(env.cl.post(f"/api/workspaces/{plain['id']}/members", headers=hdr(f),
+                   json={"login": "soloowner", "role": "owner"}))
+    ok(await env.api.delete(f"/api/workspaces/{plain['id']}", headers=hdr(owner)))
+
+
+async def test_unpublish_and_repin_stop_every_catalogue_session(env, onnx_files):
+    w = await world(env)
+    m = await ready_model(env, w, onnx_files.detect)
+    ok(await env.api.post(f"/api/models/{m['id']}/publish", headers=hdr(w.founder[1])))
+    sky = await sky_owner(env, w)
+    await connect(env, "sky", sky, workspace_id=w.sky["id"])
+    await connect(env, "pat", w.pat[1])
+    # The owning workspace without the feature runs it on the catalogue path.
+    await feature(env, w, w.iith["id"], on=False)
+    assert (await select(env, "sky", m["id"]))["status"] == "ready"
+    assert (await select(env, "pat", m["id"]))["status"] == "ready"
+    assert session(env, "pat").mode.spec.via_catalogue
+    # Re-pinning (same version, fresh snapshot) puts both back on manual.
+    ok(await env.api.post(f"/api/models/{m['id']}/publish", headers=hdr(w.founder[1])))
+    assert session(env, "sky").mode.value == "manual-control"
+    assert session(env, "pat").mode.value == "manual-control"
+    await select(env, "sky", m["id"])
+    await select(env, "pat", m["id"])
+    ok(await env.api.post(f"/api/models/{m['id']}/publish", headers=hdr(w.founder[1]),
+                          json={"published": False}))
+    assert session(env, "sky").mode.value == "manual-control"
+    assert session(env, "pat").mode.value == "manual-control"
+    assert errors(env, "pat")[-1]["code"] == "model_removed"
+    assert not storage.catalogue_dir(m["id"], 1).exists()
+
+
+async def test_switching_the_feature_off_stops_own_models_only(env, onnx_files):
+    w = await world(env)
+    own = await ready_model(env, w, onnx_files.detect)
+    cat = await ready_model(env, w, onnx_files.classify, name="Shared")
+    ok(await env.api.post(f"/api/models/{cat['id']}/publish", headers=hdr(w.founder[1])))
+    sky = await sky_owner(env, w)
+    await connect(env, "pat", w.pat[1])
+    await connect(env, "sky", sky, workspace_id=w.sky["id"])
+    await connect(env, "hp", w.founder[1], workspace_id=w.iith["id"])     # staff in IITH
+    await select(env, "pat", own["id"])
+    await select(env, "sky", cat["id"])
+    await select(env, "hp", own["id"])
+    await feature(env, w, w.iith["id"], on=False)
+    assert session(env, "pat").mode.value == "manual-control"           # own model: stopped
+    assert errors(env, "pat")[-1]["code"] == "model_removed"
+    assert session(env, "sky").mode.value == f"custom:{cat['id']}"       # catalogue: runs on
+    assert session(env, "hp").mode.value == f"custom:{own['id']}"        # staff: always entitled
+    await select(env, "pat", own["id"])
+    assert errors(env, "pat")[-1]["code"] == "not_entitled"

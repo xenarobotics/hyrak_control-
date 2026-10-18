@@ -70,6 +70,10 @@ class VersionRecord:
     created_at: datetime = field(default_factory=utcnow)
 
 
+class VersionTaken(Exception):
+    """Another request reserved this version number first."""
+
+
 _MODEL_FIELDS = {f.name for f in fields(ModelRecord)}
 _VERSION_FIELDS = {f.name for f in fields(VersionRecord)}
 
@@ -125,8 +129,13 @@ class MemoryModelStore:
             await self.delete_model(mid)
 
     async def add_version(self, v: VersionRecord) -> VersionRecord:
+        if (v.model_id, v.n) in self.versions:
+            raise VersionTaken(f"{v.model_id} v{v.n}")
         self.versions[(v.model_id, v.n)] = copy.deepcopy(v)
         return copy.deepcopy(v)
+
+    async def delete_version(self, model_id: str, n: int) -> None:
+        self.versions.pop((model_id, n), None)
 
     async def next_version_n(self, model_id: str) -> int:
         return max((n for (mid, n) in self.versions if mid == model_id), default=0) + 1
@@ -236,11 +245,23 @@ class DbModelStore:
         return None                  # the foreign key cascades
 
     async def add_version(self, v: VersionRecord) -> VersionRecord:
+        from sqlalchemy.exc import IntegrityError
         from app.db.models import CustomModelVersion
         async with self._session() as db:
             db.add(CustomModelVersion(**asdict(v)))
-            await db.commit()
+            try:
+                await db.commit()
+            except IntegrityError as e:          # uq_model_versions_model_n
+                raise VersionTaken(f"{v.model_id} v{v.n}") from e
         return v
+
+    async def delete_version(self, model_id: str, n: int) -> None:
+        from sqlalchemy import delete as sa_delete
+        from app.db.models import CustomModelVersion
+        async with self._session() as db:
+            await db.execute(sa_delete(CustomModelVersion).where(
+                CustomModelVersion.model_id == model_id, CustomModelVersion.n == n))
+            await db.commit()
 
     async def next_version_n(self, model_id: str) -> int:
         from sqlalchemy import func, select

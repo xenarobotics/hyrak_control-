@@ -130,9 +130,14 @@ Where this differs from the text above, this wins.
 **Storage and settings.** `HYRAK_DATA_DIR` (default `backend/data`,
 gitignored), layout `workspaces/<ws>/models/<id>/v<n>/` with
 `model.onnx`, Hugging Face companions (`*.onnx_data`, `config.json`,
-`preprocessor_config.json`, `labels.txt`) and `preview.jpg`; a
-published model also has `catalogue/preview.jpg`. Files are written under
-a temporary name and renamed; sha256 is recorded. Knobs:
+`preprocessor_config.json`, `labels.txt`) and `preview.jpg`. A version
+folder is never written twice: a file arrives in a unique `.incoming-*`
+staging folder, the version row is reserved (unique `(model_id, n)`),
+and the folder is renamed to `v<n>` only if that does not exist yet. The
+sha256 of every model file is recorded and checked again before every
+runner start (`file_changed` on a mismatch). The HYRAK catalogue keeps
+its own copy of each pinned version under
+`<HYRAK_DATA_DIR>/catalogue/<model_id>/v<n>/`, which no workspace writes. Knobs:
 `CUSTOM_MODELS_MAX_MB` (500), `_MAX_PER_WORKSPACE` (50),
 `_INSPECT_TIMEOUT_S`, `_TEST_TIMEOUT_S`, `_PARALLEL_CHECKS` (1),
 `_HF_ENDPOINT`, `_HF_TIMEOUT_S`, `_HF_DOWNLOAD_TIMEOUT_S`, `_USE_GPU`,
@@ -185,7 +190,7 @@ picture with the most findings.
 `load_failed`, `out_of_memory`, `run_failed`, `bad_output`, `timeout`,
 `crashed`, `storage_failed`, `hf_bad_repo`, `hf_not_found`, `hf_gated`,
 `hf_no_onnx`, `hf_choose_file`, `hf_file_not_found`, `hf_unreachable`,
-`hf_download_failed`, `not_entitled`, `quota`, `busy`, `not_ready`,
+`hf_download_failed`, `file_changed`, `not_entitled`, `quota`, `busy`, `not_ready`,
 `forbidden`, `founders_only`, `published_locked`, `bad_request`,
 `model_removed`, `not_found`, `runner_failed`. REST errors answer
 `{"detail": {code, error, hint, detail}}`.
@@ -226,7 +231,8 @@ picture with the most findings.
 
 **The catalogue is pinned.** Publishing takes a snapshot of one ready
 version (name, description, task, labels, threshold, the inspect spec,
-speed) and copies its preview. Other workspaces get a reduced card
+speed, file hashes) and copies the version's files and preview into the
+catalogue folder; catalogue sessions run from that copy. Other workspaces get a reduced card
 (`{id, kind: "catalogue", run_mode, name, description, icon, task,
 status, runnable, published, labels, threshold, version: {n, latency_ms,
 fps, gpu_mem_mb, provider, input_shape, preview}}`, nothing about the
@@ -234,9 +240,18 @@ owning workspace, authors, other versions or failures) and run exactly
 the pinned version with the snapshot's spec, without the owner's alert
 rule. The owning workspace keeps editing, relabelling, re-uploading and
 retesting its own copy; that changes only its own view and runs. Only a
-founder publishes again (moving the pin; catalogue sessions on the old
-pin go back to manual) or unpublishes. Deleting a published model needs
-a founder (`published_locked`).
+founder publishes again or unpublishes; either puts every session running
+the model on the catalogue path back on manual (the owning workspace's
+too: it runs the catalogue pin when its feature is off). Deleting a
+published model needs a founder (`published_locked`), and so does
+deleting a workspace that owns published models (a delete blocker
+computed in `workspaces.service.delete_workspace`, since the auth stores'
+`workspace_usage` does not see the model tables). A founder-forced
+workspace delete takes its models out of the catalogue: their rows
+cascade, sessions running them go back to manual and the catalogue
+copies are removed. Switching `custom_models` off stops the workspace's
+customer sessions running its own models at once; catalogue models and
+staff sessions run on.
 
 **Socket.** No new client events. `set_analysis_mode {mode:
 "custom:<id>"}` (session command, as before) resolves through
@@ -254,7 +269,8 @@ box, ts, message}` to the one session.
 **Runtime.** `CustomModelMode` stands in for an `AnalysisMode` on the
 session (`value` = `custom:<id>`) and builds a `CustomModelAnalyzer`
 through the vision pool. One runner process per (session workspace,
-model, version), shared by that workspace's sessions: frames through a
+model, version, own copy or catalogue), shared by that workspace's
+sessions: frames through a
 `/dev/shm` buffer, requests over a socketpair, one at a time (each
 session already keeps only its newest frame). A crash, exit or answer
 later than the infer timeout kills it; frames meanwhile report `error`
