@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # HYRAK cloud SITL - ONE headless PX4 + Gazebo instance for one customer
-# session (docs/ACCESS_MODEL.md 8b). Started and stopped by the backend
+# session (docs/ACCESS_MODEL.md 8c). Started and stopped by the backend
 # (backend/app/sim/), which owns the process group this script leads.
 #
 #   cloud_sim.sh --instance N --partition NAME --mav-port P --px4-port Q \

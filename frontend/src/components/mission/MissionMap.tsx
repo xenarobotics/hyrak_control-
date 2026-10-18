@@ -23,6 +23,7 @@ import type { Waypoint, MapLayer } from '@/types/mission'
 import { getServerUrl } from '@/lib/server-url'
 import { authHeaders } from '@/lib/auth'
 import { useAccess } from '@/hooks/useAccess'
+import { useResolvedDroneId } from '@/lib/droneId'
 import { visibleInterval } from '@/lib/poll'
 import { getHazards, getObstaclesAndPath, addHazard, type KnownHazard, type LiveObstacle, type LatLng } from '@/lib/avoidance'
 import { ZONE_COLORS, zoneRings, type ZoneFeature } from '@/components/admin/zones'
@@ -72,20 +73,27 @@ function AvoidanceOverlay({ show, reload, home, drone }: {
   const [obstacles, setObstacles] = useState<LiveObstacle[]>([])
   const [reroutes, setReroutes] = useState<LatLng[][]>([])
   const [goals, setGoals] = useState<LatLng[]>([])
-  // Avoidance is staff-only in phase 2a: a customer's map draws no overlay
-  // and never polls routes that answer 403.
+  // Customers (phase 2b, docs/ACCESS_MODEL.md 8b) see the shared hazard map
+  // and their OWN drone's obstacles and reroute; the all-drones status list
+  // is staff-only, so their one id comes from the session.
   const { isCustomer } = useAccess()
-  const on = show && !isCustomer
+  const ownDroneId = useResolvedDroneId()
+  const on = show
   useEffect(() => {
     if (!on) return
     let alive = true
     const load = async () => {
       try {
         const hz = await getHazards()
-        const sr = await apiFetch(`${getServerUrl()}/api/avoidance/status`)
-        if (!sr.ok) throw new Error(`avoidance status HTTP ${sr.status}`)
-        const st = await sr.json()
-        const ids: string[] = (Array.isArray(st.drones) ? st.drones : []).map((d: { drone_id: string }) => d.drone_id)
+        let ids: string[]
+        if (isCustomer) {
+          ids = ownDroneId ? [ownDroneId] : []
+        } else {
+          const sr = await apiFetch(`${getServerUrl()}/api/avoidance/status`)
+          if (!sr.ok) throw new Error(`avoidance status HTTP ${sr.status}`)
+          const st = await sr.json()
+          ids = (Array.isArray(st.drones) ? st.drones : []).map((d: { drone_id: string }) => d.drone_id)
+        }
         const per = await Promise.all(ids.map(id =>
           getObstaclesAndPath(id).catch(() => ({ obstacles: [], reroutePath: null, goal: null }))))
         if (alive) {
@@ -100,7 +108,7 @@ function AvoidanceOverlay({ show, reload, home, drone }: {
     const stop = visibleInterval(load, 1500)   // fast poll so the reroute updates live
     // Without this a poll in flight at unmount set state on a dead overlay.
     return () => { alive = false; stop() }
-  }, [on, reload])
+  }, [on, reload, isCustomer, ownDroneId])
   if (!on) return null
   const start = home ?? drone     // mission start = the drone's home / launch point
   return (
@@ -560,6 +568,7 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
   const [droneTrail, setDroneTrail] = useState<[number, number][]>([])
   const [showAvoid, setShowAvoid] = useState(true)   // obstacle-avoidance overlay
   const [pinMode, setPinMode] = useState(false)      // click-to-pin a known hazard
+  const hazardReadOnly = useAccess().isCustomer
   const [hazardNonce, setHazardNonce] = useState(0)  // bump to force overlay reload
 
   const pinHazard = useCallback(async (lat: number, lng: number) => {
@@ -779,7 +788,8 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
             <LegendRow color="#38bdf8" label="Known hazard" />
             <LegendRow color="#9aa3b5" label="Static obstacle" />
             <LegendRow color="#fbbf24" label="Moving obstacle" />
-            {!readOnly && <button
+            {/* The shared hazard map is staff-write (docs/ACCESS_MODEL.md 8b). */}
+            {!readOnly && !hazardReadOnly && <button
               onClick={() => setPinMode(p => !p)}
               style={{
                 marginTop: 4, width: '100%', padding: '4px 6px', borderRadius: 5,

@@ -19,11 +19,18 @@ function FitTrack({ points }: { points: [number, number][] }) {
     return null
 }
 
-export default function FlightTrackMap({ track }: { track: { lat: number; lng: number }[] }) {
+/** `cursor`: the sample index a replay is at (a marker on the track). */
+export default function FlightTrackMap({ track, cursor }: {
+    track: { lat: number; lng: number }[]
+    cursor?: number | null
+}) {
     const layer = MAP_LAYERS.find(l => l.key === 'satellite') ?? MAP_LAYERS[0]
     const points = track
         .filter(p => p.lat !== 0 || p.lng !== 0)
         .map(p => [p.lat, p.lng] as [number, number])
+    const at = cursor != null && track[cursor] && (track[cursor].lat !== 0 || track[cursor].lng !== 0)
+        ? [track[cursor].lat, track[cursor].lng] as [number, number]
+        : null
 
     return (
         <MapContainer
@@ -47,6 +54,10 @@ export default function FlightTrackMap({ track }: { track: { lat: number; lng: n
                     <CircleMarker center={points[points.length - 1]} radius={5}
                         pathOptions={{ color: '#ef4444', fillOpacity: 1 }} />
                 </>
+            )}
+            {at && (
+                <CircleMarker center={at} radius={7}
+                    pathOptions={{ color: '#fbbf24', fillColor: '#fbbf24', fillOpacity: 0.9 }} />
             )}
         </MapContainer>
     )

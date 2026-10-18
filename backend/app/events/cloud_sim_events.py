@@ -1,5 +1,5 @@
 """
-Cloud simulator socket events (docs/ACCESS_MODEL.md 8b).
+Cloud simulator socket events (docs/ACCESS_MODEL.md 8c).
 
     start_cloud_sim   {airframe?, home?: {lat, lon}}   session command (fly)
     stop_cloud_sim                                      session view

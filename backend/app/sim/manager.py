@@ -1,5 +1,5 @@
 """
-Cloud SITL manager (docs/ACCESS_MODEL.md 8b): a premium, per-session PX4 +
+Cloud SITL manager (docs/ACCESS_MODEL.md 8c): a premium, per-session PX4 +
 Gazebo instance on this server that the session flies like a real drone.
 
 One instance per session, at most cloud_sim_max_per_workspace per
@@ -175,7 +175,7 @@ class CloudSimManager:
         logger.warning(
             f"cloud sim: PX4 binds its MAVLink ports on 0.0.0.0 and accepts commands from "
             f"any source; udp {first}-{last} is reachable from the network unless "
-            f"firewalled to loopback (docs/ACCESS_MODEL.md 8b). Set "
+            f"firewalled to loopback (docs/ACCESS_MODEL.md 8c). Set "
             f"CLOUD_SIM_REQUIRE_FIREWALL_ACK=true once the rule is in place.")
         return True
 

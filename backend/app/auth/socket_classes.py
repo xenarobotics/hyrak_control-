@@ -49,7 +49,7 @@ EVENTS: dict[str, str] = {
     "fetch_params": SESSION_VIEW,
     "get_param": SESSION_VIEW,
 
-    # ── the session's own cloud simulator (8b, premium) ─────────────────
+    # ── the session's own cloud simulator (8c, premium) ─────────────────
     # The server picks the ports, launches the process and links the
     # session to it; the client sends at most an airframe and a home.
     "start_cloud_sim": SESSION_COMMAND,   # plus the workspace's cloud_sim feature (staff: always)
@@ -93,9 +93,11 @@ EVENTS: dict[str, str] = {
     "wall_offer": STAFF,              # mesh unit feeds on server ports
     "wall_ice_candidate": STAFF,
     "wall_close": STAFF,
-    "admin_hello": STAFF,
-    "watch_session": STAFF,           # another session's telemetry and video
+    "admin_hello": STAFF,             # console observer, scoped to the workspaces it can view
+    "watch_session": STAFF,           # another session's telemetry and video (view only)
     "unwatch_session": STAFF,
+    "takeover_session": STAFF,        # + sessions.takeover on the target session's workspace
+    "release_session": STAFF,
     "request_permit": STAFF,
     "list_my_permits": STAFF,
     "connect_swarm_relay": STAFF,
@@ -128,6 +130,23 @@ DRONE_EVENTS = frozenset({
     "set_tracking", "set_vehicle_tracking", "set_follow_vehicle", "set_follow_person",
     "set_multi_follow", "select_person", "set_pd_params", "set_altitude_mode",
     "set_altitude_nudge", "set_tracking_params",
+})
+
+# Session commands a staff console socket may route to ANOTHER session's
+# drone by naming `target_session` (docs/ACCESS_MODEL.md 8b "Takeover"):
+# hold / return / land as quick actions, anything while it holds the
+# takeover. Everything else stays bound to the caller's own session.
+ROUTABLE_EVENTS = frozenset({"drone_action", "drone_command"})
+
+# What a session in TAKEOVER may no longer send (socket_guard.takeover_stops):
+# every SESSION_COMMAND, safety actions included - staff own the decision
+# while they hold control - plus these, which would cut, replace or reprogram
+# the link staff now command through. connect_browser_serial is let through
+# only while the session has no link at all (relinking a dropped radio gives
+# staff their link back).
+TAKEOVER_LINK_EVENTS = frozenset({
+    "disconnect_telemetry", "connect_browser_serial",
+    "connect_telemetry", "connect_rf_bridge", "upload_mission",
 })
 
 # drone_action names that are never refused for a session holding the

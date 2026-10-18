@@ -1,5 +1,5 @@
 """
-The cloud SITL port plan (docs/ACCESS_MODEL.md 8b).
+The cloud SITL port plan (docs/ACCESS_MODEL.md 8c).
 
 Every cloud sim instance owns one SLOT. A slot is three UDP ports in a
 private block, a PX4 instance index and a fresh GZ_PARTITION:

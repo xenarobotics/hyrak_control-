@@ -155,7 +155,102 @@ class _FrameSniffer:
                 f"the stream, from system id(s) {ids}: {msgs}")
 
 
+# Message ids a taken-over session's relay may not inject (docs/ACCESS_MODEL.md
+# 8b "Takeover"): commands, mode changes, mission writes, parameter writes,
+# setpoints and stick input.
+TAKEOVER_BLOCKED_MSGIDS = frozenset({
+    11,     # SET_MODE
+    23,     # PARAM_SET
+    39,     # MISSION_ITEM
+    41,     # MISSION_SET_CURRENT
+    44,     # MISSION_COUNT
+    45,     # MISSION_CLEAR_ALL
+    69,     # MANUAL_CONTROL
+    70,     # RC_CHANNELS_OVERRIDE
+    73,     # MISSION_ITEM_INT
+    75,     # COMMAND_INT
+    76,     # COMMAND_LONG
+    82,     # SET_ATTITUDE_TARGET
+    84,     # SET_POSITION_TARGET_LOCAL_NED
+    86,     # SET_POSITION_TARGET_GLOBAL_INT
+})
+
+
+class CommandFilter:
+    """Streaming MAVLink framer that drops TAKEOVER_BLOCKED_MSGIDS frames and
+    passes everything else through unchanged, in order.
+
+    WHAT IT IS AND IS NOT. The relay bytes are the RADIO's downlink: they go
+    into mavsdk_server, the ground side, never to the aircraft. A command
+    frame injected here reaches mavsdk_server, not PX4, so this filter is
+    defence in depth for the takeover rather than the thing that stops a
+    customer: the customer's own machine owns the physical radio and can
+    always write to it directly (or stop relaying staff commands to it),
+    which no server-side check can prevent. That residual risk is written
+    down in docs/ACCESS_MODEL.md 8b.
+
+    Frames split across socket packets are reassembled; bytes outside any
+    frame (noise, a wrong baud) pass straight through, so the link
+    diagnostics read the same."""
+
+    _MAX_BUF = 4096
+
+    def __init__(self, blocked=TAKEOVER_BLOCKED_MSGIDS):
+        self.blocked = frozenset(blocked)
+        self._buf = bytearray()
+        self.dropped = 0
+
+    def flush(self) -> bytes:
+        out = bytes(self._buf)
+        self._buf.clear()
+        return out
+
+    def feed(self, data: bytes) -> bytes:
+        self._buf.extend(data)
+        out = bytearray()
+        buf = self._buf
+        while buf:
+            magic = buf[0]
+            if magic not in (_V1_MAGIC, _V2_MAGIC):
+                # Pass noise up to the next possible frame start.
+                nxt = next((i for i in range(1, len(buf)) if buf[i] in (_V1_MAGIC, _V2_MAGIC)),
+                           len(buf))
+                out += buf[:nxt]
+                del buf[:nxt]
+                continue
+            if len(buf) < 2:
+                break
+            plen = buf[1]
+            if magic == _V1_MAGIC:
+                total, hdr = plen + 8, 6
+            else:
+                if len(buf) < 3:
+                    break
+                signed = bool(buf[2] & 0x01)
+                total, hdr = plen + 12 + (13 if signed else 0), 10
+            if len(buf) < max(total, hdr):
+                if len(buf) > self._MAX_BUF:
+                    out += buf[:1]         # cannot be a frame: give the byte up
+                    del buf[:1]
+                    continue
+                break
+            if magic == _V1_MAGIC:
+                msgid = buf[5]
+            else:
+                msgid = buf[7] | (buf[8] << 8) | (buf[9] << 16)
+            if msgid in self.blocked:
+                self.dropped += 1
+            else:
+                out += buf[:total]
+            del buf[:total]
+        return bytes(out)
+
+
 class SerialBridge(asyncio.DatagramProtocol):
+    # Class default so a bridge built without __init__ (the test doubles)
+    # has it too.
+    _command_filter: Optional["CommandFilter"] = None
+
     def __init__(self, sio, socket_id: str, source: str = "radio"):
         self._sio = sio
         self._socket_id = socket_id
@@ -183,6 +278,22 @@ class SerialBridge(asyncio.DatagramProtocol):
         self.bytes_out = 0
         self.packets_out = 0
         self._sniffer = _FrameSniffer()
+        # Set while HYRAK operations hold this session's drone (takeover).
+        self._command_filter: Optional[CommandFilter] = None
+
+    def set_command_filter(self, on: bool) -> None:
+        """Drop command / setpoint frames from the relay while taken over.
+        Turning it off forwards any partial frame still buffered."""
+        if on and self._command_filter is None:
+            self._command_filter = CommandFilter()
+        elif not on and self._command_filter is not None:
+            rest = self._command_filter.flush()
+            if self._command_filter.dropped:
+                logger.warning(f"Takeover ended: dropped {self._command_filter.dropped} command "
+                               f"frame(s) from the {self.source} relay while it lasted")
+            self._command_filter = None
+            if rest and self._transport and not self._transport.is_closing():
+                self._transport.sendto(rest, ("127.0.0.1", self.mavsdk_port))
 
     @classmethod
     async def create(cls, sio, socket_id: str, source: str = "radio") -> "SerialBridge":
@@ -204,6 +315,10 @@ class SerialBridge(asyncio.DatagramProtocol):
         self.bytes_in += len(data)
         self.packets_in += 1
         self._sniffer.feed(data)
+        if self._command_filter is not None:
+            data = self._command_filter.feed(data)
+            if not data:
+                return
         if self._transport and not self._transport.is_closing():
             self._transport.sendto(data, ("127.0.0.1", self.mavsdk_port))
 

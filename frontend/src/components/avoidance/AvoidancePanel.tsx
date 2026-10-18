@@ -8,8 +8,8 @@
 // (camera feeding? destination known?), the tuning that decides how early
 // and how wide it dodges, and the last things it did.
 import { useCallback, useEffect, useState } from 'react'
-import { useDroneStore } from '@/store/drone'
 import { useResolvedDroneId } from '@/lib/droneId'
+import { useAccess } from '@/hooks/useAccess'
 import { visibleInterval } from '@/lib/poll'
 import { ShieldCheck, ShieldAlert, Shield, TriangleAlert, ChevronDown, ChevronRight } from 'lucide-react'
 import {
@@ -84,6 +84,8 @@ export function AvoidancePanel() {
     // panel and the Command strip used to each poll three endpoints every
     // 1.5 s for as long as no drone was attached.
     const droneId = useResolvedDroneId()
+    // The learned hazard map is shared by every drone: staff clear it.
+    const { isCustomer } = useAccess()
     const [status, setStatus] = useState<AvoidanceStatus | null>(null)
     const [events, setEvents] = useState<AvoidanceEvent[]>([])
     const [confirmArm, setConfirmArm] = useState(false)
@@ -284,12 +286,12 @@ export function AvoidancePanel() {
                             style={{ borderColor: '#22d3ee55', color: '#22d3ee', background: '#22d3ee12' }}>
                             APPLY
                         </button>
-                        <button onClick={forget} disabled={busy}
+                        {!isCustomer && <button onClick={forget} disabled={busy}
                             className="flex-1 text-[11px] font-mono py-1.5 rounded border disabled:opacity-40"
                             style={{ borderColor: 'hsl(var(--app-border))', color: 'hsl(var(--app-text-muted))' }}
                             title="Clear every obstacle it has learned and stored. Do this before an honest re-run.">
                             FORGET HAZARDS
-                        </button>
+                        </button>}
                     </div>
                 </div>
             )}

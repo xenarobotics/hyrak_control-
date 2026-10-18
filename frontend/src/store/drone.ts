@@ -67,6 +67,20 @@ export interface ActionResult {
  *  section 8a): `forbidden` (the role in this workspace does not allow it)
  *  or `drone_not_in_workspace` (the drone belongs to another workspace).
  *  `msg` is the server's own words and is shown as is. */
+/** HYRAK operations hold this session's drone (docs/ACCESS_MODEL.md 8b
+ *  "Takeover"): every command from here is refused until they release it. */
+export interface TakeoverState {
+    by: string
+    since: number
+}
+
+/** A quick hold / return / land HYRAK operations sent without taking over. */
+export interface StaffIntervention {
+    action: string
+    by: string
+    at: number
+}
+
 export interface CommandRefusal {
     code: 'forbidden' | 'drone_not_in_workspace'
     msg: string
@@ -107,6 +121,8 @@ interface DroneStore {
     missionUploadResult: MissionUploadResult | null
     lastActionResult: ActionResult | null
     commandRefusal: CommandRefusal | null
+    takeover: TakeoverState | null
+    staffIntervention: StaffIntervention | null
     droneMissionOffer: DroneMissionWaypoint[] | null   // waypoints downloaded from drone on connect
 
     /** The command that has been sent and not yet answered, so a button can
@@ -144,6 +160,8 @@ interface DroneStore {
     setMissionUploadResult: (r: MissionUploadResult | null) => void
     setLastActionResult: (r: ActionResult | null) => void
     setCommandRefusal: (r: CommandRefusal | null) => void
+    setTakeover: (t: TakeoverState | null) => void
+    setStaffIntervention: (i: StaffIntervention | null) => void
     setDroneMissionOffer: (wps: DroneMissionWaypoint[] | null) => void
     reset: () => void
 }
@@ -185,6 +203,8 @@ export const useDroneStore = create<DroneStore>((set) => ({
     missionUploadResult: null,
     lastActionResult: null,
     commandRefusal: null,
+    takeover: null,
+    staffIntervention: null,
     droneMissionOffer: null,
     pendingAction: null,
     fcMessages: [],
@@ -238,6 +258,8 @@ export const useDroneStore = create<DroneStore>((set) => ({
     }),
     // A refused command will never be acknowledged: stop its spinner too.
     setCommandRefusal: (r) => set(r ? { commandRefusal: r, pendingAction: null } : { commandRefusal: null }),
+    setTakeover: (t) => set({ takeover: t }),
+    setStaffIntervention: (i) => set({ staffIntervention: i }),
     setDroneMissionOffer: (wps) => set({ droneMissionOffer: wps }),
     addFcMessage: (m) => set(state => {
         // Trim from the FRONT. A failsafe loop or a chatty boot can emit
@@ -262,6 +284,8 @@ export const useDroneStore = create<DroneStore>((set) => ({
         missionUploadResult: null,
         lastActionResult: null,
         commandRefusal: null,
+        takeover: null,
+        staffIntervention: null,
         droneMissionOffer: null,
         pendingAction: null,
         fcMessages: [],

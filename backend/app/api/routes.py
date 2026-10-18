@@ -16,6 +16,7 @@ import cv2
 import numpy as np
 from app.auth.deps import require_admin, require_operator, require_signed_in, require_viewer
 from app.auth.service import AuthUser
+from app.auth.store import PLATFORM_WORKSPACE_ID
 from app.config import get_settings
 
 logger = logging.getLogger("verocore.api")
@@ -164,75 +165,152 @@ async def ice_servers(_user: AuthUser = Depends(require_signed_in)):
     return {"iceServers": await get_ice_servers()}
 
 
-@router.get("/sessions")
-async def get_sessions(request: Request, _user: AuthUser = Depends(require_admin)):
-    """Live client sessions for the /admin observer page (admin sockets
-    themselves are excluded). Admin only: it lists client IPs and drone
-    positions."""
-    sm = request.app.state.session_manager
-    sessions = []
+def _session_row(sm, s, scope) -> dict:
+    """One live client session as staff see it (docs/ACCESS_MODEL.md 8b):
+    whose it is, which workspace, the drone and its link, flight state, AI
+    mode and whether video is up. Plus a compact live-state summary so the
+    console map can plot every drone without a telemetry mirror each."""
+    from app.auth import perms as _perms
+    live = None
+    tel = sm.get_telemetry(s.session_id)
+    if tel and tel.is_connected:
+        from app.zones import monitor as zone_monitor
+        snap = tel.snapshot
+        live = {
+            "zone_class": zone_monitor.current_class(s.session_id),
+            "lat": snap.position.latitude_deg,
+            "lng": snap.position.longitude_deg,
+            "alt": snap.position.relative_altitude_m,
+            "heading": snap.heading_deg,
+            "armed": snap.flight_mode.is_armed,
+            "in_air": snap.flight_mode.is_in_air,
+            "mode": snap.flight_mode.mode,
+            "battery": snap.battery.remaining_percent,
+        }
+    role = None
+    ws = scope.workspace(s.workspace_id)
+    if ws is not None:
+        role, _ = _perms.my_role(s.memberships or (), ws)
+    from app.sessions import takeover as _takeover
+    held = _takeover.holder(s.session_id)
+    return {
+        "session_id": s.session_id,
+        "workspace_id": s.workspace_id,
+        "workspace_name": scope.name(s.workspace_id),
+        "username": s.username,
+        "role": role,
+        "staff": s.is_staff,
+        "mode": s.mode.value,
+        "ai_mode": s.mode.value,
+        "is_streaming": s.is_streaming,
+        "video": s.is_streaming,
+        "telemetry_connected": s.telemetry_connected,
+        "link_kind": s.link_kind or None,
+        "drone_address": s.drone_address,
+        "hardware_uid": s.hardware_uid,
+        "drone": s.drone,
+        "armed": bool(live and live["armed"]),
+        "in_air": bool(live and live["in_air"]),
+        "live": live,
+        "approx_location": s.approx_location,
+        "detached": s.detached_at is not None,
+        "takeover": held.public() if held else None,
+    }
+
+
+async def _live_sessions(sm, scope, workspace_ids=None) -> list[dict]:
+    rows = []
     for s in sm.all_sessions():
-        if s.is_admin:
+        if sm.is_observer_only(s):
             continue
-        # Compact live-state summary so the admin map can plot every drone
-        # without opening a full telemetry mirror per session.
-        live = None
-        tel = sm.get_telemetry(s.session_id)
-        if tel and tel.is_connected:
-            from app.zones import monitor as zone_monitor
-            snap = tel.snapshot
-            live = {
-                "zone_class": zone_monitor.current_class(s.session_id),
-                "lat": snap.position.latitude_deg,
-                "lng": snap.position.longitude_deg,
-                "alt": snap.position.relative_altitude_m,
-                "heading": snap.heading_deg,
-                "armed": snap.flight_mode.is_armed,
-                "in_air": snap.flight_mode.is_in_air,
-                "mode": snap.flight_mode.mode,
-                "battery": snap.battery.remaining_percent,
-            }
-        sessions.append({
-            "session_id": s.session_id,
-            "mode": s.mode.value,
-            "is_streaming": s.is_streaming,
-            "telemetry_connected": s.telemetry_connected,
-            "drone_address": s.drone_address,
-            "hardware_uid": s.hardware_uid,
-            "drone": s.drone,
-            "workspace_id": s.workspace_id,
-            "staff": s.is_staff,
-            "live": live,
-            "approx_location": s.approx_location,
-        })
+        if not scope.can(s.workspace_id):
+            continue
+        if workspace_ids is not None and (s.workspace_id or PLATFORM_WORKSPACE_ID) not in workspace_ids:
+            continue
+        rows.append(_session_row(sm, s, scope))
+    return rows
+
+
+@router.get("/sessions")
+async def get_sessions(request: Request, user: AuthUser = Depends(require_viewer)):
+    """Live client sessions for the console (admin observer sockets are
+    excluded). Staff only, and scoped (docs/ACCESS_MODEL.md 8b): founders
+    see every session, other staff the sessions of workspaces where they
+    hold `view` (a manager: the customer workspaces they manage)."""
+    from app.auth import data_scope
+    sm = request.app.state.session_manager
+    scope = await data_scope.scope_for(user)
+    sessions = await _live_sessions(sm, scope)
 
     # The server-owned delivery fleet (station drones) - lives independent
-    # of any browser session.
+    # of any browser session. HYRAK's, so for whoever can view HYRAK.
     fleet = []
-    try:
-        from app.fleet import service as fleet_service
-        for d in fleet_service.status():
-            if not d["connected"]:
-                continue
-            fleet.append({
-                "drone_id": d["instance"],
-                "db_id": d["db_id"],
-                "name": d["name"],
-                "hardware_uid": f"sitl-station-fleet-{d['instance']}",
-                "is_simulated": True,
-                "live": d["live"],
-            })
-    except Exception:
-        pass
+    if scope.can(PLATFORM_WORKSPACE_ID):
+        try:
+            from app.fleet import service as fleet_service
+            for d in fleet_service.status():
+                if not d["connected"]:
+                    continue
+                fleet.append({
+                    "drone_id": d["instance"],
+                    "db_id": d["db_id"],
+                    "name": d["name"],
+                    "hardware_uid": f"sitl-station-fleet-{d['instance']}",
+                    "is_simulated": True,
+                    "workspace_id": PLATFORM_WORKSPACE_ID,
+                    "workspace_name": scope.name(PLATFORM_WORKSPACE_ID),
+                    "live": d["live"],
+                })
+        except Exception:
+            pass
 
     return {"active_sessions": len(sessions), "sessions": sessions, "fleet_drones": fleet}
 
 
+@router.get("/workspaces/{workspace_id}/activity")
+async def workspace_activity(workspace_id: str, request: Request,
+                             limit: int = Query(20, ge=1, le=100),
+                             user: AuthUser = Depends(require_signed_in)):
+    """The console's per-workspace Activity view: live sessions, recent
+    flights and (with audit.view) recent audit events of this workspace and
+    the ones below it. HYRAK's activity is HYRAK's own (its subtree is
+    every workspace). 404 without `view`, so ids cannot be probed."""
+    from app.auth import data_scope
+    from app.auth import perms as _perms
+    from app.auth import service as _auth
+    scope = await data_scope.scope_for(user)
+    tree = scope.tree
+    ws = tree.get(workspace_id) if tree is not None else None
+    if ws is None or not scope.can(ws.id):
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    if ws.kind == _perms.PLATFORM:
+        ids = [ws.id]
+    else:
+        ids = [w for w in tree.subtree_ids(ws) if scope.can(w)]
+    sm = request.app.state.session_manager
+    sessions = await _live_sessions(sm, scope, set(ids))
+    flights = await _list_flights(ids, limit=limit)
+    audit_rows = None
+    if scope.can(ws.id, _perms.AUDIT_VIEW):
+        try:
+            audit_rows = [r.public() for r in await _auth.read_store().list_audit(ids, limit, None)]
+        except Exception as e:
+            logger.warning(f"activity: audit read failed: {e}")
+            audit_rows = []
+    return {"workspace_id": ws.id, "sessions": sessions, "flights": flights,
+            "audit": audit_rows}
+
+
 @router.get("/drones")
-async def get_drones(_user: AuthUser = Depends(require_viewer)):
-    """Every drone ever seen by the platform (persistent registry)."""
+async def get_drones(user: AuthUser = Depends(require_viewer)):
+    """The drone registry, staff only and scoped like the session list
+    (docs/ACCESS_MODEL.md 8b): founders every drone, other staff the drones
+    of workspaces where they hold `view`."""
+    from app.auth import data_scope
     from app.registry import drones as drone_registry
-    return {"drones": await drone_registry.list_drones()}
+    scope = await data_scope.scope_for(user)
+    drones = await drone_registry.list_drones()
+    return {"drones": [d for d in drones if scope.can(d.get("workspace_id"))]}
 
 
 # ── Zones ────────────────────────────────────────────────────────────────
@@ -1144,40 +1222,88 @@ async def replan_task(
 
 
 # ── Flights ──────────────────────────────────────────────────────────────
+#
+# Per workspace (docs/ACCESS_MODEL.md 8b): every flight row carries the
+# workspace it was recorded in, and anyone signed in reads the flights of
+# workspaces where they hold `view` (founders: all). One flight outside the
+# caller's scope answers 404, never 403, so flight ids cannot be probed.
 
-@router.get("/drones/{drone_id}/flights")
-async def get_drone_flights(drone_id: str, limit: int = Query(30, le=200),
-                            _user: AuthUser = Depends(require_viewer)):
+async def _list_flights(workspace_ids, *, limit: int = 30, drone_id: str | None = None) -> list[dict]:
+    """Recent flights in these workspaces (None: all, empty: none), newest
+    first, with the drone's name."""
     from sqlalchemy import select
+    from app.db import db_available, get_session
+    from app.db.models import Drone, Flight
+    if not db_available() or workspace_ids == []:
+        return []
+    q = (select(Flight, Drone.name).join(Drone, Drone.id == Flight.drone_id, isouter=True)
+         .order_by(Flight.started_at.desc()).limit(limit))
+    if workspace_ids is not None:
+        q = q.where(Flight.workspace_id.in_(list(workspace_ids)))
+    if drone_id:
+        q = q.where(Flight.drone_id == drone_id)
+    try:
+        async with get_session() as db:
+            rows = (await db.execute(q)).all()
+    except Exception as e:
+        logger.warning(f"flight list failed: {e}")
+        return []
+    return [{**f.to_dict(), "drone_name": name} for f, name in rows]
+
+
+async def _flight_in_scope(flight_id: str, user: AuthUser):
+    """The Flight row if the caller may read it, else 404 (503 DB offline)."""
+    from sqlalchemy import select
+    from app.auth import data_scope
     from app.db import db_available, get_session
     from app.db.models import Flight
-    if not db_available():
-        return {"flights": []}
-    async with get_session() as db:
-        rows = (
-            await db.execute(
-                select(Flight).where(Flight.drone_id == drone_id)
-                .order_by(Flight.started_at.desc()).limit(limit)
-            )
-        ).scalars().all()
-    return {"flights": [f.to_dict() for f in rows]}
-
-
-@router.get("/flights/{flight_id}/download")
-async def download_flight(flight_id: str, _user: AuthUser = Depends(require_viewer)):
-    """Full 1 Hz flight track as CSV."""
-    from fastapi.responses import PlainTextResponse
-    from sqlalchemy import select
-    from app.db import db_available, get_session
-    from app.db.models import Flight, FlightSample
     if not db_available():
         raise HTTPException(status_code=503, detail="Database offline")
     async with get_session() as db:
         flight = (
             await db.execute(select(Flight).where(Flight.id == flight_id))
         ).scalar_one_or_none()
-        if flight is None:
-            raise HTTPException(status_code=404, detail="Flight not found")
+    if flight is None:
+        raise HTTPException(status_code=404, detail="Flight not found")
+    scope = await data_scope.scope_for(user)
+    if not scope.can(flight.workspace_id):
+        raise HTTPException(status_code=404, detail="Flight not found")
+    return flight
+
+
+@router.get("/flights")
+async def list_flights(workspace_id: str | None = Query(None),
+                       drone_id: str | None = Query(None),
+                       limit: int = Query(30, ge=1, le=200),
+                       user: AuthUser = Depends(require_signed_in)):
+    """Flight history of the workspaces the caller can view, or of one of
+    them (`workspace_id`), optionally one drone's."""
+    from app.auth import data_scope
+    scope = await data_scope.scope_for(user)
+    return {"flights": await _list_flights(scope.narrow(workspace_id), limit=limit,
+                                           drone_id=drone_id)}
+
+
+@router.get("/drones/{drone_id}/flights")
+async def get_drone_flights(drone_id: str, limit: int = Query(30, le=200),
+                            user: AuthUser = Depends(require_signed_in)):
+    """One drone's flights, only those recorded in workspaces the caller
+    can view (a drone moved between workspaces keeps each flight where it
+    was flown)."""
+    from app.auth import data_scope
+    scope = await data_scope.scope_for(user)
+    return {"flights": await _list_flights(scope.ids(), limit=limit, drone_id=drone_id)}
+
+
+@router.get("/flights/{flight_id}/download")
+async def download_flight(flight_id: str, user: AuthUser = Depends(require_signed_in)):
+    """Full 1 Hz flight track as CSV."""
+    from fastapi.responses import PlainTextResponse
+    from sqlalchemy import select
+    from app.db import get_session
+    from app.db.models import FlightSample
+    flight = await _flight_in_scope(flight_id, user)
+    async with get_session() as db:
         samples = (
             await db.execute(
                 select(FlightSample).where(FlightSample.flight_id == flight_id)
@@ -1207,21 +1333,27 @@ async def download_flight(flight_id: str, _user: AuthUser = Depends(require_view
 # everything on explicit operator request. Nothing is ever deleted as a
 # side effect of viewing or downloading it.
 
-def _own_session_or_staff(request: Request, session_id: str, user: AuthUser) -> None:
-    """Session reports (docs/ACCESS_MODEL.md 8a): staff, or the user who
-    opened that session. 404 otherwise, so another account's session ids
-    cannot be probed."""
-    if user.has_role("viewer"):
-        return
-    sm = getattr(request.app.state, "session_manager", None)
-    if sm is None or sm.owner_of(session_id) != user.id:
+async def _report_in_scope(request: Request, session_id: str, user: AuthUser) -> None:
+    """Session reports (docs/ACCESS_MODEL.md 8b): anyone with `view` on the
+    workspace the session's rows were recorded in (founders: all). Durable:
+    the workspace comes from the rows themselves, so it survives a server
+    restart; a session that wrote no rows yet falls back to the live
+    session manager. 404 otherwise, so session ids cannot be probed."""
+    from app.auth import data_scope
+    from app.vision.persistence import session_workspace
+    ws = await session_workspace(session_id)
+    if ws is None:
+        sm = getattr(request.app.state, "session_manager", None)
+        ws = sm.workspace_of(session_id) if sm is not None else None
+    scope = await data_scope.scope_for(user)
+    if ws is None or not scope.can(ws):
         raise HTTPException(status_code=404, detail="Session not found")
 
 
 @router.get("/sessions/{session_id}/crowd-report/download")
 async def download_crowd_report(session_id: str, request: Request,
                                 user: AuthUser = Depends(require_signed_in)):
-    _own_session_or_staff(request, session_id, user)
+    await _report_in_scope(request, session_id, user)
     from app.vision.persistence import export_crowd_report
     report = await export_crowd_report(session_id)
 
@@ -1231,13 +1363,16 @@ async def download_crowd_report(session_id: str, request: Request,
             snap_csv = io.StringIO()
             w = csv.DictWriter(snap_csv, fieldnames=[
                 "t", "current_count", "peak_count", "density_level", "section_counts",
-            ])
+            ], extrasaction="ignore")
             w.writeheader()
             w.writerows(report["snapshots"])
             zf.writestr("crowd_snapshots.csv", snap_csv.getvalue())
 
             alert_csv = io.StringIO()
-            w = csv.DictWriter(alert_csv, fieldnames=["t", "level", "section_idx", "count", "message"])
+            # extrasaction: the alert rows also carry session_id and
+            # workspace_id; without it any alert made the download a 500.
+            w = csv.DictWriter(alert_csv, fieldnames=["t", "level", "section_idx", "count", "message"],
+                               extrasaction="ignore")
             w.writeheader()
             w.writerows(report["alerts"])
             zf.writestr("crowd_alerts.csv", alert_csv.getvalue())
@@ -1286,7 +1421,7 @@ def _plate_grade(ev: dict) -> str:
 @router.get("/sessions/{session_id}/plate-report/download")
 async def download_plate_report(session_id: str, request: Request,
                                 user: AuthUser = Depends(require_signed_in)):
-    _own_session_or_staff(request, session_id, user)
+    await _report_in_scope(request, session_id, user)
     from app.vision.persistence import export_plate_report
     events = await export_plate_report(session_id)
 
@@ -1343,38 +1478,61 @@ async def download_plate_report(session_id: str, request: Request,
 
 
 @router.get("/vision/crowd-history")
-async def crowd_history(limit: int = Query(10, le=50), _user: AuthUser = Depends(require_viewer)):
+async def crowd_history(limit: int = Query(10, le=50), workspace_id: str | None = Query(None),
+                        user: AuthUser = Depends(require_signed_in)):
+    """Crowd sessions and alerts of the workspaces the caller can view (or
+    of one of them). docs/ACCESS_MODEL.md 8b."""
+    from app.auth import data_scope
     from app.vision.persistence import list_crowd_history
-    return await list_crowd_history(limit=limit)
+    scope = await data_scope.scope_for(user)
+    return await list_crowd_history(limit=limit, workspace_ids=scope.narrow(workspace_id))
 
 
 @router.get("/vision/plate-history")
-async def plate_history(limit: int = Query(50, le=200), _user: AuthUser = Depends(require_viewer)):
+async def plate_history(limit: int = Query(50, le=200), workspace_id: str | None = Query(None),
+                        user: AuthUser = Depends(require_signed_in)):
+    from app.auth import data_scope
     from app.vision.persistence import list_plate_history
-    return {"events": await list_plate_history(limit=limit)}
+    scope = await data_scope.scope_for(user)
+    return {"events": await list_plate_history(limit=limit,
+                                               workspace_ids=scope.narrow(workspace_id))}
 
 
 @router.get("/vision/plate-history/{event_id}/image")
-async def plate_history_image(event_id: str, _user: AuthUser = Depends(require_viewer)):
+async def plate_history_image(event_id: str, user: AuthUser = Depends(require_signed_in)):
     from fastapi.responses import FileResponse
-    from app.vision.persistence import get_plate_image_path
-    path = await get_plate_image_path(event_id)
-    if not path or not os.path.exists(path):
+    from app.auth import data_scope
+    from app.vision.persistence import get_plate_image
+    path, ws = await get_plate_image(event_id)
+    if not path or not (await data_scope.scope_for(user)).can(ws) or not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Image not found")
     return FileResponse(path, media_type="image/jpeg")
 
 
+async def _clear_scope(user: AuthUser, workspace_id: str | None):
+    """What a history clear may delete: founders everything (or the one
+    workspace named); other staff operators only rows of workspaces where
+    they hold `fly` (a HYRAK pilot HYRAK's, a manager their customers').
+    Customers cannot clear (the operator rank is staff only)."""
+    from app.auth import data_scope
+    from app.auth import perms as _perms
+    scope = await data_scope.scope_for(user)
+    return scope.narrow(workspace_id, _perms.FLY)
+
+
 @router.delete("/vision/crowd-history")
-async def clear_crowd_history_route(_user: AuthUser = Depends(require_operator)):
+async def clear_crowd_history_route(workspace_id: str | None = Query(None),
+                                    user: AuthUser = Depends(require_operator)):
     from app.vision.persistence import clear_crowd_history
-    await clear_crowd_history()
+    await clear_crowd_history(workspace_ids=await _clear_scope(user, workspace_id))
     return {"cleared": True}
 
 
 @router.delete("/vision/plate-history")
-async def clear_plate_history_route(_user: AuthUser = Depends(require_operator)):
+async def clear_plate_history_route(workspace_id: str | None = Query(None),
+                                    user: AuthUser = Depends(require_operator)):
     from app.vision.persistence import clear_plate_history
-    await clear_plate_history()
+    await clear_plate_history(workspace_ids=await _clear_scope(user, workspace_id))
     return {"cleared": True}
 
 
@@ -1586,20 +1744,28 @@ async def face_gallery_clear(_user: AuthUser = Depends(require_operator)):
 async def face_gallery_sightings(
     session_id: str | None = Query(None),
     limit: int = Query(200, le=1000),
-    _user: AuthUser = Depends(require_viewer),
+    workspace_id: str | None = Query(None),
+    user: AuthUser = Depends(require_viewer),
 ):
-    """Gallery-match audit trail - what the system claimed, when."""
+    """Gallery-match audit trail - what the system claimed, when. Staff
+    only like the face gallery itself (a privacy decision,
+    docs/ACCESS_MODEL.md 8b), and per workspace by `view`."""
+    from app.auth import data_scope
     from app.vision.persistence import list_sightings
-    return {"sightings": await list_sightings(session_id=session_id, limit=limit)}
+    scope = await data_scope.scope_for(user)
+    return {"sightings": await list_sightings(session_id=session_id, limit=limit,
+                                              workspace_ids=scope.narrow(workspace_id))}
 
 
 @router.delete("/vision/sightings")
 async def face_gallery_clear_sightings(
     session_id: str | None = Query(None),
-    _user: AuthUser = Depends(require_operator),
+    workspace_id: str | None = Query(None),
+    user: AuthUser = Depends(require_operator),
 ):
     from app.vision.persistence import clear_sightings
-    await clear_sightings(session_id=session_id)
+    await clear_sightings(session_id=session_id,
+                          workspace_ids=await _clear_scope(user, workspace_id))
     return {"cleared": True, "session_id": session_id}
 
 
@@ -1626,19 +1792,13 @@ async def decide_permit(
 
 
 @router.get("/flights/{flight_id}")
-async def get_flight(flight_id: str, _user: AuthUser = Depends(require_viewer)):
-    """Flight summary + full 1 Hz track."""
+async def get_flight(flight_id: str, user: AuthUser = Depends(require_signed_in)):
+    """Flight summary + full 1 Hz track (the replay)."""
     from sqlalchemy import select
-    from app.db import db_available, get_session
-    from app.db.models import Flight, FlightSample
-    if not db_available():
-        raise HTTPException(status_code=503, detail="Database offline")
+    from app.db import get_session
+    from app.db.models import FlightSample
+    flight = await _flight_in_scope(flight_id, user)
     async with get_session() as db:
-        flight = (
-            await db.execute(select(Flight).where(Flight.id == flight_id))
-        ).scalar_one_or_none()
-        if flight is None:
-            raise HTTPException(status_code=404, detail="Flight not found")
         samples = (
             await db.execute(
                 select(FlightSample).where(FlightSample.flight_id == flight_id)

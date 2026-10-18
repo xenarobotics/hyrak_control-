@@ -332,6 +332,18 @@ class Settings(BaseSettings):
     # Telemetry
     default_baud_rate: int = Field(default=57600)
 
+    # Delivery-fleet watchdog (app/fleet/service.py). An instance that does
+    # not answer is retried with exponential backoff (one watchdog interval,
+    # doubling, up to backoff_max_s), and after max_retries consecutive
+    # misses it is parked until someone presses CONNECT / adopt. A drone
+    # adopted earlier that has not answered for forget_s is dropped from the
+    # heal list altogether. Without these an empty SITL port (or one held by
+    # an unrelated process) spawned a mavsdk_server and logged an ERROR every
+    # cycle, forever.
+    fleet_watchdog_backoff_max_s: float = Field(default=1800.0)
+    fleet_watchdog_max_retries: int = Field(default=10)
+    fleet_watchdog_forget_s: float = Field(default=3 * 3600.0)
+
     # Where the RF ground decoder's uplink listener (wfb_tx) runs.
     #
     # Not loopback: the decoder is its own board on the local network, not a
@@ -402,7 +414,7 @@ class Settings(BaseSettings):
     mavsdk_server_port: int = Field(default=50051)
     sitl_address: str = Field(default="udpin://0.0.0.0:14540")
 
-    # Cloud SITL (docs/ACCESS_MODEL.md 8b): a premium per-session PX4 +
+    # Cloud SITL (docs/ACCESS_MODEL.md 8c): a premium per-session PX4 +
     # Gazebo instance on this server. Each instance costs roughly one CPU
     # core (gz physics + PX4 in lockstep) and a few hundred MB of RAM, so
     # size CLOUD_SIM_MAX_GLOBAL to the machine: 2 on a dev laptop, about
@@ -421,7 +433,7 @@ class Settings(BaseSettings):
     cloud_sim_instance_base: int = Field(default=100)
     # PX4 binds its MAVLink port on 0.0.0.0 and accepts commands from any
     # source, so the cloud sim port block must be firewalled to loopback
-    # on a server (nftables example in docs/ACCESS_MODEL.md 8b). Set true
+    # on a server (nftables example in docs/ACCESS_MODEL.md 8c). Set true
     # on servers AFTER applying the rule; while false the backend logs a
     # warning at startup that the block is reachable unless firewalled.
     cloud_sim_require_firewall_ack: bool = Field(default=False)

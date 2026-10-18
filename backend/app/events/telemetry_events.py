@@ -5,7 +5,8 @@ import logging
 from app.sessions import observer
 from app.auth import socket_classes
 from app.auth.socket_guard import (
-    require_operator, require_session_fly, require_session_view, require_staff,
+    command_session, require_operator, require_session_fly, require_session_view, require_staff,
+    takeover_stops,
 )
 from app.sessions.manager import SessionManager
 from app.telemetry import serial_bridge
@@ -234,6 +235,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 other_session.drone = None
                 other_session.drone_fly = None
                 other_session.link_simulated = False
+                other_session.link_kind = ""
                 await sio.emit(
                     "telemetry_status",
                     {"status": "disconnected", "message": "Disconnected - another client connected to this drone"},
@@ -254,6 +256,8 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                         session.session_id,
                         session.drone["id"] if session.drone else None,
                         snapshot_dict,
+                        workspace_id=((session.drone or {}).get("workspace_id")
+                                      or session.workspace_id),
                     )
                 )
                 # Zone enforcement monitor
@@ -381,6 +385,13 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         session.link_simulated = False
         session_manager.attach_telemetry(session.session_id, manager)
         session.drone_address = address
+        # A relinked radio during a takeover: the new link is locked too.
+        from app.sessions import takeover as _takeover
+        if _takeover.is_taken_over(session.session_id):
+            _takeover.lock_link(manager, True)
+        from app.auth import live_scope as _live_scope
+        session.link_kind = _live_scope.link_kind_for(
+            origin, address, has_bridge=serial_bridge.get_bridge(session.session_id) is not None)
 
         await sio.emit(
             "telemetry_status",
@@ -534,6 +545,10 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             return
         bridge = serial_bridge.get_bridge(session.session_id)
         if bridge:
+            # Taken over by HYRAK operations: the relay keeps carrying the
+            # downlink, minus any command / setpoint frames (the residual
+            # risk is in docs/ACCESS_MODEL.md 8b "Takeover").
+            bridge.set_command_filter(takeover_stops(session, "serial_uplink") is not None)
             bridge.uplink(bytes(data))
 
     @sio.on("disconnect_telemetry")
@@ -566,7 +581,9 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
     @sio.on("drone_command")
     async def on_drone_command(sid, data):
         if not await require_session_fly(sid, "drone_command", data, quiet=True): return
-        session = session_manager.get_by_socket(sid)
+        # The caller's own session, or the one a staff console has taken
+        # over (data.target_session, checked by the guard).
+        session = command_session(sid, data)
         if not session:
             return
         if session.mode != AnalysisMode.MANUAL_CONTROL:
@@ -589,7 +606,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
     @sio.on("drone_action")
     async def on_drone_action(sid, data):
         if not await require_session_fly(sid, "drone_action", data): return
-        session = session_manager.get_by_socket(sid)
+        session = command_session(sid, data)
         if not session:
             return
         tel = session_manager.get_telemetry(session.session_id)

@@ -10,6 +10,12 @@
 // layer, inside their operating area) and AUDIT for their own workspaces,
 // titled "Organization console", with a way back to the app.
 //
+// Phase 2b (section 8b): MAP and DRONES are open to all staff, scoped by
+// the server to the workspaces they can view (founders: everything; a
+// manager: the customer workspaces they manage). Watching a session is view
+// only. Taking control is separate: with sessions.takeover on the session's
+// workspace the detail panel offers HOLD / RTL / LAND and "Take control".
+//
 // Left rail tabs:
 //   MAP     - live map of every connected client. GPS fix = solid marker;
 //             no fix = dashed marker at the client's IP-derived approximate
@@ -39,6 +45,7 @@ import { useAuthGate } from '@/hooks/useAuthGate'
 import { useAccess } from '@/hooks/useAccess'
 import { hasPerm, type Perm } from '@/lib/access'
 import { Tag } from '@/components/admin/console'
+import { FLIGHT_MODES } from '@/lib/flightModes'
 import { getServerUrl } from '@/lib/server-url'
 import type { MapDrone } from '@/components/admin/AdminMap'
 import type { ZoneFeature } from '@/components/admin/zones'
@@ -76,8 +83,22 @@ type LiveState = {
 
 type ApproxLocation = { lat: number; lng: number; city: string; country: string } | null
 
+type TakeoverInfo = { by: string; user_id: string; staff_session_id: string; since: number } | null
+
 type SessionInfo = {
     session_id: string
+    workspace_id: string | null
+    workspace_name: string
+    username: string | null
+    role: string | null
+    staff: boolean
+    link_kind: string | null
+    ai_mode: string
+    video: boolean
+    armed: boolean
+    in_air: boolean
+    detached: boolean
+    takeover: TakeoverInfo
     mode: string
     is_streaming: boolean
     telemetry_connected: boolean
@@ -165,12 +186,18 @@ export default function AdminPage() {
     const { isFounder, isStaff, workspaces, user } = useAccess()
     // Not staff, yet past the gate: a customer owner or admin.
     const org = !!user && !isStaff
-    // The live session map, socket mirrors and drone registry still sit
-    // behind the compatibility admin role on the server: founders only.
+    // The live session map, socket mirrors and drone registry are open to
+    // all staff since phase 2b; the server scopes each to the workspaces
+    // the account can view.
+    const monitor = isStaff
     const anyPerm = (p: Perm) => workspaces.some(w => hasPerm(w, p))
+    const canTakeover = useCallback((wsId: string | null) =>
+        isFounder || workspaces.some(w => w.id === wsId && hasPerm(w, 'sessions.takeover')),
+    [isFounder, workspaces])
     const visibleTabs = TABS.filter(t => {
         switch (t.key) {
-            case 'overview': case 'drones': case 'staff': return isFounder
+            case 'overview': case 'drones': return monitor
+            case 'staff': return isFounder
             case 'permits': return !org && (isFounder || anyPerm('permits.approve'))
             case 'audit': return isFounder || anyPerm('audit.view')
             default: return true
@@ -201,15 +228,20 @@ export default function AdminPage() {
     const selectedRef = useRef<string | null>(null)
     const frameUrlRef = useRef<string | null>(null)
 
-    // Socket: announce as admin, subscribe to mirrors
+    // Socket: announce as a console observer, subscribe to mirrors
+    const [takeoverNote, setTakeoverNote] = useState<string | null>(null)
+    const [mySessionId, setMySessionId] = useState<string | null>(null)
+    const [lastResult, setLastResult] = useState<{ action: string; ok: boolean; error?: string } | null>(null)
     useEffect(() => {
-        if (!isFounder) return
+        if (!monitor) return
         const socket = getSocket()
         const hello = () => socket.emit('admin_hello', {})
         socket.on('connect', hello)
         if (socket.connected) hello()
         else connectSocket()
 
+        const onReady = (d: { session_id?: string }) => { if (d?.session_id) setMySessionId(d.session_id) }
+        socket.on('session_ready', onReady)
         const onTelem = (d: { session_id: string; data: Telem }) => {
             if (d.session_id === selectedRef.current) setTelem(d.data)
         }
@@ -220,23 +252,40 @@ export default function AdminPage() {
             frameUrlRef.current = url
             setFrameUrl(url)
         }
+        // Takeover and routed-command answers (section 8b "Takeover").
+        const onTakeover = (d: { ok?: boolean; active?: boolean; error?: string; reason?: string }) => {
+            if (d.ok === false) setTakeoverNote(d.error ?? 'Refused')
+            else if (d.active === false && d.reason) setTakeoverNote(`Control released (${d.reason.replace(/_/g, ' ')})`)
+            else setTakeoverNote(null)
+        }
+        const onResult = (d: { action: string; ok: boolean; error?: string }) => setLastResult(d)
+        const onError = (d: { event?: string; msg?: string; code?: string }) => {
+            if (d?.event === 'drone_action' || d?.event === 'drone_command') setTakeoverNote(d.msg ?? 'Refused')
+        }
         socket.on('admin_telemetry', onTelem)
         socket.on('admin_frame', onFrame)
+        socket.on('takeover_result', onTakeover)
+        socket.on('action_result', onResult)
+        socket.on('error', onError)
 
         return () => {
             socket.off('connect', hello)
             socket.off('admin_telemetry', onTelem)
             socket.off('admin_frame', onFrame)
+            socket.off('session_ready', onReady)
+            socket.off('takeover_result', onTakeover)
+            socket.off('action_result', onResult)
+            socket.off('error', onError)
             if (selectedRef.current) {
                 socket.emit('unwatch_session', { session_id: selectedRef.current })
             }
             if (frameUrlRef.current) URL.revokeObjectURL(frameUrlRef.current)
         }
-    }, [isFounder])
+    }, [monitor])
 
     // Sessions + registry: poll every 2s
     useEffect(() => {
-        if (!isFounder) return
+        if (!monitor) return
         let alive = true
         const poll = async () => {
             try {
@@ -265,7 +314,7 @@ export default function AdminPage() {
         void poll()
         const id = setInterval(poll, 2000)
         return () => { alive = false; clearInterval(id) }
-    }, [isFounder])
+    }, [monitor])
 
     // Zones: fetch on mount + every 30s + after edits
     const refreshZones = useCallback(async () => {
@@ -384,6 +433,23 @@ export default function AdminPage() {
         if (frameUrlRef.current) URL.revokeObjectURL(frameUrlRef.current)
         frameUrlRef.current = null
         setFrameUrl(null)
+    }, [])
+
+    // Staff control of a watched session (section 8b "Takeover"). Quick
+    // hold / return / land need no takeover; everything else is sent only
+    // while this console holds it. The server checks sessions.takeover on
+    // the session's workspace for every one of them.
+    const sendTo = useCallback((sessionId: string, action: string, extra: Record<string, unknown> = {}) => {
+        setTakeoverNote(null)
+        setLastResult(null)
+        getSocket().emit('drone_action', { action, ...extra, target_session: sessionId })
+    }, [])
+    const takeOver = useCallback((sessionId: string) => {
+        setTakeoverNote(null)
+        getSocket().emit('takeover_session', { session_id: sessionId })
+    }, [])
+    const release = useCallback((sessionId: string) => {
+        getSocket().emit('release_session', { session_id: sessionId })
     }, [])
 
     const toggleSelect = useCallback((sessionId: string) => {
@@ -608,6 +674,7 @@ export default function AdminPage() {
                                                 </span>
                                                 {s.drone?.is_simulated && <Tag label="SIM" tone="amber" />}
                                                 {s.live?.armed && <Tag label="ARMED" tone="red" />}
+                                                {s.in_air && <Tag label="IN AIR" tone="amber" />}
                                             </div>
                                             {s.live?.zone_class === 'orange' && (
                                                 <div className="mt-0.5 text-[9px] text-amber-400 animate-pulse">
@@ -619,9 +686,16 @@ export default function AdminPage() {
                                                     ● IN RED ZONE - ENFORCING
                                                 </div>
                                             )}
+                                            <div className="mt-0.5 text-[9px] text-zinc-500 truncate">
+                                                {s.workspace_name || 'workspace ?'} · {s.username ?? '?'}{s.role ? ` (${s.role})` : ''}
+                                            </div>
                                             <div className="mt-1 flex items-center gap-3 text-[10px] text-zinc-500">
                                                 <Badge on={s.is_streaming} label="VIDEO" />
                                                 <Badge on={s.telemetry_connected} label="TELEM" />
+                                                {s.ai_mode && s.ai_mode !== 'manual-control' && (
+                                                    <span className="text-violet-400 truncate">{s.ai_mode}</span>
+                                                )}
+                                                {s.takeover && <Tag label="HYRAK CONTROL" tone="red" />}
                                             </div>
                                             <div className="mt-0.5 text-[9px] text-zinc-600">
                                                 {s.live
@@ -683,8 +757,18 @@ export default function AdminPage() {
                                 frameUrl={frameUrl}
                                 copiedUid={copiedUid}
                                 onCopyUid={copyUid}
-                                onRename={renameDrone}
+                                onRename={isFounder ? renameDrone : null}
                                 onClose={() => watch(null)}
+                                control={canTakeover(watched.workspace_id) ? {
+                                    mine: !!watched.takeover && (mySessionId
+                                        ? watched.takeover.staff_session_id === mySessionId
+                                        : watched.takeover.user_id === user?.id),
+                                    note: takeoverNote,
+                                    lastResult,
+                                    send: (action, extra) => sendTo(watched.session_id, action, extra),
+                                    takeOver: () => takeOver(watched.session_id),
+                                    release: () => release(watched.session_id),
+                                } : null}
                             />
                         )}
                         {!watched && watchedFleet && (
@@ -1013,16 +1097,32 @@ export default function AdminPage() {
 }
 
 // ── Detail panel (map tab) ───────────────────────────────────────────────
+type ControlProps = {
+    /** This console holds the session's takeover. */
+    mine: boolean
+    note: string | null
+    lastResult: { action: string; ok: boolean; error?: string } | null
+    send: (action: string, extra?: Record<string, unknown>) => void
+    takeOver: () => void
+    release: () => void
+} | null
+
+const LINK_LABELS: Record<string, string> = {
+    client_relay: 'client relay', rf_bridge: 'RF bridge', server_udp: 'server sim (udp)',
+    server_direct: 'server link',
+}
+
 function DetailPanel({
-    session, telem, frameUrl, copiedUid, onCopyUid, onRename, onClose,
+    session, telem, frameUrl, copiedUid, onCopyUid, onRename, onClose, control,
 }: {
     session: SessionInfo
     telem: Telem | null
     frameUrl: string | null
     copiedUid: string | null
     onCopyUid: (u: string) => void
-    onRename: (d: DroneRecord) => void
+    onRename: ((d: DroneRecord) => void) | null
     onClose: () => void
+    control: ControlProps
 }) {
     return (
         <section className="w-96 shrink-0 border-l border-zinc-800 bg-zinc-950 overflow-y-auto">
@@ -1038,6 +1138,23 @@ function DetailPanel({
                     <X size={16} />
                 </button>
             </div>
+
+            <div className="border-b border-zinc-800 px-3 py-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
+                <span className="text-zinc-500">WORKSPACE</span><span className="text-zinc-200 truncate">{session.workspace_name || '-'}</span>
+                <span className="text-zinc-500">USER</span>
+                <span className="text-zinc-200 truncate">{session.username ?? '-'}{session.role ? ` (${session.role})` : ''}{session.staff ? ' · staff' : ''}</span>
+                <span className="text-zinc-500">LINK</span><span className="text-zinc-200">{session.link_kind ? (LINK_LABELS[session.link_kind] ?? session.link_kind) : 'none'}</span>
+                <span className="text-zinc-500">AI MODE</span><span className="text-zinc-200">{session.ai_mode}</span>
+                <span className="text-zinc-500">STATE</span>
+                <span className="text-zinc-200">{session.in_air ? 'IN AIR' : session.armed ? 'ARMED' : 'ON GROUND'}{session.detached ? ' · client away' : ''}</span>
+            </div>
+
+            {control && session.telemetry_connected && <ControlBlock session={session} telem={telem} control={control} />}
+            {!control && session.takeover && (
+                <div className="border-b border-zinc-800 px-3 py-2 text-[10px] text-red-400">
+                    HYRAK operations ({session.takeover.by}) hold this drone.
+                </div>
+            )}
 
             <div className="border-b border-zinc-800">
                 <div className="px-3 py-1.5 text-[10px] text-zinc-500">VIDEO</div>
@@ -1080,7 +1197,7 @@ function DetailPanel({
                 {session.drone_address && (
                     <div className="text-zinc-700 break-all">{session.drone_address}</div>
                 )}
-                {session.drone && (
+                {session.drone && onRename && (
                     <button
                         onClick={() => onRename(session.drone!)}
                         className="mt-1 px-2 py-1 rounded border border-zinc-700 text-[10px] text-zinc-400 hover:border-zinc-500"
@@ -1094,6 +1211,83 @@ function DetailPanel({
                 <PermitsBlock />
             </div>
         </section>
+    )
+}
+
+// Staff control of a watched session (docs/ACCESS_MODEL.md 8b "Takeover").
+// HOLD / RTL / LAND go straight to the drone through the session's own
+// safety path. "Take control" puts the session in TAKEOVER: the customer's
+// commands are refused and the flight controls below act on their drone
+// until "Release". Releasing sends nothing: the drone keeps its mode.
+function ControlBlock({ session, telem, control }: { session: SessionInfo; telem: Telem | null; control: NonNullable<ControlProps> }) {
+    const [alt, setAlt] = useState(5)
+    const [confirming, setConfirming] = useState(false)
+    const heldByOther = !!session.takeover && !control.mine
+    const btn = 'px-2 py-1.5 rounded border text-[10px] tracking-widest disabled:opacity-40'
+    return (
+        <div className="border-b border-zinc-800 px-3 py-2 space-y-2">
+            <div className="flex items-center gap-2 text-[10px] tracking-widest text-zinc-500">
+                CONTROL
+                {control.mine && <Tag label="YOU HAVE CONTROL" tone="red" />}
+                {heldByOther && <Tag label={`HELD BY ${session.takeover!.by.toUpperCase()}`} tone="amber" />}
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+                <button className={btn + ' border-amber-700 text-amber-300 hover:border-amber-500'}
+                    disabled={heldByOther} onClick={() => control.send('hold')}>HOLD</button>
+                <button className={btn + ' border-cyan-700 text-cyan-300 hover:border-cyan-500'}
+                    disabled={heldByOther} onClick={() => control.send('return')}>RTL</button>
+                <button className={btn + ' border-red-800 text-red-300 hover:border-red-600'}
+                    disabled={heldByOther} onClick={() => control.send('land')}>LAND</button>
+            </div>
+            {!session.takeover && (confirming ? (
+                <div className="flex gap-1.5">
+                    <button className={btn + ' flex-1 border-red-700 bg-red-500/10 text-red-300'}
+                        onClick={() => { setConfirming(false); control.takeOver() }}>
+                        CONFIRM: TAKE CONTROL FROM {(session.username ?? 'THE PILOT').toUpperCase()}
+                    </button>
+                    <button className={btn + ' border-zinc-700 text-zinc-400'} onClick={() => setConfirming(false)}>Cancel</button>
+                </div>
+            ) : (
+                <button className={btn + ' w-full border-red-800 text-red-300 hover:border-red-600'}
+                    onClick={() => setConfirming(true)}>Take control</button>
+            ))}
+            {control.mine && (
+                <>
+                    <div className="grid grid-cols-2 gap-1.5">
+                        <button className={btn + ' border-zinc-700 text-zinc-200'} onClick={() => control.send('arm')}>ARM</button>
+                        <button className={btn + ' border-zinc-700 text-zinc-200'} onClick={() => control.send('disarm')}>DISARM</button>
+                        <button className={btn + ' border-zinc-700 text-zinc-200'} onClick={() => control.send('start_mission')}>START MISSION</button>
+                        <button className={btn + ' border-zinc-700 text-zinc-200'} onClick={() => control.send('pause_mission')}>PAUSE MISSION</button>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                        <label htmlFor="takeover-alt" className="text-[10px] text-zinc-500">TAKEOFF ALT</label>
+                        <input id="takeover-alt" type="number" min={1} max={120} value={alt}
+                            onChange={e => setAlt(Math.max(1, Math.min(120, Number(e.target.value) || 1)))}
+                            className="w-14 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-[11px] text-zinc-200" />
+                        <span className="text-[10px] text-zinc-600">m</span>
+                        <button className={btn + ' ml-auto border-zinc-700 text-zinc-200'}
+                            onClick={() => control.send('takeoff', { altitude: alt })}>TAKEOFF</button>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                        <label htmlFor="takeover-mode" className="text-[10px] text-zinc-500">MODE</label>
+                        <select id="takeover-mode" value="" aria-label="Set flight mode"
+                            onChange={e => { if (e.target.value) control.send('set_mode', { mode: e.target.value }) }}
+                            className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-[11px] text-zinc-200">
+                            <option value="">{telem?.flight_mode.mode ?? 'set mode'}</option>
+                            {FLIGHT_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                        </select>
+                    </div>
+                    <button className={btn + ' w-full border-emerald-700 text-emerald-300 hover:border-emerald-500'}
+                        onClick={control.release}>Release control</button>
+                </>
+            )}
+            {control.lastResult && (
+                <div className={'text-[10px] ' + (control.lastResult.ok ? 'text-emerald-400' : 'text-red-400')}>
+                    {control.lastResult.action}: {control.lastResult.ok ? 'done' : (control.lastResult.error ?? 'refused')}
+                </div>
+            )}
+            {control.note && <div className="text-[10px] text-amber-400">{control.note}</div>}
+        </div>
     )
 }
 

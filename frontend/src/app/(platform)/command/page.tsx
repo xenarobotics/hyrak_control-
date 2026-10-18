@@ -28,7 +28,6 @@ import dynamic from 'next/dynamic'
 import { Maximize2, Minimize2, PanelRightClose, PanelRightOpen, X } from 'lucide-react'
 import { getSocket } from '@/lib/socket'
 import { useSwarmStore } from '@/store/swarm'
-import { useAccess } from '@/hooks/useAccess'
 import { useDroneStore } from '@/store/drone'
 import { useMissionStore } from '@/store/mission'
 import { getVideoSource } from '@/lib/videoSource'
@@ -195,7 +194,6 @@ function DevCommand() {
     const [drawerOpen, setDrawerOpen] = useState(false)
     const ai = useAiModule()
     const swarmEnabled = useSwarmStore(s => s.enabled)
-    const { isCustomer } = useAccess()
     // Workspace viewers (docs/ACCESS_MODEL.md section 8a) watch only: the
     // command surfaces below are fenced and the AI drawer is not offered.
     const { viewOnly } = useLiveScope()
@@ -346,8 +344,9 @@ function DevCommand() {
 
     const dockHidden = mounted && layout.dockHidden
     // Swarm mode has no AVOID tab: a persisted 'avoid' left the dock blank.
-    // Customers have none either: avoidance is staff-only in phase 2a.
-    const noAvoid = swarmEnabled || isCustomer
+    // Customers have it since phase 2b, for their own drone
+    // (docs/ACCESS_MODEL.md 8b; the server scopes every route to it).
+    const noAvoid = swarmEnabled
     const activeTab: DockTab = noAvoid && layout.tab === 'avoid' ? 'telemetry' : layout.tab
     const mapBig = layout.big === 'map'
     const runningMod = MODES.find(m => m.value === ai.mode)

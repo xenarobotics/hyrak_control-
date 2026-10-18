@@ -136,6 +136,10 @@ def create_app() -> socketio.ASGIApp:
     fastapi_app.state.session_manager = session_manager
     fastapi_app.state.peer_registry   = peer_registry
     fastapi_app.state.vision_pool     = vision_pool
+    # Vision history rows are stamped with their session's workspace
+    # (docs/ACCESS_MODEL.md 8b); the analyzers only know the session id.
+    from app.vision import persistence as vision_persistence
+    vision_persistence.set_workspace_resolver(session_manager.workspace_of)
 
     # ------------------------------------------------------------------ #
     # Load vision modules at startup                                       #
@@ -192,6 +196,13 @@ def create_app() -> socketio.ASGIApp:
     # ------------------------------------------------------------------ #
     # Socket.IO lifecycle                                                  #
     # ------------------------------------------------------------------ #
+    def _takeover_field(session_id: str):
+        """Whether HYRAK operations hold this session's drone (8b): the
+        customer's banner survives a page reload or a resume."""
+        from app.sessions import takeover as _takeover
+        held = _takeover.holder(session_id)
+        return held.public() if held is not None else None
+
     def _scope_fields(scope) -> dict:
         """What session_ready says about the session's workspace: the client
         shows only what `perms` allow, and `staff` tells it to keep the
@@ -271,6 +282,11 @@ def create_app() -> socketio.ASGIApp:
             task = _expiry_tasks.pop(prior.session_id, None)
             if task is not None:
                 task.cancel()
+            # A console that took over a session keeps it across its own
+            # reconnect (docs/ACCESS_MODEL.md 8b "Takeover").
+            from app.sessions import takeover as _takeover
+            if _takeover.cancel_pending(prior.session_id):
+                logger.info(f"Session {prior.session_id[:8]}: back in time, its takeover stands")
             logger.info(f"Resumed session {prior.session_id[:8]} on {sid[:8]} for "
                         f"{user.username} after {gone:.1f}s away")
 
@@ -285,6 +301,7 @@ def create_app() -> socketio.ASGIApp:
                     "resume_secret": prior.resume_secret,
                     "user": user.public(),
                     **_scope_fields(scope),
+                    "takeover": _takeover_field(prior.session_id),
                 }, to=sid)
             asyncio.create_task(_send_resumed())
             return True
@@ -298,7 +315,7 @@ def create_app() -> socketio.ASGIApp:
         session.auth_checked_at = time.monotonic()
         session.resume_secret = secrets.token_urlsafe(32)
         live_scope.stamp(session, user, scope)
-        session_manager.note_owner(session.session_id, user.id)
+        session_manager.note_owner(session.session_id, user.id, scope.workspace_id)
         if not scope.is_staff:
             # The enrolled-face gallery is HYRAK's global data: a customer's
             # person-tracking matches nobody rather than everyone HYRAK knows.
@@ -372,6 +389,10 @@ def create_app() -> socketio.ASGIApp:
             session.detached_at = time.monotonic()
             logger.info(f"Session {session.session_id[:8]} lost its socket {sid[:8]} - "
                         f"held for {SESSION_GRACE_S:.0f}s for the client to return")
+            # A console holding a takeover releases it after a short grace
+            # unless it comes back (the customer is not locked out for 90 s).
+            from app.events.admin_events import on_staff_socket_gone
+            await on_staff_socket_gone(session)
             _expiry_tasks[session.session_id] = asyncio.create_task(
                 _expire_session(session.session_id))
         logger.info(f"Disconnected {sid[:8]}")
@@ -390,7 +411,7 @@ def create_app() -> socketio.ASGIApp:
         client has not come back within SESSION_GRACE_S."""
         from app.sessions import observer
         from app.telemetry.serial_bridge import close_bridge
-        # The session's cloud simulator ends with it (docs/ACCESS_MODEL.md 8b).
+        # The session's cloud simulator ends with it (docs/ACCESS_MODEL.md 8c).
         from app.sim import manager as sim_manager
         try:
             await sim_manager.get_manager().stop_for_session(session.session_id, "session_ended")
@@ -416,6 +437,8 @@ def create_app() -> socketio.ASGIApp:
         from app.webrtc import datachannel_video_source
         datachannel_video_source.release(session.session_id)
         observer.drop_session(session.session_id)
+        from app.events.admin_events import on_session_ended
+        await on_session_ended(session.session_id)
         await vision_pool.unregister_session(session.session_id)
         vision_pool.drop_gallery_rule(session.session_id)
         await session_manager.destroy(session.session_id)

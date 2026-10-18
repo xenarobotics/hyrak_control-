@@ -24,6 +24,7 @@ import {
 import { pointsFromPolygon, polygonFromPoints, type ZoneFeature } from '@/components/admin/zones'
 import type { Outline } from '@/components/admin/AreaMap'
 import { Btn, CopyLink, Empty, INPUT_CLS, LABEL_CLS, Notice, Section, Tag } from '@/components/admin/console'
+import { ActivitySection } from '@/components/admin/ActivitySection'
 
 const AreaMap = dynamic(() => import('@/components/admin/AreaMap'), { ssr: false })
 
@@ -297,6 +298,8 @@ function WorkspaceDetail({ ws, list, zones, isFounder, onChanged, onDeleted, onS
                 </div>
                 {note('head')}
             </div>
+
+            {hasPerm(ws, 'view') && <ActivitySection workspaceId={ws.id} />}
 
             <OperatingArea ws={ws} parent={parent} zones={zones} canEdit={canArea} onChanged={onChanged} />
 

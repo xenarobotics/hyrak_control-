@@ -356,6 +356,12 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
             # ── Send drone command directly to MAVLink ──────────────
             drone_cmd = meta.get("drone_command")
             if drone_cmd and drone_cmd.get("type") == "velocity":
+                # HYRAK operations hold this session's drone: its AI follow
+                # no longer steers it (docs/ACCESS_MODEL.md 8b "Takeover").
+                from app.sessions import takeover as _takeover
+                if _takeover.is_taken_over(self.session_id):
+                    drone_cmd = None
+            if drone_cmd and drone_cmd.get("type") == "velocity":
                 tel = self._session_mgr.get_telemetry(self.session_id)
                 if tel and tel.is_connected:
                     from app import latency_probe

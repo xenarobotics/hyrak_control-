@@ -77,8 +77,13 @@ def _drone_snapshot() -> dict[str, dict]:
         pass
     sm = _session_manager
     if sm is not None:
+        from app.sessions import takeover
         for s in sm.all_sessions():
             if getattr(s, "is_admin", False) or not s.drone:
+                continue
+            # A drone HYRAK operations have taken over is not offered for
+            # new orders (docs/ACCESS_MODEL.md 8b "Takeover").
+            if takeover.is_taken_over(s.session_id):
                 continue
             did = s.drone["id"]
             if did in by_id:

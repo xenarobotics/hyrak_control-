@@ -10,8 +10,14 @@ keeps live snapshots for the dispatcher and the board, and can upload and
 start missions - with the same zone gate the socket upload path enforces.
 """
 import asyncio
+import errno
 import logging
 import math
+import socket
+import time
+from dataclasses import dataclass
+
+from app.config import get_settings
 
 from app.registry import drones as drone_registry
 from app.utils.safe_json import _sanitize
@@ -104,11 +110,25 @@ _disabled = False
 RESERVE_PCT = 20.0
 _reserve_triggered: set[int] = set()
 
-# Consecutive adopt failures per instance - after a few, the watchdog only
-# retries that port every 4th cycle instead of burning a 10 s connect
-# timeout (and a zombie mavsdk_server) on an empty port every 25 s.
-_fail_counts: dict[int, int] = {}
-_scan_cycle = 0
+# Watchdog retry state per instance. An instance that does not answer is
+# retried with exponential backoff (WATCHDOG_INTERVAL_S, doubling, capped at
+# settings.fleet_watchdog_backoff_max_s) and parked after
+# settings.fleet_watchdog_max_retries consecutive misses, until an operator
+# presses CONNECT / adopt. Each run of misses is logged ONCE (INFO for a port
+# that never had a drone, WARNING for a drone that was adopted and went
+# away), and the give-up once more; the attempts themselves log at DEBUG.
+# This replaced "retry every 4th cycle forever", which on a box with no SITL
+# running spawned a mavsdk_server and printed an ERROR per empty port every
+# couple of minutes for as long as the backend ran.
+@dataclass
+class _Retry:
+    failures: int = 0
+    next_at: float = 0.0        # time.monotonic(); no attempt before this
+    parked: bool = False        # gave up; only a manual connect re-enables
+    announced: bool = False     # the one log line for this run of misses
+
+
+_retry: dict[int, _Retry] = {}
 
 
 def _snapshot_cb(i: int):
@@ -119,9 +139,13 @@ def _snapshot_cb(i: int):
     return cb
 
 
+def _now() -> float:
+    """The watchdog's clock (a seam for the tests)."""
+    return time.monotonic()
+
+
 def _is_stale(i: int) -> bool:
-    import time
-    return (time.monotonic() - _last_update.get(i, 0.0)) > STALE_AFTER_S
+    return (_now() - _last_update.get(i, 0.0)) > STALE_AFTER_S
 
 
 async def connect_one(i: int, manual: bool = False) -> str:
@@ -130,12 +154,14 @@ async def connect_one(i: int, manual: bool = False) -> str:
     global _disabled
     if manual:
         _disabled = False
+        _retry.pop(i, None)       # an operator's connect un-parks the instance
     async with _instance_lock(i):
         return await _connect_one_locked(i)
 
 
-async def _connect_one_locked(i: int) -> str:
-    """connect_one's body; the caller holds _instance_lock(i)."""
+async def _connect_one_locked(i: int, *, quiet: bool = False) -> str:
+    """connect_one's body; the caller holds _instance_lock(i). quiet=True for
+    the watchdog's background probes: a miss is the watchdog's to log, once."""
     from app.telemetry.manager import TelemetryManager
     import time
     address = f"udpin://0.0.0.0:{_port_for(i)}"
@@ -152,7 +178,7 @@ async def _connect_one_locked(i: int) -> str:
     # default 245, so PX4 never confuses the two ground stations' replies.
     manager = TelemetryManager(on_update=_snapshot_cb(i), fleet_mode=True,
                                sysid=min(254, 200 + i))
-    ok = await manager.connect(address, kill_stale=True)
+    ok = await manager.connect(address, kill_stale=True, quiet=quiet)
     if not ok:
         try:
             await manager.stop(kill_stale=True)   # reap its throwaway server
@@ -216,7 +242,7 @@ async def disconnect_all() -> int:
         _paused.clear()
         _pending_start.clear()
         _reserve_triggered.clear()
-        _fail_counts.clear()
+        _retry.clear()
         _adopted.clear()   # stop healing everything the operator just took down
         _holds_checked.clear()
     await asyncio.gather(
@@ -631,8 +657,100 @@ async def _monitor_cycle() -> None:
             await mgr.start_mission()
 
 
-async def _watchdog_loop() -> None:
-    global _scan_cycle
+# ── Watchdog backoff ─────────────────────────────────────────────────────
+
+def _backoff_s(failures: int) -> float:
+    """Wait before the next try after `failures` consecutive misses: one
+    watchdog interval, doubling, capped."""
+    cap = float(get_settings().fleet_watchdog_backoff_max_s)
+    return min(WATCHDOG_INTERVAL_S * (2 ** max(0, failures - 1)), cap)
+
+
+def _due(i: int, now: float) -> bool:
+    r = _retry.get(i)
+    return r is None or (not r.parked and now >= r.next_at)
+
+
+def _note_failure(i: int, now: float, why: str) -> None:
+    r = _retry.setdefault(i, _Retry())
+    r.failures += 1
+    port = _port_for(i)
+    limit = max(1, int(get_settings().fleet_watchdog_max_retries))
+    if r.failures >= limit:
+        r.parked = True
+        logger.info(f"Fleet watchdog: gave up on instance {i} (udp {port}) after "
+                    f"{r.failures} tries ({why}). Press CONNECT to try it again.")
+        return
+    r.next_at = now + _backoff_s(r.failures)
+    if not r.announced:
+        r.announced = True
+        if i in _adopted:
+            logger.warning(f"Fleet drone {i} is not answering on udp {port} ({why}); "
+                           f"retrying with backoff, up to {limit} tries")
+        else:
+            logger.info(f"Fleet watchdog: no drone on udp {port} ({why}); "
+                        f"retrying with backoff, up to {limit} tries")
+
+
+def _note_success(i: int) -> None:
+    r = _retry.pop(i, None)
+    if r is not None and r.failures:
+        logger.info(f"Fleet drone {i} answered again after {r.failures} missed tries")
+
+
+def _forget_stale(now: float) -> list[int]:
+    """Drop adopted instances that have not answered for
+    settings.fleet_watchdog_forget_s from the heal list. One in the
+    1..MAX_SCAN probe range is still probed, under its backoff and cap."""
+    forget_s = float(get_settings().fleet_watchdog_forget_s)
+    gone = []
+    for i in sorted(_adopted):
+        m = _managers.get(i)
+        if m is not None and m.is_connected:
+            continue
+        if now - _last_update.get(i, 0.0) > forget_s:
+            _adopted.discard(i)
+            gone.append(i)
+            logger.info(f"Fleet watchdog: forgot instance {i} (udp {_port_for(i)}), "
+                        f"no answer for over {forget_s / 3600:.1f} h")
+    return gone
+
+
+def _port_busy(port: int) -> bool:
+    """Whether something already holds udp `port` on this machine."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.bind(("0.0.0.0", port))
+        return False
+    except OSError as e:
+        return e.errno == errno.EADDRINUSE
+    finally:
+        s.close()
+
+
+def _own_server_on(port: int) -> bool:
+    """Whether one of OUR mavsdk_servers holds the port (connect's
+    kill_stale reclaims those). Read-only: nothing is signalled here."""
+    from app.telemetry.manager import TelemetryManager
+    return TelemetryManager.mavsdk_server_running(f"0.0.0.0:{port}")
+
+
+async def _probe_locked(i: int) -> str:
+    """One background connect attempt; the caller holds _instance_lock(i).
+
+    A port held by some OTHER process (not one of our mavsdk_servers) is a
+    miss without spawning anything: a mavsdk_server there only fails with
+    "bind error: Address in use", and that process is never ours to touch."""
+    port = _port_for(i)
+    if await asyncio.to_thread(_port_busy, port) and \
+            not await asyncio.to_thread(_own_server_on, port):
+        return f"udp {port} is in use by another process"
+    return await _connect_one_locked(i, quiet=True)
+
+
+async def _watchdog_cycle() -> None:
+    """One pass: forget long-dead drones, then probe / heal every instance
+    whose backoff has run out."""
     sem = asyncio.Semaphore(2)
 
     async def try_adopt(i: int) -> None:
@@ -643,11 +761,12 @@ async def _watchdog_loop() -> None:
                 m = _managers.get(i)
                 if m is not None and m.is_connected:
                     if not _is_stale(i):
-                        _fail_counts.pop(i, None)
+                        _retry.pop(i, None)
                         return
                     # Telemetry stopped flowing - the mavsdk_server under this
                     # manager is gone (killed externally, sim restarted...).
-                    # Tear it down and rebuild the link from scratch.
+                    # Tear it down and rebuild the link from scratch, now:
+                    # a drone that was alive a moment ago skips the backoff.
                     logger.warning(f"Fleet drone {i}: link stale - rebuilding")
                     async with _lock:
                         _managers.pop(i, None)
@@ -656,27 +775,29 @@ async def _watchdog_loop() -> None:
                         await m.stop(kill_stale=True)
                     except Exception:
                         pass
-                # An instance that keeps failing is probably an empty port -
-                # retry it every 4th cycle, not every cycle (each attempt costs
-                # a 10 s connect timeout and a throwaway mavsdk_server).
-                if _fail_counts.get(i, 0) >= 3 and _scan_cycle % 4 != 0:
+                    _retry.pop(i, None)
+                if not _due(i, _now()):
                     return
-                result = await _connect_one_locked(i)
+                result = await _probe_locked(i)
             if result == "connected":
-                _fail_counts.pop(i, None)
+                _note_success(i)
                 logger.info(f"Watchdog adopted fleet drone {i}")
-            elif result.startswith("no drone"):
-                _fail_counts[i] = _fail_counts.get(i, 0) + 1
+            elif result != "already connected":
+                _note_failure(i, _now(), result)
 
+    _forget_stale(_now())
+    # Probe 1..MAX_SCAN for new drones, and heal every instance already
+    # adopted (including 9-20) so a dropped high-index link is rebuilt
+    # instead of silently staying dead.
+    scan = sorted(set(range(1, MAX_SCAN + 1)) | _adopted)
+    await asyncio.gather(*[try_adopt(i) for i in scan])
+
+
+async def _watchdog_loop() -> None:
     while True:
         try:
             if not _disabled:
-                _scan_cycle += 1
-                # Probe 1..MAX_SCAN for new drones, and heal every instance
-                # already adopted (including 9-20) so a dropped high-index
-                # link is rebuilt instead of silently staying dead.
-                scan = sorted(set(range(1, MAX_SCAN + 1)) | _adopted)
-                await asyncio.gather(*[try_adopt(i) for i in scan])
+                await _watchdog_cycle()
                 # Safety-net reap: any mavsdk_server whose System was discarded
                 # (a failed probe the library never wait()ed on) is our zombie
                 # child - sweep them so they can't pile up and starve the box.

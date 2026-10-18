@@ -16,6 +16,7 @@ export type Perm =
     | 'members.manage' | 'children.manage' | 'zones.site' | 'zones.area'
     | 'permits.approve' | 'workspace.operating_area' | 'audit.view'
     | 'workspace.delete' | 'zones.regulatory' | 'staff.manage' | 'accounts'
+    | 'sessions.takeover'
 
 export type GeoPolygon =
     | { type: 'Polygon'; coordinates: number[][][] }

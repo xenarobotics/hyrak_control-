@@ -3,7 +3,7 @@
 // One line under the link picker while "Cloud simulator" is selected: what
 // the server-side sim is doing, and a Stop once it runs. Start is the
 // picker's own Connect; there is nothing else to set (one airframe, home
-// at the workspace's operating area). docs/ACCESS_MODEL.md 8b.
+// at the workspace's operating area). docs/ACCESS_MODEL.md 8c.
 
 import { useCloudSimStore, stopCloudSim, cloudSimErrorText } from '@/store/cloudSim'
 import { CLOUD_SIM_PREMIUM_NOTE } from '@/hooks/useTelemetryLink'
