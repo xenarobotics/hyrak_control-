@@ -45,10 +45,23 @@ def to_geojson(sightings: Iterable[dict], **meta) -> dict:
             "properties": {"note": NOTE, **{k: v for k, v in meta.items() if v is not None}}}
 
 
+_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(v):
+    """Class and model names come from customer-uploaded models: a label like
+    =HYPERLINK(...) would run as a formula when the CSV is opened in a
+    spreadsheet. Strings that start like a formula get a leading quote;
+    numbers stay numbers."""
+    if isinstance(v, str) and v.startswith(_FORMULA_START):
+        return "'" + v
+    return v
+
+
 def to_csv(sightings: Iterable[dict]) -> str:
     buf = io.StringIO()
     w = csv.DictWriter(buf, fieldnames=CSV_FIELDS, lineterminator="\n")
     w.writeheader()
     for s in sightings:
-        w.writerow(_row(s))
+        w.writerow({k: _csv_safe(v) for k, v in _row(s).items()})
     return buf.getvalue()

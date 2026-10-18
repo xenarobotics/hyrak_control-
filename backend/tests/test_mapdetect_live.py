@@ -206,6 +206,18 @@ def test_export_geojson_and_csv():
     assert list(out[0]) == export.CSV_FIELDS
 
 
+def test_csv_neutralises_formulas_from_model_labels():
+    rows = [{"id": "a", "label": '=HYPERLINK("http://x","y")', "lat": 17.6, "lon": -78.1,
+             "best_score": 0.5, "count": 1, "accuracy_m": 8.0, "model_name": "+cmd|' /C calc'!A0",
+             "source": "@SUM(1)", "first_seen": None, "last_seen": None}]
+    out = list(csv.DictReader(io.StringIO(export.to_csv(rows))))[0]
+    assert out["class"] == "'=HYPERLINK(\"http://x\",\"y\")"
+    assert out["model"].startswith("'+") and out["source"] == "'@SUM(1)"
+    assert out["lon"] == "-78.1"          # a negative number stays a number
+    # GeoJSON is data, not a spreadsheet: the label is kept as is.
+    assert export.to_geojson(rows)["features"][0]["properties"]["class"].startswith("=")
+
+
 # ── scoping: REST and sockets ────────────────────────────────────────────
 
 def _place(session_id):
