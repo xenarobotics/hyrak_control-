@@ -55,10 +55,11 @@ def license_note(lic: Optional[str]) -> Optional[str]:
 RECOMMENDED_FILE = Path(__file__).with_name("recommended.json")
 CATEGORIES = (
     "Drone and aerial view",
+    "People and crowds",
     "Fire and safety",
+    "Inspection and infrastructure",
     "Roads and vehicles",
-    "Construction and people",
-    "Agriculture and nature",
+    "Agriculture and wildlife",
     "General purpose",
 )
 TASKS = ("detect", "classify")

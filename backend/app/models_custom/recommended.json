@@ -4,7 +4,7 @@
     {
       "repo": "EdgeFirst/visdrone-yolo11-det",
       "file": "640/onnx/visdrone-yolo11s-det-fp32-640.onnx",
-      "name": "Aerial traffic and people (YOLO11)",
+      "name": "Aerial traffic and people",
       "category": "Drone and aerial view",
       "task": "detect",
       "what": "Trained on drone footage: finds people, cars, vans, trucks, buses and bikes seen from above.",
@@ -32,66 +32,6 @@
       ]
     },
     {
-      "repo": "EdgeFirst/visdrone-yolov8-det",
-      "file": "640/onnx/visdrone-yolov8s-det-fp32-640.onnx",
-      "name": "Aerial traffic and people (YOLOv8)",
-      "category": "Drone and aerial view",
-      "task": "detect",
-      "what": "The same drone-view classes on the widely used YOLOv8 model.",
-      "license": "agpl-3.0",
-      "license_note": null,
-      "classes_preview": [
-        "pedestrian",
-        "car",
-        "van",
-        "motor"
-      ],
-      "fps": 82,
-      "verified_at": "2026-10-18",
-      "labels": [
-        "pedestrian",
-        "people",
-        "bicycle",
-        "car",
-        "van",
-        "truck",
-        "tricycle",
-        "awning-tricycle",
-        "bus",
-        "motor"
-      ]
-    },
-    {
-      "repo": "EdgeFirst/visdrone-yolo26-det",
-      "file": "640/onnx/visdrone-yolo26s-det-fp32-640.onnx",
-      "name": "Aerial traffic and people (YOLO26)",
-      "category": "Drone and aerial view",
-      "task": "detect",
-      "what": "The newest YOLO version trained on drone footage, for the same ten classes.",
-      "license": "agpl-3.0",
-      "license_note": null,
-      "classes_preview": [
-        "people",
-        "bicycle",
-        "car",
-        "bus"
-      ],
-      "fps": 62,
-      "verified_at": "2026-10-18",
-      "labels": [
-        "pedestrian",
-        "people",
-        "bicycle",
-        "car",
-        "van",
-        "truck",
-        "tricycle",
-        "awning-tricycle",
-        "bus",
-        "motor"
-      ]
-    },
-    {
       "repo": "Siddh10/sih-aerial-person",
       "file": "best.onnx",
       "name": "People from the air",
@@ -104,6 +44,51 @@
         "person"
       ],
       "fps": 92,
+      "verified_at": "2026-10-18"
+    },
+    {
+      "repo": "engdarwish/drone-detection-yolov5",
+      "file": "best.onnx",
+      "name": "Other drones in the sky",
+      "category": "Drone and aerial view",
+      "task": "detect",
+      "what": "Spots other drones in view, for airspace awareness and counter-drone watch.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "drone"
+      ],
+      "fps": 185,
+      "verified_at": "2026-10-18"
+    },
+    {
+      "repo": "AdamCodd/YOLOv11n-face-detection",
+      "file": "model.onnx",
+      "name": "Faces",
+      "category": "People and crowds",
+      "task": "detect",
+      "what": "Finds human faces in the frame.",
+      "license": "apache-2.0",
+      "license_note": null,
+      "classes_preview": [
+        "face"
+      ],
+      "fps": 118,
+      "verified_at": "2026-10-18"
+    },
+    {
+      "repo": "deepghs/real_head_detection",
+      "file": "head_detect_v0_n_yv11/model.onnx",
+      "name": "Heads for crowd counting",
+      "category": "People and crowds",
+      "task": "detect",
+      "what": "Finds each person's head, which counts people reliably even in dense crowds.",
+      "license": "unspecified",
+      "license_note": "No licence is stated on Hugging Face. Check the repo before commercial use.",
+      "classes_preview": [
+        "head"
+      ],
+      "fps": 103,
       "verified_at": "2026-10-18"
     },
     {
@@ -144,7 +129,7 @@
       "repo": "yihong1120/Construction-Hazard-Detection",
       "file": "models/yolo26/onnx/yolo26n.onnx",
       "name": "Construction site hazards",
-      "category": "Construction and people",
+      "category": "Fire and safety",
       "task": "detect",
       "what": "Finds workers, machinery and vehicles on site, and missing hardhats, masks or vests.",
       "license": "agpl-3.0",
@@ -159,21 +144,39 @@
       "verified_at": "2026-10-18"
     },
     {
-      "repo": "constructelligence/construction-site-safety-hazards",
-      "file": "buildvision-hazards-v0.3.onnx",
-      "name": "Site safety check",
-      "category": "Construction and people",
+      "repo": "vinothvikas1987/pothole-detection-yolov8",
+      "file": "best.onnx",
+      "name": "Road damage and potholes",
+      "category": "Inspection and infrastructure",
       "task": "detect",
-      "what": "Another site-safety model: people, hardhats, vests and missing protective gear.",
-      "license": "agpl-3.0",
+      "what": "Finds potholes and three kinds of road crack for road inspection.",
+      "license": "apache-2.0",
       "license_note": null,
       "classes_preview": [
-        "person",
-        "hardhat",
-        "safety vest",
-        "no-hardhat"
+        "Pothole",
+        "Alligator Crack",
+        "Longitudinal Crack",
+        "Transverse Crack"
       ],
-      "fps": 80,
+      "fps": 99,
+      "verified_at": "2026-10-18"
+    },
+    {
+      "repo": "4keles/solar-panel-od",
+      "file": "thermal-v1.0.4/best.onnx",
+      "name": "Solar panel faults (thermal)",
+      "category": "Inspection and infrastructure",
+      "task": "detect",
+      "what": "On thermal camera images, finds hot spots, faulty diodes and string faults in solar panels.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "HotSpot",
+        "Diode",
+        "ByPassed",
+        "StringOpenCircuit"
+      ],
+      "fps": 94,
       "verified_at": "2026-10-18"
     },
     {
@@ -189,24 +192,6 @@
         "License_Plate"
       ],
       "fps": 115,
-      "verified_at": "2026-10-18"
-    },
-    {
-      "repo": "vinothvikas1987/pothole-detection-yolov8",
-      "file": "best.onnx",
-      "name": "Road damage and potholes",
-      "category": "Roads and vehicles",
-      "task": "detect",
-      "what": "Finds potholes and three kinds of road crack for road inspection.",
-      "license": "apache-2.0",
-      "license_note": null,
-      "classes_preview": [
-        "Pothole",
-        "Alligator Crack",
-        "Longitudinal Crack",
-        "Transverse Crack"
-      ],
-      "fps": 99,
       "verified_at": "2026-10-18"
     },
     {
@@ -230,8 +215,8 @@
     {
       "repo": "onnx-community/mobilenet_v2_1.0_224-plant-disease-identification-ONNX",
       "file": "onnx/model.onnx",
-      "name": "Plant disease (fast)",
-      "category": "Agriculture and nature",
+      "name": "Plant disease",
+      "category": "Agriculture and wildlife",
       "task": "classify",
       "what": "Names 38 crop diseases or healthy leaves. Works best on close-up leaf images.",
       "license": "other",
@@ -245,27 +230,10 @@
       "verified_at": "2026-10-18"
     },
     {
-      "repo": "rodynaemad/plant-disease-dinov2-small",
-      "file": "onnx/model_with_features.onnx",
-      "name": "Plant disease (accurate)",
-      "category": "Agriculture and nature",
-      "task": "classify",
-      "what": "The same 38 crop diseases on a stronger model. Works best on close-up leaf images.",
-      "license": "cc-by-sa-4.0",
-      "license_note": null,
-      "classes_preview": [
-        "Apple___healthy",
-        "Apple___Black_rot",
-        "Apple___Apple_scab"
-      ],
-      "fps": 267,
-      "verified_at": "2026-10-18"
-    },
-    {
       "repo": "chriamue/bird-species-classifier",
       "file": "model.onnx",
       "name": "Bird species",
-      "category": "Agriculture and nature",
+      "category": "Agriculture and wildlife",
       "task": "classify",
       "what": "Names 525 bird species from a close view of the bird.",
       "license": "mit",
@@ -281,7 +249,7 @@
       "repo": "NMFS-OSI/yolo11n-cls-noaa-esd-coral-bleaching",
       "file": "yolov11n-cls-noaa-esd-coral-bleaching-classifier.onnx",
       "name": "Coral bleaching",
-      "category": "Agriculture and nature",
+      "category": "Agriculture and wildlife",
       "task": "classify",
       "what": "Tells healthy coral from bleached coral, for marine surveys.",
       "license": "agpl-3.0",
@@ -294,9 +262,45 @@
       "verified_at": "2026-10-18"
     },
     {
+      "repo": "bsgcasa/yolov8-animal-detector",
+      "file": "best.onnx",
+      "name": "Farm and common animals",
+      "category": "Agriculture and wildlife",
+      "task": "detect",
+      "what": "Finds horses, deer, dogs, cats, birds and other animals.",
+      "license": "agpl-3.0",
+      "license_note": null,
+      "classes_preview": [
+        "Horse",
+        "Deer",
+        "Dog",
+        "Bird"
+      ],
+      "fps": 105,
+      "verified_at": "2026-10-18"
+    },
+    {
+      "repo": "UWyo/wildlife-north-american-wildlife",
+      "file": "yolo26s_finetuned_26-wildlife-class_by_J.Gong_uwyo_2026-05-28.onnx",
+      "name": "North American wildlife",
+      "category": "Agriculture and wildlife",
+      "task": "detect",
+      "what": "Finds 26 wild species such as bison, elk, bears, deer and eagles, for wildlife surveys.",
+      "license": "cc-by-4.0",
+      "license_note": null,
+      "classes_preview": [
+        "bison",
+        "elk",
+        "mule_deer",
+        "golden_eagle"
+      ],
+      "fps": 75,
+      "verified_at": "2026-10-18"
+    },
+    {
       "repo": "onnx-community/rfdetr_nano-ONNX",
       "file": "onnx/model.onnx",
-      "name": "Everyday objects (RF-DETR nano)",
+      "name": "Everyday objects",
       "category": "General purpose",
       "task": "detect",
       "what": "A fast modern detector for 80 everyday things like people, cars, animals and bags.",
@@ -309,24 +313,6 @@
         "dog"
       ],
       "fps": 115,
-      "verified_at": "2026-10-18"
-    },
-    {
-      "repo": "onnx-community/rfdetr_small-ONNX",
-      "file": "onnx/model.onnx",
-      "name": "Everyday objects (RF-DETR small)",
-      "category": "General purpose",
-      "task": "detect",
-      "what": "More accurate than nano, for the same everyday things.",
-      "license": "apache-2.0",
-      "license_note": null,
-      "classes_preview": [
-        "person",
-        "bicycle",
-        "bus",
-        "boat"
-      ],
-      "fps": 71,
       "verified_at": "2026-10-18"
     },
     {
@@ -345,60 +331,6 @@
         "Boat"
       ],
       "fps": 62,
-      "verified_at": "2026-10-18"
-    },
-    {
-      "repo": "onnx-community/dfine_n_coco-ONNX",
-      "file": "onnx/model.onnx",
-      "name": "Everyday objects (D-FINE nano)",
-      "category": "General purpose",
-      "task": "detect",
-      "what": "A small, quick detector for 80 everyday things.",
-      "license": "apache-2.0",
-      "license_note": null,
-      "classes_preview": [
-        "person",
-        "car",
-        "bicycle",
-        "dog"
-      ],
-      "fps": 91,
-      "verified_at": "2026-10-18"
-    },
-    {
-      "repo": "onnx-community/rtdetr_v2_r18vd-ONNX",
-      "file": "onnx/model.onnx",
-      "name": "Everyday objects (RT-DETR v2)",
-      "category": "General purpose",
-      "task": "detect",
-      "what": "A well-known transformer detector for 80 everyday things.",
-      "license": "apache-2.0",
-      "license_note": null,
-      "classes_preview": [
-        "person",
-        "car",
-        "bus",
-        "truck"
-      ],
-      "fps": 64,
-      "verified_at": "2026-10-18"
-    },
-    {
-      "repo": "EdgeFirst/yolo11-det",
-      "file": "onnx/yolo11n-det-fp32.onnx",
-      "name": "Everyday objects (YOLO11)",
-      "category": "General purpose",
-      "task": "detect",
-      "what": "The standard YOLO11 nano model for 80 everyday things.",
-      "license": "agpl-3.0",
-      "license_note": null,
-      "classes_preview": [
-        "person",
-        "car",
-        "dog",
-        "bicycle"
-      ],
-      "fps": 120,
       "verified_at": "2026-10-18"
     }
   ]
