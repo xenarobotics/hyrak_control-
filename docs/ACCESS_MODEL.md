@@ -552,22 +552,34 @@ server never dials a TURN host the customer typed.
   first connect of a new real drone puts it in the session's workspace;
   `drone.claimed` is audited when that is a customer workspace. A known
   drone is moved only by `POST /api/drones/{id}/workspace`.
-* Simulated drones are never claimed and never block. "Simulated" is the
-  CURRENT link by the server's own test (a direct `udp` address with no
-  relay bridge, i.e. staff links), never the registry's stored
-  `is_simulated` flag: that is written once by whichever link saw the UID
-  first (SITL UIDs repeat; a real drone first seen over direct UDP was
-  stored as simulated for good). A customer's desktop SITL arrives through the relay bridge, so it
-  is treated as a real drone: the first workspace to connect a given SITL
-  UID claims it, and a SITL UID already registered to HYRAK is read-only
-  for customers until staff move it.
+* The ownership check is skipped only for a **simulated drone**: the
+  registry record carries the stored `is_simulated` flag **and** the
+  session's current link is simulator-type. Only one link is
+  simulator-type: a direct udp address the server dials on a staff
+  `connect_telemetry` (the Gazebo sim on this server, udp:14600). Every
+  client-side relay (`connect_browser_serial`) and the RF bridge are never
+  simulator-type, though MAVSDK sees loopback udp for both; the link kind
+  comes from the handler that opened the link, never from the client's
+  payload (`live_scope.link_kind_for`). Either condition alone is not
+  enough: a real drone on WiFi UDP telemetry is on a udp link too, and a
+  SITL UID repeats across instances.
+* A new record is stored as simulated (and left unclaimed, on HYRAK) only
+  when a staff session first sees it on a simulator-type link. Records
+  created or first seen through a customer session's link are never
+  simulated, so a customer cannot launder a real drone into "simulated". A
+  customer's desktop SITL arrives through the relay bridge, so it is
+  treated as a real drone: the first workspace to connect a given SITL UID
+  claims it, and a SITL UID already registered to HYRAK is read-only for
+  customers until staff move it.
 * The check applies to staff sessions too (a HYRAK pilot does not command
-  a customer's drone), with two carve-outs that keep staff working as
-  before 2a: a staff session with the compatibility operator rank flies
-  every HYRAK-owned drone (this covers managers whose own HYRAK
-  membership is only viewer: all pre-2a drones sit on HYRAK, customer
-  ones included, until moved), and staff are not held back while a drone
-  is still unidentified. The legacy shared token flies HYRAK drones only.
+  a customer's drone). **HYRAK's drones are flown only by accounts with
+  `fly` on the HYRAK workspace by the perms** (founders, HYRAK pilots);
+  the compatibility operator rank is no shortcut. A manager whose own
+  HYRAK membership is viewer flies the drones of the customer workspaces
+  they manage, and flies HYRAK's drones (including customer drones still
+  sitting on HYRAK from before 2a) only by also holding a HYRAK pilot
+  membership. Staff are still not held back while a drone is unidentified.
+  The legacy shared token flies HYRAK drones only.
 * `drone_identity` (sent once the UID is read) carries `drone_fly`:
   `true` = this session may command the drone, `false` = read-only here,
   `null` = unknown (customers cannot command until it is known).

@@ -103,10 +103,10 @@ class DroneSession:
     # when it cannot be known: no UID, registry offline). See
     # app/auth/live_scope.py.
     drone_fly: Optional[bool] = None
-    # Whether the CURRENT link is a simulator by the server's own test (a
-    # direct udp address with no relay bridge), set with the identity. The
-    # registry's stored is_simulated is not used for access: it is written
-    # once, by whichever link saw the UID first.
+    # Whether the CURRENT link is simulator-type (live_scope.SIM_LINK: a
+    # direct udp address a staff connect_telemetry opened), set with the
+    # identity. Drone ownership is skipped only when this AND the registry
+    # record's stored is_simulated are both true.
     link_simulated: bool      = False
 
     # Swarm fleet: drone_id → TelemetryManager (populated when swarm mode is used)

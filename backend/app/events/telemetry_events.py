@@ -190,12 +190,14 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         # Gazebo sim on this server (udp:14600), a LAN radio, a port another
         # session uses. Customers link through connect_browser_serial.
         if not await require_operator(sid, "connect_telemetry", data): return
-        await _connect_telemetry(sid, data)
+        await _connect_telemetry(sid, data, origin="connect_telemetry")
 
-    async def _connect_telemetry(sid, data):
+    async def _connect_telemetry(sid, data, *, origin: str):
         """The connect flow itself, for an address the caller has already
         vetted: connect_telemetry's (staff), the RF bridge's (staff), or the
-        session's own loopback bridge (connect_browser_serial)."""
+        session's own loopback bridge (connect_browser_serial). `origin`
+        names the calling handler, never the client: it decides whether the
+        link can count as a simulator (live_scope.link_kind_for)."""
         session = session_manager.get_by_socket(sid)
         if not session:
             await sio.emit("error", {"msg": "No session found"}, to=sid)
@@ -386,22 +388,22 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
         async def _resolve_identity():
             """Read the FC's hardware UID and map it to a persistent drone
-            record, in the background so connect isn't delayed. A browser
-            radio arrives over a loopback-UDP bridge, so 'udp address' alone
-            doesn't mean simulated - the presence of a serial bridge does."""
+            record, in the background so connect isn't delayed. Whether the
+            link can count as a simulator comes from the handler that opened
+            it (origin), not the address: a browser radio and the RF bridge
+            both arrive as loopback udp."""
             from app.auth import live_scope
 
             uid = await manager.get_hardware_uid()
             session.hardware_uid = uid
             if uid:
-                is_sim = (
-                    address.startswith("udp")
-                    and serial_bridge.get_bridge(session.session_id) is None
-                )
+                kind = live_scope.link_kind_for(
+                    origin, address,
+                    has_bridge=serial_bridge.get_bridge(session.session_id) is not None)
                 # Registry upsert plus the claim: a drone never seen before
                 # joins this session's workspace, and drone_fly says whether
                 # this session may command it (docs/ACCESS_MODEL.md 8a).
-                await live_scope.identify_drone(session, uid, is_simulated=is_sim)
+                await live_scope.identify_drone(session, uid, link_kind=kind)
             # drone_fly: true = this session may command it, false = read-only
             # here (its workspace is not one where the user flies), null =
             # unknown (no UID / registry offline; customers cannot command).
@@ -452,7 +454,8 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             # default from settings, so the address lives in one place.
             uplink_host=(str(data.get("uplinkHost") or "").strip() or None),
         )
-        await _connect_telemetry(sid, {"address": bridge.address, "link_kind": "radio"})
+        await _connect_telemetry(sid, {"address": bridge.address, "link_kind": "radio"},
+                                 origin="connect_rf_bridge")
 
     @sio.on("connect_browser_serial")
     async def on_connect_browser_serial(sid, data=None):
@@ -503,7 +506,8 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         # Reuse the normal connect flow; the heartbeat mavsdk waits for arrives
         # through serial_uplink events the browser is already pumping.
         try:
-            await _connect_telemetry(sid, {"address": bridge.address, "link_kind": "radio"})
+            await _connect_telemetry(sid, {"address": bridge.address, "link_kind": "radio"},
+                                     origin="connect_browser_serial")
         except Exception as e:
             logger.error(f"Session {session.session_id[:8]} telemetry connect raised: {e}")
             serial_bridge.close_bridge(session.session_id)

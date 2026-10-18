@@ -299,7 +299,7 @@ async def test_live_scope_and_claim_on_postgres(db, monkeypatch):
     s.user_id, s.username = u.id, u.username
     live_scope.stamp(s, user, scope)
     hw = uid("hw")
-    drone = await live_scope.identify_drone(s, hw, is_simulated=False)
+    drone = await live_scope.identify_drone(s, hw, link_kind=live_scope.RELAY_LINK)
     assert drone["workspace_id"] == org.id and s.drone_fly is True
     rows = await db.list_audit([org.id], 10, None)
     assert any(r.action == "drone.claimed" and r.target_id == drone["id"] for r in rows)

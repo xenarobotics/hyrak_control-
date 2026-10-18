@@ -277,16 +277,80 @@ async def test_unassigned_drone_is_claimed_by_the_session_workspace(live, monkey
                 "workspace_id": claim_workspace_id or PLATFORM_WORKSPACE_ID,
                 **({"claimed": True} if claim_workspace_id else {})}
     monkeypatch.setattr(registry, "upsert_seen", upsert)
-    drone = await live_scope.identify_drone(s, "UID-1", is_simulated=False)
+    drone = await live_scope.identify_drone(s, "UID-1", link_kind=live_scope.RELAY_LINK)
     assert seen == [("UID-1", False, w.iith["id"])]
     assert drone["workspace_id"] == w.iith["id"] and "claimed" not in drone
     assert s.drone_fly is True
     events = ok(live.cl.get(f"/api/audit?workspace_id={w.iith['id']}", headers=hdr(w.olga[1])))["events"]
     claim = [e for e in events if e["action"] == "drone.claimed"]
     assert claim and claim[0]["actor_name"] == "pat" and claim[0]["target_id"] == "d-new"
-    # Simulated drones are never claimed and never block.
-    await live_scope.identify_drone(s, "SITL", is_simulated=True)
-    assert seen[-1] == ("SITL", True, None) and s.drone_fly is True
+    # A customer's desktop SITL arrives through their relay: a new UID is
+    # claimed by their workspace like any drone, never stored simulated.
+    await live_scope.identify_drone(s, "SITL", link_kind=live_scope.RELAY_LINK)
+    assert seen[-1] == ("SITL", False, w.iith["id"]) and s.drone_fly is True
+    assert s.link_simulated is False
+    # Staff on the server's simulator link: stored simulated, never claimed,
+    # never blocks.
+    await connect(live, "op", w.hp[1])
+    op = session(live, "op")
+    await live_scope.identify_drone(op, "GZ-SITL", link_kind=live_scope.SIM_LINK)
+    assert seen[-1] == ("GZ-SITL", True, None) and op.drone_fly is True and op.link_simulated
+
+
+async def test_customer_link_never_stores_a_drone_as_simulated(live, monkeypatch):
+    """Whatever link kind reaches identify_drone for a customer session, the
+    record is created real and claimed: a customer cannot launder a real
+    drone into "simulated" to dodge the ownership check."""
+    from app.registry import drones as registry
+    w = await world(live)
+    await connect(live, "p", w.pat[1])
+    s = session(live, "p")
+    seen = []
+
+    async def upsert(uid, is_simulated=False, claim_workspace_id=None):
+        seen.append((uid, is_simulated, claim_workspace_id))
+        return {"id": "d-" + uid, "workspace_id": claim_workspace_id or PLATFORM_WORKSPACE_ID,
+                "is_simulated": is_simulated}
+    monkeypatch.setattr(registry, "upsert_seen", upsert)
+    for kind in (live_scope.SIM_LINK, live_scope.RELAY_LINK, live_scope.RF_LINK, live_scope.DIRECT_LINK):
+        await live_scope.identify_drone(s, "U-" + kind, link_kind=kind)
+        assert seen[-1] == ("U-" + kind, False, w.iith["id"]), kind
+        assert s.link_simulated is False
+
+
+def test_link_kind_comes_from_the_handler_not_the_address():
+    lk = live_scope.link_kind_for
+    assert lk("connect_telemetry", "udp://:14600", has_bridge=False) == live_scope.SIM_LINK
+    assert lk("connect_telemetry", "udpin://0.0.0.0:14550", has_bridge=False) == live_scope.SIM_LINK
+    assert lk("connect_telemetry", "udp://:14600", has_bridge=True) == live_scope.DIRECT_LINK
+    assert lk("connect_telemetry", "tcp://10.0.0.5:5760", has_bridge=False) == live_scope.DIRECT_LINK
+    assert lk("connect_telemetry", "serial:///dev/ttyUSB0", has_bridge=False) == live_scope.DIRECT_LINK
+    # Both bridges are loopback udp to MAVSDK and are never simulator-type.
+    assert lk("connect_rf_bridge", "udpin://127.0.0.1:14560", has_bridge=False) == live_scope.RF_LINK
+    assert lk("connect_browser_serial", "udpin://127.0.0.1:59810", has_bridge=True) == live_scope.RELAY_LINK
+
+
+async def test_real_drone_on_a_udp_link_is_still_ownership_checked(live, monkeypatch):
+    """A staff udp link (WiFi telemetry) is simulator-type, but a drone
+    whose record is not simulated keeps its ownership check; a staff record
+    stored simulated is exempt only on a simulator-type link."""
+    from app.registry import drones as registry
+    w = await world(live)
+    await connect(live, "op", w.hp[1])
+    op = session(live, "op")
+    records = {"REAL": {"id": "dr", "workspace_id": w.sky["id"], "is_simulated": False},
+               "SIM": {"id": "ds", "workspace_id": w.sky["id"], "is_simulated": True}}
+
+    async def upsert(uid, is_simulated=False, claim_workspace_id=None):
+        return dict(records[uid])                 # known drones: never re-claimed
+    monkeypatch.setattr(registry, "upsert_seen", upsert)
+    await live_scope.identify_drone(op, "REAL", link_kind=live_scope.SIM_LINK)
+    assert op.link_simulated and op.drone_fly is False
+    await live_scope.identify_drone(op, "SIM", link_kind=live_scope.SIM_LINK)
+    assert op.drone_fly is True
+    # The same simulated record on a radio link: ownership applies.
+    await live_scope.identify_drone(op, "SIM", link_kind=live_scope.RF_LINK)
+    assert op.link_simulated is False and op.drone_fly is False
 
 
 async def test_drone_in_another_workspace_is_read_only(live):
@@ -366,21 +430,30 @@ async def test_drone_access_follows_fly_on_the_drones_workspace(live):
         await connect(live, sid, token)
     cases = {("f", "dc"): True, ("f", "dh"): True,
              ("m", "dc"): True,                       # manager of IITH flies its client's drone
-             ("m", "dh"): True,                       # ... and HYRAK's, as before 2a (HYRAK viewer + manager)
+             ("m", "dh"): False,                      # ... but not HYRAK's: no fly on HYRAK (viewer)
              ("hp", "dh"): True, ("hp", "dc"): False,  # HYRAK pilot: HYRAK's drones only
              ("p", "dc"): True, ("p", "dh"): False}
     for (sid, did), want in cases.items():
         s = session(live, sid)
         assert await live_scope.drone_fly_allowed(s, customer_drone if did == "dc" else hyrak_drone) is want, (sid, did)
+    # The compat operator rank is no shortcut to HYRAK's drones: the
+    # manager flies them by also holding a HYRAK pilot membership.
+    assert session(live, "m").role == "operator"
+    await service.set_platform_role(w.hv[0].id, "pilot")
+    await service.membership_changed(w.hv[0].id, before_compat="operator", reduced=False)
+    await connect(live, "m2", w.hv[1])
+    assert await live_scope.drone_fly_allowed(session(live, "m2"), hyrak_drone) is True
+    assert await live_scope.drone_fly_allowed(session(live, "m2"), customer_drone) is True
     # A HYRAK viewer without a manager role does not fly HYRAK's drones.
     await connect(live, "sv", (await account("plainviewer", "viewer"))[1])
     assert await live_scope.drone_fly_allowed(session(live, "sv"), hyrak_drone) is False
-    # The stored is_simulated flag does not skip ownership; only the
-    # current link being a simulator does.
+    # Ownership is skipped only when the record is stored simulated AND the
+    # current link is simulator-type; either alone is not enough.
     p = session(live, "p")
     stored_sim = {**hyrak_drone, "is_simulated": True}
     assert await live_scope.drone_fly_allowed(p, stored_sim) is False
     p.link_simulated = True
+    assert await live_scope.drone_fly_allowed(p, hyrak_drone) is False
     assert await live_scope.drone_fly_allowed(p, stored_sim) is True
     legacy = SimpleNamespace(user_id=service.LEGACY_USER_ID, memberships=())
     assert await live_scope.drone_fly_allowed(legacy, hyrak_drone) is True

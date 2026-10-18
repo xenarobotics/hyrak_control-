@@ -18,8 +18,9 @@ permission engine (app/auth/perms.py) over the user's memberships:
     on the DRONE's workspace, which can differ from the session's: a
     customer pilot who plugs their radio into someone else's drone sees it
     read-only. An unassigned drone (one the registry has never seen) is
-    claimed by the session's workspace on first connect. Simulated drones
-    are never claimed and never block.
+    claimed by the session's workspace on first connect. A simulated drone
+    (a registry record marked simulated, on a server-side simulator link)
+    is never claimed and never blocks.
 
 Why staff are special: staff sessions keep the compatibility rank checks
 (require_operator and friends) exactly as before, so nothing a founder or a
@@ -135,30 +136,52 @@ def stamp(session, user, scope: SessionScope) -> None:
 
 # ── Drones ────────────────────────────────────────────────────────────────
 
+# How the current telemetry link was opened, as far as drone access cares.
+# Only SIM_LINK is simulator-type: a direct udp address that the server
+# dials on a staff connect_telemetry (the Gazebo sim on this server,
+# udp:14600). Every client-side relay (connect_browser_serial: Web Serial,
+# the desktop's SITL / serial / RF / SIYI relays) and the RF bridge are
+# never simulator-type, whatever address MAVSDK sees.
+SIM_LINK = "server_udp"
+DIRECT_LINK = "server_direct"      # connect_telemetry to tcp / serial / anything not udp
+RELAY_LINK = "client_relay"        # connect_browser_serial
+RF_LINK = "rf_bridge"              # connect_rf_bridge
+
+
+def link_kind_for(origin: str, address: str, *, has_bridge: bool) -> str:
+    """The link kind from the handler that opened the link (never from the
+    client's payload) and the address it dialled."""
+    if origin == "connect_browser_serial":
+        return RELAY_LINK
+    if origin == "connect_rf_bridge":
+        return RF_LINK
+    if origin == "connect_telemetry" and address.startswith("udp") and not has_bridge:
+        return SIM_LINK
+    return DIRECT_LINK
+
+
 async def drone_fly_allowed(session, drone: Optional[dict]) -> Optional[bool]:
     """May `session` command `drone` (a registry record)? None when the
     drone is unknown or its workspace cannot be read.
 
-    Simulated means the session's CURRENT link is a simulator by the
-    server's own test (session.link_simulated), never the registry's
-    stored flag: a SITL UID repeats across instances and a real drone
-    first seen over a direct UDP link was stored as simulated for good."""
+    The ownership check is skipped only for a simulated drone: the registry
+    record carries the stored is_simulated flag AND the session's current
+    link is simulator-type (session.link_simulated, SIM_LINK). Either alone
+    is not enough: a real drone on a WiFi UDP link is a udp link too, and a
+    SITL UID repeats across instances. Records first seen through a
+    customer's link are never stored as simulated (identify_drone)."""
     if not drone:
         return None
-    if getattr(session, "link_simulated", False):
+    if getattr(session, "link_simulated", False) and drone.get("is_simulated"):
         return True
     ws_id = drone.get("workspace_id") or PLATFORM_WORKSPACE_ID
     if session.user_id == auth.LEGACY_USER_ID:
         # The legacy token flies HYRAK's drones (it always has) and no one
         # else's: it holds no memberships to check.
         return ws_id == PLATFORM_WORKSPACE_ID
-    if (ws_id == PLATFORM_WORKSPACE_ID and getattr(session, "is_staff", False)
-            and auth.role_at_least(getattr(session, "role", None) or "member", "operator")):
-        # Staff with the operator rank fly HYRAK's drones exactly as before
-        # 2a. That includes managers whose own HYRAK membership is only
-        # viewer: every drone seen before 2a sits on HYRAK, and a manager
-        # flies the customers' drones among them until they are moved.
-        return True
+    # No rank shortcut: HYRAK's drones need `fly` on the HYRAK workspace by
+    # the perms like any other workspace (founders, HYRAK pilots). A
+    # manager flies them by also holding a HYRAK pilot membership.
     try:
         tree = await _tree()
     except Exception as e:
@@ -189,16 +212,24 @@ async def refresh_drone_access(session) -> None:
         session.drone_fly = answer
 
 
-async def identify_drone(session, hardware_uid: str, *, is_simulated: bool) -> Optional[dict]:
+async def identify_drone(session, hardware_uid: str, *, link_kind: str) -> Optional[dict]:
     """Registry upsert on telemetry connect, with the claim: a drone the
     registry has never seen joins the session's workspace (audited as
-    drone.claimed when that is a customer workspace). Sets session.drone
-    and session.drone_fly; returns the record."""
+    drone.claimed when that is a customer workspace). Sets session.drone,
+    session.link_simulated and session.drone_fly; returns the record.
+
+    A new record is stored as simulated (and left unclaimed, on HYRAK) only
+    when a staff session saw it on a SIM_LINK. A customer session never
+    reaches one (connect_telemetry is staff-only), and the staff check is
+    repeated here so a customer can never launder a real drone into
+    "simulated": their desktop SITL is claimed by their own workspace like
+    any new drone."""
     from app.registry import drones as drone_registry
 
-    claim = None if is_simulated else session.workspace_id
-    session.link_simulated = bool(is_simulated)
-    drone = await drone_registry.upsert_seen(hardware_uid, is_simulated=is_simulated,
+    sim_link = link_kind == SIM_LINK and bool(getattr(session, "is_staff", False))
+    claim = None if sim_link else session.workspace_id
+    session.link_simulated = sim_link
+    drone = await drone_registry.upsert_seen(hardware_uid, is_simulated=sim_link,
                                              claim_workspace_id=claim)
     if drone and drone.pop("claimed", False):
         actor = SimpleNamespace(id=session.user_id, username=session.username)
