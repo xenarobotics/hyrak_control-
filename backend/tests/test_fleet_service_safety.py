@@ -134,7 +134,7 @@ class _FakeManager:
         self.sysid = sysid
         _FakeManager.built.append(self)
 
-    async def connect(self, address, kill_stale=True):
+    async def connect(self, address, kill_stale=True, quiet=False):
         await asyncio.sleep(0.05)       # the slow heartbeat wait
         self.is_connected = True
         return True

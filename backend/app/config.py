@@ -332,6 +332,18 @@ class Settings(BaseSettings):
     # Telemetry
     default_baud_rate: int = Field(default=57600)
 
+    # Delivery-fleet watchdog (app/fleet/service.py). An instance that does
+    # not answer is retried with exponential backoff (one watchdog interval,
+    # doubling, up to backoff_max_s), and after max_retries consecutive
+    # misses it is parked until someone presses CONNECT / adopt. A drone
+    # adopted earlier that has not answered for forget_s is dropped from the
+    # heal list altogether. Without these an empty SITL port (or one held by
+    # an unrelated process) spawned a mavsdk_server and logged an ERROR every
+    # cycle, forever.
+    fleet_watchdog_backoff_max_s: float = Field(default=1800.0)
+    fleet_watchdog_max_retries: int = Field(default=10)
+    fleet_watchdog_forget_s: float = Field(default=3 * 3600.0)
+
     # Where the RF ground decoder's uplink listener (wfb_tx) runs.
     #
     # Not loopback: the decoder is its own board on the local network, not a
