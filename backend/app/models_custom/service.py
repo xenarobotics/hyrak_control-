@@ -212,6 +212,8 @@ def card(rec: ModelRecord, versions: list[VersionRecord], *, kind: Optional[str]
         "source": rec.source,
         "hf": ({"repo": rec.hf_repo, "revision": rec.hf_revision, "file": rec.hf_file,
                 "url": f"https://huggingface.co/{rec.hf_repo}"} if rec.hf_repo else None),
+        # Flat copies (DESIGN.md section 0 field names; the frontend reads these).
+        "hf_repo": rec.hf_repo, "hf_file": rec.hf_file, "hf_revision": rec.hf_revision,
         "labels": list((shown.labels if shown else []) or []),
         "version": _version_public(shown) if shown else None,
         "current_version": rec.current_version,

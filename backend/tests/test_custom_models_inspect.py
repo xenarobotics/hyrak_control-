@@ -142,6 +142,15 @@ async def test_dynamic_size_nhwc_and_uint8_inputs(tmp_path):
     assert info["preprocess"]["scale"] == 1.0
 
 
+async def test_named_channel_axis_is_colour_nchw(tmp_path):
+    """Hugging Face / PyTorch exports name every axis, channels included
+    (Xenova/yolos-tiny: ["batch_size", "num_channels", "height", "width"])."""
+    p = make_model(tmp_path / "hf.onnx", {"probs": classify_output()},
+                   input_shape=("batch_size", "num_channels", "height", "width"))
+    info = await checks.inspect(p)
+    assert info["input"]["layout"] == "nchw" and info["input"]["channels"] == 3
+
+
 async def test_label_count_mismatch_is_a_warning_not_a_failure(tmp_path):
     p = make_model(tmp_path / "m.onnx", {"output0": yolov8_output(n_classes=4)},
                    metadata=ultra_meta(names="{0: 'a', 1: 'b'}"))

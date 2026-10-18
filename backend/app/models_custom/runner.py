@@ -277,6 +277,12 @@ def _image_input(sess) -> dict:
         layout, channels, h, w = "nchw", shape[1], _dim(shape[2]), _dim(shape[3])
     elif _dim(shape[3]) in (1, 3):
         layout, channels, h, w = "nhwc", shape[3], _dim(shape[1]), _dim(shape[2])
+    elif _dim(shape[1]) is None:
+        # A named channel axis (Hugging Face / PyTorch exports write
+        # ["batch_size", "num_channels", "height", "width"]): NCHW, colour.
+        layout, channels, h, w = "nchw", 3, _dim(shape[2]), _dim(shape[3])
+    elif _dim(shape[3]) is None:
+        layout, channels, h, w = "nhwc", 3, _dim(shape[1]), _dim(shape[2])
     else:
         raise Fail("dynamic_input", f"{inp.name}: shape {shape} has no 1 or 3 channel axis",
                    reason="channels", shape=[str(s) for s in shape])

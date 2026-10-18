@@ -71,8 +71,9 @@ KNOWN_FAILURES: dict[str, tuple[str, str]] = {
         "Export the model with a standard image input (float32)."),
     "dynamic_input": (
         "The model's input shape is set up in a way HYRAK cannot feed ({reason}).",
-        "Export with batch size 1 and 1 or 3 colour channels, for example "
-        "`yolo export model=best.pt format=onnx imgsz=640 batch=1`."),
+        "Export the model with batch size 1 and a 1 or 3 channel image input. For a YOLO "
+        "model: `yolo export model=best.pt format=onnx imgsz=640 batch=1`; for a Hugging "
+        "Face model, try another .onnx file from the same repo."),
     "input_size_unusual": (
         "The model asks for images {size} pixels across, which is outside the 16 to 4096 range "
         "HYRAK supports.",
