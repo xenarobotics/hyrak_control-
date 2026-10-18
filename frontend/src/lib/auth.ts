@@ -10,13 +10,33 @@
  * read and write is wrapped, and a missing token simply means "signed out".
  */
 import { getServerUrl } from './server-url'
+import type { Membership, WorkspaceInfo } from './access'
 
 const TOKEN_KEY = 'hyrak-auth-token'
 const USER_KEY = 'hyrak-auth-user'
+// Memberships and visible workspaces from /api/auth/me, cached beside the
+// user so the sidebar and settings can render before the next round trip.
+const ACCESS_KEY = 'hyrak-auth-access'
 export const LOGIN_PATH = '/login'
+/** Fired on window whenever the stored user or access changes. */
+export const AUTH_CHANGE_EVENT = 'hyrak-auth-change'
 
+/**
+ * The compatibility role (docs/ACCESS_MODEL.md section 8): computed by the
+ * server from memberships so the live control paths keep their rank check.
+ * founder -> admin, HYRAK pilot or any manager -> operator, else viewer.
+ */
 export type Role = 'viewer' | 'operator' | 'admin'
-export interface AuthUser { id: string; username: string; role: Role }
+export interface AuthUser {
+    id: string
+    username: string
+    role: Role
+    email?: string | null
+    display_name?: string | null
+    is_founder?: boolean
+    is_staff?: boolean
+}
+export interface AuthAccess { memberships: Membership[]; workspaces: WorkspaceInfo[] }
 
 const ROLE_RANK: Record<Role, number> = { viewer: 0, operator: 1, admin: 2 }
 
@@ -37,11 +57,74 @@ export function hasRole(min: Role, user: AuthUser | null = getUser()): boolean {
     return !!user && ROLE_RANK[user.role] >= ROLE_RANK[min]
 }
 
-function store(token: string | null, user: AuthUser | null): void {
+export function getAccess(): AuthAccess | null {
+    if (typeof window === 'undefined') return null
+    try {
+        const raw = localStorage.getItem(ACCESS_KEY)
+        return raw ? (JSON.parse(raw) as AuthAccess) : null
+    } catch { return null }
+}
+
+/** Staff = any membership on the HYRAK workspace. An older server without
+ *  the flag only knows roles, and there admin meant the console. */
+export function isStaff(user: AuthUser | null = getUser()): boolean {
+    if (!user) return false
+    return user.is_staff ?? user.role === 'admin'
+}
+
+export function isFounder(user: AuthUser | null = getUser()): boolean {
+    if (!user) return false
+    return user.is_founder ?? user.role === 'admin'
+}
+
+/** Changes whenever the stored user or access changes (for snapshot caches). */
+export function authStorageKey(): string {
+    try { return (localStorage.getItem(USER_KEY) ?? '') + '|' + (localStorage.getItem(ACCESS_KEY) ?? '') } catch { return '' }
+}
+
+function announce(): void {
+    try { window.dispatchEvent(new Event(AUTH_CHANGE_EVENT)) } catch { /* no window */ }
+}
+
+function store(token: string | null, user: AuthUser | null, access?: AuthAccess | null): void {
     try {
         if (token) localStorage.setItem(TOKEN_KEY, token); else localStorage.removeItem(TOKEN_KEY)
         if (user) localStorage.setItem(USER_KEY, JSON.stringify(user)); else localStorage.removeItem(USER_KEY)
+        // undefined = leave the cached access alone; null = clear it.
+        if (access) localStorage.setItem(ACCESS_KEY, JSON.stringify(access))
+        else if (access === null || !token) localStorage.removeItem(ACCESS_KEY)
     } catch { /* storage blocked: the session lasts until reload */ }
+    announce()
+}
+
+/** Keep a token the server just issued (login, invite sign-up). */
+export function storeSession(token: string, user: AuthUser): void {
+    store(token, user, null)
+}
+
+/** Update the cached user after a profile edit, without touching the token. */
+export function storeUser(user: AuthUser): void {
+    const token = getToken()
+    if (token) store(token, { ...getUser(), ...user })
+}
+
+/** A short name for this browser, shown in "My devices": "Chrome on Linux". */
+export function deviceLabel(): string {
+    if (typeof navigator === 'undefined') return ''
+    const ua = navigator.userAgent
+    const browser = /Electron\//.test(ua) ? 'HYRAK desktop'
+        : /Edg\//.test(ua) ? 'Edge'
+        : /Firefox\//.test(ua) ? 'Firefox'
+        : /Chrome\//.test(ua) ? 'Chrome'
+        : /Safari\//.test(ua) ? 'Safari'
+        : 'Browser'
+    const os = /Android/.test(ua) ? 'Android'
+        : /iPhone|iPad/.test(ua) ? 'iOS'
+        : /Windows/.test(ua) ? 'Windows'
+        : /Mac OS X/.test(ua) ? 'macOS'
+        : /Linux/.test(ua) ? 'Linux'
+        : ''
+    return os ? `${browser} on ${os}` : browser
 }
 
 /** Bearer header for a REST call: `fetch(url, { headers: authHeaders() })`. */
@@ -64,13 +147,14 @@ export function liveAuthHeaders(extra: Record<string, string> = {}): Record<stri
     return obj
 }
 
-export async function login(username: string, password: string): Promise<AuthUser> {
+/** Sign in with an email or a username. Memberships load right after. */
+export async function login(loginName: string, password: string): Promise<AuthUser> {
     let res: Response
     try {
         res = await fetch(`${getServerUrl()}/api/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password }),
+            body: JSON.stringify({ login: loginName, password, label: deviceLabel() }),
         })
     } catch {
         throw new Error('Could not reach the server. Check the connection and try again.')
@@ -80,10 +164,10 @@ export async function login(username: string, password: string): Promise<AuthUse
     if (!res.ok || !body.token || !body.user) {
         throw new Error(body.detail || (res.status === 429
             ? 'Too many attempts. Try again in 15 minutes.'
-            : 'Invalid username or password'))
+            : 'Invalid email, username or password'))
     }
-    store(body.token, body.user)
-    return body.user
+    storeSession(body.token, body.user)
+    return (await fetchMe()) ?? body.user
 }
 
 export async function logout(): Promise<void> {
@@ -110,9 +194,14 @@ export async function fetchMe(): Promise<AuthUser | null> {
         const res = await fetch(`${getServerUrl()}/api/auth/me`, { headers: authHeaders() })
         if (res.status === 401) { store(null, null); return null }
         if (!res.ok) return getUser()
-        const user = (await res.json()).user as AuthUser
-        store(token, user)
-        return user
+        const body = await res.json() as {
+            user: AuthUser; memberships?: Membership[]; workspaces?: WorkspaceInfo[]
+        }
+        store(token, body.user, {
+            memberships: Array.isArray(body.memberships) ? body.memberships : [],
+            workspaces: Array.isArray(body.workspaces) ? body.workspaces : [],
+        })
+        return body.user
     } catch {
         return getUser()
     }

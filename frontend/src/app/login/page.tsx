@@ -5,16 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import Image from 'next/image'
 import { Loader2 } from 'lucide-react'
 import { getToken, login } from '@/lib/auth'
-
-const LABEL: React.CSSProperties = {
-    display: 'block', fontSize: 10, fontFamily: 'monospace', fontWeight: 700,
-    letterSpacing: '0.12em', color: 'hsl(var(--app-text-muted))', marginBottom: 6,
-}
-const INPUT: React.CSSProperties = {
-    width: '100%', padding: '9px 11px', borderRadius: 8, fontSize: 14,
-    background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
-    color: 'hsl(var(--app-text))', outline: 'none',
-}
+import { AUTH_INPUT as INPUT, AUTH_LABEL as LABEL } from '@/components/auth/AuthCard'
 
 const FALLBACK_NEXT = '/fly'
 
@@ -44,7 +35,7 @@ function LoginForm() {
     const router = useRouter()
     const params = useSearchParams()
     const next = safeNext(params.get('next'))
-    const [username, setUsername] = useState('')
+    const [loginName, setLoginName] = useState('')
     const [password, setPassword] = useState('')
     const [error, setError] = useState('')
     const [busy, setBusy] = useState(false)
@@ -56,13 +47,13 @@ function LoginForm() {
         e.preventDefault()
         if (busy) return
         setError('')
-        if (!username.trim() || !password) {
-            setError('Enter your username and password.')
+        if (!loginName.trim() || !password) {
+            setError('Enter your email or username, and your password.')
             return
         }
         setBusy(true)
         try {
-            await login(username.trim(), password)
+            await login(loginName.trim(), password)
             router.replace(next)
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Sign-in failed')
@@ -86,17 +77,17 @@ function LoginForm() {
                     <div>
                         <p style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>Sign in to HYRAK</p>
                         <p style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>
-                            Flight control needs an operator account
+                            Sign in with your email or username
                         </p>
                     </div>
                 </div>
 
                 <div>
-                    <label htmlFor="login-username" style={LABEL}>USERNAME</label>
+                    <label htmlFor="login-username" style={LABEL}>EMAIL OR USERNAME</label>
                     <input
                         id="login-username" name="username" type="text" autoComplete="username"
                         autoFocus autoCapitalize="none" spellCheck={false}
-                        value={username} onChange={e => setUsername(e.target.value)}
+                        value={loginName} onChange={e => setLoginName(e.target.value)}
                         style={INPUT}
                     />
                 </div>
@@ -129,8 +120,8 @@ function LoginForm() {
                 </button>
 
                 <p style={{ margin: 0, fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', lineHeight: 1.5 }}>
-                    No account yet? An admin creates one on the server:
-                    python -m app.auth.cli create-user
+                    No account yet? Ask your workspace owner or HYRAK for an invite link.
+                    Forgot your password? HYRAK can issue a reset link.
                 </p>
             </form>
         </div>

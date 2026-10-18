@@ -1,7 +1,9 @@
 'use client'
 
-// /admin - HYRAK operations console (no credentials for now; the socket
-// still needs the normal app token).
+// /admin - HYRAK operations console. Staff only: anyone with a membership
+// on the HYRAK workspace (docs/ACCESS_MODEL.md section 5). Founders see
+// every tab; other staff see the tabs their memberships allow, and the
+// server re-checks every call.
 //
 // Left rail tabs:
 //   MAP     - live map of every connected client. GPS fix = solid marker;
@@ -11,7 +13,12 @@
 //             detail panel (video, flight data, identity, permits).
 //   DRONES  - persistent registry with dropdown + search; per-drone detail
 //             shows live status, video/telemetry when online, and permits.
-//   ZONES / PERMITS - arrive with the geofencing phase.
+//   ZONES   - layered zones (regulatory / area / site), edited inside the
+//             caller's area.
+//   PERMITS - red-zone permit requests (permits.approve).
+//   SPACES  - workspaces: tree, members, invites, drones, operating areas.
+//   STAFF   - founders: staff roles, account disable / reset links.
+//   AUDIT   - latest access and zone events.
 //
 // Open this in its OWN tab: it marks its socket session as admin on the
 // backend so it doesn't count as a client.
@@ -19,10 +26,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
 import dynamic from 'next/dynamic'
-import { Map as MapIcon, Plane, Shield, FileCheck, X, Search } from 'lucide-react'
+import { Map as MapIcon, Plane, Shield, FileCheck, X, Search, Building2, Users, ScrollText } from 'lucide-react'
 import { connectSocket, getSocket } from '@/lib/socket'
 import { liveAuthHeaders } from '@/lib/auth'
 import { useAuthGate } from '@/hooks/useAuthGate'
+import { useAccess } from '@/hooks/useAccess'
+import { hasPerm, type Perm } from '@/lib/access'
+import { Tag } from '@/components/admin/console'
 import { getServerUrl } from '@/lib/server-url'
 import type { MapDrone } from '@/components/admin/AdminMap'
 import type { ZoneFeature } from '@/components/admin/zones'
@@ -30,6 +40,9 @@ import type { ZoneFeature } from '@/components/admin/zones'
 const AdminMap = dynamic(() => import('@/components/admin/AdminMap'), { ssr: false })
 const ZoneEditor = dynamic(() => import('@/components/admin/ZoneEditor'), { ssr: false })
 const FlightTrackMap = dynamic(() => import('@/components/admin/FlightTrackMap'), { ssr: false })
+const WorkspacesTab = dynamic(() => import('@/components/admin/WorkspacesTab'), { ssr: false })
+const StaffTab = dynamic(() => import('@/components/admin/StaffTab'), { ssr: false })
+const AuditTab = dynamic(() => import('@/components/admin/AuditTab'), { ssr: false })
 
 const JSON_AUTH = liveAuthHeaders({ 'Content-Type': 'application/json' })
 const AUTH = liveAuthHeaders()
@@ -120,13 +133,17 @@ type FlightDetail = {
     track: { t: string; lat: number; lng: number; alt: number; speed: number; battery: number; mode: string }[]
 }
 
-type Tab = 'overview' | 'drones' | 'zones' | 'permits'
+type Tab = 'overview' | 'drones' | 'zones' | 'permits' | 'workspaces' | 'staff' | 'audit'
 
-const TABS: { key: Tab; label: string; icon: typeof MapIcon }[] = [
-    { key: 'overview', label: 'MAP',     icon: MapIcon },
-    { key: 'drones',   label: 'DRONES',  icon: Plane },
-    { key: 'zones',    label: 'ZONES',   icon: Shield },
-    { key: 'permits',  label: 'PERMITS', icon: FileCheck },
+// Rail labels fit a 48px button at 9px mono; `full` is the tooltip.
+const TABS: { key: Tab; label: string; full?: string; icon: typeof MapIcon }[] = [
+    { key: 'overview',   label: 'MAP',     icon: MapIcon },
+    { key: 'drones',     label: 'DRONES',  icon: Plane },
+    { key: 'zones',      label: 'ZONES',   icon: Shield },
+    { key: 'permits',    label: 'PERMITS', icon: FileCheck },
+    { key: 'workspaces', label: 'SPACES',  full: 'WORKSPACES', icon: Building2 },
+    { key: 'staff',      label: 'STAFF',   icon: Users },
+    { key: 'audit',      label: 'AUDIT',   icon: ScrollText },
 ]
 
 // Deterministic ~±30m offset so several clients geolocated to the same city
@@ -138,8 +155,21 @@ function jitter(id: string, v: number): number {
 }
 
 export default function AdminPage() {
-    useAuthGate('admin')
-    const [tab, setTab] = useState<Tab>('overview')
+    const gate = useAuthGate('staff')
+    const { isFounder, workspaces } = useAccess()
+    // The live session map, socket mirrors and drone registry still sit
+    // behind the compatibility admin role on the server: founders only.
+    const anyPerm = (p: Perm) => workspaces.some(w => hasPerm(w, p))
+    const visibleTabs = TABS.filter(t => {
+        switch (t.key) {
+            case 'overview': case 'drones': case 'staff': return isFounder
+            case 'permits': return isFounder || anyPerm('permits.approve')
+            case 'audit': return isFounder || anyPerm('audit.view')
+            default: return true
+        }
+    })
+    const [pickedTab, setTab] = useState<Tab | null>(null)
+    const tab: Tab = visibleTabs.find(t => t.key === pickedTab)?.key ?? visibleTabs[0]?.key ?? 'workspaces'
     const [sessions, setSessions] = useState<SessionInfo[]>([])
     const [fleetDrones, setFleetDrones] = useState<FleetDroneInfo[]>([])
     const [drones, setDrones] = useState<DroneRecord[]>([])
@@ -158,6 +188,7 @@ export default function AdminPage() {
 
     // Socket: announce as admin, subscribe to mirrors
     useEffect(() => {
+        if (!isFounder) return
         const socket = getSocket()
         const hello = () => socket.emit('admin_hello', {})
         socket.on('connect', hello)
@@ -186,10 +217,11 @@ export default function AdminPage() {
             }
             if (frameUrlRef.current) URL.revokeObjectURL(frameUrlRef.current)
         }
-    }, [])
+    }, [isFounder])
 
     // Sessions + registry: poll every 2s
     useEffect(() => {
+        if (!isFounder) return
         let alive = true
         const poll = async () => {
             try {
@@ -218,7 +250,7 @@ export default function AdminPage() {
         void poll()
         const id = setInterval(poll, 2000)
         return () => { alive = false; clearInterval(id) }
-    }, [])
+    }, [isFounder])
 
     // Zones: fetch on mount + every 30s + after edits
     const refreshZones = useCallback(async () => {
@@ -451,6 +483,14 @@ export default function AdminPage() {
         return d.name.toLowerCase().includes(q) || d.hardware_uid.toLowerCase().includes(q)
     })
 
+    if (gate !== 'ok') {
+        return (
+            <div className="h-screen flex items-center justify-center bg-zinc-950 text-zinc-500 font-mono">
+                <span className="text-[11px] tracking-[0.12em]">CHECKING SIGN-IN</span>
+            </div>
+        )
+    }
+
     return (
         <div className="h-screen flex bg-zinc-950 text-zinc-200 font-mono overflow-hidden">
             {/* ── Left rail ────────────────────────────────────────────── */}
@@ -458,12 +498,14 @@ export default function AdminPage() {
                 <div className="mb-5" title="HYRAK OPS">
                     <Image src="/brand/icon.png" alt="HYRAK" width={26} height={26} />
                 </div>
-                {TABS.map(({ key, label, icon: Icon }) => {
+                {visibleTabs.map(({ key, label, full, icon: Icon }) => {
                     const pending = key === 'permits'
                         ? permits.filter(p => p.status === 'pending').length : 0
                     return (
                         <button
                             key={key}
+                            title={full ?? label}
+                            aria-current={tab === key ? 'page' : undefined}
                             onClick={() => setTab(key)}
                             className={
                                 'relative flex flex-col items-center gap-1 w-12 py-2 rounded text-[9px] transition-colors ' +
@@ -859,6 +901,10 @@ export default function AdminPage() {
                     </div>
                 )}
 
+                {tab === 'workspaces' && <WorkspacesTab zones={zones} />}
+                {tab === 'staff' && <StaffTab zones={zones} />}
+                {tab === 'audit' && <AuditTab />}
+
                 {tab === 'permits' && (
                     <div className="flex-1 overflow-y-auto p-5">
                         <div className="max-w-3xl mx-auto space-y-6">
@@ -1137,17 +1183,6 @@ function Uid({ uid, copied, onCopy }: { uid: string; copied: boolean; onCopy: (u
             {copied ? 'COPIED ✓' : `UID ${uid}`}
         </button>
     )
-}
-
-function Tag({ label, tone }: { label: string; tone: 'amber' | 'emerald' | 'red' | 'zinc' | 'violet' }) {
-    const cls = {
-        amber:   'text-amber-500/80 border-amber-500/30',
-        emerald: 'text-emerald-400 border-emerald-500/30',
-        red:     'text-red-400 border-red-500/40',
-        zinc:    'text-zinc-500 border-zinc-700',
-        violet:  'text-violet-400 border-violet-500/30',
-    }[tone]
-    return <span className={`border rounded px-1 text-[10px] ${cls}`}>{label}</span>
 }
 
 function Badge({ on, label }: { on: boolean; label: string }) {

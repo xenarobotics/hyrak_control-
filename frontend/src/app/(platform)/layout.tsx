@@ -24,6 +24,7 @@ import { StatusBar } from '@/components/layout/StatusBar'
 import { getStatusBarEnabled, STATUSBAR_CHANGE_EVENT } from '@/lib/statusBarSettings'
 import { useAuthGate } from '@/hooks/useAuthGate'
 import { useClientValueOn, useHydrated } from '@/hooks/useClientValue'
+import { WorkspaceSwitcher } from '@/components/layout/WorkspaceSwitcher'
 
 const NAV = [
     { href: '/fly',       label: 'Fly',     icon: Radio },
@@ -102,6 +103,8 @@ function PlatformNav() {
                         </>
                     )}
                 </div>
+
+                <WorkspaceSwitcher normal={normal} />
 
                 {nav.map(({ href, label, icon: Icon }) => {
                     const active = pathname === href || pathname.startsWith(href + '/')
