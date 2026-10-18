@@ -80,7 +80,7 @@ export function AirspaceStrip({ workspaceId, droneId, path, canPlan, nonce, onRe
             detail = `Approved until ${fmtWhen(check.permit.valid_until)}. Upload this exact plan; any edit needs a new permit.`
         } else if (red.length) {
             tone = '#f87171'; icon = <ShieldAlert size={12} />
-            text = `No-fly (red): ${names(red)}`
+            text = `No-fly (red): ${names(red)}${orange.length ? ` · orange: ${names(orange)}` : ''}`
             detail = 'Upload is refused unless an approved permit covers this plan for this drone.'
         } else if (orange.length && check.needs === 'none') {
             tone = '#4ade80'; icon = <FileCheck size={12} />

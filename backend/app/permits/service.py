@@ -566,6 +566,9 @@ async def supersede_for_zone(zone_id: str, reason: str) -> list[dict]:
             p.status = SUPERSEDED
             p.decided_at = now_utc()
             p.decision_note = (f"Superseded: {reason}")[:500]
+            # Nobody decided this; the zone edit did (audited with its actor).
+            p.decided_by = None
+            p.decided_by_name = ""
         if rows:
             await db.commit()
         out = [p.to_dict() for p in rows]

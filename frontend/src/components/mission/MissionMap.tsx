@@ -23,6 +23,7 @@ import type { Waypoint, MapLayer } from '@/types/mission'
 import { getServerUrl } from '@/lib/server-url'
 import { authHeaders } from '@/lib/auth'
 import { useAccess } from '@/hooks/useAccess'
+import { PLAN_FIT_EVENT } from '@/lib/planning'
 import { visibleInterval } from '@/lib/poll'
 import { getHazards, getObstaclesAndPath, addHazard, type KnownHazard, type LiveObstacle, type LatLng } from '@/lib/avoidance'
 import { ZONE_COLORS, zoneRings, type ZoneFeature } from '@/components/admin/zones'
@@ -413,6 +414,22 @@ function SmoothDroneMarker() {
   return null
 }
 
+// ── Frame the plan when one is opened (lib/planning requestPlanFit) ─────────
+
+function PlanFitter() {
+  const map = useMap()
+  useEffect(() => {
+    const fit = () => {
+      const pts = useMissionStore.getState().waypoints.map(w => [w.lat, w.lng] as [number, number])
+      if (pts.length === 1) map.setView(pts[0], 17)
+      else if (pts.length > 1) map.fitBounds(pts, { paddingTopLeft: [260, 140], paddingBottomRight: [260, 180], maxZoom: 18 })
+    }
+    window.addEventListener(PLAN_FIT_EVENT, fit)
+    return () => window.removeEventListener(PLAN_FIT_EVENT, fit)
+  }, [map])
+  return null
+}
+
 // ── Fly to drone position on first telemetry ────────────────────────────────
 
 function DronePositionTracker() {
@@ -616,6 +633,7 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
 
       {!readOnly && <ClickHandler pinMode={pinMode} onPin={pinHazard} />}
       <DronePositionTracker />
+      <PlanFitter />
       {follow && <DroneFollower />}
       <MapResizeWatcher />
       <FlightZonesOverlay />

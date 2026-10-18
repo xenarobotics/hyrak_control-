@@ -1014,7 +1014,7 @@ export default function AdminPage() {
                                             </span>
                                             <span className="text-zinc-200 shrink-0">{p.workspace_name || p.workspace_id.slice(0, 8)}</span>
                                             <span className="text-zinc-500 truncate min-w-0" title={p.decision_note || p.description}>
-                                                {p.description}{p.decision_note ? ` - ${p.decided_by_name}: ${p.decision_note}` : ''}
+                                                {p.description}{p.decision_note ? ` - ${p.decided_by_name ? `${p.decided_by_name}: ` : ''}${p.decision_note}` : ''}
                                             </span>
                                             <span className="ml-auto text-zinc-600 shrink-0">until {fmtDate(p.valid_until)}</span>
                                             {p.status === 'approved' && p.can_decide && p.status_effective !== 'expired' && (

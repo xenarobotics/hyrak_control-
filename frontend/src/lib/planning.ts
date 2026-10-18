@@ -201,6 +201,12 @@ export async function decidePermit(id: string, approve: boolean, note: string): 
     return r.data.permit
 }
 
+/** Ask the planner map to frame the plan (after opening a saved one). */
+export const PLAN_FIT_EVENT = 'hyrak-plan-fit'
+export function requestPlanFit(): void {
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event(PLAN_FIT_EVENT))
+}
+
 export const PERMIT_TONE: Record<string, { fg: string; label: string }> = {
     pending:    { fg: '#fbbf24', label: 'PENDING' },
     approved:   { fg: '#4ade80', label: 'APPROVED' },

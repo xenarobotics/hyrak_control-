@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { FolderOpen, Save, Trash2, Loader2, Pencil, X } from 'lucide-react'
 import { useMissionStore } from '@/store/mission'
 import {
-    deleteMission, fmtWhen, fromWire, getMission, listMissions, saveMission, updateMission,
+    deleteMission, fmtWhen, fromWire, getMission, listMissions, requestPlanFit, saveMission, updateMission,
     type SavedMission,
 } from '@/lib/planning'
 
@@ -58,6 +58,7 @@ export default function MissionLibrary({ workspaceId, canPlan, droneId, loaded, 
             const full = await getMission(m.id)
             importWaypoints(fromWire(full.waypoints ?? [], `saved_${m.id.slice(0, 8)}`))
             onLoaded({ id: m.id, name: m.name || 'Untitled' })
+            requestPlanFit()
             onClose()
         } catch (e) { setError((e as Error).message) }
         finally { setBusy(null) }

@@ -20,7 +20,7 @@ import MissionLibrary, { type LoadedPlan } from '@/components/mission/MissionLib
 import AltitudeProfile from '@/components/mission/AltitudeProfile'
 import { AirspaceStrip, PermitRequestDialog, PermitsPanel } from '@/components/mission/Airspace'
 import { useAccess, useActiveWorkspace } from '@/hooks/useAccess'
-import { fromWire, planningAccess, type Permit } from '@/lib/planning'
+import { fromWire, planningAccess, requestPlanFit, type Permit } from '@/lib/planning'
 import { getSocket } from '@/lib/socket'
 import { cn } from '@/lib/utils'
 import {
@@ -617,6 +617,7 @@ export default function MissionPage() {
 
   const loadPermitPlan = useCallback((p: Permit) => {
     importWaypoints(fromWire(p.waypoints ?? [], `permit_${p.id.slice(0, 8)}`))
+    requestPlanFit()
     setLoadedPlan(null)
     setShowPermitList(false)
   }, [importWaypoints])
@@ -707,7 +708,7 @@ export default function MissionPage() {
 
       {/* ── Airspace check + altitude profile (above the stats bar) ─────── */}
       {!(rtlReturning && swarmEnabled) && (
-        <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[1100] flex flex-col items-center gap-2 w-[min(640px,calc(100%-32px))]">
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-[1100] flex flex-col items-center gap-2 w-[min(640px,calc(100%-32px))]">
           {showProfile && (
             <Panel className="w-full px-3 py-2">
               <AltitudeProfile waypoints={waypoints} />
@@ -1264,7 +1265,7 @@ export default function MissionPage() {
               danger
             />
           )}
-          <div className="w-px h-5 mx-0.5 bg-gray-700" />
+          {canFly && <div className="w-px h-5 mx-0.5 bg-gray-700" />}
           {canFly && <div className="relative">
             <ToolBtn
               icon={isUploading
