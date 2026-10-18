@@ -226,6 +226,8 @@ class ZoneRecord:
     created_by: Optional[str] = None
     updated_by: Optional[str] = None
     updated_at: Optional[datetime] = None
+    # Red zones: whether a permit can be requested (docs/ACCESS_MODEL.md 8b).
+    permission_required: bool = True
 
     def to_feature(self) -> dict:
         return {
@@ -236,6 +238,7 @@ class ZoneRecord:
                 "floor_m": self.floor_m, "ceiling_m": self.ceiling_m,
                 "active": self.active, "layer": self.layer,
                 "workspace_id": self.workspace_id,
+                "permission_required": self.permission_required,
             },
         }
 
@@ -1062,7 +1065,8 @@ class DbStore:
             row = Zone(id=z.id, name=z.name, zone_class=z.zone_class, geometry=z.geometry,
                        floor_m=z.floor_m, ceiling_m=z.ceiling_m, active=z.active,
                        created_at=z.created_at, layer=z.layer, workspace_id=z.workspace_id,
-                       created_by=z.created_by, updated_by=z.updated_by, updated_at=z.updated_at)
+                       created_by=z.created_by, updated_by=z.updated_by, updated_at=z.updated_at,
+                       permission_required=z.permission_required)
             db.add(row)
             await db.commit()
             return _zone_of(row)
@@ -1141,4 +1145,5 @@ def _zone_of(row) -> ZoneRecord:
                       active=bool(row.active), created_at=row.created_at,
                       layer=row.layer or "regulatory", workspace_id=row.workspace_id,
                       created_by=row.created_by, updated_by=row.updated_by,
-                      updated_at=row.updated_at)
+                      updated_at=row.updated_at,
+                      permission_required=row.permission_required is not False)

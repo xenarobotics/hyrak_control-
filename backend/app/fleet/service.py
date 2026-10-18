@@ -331,25 +331,14 @@ async def fly_mission(db_id: str, waypoints: list[dict],
         for w in waypoints
     ]
 
-    from app.zones import engine as zone_engine
-    path_check = zone_engine.check_path(
-        [(float(w["lat"]), float(w["lng"])) for w in flown])
-    permit = None
-    if path_check["zone_class"] == "red":
-        from app.permits import service as permit_service
-        # alt_slack: the permit froze the PLANNED altitudes; the flown
-        # mission differs by exactly this drone's separation band.
-        permit = await permit_service.find_approved(db_id, flown,
-                                                    alt_slack=band)
-        if permit is None:
-            names = ", ".join(z["name"] for z in path_check["zones"])
-            return False, {"blocked": "red", "zones": path_check["zones"],
-                           "msg": f"Mission crosses NO-FLY (red) zone: {names}"}
-    if (path_check["zone_class"] == "orange" and not ack_orange
-            and permit is None):
-        names = ", ".join(z["name"] for z in path_check["zones"])
-        return False, {"needs_ack": True, "zones": path_check["zones"],
-                       "msg": f"Mission passes through orange zone: {names}"}
+    from app.permits import service as permit_service
+    # alt_slack: a permit froze the PLANNED altitudes; the flown mission
+    # differs by exactly this drone's separation band.
+    gate = await permit_service.gate_upload(db_id, flown, ack_orange=ack_orange,
+                                            alt_slack=band)
+    if not gate["ok"]:
+        out = {k: v for k, v in gate.items() if k not in ("permit", "ok", "can_request")}
+        return False, out
 
     ok, err = await manager.upload_mission(flown, terrain_follow=False)
     if not ok and "UNAVAILABLE" in str(err):
@@ -364,7 +353,10 @@ async def fly_mission(db_id: str, waypoints: list[dict],
     if not ok:
         return False, {"msg": f"Upload failed: {err}"}
     from app.planner import service as mission_service
-    await mission_service.mark_uploaded_by_hash(waypoints, drone_id=db_id)
+    from app.auth.store import PLATFORM_WORKSPACE_ID
+    # The server fleet is HYRAK's.
+    await mission_service.mark_uploaded_by_hash(waypoints, drone_id=db_id,
+                                                workspace_id=PLATFORM_WORKSPACE_ID)
 
     last = flown[-1]
     _land_target[i] = (float(last["lat"]), float(last["lng"]))

@@ -21,14 +21,13 @@ _SEVERITY = {"green": 0, "orange": 1, "red": 2}
 _PREDICT_ERODE_M = 5.0   # red-breach prediction only counts ≥ this deep inside
 
 _lock = threading.Lock()
-_zones: list[dict] = []          # {id, name, zone_class, floor_m, ceiling_m, geom}
+_zones: list[dict] = []          # {id, name, zone_class, floor_m, ceiling_m, permission_required, geom}
 _tree: STRtree | None = None
 _tree_geoms: list = []
 
 
 async def reload() -> int:
     """(Re)load active zones from the DB. Safe to call any time."""
-    global _zones, _tree, _tree_geoms
     from sqlalchemy import select
     from app.db import db_available, get_session
     from app.db.models import Zone
@@ -44,15 +43,30 @@ async def reload() -> int:
         logger.warning(f"Zone reload failed: {e}")
         return len(_zones)
 
+    return set_zones([
+        {"id": z.id, "name": z.name, "zone_class": z.zone_class, "geometry": z.geometry,
+         "floor_m": z.floor_m, "ceiling_m": z.ceiling_m,
+         "permission_required": getattr(z, "permission_required", True) is not False}
+        for z in rows
+    ])
+
+
+def set_zones(rows: list[dict]) -> int:
+    """Replace the loaded zones with `rows` ({id, name, zone_class, geometry,
+    floor_m?, ceiling_m?, permission_required?}). reload() feeds it from the
+    database; tests feed it directly."""
+    global _zones, _tree, _tree_geoms
     zones, geoms = [], []
     for z in rows:
         try:
-            geom = shape(z.geometry)
+            geom = shape(z["geometry"])
             entry = {
-                "id": z.id, "name": z.name, "zone_class": z.zone_class,
-                "floor_m": z.floor_m, "ceiling_m": z.ceiling_m, "geom": geom,
+                "id": z["id"], "name": z["name"], "zone_class": z["zone_class"],
+                "floor_m": z.get("floor_m") or 0.0, "ceiling_m": z.get("ceiling_m"),
+                "permission_required": z.get("permission_required", True) is not False,
+                "geom": geom,
             }
-            if z.zone_class == "red":
+            if z["zone_class"] == "red":
                 # Eroded copy for breach *prediction*: skimming along the
                 # boundary must not trigger the pushback - only a track
                 # heading genuinely inside (≥ ~5 m deep) does.
@@ -60,7 +74,7 @@ async def reload() -> int:
             zones.append(entry)
             geoms.append(geom)
         except Exception as e:
-            logger.warning(f"Zone {z.id} has bad geometry - skipped: {e}")
+            logger.warning(f"Zone {z.get('id')} has bad geometry - skipped: {e}")
 
     with _lock:
         _zones = zones
@@ -75,6 +89,20 @@ def snapshot() -> list[dict]:
     read-only view for the mission planner's cost rasteriser."""
     with _lock:
         return list(_zones)
+
+
+def _public(z: dict) -> dict:
+    """A zone as checks report it."""
+    return {"id": z["id"], "name": z["name"], "zone_class": z["zone_class"],
+            "permission_required": z.get("permission_required", True)}
+
+
+def geometries(ids) -> dict:
+    """{zone id: shapely geometry} for the loaded zones among `ids`."""
+    want = set(ids)
+    with _lock:
+        zones = _zones
+    return {z["id"]: z["geom"] for z in zones if z["id"] in want}
 
 
 def _alt_applies(z: dict, alt_m: float | None) -> bool:
@@ -108,10 +136,7 @@ def check_point(lat: float, lng: float, alt_m: float | None = None) -> dict:
     worst = max((h["zone_class"] for h in hits), key=lambda c: _SEVERITY[c], default="green")
     return {
         "zone_class": worst,
-        "zones": [
-            {"id": h["id"], "name": h["name"], "zone_class": h["zone_class"]}
-            for h in sorted(hits, key=lambda h: -_SEVERITY[h["zone_class"]])
-        ],
+        "zones": [_public(h) for h in sorted(hits, key=lambda h: -_SEVERITY[h["zone_class"]])],
     }
 
 
@@ -138,28 +163,37 @@ def ceiling_at(lat: float, lng: float, alt_m: float) -> float | None:
 def predict_red(lat: float, lng: float, alt_m: float | None = None) -> bool:
     """True only if the point is meaningfully INSIDE a red zone (eroded by
     ~5 m) - used for breach prediction so boundary-skimming doesn't trip."""
+    return bool(predict_red_ids(lat, lng, alt_m))
+
+
+def predict_red_ids(lat: float, lng: float, alt_m: float | None = None) -> set[str]:
+    """The red zones the point is meaningfully inside (eroded by ~5 m), so
+    the monitor can tell a permitted zone from an unpermitted one."""
     with _lock:
         zones = _zones
     p = Point(lng, lat)
+    out = set()
     for z in zones:
         if z["zone_class"] != "red":
             continue
         eroded = z.get("geom_eroded")
         if eroded is not None and not eroded.is_empty and eroded.covers(p) \
                 and _alt_applies(z, alt_m):
-            return True
-    return False
+            out.add(z["id"])
+    return out
 
 
-def nearest_exit(lat: float, lng: float, extra_m: float = 20.0) -> tuple[float, float] | None:
+def nearest_exit(lat: float, lng: float, extra_m: float = 20.0,
+                 exclude: set | frozenset = frozenset()) -> tuple[float, float] | None:
     """
     For a point inside red zone(s): the nearest location outside them, pushed
     `extra_m` beyond the boundary. None if the point isn't in any red zone.
-    Used by the enforcement monitor to command a drone back out.
+    Used by the enforcement monitor to command a drone back out. `exclude`:
+    red zones the aircraft is permitted in right now (not pushed out of).
     """
     import math
     with _lock:
-        zones = _zones
+        zones = [z for z in _zones if z["id"] not in exclude]
     p = Point(lng, lat)
     reds = [z for z in zones if z["zone_class"] == "red" and z["geom"].covers(p)]
     if not reds:
@@ -290,8 +324,21 @@ def check_path(
     worst = max((h["zone_class"] for h in hits), key=lambda c: _SEVERITY[c], default="green")
     return {
         "zone_class": worst,
-        "zones": [
-            {"id": h["id"], "name": h["name"], "zone_class": h["zone_class"]}
-            for h in sorted(hits, key=lambda h: -_SEVERITY[h["zone_class"]])
-        ],
+        "zones": [_public(h) for h in sorted(hits, key=lambda h: -_SEVERITY[h["zone_class"]])],
+    }
+
+
+def check_area(geojson: dict) -> dict:
+    """Zones an area (GeoJSON Polygon / MultiPolygon) overlaps - what an
+    area permit has to name. Same shape as check_path."""
+    with _lock:
+        tree, zones = _tree, _zones
+    if tree is None:
+        return {"zone_class": "green", "zones": []}
+    area = shape(geojson)
+    hits = [zones[i] for i in tree.query(area) if zones[i]["geom"].intersects(area)]
+    worst = max((h["zone_class"] for h in hits), key=lambda c: _SEVERITY[c], default="green")
+    return {
+        "zone_class": worst,
+        "zones": [_public(h) for h in sorted(hits, key=lambda h: -_SEVERITY[h["zone_class"]])],
     }

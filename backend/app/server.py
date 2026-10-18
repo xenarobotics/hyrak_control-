@@ -74,6 +74,8 @@ def create_app() -> socketio.ASGIApp:
     fastapi_app.include_router(router)
     from app.workspaces.routes import router as workspaces_router
     fastapi_app.include_router(workspaces_router)
+    from app.permits.routes import router as permits_router
+    fastapi_app.include_router(permits_router)
     from app.api.public import router as public_router
     fastapi_app.include_router(public_router)
     from app.reconstruction.routes import router as recon_router

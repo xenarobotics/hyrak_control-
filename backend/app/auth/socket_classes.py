@@ -63,6 +63,7 @@ EVENTS: dict[str, str] = {
     "set_altitude_mode": SESSION_COMMAND,
     "set_altitude_nudge": SESSION_COMMAND,
     "set_tracking_params": SESSION_COMMAND,
+    "upload_mission": SESSION_COMMAND,  # phase 2b: customers fly their own plans
 
     # ── the session's AI pipeline ───────────────────────────────────────
     "set_analysis_mode": SESSION_COMMAND,  # minus CUSTOMER_BLOCKED_MODES
@@ -75,7 +76,6 @@ EVENTS: dict[str, str] = {
     "connect_telemetry": STAFF,       # arbitrary address: server Gazebo udp:14600, LAN, anything
     "connect_rf_bridge": STAFF,       # the one shared RF bridge / ground-station relay
     "start_rc_monitor": STAFF,        # binds a server port, one monitor for the whole server
-    "upload_mission": STAFF,          # customer mission planning is phase 2b
     "set_gallery_mode": STAFF,        # the face gallery is global
     "enrol_person_live": STAFF,       # writes the global face gallery
     "set_crowd_thresholds": STAFF,    # persisted to the server-wide calibration file
@@ -89,7 +89,7 @@ EVENTS: dict[str, str] = {
     "admin_hello": STAFF,
     "watch_session": STAFF,           # another session's telemetry and video
     "unwatch_session": STAFF,
-    "request_permit": STAFF,
+    "request_permit": STAFF,          # swarm / fleet drones; customers use REST /api/permits
     "list_my_permits": STAFF,
     "connect_swarm_relay": STAFF,
     "swarm_relay_uplink": STAFF,
@@ -120,7 +120,7 @@ DRONE_EVENTS = frozenset({
     "drone_action", "drone_command", "set_param",
     "set_tracking", "set_vehicle_tracking", "set_follow_vehicle", "set_follow_person",
     "set_multi_follow", "select_person", "set_pd_params", "set_altitude_mode",
-    "set_altitude_nudge", "set_tracking_params",
+    "set_altitude_nudge", "set_tracking_params", "upload_mission",
 })
 
 # drone_action names that are never refused for a session holding the
