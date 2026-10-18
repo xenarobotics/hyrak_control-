@@ -47,7 +47,7 @@ IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
 NMS_IOU = 0.45
 MAX_DETECTIONS = 300
-TOP_K = 5
+TOP_K = 10
 
 
 class Fail(Exception):

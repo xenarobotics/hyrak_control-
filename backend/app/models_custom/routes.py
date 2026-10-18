@@ -13,7 +13,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.auth.clientip import client_ip
 from app.auth.deps import require_signed_in
@@ -100,8 +100,15 @@ class HfBody(BaseModel):
     workspace_id: Optional[str] = None
     repo: str = Field(min_length=1, max_length=300)
     file: Optional[str] = Field(default=None, max_length=300)
-    name: str = Field(default="", max_length=120)
+    # Optional and trimmed: one-click Add from a list sends null, and a long
+    # Hub repo name must not fail the request.
+    name: Optional[str] = Field(default="", max_length=400)
     model_id: Optional[str] = None           # a new version of this model
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v):
+        return (v or "").strip()[:120]
 
 
 @router.post("/huggingface")

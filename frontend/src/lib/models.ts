@@ -129,6 +129,13 @@ export function problemFrom(data: unknown, status: number): ApiProblem {
                 : 'Something went wrong on the HYRAK server. Try again in a moment.'
     const d = (data ?? {}) as Record<string, unknown>
     const detail = d.detail
+    // FastAPI request validation (422): a list of {loc, msg}. Say which field.
+    if (Array.isArray(detail) && detail.length) {
+        const first = detail[0] as { loc?: unknown[]; msg?: string }
+        const field = Array.isArray(first.loc) ? String(first.loc[first.loc.length - 1]) : 'request'
+        return { message: `HYRAK could not accept this request (${field}: ${first.msg ?? 'invalid'}).`,
+            hint: 'Try again. If it keeps happening, tell HYRAK what you clicked.', status }
+    }
     const obj = (detail && typeof detail === 'object' && !Array.isArray(detail) ? detail : d) as Record<string, unknown>
     const pick = (...keys: string[]) => {
         for (const k of keys) {

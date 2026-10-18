@@ -1,7 +1,8 @@
 'use client'
 
 // Results of a running custom model, compact: what it finds with counts
-// (detect), or its top 3 answers (classify), plus the alert rule's hits.
+// (detect), or its answers (classify: every class when there are 10 or
+// fewer, else the top 5), plus the alert rule's hits.
 // The boxes themselves are drawn by CvOverlayCanvas, as for Objects.
 
 import { useEffect, useMemo, useState } from 'react'
@@ -48,7 +49,10 @@ export function CustomResultsPanel({ mode }: { mode: string }) {
     const rule = model?.alert ?? null
     const cv = useDroneStore(st => st.cvResults)
     const stable = useStableCounts(countsOf(cv))
-    const top = useMemo(() => [...(cv?.predictions ?? [])].sort((a, b) => b.score - a.score).slice(0, 3), [cv])
+    const top = useMemo(() => {
+        const all = [...(cv?.predictions ?? [])].sort((a, b) => b.score - a.score)
+        return all.length <= 10 ? all : all.slice(0, 5)
+    }, [cv])
     const classify = model?.task === 'classify' || (!!cv?.predictions && !cv?.detections)
 
     // A short log of alert hits: one entry per second at most, newest first.
