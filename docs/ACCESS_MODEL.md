@@ -555,6 +555,11 @@ server never dials a TURN host the customer typed.
   a customer's drone), except that staff keep today's behaviour while a
   drone is still unidentified. The legacy shared token flies HYRAK drones
   only.
+* `drone_identity` (sent once the UID is read) carries `drone_fly`:
+  `true` = this session may command the drone, `false` = read-only here,
+  `null` = unknown (customers cannot command until it is known).
+  `/api/sessions` (founders) shows each session's `workspace_id` and
+  `staff`.
 * **Safety exception:** `drone_action` with `hold`, `pause_mission`,
   `return`, `rtl_home` or `land`, or `set_mode` with `HOLD` / `RETURN` /
   `LAND`, passes both the workspace `fly` check and drone access whenever
