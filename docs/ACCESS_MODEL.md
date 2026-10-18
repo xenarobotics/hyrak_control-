@@ -663,7 +663,179 @@ server never dials a TURN host the customer typed.
 ### Not in 2a (phase 2b)
 
 Customer mission planning, customer flight history and recordings per
-workspace, customer fleet views, TOTP for founders and managers.
+workspace, customer fleet views, TOTP for founders and managers. The
+premium cloud simulator is section 8b.
+
+## 8b. Cloud SITL (premium, phase 2b)
+
+The customer's **default** simulator runs on their own computer: PX4 or
+Gazebo on their machine, linked through the desktop app's "SITL" relay
+(the client's udp:14540, `connect_browser_serial`). Only telemetry and
+camera pass through HYRAK. The cloud simulator is an optional **premium
+extra**: a per-session PX4 + Gazebo instance on the HYRAK server that the
+session flies from Fly, Mission and AI exactly like a real drone.
+
+Three link options stay distinct and are never merged or relabelled:
+
+| option | what | who |
+|---|---|---|
+| SITL | the desktop relay of the client's own SITL (udp:14540 on their machine) | everyone, the default |
+| Gazebo sim on server | the owner's shared demo sim, udp:14600 (`connect_telemetry`) | staff |
+| Cloud simulator (premium) | this section: one sim per session, launched by the server | staff always; customers with the workspace feature |
+
+### Entitlement
+
+* `workspaces.features` (JSON, migration `c9f5a1d3e6b4`), e.g.
+  `{"cloud_sim": true}`. Absent key = off. Not inherited by clients.
+* Only founders change it: `PATCH /api/workspaces/{id}` with
+  `{"features": {"cloud_sim": true}}` (403 for anyone else, 400 for an
+  unknown key or a non-boolean). The console's workspace page has a
+  CLOUD SIM ON / OFF button for founders. Audited as `workspace.update`.
+* Staff sessions are always entitled. A customer session in a workspace
+  without the feature gets `cloud_sim_not_entitled` and the message
+  "Cloud simulator is a premium feature ...", and the link picker shows
+  the option disabled with that note.
+
+### Socket events
+
+| event | class | notes |
+|---|---|---|
+| `start_cloud_sim` `{airframe?, home?: {lat, lon}}` | session command (`fly`; staff: operator) | plus the entitlement. Starting when the session already has one returns it (and re-links it if it is up but unlinked) |
+| `stop_cloud_sim` | session view | stopping your own sim, like `disconnect_telemetry`: a pilot demoted mid-session can still stop it |
+| `cloud_sim_status` | session view | |
+
+All three answer with the status as the ack and as a `cloud_sim_status`
+event, which the server also pushes on every change: `state` is `none`,
+`starting`, `ready`, `stopping` or `error` (with `code`, `error`), plus
+`entitled`, `enabled`, `quota {workspace_used, workspace_max,
+global_used, global_max}`, `idle_minutes`, `idle_stop_in_s`, `home`,
+`boot_s`, `linked`, and `ended` (`idle`, `stopped`, `session_ended`,
+`error`, `server_shutdown`) after one ended. Staff also get `staff
+{address, slot, instance, partition, pid, sim_id}` and, after a failure,
+the log tail in `detail`. Codes: `cloud_sim_not_entitled`,
+`cloud_sim_quota_workspace`, `cloud_sim_quota_global`,
+`cloud_sim_unavailable`, `cloud_sim_bad_request`, `cloud_sim_failed`.
+
+The client never supplies an address (any `address` in the payload is
+ignored). When the sim is up the server links the session's telemetry to
+the loopback port it chose (`udpin://127.0.0.1:<port>`) through the same
+connect flow as every other link, with origin `start_cloud_sim`.
+
+### Drone access
+
+* The link kind is `live_scope.CLOUD_SIM_LINK`, decided by the handler
+  that opened it, never by the client. It is simulator-type for
+  customers too, because nothing about it comes from the client: the
+  process, the port and the identity are the server's.
+* The identity is synthetic: `cloudsim-<workspace_id>-<n>` (n = 0 up to
+  the workspace cap), assigned by the server instead of the FC's UID
+  (PX4 SITL reports the same UID everywhere). A real FC's UID is hex, so
+  no other link can produce one.
+* The record is stored simulated and never claimed (it stays on HYRAK),
+  and `drone_fly` is true for the session holding the link. The rule of 8a
+  becomes: the ownership check is skipped only when the record is
+  simulated AND the session's link is simulator-type, which is either a
+  staff server-sim link (`SIM_LINK`) or the session's own cloud sim
+  (`CLOUD_SIM_LINK` with a `cloudsim-` UID). The same UID on any other
+  link gets the normal rules.
+
+### How it runs (backend/app/sim, simulation/cloud_sim.sh)
+
+* **Pool.** 64 slots. Slot k owns udp `base + 10k` (the backend's MAVSDK,
+  loopback only), `base + 10k + 1` (PX4's MAVLink port) and `base + 10k +
+  2` (PX4's uXRCE-DDS client, pointed at nothing), PX4 instance `100 + k`
+  (MAV_SYS_ID 101+, clear of the owner's 0-30 and the backend's GCS ids
+  200+) and a fresh `GZ_PARTITION=hyrak_cloud_<k>_<random>`. The default
+  base 15000 gives 15000-15639. `ports.validate_plan` refuses a base that
+  overlaps any reserved port (14540-14571 SITL / fleet, 14550, 14600-14601,
+  5600-5603, 5800-5900, 8001, 3000, 8888, gz discovery 10317-10318, PX4's
+  default per-instance ports for instances 0-99, the ephemeral range), and
+  allocation skips a slot whose ports are bound or whose PX4 lock
+  (`/tmp/px4_lock-<n>`) is held.
+* **Launch.** `cloud_sim.sh` (derived from `hyrak_sim.sh`): `GZ_IP=127.0.0.1`,
+  the unique partition, `hyrak_server.config` (no GstCameraSystem leak),
+  headless gz server first, then PX4 adopts the world (no
+  `PX4_GZ_STANDALONE`), `PX4_HOME_ALT=0`, `NAV_DLL_ACT=2`, `RTL_RETURN_ALT=10`,
+  logger off, a fresh working dir per instance. `cloud_sim_rc/px4-rc.mavlink`
+  replaces PX4's stock MAVLink startup: ONE link to the backend, no FTP,
+  no forwarding, nothing to udp:14550 or 1454x. Airframe: x500 only
+  (allowlist in `app/sim/manager.py`). Home: the customer's `{lat, lon}`,
+  else a point inside the workspace's operating area, else the server
+  default.
+* **Ready** when PX4 has run its startup script and opened the backend
+  link (not "Ready for takeoff": PX4 withholds that until a ground station
+  connects, and the backend link is the ground station). Pre-flight state
+  then reaches the pilot as telemetry, like a real drone's.
+* **Processes.** The backend starts the script as the leader of a new
+  process group and stops it with SIGINT to the group, SIGKILL after 8 s,
+  then a sweep of every process whose environment carries
+  `HYRAK_CLOUD_SIM_ID=<this instance>` (a positive match in
+  `/proc/<pid>/environ`, this user's processes only). It never
+  pattern-matches command lines and never touches a gz or px4 it did not
+  start. Instances are recorded in `simulation/.cloud_sim/instances.json`;
+  on startup the backend sweeps every recorded instance by its marker
+  (orphans of a crash or a hard restart) and removes their working dirs.
+* **Teardown.** On `stop_cloud_sim` (and Disconnect while the cloud sim is
+  the link), when the session ends (its socket did not return within the
+  90 s resume window), after `CLOUD_SIM_IDLE_MINUTES` on the ground
+  (disarmed or not linked; armed time never counts), when it exits on its
+  own (reported as an error), when it does not come up within
+  `CLOUD_SIM_BOOT_TIMEOUT_S`, and on backend shutdown (which includes the
+  dev backend's auto-reload). A linked session's telemetry is released
+  first (`telemetry_status: disconnected`).
+
+### Not yet
+
+* **Camera.** No video from the cloud sim. `hyrak_sim.sh`'s camera
+  bridge sends H.265 RTP to a fixed udp:5600 consumed by the staff-only
+  `air_unit_udp` source; feeding a customer session safely needs a
+  per-instance port and a server video source allowed only for the
+  session that owns the sim. Follow-up; until then the x500 has no camera
+  model (it would render for nothing).
+* Mission planning for customers is stream A of 2b; the cloud sim takes
+  whatever the session may upload.
+* Per-workspace quotas beyond the one setting, billing, usage metering.
+
+### Operator note: sizing and the firewall
+
+Settings (`.env`):
+
+| setting | default | meaning |
+|---|---|---|
+| `CLOUD_SIM_ENABLED` | true | off hides the option and refuses starts |
+| `CLOUD_SIM_MAX_GLOBAL` | 2 | instances on the server at once |
+| `CLOUD_SIM_MAX_PER_WORKSPACE` | 1 | instances per workspace (staff share HYRAK's) |
+| `CLOUD_SIM_IDLE_MINUTES` | 15 | on the ground this long: stopped |
+| `CLOUD_SIM_BOOT_TIMEOUT_S` | 150 | not ready by then: stopped as an error |
+| `CLOUD_SIM_PORT_BASE` | 15000 | first port of the 640-port block |
+| `CLOUD_SIM_INSTANCE_BASE` | 100 | first PX4 instance (100-199 allowed) |
+| `CLOUD_SIM_PX4_DIR` | ~/PX4-Autopilot | PX4 checkout built with `make px4_sitl_default` |
+| `CLOUD_SIM_WORLD` | default | PX4 gz world |
+| `CLOUD_SIM_REQUIRE_FIREWALL_ACK` | false | set true on servers after applying the rule below |
+
+Measured on the dev laptop (2026-10-18, one headless x500, default
+world): ready in 14.7 s, about 0.95 CPU core in lockstep at real time,
+about 245 MB RSS (gz server ~220 MB, PX4 ~20 MB). Size
+`CLOUD_SIM_MAX_GLOBAL` to the cores left after vision inference: on a
+dedicated 32-core box with GPU inference, 16-24 is a reasonable start;
+keep 2 on a laptop. A real-time factor below 1 (too many instances)
+stretches PX4's clock and heartbeats: watch for MAVSDK "heartbeats timed
+out" in the log.
+
+**Firewall (required on a server).** PX4's MAVLink module binds its port
+on 0.0.0.0 (this PX4 tree has no loopback-only option) and, once its
+partner is set, still accepts datagrams from ANY source. So anyone who
+can reach the server on the block can send MAVLink, including commands,
+to a customer's sim while the backend link is live. Firewall the block to
+loopback, then set `CLOUD_SIM_REQUIRE_FIREWALL_ACK=true`; until then the
+backend logs a warning at every startup. Example (nftables, default
+block 15000-15639; the backend never changes firewall settings itself):
+
+```
+nft add table inet hyrak_cloud_sim
+nft add chain inet hyrak_cloud_sim input '{ type filter hook input priority 0; policy accept; }'
+nft add rule inet hyrak_cloud_sim input iifname != "lo" udp dport 15000-15639 drop
+```
 
 ## 9. Scaling to a dedicated server
 
