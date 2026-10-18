@@ -53,7 +53,7 @@ async def inspect_err(path, **kw) -> ModelFailure:
 def test_every_failure_has_words_and_a_fix():
     for code, (msg, hint) in KNOWN_FAILURES.items():
         assert msg and hint, code
-        assert "—" not in msg + hint, f"em-dash in {code}"
+        assert "\u2014" not in msg + hint, f"em-dash in {code}"
         assert msg.rstrip().endswith((".", ")")), code
     # The extras fill the message; a missing one never raises.
     assert describe("multiple_inputs", {"count": 3, "names": ["a", "b", "c"]})[0] == \

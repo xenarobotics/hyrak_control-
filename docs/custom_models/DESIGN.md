@@ -121,6 +121,171 @@ REST, all under `/api/models`:
 Socket: `set_analysis_mode {mode: "custom:<model_id>"}` (already a session
 command); progress pushes `model_status {id, status, step, error, hint}`.
 
+### As built (backend, `feat/custom-models`, 2026-10-18)
+
+Code in `backend/app/models_custom/`; tests in
+`backend/tests/test_custom_models.py` and `test_custom_models_inspect.py`.
+Where this differs from the text above, this wins.
+
+**Storage and settings.** `HYRAK_DATA_DIR` (default `backend/data`,
+gitignored), layout `workspaces/<ws>/models/<id>/v<n>/` with
+`model.onnx`, Hugging Face companions (`*.onnx_data`, `config.json`,
+`preprocessor_config.json`, `labels.txt`) and `preview.jpg`; a
+published model also has `catalogue/preview.jpg`. Files are written under
+a temporary name and renamed; sha256 is recorded. Knobs:
+`CUSTOM_MODELS_MAX_MB` (500), `_MAX_PER_WORKSPACE` (50),
+`_INSPECT_TIMEOUT_S`, `_TEST_TIMEOUT_S`, `_PARALLEL_CHECKS` (1),
+`_HF_ENDPOINT`, `_HF_TIMEOUT_S`, `_HF_DOWNLOAD_TIMEOUT_S`, `_USE_GPU`,
+`_MAX_RUNNERS` (4), `_GPU_MEM_LIMIT_MB` (2048, CUDA arena per runner),
+`_CPU_THREADS` (2), `_RUNNER_IDLE_S` (60), `_RUNNER_START_TIMEOUT_S`,
+`_INFER_TIMEOUT_S` (10).
+
+**Tables** (migration `d1e2f3a4b5c6`): as listed above, plus on `models`
+`settings` (JSON: `threshold`, `alert`, user `labels`, forced `task`),
+`published_version` and `catalogue` (the pinned snapshot), and on
+`model_versions` `file_name`, `hf_revision`, `status`, `error`,
+`error_hint`, `task` and `details` (the inspect result, the test result,
+and `failure {code, detail}`). `models.status/error` describe the newest
+version; `current_version` is the newest READY version, the one that
+runs. A failed new version leaves the previous one running.
+
+**Entitlement.** `custom_models` joins `cloud_sim` in
+`workspaces.FEATURES` (founder-only `PATCH /api/workspaces/{id}`), not
+inherited by clients. Staff (any HYRAK membership, or the legacy token)
+are always entitled. Needed to add models and to run the workspace's own
+models; never for HYRAK modes or catalogue models.
+
+**The checker.** `runner.py` is the only code that opens a customer file,
+always as `python -I runner.py inspect|test|serve` (no `app` imports,
+nothing from the working directory on `sys.path`), with a timeout and
+its own process group. Inspect: sniffs non-ONNX bytes (PyTorch zip,
+pickle, safetensors, TFLite, Keras, archives), uses the `onnx` package
+when present to refuse custom operator domains, missing or escaping
+external data and an opset newer than the runtime, then opens the model
+with onnxruntime (CUDA, else CPU; never TensorRT) and reads one image
+input (NCHW or NHWC, 1 or 3 channels, float32 / float16 / uint8, batch 1
+or dynamic). Task and layout: Ultralytics metadata (`task`, `names`,
+`imgsz`), Hugging Face `architectures` / `id2label` /
+`preprocessor_config.json`, else shapes: `yolov8` `[1,4+C,N]`, `yolov8t`
+`[1,N,4+C]`, `yolov5` `[1,N,5+C]`, `e2e` `[1,K,6]` (NMS inside),
+`rtdetr` `[1,Q,4+C]` (Q <= 1000), `detr` (logits + pred_boxes),
+`classify` `[1,C]`. Segment, pose and obb are refused. Test: two COCO
+photos from the installed ultralytics package when present, then the
+three synthetic street scenes in `models_custom/samples/`; median
+latency, this process's GPU memory from `nvidia-smi`, a preview of the
+picture with the most findings.
+
+**Error table** (`errors.KNOWN_FAILURES`, code -> plain message + fix):
+`pytorch_file`, `pickle_file`, `safetensors_file`, `tensorflow_file`,
+`tflite_file`, `keras_file`, `tensorrt_file`, `archive_file`,
+`wrong_extension`, `not_onnx`, `empty_file`, `too_large`,
+`multiple_inputs`, `input_not_image`, `input_dtype`, `dynamic_input`,
+`input_size_unusual`, `task_unsupported`, `unknown_layout`,
+`opset_too_new`, `ir_too_new`, `custom_ops`, `external_data_missing`,
+`load_failed`, `out_of_memory`, `run_failed`, `bad_output`, `timeout`,
+`crashed`, `storage_failed`, `hf_bad_repo`, `hf_not_found`, `hf_gated`,
+`hf_no_onnx`, `hf_choose_file`, `hf_file_not_found`, `hf_unreachable`,
+`hf_download_failed`, `not_entitled`, `quota`, `busy`, `not_ready`,
+`forbidden`, `founders_only`, `published_locked`, `bad_request`,
+`model_removed`, `not_found`, `runner_failed`. REST errors answer
+`{"detail": {code, error, hint, detail}}`.
+
+**REST** (all signed in; a workspace or model the caller cannot see is
+404):
+
+* `GET /api/models?workspace_id=` -> `{workspace_id, hyrak, workspace,
+  premium: {enabled, reason}, can_manage, can_run, can_publish,
+  limits: {max_mb, max_models}}`. `hyrak` holds the built-in modes
+  `{id, kind: "builtin", mode, run_mode, name, description, icon, task,
+  status: "ready", runnable, staff_only}` (no manual control; 3D scan for
+  staff only) followed by catalogue cards. `workspace` holds full cards:
+  `{id, kind: uploaded|huggingface, run_mode: "custom:<id>", name,
+  description, icon, task, status, step, error, hint, runnable,
+  published, published_version, workspace_id, source, hf: {repo,
+  revision, file, url} | null, labels, version: {n, status, error, hint,
+  sha256, size_bytes, file_name, hf_revision, task, input_shape,
+  labels_count, latency_ms, fps, gpu_mem_mb, provider, preview,
+  created_at}, current_version, latest_version, threshold, alert,
+  created_by, created_at, updated_at}`.
+* `POST` multipart `file`, `workspace_id`, `name?`, `description?`,
+  `model_id?` (a new version) -> `{model}` in `checking`.
+* `GET /huggingface/inspect?repo=&workspace_id=` -> `{repo, sha, url,
+  pipeline_tag, task, library, license, onnx_files: [{path, size_bytes,
+  too_large}], suggested_file, labels, ok}` (no .onnx: 200 with `ok:
+  false` and the `hf_no_onnx` words).
+* `POST /huggingface {workspace_id, repo, file?, name?, model_id?}` ->
+  `{model}` in `checking`. 409 `hf_choose_file` lists the files.
+* `GET /{id}` -> `{model}`, the full card plus `versions` (newest first)
+  and `details` (inspect and test result, failure).
+* `PATCH /{id}` `{name, description, labels, task, threshold, alert:
+  {label, min_score, cooldown_s?} | null}`; a changed task re-checks the
+  newest version.
+* `DELETE /{id}`, `GET /{id}/preview?version=` (bearer, or a URL ticket
+  for this path), `POST /{id}/retest`, `POST /{id}/publish {published,
+  version?}` (founders).
+
+**The catalogue is pinned.** Publishing takes a snapshot of one ready
+version (name, description, task, labels, threshold, the inspect spec,
+speed) and copies its preview. Other workspaces get a reduced card
+(`{id, kind: "catalogue", run_mode, name, description, icon, task,
+status, runnable, published, labels, threshold, version: {n, latency_ms,
+fps, gpu_mem_mb, provider, input_shape, preview}}`, nothing about the
+owning workspace, authors, other versions or failures) and run exactly
+the pinned version with the snapshot's spec, without the owner's alert
+rule. The owning workspace keeps editing, relabelling, re-uploading and
+retesting its own copy; that changes only its own view and runs. Only a
+founder publishes again (moving the pin; catalogue sessions on the old
+pin go back to manual) or unpublishes. Deleting a published model needs
+a founder (`published_locked`).
+
+**Socket.** No new client events. `set_analysis_mode {mode:
+"custom:<id>"}` (session command, as before) resolves through
+`service.resolve_run`: `models.run` on the session's workspace, the model
+is the workspace's own (feature on, or staff) or in the catalogue, and
+ready; refusals answer `error {msg, hint, event, code}` and
+`model_status {status: "error", mode, error, code}`. Pushes (listed in
+`socket_classes.PUSHED_EVENTS`): `model_status {id, workspace_id,
+version, status, step, progress, error, hint, detail, current_version}`
+to the model's workspace's sockets only, steps `received` (upload) or
+`downloading` (Hugging Face), `inspecting`, `testing`, `done` (status
+says ready or failed); `model_alert {model_id, model_name, label, score,
+box, ts, message}` to the one session.
+
+**Runtime.** `CustomModelMode` stands in for an `AnalysisMode` on the
+session (`value` = `custom:<id>`) and builds a `CustomModelAnalyzer`
+through the vision pool. One runner process per (session workspace,
+model, version), shared by that workspace's sessions: frames through a
+`/dev/shm` buffer, requests over a socketpair, one at a time (each
+session already keeps only its newest frame). A crash, exit or answer
+later than the infer timeout kills it; frames meanwhile report `error`
+and `runner` (`crashed`, `restarting`) with no boxes while the video
+keeps flowing; restart after 1, 2, 4 ... 30 s; five crashes in five
+minutes and it stays down until its sessions leave. Stopped
+`RUNNER_IDLE_S` after the last session leaves. Frames above 1920x1088
+are scaled down and the boxes scaled back.
+
+`cv_results` for a custom model: the object-detection shape (`objects`,
+`detections [{name, box, score}]`, `person_count`, `total_count`) plus
+`model_id`, `model_name`, `model_version`, `task`, `infer_ms`; a
+classifier adds `predictions` (alias `classes`) `[{name, score}]`,
+`top_class`, `top_score`. When the alert rule fires: `alert`,
+`alert_hits [{label, score}]`, the `model_alert` event, and an
+`admin_alert` (existing path, `source: "custom_model"`) to staff
+consoles that can see the workspace. Nothing sets `drone_command`: step 1
+has no drone actions and nothing for a takeover to stop.
+
+**Measured** (RTX 4070 laptop): Ultralytics YOLOv8n exported to ONNX
+(opset 17) inspects as `yolov8`, 80 COCO names, tests at about 8 ms
+(about 125 fps) and 228 MB GPU memory, finds the bus and four people in
+the sample photo; served through a runner, a 1080p frame round trip is
+about 9 ms of which about 8 ms is the model.
+
+**Not yet.** No sandbox beyond the separate process (step 2: podman);
+no per-workspace GPU quota beyond the per-runner CUDA arena limit;
+model_status pushes reach only sockets in the model's workspace (a
+founder adding a model from the console sees it on the REST card).
+A check interrupted by a backend restart is re-run at startup.
+
 ## Original design (2026-10-17)
 
 Status: DESIGN (2026-10-17). Superseded where section 0 differs.
