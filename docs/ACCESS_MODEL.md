@@ -1,6 +1,6 @@
 # Access model: workspaces, roles, portals
 
-Status: design agreed 2026-10-18; phase 1 backend built on `feat/workspaces` (see "Phase 1 as built" in section 7); phase 2a backend built on `feat/live-scope` (see "Phase 2a as built" in section 8a).
+Status: design agreed 2026-10-18; phase 1 backend built on `feat/workspaces` (see "Phase 1 as built" in section 7); phase 2a backend built on `feat/live-scope` (see "Phase 2a as built" in section 8a); phase 2b stream A (customer missions and permits) built on `feat/2b-missions` (section 8b).
 Supersedes the flat viewer / operator / admin model in `docs/AUTH.md`
 (login, tokens, rate limits and revocation from that document stay as they are).
 
@@ -325,6 +325,7 @@ should code against:
   and env founder; every write answers 503.
 * **Not yet scoped:** `permits.approve` is in the engine but permit routes
   still use the compatibility admin rank (phase 2, with the live paths).
+  Done in 2b: permit routes decide with `permits.approve` (section 8b).
 
 ## 8. Phasing and what phase 1 does not do yet
 
@@ -497,8 +498,8 @@ on `/gs-relay`.
 |---|---|---|
 | lifecycle | 2 | connect, disconnect |
 | session view | 7 | offer, ice_candidate, stop_stream, serial_uplink, disconnect_telemetry, fetch_params, get_param |
-| session command | 19 | connect_browser_serial, drone_action, drone_command, set_param, set_tracking, set_vehicle_tracking, set_follow_vehicle, set_follow_person, set_multi_follow, select_person, set_pd_params, set_altitude_mode, set_altitude_nudge, set_tracking_params, set_analysis_mode, set_profile_override, set_zone_names, set_enhance_params, clear_reference |
-| staff | 28 + 4 | connect_telemetry, connect_rf_bridge, start_rc_monitor, upload_mission, set_gallery_mode, enrol_person_live, set_crowd_thresholds, allocate_video_relay, release_video_relay, datachannel_video_offer, datachannel_video_stats, wall_offer, wall_ice_candidate, wall_close, admin_hello, watch_session, unwatch_session, request_permit, list_my_permits, the 9 swarm events, and the 4 `/gs-relay` agent events |
+| session command | 19 (+ upload_mission in 2b, section 8b) | connect_browser_serial, drone_action, drone_command, set_param, set_tracking, set_vehicle_tracking, set_follow_vehicle, set_follow_person, set_multi_follow, select_person, set_pd_params, set_altitude_mode, set_altitude_nudge, set_tracking_params, set_analysis_mode, set_profile_override, set_zone_names, set_enhance_params, clear_reference |
+| staff | 28 + 4 (27 + 4 after 2b) | connect_telemetry, connect_rf_bridge, start_rc_monitor, upload_mission (session command since 2b), set_gallery_mode, enrol_person_live, set_crowd_thresholds, allocate_video_relay, release_video_relay, datachannel_video_offer, datachannel_video_stats, wall_offer, wall_ice_candidate, wall_close, admin_hello, watch_session, unwatch_session, request_permit, list_my_permits, the 9 swarm events, and the 4 `/gs-relay` agent events |
 
 Notes on the split:
 
@@ -666,7 +667,9 @@ server never dials a TURN host the customer typed.
 Customer mission planning, customer flight history and recordings per
 workspace, customer fleet views, TOTP for founders and managers. Phase 2b
 landed below: monitoring, per-workspace history, customer avoidance and
-takeover in 8b, the premium cloud simulator in 8c.
+takeover in 8b, the premium cloud simulator in 8c, customer mission
+planning and permits in 8d (`upload_mission` is a session command there
+and the PERMITS console tab uses `permits.approve`).
 
 ## 8b. Phase 2b: monitoring, per-workspace history, customer avoidance, takeover
 
@@ -1015,6 +1018,211 @@ nft add table inet hyrak_cloud_sim
 nft add chain inet hyrak_cloud_sim input '{ type filter hook input priority 0; policy accept; }'
 nft add rule inet hyrak_cloud_sim input iifname != "lo" udp dport 15000-15639 drop
 ```
+
+## 8d. Phase 2b: customer missions and permits (as built)
+
+Goal: Fly, Mission, AI, Config and Settings are every customer's. A
+customer plans, saves and flies their own missions with what a
+QGroundControl / Mission Planner user expects, and asks for permission to
+cross restricted airspace; staff keep working as before.
+
+### Missions, pads and route profiles belong to a workspace
+
+Migration `a7d3e9b1c4f2` adds `workspace_id` (cascade with the workspace;
+every existing row goes to HYRAK) to `missions`, `pads`, `route_profiles`
+and `permits`, plus `missions.name`. Pad and profile names are unique per
+workspace (two customers may each have a "Home" pad).
+
+Who reads and writes which workspace's plans is `app/planner/scope.py`:
+
+| | read | write |
+|---|---|---|
+| a customer workspace | `view` on it (viewers included) | `plan` on it (pilot, admin, owner, manager, founder) |
+| HYRAK's own plans (delivery legs, pads, stations, the builtin profiles) | staff (compat viewer), as before | compat operator, as before |
+| staff on a customer workspace | every workspace's, as before (compat viewer) | only with `plan` there (managers, founders) |
+
+* A request names its workspace (`workspace_id`, query or body). Without
+  one, staff act on HYRAK and a customer on the first of their own
+  memberships (grant order) that allows the action, the same pick as the
+  live session. Unknown or invisible workspace: 404; visible without the
+  right: 403.
+* **HYRAK's pads and route profiles are shared vocabulary**: listed to
+  every planner next to their own (`global: true`, `editable: false`) and
+  never writable by customers (403). Only these two kinds of row are
+  global; HYRAK's missions and permits are 404 to customers.
+* **Map features** stay global, read-only land-use data: `GET
+  /api/map-features` is open to any signed-in account; writes stay
+  operator.
+* **Deliveries stay HYRAK's**: `/api/tasks*`, `/v1` and the delivery
+  planner resolve HYRAK's pads and stations only; a customer pad is never
+  a delivery address. Stations can only be created on HYRAK.
+
+REST (all `require_signed_in`, decided by the scope):
+
+* `POST /api/missions/plan` `{..., workspace_id?, name?}`: needs `plan`.
+  Profiles resolve among HYRAK's and the workspace's own (the workspace's
+  wins a name clash); a `drone_id` must be a drone of that workspace (409).
+  `requested_by` defaults to the caller's username.
+* `POST /api/missions` `{name, waypoints, workspace_id?, drone_id?}`: save
+  a hand-drawn plan (the Mission tab's library). Waypoints are validated
+  (finite, in range, at most 500) and keep `turn_radius`; distance,
+  duration and the zones crossed are computed on the server.
+* `GET /api/missions?workspace_id=&status=&drone_id=`: one workspace's,
+  each with `editable`. Staff without `workspace_id`: every workspace's.
+* `GET|PATCH|DELETE /api/missions/{id}`: PATCH `{name?, waypoints?
+  (planned only), drone_id? (null clears), status?}`. DELETE is refused
+  (409) while flying or while a delivery order uses it; permits that named
+  it keep their frozen waypoints.
+* `GET /api/pads?workspace_id=`, `POST /api/pads {..., workspace_id?}`,
+  `PATCH|DELETE /api/pads/{id}`; `GET /api/planner/meta?workspace_id=`
+  (profiles with `global`, `editable`), `POST /api/route-profiles {...,
+  workspace_id?}`, `PATCH|DELETE /api/route-profiles/{id}` (deleting a
+  profile clears it from missions; their `profile_name` stays).
+* `POST /api/zones/check-path` `{waypoints, workspace_id?, drone_id?}`:
+  `{zone_class, zones, needs, permit, workspace_id}` with `needs` one of
+  `none`, `ack` (orange: acknowledge at upload, or a permit), `permit`
+  (red: an approved permit), `prohibited`. `permit` is the approved,
+  in-window permit of the workspace (and drone) covering the path. Zone
+  entries now carry `permission_required`, `floor_m`, `ceiling_m`.
+
+### Socket
+
+* `upload_mission` is a **session command with drone access**
+  (`socket_classes.SESSION_COMMAND`, in `DRONE_EVENTS`): `fly` on the
+  session workspace (staff: operator) and `fly` on the drone's workspace.
+  The completeness test now counts 20 session commands and 27 + 4 staff
+  events. Staff uploads to a customer's drone they cannot fly are refused
+  too (`drone_not_in_workspace`), as for every drone event.
+* Every upload (socket, swarm, the fleet's `/api/fleet/{id}/fly`) goes
+  through one gate, `permits.gate_upload`: red is refused unless an
+  approved, in-window permit of the drone's workspace covers it; orange
+  needs `ack_orange` unless a permit covers it too; a red zone with
+  `permission_required = false` is refused outright (`prohibited: true`,
+  `can_request: false`). The result shape is the old one (`blocked`,
+  `can_request`, `needs_ack`, `zones`, `msg`) plus `prohibited`,
+  `permit_check_failed` and, on success, `permit_id`.
+* A successful upload marks a planned mission `uploaded` only within the
+  drone's workspace (one workspace's upload never advances another's
+  identical plan).
+* `request_permit` / `list_my_permits` stay staff-only (swarm and fleet
+  drones; a socket request gets a 24 h window). Customers, and the
+  Mission tab for a single drone, use REST.
+
+### Permits
+
+A permit is for a **mission** (frozen waypoints; matched within GPS-noise
+tolerance, any edit invalidates it) or an **area** (a polygon: any path
+inside it). It belongs to a workspace and optionally one drone (null =
+any drone of the workspace), names the zones it covers (orange, and red
+with `permission_required`), and has a window `[valid_from, valid_until)`
+(required for new requests, at most 30 days).
+
+Statuses: `pending -> approved | denied | withdrawn`, `approved -> revoked
+| withdrawn | superseded`. `expired` is shown (`status_effective`), not
+stored: an approved permit past its window.
+
+* **Request** `POST /api/permits {workspace_id?, description, valid_from?,
+  valid_until, drone_id?, and waypoints | mission_id (+ waypoints) |
+  area}`: `plan` on the workspace (HYRAK: operator). `workspace_id`
+  defaults to the drone's. Refused: no restricted zone crossed (400), a
+  prohibited zone (409), a drone of another workspace (409).
+* **List** `GET /api/permits?workspace_id=` that workspace's (read access
+  to its plans; customers see their own and their status). Without
+  `workspace_id`: the caller's decision queue, every permit they may
+  decide (founders: all). Items add `status_effective`, `in_window`,
+  `workspace_name`, `drone_name`, `can_decide`.
+* **Decide** `POST /api/permits/{id}/decision {approve, note?}` (pending:
+  approve / deny; approved: `approve: false` revokes). Who: anyone with
+  `permits.approve` covering the **restricted footprint** - the flight's
+  path (widened by the 20 m corridor) or area, intersected with the zones
+  the permit names - by `perms.check_area`: founders anywhere, airspace
+  managers inside their area (any workspace), managers of the workspace
+  (or an ancestor) inside their membership area, else the workspace's
+  operating area. **Nobody but a founder decides their own request.**
+  Approval records each zone's current class, `floor_m` and `ceiling_m`
+  on the permit and is refused if a zone became prohibited meanwhile.
+* **Withdraw** `POST /api/permits/{id}/withdraw`: `plan` on its workspace,
+  or the requester.
+* **Audit**: `permit.request`, `permit.approve`, `permit.deny`,
+  `permit.revoke`, `permit.withdraw`, `permit.supersede` rows in
+  `audit_events`, on the permit's workspace.
+
+**Honoured** (upload gate, arm / takeoff in a red zone, the in-flight zone
+monitor) only when all hold: status `approved`, inside the window, the
+permit's workspace is the drone's **current** workspace (a moved drone
+leaves its permits behind), the drone matches (or the permit is for any
+drone), the path matches (mission) or stays inside the area, every zone
+needing cover is named on the permit, and each such zone is **live with
+exactly the recorded class and altitudes** and still admits a permit. A
+permit recorded before 8b has no altitudes and exempts nothing.
+
+* **Zone edits supersede.** Changing a zone's `zone_class`,
+  `permission_required`, `floor_m` or `ceiling_m` first marks every
+  approved permit naming it `superseded` (audited); if that cannot be
+  written the edit is refused (503) and the zone stays as it was. Geometry
+  changes are delete + redraw, a new zone no permit names.
+* **Zone monitor.** A zone named by an honoured permit does not count
+  while the aircraft is within 30 m of the mission permit's path or inside
+  the area permit's polygon (5 m slack): no warning, no pushback (it says
+  "under permit" instead, `zone_status.permitted_zones`). Leaving the
+  footprint, the window ending, a revocation or a zone change makes the
+  zone count again. The monitor caches a drone's permits for 15 s and
+  refetches at once after any permit write; it **fails closed**: a failed
+  refetch does not refresh the cache, and the cached answer is used only
+  while no permit was written since and it is under 30 s old.
+* **Arm / takeoff in a red zone** read the permits fresh; if they cannot
+  be read the action is refused with a clear message. The upload gate
+  likewise refuses red when permits cannot be read (orange can still be
+  acknowledged).
+* **Zones** gain `permission_required` (default true; only meaningful on
+  red): false = prohibited, no permit can be requested or approved. The
+  console's zone editor sets it ("Prohibited - no permits").
+* **Known limit:** the PX4 exclusion fence uploaded at connect still holds
+  every red zone, permitted or not; a permitted red crossing is cleared by
+  the server (upload, arm, monitor) but PX4's own geofence still reacts
+  (GF_ACTION). Re-uploading the fence per permit is a separate,
+  flight-tested change.
+
+### Frontend
+
+* Customers get the Mission tab in both UI modes (dev: Mission; normal:
+  Plan); the 2a redirect is gone. Deliver stays staff-only.
+* On the Mission tab, for the session's workspace: waypoint planning
+  (map, list, editor, survey grid, import / export `.plan`, terrain
+  follow, auto heading, 2D / 3D), **Plans** (open, save as new, save
+  over, rename, delete the workspace's saved missions), the **airspace
+  bar** (live zone check with an orange / red / prohibited explanation,
+  the covering permit, **Request permit** with purpose, window and drone,
+  **Permits** with status, load a permitted plan, withdraw), an
+  **altitude profile**, and upload / start / pause / RTL to their own
+  drone. A red upload refusal opens the permit dialog.
+* Viewers get read-only plans: open and inspect, no map edits, disabled
+  waypoint fields, no import / clear / upload / start / RTL (pause stays:
+  a safety action).
+* Hidden for customers: obstacle avoidance, the fleet mission panel, the
+  "Connect SITL" (server udp) button (they get a pointer to connect
+  their own drone).
+* The Command tab's mission bar links to the Mission / Plan tab.
+* Console PERMITS tab: visible to anyone with `permits.approve` (founders,
+  airspace managers, managers); shows the caller's decision queue with
+  workspace, drone, requester, window and zones, takes a note with
+  approve / deny, revokes approved permits. A permit the caller requested
+  shows as someone else's to decide.
+
+### Tests
+
+`tests/test_mission_permits.py` (no database): planning scope, permit
+window / drone / coverage / live-zone rules, decision area rules (founder,
+airspace in / out, manager of the workspace, other workspace's manager,
+customer owner, self-approval), the upload gate, the monitor standing down
+only under a permit and failing closed (revoke during cache, fetch
+failure, generation change), arm / upload refusals when permits cannot be
+read, refused zone edit when supersede fails, `upload_mission` as a
+session command with drone access on the real handler.
+`tests/test_planning_db.py` (opt in, `HYRAK_TEST_DATABASE_URL`): HTTP
+isolation of missions, pads and profiles, and request -> decide -> honour
+with expiry, revoke, deny, withdraw, supersede on a zone edit, and their
+audit rows.
 
 ## 9. Scaling to a dedicated server
 

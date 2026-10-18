@@ -30,7 +30,7 @@ async def v1_pads(x_api_key: str = Header(None, alias="X-API-Key")):
     await _require_key(x_api_key)
     from sqlalchemy import select
     from app.db import db_available, get_session
-    from app.db.models import Pad
+    from app.db.models import PLATFORM_WORKSPACE_ID, Pad
     if not db_available():
         return {"pads": []}
     async with get_session() as db:
@@ -38,7 +38,10 @@ async def v1_pads(x_api_key: str = Header(None, alias="X-API-Key")):
             await db.execute(
                 # Stations are drone infrastructure, not delivery addresses -
                 # clients never see them.
-                select(Pad).where(Pad.active == True, Pad.kind == "pad")  # noqa: E712
+                # and only HYRAK's: a customer's own pads are not delivery
+                # addresses (docs/ACCESS_MODEL.md 8d).
+                select(Pad).where(Pad.active == True, Pad.kind == "pad",  # noqa: E712
+                                  Pad.workspace_id == PLATFORM_WORKSPACE_ID)
                 .order_by(Pad.name)
             )
         ).scalars().all()

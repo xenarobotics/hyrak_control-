@@ -26,7 +26,8 @@
 //             shows live status, video/telemetry when online, and permits.
 //   ZONES   - layered zones (regulatory / area / site), edited inside the
 //             caller's area.
-//   PERMITS - red-zone permit requests (permits.approve).
+//   PERMITS - flight permit requests the caller may decide (permits.approve
+//             covering the restricted airspace; docs/ACCESS_MODEL.md 8d).
 //   SPACES  - workspaces: tree, members, invites, drones, operating areas.
 //   STAFF   - founders: staff roles, account disable / reset links.
 //   AUDIT   - latest access and zone events.
@@ -47,6 +48,7 @@ import { hasPerm, type Perm } from '@/lib/access'
 import { Tag } from '@/components/admin/console'
 import { FLIGHT_MODES } from '@/lib/flightModes'
 import { getServerUrl } from '@/lib/server-url'
+import { decidePermit as sendDecision, PERMIT_TONE, type Permit } from '@/lib/planning'
 import type { MapDrone } from '@/components/admin/AdminMap'
 import type { ZoneFeature } from '@/components/admin/zones'
 
@@ -144,16 +146,7 @@ type FlightSummary = {
     crossed_red: boolean
 }
 
-type PermitInfo = {
-    id: string
-    drone_id: string
-    description: string
-    waypoint_count: number
-    zones: { id: string; name: string; zone_class: string }[]
-    status: 'pending' | 'approved' | 'denied' | 'revoked'
-    requested_at: string | null
-    decided_at: string | null
-}
+type PermitInfo = Permit
 
 type FlightDetail = {
     flight: FlightSummary
@@ -353,16 +346,20 @@ export default function AdminPage() {
         return () => clearInterval(id)
     }, [tab, refreshPermits, permitsVisible])
 
-    const decidePermit = useCallback(async (id: string, approve: boolean) => {
+    const [permitNotes, setPermitNotes] = useState<Record<string, string>>({})
+    const [permitError, setPermitError] = useState<string | null>(null)
+    const decidePermit = async (id: string, approve: boolean) => {
+        setPermitError(null)
         try {
-            await apiFetch(`${getServerUrl()}/api/permits/${id}/decision`, {
-                method: 'POST',
-                headers: JSON_AUTH,
-                body: JSON.stringify({ approve }),
+            await sendDecision(id, approve, permitNotes[id] ?? '')
+            setPermitNotes(n => {
+                const next = { ...n }
+                delete next[id]
+                return next
             })
-            void refreshPermits()
-        } catch { /* poll shows the truth */ }
-    }, [refreshPermits])
+        } catch (e) { setPermitError((e as Error).message) }
+        void refreshPermits()
+    }
 
     // Flights: refetch when the selected drone changes; refresh while viewing
     const refreshFlights = useCallback(async (droneId: string) => {
@@ -1026,25 +1023,47 @@ export default function AdminPage() {
                 {tab === 'permits' && (
                     <div className="flex-1 overflow-y-auto p-5">
                         <div className="max-w-3xl mx-auto space-y-6">
+                            {permitError && (
+                                <div className="text-xs text-red-300 border border-red-900/60 rounded p-2">{permitError}</div>
+                            )}
                             <section className="space-y-2">
                                 <h2 className="text-xs tracking-widest text-zinc-500">
                                     PENDING REQUESTS - {permits.filter(p => p.status === 'pending').length}
                                 </h2>
                                 {permits.filter(p => p.status === 'pending').length === 0 && (
                                     <div className="text-xs text-zinc-600 border border-zinc-800 rounded p-4">
-                                        No pending requests. When a pilot&apos;s mission is blocked by a
-                                        red zone they can submit it for approval - it appears here.
+                                        No pending requests you can decide. A pilot whose plan crosses an orange
+                                        or red zone in your area asks from the Mission tab; the request appears here.
                                     </div>
                                 )}
                                 {permits.filter(p => p.status === 'pending').map(p => (
                                     <div key={p.id} className="border border-amber-700/40 rounded p-3 space-y-2 text-xs">
-                                        <div className="flex items-center gap-3">
-                                            <span className="font-semibold text-zinc-100">
-                                                {drones.find(d => d.id === p.drone_id)?.name ?? p.drone_id.slice(0, 8)}
-                                            </span>
-                                            <span className="text-zinc-600">{p.waypoint_count} waypoints</span>
-                                            <span className="text-zinc-600">{fmtDate(p.requested_at)}</span>
-                                            <span className="ml-auto flex gap-2">
+                                        <div className="flex items-center gap-3 flex-wrap">
+                                            <span className="font-semibold text-zinc-100">{p.workspace_name || p.workspace_id.slice(0, 8)}</span>
+                                            <span className="text-zinc-400">{p.drone_name ?? (p.drone_id ? p.drone_id.slice(0, 8) : 'any drone')}</span>
+                                            <span className="text-zinc-600">{p.kind === 'area' ? 'area' : `${p.waypoint_count} waypoints`}</span>
+                                            <span className="text-zinc-600">by {p.requested_by_name || '-'} {fmtDate(p.requested_at)}</span>
+                                        </div>
+                                        <div className="text-zinc-300 border-l-2 border-zinc-700 pl-2">
+                                            &ldquo;{p.description}&rdquo;
+                                        </div>
+                                        <div className="text-[10px] text-zinc-400">
+                                            window {fmtDate(p.valid_from)} to {fmtDate(p.valid_until)}
+                                        </div>
+                                        <div className="text-[10px] flex flex-wrap gap-x-3">
+                                            {p.zones.map(z => (
+                                                <span key={z.id} className={z.zone_class === 'red' ? 'text-red-400/90' : 'text-amber-400/90'}>
+                                                    {z.zone_class} zone: {z.name}
+                                                </span>
+                                            ))}
+                                        </div>
+                                        {p.can_decide ? (
+                                            <div className="flex items-center gap-2">
+                                                <label className="sr-only" htmlFor={`note-${p.id}`}>Note to the pilot</label>
+                                                <input id={`note-${p.id}`} value={permitNotes[p.id] ?? ''} maxLength={500}
+                                                    onChange={e => setPermitNotes(n => ({ ...n, [p.id]: e.target.value }))}
+                                                    placeholder="Note to the pilot (optional)"
+                                                    className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-[11px] text-zinc-200 outline-none focus:border-zinc-600" />
                                                 <button
                                                     onClick={() => void decidePermit(p.id, true)}
                                                     className="px-3 py-1 rounded border border-emerald-700 text-emerald-400 hover:border-emerald-500"
@@ -1057,14 +1076,10 @@ export default function AdminPage() {
                                                 >
                                                     DENY
                                                 </button>
-                                            </span>
-                                        </div>
-                                        <div className="text-zinc-300 border-l-2 border-zinc-700 pl-2">
-                                            &ldquo;{p.description}&rdquo;
-                                        </div>
-                                        <div className="text-[10px] text-red-400/80">
-                                            red zones: {p.zones.map(z => z.name).join(', ')}
-                                        </div>
+                                            </div>
+                                        ) : (
+                                            <div className="text-[10px] text-zinc-600">You requested this one; another reviewer decides it.</div>
+                                        )}
                                     </div>
                                 ))}
                             </section>
@@ -1074,19 +1089,27 @@ export default function AdminPage() {
                                 {permits.filter(p => p.status !== 'pending').length === 0 && (
                                     <div className="text-[10px] text-zinc-600 p-2">No decided permits yet.</div>
                                 )}
-                                {permits.filter(p => p.status !== 'pending').map(p => (
-                                    <div key={p.id} className="border border-zinc-800 rounded p-2.5 flex items-center gap-3 text-[10px]">
-                                        <Tag
-                                            label={p.status.toUpperCase()}
-                                            tone={p.status === 'approved' ? 'emerald' : 'red'}
-                                        />
-                                        <span className="text-zinc-200">
-                                            {drones.find(d => d.id === p.drone_id)?.name ?? p.drone_id.slice(0, 8)}
-                                        </span>
-                                        <span className="text-zinc-500 truncate max-w-[280px]">{p.description}</span>
-                                        <span className="ml-auto text-zinc-600">{fmtDate(p.decided_at)}</span>
-                                    </div>
-                                ))}
+                                {permits.filter(p => p.status !== 'pending').map(p => {
+                                    const tone = PERMIT_TONE[p.status_effective] ?? PERMIT_TONE.pending
+                                    return (
+                                        <div key={p.id} className="border border-zinc-800 rounded p-2.5 flex items-center gap-3 text-[10px]">
+                                            <span className="px-1.5 py-0.5 rounded border font-bold shrink-0" style={{ color: tone.fg, borderColor: `${tone.fg}66` }}>
+                                                {tone.label}
+                                            </span>
+                                            <span className="text-zinc-200 shrink-0">{p.workspace_name || p.workspace_id.slice(0, 8)}</span>
+                                            <span className="text-zinc-500 truncate min-w-0" title={p.decision_note || p.description}>
+                                                {p.description}{p.decision_note ? ` - ${p.decided_by_name ? `${p.decided_by_name}: ` : ''}${p.decision_note}` : ''}
+                                            </span>
+                                            <span className="ml-auto text-zinc-600 shrink-0">until {fmtDate(p.valid_until)}</span>
+                                            {p.status === 'approved' && p.can_decide && p.status_effective !== 'expired' && (
+                                                <button onClick={() => void decidePermit(p.id, false)}
+                                                    className="px-2 py-0.5 rounded border border-red-800 text-red-400 hover:border-red-600 shrink-0">
+                                                    REVOKE
+                                                </button>
+                                            )}
+                                        </div>
+                                    )
+                                })}
                             </section>
                         </div>
                     </div>

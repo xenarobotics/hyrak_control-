@@ -18,6 +18,8 @@ export type ZoneFeature = {
         // server, where every zone is effectively regulatory.
         layer?: ZoneLayer
         workspace_id?: string | null
+        /** Red zones (phase 2b): false = prohibited, no permit possible. */
+        permission_required?: boolean
     }
 }
 

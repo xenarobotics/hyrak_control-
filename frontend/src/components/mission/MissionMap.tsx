@@ -24,6 +24,7 @@ import { getServerUrl } from '@/lib/server-url'
 import { authHeaders } from '@/lib/auth'
 import { useAccess } from '@/hooks/useAccess'
 import { useResolvedDroneId } from '@/lib/droneId'
+import { PLAN_FIT_EVENT } from '@/lib/planning'
 import { visibleInterval } from '@/lib/poll'
 import { getHazards, getObstaclesAndPath, addHazard, type KnownHazard, type LiveObstacle, type LatLng } from '@/lib/avoidance'
 import { ZONE_COLORS, zoneRings, type ZoneFeature } from '@/components/admin/zones'
@@ -421,6 +422,22 @@ function SmoothDroneMarker() {
   return null
 }
 
+// ── Frame the plan when one is opened (lib/planning requestPlanFit) ─────────
+
+function PlanFitter() {
+  const map = useMap()
+  useEffect(() => {
+    const fit = () => {
+      const pts = useMissionStore.getState().waypoints.map(w => [w.lat, w.lng] as [number, number])
+      if (pts.length === 1) map.setView(pts[0], 17)
+      else if (pts.length > 1) map.fitBounds(pts, { paddingTopLeft: [260, 140], paddingBottomRight: [260, 180], maxZoom: 18 })
+    }
+    window.addEventListener(PLAN_FIT_EVENT, fit)
+    return () => window.removeEventListener(PLAN_FIT_EVENT, fit)
+  }, [map])
+  return null
+}
+
 // ── Fly to drone position on first telemetry ────────────────────────────────
 
 function DronePositionTracker() {
@@ -533,6 +550,7 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
   const activeFleetId      = useSwarmStore(s => s.activeDroneId)
   const fleetPlans         = useMissionStore(s => s.plans)
   const activePlanKey      = useMissionStore(s => s.activePlanKey)
+  const { isCustomer }     = useAccess()
 
   // RTL is a separate, non-mission control (see rtlPosition in the mission
   // store) - never part of the orderable/flown path. Defensive filter in case
@@ -624,6 +642,7 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
 
       {!readOnly && <ClickHandler pinMode={pinMode} onPin={pinHazard} />}
       <DronePositionTracker />
+      <PlanFitter />
       {follow && <DroneFollower />}
       <MapResizeWatcher />
       <FlightZonesOverlay />
@@ -768,8 +787,9 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
       })}
     </MapContainer>
 
-      {/* Avoidance overlay control - toggle visibility, legend, click-to-pin */}
-      {!compact && <div style={{
+      {/* Avoidance overlay control - toggle visibility, legend, click-to-pin.
+          Avoidance is staff-only (docs/ACCESS_MODEL.md 8a). */}
+      {!compact && !isCustomer && <div style={{
         position: 'absolute', bottom: 12, left: 12, zIndex: 1000,
         background: 'rgba(10,12,18,0.82)', backdropFilter: 'blur(6px)',
         border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8,

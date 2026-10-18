@@ -109,6 +109,11 @@ class Zone(Base):
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     updated_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Red zones only: True = flyable under an approved permit (docs/
+    # ACCESS_MODEL.md 8d), False = prohibited, no permit can be requested.
+    # Orange zones always admit a permit; green ones never need one.
+    permission_required: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true"))
 
     __table_args__ = (
         CheckConstraint("layer IN ('regulatory', 'area', 'site')", name="ck_zones_layer"),
@@ -127,6 +132,7 @@ class Zone(Base):
                 "active": self.active,
                 "layer": self.layer,
                 "workspace_id": self.workspace_id,
+                "permission_required": self.permission_required,
             },
         }
 
@@ -186,11 +192,21 @@ class RouteProfile(Base):
     be tuned by an admin but not deleted.
     """
     __tablename__ = "route_profiles"
+    # Names are unique per workspace (docs/ACCESS_MODEL.md 8d): HYRAK's
+    # profiles (the builtins included) are global and readable by everyone
+    # who plans; a customer's own profiles are theirs alone.
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "name", name="uq_route_profiles_workspace_name"),
+    )
 
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
-    name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(120), index=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True,
+        default=PLATFORM_WORKSPACE_ID, server_default=PLATFORM_WORKSPACE_ID,
+    )
     description: Mapped[str] = mapped_column(String(500), default="")
     rules: Mapped[dict] = mapped_column(JSONB_COL, default=dict)
     default_alt_m: Mapped[float] = mapped_column(Float, default=60.0)
@@ -212,6 +228,7 @@ class RouteProfile(Base):
             "default_speed_m_s": self.default_speed_m_s,
             "builtin": self.builtin,
             "active": self.active,
+            "workspace_id": self.workspace_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -245,6 +262,14 @@ class Mission(Base):
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
+    # The workspace that owns the plan (docs/ACCESS_MODEL.md 8d). HYRAK's
+    # delivery legs sit on the platform workspace.
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True,
+        default=PLATFORM_WORKSPACE_ID, server_default=PLATFORM_WORKSPACE_ID,
+    )
+    # A human label for saved plans; planner legs leave it empty.
+    name: Mapped[str] = mapped_column(String(120), default="", server_default="")
     # Nullable on purpose: a path can be planned before a drone is assigned.
     drone_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("drones.id"), nullable=True, index=True
@@ -290,6 +315,8 @@ class Mission(Base):
     def to_dict(self, include_waypoints: bool = True) -> dict:
         d = {
             "id": self.id,
+            "workspace_id": self.workspace_id,
+            "name": self.name,
             "drone_id": self.drone_id,
             "requested_by": self.requested_by,
             "profile_id": self.profile_id,
@@ -323,11 +350,21 @@ class Pad(Base):
     planner can use.
     """
     __tablename__ = "pads"
+    # Unique per workspace (docs/ACCESS_MODEL.md 8d). HYRAK's pads and
+    # stations serve the delivery fleet and the /v1 API; a customer's pads
+    # are named take-off / landing spots for their own plans.
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "name", name="uq_pads_workspace_name"),
+    )
 
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
-    name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(120), index=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True,
+        default=PLATFORM_WORKSPACE_ID, server_default=PLATFORM_WORKSPACE_ID,
+    )
     # 'pad': a client-facing pickup/drop location. 'station': a home base
     # drones return to between missions - clients can't order to a station.
     kind: Mapped[str] = mapped_column(String(16), default="pad", server_default="pad")
@@ -346,6 +383,7 @@ class Pad(Base):
             "lng": self.lng,
             "notes": self.notes,
             "active": self.active,
+            "workspace_id": self.workspace_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -573,37 +611,81 @@ class Flight(Base):
 
 class Permit(Base):
     """
-    A request to fly one specific mission through red zone(s). The exact
-    waypoint list is frozen into the permit - after admin approval, only a
-    mission matching those waypoints (within GPS-noise tolerance) uploads;
-    any edit invalidates it.
+    A request to fly through restricted airspace: orange zones, and red
+    zones that admit a permit (Zone.permission_required). Two kinds:
+
+      mission  the exact waypoint list is frozen into the permit; only a
+               mission matching it (within GPS-noise tolerance) uploads
+               under it, and any edit invalidates it.
+      area     a GeoJSON polygon; any mission that stays inside it may use
+               the zones the permit names.
+
+    A permit belongs to a workspace and optionally to one drone (null = any
+    drone of that workspace). It is honoured only while approved and inside
+    its time window [valid_from, valid_until) (docs/ACCESS_MODEL.md 8d).
+    Rows from before 8b have no window and no requester: they stay valid
+    as they were (approved = flyable) until decided otherwise.
+
+    Status: pending -> approved | denied; approved -> revoked; pending or
+    approved -> withdrawn (by the requesting workspace). "expired" is not
+    stored: it is an approved permit whose window has ended.
     """
     __tablename__ = "permits"
 
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
-    drone_id: Mapped[str] = mapped_column(String(36), ForeignKey("drones.id"), index=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True,
+        default=PLATFORM_WORKSPACE_ID, server_default=PLATFORM_WORKSPACE_ID,
+    )
+    # Null = any drone of the workspace.
+    drone_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("drones.id"), index=True, nullable=True)
+    mission_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("missions.id", ondelete="SET NULL"), nullable=True)
     description: Mapped[str] = mapped_column(String(500))
-    waypoints: Mapped[list] = mapped_column(JSONB_COL)
+    waypoints: Mapped[list] = mapped_column(JSONB_COL)   # [] for an area permit
     mission_hash: Mapped[str] = mapped_column(String(64), index=True)
-    zones: Mapped[list] = mapped_column(JSONB_COL)  # red zones the mission crosses
-    # Indexed: the approval queue and the fleet gate both filter permits by
-    # status (pending for the admin list, approved for find_approved).
+    area: Mapped[Optional[dict]] = mapped_column(JSONB_COL, nullable=True)
+    zones: Mapped[list] = mapped_column(JSONB_COL)  # restricted zones the flight uses
+    # Indexed: the approval queue and the upload gate both filter permits by
+    # status (pending for the queue, approved for the gate).
     status: Mapped[str] = mapped_column(String(12), default="pending", index=True)
+    valid_from: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    valid_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    requested_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    requested_by_name: Mapped[str] = mapped_column(String(120), default="", server_default="")
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    decided_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    decided_by_name: Mapped[str] = mapped_column(String(120), default="", server_default="")
+    decision_note: Mapped[str] = mapped_column(String(500), default="", server_default="")
     decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def to_dict(self, include_waypoints: bool = False) -> dict:
+        def iso(t):
+            return t.isoformat() if t else None
         d = {
             "id": self.id,
+            "workspace_id": self.workspace_id,
             "drone_id": self.drone_id,
+            "mission_id": self.mission_id,
+            "kind": "area" if self.area else "mission",
             "description": self.description,
             "waypoint_count": len(self.waypoints or []),
+            "mission_hash": self.mission_hash,
+            "area": self.area,
             "zones": self.zones,
             "status": self.status,
-            "requested_at": self.requested_at.isoformat() if self.requested_at else None,
-            "decided_at": self.decided_at.isoformat() if self.decided_at else None,
+            "valid_from": iso(self.valid_from),
+            "valid_until": iso(self.valid_until),
+            "requested_by": self.requested_by,
+            "requested_by_name": self.requested_by_name,
+            "requested_at": iso(self.requested_at),
+            "decided_by": self.decided_by,
+            "decided_by_name": self.decided_by_name,
+            "decision_note": self.decision_note,
+            "decided_at": iso(self.decided_at),
         }
         if include_waypoints:
             d["waypoints"] = self.waypoints

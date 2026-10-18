@@ -166,11 +166,15 @@ async def ensure_builtins() -> None:
 
     if not db_available():
         return
+    from app.db.models import PLATFORM_WORKSPACE_ID
     try:
         async with get_session() as db:
+            # Builtins are HYRAK's (global); a customer's own "Direct" is
+            # theirs and does not count.
             existing = {
                 p.name for p in
-                (await db.execute(select(RouteProfile))).scalars().all()
+                (await db.execute(select(RouteProfile).where(
+                    RouteProfile.workspace_id == PLATFORM_WORKSPACE_ID))).scalars().all()
             }
             added = 0
             for spec in BUILTIN_PROFILES:
@@ -192,27 +196,32 @@ async def ensure_builtins() -> None:
         logger.warning(f"Builtin profile seeding failed: {e}")
 
 
-async def get_profile(ref: str | None) -> dict | None:
-    """Profile by id or (case-insensitive) name. None if DB offline or not
-    found - callers fall back to the in-code 'Direct' spec."""
+async def get_profile(ref: str | None, workspace_id: str | None = None) -> dict | None:
+    """Profile by id or (case-insensitive) name, among HYRAK's global
+    profiles and `workspace_id`'s own (docs/ACCESS_MODEL.md 8d). A name both
+    define resolves to the workspace's own. None if DB offline or not found
+    - callers fall back to the in-code 'Direct' spec."""
     from sqlalchemy import func, or_, select
     from app.db import db_available, get_session
-    from app.db.models import RouteProfile
+    from app.db.models import PLATFORM_WORKSPACE_ID, RouteProfile
 
     if not ref or not db_available():
         return None
+    owners = {PLATFORM_WORKSPACE_ID, workspace_id or PLATFORM_WORKSPACE_ID}
     try:
         async with get_session() as db:
-            row = (
+            rows = (
                 await db.execute(
                     select(RouteProfile).where(
                         RouteProfile.active == True,  # noqa: E712
+                        RouteProfile.workspace_id.in_(owners),
                         or_(RouteProfile.id == ref,
                             func.lower(RouteProfile.name) == ref.lower()),
                     )
                 )
-            ).scalars().first()
-        return row.to_dict() if row else None
+            ).scalars().all()
+        rows.sort(key=lambda r: r.workspace_id == PLATFORM_WORKSPACE_ID)
+        return rows[0].to_dict() if rows else None
     except Exception as e:
         logger.warning(f"Profile lookup failed: {e}")
         return None

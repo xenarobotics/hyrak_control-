@@ -47,6 +47,8 @@ export interface BoundDrone {
     name?: string
     hardware_uid?: string
     is_simulated?: boolean
+    /** The workspace the drone belongs to (phase 2a registry). */
+    workspace_id?: string
 }
 
 export interface SessionInfo {

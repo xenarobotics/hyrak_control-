@@ -615,14 +615,33 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             return
         action = data.get("action", "")
 
-        # No arming/takeoff inside a red zone (without a permit - future phase)
+        # No arming/takeoff inside a red zone, unless an approved, in-window
+        # permit for this drone covers every red zone at this spot.
         if action in ("arm", "takeoff"):
             from app.zones import engine as zone_engine
+            from app.zones import monitor as zone_monitor
             snap = tel.snapshot
-            check = zone_engine.check_point(
-                snap.position.latitude_deg, snap.position.longitude_deg
-            )
-            if check["zone_class"] == "red":
+            lat, lng = snap.position.latitude_deg, snap.position.longitude_deg
+            check = zone_engine.check_point(lat, lng)
+            red_here = {z["id"] for z in check["zones"] if z["zone_class"] == "red"}
+            permitted, unchecked = set(), False
+            if red_here and (session.drone or {}).get("id"):
+                from app.permits.service import PermitCheckUnavailable
+                try:
+                    permitted = await zone_monitor.permitted_zone_ids(session, lat, lng, fresh=True)
+                except PermitCheckUnavailable:
+                    unchecked = True
+            if red_here and unchecked:
+                names = ", ".join(z["name"] for z in check["zones"])
+                await sio.emit("action_result", {
+                    "action": action, "ok": False,
+                    "error": f"Blocked - inside NO-FLY (red) zone: {names}. Its permit could not "
+                             "be checked just now (database unreachable); try again shortly",
+                }, to=sid)
+                logger.warning(f"{action} blocked in red zone for {session.session_id[:8]}: "
+                               "permits unreadable")
+                return
+            if red_here and not red_here <= permitted:
                 names = ", ".join(z["name"] for z in check["zones"])
                 await sio.emit("action_result", {
                     "action": action, "ok": False,
@@ -1015,7 +1034,11 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         - terrain_follow=True  → mission_raw.MissionItem with frame=10
           (MAV_FRAME_GLOBAL_TERRAIN_ALT) - requires TERRAIN_ENABLE=1 on the drone.
         """
-        if not await require_operator(sid, "upload_mission", data): return
+        # A session command on the vehicle (docs/ACCESS_MODEL.md 8d): `fly`
+        # on the session workspace and on the drone's.
+        if not await require_session_fly(sid, "upload_mission", data): return
+        if not isinstance(data, dict):
+            return
         try:
             session = session_manager.get_by_socket(sid)
             if not session:
@@ -1041,41 +1064,30 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 return
 
             # ── Zone validation before anything reaches the drone ────────
-            from app.zones import engine as zone_engine
-            path_check = zone_engine.check_path(
-                [(float(w["lat"]), float(w["lng"])) for w in waypoints]
-            )
-            permit = None
-            if path_check["zone_class"] == "red":
-                names = ", ".join(z["name"] for z in path_check["zones"])
-                if session.drone:
-                    from app.permits import service as permit_service
-                    permit = await permit_service.find_approved(
-                        session.drone["id"], waypoints
-                    )
-                if permit is None:
-                    await sio.emit("mission_upload_result", {
-                        "ok": False, "blocked": "red", "zones": path_check["zones"],
-                        "can_request": bool(session.drone),
-                        "msg": f"Mission crosses NO-FLY (red) zone: {names} - permission required",
-                    }, to=sid)
-                    logger.warning(
-                        f"Mission blocked (red zones: {names}) for {session.session_id[:8]}"
-                    )
-                    return
-                logger.info(
-                    f"Red-zone mission allowed under permit {permit['id'][:8]} "
-                    f"for {session.session_id[:8]}"
-                )
-            # An approved permit covers the whole profile - no extra orange ack
-            if (path_check["zone_class"] == "orange"
-                    and not data.get("ack_orange") and permit is None):
-                names = ", ".join(z["name"] for z in path_check["zones"])
+            # Red blocks unless an approved, in-window permit of the drone's
+            # workspace covers this path; orange needs an ack unless a
+            # permit covers it too (app/permits/service.gate_upload).
+            from app.permits import service as permit_service
+            try:
+                gate = await permit_service.gate_upload(
+                    session.drone, waypoints, ack_orange=bool(data.get("ack_orange")))
+            except (KeyError, TypeError, ValueError):
                 await sio.emit("mission_upload_result", {
-                    "ok": False, "needs_ack": True, "zones": path_check["zones"],
-                    "msg": f"Mission passes through restricted (orange) zone: {names}",
+                    "ok": False, "msg": "Every waypoint needs numeric lat and lng"
                 }, to=sid)
                 return
+            if not gate["ok"]:
+                await sio.emit("mission_upload_result", {
+                    k: v for k, v in gate.items() if k != "permit"}, to=sid)
+                if gate.get("blocked"):
+                    logger.warning(f"Mission blocked ({gate['msg']}) for {session.session_id[:8]}")
+                return
+            permit = gate["permit"]
+            if permit is not None:
+                logger.info(
+                    f"Mission allowed under permit {permit['id'][:8]} "
+                    f"for {session.session_id[:8]}"
+                )
 
             logger.info(
                 f"Uploading {len(waypoints)} waypoints "
@@ -1098,11 +1110,14 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 await mission_service.mark_uploaded_by_hash(
                     waypoints,
                     drone_id=session.drone["id"] if session.drone else None,
+                    workspace_id=(session.drone or {}).get("workspace_id")
+                    or getattr(session, "workspace_id", None),
                 )
             await sio.emit("mission_upload_result", {
                 "ok": ok,
                 "count": len(waypoints) if ok else 0,
                 "terrain_follow": terrain_follow,
+                "permit_id": permit["id"] if ok and permit else None,
                 "msg": f"Mission uploaded: {len(waypoints)} waypoints" if ok
                        else f"Upload failed: {err_msg}",
             }, to=sid)

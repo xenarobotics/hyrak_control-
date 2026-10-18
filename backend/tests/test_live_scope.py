@@ -528,10 +528,9 @@ async def test_rest_global_data_is_staff_only(live):
     w = await world(live)
     cl = live.cl
     # Phase 2b moved flights, crowd / plate history and the per-drone
-    # avoidance routes to per-workspace access (test_history_scope.py).
-    staff_only = ["/api/drones", "/api/fleet", "/api/missions", "/api/missions/m1", "/api/pads",
-                  "/api/tasks", "/api/tasks/t1", "/api/permits", "/api/planner/meta",
-                  "/api/map-features",
+    # avoidance routes (test_history_scope.py) and planning data
+    # (test_mission_scope.py) to per-workspace access.
+    staff_only = ["/api/drones", "/api/fleet", "/api/tasks", "/api/tasks/t1",
                   "/api/vision/face-gallery", "/api/vision/sightings", "/api/sessions",
                   "/api/avoidance/status",
                   "/api/video/mesh-units", "/api/video/feeds", "/api/latency-probe",
@@ -541,9 +540,13 @@ async def test_rest_global_data_is_staff_only(live):
         assert cl.get(path, headers=hdr(w.pat[1])).status_code == 403, path
     for path in ("/api/drones", "/api/fleet", "/api/vision/plate-history", "/api/pads"):
         assert cl.get(path, headers=hdr(w.hv[1])).status_code == 200, path
+    # Phase 2b: planning data is scoped per workspace (test_mission_scope.py);
+    # map features are shared read-only land use.
     signed_in = ["/api/zones", "/api/zones/check?lat=17.5&lng=78.5", "/api/vision/calibration",
                  "/api/webrtc/ice-servers", "/api/avoidance/hazards", "/api/flights",
-                 "/api/vision/crowd-history", "/api/vision/plate-history"]
+                 "/api/vision/crowd-history", "/api/vision/plate-history",
+                 "/api/missions", "/api/pads", "/api/permits", "/api/planner/meta",
+                 "/api/map-features"]
     for path in signed_in:
         assert cl.get(path).status_code == 401, path
         assert cl.get(path, headers=hdr(w.vic[1])).status_code == 200, path
