@@ -31,6 +31,11 @@ from app.auth.routes import router as auth_router
 
 logger = logging.getLogger("verocore.server")
 
+# How long a session whose socket dropped is held for the client to resume
+# it (drone link, relay, cloud sim and all) before it is torn down. Module
+# level so a test can shorten it.
+SESSION_GRACE_S = 90.0
+
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Browser hardening on every HTTP response. The API serves JSON and a
@@ -113,7 +118,6 @@ def create_app() -> socketio.ASGIApp:
         json=safe_json,
     )
     set_sio(sio)
-    SESSION_GRACE_S = 90.0
     _expiry_tasks: dict = {}
 
     # ------------------------------------------------------------------ #
@@ -161,6 +165,7 @@ def create_app() -> socketio.ASGIApp:
         # Cloud SITL: end what a previous run left behind (marker-matched
         # processes only), then watch for idle and crashed instances.
         from app.sim import manager as sim_manager
+        sim_manager.get_manager().warn_if_exposed()
         await sim_manager.get_manager().cleanup_orphans()
         sim_manager.get_manager().start_background()
 

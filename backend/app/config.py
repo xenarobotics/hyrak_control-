@@ -419,6 +419,12 @@ class Settings(BaseSettings):
     # refuses a base that does.
     cloud_sim_port_base: int = Field(default=15000)
     cloud_sim_instance_base: int = Field(default=100)
+    # PX4 binds its MAVLink port on 0.0.0.0 and accepts commands from any
+    # source, so the cloud sim port block must be firewalled to loopback
+    # on a server (nftables example in docs/ACCESS_MODEL.md 8b). Set true
+    # on servers AFTER applying the rule; while false the backend logs a
+    # warning at startup that the block is reachable unless firewalled.
+    cloud_sim_require_firewall_ack: bool = Field(default=False)
     cloud_sim_px4_dir: str = Field(default="")          # empty: ~/PX4-Autopilot
     cloud_sim_world: str = Field(default="default")
     # Instance working dirs and the record used for orphan cleanup.

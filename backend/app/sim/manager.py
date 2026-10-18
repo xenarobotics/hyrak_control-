@@ -162,6 +162,23 @@ class CloudSimManager:
             return f"bad port plan: {why}"
         return self.launcher.unavailable()
 
+    def warn_if_exposed(self) -> bool:
+        """Once at startup: PX4 binds its MAVLink port on 0.0.0.0 and
+        accepts commands from any source, so the port block is reachable
+        from the network unless the operator firewalled it. True when the
+        warning was logged."""
+        s = self.settings
+        if not s.cloud_sim_enabled or s.cloud_sim_require_firewall_ack:
+            return False
+        first = s.cloud_sim_port_base
+        last = first + port_plan.POOL_SLOTS * port_plan.STRIDE - 1
+        logger.warning(
+            f"cloud sim: PX4 binds its MAVLink ports on 0.0.0.0 and accepts commands from "
+            f"any source; udp {first}-{last} is reachable from the network unless "
+            f"firewalled to loopback (docs/ACCESS_MODEL.md 8b). Set "
+            f"CLOUD_SIM_REQUIRE_FIREWALL_ACK=true once the rule is in place.")
+        return True
+
     def _persist(self) -> None:
         """What cleanup_orphans needs if this process dies without stop()."""
         try:
