@@ -191,7 +191,7 @@ def suggest_file(paths: list) -> Optional[str]:
     for p in _PREFER:
         if p in paths:
             return p
-    return next((p for p in paths if not _QUANT.search(p)), paths[0])
+    return hf.rank_onnx(list(paths))[0]
 
 
 def _list_models(search: str, pipeline_tag: str, limit: int, timeout: float) -> list:

@@ -174,6 +174,25 @@ def _map_hub_error(e: Exception) -> ModelFailure:
     return ModelFailure("hf_unreachable", text)
 
 
+# Files built for one chip or squeezed for edge devices: plain onnxruntime
+# on a server GPU cannot open them (Qualcomm QNN, Hailo, Rockchip, ...) or
+# they are needlessly lossy. EdgeFirst/visdrone-* ships 120 such files.
+_HW_ONLY = re.compile(r"(qnn|hailo|rknn|tensorrt|\btrt\b|openvino|coreml|tflite|edgetpu|"
+                      r"npu|qcs|iq\d{3,}|vitis|ambarella|ethos)", re.I)
+_LOSSY = re.compile(r"(quant|int8|uint8|w8a8|w4|q4|bnb4|fp16|_q\d|tiled)", re.I)
+_GOOD_NAMES = ("model.onnx", "best.onnx")
+
+
+def rank_onnx(paths: list[str]) -> list[str]:
+    """`.onnx` paths, the one a one-click add should use first: no chip-only
+    builds, full precision, the conventional names, shallow, then shortest."""
+    def key(p: str):
+        name = p.rsplit("/", 1)[-1].lower()
+        return (bool(_HW_ONLY.search(p)), bool(_LOSSY.search(p)),
+                name not in _GOOD_NAMES, p.count("/"), len(p))
+    return sorted(paths, key=key)
+
+
 def pick_onnx(info: RepoInfo, wanted: Optional[str]) -> RepoFile:
     files = info.onnx_files()
     if not files:
@@ -189,6 +208,11 @@ def pick_onnx(info: RepoInfo, wanted: Optional[str]) -> RepoFile:
         f = info.has(preferred)
         if f is not None:
             return f
+    # One clear best (a plain full-precision build among chip-specific or
+    # quantized variants) is picked; a real choice still goes to the user.
+    plain = [f.path for f in files if not _HW_ONLY.search(f.path) and not _LOSSY.search(f.path)]
+    if len(plain) == 1:
+        return info.has(plain[0])
     raise ModelFailure("hf_choose_file", ", ".join(f.path for f in files[:20]),
                        {"files": [f.path for f in files]}, status=409)
 
