@@ -18,8 +18,9 @@ import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { useDroneStore } from '@/store/drone'
 import {
     getVideoSource, setVideoSource, needsCameraSelection, type VideoSource,
-    VIDEO_SOURCES, SOURCE_GROUPS,
+    VIDEO_SOURCES, videoSourcesFor, sourceGroupsFor,
 } from '@/lib/videoSource'
+import { useAccess } from '@/hooks/useAccess'
 import { isDesktopApp } from '@/lib/nativeBridge'
 import { setParams, type AvoidanceStatus } from '@/lib/avoidance'
 import { PersonCalibration } from './PersonCalibration'
@@ -103,6 +104,9 @@ export function LinkCluster({ avoid }: { avoid: AvoidanceStatus | null }) {
         isStreaming, isLoading, startStream, stopStream,
     } = useWebRTCContext()
     const link = useDroneStore(s => s.telemetry?.link_ok)
+    // Customer-only accounts get the customer-safe sources (lib/videoSource).
+    const { isCustomer } = useAccess()
+    const catalogue = videoSourcesFor(isCustomer)
     const [menu, setMenu] = useState<'telem' | 'video' | null>(null)
     const [src, setSrc] = useState<VideoSource>(() => getVideoSource())
     const [sensorBusy, setSensorBusy] = useState(false)
@@ -177,10 +181,10 @@ export function LinkCluster({ avoid }: { avoid: AvoidanceStatus | null }) {
                 {menu === 'video' && (
                     <Menu onClose={() => setMenu(null)}>
                         {isStreaming && <p className="px-2 pt-1 text-[10px] text-amber-300/90">Changing source or camera restarts the stream.</p>}
-                        {SOURCE_GROUPS.map(group => (
+                        {sourceGroupsFor(isCustomer).map(group => (
                             <div key={group}>
                                 <Section title={group.toUpperCase()} />
-                                {VIDEO_SOURCES.filter(v => v.group === group).map(v => (
+                                {catalogue.filter(v => v.group === group).map(v => (
                                     <Item key={v.value} active={v.value === src}
                                         label={v.label + (v.desktopOnly && !desktopApp ? '  (desktop)' : '')}
                                         onClick={() => pickSource(v.value)} />

@@ -8,7 +8,8 @@ import { useState } from 'react'
 import { useTelemetryLink } from '@/hooks/useTelemetryLink'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { useDroneStore } from '@/store/drone'
-import { getVideoSource, setVideoSource, needsCameraSelection, VIDEO_SOURCES, type VideoSource } from '@/lib/videoSource'
+import { getVideoSource, setVideoSource, needsCameraSelection, VIDEO_SOURCES, videoSourcesFor, type VideoSource } from '@/lib/videoSource'
+import { useAccess } from '@/hooks/useAccess'
 
 function Step({ n, done, title, children }: { n: number; done: boolean; title: string; children?: React.ReactNode }) {
     return (
@@ -47,6 +48,8 @@ export function SetupPanel() {
     const { isStreaming, isLoading, startStream, selectedCameraId } = useWebRTCContext()
     const [pick, setPick] = useState<'drone' | 'camera' | null>(null)
     const [src, setSrc] = useState<VideoSource>(() => getVideoSource())
+    // Customer-only accounts get the customer-safe sources (lib/videoSource).
+    const { isCustomer } = useAccess()
 
     const droneLabel = options.find(o => o.value === source)?.label ?? source
     const camLabel = VIDEO_SOURCES.find(v => v.value === src)?.label ?? src
@@ -92,7 +95,7 @@ export function SetupPanel() {
                             <button type="button" className="underline underline-offset-4 inline-flex items-center min-h-[44px] px-1" onClick={() => setPick(pick === 'camera' ? null : 'camera')}>Change camera</button>
                         </p>
                         {pick === 'camera' && (
-                            <Choice value={src} options={VIDEO_SOURCES.map(v => ({ value: v.value, label: v.label }))}
+                            <Choice value={src} options={videoSourcesFor(isCustomer).map(v => ({ value: v.value, label: v.label }))}
                                 onPick={v => { setSrc(v); setVideoSource(v) }} onClose={() => setPick(null)} />
                         )}
                         {camBlocked && <p className="text-[14px]" style={{ color: 'var(--s-ink-2)' }}>Pick which camera in Settings first.</p>}

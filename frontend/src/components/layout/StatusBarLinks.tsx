@@ -22,8 +22,9 @@ import { useTelemetryLink } from '@/hooks/useTelemetryLink'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import {
     getVideoSource, setVideoSource, needsCameraSelection, type VideoSource,
-    VIDEO_SOURCES, SOURCE_GROUPS,
+    videoSourcesFor, sourceGroupsFor,
 } from '@/lib/videoSource'
+import { useAccess } from '@/hooks/useAccess'
 import { isDesktopApp } from '@/lib/nativeBridge'
 import { Camera, Satellite, Plug, PlugZap, Loader, RefreshCw, Plus } from 'lucide-react'
 import { useClientValue } from '@/hooks/useClientValue'
@@ -74,6 +75,9 @@ export function StatusBarLinks() {
         connect, disconnect, disconnecting, isConnected, isConnecting,
         sitlNeedsDesktop,
     } = useTelemetryLink()
+    // Customer-only accounts get the customer-safe sources (lib/videoSource).
+    const { isCustomer } = useAccess()
+    const catalogue = videoSourcesFor(isCustomer)
 
     const {
         cameras, selectedCameraId, setSelectedCameraId, scanCameras,
@@ -147,9 +151,9 @@ export function StatusBarLinks() {
                     Settings, working, and absent from the bar. That exact bug
                     has already been shipped once in this app, which is why the
                     catalogue is data (see lib/videoSource.ts). */}
-                {SOURCE_GROUPS.map(group => (
+                {sourceGroupsFor(isCustomer).map(group => (
                     <optgroup key={group} label={group}>
-                        {VIDEO_SOURCES.filter(v => v.group === group).map(v => (
+                        {catalogue.filter(v => v.group === group).map(v => (
                             <option key={v.value} value={v.value}>
                                 {v.label}{v.desktopOnly && !desktopApp ? '  (desktop)' : ''}
                             </option>

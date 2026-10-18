@@ -27,7 +27,7 @@ import {
     BAUD_OPTIONS, DEFAULT_TELEMETRY_ADDRESS,
 } from '@/lib/linkSettings'
 import { setStatusBarEnabled, setStatusBarLinksEnabled } from '@/lib/statusBarSettings'
-import { VIDEO_SOURCES, SOURCE_GROUPS, specFor, sourceNeeds,
+import { videoSourcesFor, sourceGroupsFor, specFor, sourceNeeds,
     getVideoSource, setVideoSource, getSiyiRtspUrl, setSiyiRtspUrl, getAirUnitVideoPort, setAirUnitVideoPort, getAirUnitFanoutPort, setAirUnitFanoutPort, type VideoSource, getRelayTransport, setRelayTransport, getRelayLatencyMs, setRelayLatencyMs, type RelayTransport, getRtspTransport, setRtspTransport, type RtspTransport, getPreviewFragMode, setPreviewFragMode, type PreviewFragMode, getLiveEdgeClamp, setLiveEdgeClamp, getGstJitterMs, setGstJitterMs, getGstAccel, setGstAccel, type GstAccel,
     getReceiverHost, setReceiverHost, getReceiverTransport, setReceiverTransport,
     getReceiverLatencyMs, setReceiverLatencyMs, getReceiverAccel, setReceiverAccel,
@@ -52,6 +52,7 @@ import { useClientValue, useHydrated } from '@/hooks/useClientValue'
 import { PrefRow } from '@/components/settings/primitives'
 import { DevicesGroup, PasswordGroup, ProfileGroup } from '@/components/settings/AccountSettings'
 import { InvitesGroup, MembersGroup, WorkspaceGroup } from '@/components/settings/WorkspaceSettings'
+import { useAccess } from '@/hooks/useAccess'
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
 
@@ -632,6 +633,8 @@ function RtspPathRow() {
 
 function VideoGroup() {
     const { isStreaming, applyVideoSettings } = useWebRTCContext()
+    // Customer-only accounts get the customer-safe sources (lib/videoSource).
+    const { isCustomer } = useAccess()
     const [res, setRes] = useState<VideoRes>(() => getVideoSettings().res)
     const [fps, setFps] = useState<VideoFps>(() => getVideoSettings().fps)
     const [feed, setFeed] = useState<FeedMode>(() => getFeedMode())
@@ -689,9 +692,9 @@ function VideoGroup() {
                             could not be selected. Exactly the class of bug the
                             data-driven catalogue above was introduced to kill,
                             reintroduced two lines from it. */}
-                        {SOURCE_GROUPS.map(group => (
+                        {sourceGroupsFor(isCustomer).map(group => (
                             <optgroup key={group} label={group}>
-                                {VIDEO_SOURCES.filter(s => s.group === group).map(s => (
+                                {videoSourcesFor(isCustomer).filter(s => s.group === group).map(s => (
                                     <option key={s.value} value={s.value}>
                                         {s.label}{s.desktopOnly ? '  (desktop)' : ''}
                                     </option>
