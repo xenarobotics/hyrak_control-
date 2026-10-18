@@ -297,16 +297,19 @@ with `view` on the workspace (premium or not); Add still needs
 * `GET /huggingface/recommended?workspace_id=` -> `{workspace_id, premium,
   can_manage, categories: [{name, models: [{repo, file, name, category,
   task, what, license, license_note, classes_preview, fps, verified_at,
-  url, added: model_id|null}]}]}`, from `models_custom/recommended.json`
+  url, added: model_id|null, added_status}]}]}`, from `models_custom/recommended.json`
   (validated at startup; a broken file logs and serves nothing). Categories
   in a fixed order: Drone and aerial view, Fire and safety, Roads and
   vehicles, Construction and people, Agriculture and nature, General
   purpose.
-* `GET /huggingface/search?q=&task=all|detect|classify&page=&workspace_id=`
-  -> `{workspace_id, premium, can_manage, query, task, page (1-4),
-  has_more, cached, results: [{repo, name, url, task
+* `GET /huggingface/search?q=&task=all|detect|classify|segment&page=&ready=&workspace_id=`
+  -> `{workspace_id, premium, can_manage, query, task, page (1-20),
+  ready, has_more, cached, stale, results: [{repo, name, url, task
   (detect|classify|segment), downloads, likes, updated, license,
-  license_note, onnx_files, suggested_file, runnable, reason, added}]}`.
+  license_note, onnx_files, suggested_file, runnable, reason, added,
+  added_status}]}`. An empty `q` lists the most downloaded models, which
+  is what the "All vision models" tab opens on. `ready=true` ("Ready to
+  run only") lists only repos tagged `onnx` and keeps the runnable cards.
   One anonymous `list_models` call per pipeline tag (object-detection,
   image-classification, plus image-segmentation for `all`) with `expand`;
   private rows dropped. The listing has no file sizes (it refuses
@@ -315,12 +318,20 @@ with `view` on the workspace (premium or not); Add still needs
   "Only PyTorch .pt files - supported after the HYRAK sandbox update",
   "Only PyTorch or safetensors weights - ...", "No ONNX file in this
   repo", "Gated - needs approval on Hugging Face", "Segmentation - coming
-  soon", "Too large". Cached per (query, task, page) for
-  `CUSTOM_MODELS_HF_SEARCH_CACHE_S` (600, 256 entries); uncached searches
+  soon", "Too large". Cached per (query, task, page, ready) for
+  `CUSTOM_MODELS_HF_SEARCH_CACHE_S` (600, 256 entries); while the Hub or
+  the per-user limit says wait, an older entry for the same query is
+  served past its TTL with `stale: true`. Uncached searches
   limited to `CUSTOM_MODELS_HF_SEARCHES_PER_MINUTE` (20) per user
   (`search_rate_limited`, 429).
 * HTTP 429 from the Hub is `hf_rate_limited` (429) on inspect, download
   and search, and starts a 30 s cooldown with no Hub calls.
+* Panel: tabs "Recommended for drones" | "All vision models" | "Upload a
+  file"; the library's "Browse models" (everyone) opens on All. A card
+  for a model the workspace has shows Run once it is ready (closes the
+  panel, runs `custom:<id>` like the library), else its status, which
+  opens the model; step 3 has Run now next to Save. The model the panel
+  added is highlighted in the library when the panel closes.
 * `HF_TOKEN` (optional, SecretStr) is sent on single-repo calls (inspect,
   sizes, download) for higher limits; never on the search listing, and
   private repos are refused (`hf_not_found`) even when it could read them.

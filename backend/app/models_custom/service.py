@@ -496,11 +496,13 @@ async def create_hf(actor, *, workspace_id: Optional[str], repo_text: str,
 
 async def _browse_context(actor, workspace_id: Optional[str]):
     ms, tree, ws = await _workspace(actor, workspace_id)
+    # (repo, file) and (repo, None) -> (model id, status), so a card can
+    # offer Run for a model that is ready.
     added: dict = {}
     for rec in await model_store.read_store().list_models(ws.id):
         if rec.source == "huggingface" and rec.hf_repo:
-            added.setdefault((rec.hf_repo, rec.hf_file), rec.id)
-            added.setdefault((rec.hf_repo, None), rec.id)
+            added.setdefault((rec.hf_repo, rec.hf_file), (rec.id, rec.status))
+            added.setdefault((rec.hf_repo, None), (rec.id, rec.status))
     head = {"workspace_id": ws.id, "premium": entitlement(actor, ms, ws),
             "can_manage": _can(actor, ms, ws, perms.MODELS_MANAGE)}
     return head, added
@@ -511,10 +513,14 @@ async def hf_recommended(actor, workspace_id: Optional[str]) -> dict:
     return {**head, "categories": browse.grouped(browse.recommended(), added)}
 
 
-async def hf_search(actor, workspace_id: Optional[str], q: str, task: str, page: int) -> dict:
+async def hf_search(actor, workspace_id: Optional[str], q: str, task: str, page: int,
+                    ready: bool = False) -> dict:
     head, added = await _browse_context(actor, workspace_id)
-    answer = await browse.search(actor.id, q, task, page)
-    results = [{**c, "added": added.get((c["repo"], None))} for c in answer["results"]]
+    answer = await browse.search(actor.id, q, task, page, ready=ready)
+    results = []
+    for c in answer["results"]:
+        mid, status = added.get((c["repo"], None)) or (None, None)
+        results.append({**c, "added": mid, "added_status": status})
     return {**head, **answer, "results": results}
 
 
