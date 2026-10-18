@@ -552,26 +552,33 @@ server never dials a TURN host the customer typed.
   first connect of a new real drone puts it in the session's workspace;
   `drone.claimed` is audited when that is a customer workspace. A known
   drone is moved only by `POST /api/drones/{id}/workspace`.
-* Simulated drones (the server-side detection: a direct `udp` address
-  with no relay bridge, i.e. staff links) are never claimed and never
-  block. A customer's desktop SITL arrives through the relay bridge, so it
+* Simulated drones are never claimed and never block. "Simulated" is the
+  CURRENT link by the server's own test (a direct `udp` address with no
+  relay bridge, i.e. staff links), never the registry's stored
+  `is_simulated` flag: that is written once by whichever link saw the UID
+  first (SITL UIDs repeat; a real drone first seen over direct UDP was
+  stored as simulated for good). A customer's desktop SITL arrives through the relay bridge, so it
   is treated as a real drone: the first workspace to connect a given SITL
   UID claims it, and a SITL UID already registered to HYRAK is read-only
   for customers until staff move it.
 * The check applies to staff sessions too (a HYRAK pilot does not command
-  a customer's drone), except that staff keep today's behaviour while a
-  drone is still unidentified. The legacy shared token flies HYRAK drones
-  only.
+  a customer's drone), with two carve-outs that keep staff working as
+  before 2a: a staff session with the compatibility operator rank flies
+  every HYRAK-owned drone (this covers managers whose own HYRAK
+  membership is only viewer: all pre-2a drones sit on HYRAK, customer
+  ones included, until moved), and staff are not held back while a drone
+  is still unidentified. The legacy shared token flies HYRAK drones only.
 * `drone_identity` (sent once the UID is read) carries `drone_fly`:
   `true` = this session may command the drone, `false` = read-only here,
   `null` = unknown (customers cannot command until it is known).
   `/api/sessions` (founders) shows each session's `workspace_id` and
   `staff`.
 * **Safety exception:** `drone_action` with `hold`, `pause_mission`,
-  `return`, `rtl_home` or `land`, or `set_mode` with `HOLD` / `RETURN` /
+  `return` or `land`, or `set_mode` with `HOLD` / `RETURN` /
   `LAND`, passes both the workspace `fly` check and drone access whenever
   the session holds a telemetry link. It is audited with a `(safety)`
-  suffix when it bypassed either.
+  suffix when it bypassed either. `rtl_home` is deliberately not in the
+  set: it takes a caller-chosen altitude, so it is a goto, not a return.
 
 **REST as built.**
 

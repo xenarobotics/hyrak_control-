@@ -127,7 +127,9 @@ DRONE_EVENTS = frozenset({
 # drone's link, whoever owns the drone and whatever the session's perms
 # became: hold, return-to-launch, land. Blocking one of these on a link the
 # pilot physically holds is worse than any ownership rule.
-SAFETY_ACTIONS = frozenset({"hold", "pause_mission", "return", "rtl_home", "land"})
+# Not rtl_home: it takes a caller-chosen altitude (goto_home), so it is a
+# goto, not a return; `return` is the parameterless RTL.
+SAFETY_ACTIONS = frozenset({"hold", "pause_mission", "return", "land"})
 # The same, spelled as a set_mode request.
 SAFETY_MODES = frozenset({"HOLD", "RETURN", "LAND"})
 

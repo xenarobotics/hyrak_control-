@@ -137,16 +137,28 @@ def stamp(session, user, scope: SessionScope) -> None:
 
 async def drone_fly_allowed(session, drone: Optional[dict]) -> Optional[bool]:
     """May `session` command `drone` (a registry record)? None when the
-    drone is unknown or its workspace cannot be read."""
+    drone is unknown or its workspace cannot be read.
+
+    Simulated means the session's CURRENT link is a simulator by the
+    server's own test (session.link_simulated), never the registry's
+    stored flag: a SITL UID repeats across instances and a real drone
+    first seen over a direct UDP link was stored as simulated for good."""
     if not drone:
         return None
-    if drone.get("is_simulated"):
+    if getattr(session, "link_simulated", False):
         return True
     ws_id = drone.get("workspace_id") or PLATFORM_WORKSPACE_ID
     if session.user_id == auth.LEGACY_USER_ID:
         # The legacy token flies HYRAK's drones (it always has) and no one
         # else's: it holds no memberships to check.
         return ws_id == PLATFORM_WORKSPACE_ID
+    if (ws_id == PLATFORM_WORKSPACE_ID and getattr(session, "is_staff", False)
+            and auth.role_at_least(getattr(session, "role", None) or "member", "operator")):
+        # Staff with the operator rank fly HYRAK's drones exactly as before
+        # 2a. That includes managers whose own HYRAK membership is only
+        # viewer: every drone seen before 2a sits on HYRAK, and a manager
+        # flies the customers' drones among them until they are moved.
+        return True
     try:
         tree = await _tree()
     except Exception as e:
@@ -185,6 +197,7 @@ async def identify_drone(session, hardware_uid: str, *, is_simulated: bool) -> O
     from app.registry import drones as drone_registry
 
     claim = None if is_simulated else session.workspace_id
+    session.link_simulated = bool(is_simulated)
     drone = await drone_registry.upsert_seen(hardware_uid, is_simulated=is_simulated,
                                              claim_workspace_id=claim)
     if drone and drone.pop("claimed", False):

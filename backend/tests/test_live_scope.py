@@ -324,10 +324,13 @@ async def test_safety_actions_are_never_refused_on_a_held_link(live):
         s.drone_fly = False
     fly = socket_guard.require_session_fly
     for data in ({"action": "land"}, {"action": "hold"}, {"action": "return"},
-                 {"action": "rtl_home"}, {"action": "pause_mission"},
+                 {"action": "pause_mission"},
                  {"action": "set_mode", "mode": "LAND"}, {"action": "set_mode", "mode": "hold"}):
         assert await fly("p", "drone_action", data) is True, data      # foreign drone
         assert await fly("v", "drone_action", data) is True, data      # and no fly at all
+    # rtl_home takes a caller-chosen altitude: a goto, not covered.
+    assert await fly("p", "drone_action", {"action": "rtl_home", "altitude": 1}) is False
+    assert await fly("v", "drone_action", {"action": "rtl_home"}) is False
     assert await fly("p", "drone_action", {"action": "takeoff"}) is False
     assert await fly("v", "drone_action", {"action": "arm"}) is False
     assert errors(live, "v")[-1]["code"] == "forbidden"
@@ -363,11 +366,22 @@ async def test_drone_access_follows_fly_on_the_drones_workspace(live):
         await connect(live, sid, token)
     cases = {("f", "dc"): True, ("f", "dh"): True,
              ("m", "dc"): True,                       # manager of IITH flies its client's drone
+             ("m", "dh"): True,                       # ... and HYRAK's, as before 2a (HYRAK viewer + manager)
              ("hp", "dh"): True, ("hp", "dc"): False,  # HYRAK pilot: HYRAK's drones only
              ("p", "dc"): True, ("p", "dh"): False}
     for (sid, did), want in cases.items():
         s = session(live, sid)
         assert await live_scope.drone_fly_allowed(s, customer_drone if did == "dc" else hyrak_drone) is want, (sid, did)
+    # A HYRAK viewer without a manager role does not fly HYRAK's drones.
+    await connect(live, "sv", (await account("plainviewer", "viewer"))[1])
+    assert await live_scope.drone_fly_allowed(session(live, "sv"), hyrak_drone) is False
+    # The stored is_simulated flag does not skip ownership; only the
+    # current link being a simulator does.
+    p = session(live, "p")
+    stored_sim = {**hyrak_drone, "is_simulated": True}
+    assert await live_scope.drone_fly_allowed(p, stored_sim) is False
+    p.link_simulated = True
+    assert await live_scope.drone_fly_allowed(p, stored_sim) is True
     legacy = SimpleNamespace(user_id=service.LEGACY_USER_ID, memberships=())
     assert await live_scope.drone_fly_allowed(legacy, hyrak_drone) is True
     assert await live_scope.drone_fly_allowed(legacy, customer_drone) is False
@@ -564,7 +578,7 @@ async def test_a_timed_out_recheck_holds_commands_but_not_safety_or_view(live, m
         assert errors(live, sid)[-1]["code"] == "access_unverified"
         assert await fly(sid, "set_analysis_mode", {}) is False
         for data in ({"action": "land"}, {"action": "return"}, {"action": "hold"},
-                     {"action": "rtl_home"}, {"action": "set_mode", "mode": "LAND"}):
+                     {"action": "set_mode", "mode": "LAND"}):
             assert await fly(sid, "drone_action", data) is True, (sid, data)
         assert await socket_guard.require_session_view(sid, "serial_uplink") is True
         assert session(live, sid).auth_checked_at == 0.0          # still stale: retried next time

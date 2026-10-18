@@ -228,6 +228,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 other_session.hardware_uid = None
                 other_session.drone = None
                 other_session.drone_fly = None
+                other_session.link_simulated = False
                 await sio.emit(
                     "telemetry_status",
                     {"status": "disconnected", "message": "Disconnected - another client connected to this drone"},
@@ -372,6 +373,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         # previous drone's access answer must not carry over to it.
         session.drone = None
         session.drone_fly = None
+        session.link_simulated = False
         session_manager.attach_telemetry(session.session_id, manager)
         session.drone_address = address
 
@@ -546,6 +548,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         session.hardware_uid = None
         session.drone = None
         session.drone_fly = None
+        session.link_simulated = False
         await sio.emit("telemetry_status", {"status": "disconnected"}, to=sid)
 
     @sio.on("drone_command")
