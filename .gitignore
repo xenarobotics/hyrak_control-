@@ -72,6 +72,7 @@ reconstruction/.venv/
 reconstruction/data/
 .avoidance_state.json
 simulation/.pids/
+simulation/.cloud_sim/
 
 # Local test accounts (generated passwords), never committed
 .env.test-accounts

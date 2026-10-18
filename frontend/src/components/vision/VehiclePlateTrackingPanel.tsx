@@ -16,7 +16,7 @@ import { getSocket } from '@/lib/socket'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { AlertCircle, Download, Trash2 } from 'lucide-react'
 import { FollowControls } from '@/components/vision/FollowControls'
-import { fetchPlateHistory, plateImagePath, downloadSessionReport, clearHistory, toFileStamp, shortLocation, type PlateHistoryRow } from '@/lib/visionReports'
+import { fetchPlateHistory, plateImagePath, downloadSessionReport, clearHistory, canClearHistory, toFileStamp, shortLocation, type PlateHistoryRow } from '@/lib/visionReports'
 import { useApiObjectUrl } from '@/hooks/useApiMedia'
 
 const LABEL: React.CSSProperties = {
@@ -308,13 +308,13 @@ export function VehiclePlateTrackingPanel() {
                     <p style={{ fontSize: 10, color: 'hsl(var(--app-text-muted))', fontFamily: 'monospace', margin: 0, letterSpacing: '0.06em' }}>
                         RECENT VEHICLES
                     </p>
-                    <button
+                    {canClearHistory() && <button
                         onClick={() => clearHistory('plate-history').then(ok => { if (ok) loadHistory() })}
                         title="Clear all history"
                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'hsl(var(--app-text-muted))', display: 'flex' }}
                     >
                         <Trash2 size={12} />
-                    </button>
+                    </button>}
                 </div>
                 <ScrollArea style={{ flex: 1 }}>
                     {history.length > 0 ? (

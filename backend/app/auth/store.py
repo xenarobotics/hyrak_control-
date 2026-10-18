@@ -109,14 +109,20 @@ class WorkspaceRecord:
     disabled: bool = False
     created_by: Optional[str] = None
     created_at: datetime = field(default_factory=utcnow)
+    # Paid extras a founder switched on, e.g. {"cloud_sim": True}.
+    features: dict = field(default_factory=dict)
 
     def public(self) -> dict:
         return {
             "id": self.id, "kind": self.kind, "name": self.name,
             "parent_id": self.parent_id, "path": self.path,
             "operating_area": self.operating_area, "disabled": self.disabled,
+            "features": dict(self.features or {}),
             "created_at": _iso(self.created_at),
         }
+
+    def has_feature(self, name: str) -> bool:
+        return (self.features or {}).get(name) is True
 
 
 @dataclass
@@ -226,6 +232,8 @@ class ZoneRecord:
     created_by: Optional[str] = None
     updated_by: Optional[str] = None
     updated_at: Optional[datetime] = None
+    # Red zones: whether a permit can be requested (docs/ACCESS_MODEL.md 8d).
+    permission_required: bool = True
 
     def to_feature(self) -> dict:
         return {
@@ -236,6 +244,7 @@ class ZoneRecord:
                 "floor_m": self.floor_m, "ceiling_m": self.ceiling_m,
                 "active": self.active, "layer": self.layer,
                 "workspace_id": self.workspace_id,
+                "permission_required": self.permission_required,
             },
         }
 
@@ -762,7 +771,7 @@ class DbStore:
             row = Workspace(id=ws.id, kind=ws.kind, name=ws.name, parent_id=ws.parent_id,
                             path=ws.path, operating_area=ws.operating_area,
                             disabled=ws.disabled, created_by=ws.created_by,
-                            created_at=ws.created_at)
+                            created_at=ws.created_at, features=dict(ws.features or {}))
             db.add(row)
             await db.commit()
             return _workspace_of(row)
@@ -1062,7 +1071,8 @@ class DbStore:
             row = Zone(id=z.id, name=z.name, zone_class=z.zone_class, geometry=z.geometry,
                        floor_m=z.floor_m, ceiling_m=z.ceiling_m, active=z.active,
                        created_at=z.created_at, layer=z.layer, workspace_id=z.workspace_id,
-                       created_by=z.created_by, updated_by=z.updated_by, updated_at=z.updated_at)
+                       created_by=z.created_by, updated_by=z.updated_by, updated_at=z.updated_at,
+                       permission_required=z.permission_required)
             db.add(row)
             await db.commit()
             return _zone_of(row)
@@ -1108,7 +1118,7 @@ def _workspace_of(row) -> WorkspaceRecord:
     return WorkspaceRecord(id=row.id, kind=row.kind, name=row.name, parent_id=row.parent_id,
                            path=row.path, operating_area=row.operating_area,
                            disabled=bool(row.disabled), created_by=row.created_by,
-                           created_at=row.created_at)
+                           created_at=row.created_at, features=dict(row.features or {}))
 
 
 def _membership_of(m, w) -> MembershipRecord:
@@ -1141,4 +1151,5 @@ def _zone_of(row) -> ZoneRecord:
                       active=bool(row.active), created_at=row.created_at,
                       layer=row.layer or "regulatory", workspace_id=row.workspace_id,
                       created_by=row.created_by, updated_by=row.updated_by,
-                      updated_at=row.updated_at)
+                      updated_at=row.updated_at,
+                      permission_required=row.permission_required is not False)

@@ -314,3 +314,68 @@ async def test_live_scope_and_claim_on_postgres(db, monkeypatch):
     await db.delete_user(u.id)
     assert await db.delete_workspace(org.id)
     service.reset_for_tests()
+
+
+async def test_history_rows_carry_their_workspace_on_postgres(db):
+    """Phase 2b (revision b8e4f0c2d5a3): the history tables have a NOT NULL
+    workspace_id defaulting to HYRAK, and the per-workspace reads, the
+    session-report lookup and the scoped clear filter on it in SQL."""
+    from sqlalchemy import select, text
+    from app.api import routes
+    from app.auth.store import PLATFORM_WORKSPACE_ID, new_id
+    from app.db import get_session
+    from app.db.models import CrowdAlert, CrowdSnapshot, Drone, Flight, PlateEvent
+    from app.vision import persistence
+
+    async with get_session() as ses:
+        cols = (await ses.execute(text(
+            "SELECT table_name, is_nullable, column_default FROM information_schema.columns "
+            "WHERE column_name = 'workspace_id' AND table_name IN "
+            "('flights','crowd_snapshots','crowd_alerts','plate_events','person_sightings')"
+        ))).all()
+    assert {c[0] for c in cols} == {"flights", "crowd_snapshots", "crowd_alerts",
+                                    "plate_events", "person_sightings"}
+    assert all(c[1] == "NO" and PLATFORM_WORKSPACE_ID in (c[2] or "") for c in cols)
+
+    wa, wb = new_id(), new_id()       # plain strings: the column is not a FK
+    sa_, sb, sh = uid("sa"), uid("sb"), uid("sh")
+    hw = uid("hw")
+    persistence.set_workspace_resolver({sa_: wa, sb: wb}.get)
+    try:
+        await persistence.persist_events(sa_, [{"table": "crowd_snapshot", "current_count": 3},
+                                               {"table": "crowd_alert", "message": "a"},
+                                               {"table": "plate_event", "plate_text": "AA11"}])
+        await persistence.persist_events(sb, [{"table": "plate_event", "plate_text": "BB22"}])
+        await persistence.persist_events(sh, [{"table": "plate_event", "plate_text": "HH33"}])
+    finally:
+        persistence.set_workspace_resolver(None)
+    async with get_session() as ses:
+        drone = Drone(hardware_uid=hw, name="d")
+        ses.add(drone)
+        await ses.commit()
+        ses.add(Flight(drone_id=drone.id, session_id=sa_, workspace_id=wa))
+        ses.add(Flight(drone_id=drone.id, session_id=sb, workspace_id=wb))
+        await ses.commit()
+        hy = (await ses.execute(select(PlateEvent.workspace_id).where(PlateEvent.session_id == sh))).scalar_one()
+    assert hy == PLATFORM_WORKSPACE_ID                       # no workspace known: HYRAK
+    try:
+        plates = await persistence.list_plate_history(limit=50, workspace_ids=[wa])
+        assert [p["plate_text"] for p in plates] == ["AA11"] and plates[0]["workspace_id"] == wa
+        assert await persistence.list_plate_history(workspace_ids=[]) == []
+        crowd = await persistence.list_crowd_history(workspace_ids=[wa, wb])
+        assert [s["session_id"] for s in crowd["sessions"]] == [sa_]
+        assert [a["message"] for a in crowd["alerts"]] == ["a"]
+        assert await persistence.session_workspace(sb) == wb
+        assert await persistence.session_workspace(uid("none")) is None
+        flights = await routes._list_flights([wb])
+        assert [f["session_id"] for f in flights] == [sb] and flights[0]["drone_name"] == "d"
+        await persistence.clear_plate_history(workspace_ids=[wb])
+        left = {p["plate_text"] for p in await persistence.list_plate_history(limit=200)}
+        assert "BB22" not in left and {"AA11", "HH33"} <= left
+    finally:
+        async with get_session() as ses:
+            for model in (CrowdSnapshot, CrowdAlert, PlateEvent):
+                await ses.execute(model.__table__.delete().where(model.session_id.in_([sa_, sb, sh])))
+            await ses.execute(Flight.__table__.delete().where(Flight.session_id.in_([sa_, sb])))
+            await ses.execute(text("DELETE FROM drones WHERE hardware_uid = :h"), {"h": hw})
+            await ses.commit()

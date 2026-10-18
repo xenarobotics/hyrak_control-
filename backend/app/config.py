@@ -332,6 +332,18 @@ class Settings(BaseSettings):
     # Telemetry
     default_baud_rate: int = Field(default=57600)
 
+    # Delivery-fleet watchdog (app/fleet/service.py). An instance that does
+    # not answer is retried with exponential backoff (one watchdog interval,
+    # doubling, up to backoff_max_s), and after max_retries consecutive
+    # misses it is parked until someone presses CONNECT / adopt. A drone
+    # adopted earlier that has not answered for forget_s is dropped from the
+    # heal list altogether. Without these an empty SITL port (or one held by
+    # an unrelated process) spawned a mavsdk_server and logged an ERROR every
+    # cycle, forever.
+    fleet_watchdog_backoff_max_s: float = Field(default=1800.0)
+    fleet_watchdog_max_retries: int = Field(default=10)
+    fleet_watchdog_forget_s: float = Field(default=3 * 3600.0)
+
     # Where the RF ground decoder's uplink listener (wfb_tx) runs.
     #
     # Not loopback: the decoder is its own board on the local network, not a
@@ -401,6 +413,38 @@ class Settings(BaseSettings):
     mavsdk_server_host: str = Field(default="localhost")
     mavsdk_server_port: int = Field(default=50051)
     sitl_address: str = Field(default="udpin://0.0.0.0:14540")
+
+    # Cloud SITL (docs/ACCESS_MODEL.md 8c): a premium per-session PX4 +
+    # Gazebo instance on this server. Each instance costs roughly one CPU
+    # core (gz physics + PX4 in lockstep) and a few hundred MB of RAM, so
+    # size CLOUD_SIM_MAX_GLOBAL to the machine: 2 on a dev laptop, about
+    # (cores - cores reserved for vision) on a dedicated server.
+    cloud_sim_enabled: bool = Field(default=True)
+    cloud_sim_max_global: int = Field(default=2)
+    cloud_sim_max_per_workspace: int = Field(default=1)
+    # Stopped after this long with the vehicle on the ground (disarmed or
+    # not linked). Armed time never counts as idle.
+    cloud_sim_idle_minutes: float = Field(default=15.0)
+    cloud_sim_boot_timeout_s: float = Field(default=150.0)
+    # First port of the private block (10 per slot, 64 slots: 15000-15639
+    # by default). Must not overlap the owner's ports; app/sim/ports.py
+    # refuses a base that does.
+    cloud_sim_port_base: int = Field(default=15000)
+    cloud_sim_instance_base: int = Field(default=100)
+    # PX4 binds its MAVLink port on 0.0.0.0 and accepts commands from any
+    # source, so the cloud sim port block must be firewalled to loopback
+    # on a server (nftables example in docs/ACCESS_MODEL.md 8c). Set true
+    # on servers AFTER applying the rule; while false the backend logs a
+    # warning at startup that the block is reachable unless firewalled.
+    cloud_sim_require_firewall_ack: bool = Field(default=False)
+    cloud_sim_px4_dir: str = Field(default="")          # empty: ~/PX4-Autopilot
+    cloud_sim_world: str = Field(default="default")
+    # Instance working dirs and the record used for orphan cleanup.
+    cloud_sim_state_dir: Path = Field(default=ROOT_DIR / "simulation" / ".cloud_sim")
+    # Home when neither the customer nor the workspace's operating area
+    # gives one (IITH, the demo field).
+    cloud_sim_default_lat: float = Field(default=17.596569)
+    cloud_sim_default_lon: float = Field(default=78.125203)
 
     # Desktop app installers + electron-updater's manifest files
     # (latest.yml / latest-mac.yml / latest-linux.yml), served straight off

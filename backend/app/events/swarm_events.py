@@ -799,40 +799,35 @@ def register_swarm_events(sio, session_manager: SessionManager):
             }, to=sid)
             return
 
-        # Same airspace rules as single-drone uploads: red blocks unless this
-        # drone holds an approved permit for this exact profile; orange needs
-        # an explicit pilot acknowledgment (ack_orange).
-        from app.zones import engine as zone_engine
-        path_check = zone_engine.check_path(
-            [(float(w["lat"]), float(w["lng"])) for w in waypoints]
-        )
-        zone_warn = ""
-        permit = None
-        if path_check["zone_class"] == "red":
-            names = ", ".join(z["name"] for z in path_check["zones"])
-            db_id = _fleet_db_ids.get((session.session_id, drone_id))
-            if db_id:
-                from app.permits import service as permit_service
-                permit = await permit_service.find_approved(db_id, waypoints)
-            if permit is None:
-                await sio.emit("swarm_mission_upload_result", {
-                    "drone_id": drone_id, "ok": False, "blocked": "red",
-                    "can_request": bool(db_id), "zones": path_check["zones"],
-                    "msg": f"Blocked - crosses NO-FLY (red) zone: {names} - permission required",
-                }, to=sid)
-                logger.warning(f"Fleet mission blocked for drone {drone_id} (red zones: {names})")
-                return
-            logger.info(f"Fleet red-zone mission allowed under permit {permit['id'][:8]} "
+        # Same airspace rules as single-drone uploads (permits.gate_upload):
+        # red blocks unless this drone holds an approved, in-window permit for
+        # this exact profile; orange needs an explicit pilot acknowledgment
+        # (ack_orange) unless a permit covers it.
+        db_id = _fleet_db_ids.get((session.session_id, drone_id))
+        from app.permits import service as permit_service
+        try:
+            gate = await permit_service.gate_upload(
+                db_id, waypoints, ack_orange=bool(data.get("ack_orange")))
+        except (KeyError, TypeError, ValueError):
+            await sio.emit("swarm_mission_upload_result", {
+                "drone_id": drone_id, "ok": False, "msg": "Bad waypoints",
+            }, to=sid)
+            return
+        if not gate["ok"]:
+            out = {k: v for k, v in gate.items() if k != "permit"}
+            if gate.get("blocked"):
+                out["can_request"] = bool(db_id) and not gate.get("prohibited")
+                out["msg"] = "Blocked - " + gate["msg"][0].lower() + gate["msg"][1:]
+                logger.warning(f"Fleet mission blocked for drone {drone_id}: {gate['msg']}")
+            await sio.emit("swarm_mission_upload_result", {"drone_id": drone_id, **out}, to=sid)
+            return
+        permit = gate["permit"]
+        if permit is not None:
+            logger.info(f"Fleet mission allowed under permit {permit['id'][:8]} "
                         f"for drone {drone_id}")
-        if path_check["zone_class"] == "orange" and permit is None:
-            names = ", ".join(z["name"] for z in path_check["zones"])
-            if not data.get("ack_orange"):
-                await sio.emit("swarm_mission_upload_result", {
-                    "drone_id": drone_id, "ok": False, "needs_ack": True,
-                    "zones": path_check["zones"],
-                    "msg": f"Mission passes through restricted (orange) zone: {names}",
-                }, to=sid)
-                return
+        zone_warn = ""
+        if gate.get("orange_acked"):
+            names = ", ".join(z["name"] for z in gate["zones"] if z["zone_class"] == "orange")
             zone_warn = f" - passes orange zone: {names}"
 
         try:

@@ -1,10 +1,12 @@
 import asyncio
+from types import SimpleNamespace
 import time
 import logging
 from app.sessions import observer
 from app.auth import socket_classes
 from app.auth.socket_guard import (
-    require_operator, require_session_fly, require_session_view, require_staff,
+    command_session, require_operator, require_session_fly, require_session_view, require_staff,
+    takeover_stops,
 )
 from app.sessions.manager import SessionManager
 from app.telemetry import serial_bridge
@@ -192,12 +194,14 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         if not await require_operator(sid, "connect_telemetry", data): return
         await _connect_telemetry(sid, data, origin="connect_telemetry")
 
-    async def _connect_telemetry(sid, data, *, origin: str):
+    async def _connect_telemetry(sid, data, *, origin: str, identity: str | None = None):
         """The connect flow itself, for an address the caller has already
-        vetted: connect_telemetry's (staff), the RF bridge's (staff), or the
-        session's own loopback bridge (connect_browser_serial). `origin`
-        names the calling handler, never the client: it decides whether the
-        link can count as a simulator (live_scope.link_kind_for)."""
+        vetted: connect_telemetry's (staff), the RF bridge's (staff), the
+        session's own loopback bridge (connect_browser_serial), or the
+        session's own cloud simulator (start_cloud_sim). `origin` names the
+        calling handler, never the client: it decides whether the link can
+        count as a simulator (live_scope.link_kind_for). `identity` is a
+        server-assigned UID used instead of the FC's (the cloud sim's)."""
         session = session_manager.get_by_socket(sid)
         if not session:
             await sio.emit("error", {"msg": "No session found"}, to=sid)
@@ -231,6 +235,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 other_session.drone = None
                 other_session.drone_fly = None
                 other_session.link_simulated = False
+                other_session.link_kind = ""
                 await sio.emit(
                     "telemetry_status",
                     {"status": "disconnected", "message": "Disconnected - another client connected to this drone"},
@@ -251,6 +256,8 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                         session.session_id,
                         session.drone["id"] if session.drone else None,
                         snapshot_dict,
+                        workspace_id=((session.drone or {}).get("workspace_id")
+                                      or session.workspace_id),
                     )
                 )
                 # Zone enforcement monitor
@@ -378,6 +385,13 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         session.link_simulated = False
         session_manager.attach_telemetry(session.session_id, manager)
         session.drone_address = address
+        # A relinked radio during a takeover: the new link is locked too.
+        from app.sessions import takeover as _takeover
+        if _takeover.is_taken_over(session.session_id):
+            _takeover.lock_link(manager, True)
+        from app.auth import live_scope as _live_scope
+        session.link_kind = _live_scope.link_kind_for(
+            origin, address, has_bridge=serial_bridge.get_bridge(session.session_id) is not None)
 
         await sio.emit(
             "telemetry_status",
@@ -394,7 +408,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             both arrive as loopback udp."""
             from app.auth import live_scope
 
-            uid = await manager.get_hardware_uid()
+            uid = identity or await manager.get_hardware_uid()
             session.hardware_uid = uid
             if uid:
                 kind = live_scope.link_kind_for(
@@ -531,6 +545,10 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             return
         bridge = serial_bridge.get_bridge(session.session_id)
         if bridge:
+            # Taken over by HYRAK operations: the relay keeps carrying the
+            # downlink, minus any command / setpoint frames (the residual
+            # risk is in docs/ACCESS_MODEL.md 8b "Takeover").
+            bridge.set_command_filter(takeover_stops(session, "serial_uplink") is not None)
             bridge.uplink(bytes(data))
 
     @sio.on("disconnect_telemetry")
@@ -539,6 +557,11 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         session = session_manager.get_by_socket(sid)
         if not session:
             return
+        await _release_link(session, sid)
+
+    async def _release_link(session, sid):
+        """Drop the session's telemetry link: disconnect_telemetry, and the
+        cloud sim when it stops under a linked session."""
         tel = session_manager.get_telemetry(session.session_id)
         if tel:
             await tel.stop()
@@ -558,7 +581,9 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
     @sio.on("drone_command")
     async def on_drone_command(sid, data):
         if not await require_session_fly(sid, "drone_command", data, quiet=True): return
-        session = session_manager.get_by_socket(sid)
+        # The caller's own session, or the one a staff console has taken
+        # over (data.target_session, checked by the guard).
+        session = command_session(sid, data)
         if not session:
             return
         if session.mode != AnalysisMode.MANUAL_CONTROL:
@@ -581,7 +606,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
     @sio.on("drone_action")
     async def on_drone_action(sid, data):
         if not await require_session_fly(sid, "drone_action", data): return
-        session = session_manager.get_by_socket(sid)
+        session = command_session(sid, data)
         if not session:
             return
         tel = session_manager.get_telemetry(session.session_id)
@@ -590,14 +615,33 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             return
         action = data.get("action", "")
 
-        # No arming/takeoff inside a red zone (without a permit - future phase)
+        # No arming/takeoff inside a red zone, unless an approved, in-window
+        # permit for this drone covers every red zone at this spot.
         if action in ("arm", "takeoff"):
             from app.zones import engine as zone_engine
+            from app.zones import monitor as zone_monitor
             snap = tel.snapshot
-            check = zone_engine.check_point(
-                snap.position.latitude_deg, snap.position.longitude_deg
-            )
-            if check["zone_class"] == "red":
+            lat, lng = snap.position.latitude_deg, snap.position.longitude_deg
+            check = zone_engine.check_point(lat, lng)
+            red_here = {z["id"] for z in check["zones"] if z["zone_class"] == "red"}
+            permitted, unchecked = set(), False
+            if red_here and (session.drone or {}).get("id"):
+                from app.permits.service import PermitCheckUnavailable
+                try:
+                    permitted = await zone_monitor.permitted_zone_ids(session, lat, lng, fresh=True)
+                except PermitCheckUnavailable:
+                    unchecked = True
+            if red_here and unchecked:
+                names = ", ".join(z["name"] for z in check["zones"])
+                await sio.emit("action_result", {
+                    "action": action, "ok": False,
+                    "error": f"Blocked - inside NO-FLY (red) zone: {names}. Its permit could not "
+                             "be checked just now (database unreachable); try again shortly",
+                }, to=sid)
+                logger.warning(f"{action} blocked in red zone for {session.session_id[:8]}: "
+                               "permits unreadable")
+                return
+            if red_here and not red_here <= permitted:
                 names = ", ".join(z["name"] for z in check["zones"])
                 await sio.emit("action_result", {
                     "action": action, "ok": False,
@@ -990,7 +1034,11 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         - terrain_follow=True  → mission_raw.MissionItem with frame=10
           (MAV_FRAME_GLOBAL_TERRAIN_ALT) - requires TERRAIN_ENABLE=1 on the drone.
         """
-        if not await require_operator(sid, "upload_mission", data): return
+        # A session command on the vehicle (docs/ACCESS_MODEL.md 8d): `fly`
+        # on the session workspace and on the drone's.
+        if not await require_session_fly(sid, "upload_mission", data): return
+        if not isinstance(data, dict):
+            return
         try:
             session = session_manager.get_by_socket(sid)
             if not session:
@@ -1016,41 +1064,30 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 return
 
             # ── Zone validation before anything reaches the drone ────────
-            from app.zones import engine as zone_engine
-            path_check = zone_engine.check_path(
-                [(float(w["lat"]), float(w["lng"])) for w in waypoints]
-            )
-            permit = None
-            if path_check["zone_class"] == "red":
-                names = ", ".join(z["name"] for z in path_check["zones"])
-                if session.drone:
-                    from app.permits import service as permit_service
-                    permit = await permit_service.find_approved(
-                        session.drone["id"], waypoints
-                    )
-                if permit is None:
-                    await sio.emit("mission_upload_result", {
-                        "ok": False, "blocked": "red", "zones": path_check["zones"],
-                        "can_request": bool(session.drone),
-                        "msg": f"Mission crosses NO-FLY (red) zone: {names} - permission required",
-                    }, to=sid)
-                    logger.warning(
-                        f"Mission blocked (red zones: {names}) for {session.session_id[:8]}"
-                    )
-                    return
-                logger.info(
-                    f"Red-zone mission allowed under permit {permit['id'][:8]} "
-                    f"for {session.session_id[:8]}"
-                )
-            # An approved permit covers the whole profile - no extra orange ack
-            if (path_check["zone_class"] == "orange"
-                    and not data.get("ack_orange") and permit is None):
-                names = ", ".join(z["name"] for z in path_check["zones"])
+            # Red blocks unless an approved, in-window permit of the drone's
+            # workspace covers this path; orange needs an ack unless a
+            # permit covers it too (app/permits/service.gate_upload).
+            from app.permits import service as permit_service
+            try:
+                gate = await permit_service.gate_upload(
+                    session.drone, waypoints, ack_orange=bool(data.get("ack_orange")))
+            except (KeyError, TypeError, ValueError):
                 await sio.emit("mission_upload_result", {
-                    "ok": False, "needs_ack": True, "zones": path_check["zones"],
-                    "msg": f"Mission passes through restricted (orange) zone: {names}",
+                    "ok": False, "msg": "Every waypoint needs numeric lat and lng"
                 }, to=sid)
                 return
+            if not gate["ok"]:
+                await sio.emit("mission_upload_result", {
+                    k: v for k, v in gate.items() if k != "permit"}, to=sid)
+                if gate.get("blocked"):
+                    logger.warning(f"Mission blocked ({gate['msg']}) for {session.session_id[:8]}")
+                return
+            permit = gate["permit"]
+            if permit is not None:
+                logger.info(
+                    f"Mission allowed under permit {permit['id'][:8]} "
+                    f"for {session.session_id[:8]}"
+                )
 
             logger.info(
                 f"Uploading {len(waypoints)} waypoints "
@@ -1073,11 +1110,14 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 await mission_service.mark_uploaded_by_hash(
                     waypoints,
                     drone_id=session.drone["id"] if session.drone else None,
+                    workspace_id=(session.drone or {}).get("workspace_id")
+                    or getattr(session, "workspace_id", None),
                 )
             await sio.emit("mission_upload_result", {
                 "ok": ok,
                 "count": len(waypoints) if ok else 0,
                 "terrain_follow": terrain_follow,
+                "permit_id": permit["id"] if ok and permit else None,
                 "msg": f"Mission uploaded: {len(waypoints)} waypoints" if ok
                        else f"Upload failed: {err_msg}",
             }, to=sid)
@@ -1443,3 +1483,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 analyzer.set_tracking(session.session_id, active)
 
         await sio.emit("tracking_status", {"active": active}, to=sid)
+    # The connect and release flows, for the cloud simulator's events
+    # (app/events/cloud_sim_events.py), which open and drop the session's
+    # link to a server-launched sim the same way.
+    return SimpleNamespace(connect=_connect_telemetry, release=_release_link)

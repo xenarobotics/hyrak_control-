@@ -16,6 +16,7 @@ export type Perm =
     | 'members.manage' | 'children.manage' | 'zones.site' | 'zones.area'
     | 'permits.approve' | 'workspace.operating_area' | 'audit.view'
     | 'workspace.delete' | 'zones.regulatory' | 'staff.manage' | 'accounts'
+    | 'sessions.takeover'
 
 export type GeoPolygon =
     | { type: 'Polygon'; coordinates: number[][][] }
@@ -42,6 +43,8 @@ export interface WorkspaceInfo {
     perms: Perm[]
     inherited: boolean
     disabled?: boolean
+    /** Paid extras a founder switched on, e.g. { cloud_sim: true }. */
+    features?: Record<string, boolean>
 }
 
 export const ROLE_LABELS: Record<MemberRole, string> = {

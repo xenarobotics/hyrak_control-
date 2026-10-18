@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 
 from app.db import db_available, get_session
-from app.db.models import Mission, Pad, Task, TaskEvent
+from app.db.models import PLATFORM_WORKSPACE_ID, Mission, Pad, Task, TaskEvent
 
 logger = logging.getLogger("verocore.tasks.service")
 
@@ -59,8 +59,11 @@ async def resolve_pad(ref: str, kind: str = "pad") -> dict | None:
         return None
     from sqlalchemy import or_
     async with get_session() as db:
+        # Deliveries are HYRAK's: only the platform workspace's pads
+        # (customer pads are their own planning vocabulary, ACCESS_MODEL 8b).
         stmt = select(Pad).where(
             Pad.active == True,  # noqa: E712
+            Pad.workspace_id == PLATFORM_WORKSPACE_ID,
             or_(Pad.id == ref, func.lower(Pad.name) == ref.lower()),
         )
         if kind:
@@ -76,7 +79,8 @@ async def nearest_station(lat: float, lng: float) -> dict | None:
     async with get_session() as db:
         rows = (
             await db.execute(
-                select(Pad).where(Pad.active == True, Pad.kind == "station")  # noqa: E712
+                select(Pad).where(Pad.active == True, Pad.kind == "station",  # noqa: E712
+                                  Pad.workspace_id == PLATFORM_WORKSPACE_ID)
             )
         ).scalars().all()
     if not rows:

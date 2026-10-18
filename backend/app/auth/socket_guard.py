@@ -43,6 +43,7 @@ import time
 
 from app.auth import audit, live_scope, perms
 from app.auth import socket_classes as classes
+from app.sessions import takeover
 from app.auth.service import SOCKET_REVALIDATE_S, role_at_least, verify_token_hash
 
 logger = logging.getLogger("verocore.auth.socket")
@@ -59,6 +60,7 @@ FORBIDDEN = "forbidden"
 DRONE_NOT_IN_WORKSPACE = "drone_not_in_workspace"
 DRONE_UNIDENTIFIED = "drone_unidentified"
 ACCESS_UNVERIFIED = "access_unverified"
+TAKEN_OVER = "taken_over"
 
 
 def configure(sio, session_manager) -> None:
@@ -215,6 +217,39 @@ def _is_staff_session(session) -> bool:
     return bool(session.is_staff)
 
 
+def takeover_stops(session, event: str):
+    """The one takeover check for the socket paths (docs/ACCESS_MODEL.md 8b
+    "Takeover"): the Takeover that refuses `event` from this session, or
+    None. A taken-over session may not send any session command (safety
+    actions included) nor touch its link (socket_classes.TAKEOVER_LINK_EVENTS);
+    it may still watch and read. Relinking a radio is allowed while there is
+    no link at all. For serial_uplink the answer means "filter the relay"
+    (its downlink keeps flowing), never "refuse"."""
+    if session is None:
+        return None
+    t = takeover.blocking(session.session_id, actor_session_id=session.session_id)
+    if t is None:
+        return None
+    if event == "connect_browser_serial" and not _holds_link(session):
+        return None
+    if event == "serial_uplink":
+        return t          # not refused: filtered (serial_bridge.CommandFilter)
+    if event in classes.TAKEOVER_LINK_EVENTS or classes.classify(event) == classes.SESSION_COMMAND:
+        return t
+    return None
+
+
+async def _refuse_taken_over(sid: str, session, event: str, data=None) -> bool:
+    held = takeover.holder(session.session_id)
+    who = held.username if held is not None else "staff"
+    return await _refuse(
+        sid, session, event,
+        f"HYRAK operations ({who}) has taken control of this drone. Your commands, "
+        "hold, return and land included, and changes to the drone link are held back "
+        "until they release it.",
+        TAKEN_OVER, data)
+
+
 async def require_role(sid: str, min_role: str, event: str, data=None, *, quiet: bool = False) -> bool:
     session = session_for(sid)
     if session is not None:
@@ -232,6 +267,10 @@ async def require_role(sid: str, min_role: str, event: str, data=None, *, quiet:
     staff_ok = session is not None and (session.workspace_id is None or session.is_staff)
     if session is None or not role or not role_at_least(role, min_role) or not staff_ok:
         return await _refuse(sid, session, event, f"{event} requires the {min_role} role")
+    if takeover_stops(session, event) is not None:
+        # A staff session can be taken over too (a founder taking a HYRAK
+        # pilot's drone): its link and mission events stop like a customer's.
+        return await _refuse_taken_over(sid, session, event, data)
     if not quiet:
         _audit(session, event, data)
     return True
@@ -267,6 +306,10 @@ async def require_session_view(sid: str, event: str, data=None) -> bool:
     # is already disconnected.
     if await check_session(session) == DENIED:
         return False
+    if event in classes.TAKEOVER_LINK_EVENTS and takeover_stops(session, event) is not None:
+        # disconnect_telemetry: cutting the link would cut staff off the
+        # drone they now command.
+        return await _refuse_taken_over(sid, session, event, data)
     if _is_staff_session(session) or perms.VIEW in (session.perms or frozenset()):
         return True
     return await _refuse(sid, session, event, f"{event} needs view access on this workspace")
@@ -284,6 +327,8 @@ async def require_session_fly(sid: str, event: str, data=None, *, quiet: bool = 
     session = session_for(sid)
     if session is None:
         return await _refuse(sid, None, event, "No session", data=data)
+    if isinstance(data, dict) and data.get("target_session"):
+        return await _require_routed(sid, session, event, data, quiet=quiet)
     state = await check_session(session)
     safety = (event == "drone_action" and classes.is_safety_action(data) and _holds_link(session))
     if state == DENIED:
@@ -291,6 +336,8 @@ async def require_session_fly(sid: str, event: str, data=None, *, quiet: bool = 
         # The parked link runs out its grace and PX4's link-loss failsafe
         # takes over.
         return False
+    if takeover_stops(session, event) is not None:
+        return await _refuse_taken_over(sid, session, event, data)
     if state == UNVERIFIED and not safety:
         return await _refuse(sid, session, event, _UNVERIFIED_MSG, ACCESS_UNVERIFIED, data)
     staff = _is_staff_session(session)
@@ -323,4 +370,107 @@ async def require_session_fly(sid: str, event: str, data=None, *, quiet: bool = 
     if not quiet:
         bypassed = safety and (state != OK or not may_fly or session.drone_fly is not True)
         _audit(session, event, data, " (safety)" if bypassed else "")
+    return True
+
+
+# ── Staff routing to another session's drone (8b "Takeover") ─────────────
+
+def command_session(sid: str, data=None):
+    """The session a routable command acts on: the takeover target when the
+    payload names `target_session` (require_session_fly has checked the
+    caller may), else the caller's own session."""
+    caller = session_for(sid)
+    target_id = data.get("target_session") if isinstance(data, dict) else None
+    if caller is None or not target_id or _session_manager is None:
+        return caller
+    return _session_manager.get(target_id)
+
+
+async def takeover_allowed(caller, target) -> bool:
+    """`sessions.takeover` on the TARGET session's workspace, by the
+    caller's own memberships (founders anywhere, a manager on the
+    workspaces they manage). The legacy token holds no memberships and
+    never takes over. False when the tree cannot be read."""
+    if caller is None or target is None or caller.user_id == live_scope.auth.LEGACY_USER_ID:
+        return False
+    if not _is_staff_session(caller):
+        return False
+    try:
+        tree = await live_scope._tree()
+    except Exception as e:
+        logger.warning(f"takeover check: workspace tree unavailable: {e}")
+        return False
+    ws = tree.get(target.workspace_id or live_scope.PLATFORM_WORKSPACE_ID)
+    if ws is None:
+        return perms.is_founder(caller.memberships)
+    return perms.can(caller.memberships, ws, perms.SESSIONS_TAKEOVER)
+
+
+def _record_bg(caller, action: str, target, detail: dict) -> None:
+    """An audit_events row without holding up the command."""
+    from types import SimpleNamespace
+    from app.auth import service as auth
+    actor = SimpleNamespace(id=caller.user_id, username=caller.username)
+    drone = target.drone or {}
+    detail = {"session_id": target.session_id, "customer": target.username,
+              "drone_id": drone.get("id"), "drone_name": drone.get("name"),
+              "staff_session_id": caller.session_id, **detail}
+
+    async def _write():
+        await audit.record(auth.write_store(), actor, action,
+                           workspace_id=target.workspace_id, target_type="session",
+                           target_id=target.session_id, detail=detail,
+                           ip=getattr(caller, "client_ip", None) or "")
+    try:
+        asyncio.get_running_loop().create_task(_write())
+    except RuntimeError:
+        pass
+
+
+async def _require_routed(sid: str, caller, event: str, data: dict, *, quiet: bool) -> bool:
+    """A staff console socket commanding another session's drone: a quick
+    hold / return / land, or anything while it holds that session's
+    takeover. Every accepted drone_action is an audit row."""
+    if event not in classes.ROUTABLE_EVENTS:
+        return await _refuse(sid, caller, event, f"{event} cannot be sent to another session", data=data)
+    safety = event == "drone_action" and classes.is_safety_action(data)
+    state = await check_session(caller)
+    if state == DENIED:
+        return False
+    if state == UNVERIFIED and not safety:
+        return await _refuse(sid, caller, event, _UNVERIFIED_MSG, ACCESS_UNVERIFIED, data)
+    target_id = str(data.get("target_session"))
+    target = _session_manager.get(target_id) if _session_manager is not None else None
+    if target is None or target is caller or not await takeover_allowed(caller, target):
+        # One answer for "no such session" and "not yours to take": no probing.
+        return await _refuse(sid, caller, event,
+                             "That session is not one you can take control of", data=data)
+    if not _holds_link(target):
+        return await _refuse(sid, caller, event, "That session has no drone link", data=data)
+    held = takeover.holder(target_id)
+    mine = held is not None and held.staff_session_id == caller.session_id
+    if held is not None and not mine:
+        return await _refuse(sid, caller, event,
+                             f"{held.username} already holds control of this session",
+                             TAKEN_OVER, data)
+    if not mine and not safety:
+        return await _refuse(sid, caller, event,
+                             "Take control of the session first (hold, return and land "
+                             "work without it)", data=data)
+    if not quiet:
+        kind = "takeover" if mine else "quick action"
+        audit.log(caller, f"{event} ({kind})", session_id=target_id,
+                  drone=(target.drone or {}).get("id"))
+        if event == "drone_action":
+            _record_bg(caller, "session.takeover.command" if mine else "session.quick_action",
+                       target, {"event": event, "action": data.get("action"),
+                                "mode": data.get("mode")})
+            if _sio is not None and target.socket_id and not mine:
+                # The customer sees what HYRAK sent to their drone.
+                try:
+                    await _sio.emit("staff_intervention", {
+                        "action": data.get("action"), "by": caller.username,
+                    }, to=target.socket_id)
+                except Exception:
+                    pass
     return True

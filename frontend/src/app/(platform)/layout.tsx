@@ -26,6 +26,7 @@ import { useAuthGate, hasConsoleAccess } from '@/hooks/useAuthGate'
 import { useClientValueOn, useHydrated } from '@/hooks/useClientValue'
 import { WorkspaceSwitcher } from '@/components/layout/WorkspaceSwitcher'
 import { CommandRefusalBanner } from '@/components/controls/CommandRefusalBanner'
+import { TakeoverBanner } from '@/components/controls/TakeoverBanner'
 import { useAccess } from '@/hooks/useAccess'
 import { onWorkspaceSwitch } from '@/lib/workspaceSwitch'
 
@@ -40,8 +41,9 @@ const NAV = [
 ]
 
 // Pages a customer-only account never opens (docs/ACCESS_MODEL.md section
-// 8a): missions and deliveries stay staff-only in phase 2a.
-const STAFF_ONLY_PATHS = ['/mission', '/deliveries']
+// 8a): HYRAK's deliveries. The Mission tab is every customer's since phase
+// 2b (their own workspace's plans and permits, section 8b).
+const STAFF_ONLY_PATHS = ['/deliveries']
 const isStaffOnlyPath = (path: string) => STAFF_ONLY_PATHS.some(p => path === p || path.startsWith(p + '/'))
 
 // Mount socket ONCE at layout level - persists across all tab navigation
@@ -93,10 +95,11 @@ const NAV_NORMAL = [
     { href: '/settings', label: 'Settings', icon: Settings },
 ]
 
-// Customer-only accounts (docs/ACCESS_MODEL.md section 8a): Fly, AI, Config
-// and Settings in both modes, never Plan, Mission or Deliver.
+// Customer-only accounts (docs/ACCESS_MODEL.md sections 8a, 8b): Fly, Plan,
+// AI, Config and Settings in both modes, never Deliver.
 const NAV_NORMAL_CUSTOMER = [
     { href: '/command',   label: 'Fly',      icon: Radio },
+    { href: '/mission',   label: 'Plan',     icon: Map },
     { href: '/modules',   label: 'AI',       icon: Bot },
     { href: '/telemetry', label: 'Config',   icon: SlidersHorizontal },
     { href: '/settings',  label: 'Settings', icon: Settings },
@@ -324,6 +327,7 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
                         {showStatusBar && <StatusBar />}
                         <ZoneBanner />
                         <CommandRefusalBanner />
+                        <TakeoverBanner />
                         <main className="flex-1 overflow-hidden p-3 md:p-4"
                             style={uiMode === 'normal' ? { background: '#F4F7FB' } : undefined}>
                             {/* A staff-only page never renders for a customer,

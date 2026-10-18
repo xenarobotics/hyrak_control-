@@ -108,6 +108,7 @@ export function useDrone() {
             if (data.resumed) {
                 // Same session, same drone link: keep everything as it is.
                 store.setSession(data)
+                store.setTakeover(data.takeover ? { by: data.takeover.by, since: data.takeover.since } : null)
                 store.setConnectionStatus('connected')
                 console.info(`[socket] session resumed after ${data.away_s ?? '?'}s away`)
                 window.dispatchEvent(new Event('hyrak-session-resumed'))   // video restarts itself
@@ -122,6 +123,7 @@ export function useDrone() {
             }
             setResumeSession(data.session_id)
             store.setSession(data)
+            store.setTakeover(data.takeover ? { by: data.takeover.by, since: data.takeover.since } : null)
             // If swarm mode was enabled before this page load/reconnect, clear stale
             // drone entries and re-scan so the fleet repopulates automatically.
             const swarm = useSwarmStore.getState()
@@ -158,6 +160,22 @@ export function useDrone() {
         // with a code: `forbidden` and `drone_not_in_workspace`. Their message
         // names the fix, so it goes to the pilot as the server wrote it.
         const onServerError = (data: { code?: string; msg?: string }) => {
+            // The normal end of a client-overlay stream (the camera or relay
+            // track ended; backend webrtc/signaling.py _drive) also arrives as
+            // `error`, beside the stream_stopped that useWebRTC handles. It is
+            // not a failure, and it is not about telemetry: a connect waiting
+            // here must not be marked failed because the video stopped.
+            if (!data?.code && data?.msg === 'video source ended') {
+                console.info('Video source ended')
+                return
+            }
+            if (data?.code === 'taken_over') {
+                // HYRAK operations hold the drone: the takeover banner says
+                // so; the refused button just stops waiting.
+                useDroneStore.setState({ pendingAction: null })
+                console.info('Command held back - HYRAK operations have control')
+                return
+            }
             console.error('Server error', data?.code ?? '', data?.msg)
             if (data?.code === 'forbidden' || data?.code === 'drone_not_in_workspace') {
                 store.setCommandRefusal({
@@ -173,6 +191,15 @@ export function useDrone() {
                 store.setTelemetryStatus('error')
                 void stopBrowserSerial()
             }
+        }
+
+        // Staff takeover (docs/ACCESS_MODEL.md 8b): the banner, and the quick
+        // hold / return / land HYRAK operations sent without taking over.
+        const onTakeoverStatus = (data: { active?: boolean; by?: string; since?: number }) => {
+            store.setTakeover(data?.active ? { by: data.by ?? 'HYRAK operations', since: data.since ?? Date.now() / 1000 } : null)
+        }
+        const onStaffIntervention = (data: { action?: string; by?: string }) => {
+            store.setStaffIntervention({ action: data?.action ?? '', by: data?.by ?? 'HYRAK operations', at: Date.now() })
         }
 
         // Primary drone telemetry - suppressed when a fleet drone has focus so
@@ -345,6 +372,8 @@ export function useDrone() {
         socket.on('connect_error',         onConnectError)
         socket.on('session_ready',         onSessionReady)
         socket.on('error',                 onServerError)
+        socket.on('takeover_status',       onTakeoverStatus)
+        socket.on('staff_intervention',    onStaffIntervention)
         socket.on('telemetry_status',      onTelStatus)
         socket.on('drone_identity',        onDroneIdentity)
         socket.on('telemetry_update',      onTelUpdate)
@@ -377,6 +406,8 @@ export function useDrone() {
             socket.off('error',                 onServerError)
             socket.off('telemetry_status',      onTelStatus)
             socket.off('drone_identity',        onDroneIdentity)
+            socket.off('takeover_status',       onTakeoverStatus)
+            socket.off('staff_intervention',    onStaffIntervention)
             socket.off('telemetry_update',      onTelUpdate)
             socket.off('cv_results',            onCvResults)
             socket.off('mode_changed',          onModeChanged)

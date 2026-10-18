@@ -24,6 +24,7 @@ import {
 import { pointsFromPolygon, polygonFromPoints, type ZoneFeature } from '@/components/admin/zones'
 import type { Outline } from '@/components/admin/AreaMap'
 import { Btn, CopyLink, Empty, INPUT_CLS, LABEL_CLS, Notice, Section, Tag } from '@/components/admin/console'
+import { ActivitySection } from '@/components/admin/ActivitySection'
 
 const AreaMap = dynamic(() => import('@/components/admin/AreaMap'), { ssr: false })
 
@@ -246,6 +247,15 @@ function WorkspaceDetail({ ws, list, zones, isFounder, onChanged, onDeleted, onS
         if (!window.confirm(`${verb} ${ws.name}?`)) return
         void act('head', 'disable', () => updateWorkspace(ws.id, { disabled: !ws.disabled }), `${verb}d.`, onChanged)
     }
+    // The cloud simulator is a premium extra a founder switches on per
+    // workspace (docs/ACCESS_MODEL.md 8b). Staff never need it switched on.
+    const cloudSim = ws.features?.cloud_sim === true
+    const toggleCloudSim = () => {
+        const verb = cloudSim ? 'Turn off' : 'Turn on'
+        if (!window.confirm(`${verb} the cloud simulator (premium) for ${ws.name}?`)) return
+        void act('head', 'cloud_sim', () => updateWorkspace(ws.id, { features: { cloud_sim: !cloudSim } }),
+            cloudSim ? 'Cloud simulator turned off.' : 'Cloud simulator turned on.', onChanged)
+    }
     const remove = () => {
         const typed = window.prompt(`Delete ${ws.name} permanently? Type its name to confirm. Workspaces with clients or drones cannot be deleted.`)
         if (typed === null) return
@@ -263,11 +273,18 @@ function WorkspaceDetail({ ws, list, zones, isFounder, onChanged, onDeleted, onS
                     <span className="text-lg font-semibold text-zinc-100">{ws.name}</span>
                     <Tag label={KIND_LABELS[ws.kind].toUpperCase()} tone={ws.kind === 'platform' ? 'cyan' : 'zinc'} />
                     {ws.disabled && <Tag label="DISABLED" tone="red" />}
+                    {cloudSim && <Tag label="CLOUD SIM" tone="cyan" />}
                     <span className="ml-auto flex gap-2">
                         {canMembers && <Btn onClick={rename} disabled={busy === 'rename'}>RENAME</Btn>}
                         {isFounder && ws.kind !== 'platform' && (
                             <Btn tone={ws.disabled ? 'emerald' : 'red'} onClick={toggleDisabled} disabled={busy === 'disable'}>
                                 {ws.disabled ? 'ENABLE' : 'DISABLE'}
+                            </Btn>
+                        )}
+                        {isFounder && ws.kind !== 'platform' && (
+                            <Btn onClick={toggleCloudSim} disabled={busy === 'cloud_sim'}
+                                title="Premium: a per-session simulator on the HYRAK server">
+                                {cloudSim ? 'CLOUD SIM OFF' : 'CLOUD SIM ON'}
                             </Btn>
                         )}
                         {canDelete && ws.kind !== 'platform' && (
@@ -281,6 +298,8 @@ function WorkspaceDetail({ ws, list, zones, isFounder, onChanged, onDeleted, onS
                 </div>
                 {note('head')}
             </div>
+
+            {hasPerm(ws, 'view') && <ActivitySection workspaceId={ws.id} />}
 
             <OperatingArea ws={ws} parent={parent} zones={zones} canEdit={canArea} onChanged={onChanged} />
 

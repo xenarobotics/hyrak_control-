@@ -212,7 +212,11 @@ export const createWorkspace = (body: { name: string; kind: WorkspaceKind; paren
 
 export const getWorkspace = (id: string) => call<WorkspaceInfo>(ws(id))
 
-export const updateWorkspace = (id: string, body: { name?: string; operating_area?: GeoPolygon | null; disabled?: boolean }) =>
+export const updateWorkspace = (id: string, body: {
+    name?: string; operating_area?: GeoPolygon | null; disabled?: boolean
+    /** Founders only: paid extras, e.g. { cloud_sim: true }. */
+    features?: Record<string, boolean>
+}) =>
     call<unknown>(ws(id), { method: 'PATCH', json: body })
 
 export const deleteWorkspace = (id: string) => call<unknown>(ws(id), { method: 'DELETE' })
@@ -275,6 +279,8 @@ export interface ZoneBody {
     active?: boolean
     layer?: ZoneLayer
     workspace_id?: string | null
+    /** Red zones: false = prohibited, no permit can be requested (8d). */
+    permission_required?: boolean
 }
 
 export const createZone = (body: ZoneBody) =>

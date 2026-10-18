@@ -49,6 +49,13 @@ EVENTS: dict[str, str] = {
     "fetch_params": SESSION_VIEW,
     "get_param": SESSION_VIEW,
 
+    # ── the session's own cloud simulator (8c, premium) ─────────────────
+    # The server picks the ports, launches the process and links the
+    # session to it; the client sends at most an airframe and a home.
+    "start_cloud_sim": SESSION_COMMAND,   # plus the workspace's cloud_sim feature (staff: always)
+    "stop_cloud_sim": SESSION_VIEW,       # stopping your own sim, like disconnect_telemetry
+    "cloud_sim_status": SESSION_VIEW,
+
     # ── commands to the session's drone ─────────────────────────────────
     "drone_action": SESSION_COMMAND,
     "drone_command": SESSION_COMMAND,
@@ -63,6 +70,7 @@ EVENTS: dict[str, str] = {
     "set_altitude_mode": SESSION_COMMAND,
     "set_altitude_nudge": SESSION_COMMAND,
     "set_tracking_params": SESSION_COMMAND,
+    "upload_mission": SESSION_COMMAND,  # phase 2b: customers fly their own plans
 
     # ── the session's AI pipeline ───────────────────────────────────────
     "set_analysis_mode": SESSION_COMMAND,  # minus CUSTOMER_BLOCKED_MODES
@@ -75,7 +83,6 @@ EVENTS: dict[str, str] = {
     "connect_telemetry": STAFF,       # arbitrary address: server Gazebo udp:14600, LAN, anything
     "connect_rf_bridge": STAFF,       # the one shared RF bridge / ground-station relay
     "start_rc_monitor": STAFF,        # binds a server port, one monitor for the whole server
-    "upload_mission": STAFF,          # customer mission planning is phase 2b
     "set_gallery_mode": STAFF,        # the face gallery is global
     "enrol_person_live": STAFF,       # writes the global face gallery
     "set_crowd_thresholds": STAFF,    # persisted to the server-wide calibration file
@@ -86,10 +93,12 @@ EVENTS: dict[str, str] = {
     "wall_offer": STAFF,              # mesh unit feeds on server ports
     "wall_ice_candidate": STAFF,
     "wall_close": STAFF,
-    "admin_hello": STAFF,
-    "watch_session": STAFF,           # another session's telemetry and video
+    "admin_hello": STAFF,             # console observer, scoped to the workspaces it can view
+    "watch_session": STAFF,           # another session's telemetry and video (view only)
     "unwatch_session": STAFF,
-    "request_permit": STAFF,
+    "takeover_session": STAFF,        # + sessions.takeover on the target session's workspace
+    "release_session": STAFF,
+    "request_permit": STAFF,          # swarm / fleet drones; customers use REST /api/permits
     "list_my_permits": STAFF,
     "connect_swarm_relay": STAFF,
     "swarm_relay_uplink": STAFF,
@@ -120,7 +129,24 @@ DRONE_EVENTS = frozenset({
     "drone_action", "drone_command", "set_param",
     "set_tracking", "set_vehicle_tracking", "set_follow_vehicle", "set_follow_person",
     "set_multi_follow", "select_person", "set_pd_params", "set_altitude_mode",
-    "set_altitude_nudge", "set_tracking_params",
+    "set_altitude_nudge", "set_tracking_params", "upload_mission",
+})
+
+# Session commands a staff console socket may route to ANOTHER session's
+# drone by naming `target_session` (docs/ACCESS_MODEL.md 8b "Takeover"):
+# hold / return / land as quick actions, anything while it holds the
+# takeover. Everything else stays bound to the caller's own session.
+ROUTABLE_EVENTS = frozenset({"drone_action", "drone_command"})
+
+# What a session in TAKEOVER may no longer send (socket_guard.takeover_stops):
+# every SESSION_COMMAND, safety actions included - staff own the decision
+# while they hold control - plus these, which would cut, replace or reprogram
+# the link staff now command through. connect_browser_serial is let through
+# only while the session has no link at all (relinking a dropped radio gives
+# staff their link back).
+TAKEOVER_LINK_EVENTS = frozenset({
+    "disconnect_telemetry", "connect_browser_serial",
+    "connect_telemetry", "connect_rf_bridge", "upload_mission",
 })
 
 # drone_action names that are never refused for a session holding the

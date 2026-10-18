@@ -189,8 +189,12 @@ async def create_workspace(actor: AuthUser, *, name: str, kind: str, parent_id: 
 _UNSET = object()
 
 
+# Paid extras a founder can switch on per workspace (docs/ACCESS_MODEL.md 8b).
+FEATURES = frozenset({"cloud_sim"})
+
+
 async def patch_workspace(actor: AuthUser, workspace_id: str, *, name=None,
-                          operating_area=_UNSET, disabled=None, ip: str) -> dict:
+                          operating_area=_UNSET, disabled=None, features=None, ip: str) -> dict:
     store = auth.write_store()
     ms = await _fresh_memberships(actor)
     tree = await _tree(store)
@@ -212,6 +216,14 @@ async def patch_workspace(actor: AuthUser, workspace_id: str, *, name=None,
         if not perms.can(ms, ws, perms.WORKSPACE_OPERATING_AREA):
             raise Refused(403, "Only HYRAK staff (a founder or the manager) disable a workspace")
         fields["disabled"] = bool(disabled)
+    if features is not None:
+        # A paid entitlement: founders only, never the customer or a manager.
+        if not perms.is_founder(ms):
+            raise Refused(403, "Only a founder switches workspace features on or off")
+        if not isinstance(features, dict) or not set(features) <= FEATURES \
+                or not all(isinstance(v, bool) for v in features.values()):
+            raise Refused(400, f"features takes true/false for: {', '.join(sorted(FEATURES))}")
+        fields["features"] = {**(ws.features or {}), **features}
     if not fields:
         return _describe(ms, ws)
     out = await store.update_workspace(workspace_id, **fields)
@@ -711,7 +723,7 @@ async def list_zones() -> list[dict]:
 
 async def create_zone(actor: AuthUser, *, name: str, zone_class: str, geometry: dict,
                       floor_m: float, ceiling_m, layer: str | None, workspace_id: str | None,
-                      ip: str) -> dict:
+                      ip: str, permission_required: bool = True) -> dict:
     store = auth.write_store()
     if zone_class not in ZONE_CLASSES:
         raise Refused(400, "zone_class must be green/orange/red")
@@ -724,7 +736,8 @@ async def create_zone(actor: AuthUser, *, name: str, zone_class: str, geometry: 
     z = ZoneRecord(id=new_id(), name=(name or f"{zone_class} zone").strip()[:120],
                    zone_class=zone_class, geometry=geometry, floor_m=floor_m,
                    ceiling_m=ceiling_m, layer=layer, workspace_id=ws.id,
-                   created_by=actor.id, updated_by=actor.id, updated_at=now, created_at=now)
+                   created_by=actor.id, updated_by=actor.id, updated_at=now, created_at=now,
+                   permission_required=bool(permission_required))
     out = await store.add_zone(z)
     await audit.record(store, actor, "zone.create", workspace_id=ws.id, target_type="zone",
                        target_id=out.id, detail={"name": out.name, "zone_class": zone_class,
@@ -734,7 +747,7 @@ async def create_zone(actor: AuthUser, *, name: str, zone_class: str, geometry: 
 
 async def patch_zone(actor: AuthUser, zone_id: str, fields: dict, *, ip: str) -> dict:
     """fields may hold name, zone_class, floor_m, ceiling_m, active, layer,
-    workspace_id (geometry changes are delete + redraw)."""
+    workspace_id, permission_required (geometry changes are delete + redraw)."""
     store = auth.write_store()
     z = await store.get_zone(zone_id)
     if z is None:
@@ -751,14 +764,52 @@ async def patch_zone(actor: AuthUser, zone_id: str, fields: dict, *, ip: str) ->
     if "zone_class" in fields and fields["zone_class"] not in ZONE_CLASSES:
         raise Refused(400, "bad zone_class")
     changes = {k: v for k, v in fields.items()
-               if k in ("name", "zone_class", "floor_m", "ceiling_m", "active", "layer", "workspace_id")}
+               if k in ("name", "zone_class", "floor_m", "ceiling_m", "active", "layer", "workspace_id",
+                        "permission_required")}
     if not changes:
         return z.to_feature()
+    # Permits first: if they cannot be superseded the edit is refused, so a
+    # stricter zone is never saved while permits approved against the old
+    # one still count. (Superseded and then a failed zone write leaves the
+    # zone as it was and the permits gone: safe.)
+    superseded = await _supersede_permits(z, changes)
     out = await store.update_zone(zone_id, **changes, updated_by=actor.id, updated_at=utcnow())
     await audit.record(store, actor, "zone.update", workspace_id=out.workspace_id,
                        target_type="zone", target_id=zone_id,
                        detail={k: v for k, v in changes.items()}, ip=ip)
+    for p in superseded:
+        await audit.record(store, actor, "permit.supersede", workspace_id=p["workspace_id"],
+                           target_type="permit", target_id=p["id"],
+                           detail={"zone_id": z.id, "zone": z.name,
+                                   "changed": _permit_relevant_changes(z, changes)}, ip=ip)
     return out.to_feature()
+
+
+# A change to any of these alters what flying through the zone means, so
+# permits approved against the old zone stop counting (docs/ACCESS_MODEL.md
+# 8b). Geometry changes are delete + redraw: the new zone has a new id that
+# no permit names.
+_PERMIT_RELEVANT = ("zone_class", "permission_required", "floor_m", "ceiling_m")
+
+
+def _permit_relevant_changes(before: ZoneRecord, changes: dict) -> list[str]:
+    return [k for k in _PERMIT_RELEVANT if k in changes and changes[k] != getattr(before, k)]
+
+
+async def _supersede_permits(before: ZoneRecord, changes: dict) -> list[dict]:
+    """Supersede the approved permits naming this zone when the edit changes
+    what they approved. Raises Refused(503) when that cannot be done."""
+    changed = _permit_relevant_changes(before, changes)
+    if not changed:
+        return []
+    from app.permits import service as permit_service
+    reason = f"zone {before.name} changed ({', '.join(changed)})"
+    try:
+        return await permit_service.supersede_for_zone(before.id, reason)
+    except Exception as e:
+        logger.error(f"zone {before.id}: could not supersede its permits, edit refused: {e}")
+        raise Refused(503, "The zone was not changed: the permits approved for it could not be "
+                           "withdrawn just now (database error). Try again shortly.")
 
 
 async def delete_zone(actor: AuthUser, zone_id: str, *, ip: str) -> None:

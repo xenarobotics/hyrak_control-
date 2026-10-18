@@ -22,6 +22,7 @@ from app.events.admin_events import register_admin_events, set_sio
 from app.events.permit_events import register_permit_events
 from app.webrtc.signaling import register_webrtc_events
 from app.events.gs_relay_events import register_gs_relay_events
+from app.events.cloud_sim_events import register_cloud_sim_events
 from app.api.routes import router
 from app.auth import service as auth_service
 from app.auth import live_scope, socket_guard
@@ -29,6 +30,11 @@ from app.auth.clientip import client_ip_from
 from app.auth.routes import router as auth_router
 
 logger = logging.getLogger("verocore.server")
+
+# How long a session whose socket dropped is held for the client to resume
+# it (drone link, relay, cloud sim and all) before it is torn down. Module
+# level so a test can shorten it.
+SESSION_GRACE_S = 90.0
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -74,6 +80,8 @@ def create_app() -> socketio.ASGIApp:
     fastapi_app.include_router(router)
     from app.workspaces.routes import router as workspaces_router
     fastapi_app.include_router(workspaces_router)
+    from app.permits.routes import router as permits_router
+    fastapi_app.include_router(permits_router)
     from app.api.public import router as public_router
     fastapi_app.include_router(public_router)
     from app.reconstruction.routes import router as recon_router
@@ -112,7 +120,6 @@ def create_app() -> socketio.ASGIApp:
         json=safe_json,
     )
     set_sio(sio)
-    SESSION_GRACE_S = 90.0
     _expiry_tasks: dict = {}
 
     # ------------------------------------------------------------------ #
@@ -131,6 +138,10 @@ def create_app() -> socketio.ASGIApp:
     fastapi_app.state.session_manager = session_manager
     fastapi_app.state.peer_registry   = peer_registry
     fastapi_app.state.vision_pool     = vision_pool
+    # Vision history rows are stamped with their session's workspace
+    # (docs/ACCESS_MODEL.md 8b); the analyzers only know the session id.
+    from app.vision import persistence as vision_persistence
+    vision_persistence.set_workspace_resolver(session_manager.workspace_of)
 
     # ------------------------------------------------------------------ #
     # Load vision modules at startup                                       #
@@ -157,9 +168,17 @@ def create_app() -> socketio.ASGIApp:
         avoidance_loop.start(session_manager)
         from app import loop_stall
         loop_stall.start()
+        # Cloud SITL: end what a previous run left behind (marker-matched
+        # processes only), then watch for idle and crashed instances.
+        from app.sim import manager as sim_manager
+        sim_manager.get_manager().warn_if_exposed()
+        await sim_manager.get_manager().cleanup_orphans()
+        sim_manager.get_manager().start_background()
 
     @fastapi_app.on_event("shutdown")
     async def on_shutdown():
+        from app.sim import manager as sim_manager
+        await sim_manager.get_manager().shutdown()
         from app.tasks import dispatcher
         dispatcher.stop()
         from app.avoidance.core import loop as avoidance_loop
@@ -179,6 +198,13 @@ def create_app() -> socketio.ASGIApp:
     # ------------------------------------------------------------------ #
     # Socket.IO lifecycle                                                  #
     # ------------------------------------------------------------------ #
+    def _takeover_field(session_id: str):
+        """Whether HYRAK operations hold this session's drone (8b): the
+        customer's banner survives a page reload or a resume."""
+        from app.sessions import takeover as _takeover
+        held = _takeover.holder(session_id)
+        return held.public() if held is not None else None
+
     def _scope_fields(scope) -> dict:
         """What session_ready says about the session's workspace: the client
         shows only what `perms` allow, and `staff` tells it to keep the
@@ -258,6 +284,11 @@ def create_app() -> socketio.ASGIApp:
             task = _expiry_tasks.pop(prior.session_id, None)
             if task is not None:
                 task.cancel()
+            # A console that took over a session keeps it across its own
+            # reconnect (docs/ACCESS_MODEL.md 8b "Takeover").
+            from app.sessions import takeover as _takeover
+            if _takeover.cancel_pending(prior.session_id):
+                logger.info(f"Session {prior.session_id[:8]}: back in time, its takeover stands")
             logger.info(f"Resumed session {prior.session_id[:8]} on {sid[:8]} for "
                         f"{user.username} after {gone:.1f}s away")
 
@@ -272,6 +303,7 @@ def create_app() -> socketio.ASGIApp:
                     "resume_secret": prior.resume_secret,
                     "user": user.public(),
                     **_scope_fields(scope),
+                    "takeover": _takeover_field(prior.session_id),
                 }, to=sid)
             asyncio.create_task(_send_resumed())
             return True
@@ -285,7 +317,7 @@ def create_app() -> socketio.ASGIApp:
         session.auth_checked_at = time.monotonic()
         session.resume_secret = secrets.token_urlsafe(32)
         live_scope.stamp(session, user, scope)
-        session_manager.note_owner(session.session_id, user.id)
+        session_manager.note_owner(session.session_id, user.id, scope.workspace_id)
         if not scope.is_staff:
             # The enrolled-face gallery is HYRAK's global data: a customer's
             # person-tracking matches nobody rather than everyone HYRAK knows.
@@ -359,6 +391,10 @@ def create_app() -> socketio.ASGIApp:
             session.detached_at = time.monotonic()
             logger.info(f"Session {session.session_id[:8]} lost its socket {sid[:8]} - "
                         f"held for {SESSION_GRACE_S:.0f}s for the client to return")
+            # A console holding a takeover releases it after a short grace
+            # unless it comes back (the customer is not locked out for 90 s).
+            from app.events.admin_events import on_staff_socket_gone
+            await on_staff_socket_gone(session)
             _expiry_tasks[session.session_id] = asyncio.create_task(
                 _expire_session(session.session_id))
         logger.info(f"Disconnected {sid[:8]}")
@@ -377,6 +413,12 @@ def create_app() -> socketio.ASGIApp:
         client has not come back within SESSION_GRACE_S."""
         from app.sessions import observer
         from app.telemetry.serial_bridge import close_bridge
+        # The session's cloud simulator ends with it (docs/ACCESS_MODEL.md 8c).
+        from app.sim import manager as sim_manager
+        try:
+            await sim_manager.get_manager().stop_for_session(session.session_id, "session_ended")
+        except Exception as e:
+            logger.error(f"Session {session.session_id[:8]}: cloud sim stop failed: {e}")
         close_bridge(session.session_id)
         close_swarm_relay_bridge(session.session_id)
         from app.flights import recorder
@@ -397,6 +439,8 @@ def create_app() -> socketio.ASGIApp:
         from app.webrtc import datachannel_video_source
         datachannel_video_source.release(session.session_id)
         observer.drop_session(session.session_id)
+        from app.events.admin_events import on_session_ended
+        await on_session_ended(session.session_id)
         await vision_pool.unregister_session(session.session_id)
         vision_pool.drop_gallery_rule(session.session_id)
         await session_manager.destroy(session.session_id)
@@ -421,7 +465,8 @@ def create_app() -> socketio.ASGIApp:
                 except Exception:
                     pass
     auth_service.on_user_revoked(_disconnect_user_sockets)
-    register_telemetry_events(sio, session_manager, vision_pool)
+    telemetry_links = register_telemetry_events(sio, session_manager, vision_pool)
+    register_cloud_sim_events(sio, session_manager, telemetry_links)
     register_swarm_events(sio, session_manager)
     register_admin_events(sio, session_manager)
     register_permit_events(sio, session_manager)

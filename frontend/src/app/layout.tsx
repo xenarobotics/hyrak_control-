@@ -37,6 +37,12 @@ const atkinson = Atkinson_Hyperlegible_Next({
   variable: '--font-atkinson',
   subsets: ['latin'],
   weight: ['400', '500', '700', '800'],
+  // next/font has no metric overrides for this family, so it could never
+  // build the size-adjusted fallback face; it only printed "Failed to find
+  // font override values" on every compile. Same rendering, no warning: the
+  // fallback stack is the one globals.css already puts after the variable.
+  adjustFontFallback: false,
+  fallback: ['system-ui', 'sans-serif'],
 })
 
 export const metadata: Metadata = {

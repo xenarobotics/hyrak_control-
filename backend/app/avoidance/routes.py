@@ -1,16 +1,26 @@
 """/api/avoidance/* - control + telemetry for the obstacle-avoidance layer.
 
-Mutating routes require a signed-in operator (app/auth) like the rest of
-the platform. `observe` is
+Who (docs/ACCESS_MODEL.md 8b):
+  * staff keep the compatibility rank: reads need viewer, writes operator.
+  * customers reach the per-drone routes for THEIR drone: reads with
+    `view`, writes with `fly`, on the drone's workspace or on a live
+    session holding the drone's link (live_scope.user_drone_access).
+    Anything else answers 404, so drone ids cannot be probed. The 'auto'
+    drone id and the all-drones status are staff only.
+  * the global hazard map: any signed-in account reads it, staff write it.
+
+`observe` is
 how any sensor (and the SITL test harness) pushes a body-frame reading;
 `decide` runs one decision tick against an explicit pose/goal - used by the
 SITL harness and the frontend until the live telemetry loop is wired.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
-from app.auth.deps import require_operator, require_viewer
+from app.auth import live_scope, perms
+from app.sessions import takeover
+from app.auth.deps import require_operator, require_signed_in, require_viewer
 from app.auth.service import AuthUser
 from app.config import get_settings
 from app.avoidance.core import controller as avoidance
@@ -25,6 +35,40 @@ _stale_logged = -1e9
 router = APIRouter(prefix="/api/avoidance", tags=["avoidance"])
 
 
+def _drone_access(write: bool):
+    """Staff by rank, customers by drone access (see the module doc)."""
+    async def dep(drone_id: str, request: Request,
+                  user: AuthUser = Depends(require_signed_in)) -> AuthUser:
+        sm = getattr(request.app.state, "session_manager", None)
+        if user.is_staff or user.id == live_scope.auth.LEGACY_USER_ID:
+            need = "operator" if write else "viewer"
+            if not user.has_role(need):
+                raise HTTPException(status_code=403, detail=f"Requires the {need} role")
+        elif not await live_scope.user_drone_access(
+                user, drone_id, perms.FLY if write else perms.VIEW, sm):
+            raise HTTPException(status_code=404, detail="Drone not found")
+        if write and sm is not None:
+            # Taken over by HYRAK operations: only the holder changes this
+            # drone's avoidance (the same rule as the socket paths).
+            did = drone_id
+            if did == "auto":
+                on = [c for c in avoidance._controllers.values() if c.enabled]
+                did = on[0].drone_id if len(on) == 1 else None
+            held = takeover.blocking_drone(did, sm.all_sessions(), actor_user_id=user.id)
+            if held is not None:
+                raise HTTPException(status_code=423, detail={
+                    "code": "taken_over",
+                    "msg": f"HYRAK operations ({held.username}) have taken control of this "
+                           "drone; its avoidance is theirs until they release it."})
+        return user
+    dep.__name__ = "drone_write" if write else "drone_read"
+    return dep
+
+
+drone_read = _drone_access(False)
+drone_write = _drone_access(True)
+
+
 
 
 @router.get("/status")
@@ -33,7 +77,7 @@ async def all_status(_user: AuthUser = Depends(require_viewer)):
 
 
 @router.get("/{drone_id}/status")
-async def drone_status(drone_id: str, _user: AuthUser = Depends(require_viewer)):
+async def drone_status(drone_id: str, _user: AuthUser = Depends(drone_read)):
     # Non-creating: a stale id from the UI must not spawn a phantom
     # controller - but the answer keeps the full status shape (avoidance off),
     # because the Fly and Command panels render it. A 404 here crashed the
@@ -45,7 +89,7 @@ async def drone_status(drone_id: str, _user: AuthUser = Depends(require_viewer))
 
 @router.post("/{drone_id}/enable")
 async def set_enabled(drone_id: str, body: dict,
-                      _user: AuthUser = Depends(require_operator)):
+                      _user: AuthUser = Depends(drone_write)):
     c = avoidance.controller(drone_id)
     params = body.get("params") or {}
     for k, v in params.items():
@@ -65,7 +109,7 @@ async def set_enabled(drone_id: str, body: dict,
 
 @router.post("/{drone_id}/arm")
 async def set_armed(drone_id: str, body: dict,
-                    _user: AuthUser = Depends(require_operator)):
+                    _user: AuthUser = Depends(drone_write)):
     """Allow (or forbid) avoidance to COMMAND this drone. Arming requires
     detection already enabled - the deliberate second step of the trust
     ladder, separate from turning detection on."""
@@ -77,14 +121,14 @@ async def set_armed(drone_id: str, body: dict,
 
 @router.get("/{drone_id}/events")
 async def drone_events(drone_id: str, limit: int = 100,
-                       _user: AuthUser = Depends(require_viewer)):
+                       _user: AuthUser = Depends(drone_read)):
     from app.avoidance import events
     return {"events": await events.list_for(drone_id, limit=min(limit, 500))}
 
 
 @router.post("/{drone_id}/observe")
 async def observe(drone_id: str, body: dict,
-                  _user: AuthUser = Depends(require_operator)):
+                  _user: AuthUser = Depends(drone_write)):
     """Push one body-frame obstacle reading. Any sensor source uses this; the
     SITL harness uses it to inject a virtual obstacle."""
     try:
@@ -116,7 +160,7 @@ def _resolve_drone(drone_id: str):
 
 @router.post("/{drone_id}/depth_scan")
 async def depth_scan(drone_id: str, body: dict,
-                     _user: AuthUser = Depends(require_operator)):
+                     _user: AuthUser = Depends(drone_write)):
     """A pooled depth image from a range sensor (the sim's depth camera via
     simulation/gz_depth_sensor.py, or a real stereo/ToF camera).
     body: {captured_wall: unix time of capture, hfov_deg, vfov_deg, rows, cols,
@@ -169,7 +213,7 @@ async def depth_scan(drone_id: str, body: dict,
 
 @router.post("/{drone_id}/decide")
 async def decide(drone_id: str, body: dict,
-                 _user: AuthUser = Depends(require_operator)):
+                 _user: AuthUser = Depends(drone_write)):
     """Run one decision tick against an explicit pose (and optional goal).
     body: {pose:{lat,lng,heading_deg,alt_m}, goal?:{lat,lng},
            cruise_alt_m?, speed_m_s?}"""
@@ -199,7 +243,7 @@ async def decide(drone_id: str, body: dict,
 
 
 @router.get("/{drone_id}/obstacles")
-async def drone_obstacles(drone_id: str, _user: AuthUser = Depends(require_viewer)):
+async def drone_obstacles(drone_id: str, _user: AuthUser = Depends(drone_read)):
     """The drone's live obstacle map + the active reroute path - for the
     Mission-tab overlay, so the operator watches the plan update in real time."""
     c = avoidance.controller(drone_id)
@@ -214,7 +258,7 @@ async def drone_obstacles(drone_id: str, _user: AuthUser = Depends(require_viewe
 
 
 @router.get("/hazards")
-async def known_hazards(_user: AuthUser = Depends(require_viewer)):
+async def known_hazards(_user: AuthUser = Depends(require_signed_in)):
     """The persistent shared hazard map (all known static obstacles)."""
     from app.avoidance.mapping import hazards as hazard_db
     return {"hazards": await hazard_db.all_hazards()}
@@ -243,13 +287,13 @@ async def clear_hazards(_user: AuthUser = Depends(require_operator)):
 
 
 @router.get("/{drone_id}/sensors")
-async def get_sensors(drone_id: str, _user: AuthUser = Depends(require_viewer)):
+async def get_sensors(drone_id: str, _user: AuthUser = Depends(drone_read)):
     return {"sensors": sensor_registry.inventory(drone_id)}
 
 
 @router.post("/{drone_id}/sensors")
 async def set_sensors(drone_id: str, body: dict,
-                      _user: AuthUser = Depends(require_operator)):
+                      _user: AuthUser = Depends(drone_write)):
     specs = body.get("sensors")
     if not isinstance(specs, list):
         raise HTTPException(status_code=400, detail="sensors must be a list")
@@ -259,7 +303,7 @@ async def set_sensors(drone_id: str, body: dict,
 # -- person-ruler depth calibration (sensing/person_ruler.py) ---------------
 @router.post("/{drone_id}/calibrate_person")
 async def calibrate_person(drone_id: str, body: dict,
-                           _user: AuthUser = Depends(require_operator)):
+                           _user: AuthUser = Depends(drone_write)):
     """Start (or {cancel: true}) a person-ruler run for the camera feeding
     this drone's avoidance. Body: {height_m?: 1.70}. Needs avoidance
     Detection on and the video streaming."""
@@ -277,7 +321,7 @@ async def calibrate_person(drone_id: str, body: dict,
 
 
 @router.get("/{drone_id}/calibrate_person")
-async def calibrate_person_status(drone_id: str, _user: AuthUser = Depends(require_viewer)):
+async def calibrate_person_status(drone_id: str, _user: AuthUser = Depends(drone_read)):
     from app.avoidance.sensing import person_ruler
     c = _resolve_drone(drone_id)
     person_ruler.pending(c.drone_id)          # applies the timeout

@@ -27,7 +27,9 @@ function fmtDist(m: number): string {
 
 // ── Component ───────────────────────────────────────────────────────────────
 
-export default function WaypointPanel() {
+// readOnly: a viewer's plan (docs/ACCESS_MODEL.md 8d) - select to inspect,
+// never reorder or remove.
+export default function WaypointPanel({ readOnly = false }: { readOnly?: boolean } = {}) {
   const waypoints      = useMissionStore(s => s.waypoints)
   const selectedId     = useMissionStore(s => s.selectedId)
   const selectWaypoint = useMissionStore(s => s.selectWaypoint)
@@ -88,7 +90,7 @@ export default function WaypointPanel() {
             return (
               <div
                 key={wp.id}
-                draggable
+                draggable={!readOnly}
                 onDragStart={e => {
                   dragIndexRef.current = rawIdx
                   e.dataTransfer.effectAllowed = 'move'
@@ -173,7 +175,7 @@ export default function WaypointPanel() {
                 </div>
 
                 {/* Reorder arrows + delete - appear on hover / when active */}
-                <div
+                {!readOnly && <div
                   className="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
                   style={active ? { opacity: 1 } : undefined}
                 >
@@ -201,13 +203,13 @@ export default function WaypointPanel() {
                   >
                     <Trash2 size={11} />
                   </span>
-                </div>
+                </div>}
               </div>
             )
           })}
 
           {/* Hint row */}
-          {orderable.length > 1 && (
+          {orderable.length > 1 && !readOnly && (
             <p className="text-[9px] font-mono text-center pt-1 pb-0.5" style={{ color: '#374151' }}>
               ⠿ drag to reorder · ↑↓ move one step
             </p>

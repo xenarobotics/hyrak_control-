@@ -96,6 +96,11 @@ class TelemetryManager:
     # Class-level defaults for the fields __init__ sets below, so a manager
     # assembled without __init__ (the test doubles) still has them.
     _last_sp: Optional[tuple] = None
+    # HYRAK operations hold this link (docs/ACCESS_MODEL.md 8b "Takeover",
+    # app/sessions/takeover.py): no automated source - AI follow, avoidance,
+    # the Offboard re-send loop - may put a setpoint or start Offboard.
+    # Staff commands (mode changes, actions, manual control) are unaffected.
+    automation_locked: bool = False
     _target_sysid: int = 1
     _target_sysid_learned: bool = False
 
@@ -287,6 +292,22 @@ class TelemetryManager:
         TelemetryManager._kill_mavsdk_by_pattern(pattern)
 
     @staticmethod
+    def mavsdk_server_running(endpoint: str) -> bool:
+        """Whether a mavsdk_server for `endpoint` (e.g. '0.0.0.0:14547') is
+        running, by the same anchored pattern _kill_stale_mavsdk_servers
+        uses. Read-only; used to tell our own leftover server on a port from
+        an unrelated process holding it."""
+        import re
+        import subprocess
+        pattern = f"mavsdk_server.*{re.escape(endpoint)}( |$)"
+        try:
+            result = subprocess.run(["pgrep", "-f", pattern], capture_output=True,
+                                    text=True, timeout=5)
+        except Exception:
+            return False
+        return bool(result.stdout.strip())
+
+    @staticmethod
     def _kill_mavsdk_by_pattern(pattern: str) -> None:
         import subprocess, signal, os, time
         try:
@@ -344,7 +365,14 @@ class TelemetryManager:
             reaped += 1
         return reaped
 
-    async def connect(self, address: str = "udpin://0.0.0.0:14540", kill_stale: bool = True) -> bool:
+    async def connect(self, address: str = "udpin://0.0.0.0:14540", kill_stale: bool = True,
+                      quiet: bool = False) -> bool:
+        """Open the MAVLink link. quiet=True is for background probes (the
+        fleet watchdog trying a port that may be empty): a miss is logged at
+        DEBUG, because the caller logs it once per drone instead of an ERROR
+        per attempt."""
+        log = logger.debug if quiet else logger.info
+        fail = logger.debug if quiet else logger.error
         # Fix deprecated udp:// format automatically
         if address.startswith("udp://:"):
             port = address.split(":")[-1]
@@ -375,9 +403,9 @@ class TelemetryManager:
         # to it (the "arm one drone, all show armed" bug).
         self._grpc_port = _find_free_port()
         self._drone = System(port=self._grpc_port, sysid=self._sysid, compid=190)
-        logger.info(f"mavsdk_server gRPC port {self._grpc_port} for {address}")
+        log(f"mavsdk_server gRPC port {self._grpc_port} for {address}")
 
-        logger.info(f"Connecting to drone at {address} ...")
+        log(f"Connecting to drone at {address} ...")
 
         async def _wait_for_heartbeat():
             async for state in self._drone.core.connection_state():
@@ -394,7 +422,7 @@ class TelemetryManager:
             # frontend stuck on "connecting" indefinitely with no error to
             # show - a real infinite hang, not just a slow connect.
             await asyncio.wait_for(self._drone.connect(system_address=address), timeout=10.0)
-            logger.info("Waiting for heartbeat...")
+            log("Waiting for heartbeat...")
             # No timeout here previously meant a link with a listening socket
             # but no traffic yet (e.g. an RF bridge waiting on real hardware)
             # hung this call forever instead of failing with a clear error.
@@ -403,10 +431,10 @@ class TelemetryManager:
                 logger.info(f"✅ Drone connected at {address}")
                 return True
         except asyncio.TimeoutError:
-            logger.error(f"❌ Connection timed out at {address}")
+            fail(f"❌ Connection timed out at {address}")
             return False
         except Exception as e:
-            logger.error(f"❌ Connection failed: {e}")
+            fail(f"❌ Connection failed: {e}")
             return False
         return False
 
@@ -2194,6 +2222,10 @@ class TelemetryManager:
         Starts Offboard mode.
         Must send at least one setpoint before calling this.
         """
+        if self.automation_locked:
+            logger.warning("Offboard refused - HYRAK operations hold this drone (takeover)")
+            self.last_action_error = "HYRAK operations have taken control of this drone"
+            return False
         if self._pilot_override_mode is not None:
             # REFUSING HERE IS THE WHOLE POINT OF THE LATCH. The pilot took the
             # aircraft; every follow control in the UI is still on screen and
@@ -2288,6 +2320,8 @@ class TelemetryManager:
                     continue
                 if self._pilot_override_mode is not None:
                     continue   # the pilot has the aircraft: nothing goes out
+                if self.automation_locked:
+                    continue   # HYRAK operations hold it (takeover): nothing goes out
                 last = self._last_velocity_cmd_t
                 if last <= 0.0:
                     continue
@@ -2438,7 +2472,7 @@ class TelemetryManager:
         """World-frame velocity + absolute heading setpoint (Offboard) - the
         avoidance local planner's command. Same pilot latch and watchdog
         bookkeeping as send_velocity_command."""
-        if not self._connected or self._pilot_override_mode is not None:
+        if not self._connected or self._pilot_override_mode is not None or self.automation_locked:
             return
         self._last_velocity_cmd_t = time.monotonic()
         self._last_ned_sp = (float(north_m_s), float(east_m_s), float(down_m_s), float(yaw_deg))
@@ -2532,7 +2566,7 @@ class TelemetryManager:
         never command a vertical component themselves - actively maintain
         altitude instead of relying on it staying put by coincidence.
         """
-        if not self._connected:
+        if not self._connected or self.automation_locked:
             return
         if self._pilot_override_mode is not None:
             # BELT AND BRACES. The trackers are stopped by the override

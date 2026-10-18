@@ -8,7 +8,7 @@ import { getUiFont, setUiFont, getUiZoom, setUiZoom, getUiTextSize, setUiTextSiz
 import {
     Sun, Moon, MoonStar, Info, Zap,
     SlidersHorizontal, Video, Bot, Map, Route, Bell, Database, Keyboard, AlertTriangle, Radio,
-    Radar, UserRound, Users,
+    Radar, UserRound, Users, History,
     type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -54,6 +54,7 @@ import { PrefRow } from '@/components/settings/primitives'
 import { DevicesGroup, PasswordGroup, ProfileGroup } from '@/components/settings/AccountSettings'
 import { InvitesGroup, MembersGroup, WorkspaceGroup } from '@/components/settings/WorkspaceSettings'
 import { useAccess } from '@/hooks/useAccess'
+import { FlightHistory } from '@/components/settings/FlightHistory'
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
 
@@ -1697,7 +1698,8 @@ function VisionLimitsGroup() {
 //
 // `staffOnly` hides a category or section from customer-only accounts
 // (docs/ACCESS_MODEL.md section 8a): server-wide vision calibration and
-// tuning, server log paths, missions and avoidance stay with staff.
+// tuning, server log paths and missions stay with staff. Avoidance is open
+// to customers since phase 2b, for their own drone (section 8b).
 interface Section {
     label: string                        // divider text within a category
     Body: () => React.JSX.Element
@@ -1815,8 +1817,11 @@ function SensorsGroup() {
     const [params, setParams] = useState<AvoidanceParams | null>(null)
     const [enabled, setEnabledState] = useState(false)
 
+    const { isCustomer } = useAccess()
     useEffect(() => {
-        if (boundDroneId) return
+        // Customers only ever configure the drone bound to their session
+        // (the session list is staff-only).
+        if (boundDroneId || isCustomer) return
         let alive = true
         apiFetch(`${getServerUrl()}/api/sessions`).then(r => r.json()).then(j => {
             if (!alive) return
@@ -1824,7 +1829,7 @@ function SensorsGroup() {
             setDroneId(mine?.drone?.id ?? null)
         }).catch(() => {})
         return () => { alive = false }
-    }, [sessionId, boundDroneId])
+    }, [sessionId, boundDroneId, isCustomer])
 
     useEffect(() => {
         if (!droneId) return
@@ -1930,6 +1935,11 @@ const CATEGORIES: Category[] = [
         ],
     },
     {
+        id: 'flights', label: 'Flights', icon: History,
+        blurb: 'Recorded flights of the workspace: replay a track or save it as CSV',
+        sections: [{ label: 'FLIGHT HISTORY', Body: FlightHistory }],
+    },
+    {
         id: 'video', label: 'Video', icon: Video,
         blurb: 'Where the feed comes from, its quality, and how AI results are drawn',
         sections: [
@@ -1962,7 +1972,7 @@ const CATEGORIES: Category[] = [
         sections: [{ label: 'MISSION', Body: MissionGroup }],
     },
     {
-        id: 'avoidance', label: 'Avoidance', icon: Radar, staffOnly: true,
+        id: 'avoidance', label: 'Avoidance', icon: Radar,
         blurb: 'Obstacle sensors and how the drone avoids them',
         sections: [{ label: 'SENSORS & AVOIDANCE', Body: SensorsGroup }],
     },

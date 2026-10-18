@@ -226,11 +226,28 @@ export async function logout(): Promise<void> {
  * the cached user: the backend may be restarting and the token is still
  * good.
  */
+// The Cloudflare tunnel stalls some requests for 20-40 s; an unbounded
+// /api/auth/me held every page on "CHECKING SIGN-IN" for that long. Each
+// attempt is capped and a stalled one is retried once (a fresh request
+// usually rides a healthy tunnel connection).
+const ME_TIMEOUT_MS = 8000
+const ME_ATTEMPTS = 2
+
 export async function fetchMe(): Promise<AuthUser | null> {
     const token = getToken()
     if (!token) return null
     try {
-        const res = await fetch(`${getServerUrl()}/api/auth/me`, { headers: authHeaders() })
+        let res: Response | null = null
+        for (let i = 0; i < ME_ATTEMPTS && !res; i++) {
+            try {
+                res = await fetch(`${getServerUrl()}/api/auth/me`, {
+                    headers: authHeaders(), signal: AbortSignal.timeout(ME_TIMEOUT_MS),
+                })
+            } catch (e) {
+                if (i === ME_ATTEMPTS - 1) throw e
+            }
+        }
+        if (!res) return getUser()
         if (res.status === 401) { store(null, null); return null }
         if (!res.ok) return getUser()
         const body = await res.json() as {

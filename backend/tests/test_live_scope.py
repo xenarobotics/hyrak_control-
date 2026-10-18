@@ -527,13 +527,12 @@ async def test_resume_is_bound_to_user_and_workspace(live):
 async def test_rest_global_data_is_staff_only(live):
     w = await world(live)
     cl = live.cl
-    staff_only = ["/api/drones", "/api/fleet", "/api/missions", "/api/missions/m1", "/api/pads",
-                  "/api/tasks", "/api/tasks/t1", "/api/permits", "/api/planner/meta",
-                  "/api/map-features", "/api/drones/d1/flights", "/api/flights/f1",
-                  "/api/flights/f1/download", "/api/vision/crowd-history",
-                  "/api/vision/plate-history", "/api/vision/plate-history/e1/image",
+    # Phase 2b moved flights, crowd / plate history and the per-drone
+    # avoidance routes (test_history_scope.py) and planning data
+    # (test_mission_scope.py) to per-workspace access.
+    staff_only = ["/api/drones", "/api/fleet", "/api/tasks", "/api/tasks/t1",
                   "/api/vision/face-gallery", "/api/vision/sightings", "/api/sessions",
-                  "/api/avoidance/status", "/api/avoidance/d1/obstacles", "/api/avoidance/hazards",
+                  "/api/avoidance/status",
                   "/api/video/mesh-units", "/api/video/feeds", "/api/latency-probe",
                   "/api/latency-probe/stats", "/api/recon/engine", "/api/recon/results"]
     for path in staff_only:
@@ -541,8 +540,13 @@ async def test_rest_global_data_is_staff_only(live):
         assert cl.get(path, headers=hdr(w.pat[1])).status_code == 403, path
     for path in ("/api/drones", "/api/fleet", "/api/vision/plate-history", "/api/pads"):
         assert cl.get(path, headers=hdr(w.hv[1])).status_code == 200, path
+    # Phase 2b: planning data is scoped per workspace (test_mission_scope.py);
+    # map features are shared read-only land use.
     signed_in = ["/api/zones", "/api/zones/check?lat=17.5&lng=78.5", "/api/vision/calibration",
-                 "/api/webrtc/ice-servers"]
+                 "/api/webrtc/ice-servers", "/api/avoidance/hazards", "/api/flights",
+                 "/api/vision/crowd-history", "/api/vision/plate-history",
+                 "/api/missions", "/api/pads", "/api/permits", "/api/planner/meta",
+                 "/api/map-features"]
     for path in signed_in:
         assert cl.get(path).status_code == 401, path
         assert cl.get(path, headers=hdr(w.vic[1])).status_code == 200, path
@@ -550,7 +554,10 @@ async def test_rest_global_data_is_staff_only(live):
     assert cl.get("/api/health").status_code == 200
 
 
-async def test_session_reports_belong_to_their_user(live):
+async def test_session_reports_belong_to_their_workspace(live):
+    """Phase 2b: a session report is readable by anyone with `view` on the
+    session's workspace (the rows carry it, so this survives a restart),
+    staff included only by that same permission."""
     w = await world(live)
     ready = await connect(live, "p", w.pat[1])
     sid = ready["session_id"]
@@ -558,12 +565,27 @@ async def test_session_reports_belong_to_their_user(live):
         url = f"/api/sessions/{sid}/{kind}/download"
         assert live.cl.get(url).status_code == 401
         assert live.cl.get(url, headers=hdr(w.pat[1])).status_code == 200
-        assert live.cl.get(url, headers=hdr(w.vic[1])).status_code == 404
-        assert live.cl.get(url, headers=hdr(w.hv[1])).status_code == 200      # staff
+        assert live.cl.get(url, headers=hdr(w.vic[1])).status_code == 200     # same workspace
+        assert live.cl.get(url, headers=hdr(w.founder[1])).status_code == 200
+        assert live.cl.get(url, headers=hdr(w.hv[1])).status_code == 404     # HYRAK only
         assert live.cl.get(f"/api/sessions/nope/{kind}/download", headers=hdr(w.pat[1])).status_code == 404
-    # The owner record outlives the live session.
+    # The session's workspace outlives the live session.
     await live.sm.destroy(sid)
     assert live.cl.get(f"/api/sessions/{sid}/crowd-report/download", headers=hdr(w.pat[1])).status_code == 200
+    # Durable: after a restart the rows' workspace decides.
+    from app.vision import persistence
+
+    async def rows_say(session_id):
+        return w.iith["id"] if session_id == "old-session" else None
+    import pytest as _pt
+    mp = _pt.MonkeyPatch()
+    mp.setattr(persistence, "session_workspace", rows_say)
+    try:
+        url = "/api/sessions/old-session/plate-report/download"
+        assert live.cl.get(url, headers=hdr(w.vic[1])).status_code == 200
+        assert live.cl.get(url, headers=hdr(w.hp[1])).status_code == 404
+    finally:
+        mp.undo()
 
 
 async def test_org_owner_console_is_scoped_to_their_subtree(live):

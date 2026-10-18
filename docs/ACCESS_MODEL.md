@@ -1,6 +1,6 @@
 # Access model: workspaces, roles, portals
 
-Status: design agreed 2026-10-18; phase 1 backend built on `feat/workspaces` (see "Phase 1 as built" in section 7); phase 2a backend built on `feat/live-scope` (see "Phase 2a as built" in section 8a).
+Status: design agreed 2026-10-18; phase 1 backend built on `feat/workspaces` (see "Phase 1 as built" in section 7); phase 2a backend built on `feat/live-scope` (see "Phase 2a as built" in section 8a); phase 2b stream A (customer missions and permits) built on `feat/2b-missions` (section 8b).
 Supersedes the flat viewer / operator / admin model in `docs/AUTH.md`
 (login, tokens, rate limits and revocation from that document stay as they are).
 
@@ -95,6 +95,7 @@ Checks in code are on permissions, never on role names.
 | workspace.delete | x | | | x | | | |
 | zones.regulatory | x | | | | | | |
 | staff.manage, accounts | x | | | | | | |
+| sessions.takeover (take control of a live session, 8b) | x | | x | | | | |
 
 ### Who may grant what
 
@@ -324,6 +325,7 @@ should code against:
   and env founder; every write answers 503.
 * **Not yet scoped:** `permits.approve` is in the engine but permit routes
   still use the compatibility admin rank (phase 2, with the live paths).
+  Done in 2b: permit routes decide with `permits.approve` (section 8b).
 
 ## 8. Phasing and what phase 1 does not do yet
 
@@ -496,8 +498,8 @@ on `/gs-relay`.
 |---|---|---|
 | lifecycle | 2 | connect, disconnect |
 | session view | 7 | offer, ice_candidate, stop_stream, serial_uplink, disconnect_telemetry, fetch_params, get_param |
-| session command | 19 | connect_browser_serial, drone_action, drone_command, set_param, set_tracking, set_vehicle_tracking, set_follow_vehicle, set_follow_person, set_multi_follow, select_person, set_pd_params, set_altitude_mode, set_altitude_nudge, set_tracking_params, set_analysis_mode, set_profile_override, set_zone_names, set_enhance_params, clear_reference |
-| staff | 28 + 4 | connect_telemetry, connect_rf_bridge, start_rc_monitor, upload_mission, set_gallery_mode, enrol_person_live, set_crowd_thresholds, allocate_video_relay, release_video_relay, datachannel_video_offer, datachannel_video_stats, wall_offer, wall_ice_candidate, wall_close, admin_hello, watch_session, unwatch_session, request_permit, list_my_permits, the 9 swarm events, and the 4 `/gs-relay` agent events |
+| session command | 19 (+ upload_mission in 2b, section 8b) | connect_browser_serial, drone_action, drone_command, set_param, set_tracking, set_vehicle_tracking, set_follow_vehicle, set_follow_person, set_multi_follow, select_person, set_pd_params, set_altitude_mode, set_altitude_nudge, set_tracking_params, set_analysis_mode, set_profile_override, set_zone_names, set_enhance_params, clear_reference |
+| staff | 28 + 4 (27 + 4 after 2b) | connect_telemetry, connect_rf_bridge, start_rc_monitor, upload_mission (session command since 2b), set_gallery_mode, enrol_person_live, set_crowd_thresholds, allocate_video_relay, release_video_relay, datachannel_video_offer, datachannel_video_stats, wall_offer, wall_ice_candidate, wall_close, admin_hello, watch_session, unwatch_session, request_permit, list_my_permits, the 9 swarm events, and the 4 `/gs-relay` agent events |
 
 Notes on the split:
 
@@ -663,7 +665,564 @@ server never dials a TURN host the customer typed.
 ### Not in 2a (phase 2b)
 
 Customer mission planning, customer flight history and recordings per
-workspace, customer fleet views, TOTP for founders and managers.
+workspace, customer fleet views, TOTP for founders and managers. Phase 2b
+landed below: monitoring, per-workspace history, customer avoidance and
+takeover in 8b, the premium cloud simulator in 8c, customer mission
+planning and permits in 8d (`upload_mission` is a session command there
+and the PERMITS console tab uses `permits.approve`).
+
+## 8b. Phase 2b: monitoring, per-workspace history, customer avoidance, takeover
+
+Goal: staff (founders, managers) can see and follow what customers are
+doing, customers see their own flight and AI history, and customers run
+obstacle avoidance on their own drone. HYRAK operations can take control
+of a customer's flight when something looks wrong.
+
+### Who sees what now
+
+| account | live sessions (console MAP / DRONES, `/api/sessions`) | history (flights, crowd, plates) | sightings, face gallery |
+|---|---|---|---|
+| founder | every session, every workspace | everything, including rows of deleted workspaces | yes |
+| manager | the workspaces they manage (with `view`), plus HYRAK if they also hold a HYRAK viewer or pilot membership | same workspaces | sightings of those workspaces; the gallery (staff) |
+| HYRAK pilot / viewer | HYRAK's sessions | HYRAK's history | HYRAK's sightings; the gallery |
+| airspace manager | none (no `view` anywhere) | none | gallery only (staff) |
+| customer owner / admin / pilot / viewer | no console session list (the console stays SPACES / ZONES / AUDIT) | their workspace and the ones below it | no |
+| legacy shared token | HYRAK | HYRAK | HYRAK |
+
+The rule in every case is the permission engine: `view` on the row's
+workspace (`app/auth/data_scope.py`), with fresh memberships per request.
+Founders have no filter. A requested workspace outside the caller's scope
+reads as empty (lists) or 404 (one row), never 403, so ids cannot be probed.
+
+### Staff monitoring
+
+* `/api/sessions` and the console socket (`admin_hello`, `watch_session`,
+  `unwatch_session`) are open to all staff (compatibility viewer rank) and
+  scoped as above. `/api/drones` is scoped the same way.
+* Each session row carries `workspace_id`, `workspace_name`, `username`,
+  `role` (the user's strongest role on that workspace), `staff`,
+  `link_kind` (`client_relay`, `rf_bridge`, `server_udp`, `server_direct`,
+  or null), `armed`, `in_air`, `ai_mode`, `video`, `drone`, `detached`
+  (client away, session parked) and `takeover` (who holds it, or null).
+* `watch_session` is view only: telemetry, video frames and overlays. It
+  answers `Session not found` for a session outside the caller's scope.
+  `admin_alert` (zone transitions, AI alerts) goes only to observers who
+  can view the session's workspace.
+* **Observers cannot hide.** `admin_hello` marks a socket as a console
+  observer, which keeps it off the session list. It is refused on a session
+  that holds a drone link or sends video, attaching a link clears it, and
+  a session with a link or video is listed and can be taken over whatever
+  the flag says (`SessionManager.is_observer_only`).
+* Console: MAP and DRONES are shown to all staff (STAFF stays founders).
+  Session cards show workspace, user and role, AI mode and a HYRAK CONTROL
+  tag. Drone RENAME is founders only in the UI.
+* SPACES detail has an **Activity** section
+  (`GET /api/workspaces/{id}/activity`, needs `view`): live sessions,
+  recent flights and, with `audit.view`, recent audit events of the
+  workspace and its subtree (HYRAK's activity is HYRAK's own).
+
+### Per-workspace history
+
+* `flights`, `crowd_snapshots`, `crowd_alerts`, `plate_events` and
+  `person_sightings` have `workspace_id` (alembic `b8e4f0c2d5a3`): NOT
+  NULL, indexed, default HYRAK, a plain string like
+  `audit_events.workspace_id` (history never fails to write; a deleted
+  workspace's rows stay readable by founders). Existing rows went to HYRAK.
+* Stamped at record time: a flight takes its drone's workspace (the
+  registry's, read once on the arm edge), falling back to the session's;
+  vision rows take the session's workspace through a resolver the server
+  installs (`persistence.set_workspace_resolver`). A `workspace_id` in an
+  analyzer's payload is ignored.
+* Reads, signed in, scoped: `GET /api/flights?workspace_id=&drone_id=`,
+  `/api/drones/{id}/flights`, `/api/flights/{id}` (track replay) and
+  `/download` (CSV), `/api/vision/crowd-history?workspace_id=`,
+  `/api/vision/plate-history?workspace_id=` and `/{id}/image`.
+* Session reports (`/api/sessions/{id}/crowd-report/download`,
+  `plate-report/download`) are now **durable**: access is `view` on the
+  workspace the session's rows were recorded in, which survives a restart;
+  a live session that wrote no rows yet falls back to the session manager.
+  The 2a "the user who opened it" rule is gone (a colleague with `view` on
+  the workspace reads it; staff only with `view` there).
+* Clearing history (`DELETE /api/vision/crowd-history`, `plate-history`,
+  `sightings`, optional `workspace_id`) stays staff operators, and deletes
+  only rows of workspaces where they hold `fly` (founders: all).
+* **Privacy decision:** the face gallery (`persons`, `person_faces`) and
+  the gallery-match log (`/api/vision/sightings`) stay HYRAK staff-only.
+  Sightings are scoped per workspace for staff, but customers never read
+  them, and customer sessions never load the gallery (8a), so their
+  workspaces have no sightings.
+* Frontend: Settings has a **Flights** category (track replay with a
+  scrubber, CSV download), scoped to the session's workspace for customers.
+  The AI panels' history asks for the session's workspace for customers;
+  their "clear" buttons are staff only.
+
+### Avoidance for customers on their own drone
+
+* Per-drone routes (`/api/avoidance/{drone_id}/...`): staff keep the rank
+  check (reads viewer, writes operator). A customer reads with `view` and
+  writes with `fly`, either on the drone's registry workspace (drone
+  access) or on a live session holding the drone's link (for writes that
+  session must also be allowed to command the drone, `drone_fly`). Anything
+  else is 404. `drone_id` "auto" and `GET /api/avoidance/status` (every
+  drone) stay staff only.
+* The shared hazard map: `GET /api/avoidance/hazards` any signed-in
+  account; `POST /hazards` and `/hazards/clear` staff operators.
+* Frontend: the AVOID dock tab, the avoidance panels, the Mission map
+  overlay (their own drone's obstacles and reroute) and the Settings
+  Avoidance category are back for customers; "Pin hazard" and "Forget
+  hazards" stay staff.
+
+### Takeover
+
+HYRAK operations can take control of a session's drone. The permission is
+`sessions.takeover` (founder, manager; owners and admins do not hold it
+yet, and since it is a permission it can be granted to them later without
+code changes), checked on the **target session's workspace** with the
+staff member's own memberships. A manager of another workspace, a HYRAK
+pilot and the legacy token are refused.
+
+* **Quick actions.** From the console's watch view: HOLD, RTL and LAND,
+  sent as `drone_action {action, target_session}` and run through the
+  session's own drone_action handler (red-zone checks, action_result to
+  the console). No takeover needed. The customer sees a short notice
+  (`staff_intervention {action, by}`).
+* **Full takeover.** `takeover_session {session_id}` (staff, plus the
+  permission) puts the session in TAKEOVER mode; `takeover_result` answers
+  the console, `takeover_status {active, by, since}` tells the customer
+  (and `session_ready` carries `takeover` on a reload or resume). While it
+  lasts:
+  * Staff `drone_action` / `drone_command` naming `target_session` act on
+    that session's drone. Only the holding console may; another staff
+    member gets `taken_over`.
+  * The customer's every session command is refused with `taken_over`,
+    **hold, return and land included**: staff now own the decision, and
+    two parties issuing safety commands at once is the worse failure.
+  * The customer's link events are refused too: `disconnect_telemetry`
+    (cutting the link would cut staff off), `connect_browser_serial`
+    while a link is up (relinking a dropped radio is allowed, it gives
+    staff their link back). A taken-over **staff** session also loses
+    `connect_telemetry`, `connect_rf_bridge` and `upload_mission`.
+  * Avoidance writes for that drone answer 423 `{code: "taken_over"}`
+    unless the caller is the holding staff user. Reads continue.
+  * Automated sources stop: the link is marked `automation_locked`, so AI
+    follow setpoints, avoidance commands, Offboard starts and the Offboard
+    re-send loop send nothing; stream_track drops the vision pipeline's
+    velocity commands; the dispatcher offers the drone to no order. If the
+    AI follow was flying it in Offboard, the drone is put in HOLD at the
+    moment of takeover.
+  * All of the above go through one check: `takeover.blocking()` (and
+    `socket_guard.takeover_stops()` on the socket paths).
+* `release_session` hands control back (the holder, or anyone else allowed
+  to take that session over, such as a founder). The drone keeps its
+  current mode: nothing is sent. If the holding console's socket drops,
+  the takeover is released after `RELEASE_GRACE_S` (15 s) unless that
+  console session resumes first; no auto-land. A takeover also ends when
+  either session is torn down.
+* Audit rows (`audit_events`, with actor, workspace and drone in
+  `detail`): `session.takeover`, `session.takeover.command` (each staff
+  drone_action while holding it), `session.quick_action`, and
+  `session.release` with a reason (`released`, `released by <name>`,
+  `staff_disconnected`, `session_ended`, `staff_session_ended`).
+* **Residual risk (radio relay).** `serial_uplink` carries the radio's
+  downlink into mavsdk_server; it cannot be refused without blinding
+  staff. While taken over it is filtered: COMMAND_LONG / INT, SET_MODE,
+  mission writes, PARAM_SET, setpoints, MANUAL_CONTROL and
+  RC_CHANNELS_OVERRIDE frames are dropped (`serial_bridge.CommandFilter`).
+  That is defence in depth: those bytes reach the ground-side
+  mavsdk_server, not the aircraft. The customer's own machine owns the
+  physical radio and can still write to it directly, stop relaying staff
+  commands, or unplug it; no server-side check can prevent that, and an
+  RC transmitter on the aircraft can always override too. A drone whose
+  customer must not be able to override HYRAK needs that enforced on the
+  aircraft (phase 3).
+* Socket classes: `takeover_session` and `release_session` are STAFF
+  (58 handlers on the default namespace). `drone_action` / `drone_command`
+  stay SESSION_COMMAND; their `target_session` routing is checked inside
+  `require_session_fly`.
+* Frontend: the console detail panel has HOLD / RTL / LAND, "Take
+  control" (with a confirm) and, while held, ARM / DISARM / TAKEOFF /
+  START and PAUSE MISSION / a mode menu bound to that session, and
+  "Release control". These are console controls that emit the same
+  drone_action names as the app's flight controls, not the app's
+  DroneControls component itself (that one is bound to the page's own
+  session). Customers get a red banner, "HYRAK operations has taken control
+  (name)", with no buttons.
+
+## 8c. Cloud SITL (premium, phase 2b)
+
+The customer's **default** simulator runs on their own computer: PX4 or
+Gazebo on their machine, linked through the desktop app's "SITL" relay
+(the client's udp:14540, `connect_browser_serial`). Only telemetry and
+camera pass through HYRAK. The cloud simulator is an optional **premium
+extra**: a per-session PX4 + Gazebo instance on the HYRAK server that the
+session flies from Fly, Mission and AI exactly like a real drone.
+
+Three link options stay distinct and are never merged or relabelled:
+
+| option | what | who |
+|---|---|---|
+| SITL | the desktop relay of the client's own SITL (udp:14540 on their machine) | everyone, the default |
+| Gazebo sim on server | the owner's shared demo sim, udp:14600 (`connect_telemetry`) | staff |
+| Cloud simulator (premium) | this section: one sim per session, launched by the server | staff always; customers with the workspace feature |
+
+### Entitlement
+
+* `workspaces.features` (JSON, migration `c9f5a1d3e6b4`), e.g.
+  `{"cloud_sim": true}`. Absent key = off. Not inherited by clients.
+* Only founders change it: `PATCH /api/workspaces/{id}` with
+  `{"features": {"cloud_sim": true}}` (403 for anyone else, 400 for an
+  unknown key or a non-boolean). The console's workspace page has a
+  CLOUD SIM ON / OFF button for founders. Audited as `workspace.update`.
+* Staff sessions are always entitled. A customer session in a workspace
+  without the feature gets `cloud_sim_not_entitled` and the message
+  "Cloud simulator is a premium feature ...", and the link picker shows
+  the option disabled with that note.
+
+### Socket events
+
+| event | class | notes |
+|---|---|---|
+| `start_cloud_sim` `{airframe?, home?: {lat, lon}}` | session command (`fly`; staff: operator) | plus the entitlement. Starting when the session already has one returns it (and re-links it if it is up but unlinked) |
+| `stop_cloud_sim` | session view | stopping your own sim, like `disconnect_telemetry`: a pilot demoted mid-session can still stop it |
+| `cloud_sim_status` | session view | |
+
+All three answer with the status as the ack and as a `cloud_sim_status`
+event, which the server also pushes on every change: `state` is `none`,
+`starting`, `ready`, `stopping` or `error` (with `code`, `error`), plus
+`entitled`, `enabled`, `quota {workspace_used, workspace_max,
+global_used, global_max}`, `idle_minutes`, `idle_stop_in_s`, `home`,
+`boot_s`, `linked`, and `ended` (`idle`, `stopped`, `session_ended`,
+`error`, `server_shutdown`) after one ended. Staff also get `staff
+{address, slot, instance, partition, pid, sim_id}` and, after a failure,
+the log tail in `detail`. Codes: `cloud_sim_not_entitled`,
+`cloud_sim_quota_workspace`, `cloud_sim_quota_global`,
+`cloud_sim_unavailable`, `cloud_sim_bad_request`, `cloud_sim_failed`.
+
+The client never supplies an address (any `address` in the payload is
+ignored). When the sim is up the server links the session's telemetry to
+the loopback port it chose (`udpin://127.0.0.1:<port>`) through the same
+connect flow as every other link, with origin `start_cloud_sim`.
+
+### Drone access
+
+* The link kind is `live_scope.CLOUD_SIM_LINK`, decided by the handler
+  that opened it, never by the client. It is simulator-type for
+  customers too, because nothing about it comes from the client: the
+  process, the port and the identity are the server's.
+* The identity is synthetic: `cloudsim-<workspace_id>-<n>` (n = 0 up to
+  the workspace cap), assigned by the server instead of the FC's UID
+  (PX4 SITL reports the same UID everywhere). A real FC's UID is hex, so
+  no other link can produce one.
+* The record is stored simulated and never claimed (it stays on HYRAK),
+  and `drone_fly` is true for the session holding the link. The rule of 8a
+  becomes: the ownership check is skipped only when the record is
+  simulated AND the session's link is simulator-type, which is either a
+  staff server-sim link (`SIM_LINK`) or the session's own cloud sim
+  (`CLOUD_SIM_LINK` with a `cloudsim-` UID). The same UID on any other
+  link gets the normal rules.
+
+### How it runs (backend/app/sim, simulation/cloud_sim.sh)
+
+* **Pool.** 64 slots. Slot k owns udp `base + 10k` (the backend's MAVSDK,
+  loopback only), `base + 10k + 1` (PX4's MAVLink port) and `base + 10k +
+  2` (PX4's uXRCE-DDS client, pointed at nothing), PX4 instance `100 + k`
+  (MAV_SYS_ID 101+, clear of the owner's 0-30 and the backend's GCS ids
+  200+) and a fresh `GZ_PARTITION=hyrak_cloud_<k>_<random>`. The default
+  base 15000 gives 15000-15639. `ports.validate_plan` refuses a base that
+  overlaps any reserved port (14540-14571 SITL / fleet, 14550, 14600-14601,
+  5600-5603, 5800-5900, 8001, 3000, 8888, gz discovery 10317-10318, PX4's
+  default per-instance ports for instances 0-99, the ephemeral range), and
+  allocation skips a slot whose ports are bound or whose PX4 lock
+  (`/tmp/px4_lock-<n>`) is held.
+* **Launch.** `cloud_sim.sh` (derived from `hyrak_sim.sh`): `GZ_IP=127.0.0.1`,
+  the unique partition, `hyrak_server.config` (no GstCameraSystem leak),
+  headless gz server first, then PX4 adopts the world (no
+  `PX4_GZ_STANDALONE`), `PX4_HOME_ALT=0`, `NAV_DLL_ACT=2`, `RTL_RETURN_ALT=10`,
+  logger off, a fresh working dir per instance. `cloud_sim_rc/px4-rc.mavlink`
+  replaces PX4's stock MAVLink startup: ONE link to the backend, no FTP,
+  no forwarding, nothing to udp:14550 or 1454x. Airframe: x500 only
+  (allowlist in `app/sim/manager.py`). Home: the customer's `{lat, lon}`,
+  else a point inside the workspace's operating area, else the server
+  default.
+* **Ready** when PX4 has run its startup script and opened the backend
+  link (not "Ready for takeoff": PX4 withholds that until a ground station
+  connects, and the backend link is the ground station). Pre-flight state
+  then reaches the pilot as telemetry, like a real drone's.
+* **Processes.** The backend starts the script as the leader of a new
+  process group and stops it with SIGINT to the group, SIGKILL after 8 s,
+  then a sweep of every process whose environment carries
+  `HYRAK_CLOUD_SIM_ID=<this instance>` (a positive match in
+  `/proc/<pid>/environ`, this user's processes only). It never
+  pattern-matches command lines and never touches a gz or px4 it did not
+  start. Instances are recorded in `simulation/.cloud_sim/instances.json`;
+  on startup the backend sweeps every recorded instance by its marker
+  (orphans of a crash or a hard restart) and removes their working dirs.
+* **Teardown.** On `stop_cloud_sim` (and Disconnect while the cloud sim is
+  the link), when the session ends (its socket did not return within the
+  90 s resume window), after `CLOUD_SIM_IDLE_MINUTES` on the ground
+  (disarmed or not linked; armed time never counts), when it exits on its
+  own (reported as an error), when it does not come up within
+  `CLOUD_SIM_BOOT_TIMEOUT_S`, and on backend shutdown (which includes the
+  dev backend's auto-reload). A linked session's telemetry is released
+  first (`telemetry_status: disconnected`).
+
+### Not yet
+
+* **Camera.** No video from the cloud sim. `hyrak_sim.sh`'s camera
+  bridge sends H.265 RTP to a fixed udp:5600 consumed by the staff-only
+  `air_unit_udp` source; feeding a customer session safely needs a
+  per-instance port and a server video source allowed only for the
+  session that owns the sim. Follow-up; until then the x500 has no camera
+  model (it would render for nothing).
+* Mission planning for customers is stream A of 2b; the cloud sim takes
+  whatever the session may upload.
+* Per-workspace quotas beyond the one setting, billing, usage metering.
+
+### Operator note: sizing and the firewall
+
+Settings (`.env`):
+
+| setting | default | meaning |
+|---|---|---|
+| `CLOUD_SIM_ENABLED` | true | off hides the option and refuses starts |
+| `CLOUD_SIM_MAX_GLOBAL` | 2 | instances on the server at once |
+| `CLOUD_SIM_MAX_PER_WORKSPACE` | 1 | instances per workspace (staff share HYRAK's) |
+| `CLOUD_SIM_IDLE_MINUTES` | 15 | on the ground this long: stopped |
+| `CLOUD_SIM_BOOT_TIMEOUT_S` | 150 | not ready by then: stopped as an error |
+| `CLOUD_SIM_PORT_BASE` | 15000 | first port of the 640-port block |
+| `CLOUD_SIM_INSTANCE_BASE` | 100 | first PX4 instance (100-199 allowed) |
+| `CLOUD_SIM_PX4_DIR` | ~/PX4-Autopilot | PX4 checkout built with `make px4_sitl_default` |
+| `CLOUD_SIM_WORLD` | default | PX4 gz world |
+| `CLOUD_SIM_REQUIRE_FIREWALL_ACK` | false | set true on servers after applying the rule below |
+
+Measured on the dev laptop (2026-10-18, one headless x500, default
+world): ready in 14.7 s, about 0.95 CPU core in lockstep at real time,
+about 245 MB RSS (gz server ~220 MB, PX4 ~20 MB). Size
+`CLOUD_SIM_MAX_GLOBAL` to the cores left after vision inference: on a
+dedicated 32-core box with GPU inference, 16-24 is a reasonable start;
+keep 2 on a laptop. A real-time factor below 1 (too many instances)
+stretches PX4's clock and heartbeats: watch for MAVSDK "heartbeats timed
+out" in the log.
+
+**Firewall (required on a server).** PX4's MAVLink module binds its port
+on 0.0.0.0 (this PX4 tree has no loopback-only option) and, once its
+partner is set, still accepts datagrams from ANY source. So anyone who
+can reach the server on the block can send MAVLink, including commands,
+to a customer's sim while the backend link is live. Firewall the block to
+loopback, then set `CLOUD_SIM_REQUIRE_FIREWALL_ACK=true`; until then the
+backend logs a warning at every startup. Example (nftables, default
+block 15000-15639; the backend never changes firewall settings itself):
+
+```
+nft add table inet hyrak_cloud_sim
+nft add chain inet hyrak_cloud_sim input '{ type filter hook input priority 0; policy accept; }'
+nft add rule inet hyrak_cloud_sim input iifname != "lo" udp dport 15000-15639 drop
+```
+
+## 8d. Phase 2b: customer missions and permits (as built)
+
+Goal: Fly, Mission, AI, Config and Settings are every customer's. A
+customer plans, saves and flies their own missions with what a
+QGroundControl / Mission Planner user expects, and asks for permission to
+cross restricted airspace; staff keep working as before.
+
+### Missions, pads and route profiles belong to a workspace
+
+Migration `a7d3e9b1c4f2` adds `workspace_id` (cascade with the workspace;
+every existing row goes to HYRAK) to `missions`, `pads`, `route_profiles`
+and `permits`, plus `missions.name`. Pad and profile names are unique per
+workspace (two customers may each have a "Home" pad).
+
+Who reads and writes which workspace's plans is `app/planner/scope.py`:
+
+| | read | write |
+|---|---|---|
+| a customer workspace | `view` on it (viewers included) | `plan` on it (pilot, admin, owner, manager, founder) |
+| HYRAK's own plans (delivery legs, pads, stations, the builtin profiles) | staff (compat viewer), as before | compat operator, as before |
+| staff on a customer workspace | every workspace's, as before (compat viewer) | only with `plan` there (managers, founders) |
+
+* A request names its workspace (`workspace_id`, query or body). Without
+  one, staff act on HYRAK and a customer on the first of their own
+  memberships (grant order) that allows the action, the same pick as the
+  live session. Unknown or invisible workspace: 404; visible without the
+  right: 403.
+* **HYRAK's pads and route profiles are shared vocabulary**: listed to
+  every planner next to their own (`global: true`, `editable: false`) and
+  never writable by customers (403). Only these two kinds of row are
+  global; HYRAK's missions and permits are 404 to customers.
+* **Map features** stay global, read-only land-use data: `GET
+  /api/map-features` is open to any signed-in account; writes stay
+  operator.
+* **Deliveries stay HYRAK's**: `/api/tasks*`, `/v1` and the delivery
+  planner resolve HYRAK's pads and stations only; a customer pad is never
+  a delivery address. Stations can only be created on HYRAK.
+
+REST (all `require_signed_in`, decided by the scope):
+
+* `POST /api/missions/plan` `{..., workspace_id?, name?}`: needs `plan`.
+  Profiles resolve among HYRAK's and the workspace's own (the workspace's
+  wins a name clash); a `drone_id` must be a drone of that workspace (409).
+  `requested_by` defaults to the caller's username.
+* `POST /api/missions` `{name, waypoints, workspace_id?, drone_id?}`: save
+  a hand-drawn plan (the Mission tab's library). Waypoints are validated
+  (finite, in range, at most 500) and keep `turn_radius`; distance,
+  duration and the zones crossed are computed on the server.
+* `GET /api/missions?workspace_id=&status=&drone_id=`: one workspace's,
+  each with `editable`. Staff without `workspace_id`: every workspace's.
+* `GET|PATCH|DELETE /api/missions/{id}`: PATCH `{name?, waypoints?
+  (planned only), drone_id? (null clears), status?}`. DELETE is refused
+  (409) while flying or while a delivery order uses it; permits that named
+  it keep their frozen waypoints.
+* `GET /api/pads?workspace_id=`, `POST /api/pads {..., workspace_id?}`,
+  `PATCH|DELETE /api/pads/{id}`; `GET /api/planner/meta?workspace_id=`
+  (profiles with `global`, `editable`), `POST /api/route-profiles {...,
+  workspace_id?}`, `PATCH|DELETE /api/route-profiles/{id}` (deleting a
+  profile clears it from missions; their `profile_name` stays).
+* `POST /api/zones/check-path` `{waypoints, workspace_id?, drone_id?}`:
+  `{zone_class, zones, needs, permit, workspace_id}` with `needs` one of
+  `none`, `ack` (orange: acknowledge at upload, or a permit), `permit`
+  (red: an approved permit), `prohibited`. `permit` is the approved,
+  in-window permit of the workspace (and drone) covering the path. Zone
+  entries now carry `permission_required`, `floor_m`, `ceiling_m`.
+
+### Socket
+
+* `upload_mission` is a **session command with drone access**
+  (`socket_classes.SESSION_COMMAND`, in `DRONE_EVENTS`): `fly` on the
+  session workspace (staff: operator) and `fly` on the drone's workspace.
+  The completeness test now counts 20 session commands and 27 + 4 staff
+  events. Staff uploads to a customer's drone they cannot fly are refused
+  too (`drone_not_in_workspace`), as for every drone event.
+* Every upload (socket, swarm, the fleet's `/api/fleet/{id}/fly`) goes
+  through one gate, `permits.gate_upload`: red is refused unless an
+  approved, in-window permit of the drone's workspace covers it; orange
+  needs `ack_orange` unless a permit covers it too; a red zone with
+  `permission_required = false` is refused outright (`prohibited: true`,
+  `can_request: false`). The result shape is the old one (`blocked`,
+  `can_request`, `needs_ack`, `zones`, `msg`) plus `prohibited`,
+  `permit_check_failed` and, on success, `permit_id`.
+* A successful upload marks a planned mission `uploaded` only within the
+  drone's workspace (one workspace's upload never advances another's
+  identical plan).
+* `request_permit` / `list_my_permits` stay staff-only (swarm and fleet
+  drones; a socket request gets a 24 h window). Customers, and the
+  Mission tab for a single drone, use REST.
+
+### Permits
+
+A permit is for a **mission** (frozen waypoints; matched within GPS-noise
+tolerance, any edit invalidates it) or an **area** (a polygon: any path
+inside it). It belongs to a workspace and optionally one drone (null =
+any drone of the workspace), names the zones it covers (orange, and red
+with `permission_required`), and has a window `[valid_from, valid_until)`
+(required for new requests, at most 30 days).
+
+Statuses: `pending -> approved | denied | withdrawn`, `approved -> revoked
+| withdrawn | superseded`. `expired` is shown (`status_effective`), not
+stored: an approved permit past its window.
+
+* **Request** `POST /api/permits {workspace_id?, description, valid_from?,
+  valid_until, drone_id?, and waypoints | mission_id (+ waypoints) |
+  area}`: `plan` on the workspace (HYRAK: operator). `workspace_id`
+  defaults to the drone's. Refused: no restricted zone crossed (400), a
+  prohibited zone (409), a drone of another workspace (409).
+* **List** `GET /api/permits?workspace_id=` that workspace's (read access
+  to its plans; customers see their own and their status). Without
+  `workspace_id`: the caller's decision queue, every permit they may
+  decide (founders: all). Items add `status_effective`, `in_window`,
+  `workspace_name`, `drone_name`, `can_decide`.
+* **Decide** `POST /api/permits/{id}/decision {approve, note?}` (pending:
+  approve / deny; approved: `approve: false` revokes). Who: anyone with
+  `permits.approve` covering the **restricted footprint** - the flight's
+  path (widened by the 20 m corridor) or area, intersected with the zones
+  the permit names - by `perms.check_area`: founders anywhere, airspace
+  managers inside their area (any workspace), managers of the workspace
+  (or an ancestor) inside their membership area, else the workspace's
+  operating area. **Nobody but a founder decides their own request.**
+  Approval records each zone's current class, `floor_m` and `ceiling_m`
+  on the permit and is refused if a zone became prohibited meanwhile.
+* **Withdraw** `POST /api/permits/{id}/withdraw`: `plan` on its workspace,
+  or the requester.
+* **Audit**: `permit.request`, `permit.approve`, `permit.deny`,
+  `permit.revoke`, `permit.withdraw`, `permit.supersede` rows in
+  `audit_events`, on the permit's workspace.
+
+**Honoured** (upload gate, arm / takeoff in a red zone, the in-flight zone
+monitor) only when all hold: status `approved`, inside the window, the
+permit's workspace is the drone's **current** workspace (a moved drone
+leaves its permits behind), the drone matches (or the permit is for any
+drone), the path matches (mission) or stays inside the area, every zone
+needing cover is named on the permit, and each such zone is **live with
+exactly the recorded class and altitudes** and still admits a permit. A
+permit recorded before 8b has no altitudes and exempts nothing.
+
+* **Zone edits supersede.** Changing a zone's `zone_class`,
+  `permission_required`, `floor_m` or `ceiling_m` first marks every
+  approved permit naming it `superseded` (audited); if that cannot be
+  written the edit is refused (503) and the zone stays as it was. Geometry
+  changes are delete + redraw, a new zone no permit names.
+* **Zone monitor.** A zone named by an honoured permit does not count
+  while the aircraft is within 30 m of the mission permit's path or inside
+  the area permit's polygon (5 m slack): no warning, no pushback (it says
+  "under permit" instead, `zone_status.permitted_zones`). Leaving the
+  footprint, the window ending, a revocation or a zone change makes the
+  zone count again. The monitor caches a drone's permits for 15 s and
+  refetches at once after any permit write; it **fails closed**: a failed
+  refetch does not refresh the cache, and the cached answer is used only
+  while no permit was written since and it is under 30 s old.
+* **Arm / takeoff in a red zone** read the permits fresh; if they cannot
+  be read the action is refused with a clear message. The upload gate
+  likewise refuses red when permits cannot be read (orange can still be
+  acknowledged).
+* **Zones** gain `permission_required` (default true; only meaningful on
+  red): false = prohibited, no permit can be requested or approved. The
+  console's zone editor sets it ("Prohibited - no permits").
+* **Known limit:** the PX4 exclusion fence uploaded at connect still holds
+  every red zone, permitted or not; a permitted red crossing is cleared by
+  the server (upload, arm, monitor) but PX4's own geofence still reacts
+  (GF_ACTION). Re-uploading the fence per permit is a separate,
+  flight-tested change.
+
+### Frontend
+
+* Customers get the Mission tab in both UI modes (dev: Mission; normal:
+  Plan); the 2a redirect is gone. Deliver stays staff-only.
+* On the Mission tab, for the session's workspace: waypoint planning
+  (map, list, editor, survey grid, import / export `.plan`, terrain
+  follow, auto heading, 2D / 3D), **Plans** (open, save as new, save
+  over, rename, delete the workspace's saved missions), the **airspace
+  bar** (live zone check with an orange / red / prohibited explanation,
+  the covering permit, **Request permit** with purpose, window and drone,
+  **Permits** with status, load a permitted plan, withdraw), an
+  **altitude profile**, and upload / start / pause / RTL to their own
+  drone. A red upload refusal opens the permit dialog.
+* Viewers get read-only plans: open and inspect, no map edits, disabled
+  waypoint fields, no import / clear / upload / start / RTL (pause stays:
+  a safety action).
+* Hidden for customers: obstacle avoidance, the fleet mission panel, the
+  "Connect SITL" (server udp) button (they get a pointer to connect
+  their own drone).
+* The Command tab's mission bar links to the Mission / Plan tab.
+* Console PERMITS tab: visible to anyone with `permits.approve` (founders,
+  airspace managers, managers); shows the caller's decision queue with
+  workspace, drone, requester, window and zones, takes a note with
+  approve / deny, revokes approved permits. A permit the caller requested
+  shows as someone else's to decide.
+
+### Tests
+
+`tests/test_mission_permits.py` (no database): planning scope, permit
+window / drone / coverage / live-zone rules, decision area rules (founder,
+airspace in / out, manager of the workspace, other workspace's manager,
+customer owner, self-approval), the upload gate, the monitor standing down
+only under a permit and failing closed (revoke during cache, fetch
+failure, generation change), arm / upload refusals when permits cannot be
+read, refused zone edit when supersede fails, `upload_mission` as a
+session command with drone access on the real handler.
+`tests/test_planning_db.py` (opt in, `HYRAK_TEST_DATABASE_URL`): HTTP
+isolation of missions, pads and profiles, and request -> decide -> honour
+with expiry, revoke, deny, withdraw, supersede on a zone edit, and their
+audit rows.
 
 ## 9. Scaling to a dedicated server
 

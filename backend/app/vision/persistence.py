@@ -20,6 +20,7 @@ which auto-purged on every stop; Japesh wanted a browsable history instead.
 import contextlib
 import logging
 import os
+from typing import Callable, Optional
 
 from sqlalchemy import delete, func, select
 
@@ -38,12 +39,33 @@ _WRITERS = {
 }
 
 
+# session_id -> workspace_id, installed once by server.py from the session
+# manager. Every row is stamped with its session's workspace
+# (docs/ACCESS_MODEL.md 8b); the analyzers only know the session id.
+_workspace_of: Optional[Callable[[str], Optional[str]]] = None
+
+
+def set_workspace_resolver(fn: Optional[Callable[[str], Optional[str]]]) -> None:
+    global _workspace_of
+    _workspace_of = fn
+
+
+def _session_workspace_now(session_id: str) -> Optional[str]:
+    if _workspace_of is None:
+        return None
+    try:
+        return _workspace_of(session_id)
+    except Exception:
+        return None
+
+
 async def persist_events(session_id: str, events: list[dict]) -> None:
     """Live-write path, called per camera frame when an analyzer queues
     something. Cheap no-op when the DB is offline - vision must never
     depend on persistence to keep working."""
     if not events or not db_available():
         return
+    workspace_id = _session_workspace_now(session_id)
     try:
         async with get_session() as db:
             for ev in events:
@@ -52,6 +74,10 @@ async def persist_events(session_id: str, events: list[dict]) -> None:
                     continue
                 fields = {k: v for k, v in ev.items() if k != "table"}
                 fields.setdefault("session_id", session_id)
+                # Never from the analyzer's payload: the session decides.
+                fields.pop("workspace_id", None)
+                if workspace_id:
+                    fields["workspace_id"] = workspace_id
                 db.add(model(**fields))
             await db.commit()
     except Exception as e:
@@ -110,37 +136,48 @@ async def export_plate_report(session_id: str) -> list[dict]:
 
 # ── Cross-session history (for the "previous sessions" sidebar)            ──
 
-async def list_crowd_history(limit: int = 10) -> dict:
+def _in_workspaces(q, column, workspace_ids: Optional[list[str]]):
+    """Filter a query to these workspaces; None = no filter (founders)."""
+    if workspace_ids is None:
+        return q
+    return q.where(column.in_(list(workspace_ids)))
+
+
+async def list_crowd_history(limit: int = 10, workspace_ids: Optional[list[str]] = None) -> dict:
     """Per-session summaries (from snapshot rows) + the most recent
-    sustained-density alerts, most recent session first."""
-    if not db_available():
+    sustained-density alerts, most recent session first. `workspace_ids`
+    limits both to those workspaces (None: all, an empty list: nothing)."""
+    if not db_available() or workspace_ids == []:
         return {"sessions": [], "alerts": []}
     try:
         async with get_session() as db:
-            rows = (
-                await db.execute(
-                    select(
-                        CrowdSnapshot.session_id,
-                        func.min(CrowdSnapshot.t).label("started"),
-                        func.max(CrowdSnapshot.t).label("last_seen"),
-                        func.max(CrowdSnapshot.peak_count).label("peak_count"),
-                    )
-                    .group_by(CrowdSnapshot.session_id)
-                    .order_by(func.max(CrowdSnapshot.t).desc())
-                    .limit(limit)
+            q = (
+                select(
+                    CrowdSnapshot.session_id,
+                    func.min(CrowdSnapshot.workspace_id).label("workspace_id"),
+                    func.min(CrowdSnapshot.t).label("started"),
+                    func.max(CrowdSnapshot.t).label("last_seen"),
+                    func.max(CrowdSnapshot.peak_count).label("peak_count"),
                 )
-            ).all()
+                .group_by(CrowdSnapshot.session_id)
+                .order_by(func.max(CrowdSnapshot.t).desc())
+                .limit(limit)
+            )
+            rows = (await db.execute(
+                _in_workspaces(q, CrowdSnapshot.workspace_id, workspace_ids))).all()
             sessions = [
                 {
                     "session_id": r.session_id,
+                    "workspace_id": r.workspace_id,
                     "started": r.started.isoformat() if r.started else None,
                     "last_seen": r.last_seen.isoformat() if r.last_seen else None,
                     "peak_count": r.peak_count,
                 }
                 for r in rows
             ]
+            aq = select(CrowdAlert).order_by(CrowdAlert.t.desc()).limit(limit * 3)
             alerts = (
-                await db.execute(select(CrowdAlert).order_by(CrowdAlert.t.desc()).limit(limit * 3))
+                await db.execute(_in_workspaces(aq, CrowdAlert.workspace_id, workspace_ids))
             ).scalars().all()
             return {"sessions": sessions, "alerts": [a.to_dict() for a in alerts]}
     except Exception as e:
@@ -148,13 +185,14 @@ async def list_crowd_history(limit: int = 10) -> dict:
         return {"sessions": [], "alerts": []}
 
 
-async def list_plate_history(limit: int = 50) -> list[dict]:
-    if not db_available():
+async def list_plate_history(limit: int = 50, workspace_ids: Optional[list[str]] = None) -> list[dict]:
+    if not db_available() or workspace_ids == []:
         return []
     try:
         async with get_session() as db:
+            q = select(PlateEvent).order_by(PlateEvent.first_seen.desc()).limit(limit)
             rows = (
-                await db.execute(select(PlateEvent).order_by(PlateEvent.first_seen.desc()).limit(limit))
+                await db.execute(_in_workspaces(q, PlateEvent.workspace_id, workspace_ids))
             ).scalars().all()
             return [r.to_dict() for r in rows]
     except Exception as e:
@@ -162,48 +200,82 @@ async def list_plate_history(limit: int = 50) -> list[dict]:
         return []
 
 
-async def get_plate_image_path(event_id: str) -> str | None:
+async def get_plate_image(event_id: str) -> tuple[str | None, str | None]:
+    """(image path, workspace id) of one plate event; (None, None) when
+    unknown or the DB is offline."""
     if not db_available():
-        return None
+        return None, None
     try:
         async with get_session() as db:
             row = (
                 await db.execute(select(PlateEvent).where(PlateEvent.id == event_id))
             ).scalar_one_or_none()
-            return row.image_path if row else None
+            return (row.image_path, row.workspace_id) if row else (None, None)
     except Exception as e:
         logger.warning(f"Plate image lookup error: {e}")
+        return None, None
+
+
+async def get_plate_image_path(event_id: str) -> str | None:
+    return (await get_plate_image(event_id))[0]
+
+
+async def session_workspace(session_id: str) -> str | None:
+    """The workspace a session's history rows were recorded in (any of the
+    crowd, plate, sighting or flight rows), or None when it wrote none or
+    the DB is offline. This is what makes a session report's access
+    durable: it survives a restart, unlike the in-memory session owner."""
+    if not db_available():
         return None
+    from app.db.models import Flight
+    try:
+        async with get_session() as db:
+            for model in (CrowdSnapshot, CrowdAlert, PlateEvent, PersonSighting, Flight):
+                ws = (await db.execute(
+                    select(model.workspace_id).where(model.session_id == session_id).limit(1)
+                )).scalar_one_or_none()
+                if ws:
+                    return ws
+    except Exception as e:
+        logger.warning(f"Session workspace lookup error: {e}")
+    return None
 
 
 # ── Manual cleanup (operator-triggered - "Clear history" in the sidebar)   ──
 
-async def clear_crowd_history() -> None:
-    if not db_available():
+async def clear_crowd_history(workspace_ids: Optional[list[str]] = None) -> None:
+    """Delete crowd history; `workspace_ids` limits it to those workspaces
+    (None: everything, an empty list: nothing)."""
+    if not db_available() or workspace_ids == []:
         return
     try:
         async with get_session() as db:
-            await db.execute(delete(CrowdSnapshot))
-            await db.execute(delete(CrowdAlert))
+            await db.execute(_in_workspaces(delete(CrowdSnapshot), CrowdSnapshot.workspace_id,
+                                            workspace_ids))
+            await db.execute(_in_workspaces(delete(CrowdAlert), CrowdAlert.workspace_id,
+                                            workspace_ids))
             await db.commit()
     except Exception as e:
         logger.warning(f"Crowd history clear error: {e}")
 
 
-async def clear_plate_history() -> None:
-    if not db_available():
+async def clear_plate_history(workspace_ids: Optional[list[str]] = None) -> None:
+    if not db_available() or workspace_ids == []:
         return
     image_paths: list[str] = []
     try:
         async with get_session() as db:
-            rows = (await db.execute(select(PlateEvent))).scalars().all()
+            rows = (await db.execute(
+                _in_workspaces(select(PlateEvent), PlateEvent.workspace_id, workspace_ids)
+            )).scalars().all()
             # Both images per row - the plate crop AND the vehicle shot.
             # Collecting only image_path would leave every _vehicle.jpg behind
             # as an orphan after a "clear history", growing without bound.
             image_paths = [
                 p for r in rows for p in (r.image_path, r.vehicle_image_path) if p
             ]
-            await db.execute(delete(PlateEvent))
+            await db.execute(_in_workspaces(delete(PlateEvent), PlateEvent.workspace_id,
+                                            workspace_ids))
             await db.commit()
     except Exception as e:
         logger.warning(f"Plate history clear error: {e}")
@@ -454,13 +526,16 @@ async def enrol_from_folder(root: str) -> list:
     return out
 
 
-async def list_sightings(session_id: str | None = None, limit: int = 200) -> list[dict]:
-    """Gallery-match audit trail. Session-scoped when given a session_id."""
-    if not db_available():
+async def list_sightings(session_id: str | None = None, limit: int = 200,
+                         workspace_ids: Optional[list[str]] = None) -> list[dict]:
+    """Gallery-match audit trail. Session-scoped when given a session_id,
+    limited to `workspace_ids` when given (an empty list: nothing)."""
+    if not db_available() or workspace_ids == []:
         return []
     try:
         async with get_session() as db:
             q = select(PersonSighting).order_by(PersonSighting.t.desc()).limit(limit)
+            q = _in_workspaces(q, PersonSighting.workspace_id, workspace_ids)
             if session_id:
                 q = q.where(PersonSighting.session_id == session_id)
             return [s.to_dict() for s in (await db.execute(q)).scalars().all()]
@@ -469,19 +544,20 @@ async def list_sightings(session_id: str | None = None, limit: int = 200) -> lis
         return []
 
 
-async def clear_sightings(session_id: str | None = None) -> None:
-    if not db_available():
+async def clear_sightings(session_id: str | None = None,
+                         workspace_ids: Optional[list[str]] = None) -> None:
+    if not db_available() or workspace_ids == []:
         return
     from app.vision.face_gallery import delete_gallery_files
     paths: list[str] = []
     try:
         async with get_session() as db:
-            q = select(PersonSighting)
+            q = _in_workspaces(select(PersonSighting), PersonSighting.workspace_id, workspace_ids)
             if session_id:
                 q = q.where(PersonSighting.session_id == session_id)
             rows = (await db.execute(q)).scalars().all()
             paths = [r.image_path for r in rows if r.image_path]
-            d = delete(PersonSighting)
+            d = _in_workspaces(delete(PersonSighting), PersonSighting.workspace_id, workspace_ids)
             if session_id:
                 d = d.where(PersonSighting.session_id == session_id)
             await db.execute(d)
