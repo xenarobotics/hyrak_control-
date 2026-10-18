@@ -309,8 +309,9 @@ with `view` on the workspace (premium or not); Add still needs
   license_note, onnx_files, suggested_file, runnable, reason, added}]}`.
   One anonymous `list_models` call per pipeline tag (object-detection,
   image-classification, plus image-segmentation for `all`) with `expand`;
-  private rows dropped; at most 3 `model_info` calls to size repos whose
-  storage passes the limit. Runnable first, then by downloads. Reasons:
+  private rows dropped. The listing has no file sizes (it refuses
+  `usedStorage` in `expand`), so "Too large" shows only when a row carries
+  its storage; Add always checks the size (`too_large`). Runnable first, then by downloads. Reasons:
   "Only PyTorch .pt files - supported after the HYRAK sandbox update",
   "Only PyTorch or safetensors weights - ...", "No ONNX file in this
   repo", "Gated - needs approval on Hugging Face", "Segmentation - coming

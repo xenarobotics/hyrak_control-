@@ -166,8 +166,10 @@ TASK_OF = {"object-detection": "detect", "image-classification": "classify",
 PAGE_SIZE = 20
 MAX_PAGE = 4
 SIZE_LOOKUPS = 3                                    # model_info calls per search, at most
+# What the Hub's listing accepts in `expand` (checked live 2026-10-18; it
+# refuses usedStorage, so repo sizes are not in the listing).
 EXPAND = ["siblings", "likes", "downloads", "lastModified", "cardData", "gated", "private",
-          "pipeline_tag", "usedStorage", "tags"]
+          "pipeline_tag", "tags"]
 
 REASON_GATED = "Gated - needs approval on Hugging Face"
 REASON_SEGMENT = "Segmentation - coming soon"
@@ -265,8 +267,11 @@ def _card(m, pipeline: str, limit_bytes: int) -> dict:
 
 
 async def _size_check(cards: list, limit_bytes: int) -> None:
-    """Repos whose total storage passes the limit: look up the .onnx sizes
-    (bounded) and mark a repo whose every .onnx is too big."""
+    """Repos whose total storage is known to pass the limit: look up the
+    .onnx sizes (bounded) and mark a repo whose every .onnx is too big.
+    The Hub listing does not return storage today, so this only runs when
+    a row carries it; adding a model always checks the size again
+    (`too_large`)."""
     s = get_settings()
     timeout = float(s.custom_models_hf_timeout_s)
     big = [c for c in cards if c["runnable"] and c["_size"] and c["_size"] > limit_bytes]
