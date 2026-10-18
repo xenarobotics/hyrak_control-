@@ -62,7 +62,7 @@ actor and client IP, readable through `GET /api/audit`.
 
 * REST: `Authorization: Bearer <token>`.
 * Socket.IO: `auth: {token, resume_session, resume_secret}`. A refused handshake carries the message `unauthorized`; the frontend clears its token and goes to `/login`.
-* Frontend: `src/lib/auth.ts` (`login`, `logout`, `getToken`, `getUser`, `authHeaders`, `liveAuthHeaders`) and `src/lib/api.ts` (`apiFetch`, redirects to `/login` on 401). The token lives in `localStorage` under `hyrak-auth-token`. `src/hooks/useAuthGate.ts` keeps the platform layout and `/admin` behind the login; `/` stays public.
+* Frontend: `src/lib/auth.ts` (`login`, `logout`, `getToken`, `getUser`, `authHeaders`, `liveAuthHeaders`) and `src/lib/api.ts` (`apiFetch`, redirects to `/login` on 401; `apiDownload` for files; `ticketedUrl` for streams). Every backend call goes through `apiFetch`, except the auth calls themselves, `src/lib/workspaces.ts` in its soft mode (no redirect), the local-backend probe in `serverHevcFeed.ts` (bearer, no redirect: a different local server's 401 must not sign you out) and the public `/releases` fetches. An `<img>` or `<a href>` cannot send the header: one-shot media and downloads are fetched into a blob and shown or saved through an object URL (`src/hooks/useApiMedia.ts` `useApiObjectUrl`, `apiDownload`), and long-lived MJPEG streams use URL tickets (below). The token lives in `localStorage` under `hyrak-auth-token`. `src/hooks/useAuthGate.ts` keeps the platform layout and `/admin` behind the login; `/` stays public.
 * Scripts (`simulation/gz_depth_sensor.py`, `gs_relay_agent.py`): put an operator's bearer token in `HYRAK_TOKEN`. Get one with the login call below or from a signed-in browser's `localStorage`.
 
 ```
@@ -90,6 +90,49 @@ signed-in account must hold the locked address verified; a signed-out
 sign-up must use the locked address). The full account API
 (profile, password change, devices, invites, reset links) is in
 `docs/ACCESS_MODEL.md` section 7 and its phase 1 notes.
+
+### URL tickets
+
+For a GET that a browser element must load without a header and that runs
+too long for a blob (the recon MJPEG streams in an `<img>`):
+
+```
+POST /api/auth/url-ticket   {"path": "/api/recon/stream/depth"}   (bearer)
+-> {"ticket": "<43 chars>", "expires_at": <unix seconds>}
+GET  /api/recon/stream/depth?ticket=<ticket>
+```
+
+* The ticket is 32 random bytes (urlsafe base64). The server keeps only its
+  SHA-256, in a bounded in-memory map (4096 entries, expired ones pruned on
+  each issue, oldest dropped first).
+* It is bound to the user, to the bearer token that asked for it and to one
+  exact path (no query string, no `..`), and is valid for 60 s from issue.
+  It may be presented any number of times in that window, so an `<img>`
+  can reconnect; after that the client asks for a new one
+  (`useTicketedStream` does this on the `<img>` error event, with backoff).
+  A stream already open keeps running past the 60 s: the check is at
+  request start.
+* Issue refuses (404) a path that no route opted in for, (403) a caller who
+  could not GET it with the bearer, and (403) the legacy shared token,
+  which has no token record to re-check.
+* A route opts in with `Depends(require_user_or_ticket(min_role, template))`
+  (`backend/app/auth/url_tickets.py`), passing its own full path template;
+  today only `GET /api/recon/stream/{kind}`. Every other route uses
+  `require_user`, which reads headers only and ignores `?ticket=`. The
+  dependency also ignores a ticket on any method but GET / HEAD and on a
+  path its template does not match. A credential header, when present,
+  wins over a ticket.
+* On every use the issuing token is verified again through the normal
+  token check (cache, then store): a logout, a revoked token, a disabled
+  account or a role that dropped below the route's minimum refuses the
+  ticket (401 / 403), and the ticket's user must still be the token's user.
+  A ticket always carries its owner's access, never the presenter's.
+* **One process only.** The map lives in the backend process that issued
+  the ticket, like the login rate limiter and the token cache. With more
+  than one API worker, either keep the stream routes and `url-ticket` on
+  the same sticky worker or move the map to Redis (a key per ticket hash
+  with a 60 s TTL) with the rest of the per-process state (ACCESS_MODEL.md
+  section 9).
 
 ## Revocation on live sockets
 
@@ -209,6 +252,7 @@ Generate a real value with `python3 -c "import secrets; print(secrets.token_urls
 * `backend/app/auth/store.py`: `DbStore` (tables) and `MemoryStore` (platform workspace, env founder, tests).
 * `backend/app/auth/service.py`: login, verify, cache, rate limits, legacy token, account self-service, reset links, startup bootstrap.
 * `backend/app/auth/deps.py`: `require_user(min_role)`, `require_founder`, `optional_user` FastAPI dependencies.
+* `backend/app/auth/url_tickets.py`: URL tickets, `require_user_or_ticket(min_role, template)`.
 * `backend/app/auth/socket_guard.py`: `require_session_view`, `require_session_fly` (customer-reachable events), `require_operator`, `require_admin`, `require_staff` (staff only) for socket handlers.
 * `backend/app/auth/socket_classes.py`: the classification of every socket event, drone events, the hold / return / land safety actions, customer-blocked video sources and AI modes.
 * `backend/app/auth/live_scope.py`: the session's workspace and perms at connect and revalidation, the drone claim, drone access.
@@ -217,4 +261,4 @@ Generate a real value with `python3 -c "import secrets; print(secrets.token_urls
 * `backend/app/auth/cli.py`: `create-user`, `grant`, `list-users`, `hash-password`.
 * `backend/app/workspaces/`: workspaces, members, invites, drone assignment, zone layer rules, staff and audit routes.
 * `backend/alembic/versions/e4b7a2c9d013_users_and_auth_tokens.py`, `backend/alembic/versions/f6c2a8d4e1b7_workspaces_memberships_invites.py`.
-* `backend/tests/test_auth.py`, `test_perms.py`, `test_workspaces.py`, `test_live_scope.py`, `test_socket_classes.py`, `test_auth_dbstore.py` (opt-in: `HYRAK_TEST_DATABASE_URL` pointing at a disposable migrated database), plus the `auth_headers` fixture in `tests/conftest.py` for route tests.
+* `backend/tests/test_auth.py`, `test_perms.py`, `test_workspaces.py`, `test_live_scope.py`, `test_url_tickets.py`, `test_socket_classes.py`, `test_auth_dbstore.py` (opt-in: `HYRAK_TEST_DATABASE_URL` pointing at a disposable migrated database), plus the `auth_headers` fixture in `tests/conftest.py` for route tests.

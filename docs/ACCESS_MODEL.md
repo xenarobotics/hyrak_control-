@@ -608,16 +608,37 @@ server never dials a TURN host the customer typed.
   and `/api/audit` already scope an owner or admin to their subtree
   (tested in `test_live_scope.py` and `test_workspaces.py`).
 * `start.sh` probes `/api/health` for readiness (it used `/api/fleet`).
-* **Frontend must send the bearer** on every route above that it fetched
-  without one (plain `fetch` instead of `apiFetch`): `/api/drones`,
-  `/api/zones`, `/api/permits`, `/api/flights/*`, `/api/map-features`,
-  `/api/vision/*` history / calibration / face gallery / sightings,
-  `/api/fleet`, `/api/video/mesh-units` and `/feeds`,
-  `/api/avoidance/*`, `/api/recon/*`, `/api/webrtc/ice-servers`, the
-  session report downloads. `<img src>` and `<a href>` uses (plate images,
-  flight CSV download, reconstruction MJPEG streams and file downloads)
-  cannot carry a header: they need a fetch-to-blob (or, for the MJPEG
-  streams, a stream reader or a short-lived signed URL, not built yet).
+* **The frontend sends the bearer everywhere.** Every backend call goes
+  through `apiFetch` (`src/lib/api.ts`), which adds the token and sends
+  the browser to `/login` on a 401: the zone, drone, permit, flight,
+  map-feature, planner, task, pad, fleet, sessions, vision history /
+  calibration / face gallery / sightings, avoidance, mesh-unit, recon and
+  ICE-server reads, and the writes that already carried the token. The
+  exceptions are deliberate: the auth calls themselves,
+  `src/lib/workspaces.ts` in its soft mode (no redirect), the local-backend
+  probe in `serverHevcFeed.ts` (bearer, but no redirect), the
+  `/api/video/feeds` stream reader (bearer through `authHeaders`) and the
+  public `/releases` fetches.
+* Elements that cannot send a header: the plate crop
+  (`/api/vision/plate-history/{id}/image`) is fetched into a blob and shown
+  through an object URL revoked on unmount (`useApiObjectUrl`); the flight
+  CSV, the session report zips and the recon result files are fetched into
+  a blob and saved through an object URL revoked a minute after the click
+  (`apiDownload`; the backend now exposes `Content-Disposition` to CORS so
+  the server's file name survives). The recon MJPEG streams
+  (`/api/recon/stream/video`, `/depth`) use **URL tickets**:
+  `POST /api/auth/url-ticket {path}` returns a 60 s ticket bound to the
+  user, the token and that exact path, reusable within the window so the
+  `<img>` can reconnect, re-checked against the token on every use, and
+  accepted only by routes that opted in with `require_user_or_ticket` (the
+  recon streams only). Details in `docs/AUTH.md` "URL tickets".
+* Video sources: the frontend hides the two DataChannel modes
+  (`rtsp_datachannel`, `air_unit_datachannel`) from customers as well, to
+  match the backend (`datachannel_video_offer` is staff-only because of the
+  shared 5800-5900 loopback pool). Customers keep `camera` (including the
+  desktop's virtual webcam) and `rtsp_camera` (RTSP decoded on their own
+  machine): both produce a WebRTC track in the browser and need no
+  server-sourced `videoSource` or relay allocation.
 
 ### Not in 2a (phase 2b)
 
