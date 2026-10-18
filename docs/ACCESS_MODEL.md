@@ -357,6 +357,84 @@ open live sessions or command drones yet; HYRAK staff fly as today. Phase 2 scop
 scopes recordings / vision history / flights per workspace, and adds TOTP.
 Phase 3 adds Google sign-in and outgoing email.
 
+## 8a. Phase 2a: customers in the live app (enough for Custom Models)
+
+Goal: a customer pilot opens Fly / AI / Config for **their own** workspace,
+connects their own drone and camera, runs AI modes (and later their own
+models) on their own video, and commands their own drone. Nothing shared
+with other workspaces is reachable. Staff keep working exactly as today.
+
+### Who gets what
+
+| account | console (/admin) | live app |
+|---|---|---|
+| founder | everything | everything (as today) |
+| manager / service operator | SPACES, ZONES, AUDIT for the workspaces they manage | as today (compat operator) |
+| other HYRAK staff | SPACES / ZONES / PERMITS / AUDIT as their memberships allow | as today (compat rank) |
+| customer owner / admin | **organization console**: SPACES, ZONES (site layer) and AUDIT, scoped to their workspaces | Fly, AI, Config, Settings for the active workspace |
+| customer pilot | none | Fly, AI, Config, Settings; commands own drone |
+| customer viewer | none | Fly, AI, Config, Settings read-only (video, telemetry, AI overlays) |
+
+Customers never see: Command-tab fleet aside / swarm, Mission and Deliver
+tabs, "Gazebo sim on server", mesh units, ground decoder relays, video wall,
+the fleet, other sessions, global vision history, other workspaces' flights.
+
+### Socket sessions
+
+* Handshake `auth: {token, workspace_id?, resume_session?, resume_secret?}`.
+  Staff: `workspace_id` optional, defaults to HYRAK. Customer-only accounts:
+  must have `view` on `workspace_id` (default: their first workspace with
+  `view`), else refused with `no_workspace_access`.
+* The session is stamped with `workspace_id`, the user's perms on it and
+  `is_staff`; `session_ready` carries `{workspace_id, perms, staff}`.
+  Revalidation (every 60 s and on membership change) refreshes the perms
+  and disconnects a session that lost `view`.
+* Switching the active workspace in the UI reconnects the socket (a session
+  belongs to exactly one workspace).
+
+### Every socket event is classified (default deny for customers)
+
+| class | guard | examples |
+|---|---|---|
+| session view | `view` on the session workspace (staff: signed in) | WebRTC offer / ICE / stop_stream for the session's own stream, own telemetry, own params read |
+| session command | `fly` on the session workspace (staff: compat operator) **and** drone access (below) | drone_action, drone_command, offboard, tracking, AI mode / params, calibration, own telemetry link connect |
+| staff only | compat rank as today | fleet / swarm, server-side links (udp:14600 Gazebo on server), mesh units, gs relay, allocate/release_video_relay, wall_offer/close, admin_hello / watch_session, permits, deliveries |
+
+Existing guards (`require_operator`, `require_admin`) keep meaning
+**staff only**; only events explicitly moved to the session guards become
+reachable for customers. A test enumerates every registered socket handler
+and fails if one is not in the classification table, so a new event cannot
+ship unclassified.
+
+### Drone access
+
+* On telemetry connect the registry records the drone with the session's
+  workspace: an **unassigned** drone is claimed by that workspace (audit
+  `drone.claimed`). Simulated drones are never claimed and never block.
+* A drone that belongs to a workspace where the user lacks `fly` is
+  read-only for that session: commands answer `{code: "drone_not_in_workspace"}`
+  with a message naming the fix (ask its owner to move it).
+* **Safety exception**: hold, return-to-launch and land are never refused
+  for a session that holds the drone's link, whoever owns it. Blocking a
+  safety command on a link the pilot physically holds is worse than any
+  ownership rule.
+
+### REST
+
+* Global data becomes staff-only (compat viewer): vision history (crowd,
+  plates and plate images, faces, sightings), flights and their downloads,
+  `/api/drones`, `/api/fleet`, sessions, missions, tasks, pads.
+* Session reports (`/sessions/{id}/crowd-report`, `plate-report`): the
+  session's own user or staff.
+* `/api/zones` GET and terrain: any signed-in account.
+* Org console data comes from the existing `/api/workspaces*`, zones and
+  `/api/audit` routes, which already check workspace permissions.
+
+### Not in 2a (phase 2b)
+
+Customer mission planning, customer flight history and recordings per
+workspace, customer fleet views, TOTP for founders and managers.
+
 ## 9. Scaling to a dedicated server
 
 * Workspaces, memberships and tokens live in Postgres; permission checks are
