@@ -1,7 +1,8 @@
 'use client'
 
-// One model's detail as a slide-over from its card: preview, classes,
-// versions, the optional alert rule, and Rename (in place), Re-test,
+// One model's detail as a slide-over from its card: preview, Settings
+// (what it does, sensitivity, shown classes, small-object tiling; saved on
+// change), classes, versions, the optional alert rule, and Rename (in place), Re-test,
 // Delete (named confirmation inside the panel, never a second modal) and,
 // for founders, Publish to HYRAK catalogue. Technical facts sit behind a
 // Details disclosure.
@@ -17,12 +18,13 @@ import {
 } from '@/lib/models'
 import { useModelsStore } from '@/store/models'
 import { ClassChips } from './ClassChips'
+import { ModelSettingsSection, type SettingFocus } from './ModelSettings'
 import { Callout, Hint, SlideOver, StatusChip, css as s } from './ui'
 
 const SCORES = [0.3, 0.5, 0.6, 0.7, 0.8, 0.9]
 
 // Mount with key={modelId}: each model starts with a clean panel.
-export function ModelDetailPanel({ modelId, open, onOpenChange, editable, canPublish, canRun, running, onRun, onDeleted }: {
+export function ModelDetailPanel({ modelId, open, onOpenChange, editable, canPublish, canRun, running, onRun, onDeleted, focus }: {
     modelId: string | null
     open: boolean
     onOpenChange: (open: boolean) => void
@@ -33,6 +35,8 @@ export function ModelDetailPanel({ modelId, open, onOpenChange, editable, canPub
     running: boolean
     onRun: (m: CustomModel) => void
     onDeleted: (name: string) => void
+    /** Opened from a results chip: scroll to and focus this setting. */
+    focus?: SettingFocus | null
 }) {
     const fromStore = useModelsStore(st => modelId ? st.workspace.find(m => m.id === modelId)
         ?? (st.hyrak.find(m => (m as CustomModel).id === modelId && (m as { kind?: string }).kind !== 'builtin') as CustomModel | undefined)
@@ -152,6 +156,11 @@ export function ModelDetailPanel({ modelId, open, onOpenChange, editable, canPub
                 </div>
             )}
 
+            {m.task && (
+                <ModelSettingsSection model={m} labels={labels} editable={editable} focus={focus}
+                    onSaved={apply} />
+            )}
+
             <div className={s.section}>
                 <span className={s.label}>{m.task === 'classify' ? 'Answers it can give' : 'Things it finds'} ({labels.length})</span>
                 {editable && <p className={s.help}>Click a name to change how it shows on the video.</p>}
@@ -169,7 +178,7 @@ export function ModelDetailPanel({ modelId, open, onOpenChange, editable, canPub
                     <span className={s.label}>Versions</span>
                     <ul className={cn(s.inset, s.versions)} style={{ padding: '0 10px' }}>
                         {m.versions!.map(x => (
-                            <li key={x.id}>
+                            <li key={x.id ?? x.n}>
                                 <span className={s.mono}>v{x.n}</span>
                                 <span>
                                     {new Date(x.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}

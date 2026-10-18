@@ -497,3 +497,14 @@
   .toggle input, .toggle input::after { transition: none; }
   .cardNew { animation: none; box-shadow: 0 0 0 2px var(--cm-accent); }
 }
+
+/* results: per-class counts now and over the run */
+.counts { width: 100%; border-collapse: collapse; font-size: var(--cm-small); }
+.counts th, .counts td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--cm-line); }
+.counts th:first-child { text-align: left; font-weight: 500; color: var(--cm-ink); overflow-wrap: anywhere; }
+.counts thead th { font-weight: 500; color: var(--cm-ink-2); }
+.counts thead th:first-child { color: var(--cm-ink-2); }
+.counts .resCount { font-size: 16px; }
+.normal .counts { font-size: 15px; }
+/* settings chips in the results panel are buttons: a 24 px target */
+.results .chipBtn { min-height: 24px; }

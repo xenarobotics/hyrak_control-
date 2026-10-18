@@ -1,8 +1,10 @@
 'use client'
 
-// Results of a running custom model, compact: what it finds with counts
-// (detect), or its answers (classify: every class when there are 10 or
-// fewer, else the top 5), plus the alert rule's hits.
+// Results of a running custom model, compact: the active settings as chips
+// (each opens that setting in the model's panel), what it finds with counts
+// now and over the run (detect), or its answers (classify: every class when
+// there are 10 or fewer, else the top 5, plus how often each was the top
+// answer), plus the alert rule's hits.
 // The boxes themselves are drawn by CvOverlayCanvas, as for Objects.
 
 import { useEffect, useMemo, useState } from 'react'
@@ -13,7 +15,18 @@ import { customIdOf, type AlertRule, type CustomModel } from '@/lib/models'
 import { useModelsStore } from '@/store/models'
 import type { AlertHit, CVResult } from '@/types/vision'
 import { cn } from '@/lib/utils'
+import { ModelDetailPanel } from './ModelDetailPanel'
+import { SettingsChips, type SettingFocus } from './ModelSettings'
+import { useModelAccess } from './useModelLibrary'
 import { css as s } from './ui'
+
+/** The custom model fields of cv_results (runtime analyzer.py). */
+type CustomCv = CVResult & {
+    tiling?: string | null
+    infer_ms?: number | null
+    run_frames?: number
+    run_counts?: Record<string, { peak: number; frames: number }>
+}
 
 const MAX_HITS = 6
 
@@ -47,7 +60,12 @@ export function CustomResultsPanel({ mode }: { mode: string }) {
     const model = useModelsStore(st => st.workspace.find(m => m.id === id)
         ?? (st.hyrak.find(m => (m as CustomModel).id === id) as CustomModel | undefined) ?? null)
     const rule = model?.alert ?? null
-    const cv = useDroneStore(st => st.cvResults)
+    const cv = useDroneStore(st => st.cvResults) as CustomCv | null
+    const access = useModelAccess()
+    const ours = useModelsStore(st => !!id && st.workspace.some(m => m.id === id))
+    const [setting, setSetting] = useState<{ focus: SettingFocus; open: boolean; n: number } | null>(null)
+    const runCounts = cv?.run_counts
+    const runFrames = cv?.run_frames ?? 0
     const stable = useStableCounts(countsOf(cv))
     const top = useMemo(() => {
         const all = [...(cv?.predictions ?? [])].sort((a, b) => b.score - a.score)
@@ -69,6 +87,10 @@ export function CustomResultsPanel({ mode }: { mode: string }) {
 
     return (
         <div className={s.results}>
+            {model && (
+                <SettingsChips model={model} liveTiling={cv?.tiling ?? null} inferMs={cv?.infer_ms ?? null}
+                    onOpen={focus => setSetting(p => ({ focus, open: true, n: (p?.n ?? 0) + 1 }))} />
+            )}
             {classify ? (
                 <div className={s.section}>
                     <span className={s.label}>Top answers</span>
@@ -80,18 +102,22 @@ export function CustomResultsPanel({ mode }: { mode: string }) {
                             <span className={s.scoreBar}><i style={{ width: `${p.score * 100}%` }} /></span>
                         </div>
                     ))}
+                    {runCounts && runFrames > 0 && (
+                        <>
+                            <span className={s.label} style={{ marginTop: 6 }}>Top answer over this run</span>
+                            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                {Object.entries(runCounts).sort((a, b) => b[1].frames - a[1].frames).slice(0, 5).map(([name, t]) => (
+                                    <li key={name} className={s.help} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                                        <span>{name}</span>
+                                        <span className={s.mono}>{Math.round((t.frames / runFrames) * 100)}% of frames</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </>
+                    )}
                 </div>
             ) : (
-                <div className={s.section}>
-                    <span className={s.label}>In view now</span>
-                    {stable.length === 0 && <p className={s.muted}>{cv ? 'Nothing found in this frame.' : 'Waiting for the first frame...'}</p>}
-                    {stable.map(o => (
-                        <div key={o.name} className={cn(s.inset, s.resRow)} style={{ opacity: o.stale ? 0.5 : 1 }}>
-                            <span style={{ textTransform: 'capitalize' }}>{o.name}</span>
-                            <span className={s.resCount}>{o.count}</span>
-                        </div>
-                    ))}
-                </div>
+                <CountsTable now={stable} run={runCounts} waiting={!cv} />
             )}
 
             {rule && (
@@ -116,6 +142,54 @@ export function CustomResultsPanel({ mode }: { mode: string }) {
                         </ul>
                     )}
                 </div>
+            )}
+
+            {model && setting && (
+                <ModelDetailPanel key={`${model.id}:${setting.n}`} modelId={model.id} open={setting.open}
+                    onOpenChange={o => setSetting(p => p && { ...p, open: o })}
+                    focus={setting.focus}
+                    editable={access.canManage && ours} canPublish={false}
+                    canRun={false} running onRun={() => undefined}
+                    onDeleted={() => setSetting(null)} />
+            )}
+        </div>
+    )
+}
+
+/** Per class: how many are in view now (smoothed) and the most seen at
+ *  once since the model started. */
+function CountsTable({ now, run, waiting }: {
+    now: { name: string; count: number; stale: boolean }[]
+    run?: Record<string, { peak: number; frames: number }>
+    waiting: boolean
+}) {
+    const rows = useMemo(() => {
+        const byName = new Map(now.map(o => [o.name, o]))
+        const names = new Set([...now.map(o => o.name), ...Object.keys(run ?? {})])
+        return [...names].map(name => ({
+            name, now: byName.get(name)?.count ?? 0, stale: byName.get(name)?.stale ?? true,
+            peak: Math.max(run?.[name]?.peak ?? 0, byName.get(name)?.count ?? 0),
+        })).sort((a, b) => b.now - a.now || b.peak - a.peak || a.name.localeCompare(b.name))
+    }, [now, run])
+    return (
+        <div className={s.section}>
+            <span className={s.label}>What it finds</span>
+            {rows.length === 0 && <p className={s.muted}>{waiting ? 'Waiting for the first frame...' : 'Nothing found yet.'}</p>}
+            {rows.length > 0 && (
+                <table className={s.counts}>
+                    <thead>
+                        <tr><th scope="col">Class</th><th scope="col">Now</th><th scope="col">Most at once</th></tr>
+                    </thead>
+                    <tbody>
+                        {rows.map(r => (
+                            <tr key={r.name} style={{ opacity: r.now === 0 || r.stale ? 0.6 : 1 }}>
+                                <th scope="row" style={{ textTransform: 'capitalize' }}>{r.name}</th>
+                                <td className={s.resCount}>{r.now}</td>
+                                <td className={s.mono}>{r.peak}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
             )}
         </div>
     )
