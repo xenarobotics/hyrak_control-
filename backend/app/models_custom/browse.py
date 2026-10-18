@@ -64,6 +64,7 @@ CATEGORIES = (
 TASKS = ("detect", "classify")
 _ENTRY_KEYS = {"repo", "file", "name", "category", "task", "what", "license", "license_note",
                "classes_preview", "fps", "verified_at"}
+_OPTIONAL_KEYS = {"labels"}
 _recommended: Optional[list] = None
 
 
@@ -83,7 +84,7 @@ def validate_recommended(data) -> list:
         missing = _ENTRY_KEYS - set(e)
         if missing:
             raise ValueError(f"{where}: missing {sorted(missing)}")
-        extra = set(e) - _ENTRY_KEYS
+        extra = set(e) - _ENTRY_KEYS - _OPTIONAL_KEYS
         if extra:
             raise ValueError(f"{where}: unknown keys {sorted(extra)}")
         try:
@@ -117,6 +118,10 @@ def validate_recommended(data) -> list:
         if e["verified_at"] is not None and not (
                 isinstance(e["verified_at"], str) and re.match(r"^\d{4}-\d{2}-\d{2}", e["verified_at"])):
             raise ValueError(f"{where}: verified_at must be a date (YYYY-MM-DD) or null")
+        labels = e.get("labels")
+        if labels is not None and (not isinstance(labels, list)
+                                   or not all(isinstance(c, str) and c for c in labels)):
+            raise ValueError(f"{where}: labels must be a list of class names or absent")
         key = (e["repo"], e["file"])
         if key in seen:
             raise ValueError(f"{where}: listed twice")
@@ -405,3 +410,16 @@ async def _search_hub(user_id: str, q: str, task: str, page: int, ready: bool, k
     while len(_cache) > CACHE_MAX:
         _cache.popitem(last=False)
     return {**answer, "cached": False, "stale": False}
+
+
+def recommended_labels(repo: str, file: str) -> Optional[list]:
+    """Class names HYRAK supplies for a recommended model whose file has none
+    (EdgeFirst/visdrone-* label everything "class N")."""
+    try:
+        entries = recommended()
+    except Exception:
+        return None
+    for e in entries:
+        if e["repo"] == repo and e["file"] == file and e.get("labels"):
+            return list(e["labels"])
+    return None

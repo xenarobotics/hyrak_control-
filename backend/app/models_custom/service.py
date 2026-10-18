@@ -478,6 +478,12 @@ async def create_hf(actor, *, workspace_id: Optional[str], repo_text: str,
         default = repo.split("/", 1)[1]
         rec = await _new_record(actor, ws, name=_clean_name(name, default), source="huggingface",
                                 **hf_fields)
+        from app.models_custom import browse
+        names = browse.recommended_labels(repo, f.path)
+        if names:
+            # A recommended model whose file carries no class names gets
+            # HYRAK's (the check_version labels override, like a labels file).
+            rec = await store.update_model(rec.id, settings={**(rec.settings or {}), "labels": names})
     else:
         rec = await store.update_model(existing.id, status="checking", error="", error_hint="",
                                        source="huggingface", **hf_fields)

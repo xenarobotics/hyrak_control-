@@ -32,10 +32,18 @@ def test_shipped_recommended_list_is_valid():
     entries = browse.validate_recommended(raw)
     assert entries, "recommended.json is empty"
     for e in entries:
-        assert set(e) == browse._ENTRY_KEYS, e["repo"]
+        assert browse._ENTRY_KEYS <= set(e) <= browse._ENTRY_KEYS | browse._OPTIONAL_KEYS, e["repo"]
+        assert e["verified_at"], f"{e['repo']}: shipped entries must have passed the HYRAK check"
         assert e["file"].lower().endswith(".onnx"), e["repo"]
         assert e["category"] in browse.CATEGORIES and e["task"] in ("detect", "classify")
         assert "\u2014" not in json.dumps(e, ensure_ascii=False)
+
+
+def test_recommended_labels_name_unlabelled_files():
+    names = browse.recommended_labels("EdgeFirst/visdrone-yolo11-det",
+                                      "640/onnx/visdrone-yolo11s-det-fp32-640.onnx")
+    assert names and names[0] == "pedestrian" and len(names) == 10
+    assert browse.recommended_labels("EdgeFirst/visdrone-yolo11-det", "other.onnx") is None
 
 
 def test_recommended_validation_names_the_problem():
