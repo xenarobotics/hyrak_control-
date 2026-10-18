@@ -193,6 +193,8 @@ async def get_sessions(request: Request, _user: AuthUser = Depends(require_admin
             "drone_address": s.drone_address,
             "hardware_uid": s.hardware_uid,
             "drone": s.drone,
+            "workspace_id": s.workspace_id,
+            "staff": s.is_staff,
             "live": live,
             "approx_location": s.approx_location,
         })

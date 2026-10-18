@@ -400,9 +400,12 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 # joins this session's workspace, and drone_fly says whether
                 # this session may command it (docs/ACCESS_MODEL.md 8a).
                 await live_scope.identify_drone(session, uid, is_simulated=is_sim)
+            # drone_fly: true = this session may command it, false = read-only
+            # here (its workspace is not one where the user flies), null =
+            # unknown (no UID / registry offline; customers cannot command).
             await sio.emit(
                 "drone_identity",
-                {"hardware_uid": uid, "drone": session.drone},
+                {"hardware_uid": uid, "drone": session.drone, "drone_fly": session.drone_fly},
                 to=sid,
             )
             # FC-level backstop: push red zones to PX4 as exclusion fences

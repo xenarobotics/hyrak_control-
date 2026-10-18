@@ -497,3 +497,23 @@ async def test_org_owner_console_is_scoped_to_their_subtree(live):
     assert cl.get("/api/staff", headers=oh).status_code == 403
     # A customer pilot has no console rights even in their own workspace.
     assert cl.get(f"/api/audit?workspace_id={w.iith['id']}", headers=hdr(w.pat[1])).status_code == 403
+
+
+async def test_one_revalidation_per_session_at_a_time(live, monkeypatch):
+    """A stream (serial_uplink, joystick) arriving while the store is slow
+    starts one re-check, not one per packet."""
+    w = await world(live)
+    await connect(live, "p", w.pat[1])
+    s = session(live, "p")
+    calls = []
+    real = socket_guard.verify_token_hash
+
+    async def slow(h):
+        calls.append(h)
+        await asyncio.sleep(0.05)
+        return await real(h)
+    monkeypatch.setattr(socket_guard, "verify_token_hash", slow)
+    s.auth_checked_at = 0.0
+    results = await asyncio.gather(*(socket_guard.require_session_view("p", "serial_uplink")
+                                     for _ in range(10)))
+    assert all(results) and len(calls) == 1 and s.auth_checked_at > 0

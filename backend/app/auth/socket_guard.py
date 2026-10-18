@@ -43,6 +43,7 @@ logger = logging.getLogger("verocore.auth.socket")
 
 _sio = None
 _session_manager = None
+_revalidating: set = set()
 
 FORBIDDEN = "forbidden"
 DRONE_NOT_IN_WORKSPACE = "drone_not_in_workspace"
@@ -83,6 +84,20 @@ async def revalidate(session) -> bool:
     now = time.monotonic()
     if now - (getattr(session, "auth_checked_at", 0.0) or 0.0) < SOCKET_REVALIDATE_S:
         return True
+    if session.session_id in _revalidating:
+        # One re-check per session at a time: socket.io runs every event in
+        # its own task, so a stream (relay bytes, joystick) arriving while
+        # the store is slow would otherwise start one check per packet. The
+        # check in flight disconnects if it has to.
+        return True
+    _revalidating.add(session.session_id)
+    try:
+        return await _revalidate(session, token_hash, now)
+    finally:
+        _revalidating.discard(session.session_id)
+
+
+async def _revalidate(session, token_hash: str, now: float) -> bool:
     user = await verify_token_hash(token_hash)
     if user is None or user.id != session.user_id:
         await _drop(session, "token no longer valid")
