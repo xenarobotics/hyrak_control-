@@ -170,6 +170,34 @@ async def revoke_my_other_sessions(authorization: str | None = Header(None),
     return {"ok": True, "ended": n}
 
 
+class UrlTicketBody(BaseModel):
+    path: str = Field(max_length=512)
+
+
+@router.post("/url-ticket")
+async def url_ticket(body: UrlTicketBody,
+                     authorization: str | None = Header(None),
+                     user: AuthUser = Depends(require_signed_in)):
+    """A 60 s ticket for one GET path that must load without a header (an
+    MJPEG stream in an <img>). Only for routes that opted in with
+    require_user_or_ticket, and only when the caller may GET that path
+    now (app/auth/url_tickets.py, docs/AUTH.md)."""
+    from app.auth import url_tickets
+    token = bearer_of(authorization)
+    if not token or await service.verify_token(token) is None:
+        # The legacy shared token has no token record to re-check against.
+        raise HTTPException(status_code=403, detail="URL tickets need a personal sign-in")
+    if not url_tickets.valid_path(body.path):
+        raise HTTPException(status_code=400, detail="path must be an /api/ path with no query")
+    min_role = url_tickets.ticket_role_for(body.path)
+    if min_role is None:
+        raise HTTPException(status_code=404, detail="That path does not accept URL tickets")
+    if not user.has_role(min_role):
+        raise HTTPException(status_code=403, detail=f"Requires the {min_role} role")
+    ticket, expires_at = url_tickets.issue(user.id, service.hash_token(token), body.path)
+    return {"ticket": ticket, "expires_at": expires_at}
+
+
 # ── Invites (public) ──────────────────────────────────────────────────────
 
 

@@ -66,6 +66,9 @@ def create_app() -> socketio.ASGIApp:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        # Downloads are fetched into a blob (they need the bearer), so the
+        # page reads the server's file name from this header.
+        expose_headers=["Content-Disposition"],
     )
     fastapi_app.include_router(auth_router)
     fastapi_app.include_router(router)
