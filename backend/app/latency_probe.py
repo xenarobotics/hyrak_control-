@@ -289,7 +289,7 @@ async def stats_async() -> dict:
 from fastapi import APIRouter, Depends  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
-from app.auth.deps import require_operator  # noqa: E402
+from app.auth.deps import require_operator, require_viewer  # noqa: E402
 from app.auth.service import AuthUser  # noqa: E402
 
 router = APIRouter(prefix="/api/latency-probe", tags=["latency-probe"])
@@ -300,7 +300,7 @@ class _Toggle(BaseModel):
 
 
 @router.get("")
-async def probe_state() -> dict:
+async def probe_state(_user: AuthUser = Depends(require_viewer)) -> dict:
     return {"enabled": enabled(), "file": str(_LOG_PATH)}
 
 
@@ -311,5 +311,5 @@ async def probe_toggle(body: _Toggle, _user: AuthUser = Depends(require_operator
 
 
 @router.get("/stats")
-async def probe_stats() -> dict:
+async def probe_stats(_user: AuthUser = Depends(require_viewer)) -> dict:
     return await stats_async()

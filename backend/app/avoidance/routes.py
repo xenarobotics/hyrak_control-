@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.auth.deps import require_operator
+from app.auth.deps import require_operator, require_viewer
 from app.auth.service import AuthUser
 from app.config import get_settings
 from app.avoidance.core import controller as avoidance
@@ -28,12 +28,12 @@ router = APIRouter(prefix="/api/avoidance", tags=["avoidance"])
 
 
 @router.get("/status")
-async def all_status():
+async def all_status(_user: AuthUser = Depends(require_viewer)):
     return {"drones": avoidance.all_status()}
 
 
 @router.get("/{drone_id}/status")
-async def drone_status(drone_id: str):
+async def drone_status(drone_id: str, _user: AuthUser = Depends(require_viewer)):
     # Non-creating: a stale id from the UI must not spawn a phantom
     # controller - but the answer keeps the full status shape (avoidance off),
     # because the Fly and Command panels render it. A 404 here crashed the
@@ -76,7 +76,8 @@ async def set_armed(drone_id: str, body: dict,
 
 
 @router.get("/{drone_id}/events")
-async def drone_events(drone_id: str, limit: int = 100):
+async def drone_events(drone_id: str, limit: int = 100,
+                       _user: AuthUser = Depends(require_viewer)):
     from app.avoidance import events
     return {"events": await events.list_for(drone_id, limit=min(limit, 500))}
 
@@ -198,7 +199,7 @@ async def decide(drone_id: str, body: dict,
 
 
 @router.get("/{drone_id}/obstacles")
-async def drone_obstacles(drone_id: str):
+async def drone_obstacles(drone_id: str, _user: AuthUser = Depends(require_viewer)):
     """The drone's live obstacle map + the active reroute path - for the
     Mission-tab overlay, so the operator watches the plan update in real time."""
     c = avoidance.controller(drone_id)
@@ -213,7 +214,7 @@ async def drone_obstacles(drone_id: str):
 
 
 @router.get("/hazards")
-async def known_hazards():
+async def known_hazards(_user: AuthUser = Depends(require_viewer)):
     """The persistent shared hazard map (all known static obstacles)."""
     from app.avoidance.mapping import hazards as hazard_db
     return {"hazards": await hazard_db.all_hazards()}
@@ -242,7 +243,7 @@ async def clear_hazards(_user: AuthUser = Depends(require_operator)):
 
 
 @router.get("/{drone_id}/sensors")
-async def get_sensors(drone_id: str):
+async def get_sensors(drone_id: str, _user: AuthUser = Depends(require_viewer)):
     return {"sensors": sensor_registry.inventory(drone_id)}
 
 
@@ -276,7 +277,7 @@ async def calibrate_person(drone_id: str, body: dict,
 
 
 @router.get("/{drone_id}/calibrate_person")
-async def calibrate_person_status(drone_id: str):
+async def calibrate_person_status(drone_id: str, _user: AuthUser = Depends(require_viewer)):
     from app.avoidance.sensing import person_ruler
     c = _resolve_drone(drone_id)
     person_ruler.pending(c.drone_id)          # applies the timeout

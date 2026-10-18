@@ -71,7 +71,7 @@ if [ "${1:-}" = "logs" ]; then
     exec tail -n 200 -F "$LOG_DIR/$f.log"
 fi
 if [ "${1:-}" = "status" ]; then
-    for s in "backend http://127.0.0.1:8001/api/fleet" "frontend http://127.0.0.1:3000/"; do
+    for s in "backend http://127.0.0.1:8001/api/health" "frontend http://127.0.0.1:3000/"; do
         set -- $s
         c=$(curl -s -o /dev/null -m 5 -w '%{http_code}' "$2")
         [ "$c" = 200 ] && echo "${GRN}up${R}    $1" || echo "${RED}down${R}  $1 ($c)"
@@ -337,7 +337,7 @@ if [ $TUNNEL = 1 ]; then
     tunnel_supervisor & PIDS+=($!)
 fi
 
-wait_http backend "http://127.0.0.1:8001/api/fleet" 90
+wait_http backend "http://127.0.0.1:8001/api/health" 90
 wait_http frontend "http://127.0.0.1:3000/" 120
 if [ $TUNNEL = 1 ]; then
     read -r st tot slow <<<"$(probe_tunnel)"
