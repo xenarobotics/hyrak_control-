@@ -21,7 +21,7 @@
  * access, else to the standalone /account page.
  */
 import { useEffect, useState } from 'react'
-import { fetchMe, getAccess, getToken, hasRole, isCustomer, isStaff, redirectToLogin, type AuthUser, type Role } from '@/lib/auth'
+import { fetchMe, getAccess, getToken, getUser, hasRole, isCustomer, isStaff, redirectToLogin, type AuthUser, type Role } from '@/lib/auth'
 import { hasPerm, type WorkspaceInfo } from '@/lib/access'
 
 export type GateState = 'checking' | 'ok'
@@ -53,6 +53,15 @@ export function useAuthGate(gate: Gate = 'viewer'): GateState {
     useEffect(() => {
         let alive = true
         if (!getToken()) { redirectToLogin(); return }
+        // A browser that already signed in opens at once on its cached
+        // account while /api/auth/me confirms in the background (a slow
+        // tunnel must not hold the page). This is a UI gate only: the
+        // server checks the token on every request and socket event, and a
+        // 401 or a changed account below still redirects.
+        const cached = getUser()
+        // (In a microtask: the first render stays 'checking' on server and
+        // client alike, so hydration matches.)
+        if (cached && passes(gate, cached)) queueMicrotask(() => { if (alive) setState('ok') })
         void fetchMe().then(user => {
             if (!alive) return
             if (!user) { redirectToLogin(); return }
