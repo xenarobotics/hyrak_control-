@@ -143,12 +143,16 @@ def recommended() -> list:
 
 def grouped(entries: list, added: dict) -> list:
     """[{name, models}] in CATEGORIES order, empty categories left out.
-    `added`: (repo, file) -> model id already in the workspace."""
+    `added`: (repo, file) -> (model id, status) already in the workspace."""
     out = []
     for cat in CATEGORIES:
-        models = [{**e, "url": f"https://huggingface.co/{e['repo']}",
-                   "added": added.get((e["repo"], e["file"]))}
-                  for e in entries if e["category"] == cat]
+        models = []
+        for e in entries:
+            if e["category"] != cat:
+                continue
+            mid, status = added.get((e["repo"], e["file"])) or (None, None)
+            models.append({**e, "url": f"https://huggingface.co/{e['repo']}",
+                           "added": mid, "added_status": status})
         if models:
             out.append({"name": cat, "models": models})
     return out
@@ -159,12 +163,13 @@ def grouped(entries: list, added: dict) -> list:
 PIPELINES = {
     "detect": ("object-detection",),
     "classify": ("image-classification",),
+    "segment": ("image-segmentation",),
     "all": ("object-detection", "image-classification", "image-segmentation"),
 }
 TASK_OF = {"object-detection": "detect", "image-classification": "classify",
            "image-segmentation": "segment"}
 PAGE_SIZE = 20
-MAX_PAGE = 4
+MAX_PAGE = 20                                       # "Show more" reaches about 500 models in "all"
 SIZE_LOOKUPS = 3                                    # model_info calls per search, at most
 # What the Hub's listing accepts in `expand` (checked live 2026-10-18; it
 # refuses usedStorage, so repo sizes are not in the listing).
@@ -194,8 +199,10 @@ def suggest_file(paths: list) -> Optional[str]:
     return hf.rank_onnx(list(paths))[0]
 
 
-def _list_models(search: str, pipeline_tag: str, limit: int, timeout: float) -> list:
+def _list_models(search: str, pipeline_tag: str, limit: int, timeout: float,
+                 onnx_only: bool = False) -> list:
     """huggingface_hub list_models, most downloaded first. Replaced in tests.
+    `onnx_only` keeps repos tagged "onnx" (the "Ready to run only" toggle).
 
     Always ANONYMOUS (token=False): the listing is exactly what the public
     sees, so the owner's HF_TOKEN can never put the owner's private repos in
@@ -204,7 +211,8 @@ def _list_models(search: str, pipeline_tag: str, limit: int, timeout: float) -> 
     from huggingface_hub import HfApi
     api = HfApi(endpoint=get_settings().custom_models_hf_endpoint, token=False)
     # list_models takes no timeout; huggingface_hub's default request timeout applies.
-    return list(api.list_models(search=search or None, pipeline_tag=pipeline_tag, sort="downloads",
+    return list(api.list_models(search=search or None, pipeline_tag=pipeline_tag,
+                                filter="onnx" if onnx_only else None, sort="downloads",
                                 direction=-1, limit=limit, expand=EXPAND, token=False))
 
 
@@ -296,7 +304,8 @@ async def _size_check(cards: list, limit_bytes: int) -> None:
             c["suggested_file"] = suggest_file(fits)
 
 
-# (query, task, page) -> (monotonic time, answer)
+# (query, task, page, ready) -> (monotonic time, answer). Entries past the
+# TTL stay (bounded by CACHE_MAX) so a rate-limited search can still serve them.
 _cache: "OrderedDict[tuple, tuple]" = OrderedDict()
 CACHE_MAX = 256
 # user id -> monotonic times of that user's uncached searches in the last minute
@@ -323,19 +332,34 @@ def _rate_check(user_id: str) -> None:
             _user_calls.pop(k, None)
 
 
-async def search(user_id: str, q: str, task: str, page: int) -> dict:
-    """Cards for one page of results; runnable first, then by downloads."""
+RATE_LIMITED = ("hf_rate_limited", "search_rate_limited")
+
+
+async def search(user_id: str, q: str, task: str, page: int, ready: bool = False) -> dict:
+    """Cards for one page of results; runnable first, then by downloads.
+    While Hugging Face (or the per-user limit) says wait, an earlier answer
+    for the same query is served even past its TTL, marked `stale`."""
     q = " ".join((q or "").split())[:100]
     if task not in PIPELINES:
-        raise ModelFailure("bad_request", "task", {"reason": "task must be detect, classify or all"},
-                           status=422)
+        raise ModelFailure("bad_request", "task",
+                           {"reason": "task must be detect, classify, segment or all"}, status=422)
     page = max(1, min(int(page or 1), MAX_PAGE))
-    key = (q.lower(), task, page)
+    key = (q.lower(), task, page, bool(ready))
     ttl = float(get_settings().custom_models_hf_search_cache_s)
     hit = _cache.get(key)
     if hit and time.monotonic() - hit[0] < ttl:
         _cache.move_to_end(key)
-        return {**hit[1], "cached": True}
+        return {**hit[1], "cached": True, "stale": False}
+    try:
+        return await _search_hub(user_id, q, task, page, bool(ready), key)
+    except ModelFailure as e:
+        if hit and e.code in RATE_LIMITED:
+            _cache.move_to_end(key)
+            return {**hit[1], "cached": True, "stale": True}
+        raise
+
+
+async def _search_hub(user_id: str, q: str, task: str, page: int, ready: bool, key: tuple) -> dict:
     _rate_check(user_id)
     hf._check_cooldown()
     s = get_settings()
@@ -347,8 +371,9 @@ async def search(user_id: str, q: str, task: str, page: int) -> dict:
     cards, more = [], False
     for p in pipes:
         try:
-            rows = await asyncio.wait_for(asyncio.to_thread(_list_models, q, p, per[p] + 1, timeout),
-                                          timeout=timeout + 10)
+            rows = await asyncio.wait_for(
+                asyncio.to_thread(_list_models, q, p, per[p] + 1, timeout, ready),
+                timeout=timeout + 10)
         except ModelFailure:
             raise
         except asyncio.TimeoutError:
@@ -369,12 +394,14 @@ async def search(user_id: str, q: str, task: str, page: int) -> dict:
             seen.add(c["repo"])
             unique.append(c)
     await _size_check(unique, limit_bytes)
+    if ready:
+        unique = [c for c in unique if c["runnable"]]
     unique.sort(key=lambda c: (not c["runnable"], -c["downloads"]))
     for c in unique:
         c.pop("_size", None)
-    answer = {"query": q, "task": task, "page": page, "has_more": more and page < MAX_PAGE,
-              "results": unique}
+    answer = {"query": q, "task": task, "page": page, "ready": ready,
+              "has_more": more and page < MAX_PAGE, "results": unique}
     _cache[key] = (time.monotonic(), answer)
     while len(_cache) > CACHE_MAX:
         _cache.popitem(last=False)
-    return {**answer, "cached": False}
+    return {**answer, "cached": False, "stale": False}

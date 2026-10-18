@@ -2,16 +2,17 @@
 
 // Add model: one slide-over, three steps (DESIGN.md section 0, rule 2).
 //
-//   1. Choose        three ways in, as tabs: Recommended (HYRAK's picks,
-//                    one click), Search Hugging Face (vision models, one
-//                    click on the runnable ones), or Upload a file (drop an
+//   1. Choose        three ways in, as tabs: Recommended for drones (HYRAK's
+//                    picks, one click), All vision models (the Hub's most
+//                    downloaded, searchable, one click on the runnable
+//                    ones; an added one shows Run), or Upload a file (drop an
 //                    .onnx file, or paste a Hugging Face link; it is
 //                    inspected as you paste; an ONNX picker only when the
 //                    repo has several)
 //   2. Confirm       what the server detected, in plain words: the task, the
 //                    class names (editable chips) and a name
 //   3. Test and save the automatic check's progress, then a preview with
-//                    boxes and a speed sentence, then Save
+//                    boxes and a speed sentence, then Save or Run now
 //
 // The model exists on the server from the moment it is uploaded, so closing
 // the panel never loses it: it stays in Our models with its status. Without
@@ -20,7 +21,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-    ArrowLeft, Check, CheckCircle2, Circle, Copy, FileBox, Link2, Loader, Lock, Search, Sparkles, Upload, X, Boxes, ShieldCheck,
+    ArrowLeft, Check, CheckCircle2, Circle, Copy, FileBox, Layers, Link2, Loader, Lock, Play, Search, Sparkles, Upload, X, Boxes, ShieldCheck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatBytes } from '@/lib/formatBytes'
@@ -33,7 +34,7 @@ import {
 } from '@/lib/models'
 import { useModelsStore } from '@/store/models'
 import { ClassChips } from './ClassChips'
-import { RecommendedTab, SearchTab, type AddState, type AddTarget } from './BrowseModels'
+import { AllModelsTab, RecommendedTab, type AddState, type AddTarget } from './BrowseModels'
 import { Callout, Hint, SlideOver, css as s } from './ui'
 
 type Stage = 'choose' | 'confirm' | 'test'
@@ -43,12 +44,26 @@ const STAGES: { key: Stage; label: string }[] = [
     { key: 'test', label: '3. Test and save' },
 ]
 
-export type AddSource = 'recommended' | 'search' | 'upload'
+export type AddSource = 'recommended' | 'all' | 'upload'
 const SOURCES: { key: AddSource; label: string; short: string; icon: typeof Search }[] = [
-    { key: 'recommended', label: 'Recommended', short: 'Recommended', icon: Sparkles },
-    { key: 'search', label: 'Search Hugging Face', short: 'Search', icon: Search },
+    { key: 'recommended', label: 'Recommended for drones', short: 'Recommended', icon: Sparkles },
+    { key: 'all', label: 'All vision models', short: 'All models', icon: Layers },
     { key: 'upload', label: 'Upload a file', short: 'Upload', icon: Upload },
 ]
+
+/** What the page does for the panel: run a model of ours (closing the
+ *  panel first), open one, and mark one in the library. */
+export interface PanelRunProps {
+    /** The tab the Choose step opens on. */
+    initialSource?: AddSource
+    canRun?: boolean
+    /** Run this model through the library's run path (`custom:<id>`). */
+    onRun?: (m: { id: string; name?: string }) => void
+    /** Open this model's detail. */
+    onOpenModel?: (id: string) => void
+    /** The panel closed with a model it created: show where it went. */
+    onAdded?: (m: CustomModel) => void
+}
 
 type Inspect =
     | { state: 'idle' }
@@ -56,7 +71,7 @@ type Inspect =
     | { state: 'ok'; data: HfInspect }
     | { state: 'error'; repo: string; error: ApiProblem }
 
-export function AddModelPanel({ open, onOpenChange, premium, workspaceId, workspaceName, onSaved, canManage = true }: {
+export function AddModelPanel({ open, onOpenChange, premium, workspaceId, workspaceName, onSaved, canManage = true, ...run }: PanelRunProps & {
     open: boolean
     onOpenChange: (open: boolean) => void
     premium: Premium
@@ -68,7 +83,7 @@ export function AddModelPanel({ open, onOpenChange, premium, workspaceId, worksp
 }) {
     const addState: AddState = !canManage ? 'none' : premium.enabled ? 'add' : 'locked'
     return <AddFlow open={open} onOpenChange={onOpenChange} workspaceId={workspaceId} onSaved={onSaved}
-        addState={addState} reason={premium.reason} workspaceName={workspaceName} />
+        addState={addState} reason={premium.reason} workspaceName={workspaceName} {...run} />
 }
 
 // ── premium lock ───────────────────────────────────────────────────────
@@ -120,7 +135,8 @@ function LockedContent({ reason, workspaceId, workspaceName, onBack }: {
 
 // ── the add flow ───────────────────────────────────────────────────────
 
-function AddFlow({ open, onOpenChange, workspaceId, onSaved, addState, reason, workspaceName }: {
+function AddFlow({ open, onOpenChange, workspaceId, onSaved, addState, reason, workspaceName,
+    initialSource = 'recommended', canRun = false, onRun, onOpenModel, onAdded }: PanelRunProps & {
     open: boolean; onOpenChange: (o: boolean) => void; workspaceId: string | null
     onSaved: (m: CustomModel) => void
     addState: AddState; reason: string | null; workspaceName: string | null
@@ -165,16 +181,32 @@ function AddFlow({ open, onOpenChange, workspaceId, onSaved, addState, reason, w
         setImporting(false); setSubmitErr(null); setModel(null); setName(''); setNameErr(null)
         setLabels([]); setTask('detect'); setDetectedTask(null); setFilled(false); setBusy(false)
         setStepErr(null); setSaveNote(null)
-        setSource('recommended'); setLockAsk(false); setAdding(null); setBrowseErr(null)
-    }, [])
+        setSource(initialSource); setLockAsk(false); setAdding(null); setBrowseErr(null)
+    }, [initialSource])
 
     // A fresh panel every time it opens; an upload in flight stops on close.
     const close = (o: boolean) => {
         if (!o) {
             cancelUpload.current?.()
-            if (model) useModelsStore.getState().upsert(model)
+            if (model) {
+                useModelsStore.getState().upsert(model)
+                onAdded?.(live ?? model)
+            }
         }
         onOpenChange(o)
+    }
+    // Run from a card or from step 3: close the panel, then the page runs it
+    // the way the library's Run does (which also starts the video).
+    const runModel = (id: string, name?: string) => {
+        cancelUpload.current?.()
+        if (model && model.id !== id) onAdded?.(live ?? model)
+        onOpenChange(false)
+        onRun?.({ id, name })
+    }
+    const openModel = (id: string) => {
+        if (model) onAdded?.(live ?? model)
+        onOpenChange(false)
+        onOpenModel?.(id)
     }
     useEffect(() => { if (open) reset() }, [open, reset])
 
@@ -219,7 +251,7 @@ function AddFlow({ open, onOpenChange, workspaceId, onSaved, addState, reason, w
             if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
             e.preventDefault()
             setLockAsk(false)
-            setSource('search')
+            setSource('all')
             setTimeout(() => searchInput.current?.focus(), 0)
         }
         window.addEventListener('keydown', key)
@@ -367,6 +399,11 @@ function AddFlow({ open, onOpenChange, workspaceId, onSaved, addState, reason, w
         setModel(r.data); useModelsStore.getState().upsert(r.data)
     }
 
+    const runNow = () => {
+        if (!model || status !== 'ready') return
+        runModel(model.id, (live ?? model).name)
+    }
+
     const save = () => {
         if (!model) return
         if (status === 'checking') {
@@ -446,13 +483,26 @@ function AddFlow({ open, onOpenChange, workspaceId, onSaved, addState, reason, w
             </>
         )
     } else {
+        const canRunNow = canRun && !!onRun
         foot = (
             <>
                 <button type="button" className={s.btn} onClick={() => setStage('confirm')}>Back</button>
                 <span className={s.spacer} />
-                <button type="button" className={cn(s.btn, s.primary)} onClick={save}>
+                <button type="button" className={cn(s.btn, !canRunNow && s.primary)} onClick={save}>
                     <Check size={13} aria-hidden /> Save model
                 </button>
+                {canRunNow && (
+                    <button type="button" className={cn(s.btn, s.primary)} onClick={runNow}
+                        disabled={status !== 'ready'} aria-describedby={status !== 'ready' ? 'cm-run-now-help' : undefined}
+                        title={status === 'ready' ? 'Save it and run it on the live video' : status === 'failed' ? 'Fix the test first' : 'Ready when the test finishes'}>
+                        <Play size={13} aria-hidden /> Run now
+                    </button>
+                )}
+                {canRunNow && status !== 'ready' && (
+                    <span id="cm-run-now-help" className="sr-only">
+                        {status === 'failed' ? 'Run now needs the test to pass.' : 'Run now is ready when the test finishes.'}
+                    </span>
+                )}
             </>
         )
     }
@@ -460,8 +510,8 @@ function AddFlow({ open, onOpenChange, workspaceId, onSaved, addState, reason, w
     return (
         <SlideOver open={open} onOpenChange={close} title={addState === 'none' ? 'Browse models' : 'Add a model'}
             description={addState === 'none'
-                ? 'Models HYRAK recommends, and vision models from Hugging Face.'
-                : 'Pick one HYRAK recommends, find one on Hugging Face, or bring your own. HYRAK checks it and runs it on the live video.'}
+                ? 'Models HYRAK recommends for drones, and every vision model on Hugging Face.'
+                : 'Pick one HYRAK recommends, browse every vision model on Hugging Face, or bring your own. HYRAK checks it and runs it on the live video.'}
             head={addState === 'add' ? stepper : undefined} foot={foot}>
             {stage === 'choose' && (
                 <div className={s.tabs} role="tablist" aria-label="Where the model comes from" onKeyDown={onTabKey}>
@@ -520,10 +570,12 @@ function AddFlow({ open, onOpenChange, workspaceId, onSaved, addState, reason, w
                             {source === 'recommended' ? (
                                 <RecommendedTab workspaceId={workspaceId} addState={addState} adding={adding}
                                     onAdd={addFromHub} onLocked={() => setLockAsk(true)}
-                                    onSearch={() => pickSource('search')} />
+                                    canRun={canRun && !!onRun} onRun={id => runModel(id)} onOpenModel={openModel}
+                                    onSearch={() => pickSource('all')} />
                             ) : (
-                                <SearchTab workspaceId={workspaceId} addState={addState} adding={adding}
-                                    onAdd={addFromHub} onLocked={() => setLockAsk(true)} inputRef={searchInput} />
+                                <AllModelsTab workspaceId={workspaceId} addState={addState} adding={adding}
+                                    onAdd={addFromHub} onLocked={() => setLockAsk(true)} inputRef={searchInput}
+                                    canRun={canRun && !!onRun} onRun={id => runModel(id)} onOpenModel={openModel} />
                             )}
                         </>
                     )}

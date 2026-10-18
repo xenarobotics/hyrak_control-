@@ -264,6 +264,8 @@ export interface RecommendedModel {
     url: string
     /** This workspace's model id when it already has this one. */
     added: string | null
+    /** That model's status when the list was made (the store has the live one). */
+    added_status?: ModelStatus | null
 }
 
 export interface RecommendedList {
@@ -272,7 +274,7 @@ export interface RecommendedList {
     categories: { name: string; models: RecommendedModel[] }[]
 }
 
-export type SearchTask = 'all' | 'detect' | 'classify'
+export type SearchTask = 'all' | 'detect' | 'classify' | 'segment'
 
 /** One search result card (GET /api/models/huggingface/search). */
 export interface HfSearchCard {
@@ -292,6 +294,7 @@ export interface HfSearchCard {
     /** Why not, in plain words, when not runnable. */
     reason: string | null
     added: string | null
+    added_status?: ModelStatus | null
 }
 
 export interface HfSearchResult {
@@ -299,6 +302,10 @@ export interface HfSearchResult {
     task: SearchTask
     page: number
     has_more: boolean
+    /** "Ready to run only" was on. */
+    ready: boolean
+    /** An earlier answer, served because Hugging Face asked us to wait. */
+    stale: boolean
     results: HfSearchCard[]
     premium: Premium
     can_manage: boolean
@@ -319,9 +326,10 @@ export async function getRecommended(workspaceId: string | null): Promise<Result
 }
 
 export async function searchHuggingFace(opts: {
-    q: string; task: SearchTask; page?: number; workspaceId: string | null; signal?: AbortSignal
+    q: string; task: SearchTask; page?: number; ready?: boolean; workspaceId: string | null; signal?: AbortSignal
 }): Promise<Result<HfSearchResult>> {
     const params = new URLSearchParams({ q: opts.q, task: opts.task, page: String(opts.page ?? 1) })
+    if (opts.ready) params.set('ready', 'true')
     if (opts.workspaceId) params.set('workspace_id', opts.workspaceId)
     try {
         const res = await apiFetch(`/api/models/huggingface/search?${params}`, { signal: opts.signal })
@@ -333,7 +341,8 @@ export async function searchHuggingFace(opts: {
             ok: true,
             data: {
                 query: d.query ?? opts.q, task: d.task ?? opts.task, page: d.page ?? 1,
-                has_more: !!d.has_more, results: Array.isArray(d.results) ? d.results : [],
+                has_more: !!d.has_more, ready: !!d.ready, stale: !!d.stale,
+                results: Array.isArray(d.results) ? d.results : [],
                 premium: { enabled: !!d.premium?.enabled, reason: d.premium?.reason ?? null },
                 can_manage: !!d.can_manage,
             },

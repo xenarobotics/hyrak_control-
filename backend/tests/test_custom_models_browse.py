@@ -97,7 +97,7 @@ async def test_recommended_endpoint_marks_what_the_workspace_has(env, onnx_files
                              headers=hdr(w.olga[1])))
     again = next(x for c in r["categories"] for x in c["models"]
                  if (x["repo"], x["file"]) == (first["repo"], first["file"]))
-    assert again["added"] == m["id"] and r["premium"]["enabled"]
+    assert again["added"] == m["id"] and again["added_status"] == "ready" and r["premium"]["enabled"]
 
 
 # ── search ───────────────────────────────────────────────────────────────
@@ -114,9 +114,12 @@ def hub_model(repo, files, *, pipeline="object-detection", downloads=10, likes=1
 def fake_list(monkeypatch, by_pipeline: dict, calls=None):
     calls = calls if calls is not None else []
 
-    def list_models(search, pipeline_tag, limit, timeout):
+    def list_models(search, pipeline_tag, limit, timeout, onnx_only=False):
         calls.append((search, pipeline_tag, limit))
-        return list(by_pipeline.get(pipeline_tag, []))[:limit]
+        rows = list(by_pipeline.get(pipeline_tag, []))
+        if onnx_only:
+            rows = [m for m in rows if any(sib.rfilename.endswith(".onnx") for sib in m.siblings)]
+        return rows[:limit]
     monkeypatch.setattr(browse, "_list_models", list_models)
     return calls
 
@@ -165,8 +168,9 @@ async def test_search_cards_reasons_and_order(env, monkeypatch):
     assert by["acme/huge"]["reason"] == "Too large"
     c = by["acme/fire-onnx"]
     assert set(c) == {"repo", "name", "url", "task", "downloads", "likes", "updated", "license",
-                      "license_note", "onnx_files", "suggested_file", "runnable", "reason", "added"}
-    assert c["updated"].startswith("2026-09-01") and c["added"] is None
+                      "license_note", "onnx_files", "suggested_file", "runnable", "reason", "added",
+                      "added_status"}
+    assert c["updated"].startswith("2026-09-01") and c["added"] is None and c["added_status"] is None
 
     # The same query again comes from the cache: no Hub call.
     n = len(calls)
@@ -180,7 +184,13 @@ async def test_search_cards_reasons_and_order(env, monkeypatch):
                              headers=hdr(w.vic[1])))
     assert [p for _, p, _ in calls] == ["image-classification"]
     assert [c["repo"] for c in r["results"]] == ["acme/fire-cls"]
-    bad = await env.api.get(f"/api/models/huggingface/search?task=segment&workspace_id={w.iith['id']}",
+    # Segmentation on its own is listed too (not runnable yet).
+    calls.clear()
+    r = ok(await env.api.get(f"/api/models/huggingface/search?q=fire&task=segment&workspace_id={w.iith['id']}",
+                             headers=hdr(w.vic[1])))
+    assert [p for _, p, _ in calls] == ["image-segmentation"]
+    assert [(c["repo"], c["runnable"]) for c in r["results"]] == [("acme/seg", False)]
+    bad = await env.api.get(f"/api/models/huggingface/search?task=pose&workspace_id={w.iith['id']}",
                             headers=hdr(w.vic[1]))
     assert bad.status_code == 422 and bad.json()["detail"]["code"] == "bad_request"
 
@@ -198,10 +208,75 @@ async def test_search_marks_added_and_pages(env, onnx_files, monkeypatch):
                              headers=hdr(w.olga[1])))
     assert len(r["results"]) == browse.PAGE_SIZE and r["has_more"]
     assert r["results"][1]["repo"] == "acme/m1" and r["results"][1]["added"] == m["id"]
+    assert r["results"][1]["added_status"] == "ready" and r["results"][0]["added_status"] is None
     r = ok(await env.api.get(f"/api/models/huggingface/search?task=detect&page=3&workspace_id={w.iith['id']}",
                              headers=hdr(w.olga[1])))
     assert [c["repo"] for c in r["results"]] == [f"acme/m{i}" for i in range(40, 45)]
     assert not r["has_more"] and calls[-1][2] == 3 * browse.PAGE_SIZE + 1
+
+
+async def test_browse_opens_on_the_most_downloaded_and_pages_deep(env, monkeypatch):
+    """No query: the most downloaded vision models, and "Show more" goes
+    about 20 pages deep before it stops."""
+    w = await world(env)
+    many = [hub_model(f"acme/d{i}", ["model.safetensors"], downloads=100_000 - i) for i in range(600)]
+    calls = fake_list(monkeypatch, {"object-detection": many})
+    monkeypatch.setattr(get_settings(), "custom_models_hf_searches_per_minute", 100)
+    url = f"/api/models/huggingface/search?task=detect&workspace_id={w.iith['id']}"
+    r = ok(await env.api.get(url, headers=hdr(w.vic[1])))
+    assert calls[-1][0] == "" and r["has_more"] and r["results"][0]["repo"] == "acme/d0"
+    assert browse.MAX_PAGE >= 20
+    r = ok(await env.api.get(url + f"&page={browse.MAX_PAGE}", headers=hdr(w.vic[1])))
+    first = (browse.MAX_PAGE - 1) * browse.PAGE_SIZE
+    assert [c["repo"] for c in r["results"]][:2] == [f"acme/d{first}", f"acme/d{first + 1}"]
+    assert r["has_more"] is False                                           # the cap
+    r = ok(await env.api.get(url + "&page=50", headers=hdr(w.vic[1])))       # clamped to the cap
+    assert r["page"] == browse.MAX_PAGE
+
+
+async def test_ready_only_lists_onnx_repos_and_runnable_cards(env, monkeypatch):
+    w = await world(env)
+    seen = []
+
+    def list_models(search, pipeline_tag, limit, timeout, onnx_only=False):
+        seen.append(onnx_only)
+        rows = [hub_model("acme/pt", ["best.pt"], downloads=900),
+                hub_model("acme/gated", ["model.onnx"], downloads=800, gated="manual"),
+                hub_model("acme/ok", ["model.onnx"], downloads=10)]
+        return rows if not onnx_only else rows[1:]
+    monkeypatch.setattr(browse, "_list_models", list_models)
+    url = f"/api/models/huggingface/search?task=detect&workspace_id={w.iith['id']}"
+    r = ok(await env.api.get(url, headers=hdr(w.vic[1])))
+    assert [c["repo"] for c in r["results"]] == ["acme/ok", "acme/pt", "acme/gated"]
+    assert r["ready"] is False and seen == [False]
+    r = ok(await env.api.get(url + "&ready=true", headers=hdr(w.vic[1])))
+    assert [c["repo"] for c in r["results"]] == ["acme/ok"] and r["ready"] is True
+    assert seen == [False, True]                                            # its own cache entry
+
+
+async def test_rate_limited_search_serves_an_earlier_answer(env, monkeypatch):
+    w = await world(env)
+    calls = fake_list(monkeypatch, {"object-detection": [hub_model("acme/ok", ["model.onnx"])]})
+    url = f"/api/models/huggingface/search?q=fire&task=detect&workspace_id={w.iith['id']}"
+    r = ok(await env.api.get(url, headers=hdr(w.vic[1])))
+    assert r["stale"] is False and r["cached"] is False
+    # The cache entry ages past its TTL, then the Hub starts refusing.
+    monkeypatch.setattr(get_settings(), "custom_models_hf_search_cache_s", 0.0)
+
+    def list_429(search, pipeline_tag, limit, timeout, onnx_only=False):
+        calls.append("429")
+        raise HubError(429)
+    monkeypatch.setattr(browse, "_list_models", list_429)
+    r = ok(await env.api.get(url, headers=hdr(w.vic[1])))
+    assert r["stale"] is True and r["cached"] is True and r["results"][0]["repo"] == "acme/ok"
+    assert calls[-1] == "429"
+    # During the cooldown the Hub is not asked again; the old answer still serves.
+    n = len(calls)
+    r = ok(await env.api.get(url, headers=hdr(w.vic[1])))
+    assert r["stale"] is True and len(calls) == n
+    # A query with nothing cached gets the friendly 429.
+    r = await env.api.get(url.replace("q=fire", "q=smoke"), headers=hdr(w.vic[1]))
+    assert r.status_code == 429 and r.json()["detail"]["code"] == "hf_rate_limited"
 
 
 async def test_search_per_user_limit(env, monkeypatch):
@@ -231,7 +306,7 @@ async def test_hub_429_is_hf_rate_limited_everywhere(env, tmp_path, monkeypatch)
     await feature(env, w, w.iith["id"])
     calls = []
 
-    def list_429(search, pipeline_tag, limit, timeout):
+    def list_429(search, pipeline_tag, limit, timeout, onnx_only=False):
         calls.append(1)
         raise HubError(429)
     monkeypatch.setattr(browse, "_list_models", list_429)

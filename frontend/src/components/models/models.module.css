@@ -478,3 +478,22 @@
   .tabLong { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .tabShort { display: inline; }
 }
+.browseFilters { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.toggle { display: inline-flex; align-items: center; gap: 8px; font-size: var(--cm-small); color: var(--cm-ink-2); cursor: pointer; user-select: none; }
+.toggle input { appearance: none; width: 28px; height: 16px; border-radius: 999px; background: var(--cm-line); position: relative; cursor: pointer; margin: 0; flex-shrink: 0; transition: background-color 150ms ease-out; }
+.toggle input::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--cm-panel); transition: transform 150ms ease-out; }
+.toggle input:checked { background: var(--cm-accent); }
+.toggle input:checked::after { transform: translateX(12px); }
+.toggle input:focus-visible { outline: 2px solid var(--cm-accent); outline-offset: 2px; }
+.chipBtn { border: none; cursor: pointer; font-family: inherit; }
+.chipBtn:hover { filter: brightness(1.1); }
+.chipBtn:focus-visible { outline: 2px solid var(--cm-accent); outline-offset: 1px; }
+.cardNew { animation: cm-new 2.5s ease-out; }
+@keyframes cm-new {
+  0%, 60% { box-shadow: 0 0 0 2px var(--cm-accent); background: var(--cm-accent-soft); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toggle input, .toggle input::after { transition: none; }
+  .cardNew { animation: none; box-shadow: 0 0 0 2px var(--cm-accent); }
+}

@@ -1,8 +1,9 @@
 'use client'
 
 // The AI tab's model library (Pattern 1, List / Index): heading, one line,
-// Add model in the header (Browse models for roles that cannot add; both
-// open the same panel on HYRAK's recommendations); a filter (All, HYRAK models, Our models) and a
+// Browse models (everyone; opens the panel on All vision models) and Add
+// model (roles that can add; opens it on HYRAK's recommendations) in the
+// header; a filter (All, HYRAK models, Our models) and a
 // search in the toolbar; then one framed list of model cards. Each card has
 // an icon, a plain name, one line, a status chip and Run. Clicking a model
 // of ours (or a catalogue model) opens its detail slide-over.
@@ -35,6 +36,8 @@ export interface LibraryProps {
     onRun: (e: LibraryEntry) => void
     onStop: () => void
     onAdd: () => void
+    /** Open the panel on "All vision models". */
+    onBrowse: () => void
     onOpen: (e: LibraryEntry) => void
     /** Briefly highlight a card (just added). */
     highlightKey?: string | null
@@ -86,7 +89,7 @@ export function ModelLibrary(p: LibraryProps) {
             {p.loading && ours.length === 0 ? <CardSkeleton /> : ours.map(card)}
             {!p.loading && !p.loadError && ours.length === 0 && !q && (
                 <OursEmpty compact={filter === 'all'} canManage={p.canManage}
-                    onAdd={p.onAdd} />
+                    onAdd={p.onAdd} onBrowse={p.onBrowse} />
             )}
         </>
     )
@@ -99,15 +102,16 @@ export function ModelLibrary(p: LibraryProps) {
                         <h2 id="cm-lib-title" className={s.title}>Models</h2>
                         <p className={s.muted}>Pick a model and press Run. It watches the live video and marks what it finds.</p>
                     </div>
-                    {showAdd ? (
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button type="button" className={s.btn} onClick={p.onBrowse}
+                        title="Every vision model on Hugging Face, most downloaded first">
+                        <Compass size={14} aria-hidden /> Browse models
+                    </button>
+                    {showAdd && (
                         <button type="button" className={cn(s.btn, s.primary)} onClick={p.onAdd}
-                            title="Pick a recommended model, search Hugging Face, or upload your own">
+                            title="Pick a model recommended for drones, browse Hugging Face, or upload your own">
                             <Plus size={14} aria-hidden /> Add model
-                        </button>
-                    ) : (
-                        <button type="button" className={s.btn} onClick={p.onAdd}
-                            title="See the models HYRAK recommends and search Hugging Face">
-                            <Compass size={14} aria-hidden /> Browse models
                         </button>
                     )}
                 </div>
@@ -175,7 +179,7 @@ function ModelCard({ entry: e, running, starting, canRun, canManage, onRun, onSt
 }) {
     const Icon = e.icon
     const ref = useRef<HTMLDivElement>(null)
-    useEffect(() => { if (highlight) ref.current?.scrollIntoView({ block: 'nearest' }) }, [highlight])
+    useEffect(() => { if (highlight) ref.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }, [highlight])
     const text = (
         <>
             <span className={s.cardName}><span>{e.name}</span></span>
@@ -188,8 +192,7 @@ function ModelCard({ entry: e, running, starting, canRun, canManage, onRun, onSt
         </>
     )
     return (
-        <div ref={ref} className={s.card} data-running={running} data-clickable={!!onOpen}
-            style={highlight ? { boxShadow: '0 0 0 2px var(--cm-accent)' } : undefined}>
+        <div ref={ref} className={cn(s.card, highlight && s.cardNew)} data-running={running} data-clickable={!!onOpen}>
             <span className={s.iconTile} style={{ background: `${e.color}1f`, color: e.color }} aria-hidden>
                 <Icon size={18} />
             </span>
@@ -237,8 +240,8 @@ function CardSkeleton() {
 
 /** "Our models" with nothing in it: one sentence, the action, and three
  *  steps in text and icons. In the All view a slimmer version. */
-function OursEmpty({ compact, canManage, onAdd }: {
-    compact: boolean; canManage: boolean; onAdd: () => void
+function OursEmpty({ compact, canManage, onAdd, onBrowse }: {
+    compact: boolean; canManage: boolean; onAdd: () => void; onBrowse: () => void
 }) {
     return (
         <div className={cn(s.inset, s.empty)} style={compact ? { padding: '14px 14px' } : undefined}>
@@ -248,7 +251,7 @@ function OursEmpty({ compact, canManage, onAdd }: {
             </p>
             {!compact && (
                 <ol className={s.howto} aria-label="How adding a model works">
-                    <li><span><Upload size={14} aria-hidden /></span>Pick a recommended model, search Hugging Face, or drop an .onnx file</li>
+                    <li><span><Upload size={14} aria-hidden /></span>Pick a model recommended for drones, browse Hugging Face, or drop an .onnx file</li>
                     <li><span><Wand2 size={14} aria-hidden /></span>Check what it finds and give it a name</li>
                     <li><span><CheckCircle2 size={14} aria-hidden /></span>HYRAK tests it, then it is ready to run</li>
                 </ol>
@@ -258,7 +261,7 @@ function OursEmpty({ compact, canManage, onAdd }: {
                     <Plus size={14} aria-hidden /> Add your first model
                 </button>
             ) : (
-                <button type="button" className={s.btn} onClick={onAdd}>
+                <button type="button" className={s.btn} onClick={onBrowse}>
                     <Compass size={14} aria-hidden /> Browse models
                 </button>
             )}

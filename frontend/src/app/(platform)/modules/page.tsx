@@ -29,7 +29,7 @@ import { ViewOnlyFence } from '@/components/layout/ViewOnly'
 import { useDrone } from '@/hooks/useDrone'
 import { useAiModule } from '@/components/command/useAiModule'
 import { ModelLibrary } from '@/components/models/ModelLibrary'
-import { AddModelPanel } from '@/components/models/AddModelPanel'
+import { AddModelPanel, type AddSource } from '@/components/models/AddModelPanel'
 import { ModelDetailPanel } from '@/components/models/ModelDetailPanel'
 import { CustomResultsPanel } from '@/components/models/CustomResultsPanel'
 import { useModelAccess, useModelLibrary, useModeName, type LibraryEntry } from '@/components/models/useModelLibrary'
@@ -169,8 +169,18 @@ export default function ModulesPage() {
     const modeName = useModeName(mode)
     const [runHelp, setRunHelp] = useState<RunHelp>(null)
     const [addOpen, setAddOpen] = useState(false)
+    const [addSource, setAddSource] = useState<AddSource>('recommended')
+    const openAdd = useCallback((src: AddSource) => { setAddSource(src); setAddOpen(true) }, [])
     const [detail, setDetail] = useState<{ id: string; open: boolean } | null>(null)
     const [highlight, setHighlight] = useState<string | null>(null)
+    const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+    // Mark a model of ours in the library for a moment: "this is where it went".
+    const spotlight = useCallback((id: string) => {
+        setHighlight(`ours:${id}`)
+        if (highlightTimer.current) clearTimeout(highlightTimer.current)
+        highlightTimer.current = setTimeout(() => setHighlight(null), 2500)
+    }, [])
+    useEffect(() => () => { if (highlightTimer.current) clearTimeout(highlightTimer.current) }, [])
     const [toast, setToast] = useState<string | null>(null)
     const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     const flash = useCallback((text: string) => {
@@ -225,7 +235,8 @@ export default function ModulesPage() {
                     premiumEnabled={lib.premium.enabled}
                     onRun={onRun}
                     onStop={onStop}
-                    onAdd={() => setAddOpen(true)}
+                    onAdd={() => openAdd('recommended')}
+                    onBrowse={() => openAdd('all')}
                     onOpen={e => e.model && setDetail({ id: e.model.id, open: true })}
                     highlightKey={highlight}
                 />
@@ -486,12 +497,22 @@ export default function ModulesPage() {
                 canManage={access.canManage}
                 workspaceId={access.workspace?.id ?? null}
                 workspaceName={access.workspace?.name ?? null}
+                initialSource={addSource}
+                canRun={access.canRun}
                 onSaved={(m: CustomModel) => {
                     void lib.reload()
-                    setHighlight(`ours:${m.id}`)
-                    setTimeout(() => setHighlight(null), 2500)
+                    spotlight(m.id)
                     flash(`${m.name} is ready. Press Run to use it.`)
                 }}
+                onAdded={(m: CustomModel) => {
+                    void lib.reload()
+                    spotlight(m.id)
+                }}
+                onRun={m => {
+                    spotlight(m.id)
+                    runMode(customMode(m.id))
+                }}
+                onOpenModel={id => setDetail({ id, open: true })}
             />
 
             {detail && (

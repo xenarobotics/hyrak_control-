@@ -88,10 +88,12 @@ async def hf_recommended(workspace_id: Optional[str] = Query(None),
 
 @router.get("/huggingface/search")
 async def hf_search(q: str = Query("", max_length=100), task: str = Query("all"),
-                    page: int = Query(1, ge=1, le=50), workspace_id: Optional[str] = Query(None),
+                    page: int = Query(1, ge=1, le=50), ready: bool = Query(False),
+                    workspace_id: Optional[str] = Query(None),
                     user: AuthUser = Depends(require_signed_in)):
-    """Vision models on Hugging Face as cards, runnable ones first."""
-    return await _run(service.hf_search(user, workspace_id, q, task, page))
+    """Vision models on Hugging Face as cards, runnable ones first.
+    `ready=true` lists only repos tagged ONNX and keeps the runnable cards."""
+    return await _run(service.hf_search(user, workspace_id, q, task, page, ready))
 
 
 class HfBody(BaseModel):
