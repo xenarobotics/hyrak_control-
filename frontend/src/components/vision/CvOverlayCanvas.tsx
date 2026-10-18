@@ -817,7 +817,10 @@ function drawTrafficManagement(ctx: CanvasRenderingContext2D, r: CVResult, W: nu
 export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null)
     const cvResults = useDroneStore(s => s.cvResults)
-    const mode = useDroneStore(s => s.mode)
+    const storeMode = useDroneStore(s => s.mode)
+    // A custom model's results have the object-detection shape, so it is
+    // smoothed and drawn exactly like that mode.
+    const mode = storeMode.startsWith('custom:') ? 'object-detection' : storeMode
     // Read by the render loop to draw a hover ring, so clicking is
     // discoverable rather than a hidden feature.
     const hovered = useRef<number | null>(null)
@@ -854,7 +857,9 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
         // claim in person-ID. See MODE_HOLD_MS.
         smoothers.current.setMode(mode)
         latest.current = null
-    }, [mode])
+        // storeMode too: two custom models draw as one mode, but their
+        // tracks must not carry across a switch between them.
+    }, [mode, storeMode])
 
     useEffect(() => {
         const canvas = canvasRef.current

@@ -218,8 +218,13 @@ export function useDrone() {
         }
         const onCvResults      = (data: CVResult) => store.setCvResults(data)
         const onModeChanged    = (data: { mode: AnalysisMode }) => store.setMode(data.mode)
-        const onModelStatus    = (data: { status: string; mode: string }) =>
+        // Custom Models reuse this event for their check progress, with an
+        // `id`; those belong to the model library (useModelLibrary), not to
+        // the running mode's loading flag.
+        const onModelStatus    = (data: { status: string; mode?: string; id?: string }) => {
+            if (typeof data?.id === 'string') return
             store.setModelLoading(data.status === 'loading')
+        }
         const onTrackingStatus = (_data: { active: boolean }) => { /* handled in panel */ }
         const onMissionUpload  = (data: { ok: boolean; count?: number; terrain_follow?: boolean; msg: string }) =>
             store.setMissionUploadResult(data)
