@@ -8,7 +8,6 @@
 // (camera feeding? destination known?), the tuning that decides how early
 // and how wide it dodges, and the last things it did.
 import { useCallback, useEffect, useState } from 'react'
-import { useDroneStore } from '@/store/drone'
 import { useResolvedDroneId } from '@/lib/droneId'
 import { useAccess } from '@/hooks/useAccess'
 import { visibleInterval } from '@/lib/poll'
