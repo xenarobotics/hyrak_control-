@@ -5,7 +5,8 @@
 // manual export/clear actions.
 
 import { apiFetch } from '@/lib/api'
-import { authHeaders } from '@/lib/auth'
+import { authHeaders, isCustomer } from '@/lib/auth'
+import { useDroneStore } from '@/store/drone'
 import { getServerUrl } from './server-url'
 
 export interface CrowdSessionSummary {
@@ -51,9 +52,23 @@ export interface PlateHistoryRow {
     vehicle_image_path: string | null
 }
 
+// History is per workspace (docs/ACCESS_MODEL.md 8b). A customer's panels
+// show the workspace their live session is in; staff see every workspace
+// they can view (the server decides which).
+function workspaceParam(): string {
+    if (!isCustomer()) return ''
+    const ws = useDroneStore.getState().session?.workspace_id
+    return ws ? `&workspace_id=${encodeURIComponent(ws)}` : ''
+}
+
+/** Clearing history is a staff action; customers do not get the button. */
+export function canClearHistory(): boolean {
+    return !isCustomer()
+}
+
 export async function fetchCrowdHistory(limit = 10): Promise<{ sessions: CrowdSessionSummary[]; alerts: CrowdAlertRow[] }> {
     try {
-        const res = await apiFetch(`${getServerUrl()}/api/vision/crowd-history?limit=${limit}`)
+        const res = await apiFetch(`${getServerUrl()}/api/vision/crowd-history?limit=${limit}${workspaceParam()}`)
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return await res.json()
     } catch (e) {
@@ -64,7 +79,7 @@ export async function fetchCrowdHistory(limit = 10): Promise<{ sessions: CrowdSe
 
 export async function fetchPlateHistory(limit = 50): Promise<PlateHistoryRow[]> {
     try {
-        const res = await apiFetch(`${getServerUrl()}/api/vision/plate-history?limit=${limit}`)
+        const res = await apiFetch(`${getServerUrl()}/api/vision/plate-history?limit=${limit}${workspaceParam()}`)
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = await res.json()
         return data.events ?? []

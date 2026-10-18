@@ -16,7 +16,7 @@ import { AlertCircle, Download, Layers, Trash2, TriangleAlert } from 'lucide-rea
 import { FollowControls } from '@/components/vision/FollowControls'
 import type { CVResult } from '@/types/vision'
 import {
-    fetchPlateHistory, downloadSessionReport, clearHistory, toFileStamp,
+    fetchPlateHistory, downloadSessionReport, clearHistory, canClearHistory, toFileStamp,
     type PlateHistoryRow,
 } from '@/lib/visionReports'
 
@@ -580,7 +580,7 @@ export function TrafficManagementPanel() {
                         >
                             <Download size={11} /> report
                         </button>
-                        <button
+                        {canClearHistory() && <button
                             onClick={async () => { await clearHistory('plate-history'); loadHistory() }}
                             style={{
                                 border: 'none', background: 'none', cursor: 'pointer',
@@ -589,7 +589,7 @@ export function TrafficManagementPanel() {
                             }}
                         >
                             <Trash2 size={11} /> clear
-                        </button>
+                        </button>}
                     </div>
                     <div style={{ maxHeight: 96, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
                         {history.slice(0, 12).map(ev => (

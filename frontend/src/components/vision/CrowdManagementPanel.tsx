@@ -5,7 +5,7 @@ import { useDroneStore } from '@/store/drone'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { getSocket } from '@/lib/socket'
 import { getCrowdThresholds } from '@/lib/videoSettings'
-import { fetchCrowdHistory, downloadSessionReport, clearHistory, toFileStamp, type CrowdSessionSummary, type CrowdAlertRow } from '@/lib/visionReports'
+import { fetchCrowdHistory, downloadSessionReport, clearHistory, canClearHistory, toFileStamp, type CrowdSessionSummary, type CrowdAlertRow } from '@/lib/visionReports'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Users, Download, Trash2, MapPin } from 'lucide-react'
 import { FollowControls } from '@/components/vision/FollowControls'
@@ -324,13 +324,13 @@ export function CrowdManagementPanel() {
                     <p style={{ fontSize: 10, color: 'hsl(var(--app-text-muted))', fontFamily: 'monospace', margin: 0, letterSpacing: '0.06em' }}>
                         RECENT SESSIONS
                     </p>
-                    <button
+                    {canClearHistory() && <button
                         onClick={() => clearHistory('crowd-history').then(ok => { if (ok) loadHistory() })}
                         title="Clear all history"
                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'hsl(var(--app-text-muted))', display: 'flex' }}
                     >
                         <Trash2 size={12} />
-                    </button>
+                    </button>}
                 </div>
                 <ScrollArea style={{ flex: 1 }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 5, paddingRight: 4 }}>

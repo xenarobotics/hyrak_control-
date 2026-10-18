@@ -8,7 +8,7 @@ import { getUiFont, setUiFont, getUiZoom, setUiZoom, getUiTextSize, setUiTextSiz
 import {
     Sun, Moon, MoonStar, Info, Zap,
     SlidersHorizontal, Video, Bot, Map, Route, Bell, Database, Keyboard, AlertTriangle, Radio,
-    Radar, UserRound, Users,
+    Radar, UserRound, Users, History,
     type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -54,6 +54,7 @@ import { PrefRow } from '@/components/settings/primitives'
 import { DevicesGroup, PasswordGroup, ProfileGroup } from '@/components/settings/AccountSettings'
 import { InvitesGroup, MembersGroup, WorkspaceGroup } from '@/components/settings/WorkspaceSettings'
 import { useAccess } from '@/hooks/useAccess'
+import { FlightHistory } from '@/components/settings/FlightHistory'
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
 
@@ -1932,6 +1933,11 @@ const CATEGORIES: Category[] = [
             { label: 'MEMBERS',   Body: MembersGroup },
             { label: 'INVITES',   Body: InvitesGroup },
         ],
+    },
+    {
+        id: 'flights', label: 'Flights', icon: History,
+        blurb: 'Recorded flights of the workspace: replay a track or save it as CSV',
+        sections: [{ label: 'FLIGHT HISTORY', Body: FlightHistory }],
     },
     {
         id: 'video', label: 'Video', icon: Video,
