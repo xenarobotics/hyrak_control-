@@ -67,4 +67,6 @@ export interface SessionInfo {
     workspace_id?: string | null
     perms?: Perm[]
     staff?: boolean
+    /** Phase 2b: HYRAK operations hold this session's drone (null: no). */
+    takeover?: { by: string; since: number } | null
 }

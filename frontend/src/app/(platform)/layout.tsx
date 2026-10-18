@@ -26,6 +26,7 @@ import { useAuthGate, hasConsoleAccess } from '@/hooks/useAuthGate'
 import { useClientValueOn, useHydrated } from '@/hooks/useClientValue'
 import { WorkspaceSwitcher } from '@/components/layout/WorkspaceSwitcher'
 import { CommandRefusalBanner } from '@/components/controls/CommandRefusalBanner'
+import { TakeoverBanner } from '@/components/controls/TakeoverBanner'
 import { useAccess } from '@/hooks/useAccess'
 import { onWorkspaceSwitch } from '@/lib/workspaceSwitch'
 
@@ -324,6 +325,7 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
                         {showStatusBar && <StatusBar />}
                         <ZoneBanner />
                         <CommandRefusalBanner />
+                        <TakeoverBanner />
                         <main className="flex-1 overflow-hidden p-3 md:p-4"
                             style={uiMode === 'normal' ? { background: '#F4F7FB' } : undefined}>
                             {/* A staff-only page never renders for a customer,
