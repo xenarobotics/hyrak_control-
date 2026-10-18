@@ -79,6 +79,17 @@ export function ModelLibrary(p: LibraryProps) {
             highlight={p.highlightKey === e.key} />
     )
 
+    const oursBlock = (
+        <>
+            {filter === 'all' && (ours.length > 0 || !q) && <p className={cn(s.label, s.groupLabel)}>Our models</p>}
+            {p.loading && ours.length === 0 ? <CardSkeleton /> : ours.map(card)}
+            {!p.loading && !p.loadError && ours.length === 0 && !q && (
+                <OursEmpty compact={filter === 'all'} canManage={p.canManage}
+                    premiumEnabled={p.premiumEnabled} onAdd={p.onAdd} />
+            )}
+        </>
+    )
+
     return (
         <section className={cn(s.panel, s.library)} aria-labelledby="cm-lib-title">
             <div className={s.libHead}>
@@ -135,22 +146,17 @@ export function ModelLibrary(p: LibraryProps) {
                     </div>
                 ) : (
                     <>
+                        {/* Our own models lead once there are any: they are
+                            why someone comes back. Until then HYRAK's lead,
+                            with the add prompt after them. */}
+                        {ours.length > 0 && filter !== 'hyrak' && oursBlock}
                         {filter !== 'ours' && hyrak.length > 0 && (
                             <>
                                 {filter === 'all' && <p className={cn(s.label, s.groupLabel)}>HYRAK models</p>}
                                 {hyrak.map(card)}
                             </>
                         )}
-                        {filter !== 'hyrak' && (
-                            <>
-                                {filter === 'all' && (ours.length > 0 || !q) && <p className={cn(s.label, s.groupLabel)}>Our models</p>}
-                                {p.loading && ours.length === 0 ? <CardSkeleton /> : ours.map(card)}
-                                {!p.loading && !p.loadError && ours.length === 0 && !q && (
-                                    <OursEmpty compact={filter === 'all'} canManage={p.canManage}
-                                        premiumEnabled={p.premiumEnabled} onAdd={p.onAdd} />
-                                )}
-                            </>
-                        )}
+                        {ours.length === 0 && filter !== 'hyrak' && oursBlock}
                     </>
                 )}
             </div>
@@ -167,12 +173,11 @@ function ModelCard({ entry: e, running, starting, canRun, onRun, onStop, onOpen,
     useEffect(() => { if (highlight) ref.current?.scrollIntoView({ block: 'nearest' }) }, [highlight])
     const text = (
         <>
-            <span className={s.cardName}>
-                <span>{e.name}</span>
-                {running && <span className={cn(s.chip, s.chipInfo)}><span className={s.dot} aria-hidden />Running</span>}
-            </span>
+            <span className={s.cardName}><span>{e.name}</span></span>
             <span className={s.cardBlurb}>{e.blurb}</span>
-            {e.group === 'ours' || e.status !== 'ready' ? (
+            {running ? (
+                <span className={cn(s.chip, s.chipInfo)}><span className={s.dot} aria-hidden />{starting ? 'Starting' : 'Running'}</span>
+            ) : e.group === 'ours' || e.status !== 'ready' ? (
                 <StatusChip status={e.status} step={e.step} progress={e.progress} source={e.model?.source} />
             ) : null}
         </>

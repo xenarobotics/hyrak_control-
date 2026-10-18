@@ -60,7 +60,7 @@ function ClassChip({ index, value, onSave }: { index: number; value: string; onS
                 <span className={s.idx}>{index}</span>{value}<Pencil size={10} aria-hidden style={{ opacity: 0.5 }} />
             </button>
             {editing && (
-                <input autoFocus value={draft} style={{ width: '100%', minWidth: 0 }} aria-label={`Class ${index} name`}
+                <input autoFocus size={1} value={draft} style={{ width: '100%', minWidth: 0 }} aria-label={`Class ${index} name`}
                     onChange={e => setDraft(e.target.value)}
                     onBlur={commit}
                     onKeyDown={e => {

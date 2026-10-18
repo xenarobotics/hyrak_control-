@@ -184,7 +184,7 @@ export default function ModulesPage() {
     // the video around it. When there is no camera to start, say so and how
     // to fix it instead of pressing on into a silent failure.
     const runMode = useCallback((m: string) => {
-        if (needsCamera && camerasScanned && cameras.length === 0) {
+        if (needsCamera && cameras.length === 0) {
             setRunHelp({
                 title: 'No camera found',
                 body: "Plug in a camera and allow camera access, or pick your drone's video as the source in Settings.",
@@ -193,12 +193,12 @@ export default function ModulesPage() {
             return
         }
         if (needsCamera && !selectedCameraId) {
-            setRunHelp({ title: 'Choose a camera first', body: 'Pick a camera in the Video list above the picture, then press Run again.' })
+            setRunHelp({ title: 'Choose a camera first', body: 'Pick a camera in the Video list above the picture, then press Run again.', settings: true })
             return
         }
         setRunHelp(null)
         ai.start(m)
-    }, [needsCamera, camerasScanned, cameras.length, selectedCameraId, ai])
+    }, [needsCamera, cameras.length, selectedCameraId, ai])
     const onRun = useCallback((e: LibraryEntry) => runMode(e.mode), [runMode])
     const onStop = useCallback(() => {
         stopStream()

@@ -84,7 +84,20 @@ export function ModelDetailPanel({ modelId, open, onOpenChange, editable, canPub
     const speed = speedSentence(v?.latency_ms)
     const ready = m.status === 'ready'
 
-    const foot = (
+    // The named confirmation takes the footer's place, right where Delete
+    // was pressed, instead of stacking a second dialog on the panel.
+    const foot = confirmDelete ? (
+                <DeleteConfirm name={m.name} busy={busy === 'delete'}
+                    onCancel={() => setConfirmDelete(false)}
+                    onConfirm={async () => {
+                        setBusy('delete'); setErr(null)
+                        const r = await deleteModel(m.id)
+                        setBusy(null)
+                        if (!r.ok) { setErr(r.error); setConfirmDelete(false); return }
+                        useModelsStore.getState().remove(m.id)
+                        onDeleted(m.name)
+                    }} />
+    ) : (
         <>
             {editable && (
                 <button type="button" className={s.btn} onClick={() => setConfirmDelete(true)}
@@ -119,19 +132,6 @@ export function ModelDetailPanel({ modelId, open, onOpenChange, editable, canPub
             </div>}
             foot={foot}>
 
-            {confirmDelete && (
-                <DeleteConfirm name={m.name} busy={busy === 'delete'}
-                    onCancel={() => setConfirmDelete(false)}
-                    onConfirm={async () => {
-                        setBusy('delete'); setErr(null)
-                        const r = await deleteModel(m.id)
-                        setBusy(null)
-                        if (!r.ok) { setErr(r.error); setConfirmDelete(false); return }
-                        useModelsStore.getState().remove(m.id)
-                        onDeleted(m.name)
-                    }} />
-            )}
-
             {err && <Callout tone="bad" title={err.message}><Hint text={err.hint} /></Callout>}
             {note && <Callout tone="info">{note}</Callout>}
 
@@ -161,7 +161,7 @@ export function ModelDetailPanel({ modelId, open, onOpenChange, editable, canPub
 
             {labels.length > 0 && (
                 <AlertRuleEditor model={m} labels={labels} editable={editable}
-                    onSave={alert => run('alert', () => updateModel(m.id, { alert }), alert ? 'Alert saved.' : 'Alert turned off.')} />
+                    onSave={alert => run('alert', () => updateModel(m.id, { alert }))} />
             )}
 
             {(m.versions?.length ?? 0) > 0 && (
@@ -259,7 +259,7 @@ function RenameInline({ value, onSave }: { value: string; onSave: (v: string) =>
                     <span>{value}</span><Pencil size={13} aria-hidden style={{ opacity: 0.55, flexShrink: 0 }} />
                 </button>
                 {editing && (
-                    <input autoFocus className={s.renameInput} value={draft} aria-label="Model name"
+                    <input autoFocus size={1} className={s.renameInput} value={draft} aria-label="Model name"
                         aria-invalid={err ? true : undefined}
                         onChange={e => { setDraft(e.target.value); setErr(null) }}
                         onBlur={() => void commit()}
@@ -280,7 +280,7 @@ function DeleteConfirm({ name, busy, onCancel, onConfirm }: {
     const cancel = useRef<HTMLButtonElement>(null)
     useEffect(() => { cancel.current?.focus() }, [])
     return (
-        <div className={s.confirm} role="alertdialog" aria-labelledby="cm-del-title" aria-describedby="cm-del-body"
+        <div className={s.confirm} style={{ flex: 1 }} role="alertdialog" aria-labelledby="cm-del-title" aria-describedby="cm-del-body"
             onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onCancel() } }}>
             <strong id="cm-del-title">Delete model &quot;{name}&quot;?</strong>
             <p id="cm-del-body" className={s.muted}>
@@ -317,14 +317,12 @@ function AlertRuleEditor({ model, labels, editable, onSave }: {
         <div className={s.section}>
             <span className={s.label}>Alert</span>
             <div className={s.inset} style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                    <input type="checkbox" checked={on} style={{ accentColor: 'var(--cm-accent)', width: 16, height: 16 }}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <input id="cm-alert-on" type="checkbox" checked={on} style={{ accentColor: 'var(--cm-accent)', width: 16, height: 16 }}
                         onChange={e => onSave(e.target.checked ? { label, min_score: score } : null)} />
-                    <BellRing size={14} aria-hidden style={{ color: 'var(--cm-accent)' }} />
-                    <span>Alert me when this model sees something</span>
-                </label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', opacity: on ? 1 : 0.6 }}>
-                    <span>Alert me when</span>
+                    <label htmlFor="cm-alert-on" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                        <BellRing size={14} aria-hidden style={{ color: 'var(--cm-accent)' }} />Alert me when
+                    </label>
                     <select className={s.input} style={{ width: 'auto', maxWidth: 180 }} value={label} aria-label="Class to watch for"
                         onChange={e => { setLabel(e.target.value); if (on) onSave({ label: e.target.value, min_score: score }) }}>
                         {labels.map(l => <option key={l} value={l}>{l}</option>)}
@@ -335,7 +333,7 @@ function AlertRuleEditor({ model, labels, editable, onSave }: {
                         {SCORES.map(x => <option key={x} value={x}>{Math.round(x * 100)}% sure</option>)}
                     </select>
                 </div>
-                <p className={s.help}>Alerts show in the results panel while the model runs.</p>
+                <p className={s.help}>{on ? 'On. Alerts show in the results panel while the model runs.' : 'Off. Tick the box to turn it on.'}</p>
             </div>
         </div>
     )

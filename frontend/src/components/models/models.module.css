@@ -131,8 +131,9 @@
 .normal .btn { font-size: 16px; padding: 0 16px; border-width: 2px; }
 .primary { background: var(--cm-accent); border-color: var(--cm-accent); color: var(--cm-accent-ink); }
 .primary:hover { background: var(--cm-accent); filter: brightness(1.08); }
-.danger { background: var(--cm-bad); border-color: var(--cm-bad); color: #fff; }
-.danger:hover { background: var(--cm-bad); filter: brightness(1.08); }
+.danger { background: #dc2626; border-color: #dc2626; color: #fff; }
+.danger:hover { background: #dc2626; filter: brightness(1.08); }
+.normal .danger, .normal .danger:hover { background: var(--cm-bad); border-color: var(--cm-bad); }
 .ghost { background: transparent; border-color: transparent; color: var(--cm-ink-2); }
 .ghost:hover { background: var(--cm-panel-2); color: var(--cm-ink); }
 .link {
@@ -255,6 +256,7 @@
   border-color: var(--cm-line) !important;
   width: 100% !important; max-width: 480px !important;
   gap: 0 !important; padding: 0;
+  outline: none;
 }
 .normal.sheet { max-width: 520px !important; }
 .sheetHead { padding: 16px 52px 12px 18px; border-bottom: 1px solid var(--cm-line); display: flex; flex-direction: column; gap: 10px; }

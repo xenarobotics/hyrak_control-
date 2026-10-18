@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-    Check, CheckCircle2, Circle, Copy, FileBox, Link2, Loader, Lock, Upload, X, Boxes, Tags, ShieldCheck,
+    Check, CheckCircle2, Circle, Copy, FileBox, Link2, Loader, Lock, Upload, X, Boxes, ShieldCheck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatBytes } from '@/lib/formatBytes'
@@ -356,7 +356,7 @@ function AddFlow({ open, onOpenChange, workspaceId, onSaved }: {
                     aria-busy={importing || (!!link.trim() && inspect.state === 'loading') || undefined}>
                     {importing || (!file && inspect.state === 'loading')
                         ? <><Loader size={13} className="animate-spin motion-reduce:animate-none" aria-hidden /> {importing ? 'Importing' : 'Checking the link'}</>
-                        : <>{file ? <Upload size={13} aria-hidden /> : <Link2 size={13} aria-hidden />} {primaryLabel}</>}
+                        : <>{file ? <Upload size={13} aria-hidden /> : link.trim() ? <Link2 size={13} aria-hidden /> : null} {primaryLabel}</>}
                 </button>
             </>
         )
@@ -364,7 +364,7 @@ function AddFlow({ open, onOpenChange, workspaceId, onSaved }: {
         foot = (
             <>
                 <span className={s.help} style={{ flex: 1 }}>The check keeps running if you close this.</span>
-                {!earlyFailure && (
+                {!earlyFailure && filled && (
                     <button type="button" className={cn(s.btn, s.primary)} onClick={toTest} aria-busy={busy || undefined}>
                         {busy ? <Loader size={13} className="animate-spin motion-reduce:animate-none" aria-hidden /> : null}
                         Test model
@@ -690,10 +690,6 @@ function TestStep({ model, status, step, failure, busy, stepErr, saveNote, onRet
                     </p>
                 </div>
             )}
-
-            {model.task === 'detect' || model.task === 'classify' ? (
-                <p className={s.help}><Tags size={12} aria-hidden style={{ display: 'inline', verticalAlign: '-2px' }} /> {TASK_WORDS[model.task].line}.</p>
-            ) : null}
 
             {stepErr && <Callout tone="bad" title={stepErr.message}><Hint text={stepErr.hint} /></Callout>}
             {saveNote && <Callout tone="info">{saveNote}</Callout>}
