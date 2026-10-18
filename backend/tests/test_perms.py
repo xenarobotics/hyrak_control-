@@ -158,12 +158,13 @@ def test_compat_role_mapping():
     assert P.compat_role([on(IITH, "manager")]) == "operator"
     assert P.compat_role([on(HYRAK, "viewer")]) == "viewer"
     assert P.compat_role([on(HYRAK, "airspace", box(0, 0, 1, 1))]) == "viewer"
-    assert P.compat_role([on(IITH, "owner")]) == "viewer"
-    assert P.compat_role([on(IITH, "pilot")]) == "viewer"       # customer pilot: phase 2
-    assert P.compat_role([]) == "viewer"
+    assert P.compat_role([on(IITH, "owner")]) == "member"     # customer: no live paths
+    assert P.compat_role([on(IITH, "pilot")]) == "member"       # customer pilot: phase 2
+    assert P.compat_role([]) == "member"
     assert P.compat_role([on(HYRAK, "viewer"), on(HYRAK, "founder")]) == "admin"
     off = M("off", "/root/off/", P.ORGANIZATION, "manager", workspace_disabled=True)
-    assert P.compat_role([off]) == "viewer"
+    assert P.compat_role([off]) == "member"
+    assert P.compat_role([on(IITH, "owner"), on(HYRAK, "viewer")]) == "viewer"
 
 
 # ── area checks ───────────────────────────────────────────────────────────

@@ -175,7 +175,14 @@ def compat_role(memberships: Iterable) -> str:
             continue
         if (m.role == PILOT and _is_platform_membership(m)) or m.role == MANAGER:
             return "operator"
-    return "viewer"
+    # Any other HYRAK membership (viewer, airspace) is staff and keeps the
+    # viewer rank. A customer-only account gets "member", below viewer: the
+    # live paths (sessions, telemetry, recordings, flights) are not scoped
+    # per workspace until phase 2, so a viewer rank would let a customer
+    # watch HYRAK's and other customers' drones.
+    if any(_is_platform_membership(m) and not getattr(m, "workspace_disabled", False) for m in ms):
+        return "viewer"
+    return "member"
 
 
 def applicable(memberships: Iterable, ws) -> list[tuple[object, bool]]:

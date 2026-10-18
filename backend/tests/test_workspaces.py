@@ -131,10 +131,16 @@ async def test_inheritance_and_404_for_invisible(cl):
     assert me["role"] == "operator" and me["is_staff"] and not me["is_founder"]
 
 
-async def test_customer_compat_role_is_viewer(cl):
+async def test_customer_compat_role_is_member(cl):
+    """Customer-only accounts rank below viewer in phase 1: their own account
+    and workspace routes work, the unscoped live/viewer routes do not."""
     founder, fh, iith, civil = await world(cl)
     _, oh, _ = await member(cl, fh, iith["id"], "olga", "owner")
-    assert ok(cl.get("/api/auth/me", headers=oh))["user"]["role"] == "viewer"
+    assert ok(cl.get("/api/auth/me", headers=oh))["user"]["role"] == "member"
+    ok(cl.get("/api/workspaces", headers=oh))
+    ok(cl.get(f"/api/workspaces/{iith['id']}/members", headers=oh))
+    ok(cl.get("/api/auth/sessions", headers=oh))
+    assert cl.get("/api/sessions", headers=oh).status_code == 403
 
 
 async def test_workspace_creation_rules(cl):
@@ -344,6 +350,39 @@ async def test_socket_guard_sees_compat_role_from_memberships(cl):
     s.auth_checked_at = 0.0
     assert await socket_guard.require_operator("s1", "drone_action") is True
     assert s.role == "operator"
+
+
+async def test_customer_only_account_loses_live_socket(cl):
+    """Phase 1: a customer-only account ranks "member", below viewer, and an
+    open socket of an account demoted to that is disconnected."""
+    from app.auth import socket_guard
+    from app.sessions.manager import SessionManager
+
+    dropped = []
+
+    class FakeSio:
+        async def emit(self, *a, **k): pass
+        async def disconnect(self, sid): dropped.append(sid)
+
+    founder, fh, iith, civil = await world(cl)
+    staff, sh = await user("demoted", "viewer")
+    ok(cl.post(f"/api/workspaces/{iith['id']}/members", headers=fh,
+               json={"login": "demoted", "role": "pilot"}))
+    sm = SessionManager()
+    socket_guard.configure(FakeSio(), sm)
+    s = sm.create(socket_id="s9")
+    s.user_id, s.username, s.role = staff.id, "demoted", "viewer"
+    s.token_hash = service.hash_token(sh["Authorization"].split()[1])
+    s.auth_checked_at = 0.0
+    assert await socket_guard.revalidate(s) is True and s.role == "viewer"
+    members = ok(cl.get(f"/api/workspaces/{PLATFORM_WORKSPACE_ID}/members", headers=fh))["members"]
+    mid = next(m["id"] for m in members if m["user"]["username"] == "demoted")
+    ok(cl.delete(f"/api/workspaces/{PLATFORM_WORKSPACE_ID}/members/{mid}", headers=fh))
+    assert ok(cl.get("/api/auth/me", headers=sh))["user"]["role"] == "member"
+    assert cl.get("/api/sessions", headers=sh).status_code == 403
+    s.auth_checked_at = 0.0
+    assert await socket_guard.revalidate(s) is False
+    assert dropped == ["s9"]
 
 
 # ── invites ──────────────────────────────────────────────────────────────

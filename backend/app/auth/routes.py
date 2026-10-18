@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field, model_validator
 from app.auth import audit, service
 from app.auth import perms
 from app.auth.clientip import client_ip
-from app.auth.deps import bearer_of, optional_user, require_founder, require_viewer
+from app.auth.deps import bearer_of, optional_user, require_founder, require_signed_in
 from app.auth.service import AuthError, AuthUnavailable, AuthUser, DbOffline, RateLimited
 from app.auth.store import ROLES, PLATFORM_WORKSPACE_ID, StoreConflict
 
@@ -90,7 +90,7 @@ async def logout(authorization: str | None = Header(None)):
 
 
 @router.get("/me")
-async def me(user: AuthUser = Depends(require_viewer)):
+async def me(user: AuthUser = Depends(require_signed_in)):
     from app.workspaces import service as ws_service
     return await ws_service.describe_me(user)
 
@@ -106,7 +106,7 @@ def _real_account(user: AuthUser) -> None:
 
 
 @router.patch("/me")
-async def patch_me(body: ProfileBody, request: Request, user: AuthUser = Depends(require_viewer)):
+async def patch_me(body: ProfileBody, request: Request, user: AuthUser = Depends(require_signed_in)):
     _real_account(user)
     try:
         rec = await service.update_profile(user.id, display_name=body.display_name,
@@ -129,7 +129,7 @@ class PasswordBody(BaseModel):
 @router.post("/me/password")
 async def change_password(body: PasswordBody, request: Request,
                           authorization: str | None = Header(None),
-                          user: AuthUser = Depends(require_viewer)):
+                          user: AuthUser = Depends(require_signed_in)):
     _real_account(user)
     token = bearer_of(authorization)
     try:
@@ -149,13 +149,13 @@ async def change_password(body: PasswordBody, request: Request,
 
 @router.get("/sessions")
 async def my_sessions(authorization: str | None = Header(None),
-                      user: AuthUser = Depends(require_viewer)):
+                      user: AuthUser = Depends(require_signed_in)):
     token = bearer_of(authorization)
     return await service.list_sessions(user.id, service.hash_token(token) if token else None)
 
 
 @router.delete("/sessions/{token_id}")
-async def revoke_my_session(token_id: str, user: AuthUser = Depends(require_viewer)):
+async def revoke_my_session(token_id: str, user: AuthUser = Depends(require_signed_in)):
     if not await service.revoke_session(user.id, token_id):
         raise HTTPException(status_code=404, detail="Session not found")
     return {"ok": True}
@@ -163,7 +163,7 @@ async def revoke_my_session(token_id: str, user: AuthUser = Depends(require_view
 
 @router.post("/sessions/revoke-others")
 async def revoke_my_other_sessions(authorization: str | None = Header(None),
-                                   user: AuthUser = Depends(require_viewer)):
+                                   user: AuthUser = Depends(require_signed_in)):
     _real_account(user)
     token = bearer_of(authorization)
     n = await service.revoke_all(user.id, keep_hash=service.hash_token(token) if token else None)

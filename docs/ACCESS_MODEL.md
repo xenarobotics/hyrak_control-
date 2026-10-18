@@ -339,11 +339,20 @@ vision history, recordings) still use the existing rank check. They see a
 |---|---|
 | founder | admin |
 | HYRAK pilot, or manager anywhere | operator |
-| anything else | viewer |
+| any other HYRAK membership (viewer, airspace) | viewer |
+| customer memberships only, or none | member (below viewer) |
+
+`member` passes no live-path check: no socket (refused with
+`no_live_access`), no viewer routes. The live paths are not scoped per
+workspace yet, so a viewer rank would let a customer watch HYRAK's and other
+customers' drones. Account, workspace and zone-write routes use
+`require_signed_in` and decide with workspace permissions instead. A staff
+account demoted to customer-only loses its open socket at the next
+revalidation.
 
 So in phase 1 a customer can sign in, see their workspace, members, drones
-and zones, and invite people, but cannot command drones yet; HYRAK staff fly
-as today. Phase 2 scopes every live path by the drone's workspace
+and zones, and invite people (on the standalone `/account` page), but cannot
+open live sessions or command drones yet; HYRAK staff fly as today. Phase 2 scopes every live path by the drone's workspace
 (`fly` on that workspace), gives customers flying rights on their own drones,
 scopes recordings / vision history / flights per workspace, and adds TOTP.
 Phase 3 adds Google sign-in and outgoing email.

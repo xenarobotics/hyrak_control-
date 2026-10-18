@@ -16,7 +16,7 @@ B12, I1, F16, B8, B20, B30 in `docs/AUDIT_2026-10-17.md`.
 |---|---|---|
 | user | `users` table | username (unique, lower-case, no `@`), email (unique, lower-case, optional for old accounts) with `email_verified`, display name, scrypt password hash, disabled flag, last_login_at. **No role column** |
 | membership | `memberships` table | one role on one workspace, optional GeoJSON area and title. See `docs/ACCESS_MODEL.md` section 2 |
-| compatibility role | computed | `viewer` < `operator` < `admin`, derived from memberships (founder -> admin; HYRAK pilot or manager anywhere -> operator; anything else -> viewer). What `require_user(...)` and the socket guard still compare in phase 1 |
+| compatibility role | computed | `member` < `viewer` < `operator` < `admin`, derived from memberships (founder -> admin; HYRAK pilot or manager anywhere -> operator; any other HYRAK membership -> viewer; customer-only -> member, which has no socket and no viewer routes). What `require_user(...)` and the socket guard still compare in phase 1 |
 | token | `auth_tokens` table | 32 random bytes (urlsafe), stored as SHA-256 only; 30-day expiry that slides on use; cached in memory for 60 s together with the user's memberships |
 | session | in memory (`DroneSession`) | stamped with `user_id` / `username` / compatibility `role` at socket connect, plus a random `resume_secret` |
 

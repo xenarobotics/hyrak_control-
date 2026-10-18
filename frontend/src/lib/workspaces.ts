@@ -156,7 +156,7 @@ export interface AuditEvent {
 
 // ── Account ──────────────────────────────────────────────────────────────
 
-export const updateMe = (body: { display_name?: string; email?: string }) =>
+export const updateMe = (body: { display_name?: string }) =>
     call<{ user?: AuthUser }>('/api/auth/me', { method: 'PATCH', json: body })
 
 export const changePassword = (current_password: string, new_password: string) =>

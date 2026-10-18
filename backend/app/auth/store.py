@@ -34,7 +34,9 @@ from app.db.models import PLATFORM_WORKSPACE_ID
 # The compatibility ranks (docs/ACCESS_MODEL.md section 8). Still what
 # require_user("operator") and the socket guard compare against.
 ROLES = ("viewer", "operator", "admin")
-ROLE_RANK = {"viewer": 0, "operator": 1, "admin": 2}
+# "member" is the phase 1 compatibility rank of a customer-only account
+# (perms.compat_role): signed in, but below every live-path check.
+ROLE_RANK = {"member": -1, "viewer": 0, "operator": 1, "admin": 2}
 
 
 def utcnow() -> datetime:

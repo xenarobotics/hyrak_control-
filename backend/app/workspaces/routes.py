@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from app.auth.clientip import client_ip
-from app.auth.deps import require_viewer
+from app.auth.deps import require_signed_in
 from app.auth.routes import _http
 from app.auth.service import AuthUser
 from app.workspaces import service
@@ -35,7 +35,7 @@ async def _run(coro):
 
 
 @router.get("/workspaces")
-async def list_workspaces(user: AuthUser = Depends(require_viewer)):
+async def list_workspaces(user: AuthUser = Depends(require_signed_in)):
     return {"workspaces": await _run(service.list_visible(user))}
 
 
@@ -48,7 +48,7 @@ class CreateWorkspaceBody(BaseModel):
 
 @router.post("/workspaces")
 async def create_workspace(body: CreateWorkspaceBody, request: Request,
-                           user: AuthUser = Depends(require_viewer)):
+                           user: AuthUser = Depends(require_signed_in)):
     ws = await _run(service.create_workspace(
         user, name=body.name, kind=body.kind, parent_id=body.parent_id,
         operating_area=body.operating_area, ip=client_ip(request)))
@@ -56,7 +56,7 @@ async def create_workspace(body: CreateWorkspaceBody, request: Request,
 
 
 @router.get("/workspaces/{workspace_id}")
-async def get_workspace(workspace_id: str, user: AuthUser = Depends(require_viewer)):
+async def get_workspace(workspace_id: str, user: AuthUser = Depends(require_signed_in)):
     return {"workspace": await _run(service.get_workspace(user, workspace_id))}
 
 
@@ -68,7 +68,7 @@ class PatchWorkspaceBody(BaseModel):
 
 @router.patch("/workspaces/{workspace_id}")
 async def patch_workspace(workspace_id: str, body: PatchWorkspaceBody, request: Request,
-                          user: AuthUser = Depends(require_viewer)):
+                          user: AuthUser = Depends(require_signed_in)):
     kw = {}
     if "operating_area" in body.model_fields_set:
         kw["operating_area"] = body.operating_area
@@ -79,7 +79,7 @@ async def patch_workspace(workspace_id: str, body: PatchWorkspaceBody, request: 
 
 @router.delete("/workspaces/{workspace_id}")
 async def delete_workspace(workspace_id: str, request: Request,
-                           user: AuthUser = Depends(require_viewer)):
+                           user: AuthUser = Depends(require_signed_in)):
     await _run(service.delete_workspace(user, workspace_id, ip=client_ip(request)))
     return {"ok": True}
 
@@ -88,7 +88,7 @@ async def delete_workspace(workspace_id: str, request: Request,
 
 
 @router.get("/workspaces/{workspace_id}/members")
-async def list_members(workspace_id: str, user: AuthUser = Depends(require_viewer)):
+async def list_members(workspace_id: str, user: AuthUser = Depends(require_signed_in)):
     return {"members": await _run(service.list_members(user, workspace_id))}
 
 
@@ -101,7 +101,7 @@ class AddMemberBody(BaseModel):
 
 @router.post("/workspaces/{workspace_id}/members")
 async def add_member(workspace_id: str, body: AddMemberBody, request: Request,
-                     user: AuthUser = Depends(require_viewer)):
+                     user: AuthUser = Depends(require_signed_in)):
     m = await _run(service.add_member(user, workspace_id, login=body.login, role=body.role,
                                       area=body.area, title=body.title, ip=client_ip(request)))
     return {"member": m}
@@ -115,7 +115,7 @@ class PatchMemberBody(BaseModel):
 
 @router.patch("/workspaces/{workspace_id}/members/{membership_id}")
 async def patch_member(workspace_id: str, membership_id: str, body: PatchMemberBody,
-                       request: Request, user: AuthUser = Depends(require_viewer)):
+                       request: Request, user: AuthUser = Depends(require_signed_in)):
     kw = {}
     if "area" in body.model_fields_set:
         kw["area"] = body.area
@@ -126,7 +126,7 @@ async def patch_member(workspace_id: str, membership_id: str, body: PatchMemberB
 
 @router.delete("/workspaces/{workspace_id}/members/{membership_id}")
 async def remove_member(workspace_id: str, membership_id: str, request: Request,
-                        user: AuthUser = Depends(require_viewer)):
+                        user: AuthUser = Depends(require_signed_in)):
     await _run(service.remove_member(user, workspace_id, membership_id, ip=client_ip(request)))
     return {"ok": True}
 
@@ -135,7 +135,7 @@ async def remove_member(workspace_id: str, membership_id: str, request: Request,
 
 
 @router.get("/workspaces/{workspace_id}/invites")
-async def list_invites(workspace_id: str, user: AuthUser = Depends(require_viewer)):
+async def list_invites(workspace_id: str, user: AuthUser = Depends(require_signed_in)):
     return {"invites": await _run(service.list_invites(user, workspace_id))}
 
 
@@ -149,7 +149,7 @@ class InviteBody(BaseModel):
 
 @router.post("/workspaces/{workspace_id}/invites")
 async def create_invite(workspace_id: str, body: InviteBody, request: Request,
-                        user: AuthUser = Depends(require_viewer)):
+                        user: AuthUser = Depends(require_signed_in)):
     return await _run(service.create_invite(
         user, workspace_id, role=body.role, email=body.email, area=body.area,
         title=body.title, expires_days=body.expires_days, ip=client_ip(request)))
@@ -157,7 +157,7 @@ async def create_invite(workspace_id: str, body: InviteBody, request: Request,
 
 @router.delete("/workspaces/{workspace_id}/invites/{invite_id}")
 async def revoke_invite(workspace_id: str, invite_id: str, request: Request,
-                        user: AuthUser = Depends(require_viewer)):
+                        user: AuthUser = Depends(require_signed_in)):
     await _run(service.revoke_invite(user, workspace_id, invite_id, ip=client_ip(request)))
     return {"ok": True}
 
@@ -166,7 +166,7 @@ async def revoke_invite(workspace_id: str, invite_id: str, request: Request,
 
 
 @router.get("/workspaces/{workspace_id}/drones")
-async def workspace_drones(workspace_id: str, user: AuthUser = Depends(require_viewer)):
+async def workspace_drones(workspace_id: str, user: AuthUser = Depends(require_signed_in)):
     return {"drones": await _run(service.list_workspace_drones(user, workspace_id))}
 
 
@@ -176,7 +176,7 @@ class AssignDroneBody(BaseModel):
 
 @router.post("/drones/{drone_id}/workspace")
 async def assign_drone(drone_id: str, body: AssignDroneBody, request: Request,
-                       user: AuthUser = Depends(require_viewer)):
+                       user: AuthUser = Depends(require_signed_in)):
     d = await _run(service.assign_drone(user, drone_id, body.workspace_id, ip=client_ip(request)))
     return {"drone": d}
 
@@ -185,12 +185,12 @@ async def assign_drone(drone_id: str, body: AssignDroneBody, request: Request,
 
 
 @router.get("/staff")
-async def staff(user: AuthUser = Depends(require_viewer)):
+async def staff(user: AuthUser = Depends(require_signed_in)):
     return {"staff": await _run(service.list_staff(user))}
 
 
 @router.get("/audit")
-async def audit_log(user: AuthUser = Depends(require_viewer),
+async def audit_log(user: AuthUser = Depends(require_signed_in),
                     workspace_id: Optional[str] = Query(None),
                     limit: int = Query(100, ge=1, le=500),
                     before: Optional[int] = Query(None)):

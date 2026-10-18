@@ -19,7 +19,6 @@ export function ProfileGroup() {
     // Drafts start empty and fall back to the stored values, so a profile
     // that arrives after mount still shows without an effect.
     const [name, setName] = useState<string | null>(null)
-    const [email, setEmail] = useState<string | null>(null)
     const [busy, setBusy] = useState(false)
     const [error, setError] = useState('')
     const [ok, setOk] = useState('')
@@ -27,26 +26,19 @@ export function ProfileGroup() {
     if (!user) return <p style={{ ...S_NOTE, padding: '10px 0' }}>Not signed in.</p>
 
     const curName = name ?? user.display_name ?? ''
-    const curEmail = email ?? user.email ?? ''
-    const dirty = curName.trim() !== (user.display_name ?? '') || curEmail.trim() !== (user.email ?? '')
+    const dirty = curName.trim() !== (user.display_name ?? '')
 
     async function save(e: FormEvent) {
         e.preventDefault()
         if (!dirty || busy || !user) return
-        if (curEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(curEmail.trim())) {
-            setError('Enter a valid email address.')
-            return
-        }
         setBusy(true); setError(''); setOk('')
-        const body: { display_name?: string; email?: string } = {}
-        if (curName.trim() !== (user.display_name ?? '')) body.display_name = curName.trim()
-        if (curEmail.trim() !== (user.email ?? '')) body.email = curEmail.trim()
+        const body = { display_name: curName.trim() }
         const r = await updateMe(body)
         setBusy(false)
         if (!r.ok) { setError(r.error); return }
         const next: AuthUser = { ...user, ...body, ...(r.data?.user ?? {}) }
         storeUser(next)
-        setName(null); setEmail(null)
+        setName(null)
         setOk('Profile saved.')
         void fetchMe()
     }
@@ -58,9 +50,16 @@ export function ProfileGroup() {
             <PrefRow label={<label htmlFor="acct-name">Display name</label>} sub="Shown to the people in your workspaces"
                 right={<input id="acct-name" value={curName} autoComplete="name"
                     onChange={e => { setName(e.target.value); setOk('') }} style={{ ...S_INPUT, width: 220 }} />} />
-            <PrefRow label={<label htmlFor="acct-email">Email</label>} sub="Used to sign in"
-                right={<input id="acct-email" type="email" value={curEmail} autoComplete="email" spellCheck={false}
-                    onChange={e => { setEmail(e.target.value); setError(''); setOk('') }} style={{ ...S_INPUT, width: 220 }} />} />
+            {/* Read-only in phase 1: an email is an identity claim that invites and
+                member lookups trust, and nothing can verify a new address until
+                outgoing email exists. A founder changes it from the console. */}
+            <PrefRow label="Email"
+                sub={user.email_verified ? 'Verified - sign in with this or your username'
+                    : user.email ? 'Not verified - sign in with your username' : 'Ask HYRAK to add one'}
+                right={<span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>{user.email || '-'}</span>
+                    {user.email && <Pill tone={user.email_verified ? 'cyan' : 'amber'}>{user.email_verified ? 'VERIFIED' : 'UNVERIFIED'}</Pill>}
+                </span>} />
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0' }}>
                 <SButton type="submit" tone="primary" disabled={!dirty || busy}>{busy ? 'Saving' : 'Save profile'}</SButton>
                 <Status error={error} ok={ok} />

@@ -24,21 +24,24 @@ export const AUTH_CHANGE_EVENT = 'hyrak-auth-change'
 /**
  * The compatibility role (docs/ACCESS_MODEL.md section 8): computed by the
  * server from memberships so the live control paths keep their rank check.
- * founder -> admin, HYRAK pilot or any manager -> operator, else viewer.
+ * founder -> admin, HYRAK pilot or any manager -> operator, other HYRAK
+ * memberships -> viewer, customer-only -> member (no live access in phase 1:
+ * no socket, no platform pages, only /account).
  */
-export type Role = 'viewer' | 'operator' | 'admin'
+export type Role = 'member' | 'viewer' | 'operator' | 'admin'
 export interface AuthUser {
     id: string
     username: string
     role: Role
     email?: string | null
+    email_verified?: boolean
     display_name?: string | null
     is_founder?: boolean
     is_staff?: boolean
 }
 export interface AuthAccess { memberships: Membership[]; workspaces: WorkspaceInfo[] }
 
-const ROLE_RANK: Record<Role, number> = { viewer: 0, operator: 1, admin: 2 }
+const ROLE_RANK: Record<Role, number> = { member: -1, viewer: 0, operator: 1, admin: 2 }
 
 export function getToken(): string | null {
     if (typeof window === 'undefined') return null

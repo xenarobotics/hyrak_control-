@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ValidationError, field_validator
 import cv2
 import numpy as np
-from app.auth.deps import require_admin, require_operator, require_viewer
+from app.auth.deps import require_admin, require_operator, require_signed_in, require_viewer
 from app.auth.service import AuthUser
 from app.config import get_settings
 
@@ -250,7 +250,7 @@ def _zone_refused(e):
 async def create_zone(
     body: dict,
     request: Request,
-    user: AuthUser = Depends(require_viewer),
+    user: AuthUser = Depends(require_signed_in),
 ):
     """Create a zone. body: {name, zone_class, geometry, floor_m?, ceiling_m?,
     layer?, workspace_id?}. layer defaults to regulatory and workspace_id to
@@ -281,7 +281,7 @@ async def patch_zone(
     zone_id: str,
     body: dict,
     request: Request,
-    user: AuthUser = Depends(require_viewer),
+    user: AuthUser = Depends(require_signed_in),
 ):
     """Edit zone properties: name, zone_class, floor_m, ceiling_m, active,
     layer, workspace_id. (Geometry changes = delete + redraw.) Needs edit
@@ -317,7 +317,7 @@ async def patch_zone(
 async def delete_zone(
     zone_id: str,
     request: Request,
-    user: AuthUser = Depends(require_viewer),
+    user: AuthUser = Depends(require_signed_in),
 ):
     from app.auth.clientip import client_ip
     from app.workspaces import service as ws_service

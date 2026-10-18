@@ -189,6 +189,12 @@ def create_app() -> socketio.ASGIApp:
         if user is None:
             logger.warning(f"Rejected {sid[:8]} - not signed in")
             raise socketio.exceptions.ConnectionRefusedError("unauthorized")
+        if user.role == "member":
+            # Customer-only account: no live sessions until phase 2 scopes
+            # them per workspace (docs/ACCESS_MODEL.md section 8). Not
+            # "unauthorized", so the client keeps its (valid) token.
+            logger.warning(f"Rejected {sid[:8]} - {user.username} has no live access yet")
+            raise socketio.exceptions.ConnectionRefusedError("no_live_access")
         # Legacy shared-token sockets have no per-user token to re-check.
         token_hash = auth_service.hash_token(token) if user.id != auth_service.LEGACY_USER_ID else None
 

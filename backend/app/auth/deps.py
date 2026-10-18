@@ -57,6 +57,10 @@ def require_user(min_role: str = "viewer"):
     return _dep
 
 
+# Any signed-in account, customers included ("member" rank, phase 1). For
+# routes whose real check is a workspace permission (workspaces, account,
+# zone writes); never for the live paths.
+require_signed_in = require_user("member")
 require_viewer = require_user("viewer")
 require_operator = require_user("operator")
 require_admin = require_user("admin")

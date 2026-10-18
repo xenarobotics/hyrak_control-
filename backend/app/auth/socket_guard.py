@@ -49,7 +49,9 @@ async def revalidate(session) -> bool:
     if now - (getattr(session, "auth_checked_at", 0.0) or 0.0) < SOCKET_REVALIDATE_S:
         return True
     user = await verify_token_hash(token_hash)
-    if user is None or user.id != session.user_id:
+    # "member" (customer-only, phase 1) has no live access at all: a staff
+    # account demoted to customer-only loses its open socket like a revoked one.
+    if user is None or user.id != session.user_id or user.role == "member":
         logger.warning(f"Session {session.session_id[:8]} ({session.username}): token no longer "
                        f"valid - disconnecting {str(session.socket_id)[:8]}")
         session.role = None
