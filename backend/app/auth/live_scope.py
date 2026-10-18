@@ -248,3 +248,47 @@ async def identify_drone(session, hardware_uid: str, *, link_kind: str) -> Optio
     session.drone = drone
     session.drone_fly = await drone_fly_allowed(session, drone)
     return drone
+
+
+# ── Per-drone REST (avoidance) for customers, phase 2b ───────────────────
+
+async def user_drone_access(user, drone_id: str, perm: str, session_manager) -> bool:
+    """May this signed-in CUSTOMER read (`view`) or change (`fly`) the
+    per-drone state of `drone_id` (docs/ACCESS_MODEL.md 8b: the avoidance
+    routes)? Either:
+
+      * drone access: the registry puts the drone in a workspace where the
+        user holds `perm` (for `fly` that is exactly the drone access the
+        socket commands need), or
+      * a live session holding the drone's link sits in a workspace where
+        the user holds `perm`; for `fly` that session must also be allowed
+        to command the drone (its drone_fly is True), so a pilot who has a
+        read-only link to someone else's drone cannot arm its avoidance.
+
+    Staff keep their compatibility rank on these routes and never come
+    here. Fails closed (False) when the registry or the tree cannot be
+    read."""
+    from app.auth import data_scope
+    if not drone_id or drone_id == "auto":
+        return False          # 'auto' picks among every drone: staff only
+    scope = await data_scope.scope_for(user)
+    try:
+        drone = await auth.read_store().get_drone(drone_id)
+    except Exception as e:
+        logger.debug(f"drone access: registry read failed: {e}")
+        drone = None
+    if drone and scope.can(drone.get("workspace_id"), perm):
+        return True
+    if session_manager is None:
+        return False
+    for s in session_manager.all_sessions():
+        if (s.drone or {}).get("id") != drone_id:
+            continue
+        if session_manager.get_telemetry(s.session_id) is None:
+            continue
+        if not scope.can(s.workspace_id, perm):
+            continue
+        if perm == perms.FLY and s.drone_fly is not True:
+            continue
+        return True
+    return False
