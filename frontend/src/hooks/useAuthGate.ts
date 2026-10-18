@@ -22,24 +22,23 @@
  */
 import { useEffect, useState } from 'react'
 import { fetchMe, getAccess, getToken, hasRole, isCustomer, isStaff, redirectToLogin, type AuthUser, type Role } from '@/lib/auth'
-import { hasPerm, type Perm } from '@/lib/access'
+import { hasPerm, type WorkspaceInfo } from '@/lib/access'
 
 export type GateState = 'checking' | 'ok'
 export type Gate = Role | 'live' | 'staff' | 'console'
 
-function anyWorkspace(perm: Perm): boolean {
-    return (getAccess()?.workspaces ?? []).some(w => hasPerm(w, perm))
-}
+const cachedWorkspaces = (): WorkspaceInfo[] => getAccess()?.workspaces ?? []
 
-/** Whether this account may open the platform pages (Fly, AI, Config, Settings). */
-export function hasLiveAccess(user: AuthUser): boolean {
-    if (isCustomer(user)) return anyWorkspace('view')
+/** Whether this account may open the platform pages (Fly, AI, Config, Settings).
+ *  `workspaces` defaults to the cached /api/auth/me list. */
+export function hasLiveAccess(user: AuthUser, workspaces: WorkspaceInfo[] = cachedWorkspaces()): boolean {
+    if (isCustomer(user)) return workspaces.some(w => hasPerm(w, 'view'))
     return hasRole('viewer', user)
 }
 
 /** Whether this account may open /admin (HYRAK or organization console). */
-export function hasConsoleAccess(user: AuthUser): boolean {
-    return isStaff(user) || anyWorkspace('members.manage')
+export function hasConsoleAccess(user: AuthUser, workspaces: WorkspaceInfo[] = cachedWorkspaces()): boolean {
+    return isStaff(user) || workspaces.some(w => hasPerm(w, 'members.manage'))
 }
 
 function passes(gate: Gate, user: AuthUser): boolean {

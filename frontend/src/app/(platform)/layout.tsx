@@ -113,8 +113,8 @@ function navFor(normal: boolean, customer: boolean) {
 // own tab, as the console page asks: a founder's console marks its socket
 // session as admin, which must never be this flying tab's session.
 function ConsoleLink({ normal }: { normal: boolean }) {
-    const { user } = useAccess()
-    if (!user || !hasConsoleAccess(user)) return null
+    const { user, workspaces } = useAccess()
+    if (!user || !hasConsoleAccess(user, workspaces)) return null
     return (
         <a href="/admin" target="_blank" rel="noopener" title="Console (opens in a new tab)"
             className={cn(
