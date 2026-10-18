@@ -338,6 +338,18 @@ def test_marker_sweep_kills_only_marked_processes(tmp_path):
                 p.wait()
 
 
+def test_ready_means_px4_opened_the_backend_link(tmp_path):
+    from app.sim.launcher import log_says_ready
+    log = tmp_path / "sim.log"
+    log.write_text("INFO  [init] Gazebo world is ready\n"
+                   "WARN  [health_and_arming_checks] Preflight Fail: No connection to the GCS\n")
+    assert not log_says_ready(log)
+    with open(log, "a") as f:
+        f.write("INFO  [mavlink] mode: Normal, data rate: 4000000 B/s on udp port 15001 remote port 15000\n")
+    assert log_says_ready(log)
+    assert not log_says_ready(tmp_path / "missing.log")
+
+
 def test_marker_scan_needs_an_exact_match(tmp_path):
     root = tmp_path / "proc"
     for pid, env in ((11, b"A=1\0HYRAK_CLOUD_SIM_ID=abc\0"), (12, b"HYRAK_CLOUD_SIM_ID=abcd\0"),

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import signal
 import subprocess
 import time
@@ -31,7 +32,13 @@ from app.sim.ports import SlotPorts
 logger = logging.getLogger("verocore.sim.launcher")
 
 MARKER = "HYRAK_CLOUD_SIM_ID"
-READY_LINE = "Ready for takeoff"
+# Ready = PX4 has booted through its startup script (sensors, gz bridge)
+# and opened the backend link. NOT "Ready for takeoff": PX4 withholds that
+# until a ground station is connected ("Preflight Fail: No connection to
+# the GCS"), and the backend link IS the ground station. Pre-flight state
+# after that (EKF, GPS fix) reaches the pilot as telemetry, like a real
+# drone's.
+READY_RE = re.compile(rb"\[mavlink\] mode: Normal.*on udp port|Ready for takeoff")
 
 
 @dataclass
@@ -110,7 +117,7 @@ def tail(path: Path, lines: int = 12) -> str:
 def log_says_ready(path: Path) -> bool:
     try:
         with open(path, "rb") as f:
-            return READY_LINE.encode() in f.read()
+            return READY_RE.search(f.read()) is not None
     except OSError:
         return False
 
