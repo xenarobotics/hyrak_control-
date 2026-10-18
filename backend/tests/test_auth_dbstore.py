@@ -44,6 +44,7 @@ async def test_users_memberships_and_upsert_keep_disabled(db):
     name = uid("u")
     u = await db.upsert_user(UserRecord(id=new_id(), username=name, password_hash="h1",
                                         email=f"{name}@x.com", display_name="U"))
+    assert u.email_verified is False                          # nobody starts verified
     await db.update_user(u.id, disabled=True)
     again = await db.upsert_user(UserRecord(id=new_id(), username=name, password_hash="h2"))
     assert again.id == u.id and again.disabled is True and again.password_hash == "h2"
@@ -53,6 +54,7 @@ async def test_users_memberships_and_upsert_keep_disabled(db):
         await db.upsert_user(UserRecord(id=new_id(), username=other, password_hash="h",
                                         email=f"{name}@x.com"))
     assert (await db.get_user_by_email(f"{name}@x.com")).id == u.id
+    assert (await db.update_user(u.id, email_verified=True)).email_verified is True
 
     plat = await db.get_workspace(PLATFORM_WORKSPACE_ID)
     assert plat.kind == "platform"
@@ -200,7 +202,7 @@ async def test_routes_end_to_end_on_postgres(db, monkeypatch):
         app.include_router(r)
     founder_name = uid("f")
     await service.create_user(founder_name, "founder-password", founder=True,
-                              email=f"{founder_name}@x.com")
+                              email=f"{founder_name}@x.com", email_verified=True)
     area = {"type": "Polygon", "coordinates": [[[78, 17], [79, 17], [79, 18], [78, 18], [78, 17]]]}
     inside = {"type": "Polygon", "coordinates": [[[78.2, 17.2], [78.3, 17.2], [78.3, 17.3], [78.2, 17.3], [78.2, 17.2]]]}
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:

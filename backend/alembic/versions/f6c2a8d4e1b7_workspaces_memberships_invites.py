@@ -3,6 +3,9 @@
 Phase 1 of docs/ACCESS_MODEL.md: the flat users.role (viewer / operator /
 admin) becomes memberships on a workspace tree with HYRAK at the root.
 
+users also gain email_verified (false for everyone): an email is trusted
+for invites and lookups only once the inviter or a founder vouched for it.
+
 Data carried over:
   * one platform workspace "HYRAK" with the fixed PLATFORM_WORKSPACE_ID
   * users.role admin -> founder, operator -> pilot, viewer -> viewer, all on
@@ -151,6 +154,10 @@ def upgrade() -> None:
     op.add_column("users", sa.Column("display_name", sa.String(length=120), nullable=False,
                                      server_default=""))
     op.add_column("users", sa.Column("last_login_at", sa.DateTime(timezone=True), nullable=True))
+    # An email is an unverified claim until the inviter (email-locked
+    # invite) or a founder vouches for it; nobody starts verified.
+    op.add_column("users", sa.Column("email_verified", sa.Boolean(), nullable=False,
+                                     server_default=sa.false()))
     op.create_index("ix_users_email", "users", ["email"], unique=True)
     op.create_check_constraint("ck_users_email_lower", "users", "email = lower(email)")
 
@@ -219,7 +226,7 @@ def downgrade() -> None:
     op.create_check_constraint("ck_users_role", "users", "role IN ('admin', 'operator', 'viewer')")
     op.drop_constraint("ck_users_email_lower", "users", type_="check")
     op.drop_index("ix_users_email", table_name="users")
-    for col in ("last_login_at", "display_name", "email"):
+    for col in ("email_verified", "last_login_at", "display_name", "email"):
         op.drop_column("users", col)
 
     op.drop_index("ix_audit_events_workspace_id", table_name="audit_events")

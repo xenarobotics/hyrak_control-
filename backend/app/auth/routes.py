@@ -263,8 +263,10 @@ async def create_user(body: CreateUserBody, request: Request,
     try:
         if await service.find_account(body.username) is not None:
             raise HTTPException(status_code=409, detail="That username is taken")
+        # A founder typing the address vouches for it.
         rec = await service.create_user(body.username, body.password, body.role,
-                                        email=body.email, display_name=body.display_name)
+                                        email=body.email, display_name=body.display_name,
+                                        email_verified=True)
     except HTTPException:
         raise
     except RuntimeError:
@@ -282,6 +284,7 @@ async def create_user(body: CreateUserBody, request: Request,
 class PatchUserBody(BaseModel):
     disabled: bool | None = None
     display_name: str | None = Field(default=None, max_length=120)
+    email: str | None = Field(default=None, max_length=254)   # founder-set = verified; "" clears
     password: str | None = Field(default=None, max_length=1024)
     role: str | None = None           # refused with 400: roles live in memberships
 
@@ -296,7 +299,8 @@ async def patch_user(user_id: str, body: PatchUserBody, request: Request,
         raise HTTPException(status_code=400, detail="You cannot lock yourself out")
     try:
         rec = await service.update_user(user_id, disabled=body.disabled,
-                                        display_name=body.display_name, password=body.password)
+                                        display_name=body.display_name, password=body.password,
+                                        email=body.email, email_verified=True)
     except Exception as e:
         raise _http(e)
     if rec is None:

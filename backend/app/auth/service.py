@@ -108,6 +108,7 @@ class AuthUser:
     memberships: tuple = ()
     email: Optional[str] = None
     display_name: str = ""
+    email_verified: bool = False
 
     def has_role(self, min_role: str) -> bool:
         return ROLE_RANK.get(self.role, -1) >= ROLE_RANK[min_role]
@@ -122,6 +123,7 @@ class AuthUser:
 
     def public(self) -> dict:
         return {"id": self.id, "username": self.username, "email": self.email,
+                "email_verified": self.email_verified,
                 "display_name": self.display_name, "is_founder": self.is_founder,
                 "is_staff": self.is_staff, "role": self.role}
 
@@ -268,6 +270,20 @@ def username_backoff_s(username: str, now: float | None = None) -> float:
 _inflight: dict[str, int] = {}
 
 
+def _check_account_key(key: str, now: float) -> None:
+    """The per-account limits for one key, no side effects. Raises RateLimited."""
+    uq = _prune(f"u:{key}", now)
+    if len(uq) >= USERNAME_HARD_CAP:
+        raise RateLimited("Too many attempts for this account. Try again in 15 minutes.")
+    if len(uq) >= LOGIN_MAX_FAILURES:
+        # In backoff: one attempt at a time, and only after the delay.
+        if _inflight.get(key, 0) > 0:
+            raise RateLimited("Another sign-in for this account is in progress. Try again shortly.")
+        wait = username_backoff_s(key, now)
+        if wait > 0:
+            raise RateLimited(f"Too many attempts. Try again in {int(wait) + 1} seconds.")
+
+
 def _reserve_attempt(username: str, ip: str) -> None:
     """Check the limits AND count this attempt, with no await in between.
 
@@ -276,21 +292,31 @@ def _reserve_attempt(username: str, ip: str) -> None:
     verdict lands: the sixth already sees five. Raises RateLimited."""
     now = time.monotonic()
     ipq = _prune(f"ip:{ip}", now)
-    uq = _prune(f"u:{username}", now)
     if len(ipq) >= LOGIN_MAX_FAILURES:
         raise RateLimited("Too many attempts from this address. Try again in 15 minutes.")
-    if len(uq) >= USERNAME_HARD_CAP:
-        raise RateLimited("Too many attempts for this account. Try again in 15 minutes.")
-    if len(uq) >= LOGIN_MAX_FAILURES:
-        # In backoff: one attempt at a time, and only after the delay.
-        if _inflight.get(username, 0) > 0:
-            raise RateLimited("Another sign-in for this account is in progress. Try again shortly.")
-        wait = username_backoff_s(username, now)
-        if wait > 0:
-            raise RateLimited(f"Too many attempts. Try again in {int(wait) + 1} seconds.")
+    _check_account_key(username, now)
     ipq.append(now)
-    uq.append(now)
+    _prune(f"u:{username}", now).append(now)
     _inflight[username] = _inflight.get(username, 0) + 1
+
+
+def account_key(user_id: str) -> str:
+    """The canonical per-account limiter key. Sign-in is first limited on
+    the login string as typed (that reservation must happen before the
+    first await, i.e. before we know which account it is); once the
+    account resolves, the same attempt is also counted under this key, so
+    alternating an account's username and email does not double the
+    guess budget."""
+    return f"uid:{user_id}"
+
+
+def _reserve_account(key: str) -> None:
+    """Check and count under the canonical key, synchronously (no await
+    between check and count, same reason as _reserve_attempt)."""
+    now = time.monotonic()
+    _check_account_key(key, now)
+    _prune(f"u:{key}", now).append(now)
+    _inflight[key] = _inflight.get(key, 0) + 1
 
 
 def _release_attempt(username: str) -> None:
@@ -308,8 +334,9 @@ def _record_failure(username: str, ip: str) -> None:
     _prune(f"ip:{ip}", now).append(now)
 
 
-def _clear_failures(username: str, ip: str) -> None:
-    _failures.pop(f"u:{username}", None)
+def _clear_failures(username: str, ip: str, *more_keys: str) -> None:
+    for k in (username, *more_keys):
+        _failures.pop(f"u:{k}", None)
     _failures.pop(f"ip:{ip}", None)
 
 
@@ -356,18 +383,36 @@ def normalise_email(email) -> Optional[str]:
 
 
 async def _find_user(login: str) -> UserRecord | None:
-    """The account for a username or (when it contains '@') an email.
+    """The account for a username or (when it contains '@') a VERIFIED email.
+
+    An unverified email is only a claim (anyone could type anyone's
+    address on an unlocked invite), so it resolves nothing: not sign-in,
+    not "add member by email". Those accounts use their username.
 
     Fails closed: when the DB is up, a query error propagates instead of
     falling back to the memory store, whose copy of an account the DB
     knows about may be stale (a disable or demotion made in the DB). Only
     an account the DB does NOT have is looked for in memory."""
-    by = "email" if "@" in login else "username"
+    by_email = "@" in login
+    by = "email" if by_email else "username"
+    u = None
     if _db_up():
         u = await getattr(_db, f"get_user_by_{by}")(login)
-        if u is not None:
-            return u
-    return await getattr(_memory, f"get_user_by_{by}")(login)
+    if u is None:
+        u = await getattr(_memory, f"get_user_by_{by}")(login)
+    if u is not None and by_email and not u.email_verified:
+        return None
+    return u
+
+
+async def email_in_use(email: str) -> bool:
+    """Whether any account, verified or not, holds this address (it is
+    unique in the table). Fails closed like _find_user."""
+    if not email:
+        return False
+    if _db_up() and await _db.get_user_by_email(email) is not None:
+        return True
+    return await _memory.get_user_by_email(email) is not None
 
 
 async def _find_user_by_id(user_id: str) -> tuple[UserRecord | None, object]:
@@ -385,8 +430,8 @@ async def get_user(user_id: str) -> UserRecord | None:
 
 
 async def find_account(login: str) -> UserRecord | None:
-    """Look up an existing account by username or email (for adding a
-    member). None when there is none."""
+    """Look up an existing account by username or verified email (for
+    adding a member). None when there is none."""
     s = str(login or "").strip().lower()
     if not s:
         return None
@@ -407,7 +452,8 @@ async def _auth_user_for(user: UserRecord, store=None) -> AuthUser:
         store = store or _memory
     ms = tuple(await store.memberships_for_user(user.id))
     return AuthUser(id=user.id, username=user.username, role=perms.compat_role(ms),
-                    memberships=ms, email=user.email, display_name=user.display_name)
+                    memberships=ms, email=user.email, display_name=user.display_name,
+                    email_verified=bool(user.email and user.email_verified))
 
 
 async def compat_role_of(user_id: str) -> str:
@@ -416,15 +462,17 @@ async def compat_role_of(user_id: str) -> str:
 
 async def create_user(username: str, password: str, role: str | None = None, *,
                       memory_only: bool = False, email: str | None = None,
-                      display_name: str = "", founder: bool = False) -> UserRecord:
+                      display_name: str = "", founder: bool = False,
+                      email_verified: bool = False) -> UserRecord:
     """Create a user, or replace the password of an existing one (an
     existing account's disabled flag is never touched).
 
     `role` is the old viewer / operator / admin vocabulary, kept for the
     CLI and the old admin form: it sets the user's membership on the
     platform workspace (admin -> founder, operator -> pilot, viewer ->
-    viewer). `founder=True` is the same as role="admin". Requires the DB
-    unless memory_only."""
+    viewer). `founder=True` is the same as role="admin". `email_verified`
+    is for callers that vouch for the address (a founder, the CLI).
+    Requires the DB unless memory_only."""
     username = normalise_new_username(username)
     if role is not None and role not in ROLES:
         raise ValueError(f"role must be one of {', '.join(ROLES)}")
@@ -432,20 +480,27 @@ async def create_user(username: str, password: str, role: str | None = None, *,
     rec = UserRecord(id=str(uuid.uuid4()), username=username,
                      password_hash=hash_password(password),
                      email=normalise_email(email), display_name=(display_name or "").strip()[:120])
+    rec.email_verified = bool(rec.email and email_verified)
     if memory_only:
         store = _memory
     elif _db_up():
         store = _db
+    elif _memory_writes:
+        store = _memory
     else:
         raise RuntimeError("database offline")
     before = await compat_role_of_in(store, username)
     out = await store.upsert_user(rec)
-    if platform_role is not None:
-        await set_platform_role(out.id, platform_role, store=store)
-    drop_cached_user(out.id)
-    after = perms.compat_role(await store.memberships_for_user(out.id))
-    if before is not None and before != after:
-        await _notify_revoked(out.id)
+    try:
+        if platform_role is not None:
+            await set_platform_role(out.id, platform_role, store=store)
+    finally:
+        drop_cached_user(out.id)
+        if before is not None:
+            # An existing account got a new password: like any password
+            # change, every signed-in device is signed out (and, run from
+            # the CLI, the server sees the tokens gone within TOKEN_CACHE_S).
+            await revoke_all(out.id)
     return out
 
 
@@ -504,9 +559,12 @@ async def list_users() -> list[UserRecord]:
 
 async def update_user(user_id: str, *, disabled: bool | None = None,
                       password: str | None = None, display_name: str | None = None,
-                      email: str | None = None, role: str | None = None) -> UserRecord | None:
+                      email: str | None = None, email_verified: bool = False,
+                      role: str | None = None) -> UserRecord | None:
     """Account fields only. Authorization is in memberships; `role` is
-    refused (ValueError -> 400) rather than silently ignored."""
+    refused (ValueError -> 400) rather than silently ignored. A new email
+    is unverified unless the caller vouches (email_verified=True: the
+    founder route); "" clears it."""
     if role is not None:
         raise ValueError("role is no longer an account field; change the user's "
                          "workspace memberships instead")
@@ -519,6 +577,7 @@ async def update_user(user_id: str, *, disabled: bool | None = None,
         fields["display_name"] = str(display_name).strip()[:120]
     if email is not None:
         fields["email"] = normalise_email(email)
+        fields["email_verified"] = bool(fields["email"] and email_verified)
     if not fields:
         return await get_user(user_id)
     revoke = fields.get("disabled") is True or "password_hash" in fields
@@ -613,18 +672,29 @@ async def login(login: str, password: str, ip: str, label: str = "") -> tuple[st
     except RateLimited as e:
         logger.warning(f"auth: login rate-limited login={key} ip={ip}: {e}")
         raise
+    canonical = None
     try:
         try:
             user = await _find_user(key)
         except Exception as e:
             logger.error(f"auth: user lookup failed, refusing sign-in: {e}")
             raise AuthUnavailable("Sign-in is temporarily unavailable. Try again shortly.")
+        if user is not None:
+            # Second reservation, under the account itself (see account_key).
+            try:
+                _reserve_account(account_key(user.id))
+            except RateLimited as e:
+                logger.warning(f"auth: login rate-limited (account) user={user.username} ip={ip}: {e}")
+                raise
+            canonical = account_key(user.id)
         # Always run the hash, even for an unknown user, so the response
         # time does not say whether the account exists.
         stored = user.password_hash if user else _DUMMY_HASH
         ok = verify_password(password, stored) and user is not None and not user.disabled
     finally:
         _release_attempt(key)
+        if canonical is not None:
+            _release_attempt(canonical)
     if not ok:
         # Already counted by the reservation.
         logger.warning(f"auth: login failed login={key} ip={ip}")
@@ -634,7 +704,7 @@ async def login(login: str, password: str, ip: str, label: str = "") -> tuple[st
     except Exception as e:
         logger.error(f"auth: could not load memberships for {user.username}: {e}")
         raise AuthUnavailable("Sign-in is temporarily unavailable. Try again shortly.")
-    _clear_failures(key, ip)
+    _clear_failures(key, ip, account_key(user.id))
     logger.info(f"auth: login ok user={user.username} role={auth_user.role} ip={ip}")
     return token, auth_user, expires_at
 
@@ -763,11 +833,17 @@ async def _user_stores(user_id: str) -> list:
 
 async def update_profile(user_id: str, *, display_name: str | None = None,
                          email: str | None = None) -> UserRecord | None:
+    # Phase 1 has no outgoing email, so an address a user types for
+    # themselves cannot be verified, and an unverified address must not
+    # be changeable into someone else's. Self-service email change comes
+    # back with verification links once outgoing email exists; until then
+    # a founder sets it (PATCH /api/auth/users/{id}).
+    if email is not None:
+        raise ValueError("You cannot change your own email yet. Ask a HYRAK founder to "
+                         "change it (self-service change arrives with email verification).")
     fields: dict = {}
     if display_name is not None:
         fields["display_name"] = str(display_name).strip()[:120]
-    if email is not None:
-        fields["email"] = normalise_email(email)
     out = None
     for store in await _user_stores(user_id):
         out = (await store.update_user(user_id, **fields)) if fields else await store.get_user_by_id(user_id)
@@ -781,12 +857,13 @@ async def change_password(user: AuthUser, current_password: str, new_password: s
     limit as sign-in, so a stolen token cannot brute-force it) and signs
     out every other device. Returns how many tokens were revoked."""
     ip = ip or "-"
-    _reserve_attempt(user.username, ip)
+    key = account_key(user.id)
+    _reserve_attempt(key, ip)
     try:
         rec = await get_user(user.id)
         ok = rec is not None and verify_password(current_password or "", rec.password_hash)
     finally:
-        _release_attempt(user.username)
+        _release_attempt(key)
     if not ok:
         logger.warning(f"auth: password change refused (wrong current) user={user.username} ip={ip}")
         raise AuthError("Current password is wrong")
@@ -796,7 +873,7 @@ async def change_password(user: AuthUser, current_password: str, new_password: s
             await store.update_user(user.id, password_hash=new_hash)
     finally:
         n = await revoke_all(user.id, keep_hash=keep_hash)
-    _clear_failures(user.username, ip)
+    _clear_failures(key, ip)
     logger.info(f"auth: password changed user={user.username} ip={ip}, {n} other session(s) ended")
     return n
 
@@ -940,6 +1017,7 @@ async def bootstrap() -> None:
                     rec.id = existing.id
                     rec.disabled = existing.disabled
                     rec.email = existing.email
+                    rec.email_verified = existing.email_verified
                     rec.display_name = existing.display_name
                     if existing.disabled:
                         logger.warning(f"auth: env admin '{username}' is disabled in the user store "

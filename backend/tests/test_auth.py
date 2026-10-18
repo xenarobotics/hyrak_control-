@@ -557,3 +557,120 @@ async def test_backoff_allows_one_in_flight_attempt_and_hard_cap(monkeypatch):
     clock["t"] += service.username_backoff_s("lee") + 0.01
     with pytest.raises(service.RateLimited, match="this account"):
         await service.login("lee", "correct-horse-battery", "10.4.1.1")
+
+
+# ── changes made by another process (the CLI) ────────────────────────────
+
+async def test_out_of_process_membership_change_applies_within_cache_window(monkeypatch):
+    """The CLI runs in its own process and cannot drop this process's token
+    cache or reach its sockets. Simulated here by writing the store directly
+    (no membership_changed / revocation in this process): the server must
+    pick the change up once the cached entry is older than TOKEN_CACHE_S,
+    both for HTTP (verify_token reloads memberships) and for a live socket
+    (revalidate refreshes the compat role, and disconnects once the token
+    is gone)."""
+    from app.auth import socket_guard
+    from app.sessions.manager import SessionManager
+
+    disconnected = []
+
+    class FakeSio:
+        async def emit(self, *a, **k): pass
+        async def disconnect(self, sid): disconnected.append(sid)
+
+    clock = {"t": 5000.0}
+    monkeypatch.setattr(service.time, "monotonic", lambda: clock["t"])
+    rec = await _user("cleo", "operator")
+    token, user, _ = await service.login("cleo", "correct-horse-battery", "127.0.0.1")
+    sm = SessionManager()
+    socket_guard.configure(FakeSio(), sm)
+    s = sm.create(socket_id="cleo-sock")
+    s.user_id, s.username, s.role = user.id, "cleo", "operator"
+    s.token_hash = service.hash_token(token)
+    s.auth_checked_at = clock["t"]
+
+    mem = service.memory_store()
+    pilot = (await mem.memberships_for_user(rec.id))[0]
+    await mem.update_membership(pilot.id, role="viewer")       # "the CLI" demotes
+
+    # Inside the window the cached answer stands ...
+    clock["t"] += service.TOKEN_CACHE_S - 1
+    assert (await service.verify_token(token)).role == "operator"
+    assert await socket_guard.require_operator("cleo-sock", "drone_action") is True
+    # ... and once it is older than TOKEN_CACHE_S both paths see the change.
+    clock["t"] += 2
+    assert (await service.verify_token(token)).role == "viewer"
+    clock["t"] += service.SOCKET_REVALIDATE_S + 1
+    assert await socket_guard.require_operator("cleo-sock", "drone_action") is False
+    assert s.role == "viewer" and not disconnected
+
+    # Re-running create-user (a new password) revokes the tokens; another
+    # process's revocation reaches this one's socket on the next stale check.
+    await mem.update_membership(pilot.id, role="pilot")
+    await mem.delete_tokens_for_user(rec.id)                   # what the CLI's revoke_all does in the DB
+    clock["t"] += service.TOKEN_CACHE_S + 1
+    assert await service.verify_token(token) is None
+    assert await socket_guard.require_operator("cleo-sock", "drone_action") is False
+    assert disconnected == ["cleo-sock"]
+
+
+async def test_create_user_rerun_signs_out_existing_sessions():
+    await _user("dina", "operator")
+    token, _, _ = await service.login("dina", "correct-horse-battery", "127.0.0.1")
+    await service.create_user("dina", "a-replaced-password", "operator", memory_only=True)
+    assert await service.verify_token(token) is None
+
+
+# ── rate limit keyed on the account, not the login string ────────────────
+
+async def test_alternating_username_and_email_shares_one_budget():
+    await service.create_user("eli", "correct-horse-battery", "operator", memory_only=True,
+                              email="eli@example.com", email_verified=True)
+    for i in range(service.LOGIN_MAX_FAILURES):
+        with pytest.raises(service.AuthError):
+            await service.login("eli", "wrong-password-here", f"10.9.0.{i}")
+    # The email is a fresh login string, but the same account: in backoff,
+    # refused even with the right password.
+    with pytest.raises(service.RateLimited):
+        await service.login("eli@example.com", "correct-horse-battery", "10.9.1.1")
+    for i in range(service.LOGIN_MAX_FAILURES):
+        with pytest.raises(service.RateLimited):
+            await service.login("eli@example.com", "wrong-password-here", f"10.9.2.{i}")
+
+
+async def test_mixed_username_and_email_failures_reach_backoff(monkeypatch):
+    """5 failures by username and 5 by email on one account: the account is
+    in backoff (and well before the 10th)."""
+    clock = {"t": 9000.0}
+    monkeypatch.setattr(service.time, "monotonic", lambda: clock["t"])
+    await service.create_user("fay", "correct-horse-battery", "operator", memory_only=True,
+                              email="fay@example.com", email_verified=True)
+    outcomes = []
+    for i in range(service.LOGIN_MAX_FAILURES):
+        for login in ("fay", "fay@example.com"):
+            try:
+                await service.login(login, "wrong-password-here", f"10.8.{len(outcomes)}.1")
+            except service.RateLimited:
+                outcomes.append("limited")
+            except service.AuthError:
+                outcomes.append("checked")
+    assert outcomes.count("checked") == service.LOGIN_MAX_FAILURES
+    assert outcomes[service.LOGIN_MAX_FAILURES:] == ["limited"] * service.LOGIN_MAX_FAILURES
+    assert service.username_backoff_s(service.account_key((await service.memory_store()
+                                                          .get_user_by_username("fay")).id)) > 0
+    # After the delay the right password works and clears both keys.
+    clock["t"] += service.USERNAME_BACKOFF_MAX_S
+    token, user, _ = await service.login("fay@example.com", "correct-horse-battery", "10.8.99.1")
+    assert token and service.username_backoff_s(service.account_key(user.id)) == 0.0
+    assert service.username_backoff_s("fay@example.com") == 0.0
+
+
+async def test_password_change_shares_the_account_budget():
+    await _user("gus", "operator")
+    token, user, _ = await service.login("gus", "correct-horse-battery", "127.0.0.1")
+    for i in range(service.LOGIN_MAX_FAILURES):
+        with pytest.raises(service.AuthError):
+            await service.login("gus", "wrong-password-here", f"10.7.0.{i}")
+    with pytest.raises(service.RateLimited):
+        await service.change_password(user, "correct-horse-battery", "a-new-password-1",
+                                      "10.7.1.1", keep_hash=None)

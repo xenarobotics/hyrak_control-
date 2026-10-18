@@ -1015,7 +1015,7 @@ class User(Base):
     app/auth/passwords.py). What they may do lives in memberships, one per
     workspace (docs/ACCESS_MODEL.md); the old single role column is gone.
     Email is unique and stored lower-case; accounts from before workspaces
-    have none until they set one.
+    have none. An email is an unverified claim unless email_verified.
     """
     __tablename__ = "users"
 
@@ -1029,6 +1029,10 @@ class User(Base):
     email: Mapped[Optional[str]] = mapped_column(String(254), nullable=True, unique=True, index=True)
     display_name: Mapped[str] = mapped_column(String(120), default="", server_default="")
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # True only when an email-locked invite to exactly this address was
+    # accepted, or a founder set the address. Lookups by email and
+    # email-locked invites trust verified addresses only.
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
 
     __table_args__ = (
         CheckConstraint("email = lower(email)", name="ck_users_email_lower"),

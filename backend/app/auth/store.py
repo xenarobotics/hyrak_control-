@@ -66,12 +66,14 @@ class UserRecord:
     email: Optional[str] = None
     display_name: str = ""
     last_login_at: Optional[datetime] = None
+    email_verified: bool = False
 
     def public(self) -> dict:
         return {
             "id": self.id,
             "username": self.username,
             "email": self.email,
+            "email_verified": self.email_verified,
             "display_name": self.display_name,
             "disabled": self.disabled,
             "created_at": _iso(self.created_at),
@@ -80,7 +82,7 @@ class UserRecord:
 
     def brief(self) -> dict:
         return {"id": self.id, "username": self.username, "email": self.email,
-                "display_name": self.display_name}
+                "email_verified": self.email_verified, "display_name": self.display_name}
 
 
 @dataclass
@@ -302,6 +304,7 @@ class MemoryStore:
             if self._email_taken(user.email, existing.id):
                 raise StoreConflict("That email is already used by another account")
             out.email = user.email
+            out.email_verified = user.email_verified
         if user.display_name:
             out.display_name = user.display_name
         if set_disabled:
@@ -624,12 +627,14 @@ class DbStore:
             if row is None:
                 row = User(id=user.id or new_id(), username=user.username,
                            password_hash=user.password_hash, disabled=user.disabled,
-                           email=user.email, display_name=user.display_name or "")
+                           email=user.email, email_verified=bool(user.email and user.email_verified),
+                           display_name=user.display_name or "")
                 db.add(row)
             else:
                 row.password_hash = user.password_hash
                 if user.email:
                     row.email = user.email
+                    row.email_verified = bool(user.email_verified)
                 if user.display_name:
                     row.display_name = user.display_name
                 if set_disabled:
@@ -933,7 +938,8 @@ class DbStore:
             if new_user is not None:
                 db.add(User(id=new_user.id, username=new_user.username,
                             password_hash=new_user.password_hash, disabled=False,
-                            email=new_user.email, display_name=new_user.display_name or "",
+                            email=new_user.email, email_verified=bool(new_user.email_verified),
+                            display_name=new_user.display_name or "",
                             created_at=new_user.created_at))
                 await db.flush()
             db.add(Membership(id=membership.id, user_id=user_id,
@@ -1086,7 +1092,8 @@ def _user_of(row) -> UserRecord:
     return UserRecord(id=row.id, username=row.username, password_hash=row.password_hash,
                       disabled=bool(row.disabled), created_at=row.created_at,
                       email=row.email, display_name=row.display_name or "",
-                      last_login_at=row.last_login_at)
+                      last_login_at=row.last_login_at,
+                      email_verified=bool(getattr(row, "email_verified", False)))
 
 
 def _token_of(row) -> TokenRecord:

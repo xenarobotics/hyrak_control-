@@ -51,10 +51,11 @@ def cl(monkeypatch):
     service.reset_for_tests()
 
 
-async def user(name, role=None, email=None):
-    """A memory account; `role` is the compat alias (admin = founder)."""
+async def user(name, role=None, email=None, verified=True):
+    """A memory account; `role` is the compat alias (admin = founder). The
+    email is verified by default, as if a founder had set it."""
     rec = await service.create_user(name, PW, role, memory_only=True,
-                                    email=email or f"{name}@example.com")
+                                    email=email or f"{name}@example.com", email_verified=verified)
     token, _, _ = await service.login(name, PW, "127.0.0.1")
     return rec, {"Authorization": f"Bearer {token}"}
 
@@ -88,8 +89,9 @@ async def test_me_shape_and_login_by_email(cl):
     founder, fh, iith, civil = await world(cl)
     me = ok(cl.get("/api/auth/me", headers=fh))
     assert set(me) == {"user", "memberships", "workspaces"}
-    assert set(me["user"]) == {"id", "username", "email", "display_name", "is_founder",
-                               "is_staff", "role"}
+    assert set(me["user"]) == {"id", "username", "email", "email_verified", "display_name",
+                               "is_founder", "is_staff", "role"}
+    assert me["user"]["email_verified"] is True
     assert me["user"]["is_founder"] and me["user"]["is_staff"] and me["user"]["role"] == "admin"
     assert me["memberships"][0]["workspace_id"] == PLATFORM_WORKSPACE_ID
     assert set(me["memberships"][0]) == {"id", "workspace_id", "workspace_name",
@@ -525,13 +527,81 @@ async def test_password_change_and_sessions(cl):
     ok(cl.post("/api/auth/sessions/revoke-others", headers=h1))
 
 
-async def test_profile_patch(cl):
+async def test_profile_patch_cannot_change_own_email(cl):
     rec, h = await user("pia")
-    out = ok(cl.patch("/api/auth/me", headers=h, json={"display_name": "Pia K", "email": "PIA@new.com"}))
-    assert out["user"]["email"] == "pia@new.com" and out["user"]["display_name"] == "Pia K"
+    out = ok(cl.patch("/api/auth/me", headers=h, json={"display_name": "Pia K"}))
+    assert out["user"]["display_name"] == "Pia K" and out["user"]["email"] == "pia@example.com"
+    r = cl.patch("/api/auth/me", headers=h, json={"email": "victim@x.com"})
+    assert r.status_code == 400 and "founder" in r.json()["detail"]
+    assert (await service.get_user(rec.id)).email == "pia@example.com"
+
+
+async def test_founder_sets_email_verified(cl):
+    founder, fh = await user("founder", "admin")
+    rec, h = await user("nina", email="old@x.com", verified=False)
+    out = ok(cl.patch(f"/api/auth/users/{rec.id}", headers=fh, json={"email": "Nina@New.com"}))
+    assert out["user"]["email"] == "nina@new.com" and out["user"]["email_verified"] is True
     await user("taken", email="taken@x.com")
-    assert cl.patch("/api/auth/me", headers=h, json={"email": "taken@x.com"}).status_code == 409
-    assert cl.patch("/api/auth/me", headers=h, json={"email": "nope"}).status_code == 400
+    assert cl.patch(f"/api/auth/users/{rec.id}", headers=fh, json={"email": "taken@x.com"}).status_code == 409
+    cleared = ok(cl.patch(f"/api/auth/users/{rec.id}", headers=fh, json={"email": ""}))["user"]
+    assert cleared["email"] is None and cleared["email_verified"] is False
+    # A founder-created account's email is verified too.
+    made = ok(cl.post("/api/auth/users", headers=fh, json={
+        "username": "olaf", "password": "a-long-password", "role": "viewer", "email": "olaf@x.com"}))
+    assert made["user"]["email_verified"] is True
+
+
+async def test_unverified_email_resolves_nothing(cl):
+    founder, fh, iith, civil = await world(cl)
+    rec, h = await user("uma", email="uma@x.com", verified=False)
+    # Not addable by email ...
+    r = cl.post(f"/api/workspaces/{iith['id']}/members", headers=fh, json={"login": "uma@x.com", "role": "viewer"})
+    assert r.status_code == 404 and "username" in r.json()["detail"]
+    # ... but by username.
+    m = ok(cl.post(f"/api/workspaces/{iith['id']}/members", headers=fh, json={"login": "uma", "role": "viewer"}))
+    assert m["member"]["user"]["email_verified"] is False
+    # No sign-in by an unverified email; the username works.
+    assert cl.post("/api/auth/login", json={"login": "uma@x.com", "password": PW}).status_code == 401
+    ok(cl.post("/api/auth/login", json={"login": "uma", "password": PW}))
+    # Exposed on /auth/me and the founder's user rows.
+    assert ok(cl.get("/api/auth/me", headers=h))["user"]["email_verified"] is False
+    rows = {u["username"]: u for u in ok(cl.get("/api/auth/users", headers=fh))["users"]}
+    assert rows["uma"]["email_verified"] is False and rows["founder"]["email_verified"] is True
+
+
+async def test_invite_signup_verifies_only_through_a_locked_invite(cl):
+    founder, fh, iith, civil = await world(cl)
+    open_inv = _token_of(ok(cl.post(f"/api/workspaces/{iith['id']}/invites", headers=fh,
+                                    json={"role": "viewer"}))["url"])
+    r = ok(cl.post(f"/api/auth/invites/{open_inv}/accept", json={
+        "display_name": "Free", "email": "free@x.com", "password": "a-long-password"}))
+    assert r["user"]["email_verified"] is False
+    locked = _token_of(ok(cl.post(f"/api/workspaces/{iith['id']}/invites", headers=fh,
+                                  json={"role": "viewer", "email": "lockd@x.com"}))["url"])
+    r = ok(cl.post(f"/api/auth/invites/{locked}/accept", json={
+        "display_name": "Lock", "email": "LOCKD@x.com", "password": "a-long-password"}))
+    assert r["user"]["email_verified"] is True
+
+
+async def test_locked_invite_refuses_an_unverified_matching_email(cl):
+    """The squatting attack: someone typed the victim's address on an
+    unlocked invite (unverified). A locked invite for that address must not
+    go to them."""
+    founder, fh, iith, civil = await world(cl)
+    _, sh = await user("squatter", email="victim@x.com", verified=False)
+    token = _token_of(ok(cl.post(f"/api/workspaces/{iith['id']}/invites", headers=fh,
+                                 json={"role": "admin", "email": "victim@x.com"}))["url"])
+    r = cl.post(f"/api/auth/invites/{token}/accept", headers=sh)
+    assert r.status_code == 403 and "verified" in r.json()["detail"]
+    # Signed out, the locked address must be used (and here it is taken).
+    r = cl.post(f"/api/auth/invites/{token}/accept", json={
+        "display_name": "V", "email": "other@x.com", "password": "a-long-password"})
+    assert r.status_code == 403
+    r = cl.post(f"/api/auth/invites/{token}/accept", json={
+        "display_name": "V", "email": "victim@x.com", "password": "a-long-password"})
+    assert r.status_code == 409
+    # The invite is still unused.
+    assert ok(cl.get(f"/api/auth/invites/{token}"))["role"] == "admin"
 
 
 async def test_founder_user_admin(cl):

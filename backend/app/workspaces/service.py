@@ -313,7 +313,8 @@ async def add_member(actor: AuthUser, workspace_id: str, *, login: str, role: st
     ws = _visible_or_404(ms, tree.get(workspace_id))
     target = await auth.find_account(login)
     if target is None:
-        raise Refused(404, "No account with that username or email. Send an invite instead.")
+        raise Refused(404, "No account with that username or verified email. Use the "
+                           "username, or send an invite.")
     if area is not None:
         _bad_area(area, "area")
     target_ms = await auth.memberships_of(target.id)
@@ -533,8 +534,11 @@ async def accept_invite(token: str, actor: Optional[AuthUser], *, ip: str, label
     if actor is not None:
         if actor.id == auth.LEGACY_USER_ID:
             raise Refused(403, "Sign in with your own account to accept an invite")
-        if inv.email and (actor.email or "") != inv.email:
-            raise Refused(403, "This invite is for a different email address")
+        # The inviter vouched for the locked address; only an account that
+        # holds it AND had it verified may take the invite (an unverified
+        # email is just a claim).
+        if inv.email and not (actor.email == inv.email and actor.email_verified):
+            raise Refused(403, "This invite is for a different (verified) email address")
         before = await auth.compat_role_of(actor.id)
         membership.user_id = actor.id
         try:
@@ -561,7 +565,7 @@ async def accept_invite(token: str, actor: Optional[AuthUser], *, ip: str, label
         raise Refused(400, "email is required")
     if inv.email and email_n != inv.email:
         raise Refused(403, "This invite is for a different email address")
-    if await auth.find_account(email_n) is not None:
+    if await auth.email_in_use(email_n):
         raise Refused(409, "An account with this email already exists. Sign in first, "
                            "then open the invite link again.")
     name = str(display_name or "").strip()[:120]
@@ -580,8 +584,11 @@ async def accept_invite(token: str, actor: Optional[AuthUser], *, ip: str, label
             raise Refused(409, "That username is taken")
     else:
         uname = await _free_username(email_n.split("@", 1)[0])
+    # Verified only through an email-locked invite: the inviter sent the
+    # link to exactly this address. An unlocked invite proves nothing.
     user = UserRecord(id=new_id(), username=uname, password_hash=pw_hash,
-                      email=email_n, display_name=name)
+                      email=email_n, display_name=name,
+                      email_verified=inv.email is not None and email_n == inv.email)
     membership.user_id = user.id
     try:
         await store.accept_invite(inv.token_hash, now, user_id=user.id, new_user=user,

@@ -30,6 +30,14 @@ from app.auth.passwords import MIN_PASSWORD_LENGTH, hash_password
 from app.auth.store import ROLES
 
 
+# The CLI is its own process: it cannot drop the running server's 60 s
+# token cache or reach its live sockets (cross-process invalidation is the
+# planned Redis / LISTEN-NOTIFY work). The server picks a change up when the
+# cached entry expires; say so after every change that affects access.
+SERVER_NOTE = ("note: a running server applies this within 60 s (its token cache); "
+               "the same change made through the API applies immediately.")
+
+
 def _prompt_password(confirm: bool = True) -> str:
     pw = getpass.getpass("Password: ")
     if len(pw) < MIN_PASSWORD_LENGTH:
@@ -55,8 +63,10 @@ async def _create_user(username: str, role: str | None, founder: bool, email: st
         return 2
     pw = _prompt_password()
     try:
+        # The shell operator is above a founder: an email given here is vouched for.
         rec = await service.create_user(username, pw, role, email=email,
-                                        display_name=display_name, founder=founder)
+                                        display_name=display_name, founder=founder,
+                                        email_verified=True)
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
@@ -64,6 +74,7 @@ async def _create_user(username: str, role: str | None, founder: bool, email: st
     roles = ", ".join(f"{m.role}@{m.workspace_name}" for m in ms) or "no memberships"
     flag = " (disabled - left as it was)" if rec.disabled else ""
     print(f"user '{rec.username}' ready: {roles}{flag}")
+    print(SERVER_NOTE)
     return 0
 
 
@@ -96,6 +107,7 @@ async def _grant(login: str, workspace: str, role: str | None, title: str,
         await store.delete_membership(current.id)
         await service.membership_changed(user.id, before_compat=before, reduced=True)
         print(f"removed {current.role} on {ws.name} from {user.username}")
+        print(SERVER_NOTE)
         return 0
     if role not in perms.roles_for_kind(ws.kind):
         print(f"error: role must be one of {', '.join(perms.roles_for_kind(ws.kind))} "
@@ -126,6 +138,7 @@ async def _grant(login: str, workspace: str, role: str | None, title: str,
     await service.membership_changed(user.id, before_compat=before,
                                      reduced=current is not None and current.role != role)
     print(f"{user.username} is now {role} on {ws.name}")
+    print(SERVER_NOTE)
     return 0
 
 
