@@ -1697,7 +1697,8 @@ function VisionLimitsGroup() {
 //
 // `staffOnly` hides a category or section from customer-only accounts
 // (docs/ACCESS_MODEL.md section 8a): server-wide vision calibration and
-// tuning, server log paths, missions and avoidance stay with staff.
+// tuning, server log paths and missions stay with staff. Avoidance is open
+// to customers since phase 2b, for their own drone (section 8b).
 interface Section {
     label: string                        // divider text within a category
     Body: () => React.JSX.Element
@@ -1815,8 +1816,11 @@ function SensorsGroup() {
     const [params, setParams] = useState<AvoidanceParams | null>(null)
     const [enabled, setEnabledState] = useState(false)
 
+    const { isCustomer } = useAccess()
     useEffect(() => {
-        if (boundDroneId) return
+        // Customers only ever configure the drone bound to their session
+        // (the session list is staff-only).
+        if (boundDroneId || isCustomer) return
         let alive = true
         apiFetch(`${getServerUrl()}/api/sessions`).then(r => r.json()).then(j => {
             if (!alive) return
@@ -1824,7 +1828,7 @@ function SensorsGroup() {
             setDroneId(mine?.drone?.id ?? null)
         }).catch(() => {})
         return () => { alive = false }
-    }, [sessionId, boundDroneId])
+    }, [sessionId, boundDroneId, isCustomer])
 
     useEffect(() => {
         if (!droneId) return
@@ -1962,7 +1966,7 @@ const CATEGORIES: Category[] = [
         sections: [{ label: 'MISSION', Body: MissionGroup }],
     },
     {
-        id: 'avoidance', label: 'Avoidance', icon: Radar, staffOnly: true,
+        id: 'avoidance', label: 'Avoidance', icon: Radar,
         blurb: 'Obstacle sensors and how the drone avoids them',
         sections: [{ label: 'SENSORS & AVOIDANCE', Body: SensorsGroup }],
     },

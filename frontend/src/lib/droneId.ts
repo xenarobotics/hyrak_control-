@@ -18,6 +18,7 @@ import { apiFetch } from '@/lib/api'
 import { useEffect, useState } from 'react'
 import { getServerUrl } from '@/lib/server-url'
 import { useDroneStore } from '@/store/drone'
+import { isCustomer } from '@/lib/auth'
 
 const BACKOFF_MIN_MS = 1500
 const BACKOFF_MAX_MS = 15000
@@ -42,6 +43,8 @@ function publish(id: string | null) {
 async function lookup(): Promise<string | null> {
     const bound = useDroneStore.getState().session?.drone?.id
     if (bound) return bound
+    // The fleet is staff-only: a customer's only drone is the bound one.
+    if (isCustomer()) return null
     try {
         const f = await apiFetch(`${getServerUrl()}/api/fleet`, { signal: AbortSignal.timeout(5000) })
         if (f.ok) {
