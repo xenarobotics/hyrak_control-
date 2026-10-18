@@ -664,7 +664,186 @@ server never dials a TURN host the customer typed.
 ### Not in 2a (phase 2b)
 
 Customer mission planning, customer flight history and recordings per
-workspace, customer fleet views, TOTP for founders and managers.
+workspace, customer fleet views, TOTP for founders and managers. Flight and
+AI history per workspace, staff monitoring and customer avoidance landed in
+8b below.
+
+## 8b. Phase 2b: monitoring, per-workspace history, customer avoidance, takeover
+
+Goal: staff (founders, managers) can see and follow what customers are
+doing, customers see their own flight and AI history, and customers run
+obstacle avoidance on their own drone. HYRAK operations can take control
+of a customer's flight when something looks wrong.
+
+### Who sees what now
+
+| account | live sessions (console MAP / DRONES, `/api/sessions`) | history (flights, crowd, plates) | sightings, face gallery |
+|---|---|---|---|
+| founder | every session, every workspace | everything, including rows of deleted workspaces | yes |
+| manager | the workspaces they manage (with `view`), plus HYRAK if they also hold a HYRAK viewer or pilot membership | same workspaces | sightings of those workspaces; the gallery (staff) |
+| HYRAK pilot / viewer | HYRAK's sessions | HYRAK's history | HYRAK's sightings; the gallery |
+| airspace manager | none (no `view` anywhere) | none | gallery only (staff) |
+| customer owner / admin / pilot / viewer | no console session list (the console stays SPACES / ZONES / AUDIT) | their workspace and the ones below it | no |
+| legacy shared token | HYRAK | HYRAK | HYRAK |
+
+The rule in every case is the permission engine: `view` on the row's
+workspace (`app/auth/data_scope.py`), with fresh memberships per request.
+Founders have no filter. A requested workspace outside the caller's scope
+reads as empty (lists) or 404 (one row), never 403, so ids cannot be probed.
+
+### Staff monitoring
+
+* `/api/sessions` and the console socket (`admin_hello`, `watch_session`,
+  `unwatch_session`) are open to all staff (compatibility viewer rank) and
+  scoped as above. `/api/drones` is scoped the same way.
+* Each session row carries `workspace_id`, `workspace_name`, `username`,
+  `role` (the user's strongest role on that workspace), `staff`,
+  `link_kind` (`client_relay`, `rf_bridge`, `server_udp`, `server_direct`,
+  or null), `armed`, `in_air`, `ai_mode`, `video`, `drone`, `detached`
+  (client away, session parked) and `takeover` (who holds it, or null).
+* `watch_session` is view only: telemetry, video frames and overlays. It
+  answers `Session not found` for a session outside the caller's scope.
+  `admin_alert` (zone transitions, AI alerts) goes only to observers who
+  can view the session's workspace.
+* **Observers cannot hide.** `admin_hello` marks a socket as a console
+  observer, which keeps it off the session list. It is refused on a session
+  that holds a drone link or sends video, attaching a link clears it, and
+  a session with a link or video is listed and can be taken over whatever
+  the flag says (`SessionManager.is_observer_only`).
+* Console: MAP and DRONES are shown to all staff (STAFF stays founders).
+  Session cards show workspace, user and role, AI mode and a HYRAK CONTROL
+  tag. Drone RENAME is founders only in the UI.
+* SPACES detail has an **Activity** section
+  (`GET /api/workspaces/{id}/activity`, needs `view`): live sessions,
+  recent flights and, with `audit.view`, recent audit events of the
+  workspace and its subtree (HYRAK's activity is HYRAK's own).
+
+### Per-workspace history
+
+* `flights`, `crowd_snapshots`, `crowd_alerts`, `plate_events` and
+  `person_sightings` have `workspace_id` (alembic `b8e4f0c2d5a3`): NOT
+  NULL, indexed, default HYRAK, a plain string like
+  `audit_events.workspace_id` (history never fails to write; a deleted
+  workspace's rows stay readable by founders). Existing rows went to HYRAK.
+* Stamped at record time: a flight takes its drone's workspace (the
+  registry's, read once on the arm edge), falling back to the session's;
+  vision rows take the session's workspace through a resolver the server
+  installs (`persistence.set_workspace_resolver`). A `workspace_id` in an
+  analyzer's payload is ignored.
+* Reads, signed in, scoped: `GET /api/flights?workspace_id=&drone_id=`,
+  `/api/drones/{id}/flights`, `/api/flights/{id}` (track replay) and
+  `/download` (CSV), `/api/vision/crowd-history?workspace_id=`,
+  `/api/vision/plate-history?workspace_id=` and `/{id}/image`.
+* Session reports (`/api/sessions/{id}/crowd-report/download`,
+  `plate-report/download`) are now **durable**: access is `view` on the
+  workspace the session's rows were recorded in, which survives a restart;
+  a live session that wrote no rows yet falls back to the session manager.
+  The 2a "the user who opened it" rule is gone (a colleague with `view` on
+  the workspace reads it; staff only with `view` there).
+* Clearing history (`DELETE /api/vision/crowd-history`, `plate-history`,
+  `sightings`, optional `workspace_id`) stays staff operators, and deletes
+  only rows of workspaces where they hold `fly` (founders: all).
+* **Privacy decision:** the face gallery (`persons`, `person_faces`) and
+  the gallery-match log (`/api/vision/sightings`) stay HYRAK staff-only.
+  Sightings are scoped per workspace for staff, but customers never read
+  them, and customer sessions never load the gallery (8a), so their
+  workspaces have no sightings.
+* Frontend: Settings has a **Flights** category (track replay with a
+  scrubber, CSV download), scoped to the session's workspace for customers.
+  The AI panels' history asks for the session's workspace for customers;
+  their "clear" buttons are staff only.
+
+### Avoidance for customers on their own drone
+
+* Per-drone routes (`/api/avoidance/{drone_id}/...`): staff keep the rank
+  check (reads viewer, writes operator). A customer reads with `view` and
+  writes with `fly`, either on the drone's registry workspace (drone
+  access) or on a live session holding the drone's link (for writes that
+  session must also be allowed to command the drone, `drone_fly`). Anything
+  else is 404. `drone_id` "auto" and `GET /api/avoidance/status` (every
+  drone) stay staff only.
+* The shared hazard map: `GET /api/avoidance/hazards` any signed-in
+  account; `POST /hazards` and `/hazards/clear` staff operators.
+* Frontend: the AVOID dock tab, the avoidance panels, the Mission map
+  overlay (their own drone's obstacles and reroute) and the Settings
+  Avoidance category are back for customers; "Pin hazard" and "Forget
+  hazards" stay staff.
+
+### Takeover
+
+HYRAK operations can take control of a session's drone. The permission is
+`sessions.takeover` (founder, manager; owners and admins do not hold it
+yet, and since it is a permission it can be granted to them later without
+code changes), checked on the **target session's workspace** with the
+staff member's own memberships. A manager of another workspace, a HYRAK
+pilot and the legacy token are refused.
+
+* **Quick actions.** From the console's watch view: HOLD, RTL and LAND,
+  sent as `drone_action {action, target_session}` and run through the
+  session's own drone_action handler (red-zone checks, action_result to
+  the console). No takeover needed. The customer sees a short notice
+  (`staff_intervention {action, by}`).
+* **Full takeover.** `takeover_session {session_id}` (staff, plus the
+  permission) puts the session in TAKEOVER mode; `takeover_result` answers
+  the console, `takeover_status {active, by, since}` tells the customer
+  (and `session_ready` carries `takeover` on a reload or resume). While it
+  lasts:
+  * Staff `drone_action` / `drone_command` naming `target_session` act on
+    that session's drone. Only the holding console may; another staff
+    member gets `taken_over`.
+  * The customer's every session command is refused with `taken_over`,
+    **hold, return and land included**: staff now own the decision, and
+    two parties issuing safety commands at once is the worse failure.
+  * The customer's link events are refused too: `disconnect_telemetry`
+    (cutting the link would cut staff off), `connect_browser_serial`
+    while a link is up (relinking a dropped radio is allowed, it gives
+    staff their link back). A taken-over **staff** session also loses
+    `connect_telemetry`, `connect_rf_bridge` and `upload_mission`.
+  * Avoidance writes for that drone answer 423 `{code: "taken_over"}`
+    unless the caller is the holding staff user. Reads continue.
+  * Automated sources stop: the link is marked `automation_locked`, so AI
+    follow setpoints, avoidance commands, Offboard starts and the Offboard
+    re-send loop send nothing; stream_track drops the vision pipeline's
+    velocity commands; the dispatcher offers the drone to no order. If the
+    AI follow was flying it in Offboard, the drone is put in HOLD at the
+    moment of takeover.
+  * All of the above go through one check: `takeover.blocking()` (and
+    `socket_guard.takeover_stops()` on the socket paths).
+* `release_session` hands control back (the holder, or anyone else allowed
+  to take that session over, such as a founder). The drone keeps its
+  current mode: nothing is sent. If the holding console's socket drops,
+  the takeover is released after `RELEASE_GRACE_S` (15 s) unless that
+  console session resumes first; no auto-land. A takeover also ends when
+  either session is torn down.
+* Audit rows (`audit_events`, with actor, workspace and drone in
+  `detail`): `session.takeover`, `session.takeover.command` (each staff
+  drone_action while holding it), `session.quick_action`, and
+  `session.release` with a reason (`released`, `released by <name>`,
+  `staff_disconnected`, `session_ended`, `staff_session_ended`).
+* **Residual risk (radio relay).** `serial_uplink` carries the radio's
+  downlink into mavsdk_server; it cannot be refused without blinding
+  staff. While taken over it is filtered: COMMAND_LONG / INT, SET_MODE,
+  mission writes, PARAM_SET, setpoints, MANUAL_CONTROL and
+  RC_CHANNELS_OVERRIDE frames are dropped (`serial_bridge.CommandFilter`).
+  That is defence in depth: those bytes reach the ground-side
+  mavsdk_server, not the aircraft. The customer's own machine owns the
+  physical radio and can still write to it directly, stop relaying staff
+  commands, or unplug it; no server-side check can prevent that, and an
+  RC transmitter on the aircraft can always override too. A drone whose
+  customer must not be able to override HYRAK needs that enforced on the
+  aircraft (phase 3).
+* Socket classes: `takeover_session` and `release_session` are STAFF
+  (58 handlers on the default namespace). `drone_action` / `drone_command`
+  stay SESSION_COMMAND; their `target_session` routing is checked inside
+  `require_session_fly`.
+* Frontend: the console detail panel has HOLD / RTL / LAND, "Take
+  control" (with a confirm) and, while held, ARM / DISARM / TAKEOFF /
+  START and PAUSE MISSION / a mode menu bound to that session, and
+  "Release control". These are console controls that emit the same
+  drone_action names as the app's flight controls, not the app's
+  DroneControls component itself (that one is bound to the page's own
+  session). Customers get a red banner, "HYRAK operations has taken control
+  (name)", with no buttons.
 
 ## 9. Scaling to a dedicated server
 
