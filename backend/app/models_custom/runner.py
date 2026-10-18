@@ -259,9 +259,23 @@ def _image_input(sess) -> dict:
     inputs = sess.get_inputs()
     if not inputs:
         raise Fail("input_not_image", "the model declares no inputs")
+    mask = None
     if len(inputs) > 1:
-        names = [i.name for i in inputs]
-        raise Fail("multiple_inputs", ", ".join(names), count=len(names), names=names)
+        # DETR-family Hugging Face exports add a `pixel_mask` (batch, h, w)
+        # that marks real pixels; for one whole camera frame it is all ones,
+        # so it is filled in rather than refused.
+        masks = [i for i in inputs if "mask" in i.name.lower() and len(i.shape or []) == 3]
+        images = [i for i in inputs if i not in masks]
+        if len(inputs) != 2 or len(masks) != 1 or len(images) != 1:
+            names = [i.name for i in inputs]
+            raise Fail("multiple_inputs", ", ".join(names), count=len(names), names=names)
+        ms = list(masks[0].shape)
+        mask = {"name": masks[0].name,
+                # Some exports fix the mask's size (Xenova/detr-resnet-50: 64x64).
+                "hw": [_dim(ms[1]), _dim(ms[2])] if _dim(ms[1]) and _dim(ms[2]) else None,
+                "dtype": {"tensor(int64)": "int64", "tensor(int32)": "int32", "tensor(bool)": "bool",
+                          "tensor(float)": "float32"}.get(masks[0].type, "int64")}
+        inputs = images
     inp = inputs[0]
     shape = list(inp.shape or [])
     if len(shape) != 4:
@@ -290,7 +304,8 @@ def _image_input(sess) -> dict:
         if v is not None and not (16 <= v <= 4096):
             raise Fail("input_size_unusual", f"{inp.name}: shape {shape}", size=v)
     return {"name": inp.name, "shape": [s if isinstance(s, int) else str(s) for s in shape],
-            "dtype": dtype, "layout": layout, "channels": channels, "height": h, "width": w}
+            "dtype": dtype, "layout": layout, "channels": channels, "height": h, "width": w,
+            "mask": mask}
 
 
 def _outputs(sess) -> list:
@@ -543,7 +558,12 @@ class Model:
         np = self.np
         x, geo = self.preprocess(frame_bgr)
         try:
-            outs = self.sess.run(None, {self.inp["name"]: x})
+            feed = {self.inp["name"]: x}
+            if self.inp.get("mask"):
+                hw = self.inp["mask"].get("hw") or (x.shape[2:4] if self.inp["layout"] == "nchw"
+                                                     else x.shape[1:3])
+                feed[self.inp["mask"]["name"]] = np.ones((1, *hw), dtype=self.inp["mask"]["dtype"])
+            outs = self.sess.run(None, feed)
         except Exception as e:
             text = f"{type(e).__name__}: {e}"
             raise Fail("out_of_memory" if "memory" in text.lower() else "run_failed", text[:2000])
