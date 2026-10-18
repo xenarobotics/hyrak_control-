@@ -10,7 +10,7 @@ import uuid
 
 from sqlalchemy import (
     JSON, BigInteger, Boolean, CheckConstraint, DateTime, Float, ForeignKey,
-    Index, Integer, LargeBinary, Sequence, String,
+    Index, Integer, LargeBinary, Sequence, String, UniqueConstraint, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -24,6 +24,14 @@ JSONB_COL = JSON().with_variant(JSONB, "postgresql")
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+# The one platform workspace (HYRAK, the root of the workspace tree). Its id
+# is a fixed constant so drones / zones can default to it at the storage
+# layer (a server_default cannot run a subquery) and so the in-memory auth
+# store and the database agree on it across a DB flap. A partial unique
+# index on workspaces.kind keeps it the only platform row.
+PLATFORM_WORKSPACE_ID = "00000000-0000-0000-0000-000000000001"
 
 
 class Base(DeclarativeBase):
@@ -49,6 +57,13 @@ class Drone(Base):
     is_simulated: Mapped[bool] = mapped_column(Boolean, default=False)
     first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    # The workspace that owns the vehicle (docs/ACCESS_MODEL.md). A newly
+    # seen drone belongs to the platform until someone with drones.manage
+    # assigns it.
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="RESTRICT"), index=True,
+        default=PLATFORM_WORKSPACE_ID, server_default=PLATFORM_WORKSPACE_ID,
+    )
 
     def to_dict(self) -> dict:
         return {
@@ -58,6 +73,7 @@ class Drone(Base):
             "is_simulated": self.is_simulated,
             "first_seen": self.first_seen.isoformat() if self.first_seen else None,
             "last_seen": self.last_seen.isoformat() if self.last_seen else None,
+            "workspace_id": self.workspace_id,
         }
 
 
@@ -67,6 +83,10 @@ class Zone(Base):
     Geometry is a GeoJSON Polygon/MultiPolygon - the industry-standard
     format (converts cleanly to/from ED-269 / Digital Sky data). Zones are
     3D-aware via floor/ceiling (metres above ground at the zone).
+
+    Every active zone applies to every drone. The layer (regulatory / area /
+    site) and workspace decide only who may edit it (docs/ACCESS_MODEL.md
+    section 3).
     """
     __tablename__ = "zones"
 
@@ -80,6 +100,19 @@ class Zone(Base):
     ceiling_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    layer: Mapped[str] = mapped_column(String(16), default="regulatory",
+                                       server_default="regulatory")
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="RESTRICT"), index=True,
+        default=PLATFORM_WORKSPACE_ID, server_default=PLATFORM_WORKSPACE_ID,
+    )
+    created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    updated_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("layer IN ('regulatory', 'area', 'site')", name="ck_zones_layer"),
+    )
 
     def to_feature(self) -> dict:
         return {
@@ -92,6 +125,8 @@ class Zone(Base):
                 "floor_m": self.floor_m,
                 "ceiling_m": self.ceiling_m,
                 "active": self.active,
+                "layer": self.layer,
+                "workspace_id": self.workspace_id,
             },
         }
 
@@ -977,8 +1012,10 @@ class PersonSighting(Base):
 class User(Base):
     """
     One person who can sign in. The password is a scrypt hash (see
-    app/auth/passwords.py); the role is the whole permission model:
-    viewer < operator < admin, compared by rank, never by string.
+    app/auth/passwords.py). What they may do lives in memberships, one per
+    workspace (docs/ACCESS_MODEL.md); the old single role column is gone.
+    Email is unique and stored lower-case; accounts from before workspaces
+    have none. An email is an unverified claim unless email_verified.
     """
     __tablename__ = "users"
 
@@ -987,22 +1024,19 @@ class User(Base):
     )
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(200))
-    role: Mapped[str] = mapped_column(String(16), default="viewer")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     disabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    email: Mapped[Optional[str]] = mapped_column(String(254), nullable=True, unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(120), default="", server_default="")
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # True only when an email-locked invite to exactly this address was
+    # accepted, or a founder set the address. Lookups by email and
+    # email-locked invites trust verified addresses only.
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
 
     __table_args__ = (
-        CheckConstraint("role IN ('admin', 'operator', 'viewer')", name="ck_users_role"),
+        CheckConstraint("email = lower(email)", name="ck_users_email_lower"),
     )
-
-    def to_dict(self) -> dict:
-        return {
-            "id": self.id,
-            "username": self.username,
-            "role": self.role,
-            "disabled": self.disabled,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-        }
 
 
 class AuthToken(Base):
@@ -1027,3 +1061,136 @@ class AuthToken(Base):
         DateTime(timezone=True), nullable=True
     )
     label: Mapped[str] = mapped_column(String(120), default="")
+
+
+# ── Workspaces, memberships, invites (docs/ACCESS_MODEL.md) ──────────────
+
+
+class Workspace(Base):
+    """
+    A node in the customer tree: the one platform row (HYRAK) at the root,
+    organizations and individuals under it, clients under organizations.
+    `path` is the materialized chain of ids, "/<root>/<org>/<client>/", so
+    "everything below X" is a prefix match on an indexed column and never a
+    recursive query.
+    """
+    __tablename__ = "workspaces"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    kind: Mapped[str] = mapped_column(String(16))
+    name: Mapped[str] = mapped_column(String(120))
+    parent_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    path: Mapped[str] = mapped_column(String(400))
+    operating_area: Mapped[Optional[dict]] = mapped_column(JSONB_COL, nullable=True)
+    disabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    __table_args__ = (
+        CheckConstraint("kind IN ('platform', 'organization', 'individual', 'client')",
+                        name="ck_workspaces_kind"),
+        CheckConstraint("(kind = 'platform') = (parent_id IS NULL)",
+                        name="ck_workspaces_platform_root"),
+        Index("ux_workspaces_single_platform", "kind", unique=True,
+              postgresql_where=text("kind = 'platform'")),
+        Index("ix_workspaces_path", "path", postgresql_ops={"path": "varchar_pattern_ops"}),
+    )
+
+
+class Membership(Base):
+    """
+    One role a user holds on one workspace, optionally limited to a GeoJSON
+    area. A membership covers the workspace and everything below it, except
+    on the platform workspace where only founders inherit downward.
+    """
+    __tablename__ = "memberships"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    role: Mapped[str] = mapped_column(String(16))
+    area: Mapped[Optional[dict]] = mapped_column(JSONB_COL, nullable=True)
+    title: Mapped[str] = mapped_column(String(120), default="", server_default="")
+    created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "workspace_id", name="uq_memberships_user_workspace"),
+        CheckConstraint(
+            "role IN ('founder', 'airspace', 'manager', 'owner', 'admin', 'pilot', 'viewer')",
+            name="ck_memberships_role",
+        ),
+    )
+
+
+class Invite(Base):
+    """
+    A single-use link that grants a membership (and, for someone without an
+    account, creates one). Only the SHA-256 of the token is stored.
+    """
+    __tablename__ = "invites"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    role: Mapped[str] = mapped_column(String(16))
+    area: Mapped[Optional[dict]] = mapped_column(JSONB_COL, nullable=True)
+    title: Mapped[str] = mapped_column(String(120), default="", server_default="")
+    email: Mapped[Optional[str]] = mapped_column(String(254), nullable=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    accepted_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PasswordReset(Base):
+    """A founder-issued one-hour, single-use password reset link (hash only)."""
+    __tablename__ = "password_resets"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AuditEvent(Base):
+    """
+    Who changed access or airspace, when, from where. Deliberately no
+    foreign keys: the trail must outlive the user, workspace or zone it
+    talks about.
+    """
+    __tablename__ = "audit_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    actor_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    actor_name: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    workspace_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(64))
+    target_type: Mapped[str] = mapped_column(String(32), default="", server_default="")
+    target_id: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    detail: Mapped[Optional[dict]] = mapped_column(JSONB_COL, nullable=True)
+    ip: Mapped[str] = mapped_column(String(64), default="", server_default="")

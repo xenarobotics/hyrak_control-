@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     hyrak_admin_password_hash: str = Field(default="")
     # User tokens live this long, sliding on use.
     auth_token_ttl_days: int = Field(default=30)
+    # Public origin of the web app (e.g. https://dev.xenarobotics.com), used
+    # to build invite and reset links. Empty: the API returns the path
+    # ("/invite/<token>") and the frontend prefixes its own origin.
+    public_app_url: str = Field(default="")
     # Reverse proxies whose CF-Connecting-IP / X-Forwarded-For headers are
     # believed (comma-separated IPs or CIDRs). Default: loopback only, which
     # is where cloudflared and a local nginx sit. Anything else talking to

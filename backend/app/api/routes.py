@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ValidationError, field_validator
 import cv2
 import numpy as np
-from app.auth.deps import require_admin, require_operator, require_viewer
+from app.auth.deps import require_admin, require_operator, require_signed_in, require_viewer
 from app.auth.service import AuthUser
 from app.config import get_settings
 
@@ -241,45 +241,38 @@ async def get_zones():
     return {"type": "FeatureCollection", "features": [z.to_feature() for z in rows]}
 
 
+def _zone_refused(e):
+    from app.auth.routes import _http
+    return _http(e)
+
+
 @router.post("/zones")
 async def create_zone(
     body: dict,
-    _user: AuthUser = Depends(require_admin),
+    request: Request,
+    user: AuthUser = Depends(require_signed_in),
 ):
-    """Create a zone. body: {name, zone_class, geometry, floor_m?, ceiling_m?}"""
-    zone_class = body.get("zone_class")
-    if zone_class not in ("green", "orange", "red"):
-        raise HTTPException(status_code=400, detail="zone_class must be green/orange/red")
-    geometry = body.get("geometry")
-    if not geometry or geometry.get("type") not in ("Polygon", "MultiPolygon"):
-        raise HTTPException(status_code=400, detail="geometry must be a GeoJSON (Multi)Polygon")
-    from shapely.geometry import shape
-    try:
-        geom = shape(geometry)
-        if not geom.is_valid or geom.is_empty:
-            raise ValueError("invalid polygon")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Bad geometry: {e}")
-
-    nums = _validate(ZoneNumbers, body)
-    from app.db import db_available, get_session
-    from app.db.models import Zone
+    """Create a zone. body: {name, zone_class, geometry, floor_m?, ceiling_m?,
+    layer?, workspace_id?}. layer defaults to regulatory and workspace_id to
+    HYRAK; who may draw which layer where is docs/ACCESS_MODEL.md section 3
+    (enforced in app/workspaces/service.py)."""
+    from app.auth.clientip import client_ip
+    from app.workspaces import service as ws_service
     from app.zones import engine as zone_engine
-    if not db_available():
-        raise HTTPException(status_code=503, detail="Database offline")
-    zone = Zone(
-        name=(body.get("name") or f"{zone_class} zone").strip()[:120],
-        zone_class=zone_class,
-        geometry=geometry,
-        floor_m=nums.floor_m if nums.floor_m is not None else 0.0,
-        ceiling_m=nums.ceiling_m,
-    )
-    async with get_session() as db:
-        db.add(zone)
-        await db.commit()
-        feature = zone.to_feature()
+    nums = _validate(ZoneNumbers, body)
+    try:
+        feature = await ws_service.create_zone(
+            user, name=str(body.get("name") or ""), zone_class=body.get("zone_class"),
+            geometry=body.get("geometry"),
+            floor_m=nums.floor_m if nums.floor_m is not None else 0.0,
+            ceiling_m=nums.ceiling_m, layer=body.get("layer"),
+            workspace_id=body.get("workspace_id"), ip=client_ip(request))
+    except Exception as e:
+        raise _zone_refused(e)
     await zone_engine.reload()
-    logger.info(f"Zone created: {zone.name} ({zone_class})")
+    logger.info(f"Zone created: {feature['properties']['name']} "
+                f"({feature['properties']['zone_class']}, {feature['properties']['layer']}) "
+                f"by {user.username}")
     return {"zone": feature}
 
 
@@ -287,37 +280,35 @@ async def create_zone(
 async def patch_zone(
     zone_id: str,
     body: dict,
-    _user: AuthUser = Depends(require_admin),
+    request: Request,
+    user: AuthUser = Depends(require_signed_in),
 ):
-    """Edit zone properties: name, zone_class, floor_m, ceiling_m, active.
-    (Geometry changes = delete + redraw.)"""
-    nums = _validate(ZoneNumbers, body)
-    from sqlalchemy import select
-    from app.db import db_available, get_session
-    from app.db.models import Zone
+    """Edit zone properties: name, zone_class, floor_m, ceiling_m, active,
+    layer, workspace_id. (Geometry changes = delete + redraw.) Needs edit
+    rights on the zone as it is and, for a layer / workspace move, as it
+    would become."""
+    from app.auth.clientip import client_ip
+    from app.workspaces import service as ws_service
     from app.zones import engine as zone_engine
-    if not db_available():
-        raise HTTPException(status_code=503, detail="Database offline")
-    async with get_session() as db:
-        zone = (
-            await db.execute(select(Zone).where(Zone.id == zone_id))
-        ).scalar_one_or_none()
-        if zone is None:
-            raise HTTPException(status_code=404, detail="Zone not found")
-        if "name" in body and str(body["name"]).strip():
-            zone.name = str(body["name"]).strip()[:120]
-        if "zone_class" in body:
-            if body["zone_class"] not in ("green", "orange", "red"):
-                raise HTTPException(status_code=400, detail="bad zone_class")
-            zone.zone_class = body["zone_class"]
-        if "floor_m" in body:
-            zone.floor_m = nums.floor_m if nums.floor_m is not None else 0.0
-        if "ceiling_m" in body:
-            zone.ceiling_m = nums.ceiling_m
-        if "active" in body:
-            zone.active = bool(body["active"])
-        await db.commit()
-        feature = zone.to_feature()
+    nums = _validate(ZoneNumbers, body)
+    fields: dict = {}
+    if "name" in body and str(body["name"]).strip():
+        fields["name"] = str(body["name"]).strip()[:120]
+    if "zone_class" in body:
+        fields["zone_class"] = body["zone_class"]
+    if "floor_m" in body:
+        fields["floor_m"] = nums.floor_m if nums.floor_m is not None else 0.0
+    if "ceiling_m" in body:
+        fields["ceiling_m"] = nums.ceiling_m
+    if "active" in body:
+        fields["active"] = bool(body["active"])
+    for k in ("layer", "workspace_id"):
+        if body.get(k):
+            fields[k] = str(body[k])
+    try:
+        feature = await ws_service.patch_zone(user, zone_id, fields, ip=client_ip(request))
+    except Exception as e:
+        raise _zone_refused(e)
     await zone_engine.reload()
     return {"zone": feature}
 
@@ -325,17 +316,16 @@ async def patch_zone(
 @router.delete("/zones/{zone_id}")
 async def delete_zone(
     zone_id: str,
-    _user: AuthUser = Depends(require_admin),
+    request: Request,
+    user: AuthUser = Depends(require_signed_in),
 ):
-    from sqlalchemy import delete as sa_delete
-    from app.db import db_available, get_session
-    from app.db.models import Zone
+    from app.auth.clientip import client_ip
+    from app.workspaces import service as ws_service
     from app.zones import engine as zone_engine
-    if not db_available():
-        raise HTTPException(status_code=503, detail="Database offline")
-    async with get_session() as db:
-        await db.execute(sa_delete(Zone).where(Zone.id == zone_id))
-        await db.commit()
+    try:
+        await ws_service.delete_zone(user, zone_id, ip=client_ip(request))
+    except Exception as e:
+        raise _zone_refused(e)
     await zone_engine.reload()
     return {"ok": True}
 

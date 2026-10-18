@@ -270,14 +270,17 @@ async def test_socket_guard_revalidates_and_disconnects_revoked_tokens():
     assert await socket_guard.require_operator("gina-sock", "drone_action") is True
     assert s.auth_checked_at > 0
 
-    # Demotion: the next (stale) check refreshes the role and refuses.
-    await service.update_user(rec.id, role="viewer")
+    # Demotion (HYRAK pilot -> HYRAK viewer membership): the next (stale)
+    # check refreshes the compatibility role and refuses.
+    await service.set_platform_role(rec.id, "viewer", store=service.memory_store())
+    await service.membership_changed(rec.id, before_compat="operator", reduced=True)
     s.auth_checked_at = 0.0
     assert await socket_guard.require_operator("gina-sock", "drone_action") is False
     assert s.role == "viewer" and not disconnected
 
     # Revocation: the socket is dropped.
-    await service.update_user(rec.id, role="operator")
+    await service.set_platform_role(rec.id, "pilot", store=service.memory_store())
+    await service.membership_changed(rec.id, before_compat="viewer", reduced=False)
     s.auth_checked_at = 0.0
     assert await socket_guard.require_operator("gina-sock", "drone_action") is True
     await service.revoke_all(rec.id)
@@ -292,7 +295,8 @@ async def test_revocation_listener_fires_on_every_access_change():
     async def listener(user_id): seen.append(user_id)
     service.on_user_revoked(listener)
     rec = await _user("hank", "operator")
-    await service.update_user(rec.id, role="viewer")          # re-role
+    await service.set_platform_role(rec.id, "viewer", store=service.memory_store())
+    await service.membership_changed(rec.id, before_compat="operator", reduced=True)   # re-role
     await service.update_user(rec.id, disabled=True)          # disable -> revoke_all
     await service.update_user(rec.id, password="another-password-1")
     await service.delete_user(rec.id)
@@ -308,13 +312,130 @@ async def test_update_user_reaches_memory_store_when_db_also_answers(monkeypatch
         async def update_user(self, user_id, **fields):
             calls.append(fields)
             return rec                                        # DB "succeeds"
-        async def delete_tokens_for_user(self, user_id): return 0
+        async def delete_tokens_for_user(self, user_id, keep_hash=None): return 0
     monkeypatch.setattr(service, "_db_up", lambda: True)
     monkeypatch.setattr(service, "_db", FakeDb())
-    await service.update_user(rec.id, role="viewer", disabled=True)
-    assert calls == [{"role": "viewer", "disabled": True}]
+    await service.update_user(rec.id, display_name="Iris", disabled=True)
+    assert calls == [{"display_name": "Iris", "disabled": True}]
     mem = await service.memory_store().get_user_by_id(rec.id)
-    assert mem.role == "viewer" and mem.disabled is True
+    assert mem.display_name == "Iris" and mem.disabled is True
+
+
+async def test_update_user_refuses_role():
+    """The role column is gone; a role in update_user is an error, not a no-op."""
+    rec = await _user("ivan", "operator")
+    with pytest.raises(ValueError, match="memberships"):
+        await service.update_user(rec.id, role="admin")
+    with pytest.raises(ValueError):
+        await service.update_user(rec.id, role="viewer", disabled=True)
+    assert (await service.memory_store().get_user_by_id(rec.id)).disabled is False
+
+
+async def test_patch_user_route_refuses_role():
+    cl = _app()
+    founder = await _bearer("boss", "admin")
+    target = await _user("pat", "operator")
+    r = cl.patch(f"/api/auth/users/{target.id}", headers=founder, json={"role": "admin"})
+    assert r.status_code == 400 and "membership" in r.json()["detail"]
+
+
+async def test_disable_revokes_even_when_a_later_step_raises(monkeypatch):
+    """Coordinator point 4: the DB commit of a disable / password change is
+    followed by revocation in a finally, so an exception afterwards (here:
+    the memory store write) cannot leave tokens and sockets alive."""
+    seen = []
+
+    async def listener(user_id): seen.append(user_id)
+    service.on_user_revoked(listener)
+    rec = await _user("jack", "operator")
+    token, _, _ = await service.login("jack", "correct-horse-battery", "127.0.0.1")
+    committed = []
+
+    class FakeDb:
+        async def update_user(self, user_id, **fields):
+            committed.append(fields)
+            return rec
+        async def delete_tokens_for_user(self, user_id, keep_hash=None): return 0
+
+    async def boom(*a, **k):
+        raise RuntimeError("memory store write failed after the DB commit")
+    monkeypatch.setattr(service, "_db_up", lambda: True)
+    monkeypatch.setattr(service, "_db", FakeDb())
+    monkeypatch.setattr(service.memory_store(), "update_user", boom)
+    with pytest.raises(RuntimeError):
+        await service.update_user(rec.id, disabled=True)
+    assert committed == [{"disabled": True}]
+    assert seen == [rec.id]                                   # sockets told
+    assert await service.memory_store().get_token(service.hash_token(token)) is None
+    monkeypatch.setattr(service, "_db_up", lambda: False)
+    assert await service.verify_token(token) is None
+
+    # Same for a password change.
+    rec2 = await _user("jill", "operator")
+    token2, _, _ = await service.login("jill", "correct-horse-battery", "127.0.0.1")
+    monkeypatch.setattr(service, "_db_up", lambda: True)
+    with pytest.raises(RuntimeError):
+        await service.update_user(rec2.id, password="a-brand-new-password")
+    monkeypatch.setattr(service, "_db_up", lambda: False)
+    assert await service.verify_token(token2) is None
+
+
+async def test_user_lookup_fails_closed_when_db_errors(monkeypatch):
+    """Coordinator point 2: with the DB up, a query error must not fall back
+    to the memory store's (possibly stale, e.g. not-yet-disabled) copy."""
+    await _user("kate", "admin")                              # exists in memory as a founder
+
+    class BrokenDb:
+        async def get_user_by_username(self, username): raise ConnectionError("db went away")
+        async def get_user_by_email(self, email): raise ConnectionError("db went away")
+        async def get_user_by_id(self, user_id): raise ConnectionError("db went away")
+        async def get_token(self, h): raise ConnectionError("db went away")
+    monkeypatch.setattr(service, "_db_up", lambda: True)
+    monkeypatch.setattr(service, "_db", BrokenDb())
+    with pytest.raises(service.AuthUnavailable):
+        await service.login("kate", "correct-horse-battery", "127.0.0.1")
+    with pytest.raises(ConnectionError):
+        await service._find_user("kate")
+    # The HTTP route answers 503, never a token.
+    cl = _app()
+    r = cl.post("/api/auth/login", json={"login": "kate", "password": "correct-horse-battery"})
+    assert r.status_code == 503 and "token" not in r.json()
+
+
+async def test_token_verify_fails_closed_on_user_lookup_error(monkeypatch):
+    """A token whose user cannot be read is refused, except for a still
+    fresh-ish cache entry (which holds what the store said moments ago)."""
+    await _user("lena", "operator")
+    token, _, _ = await service.login("lena", "correct-horse-battery", "127.0.0.1")
+    h = service.hash_token(token)
+    service._token_cache.clear()
+
+    class HalfBrokenDb:
+        async def get_token(self, th): return await service.memory_store().get_token(th)
+        async def get_user_by_id(self, user_id): raise ConnectionError("db went away")
+    monkeypatch.setattr(service, "_db_up", lambda: True)
+    monkeypatch.setattr(service, "_db", HalfBrokenDb())
+    assert await service.verify_token(token) is None          # no cache: closed
+    assert h not in service._token_cache
+
+
+async def test_upsert_never_reenables_a_disabled_account():
+    """Coordinator point 3: re-running create-user replaces the password but
+    leaves `disabled` alone."""
+    rec = await _user("mike", "operator")
+    await service.update_user(rec.id, disabled=True)
+    again = await service.create_user("mike", "a-fresh-password-1", "operator", memory_only=True)
+    assert again.id == rec.id and again.disabled is True
+    with pytest.raises(service.AuthError):
+        await service.login("mike", "a-fresh-password-1", "127.0.0.1")
+    # The store contract itself: disabled is written only when asked.
+    from app.auth.store import UserRecord
+    mem = service.memory_store()
+    out = await mem.upsert_user(UserRecord(id="x", username="mike", password_hash="h", disabled=False))
+    assert out.disabled is True
+    out = await mem.upsert_user(UserRecord(id="x", username="mike", password_hash="h", disabled=False),
+                                set_disabled=True)
+    assert out.disabled is False
 
 
 async def test_bootstrap_keeps_disabled_env_admin_disabled(monkeypatch):
@@ -436,3 +557,120 @@ async def test_backoff_allows_one_in_flight_attempt_and_hard_cap(monkeypatch):
     clock["t"] += service.username_backoff_s("lee") + 0.01
     with pytest.raises(service.RateLimited, match="this account"):
         await service.login("lee", "correct-horse-battery", "10.4.1.1")
+
+
+# ── changes made by another process (the CLI) ────────────────────────────
+
+async def test_out_of_process_membership_change_applies_within_cache_window(monkeypatch):
+    """The CLI runs in its own process and cannot drop this process's token
+    cache or reach its sockets. Simulated here by writing the store directly
+    (no membership_changed / revocation in this process): the server must
+    pick the change up once the cached entry is older than TOKEN_CACHE_S,
+    both for HTTP (verify_token reloads memberships) and for a live socket
+    (revalidate refreshes the compat role, and disconnects once the token
+    is gone)."""
+    from app.auth import socket_guard
+    from app.sessions.manager import SessionManager
+
+    disconnected = []
+
+    class FakeSio:
+        async def emit(self, *a, **k): pass
+        async def disconnect(self, sid): disconnected.append(sid)
+
+    clock = {"t": 5000.0}
+    monkeypatch.setattr(service.time, "monotonic", lambda: clock["t"])
+    rec = await _user("cleo", "operator")
+    token, user, _ = await service.login("cleo", "correct-horse-battery", "127.0.0.1")
+    sm = SessionManager()
+    socket_guard.configure(FakeSio(), sm)
+    s = sm.create(socket_id="cleo-sock")
+    s.user_id, s.username, s.role = user.id, "cleo", "operator"
+    s.token_hash = service.hash_token(token)
+    s.auth_checked_at = clock["t"]
+
+    mem = service.memory_store()
+    pilot = (await mem.memberships_for_user(rec.id))[0]
+    await mem.update_membership(pilot.id, role="viewer")       # "the CLI" demotes
+
+    # Inside the window the cached answer stands ...
+    clock["t"] += service.TOKEN_CACHE_S - 1
+    assert (await service.verify_token(token)).role == "operator"
+    assert await socket_guard.require_operator("cleo-sock", "drone_action") is True
+    # ... and once it is older than TOKEN_CACHE_S both paths see the change.
+    clock["t"] += 2
+    assert (await service.verify_token(token)).role == "viewer"
+    clock["t"] += service.SOCKET_REVALIDATE_S + 1
+    assert await socket_guard.require_operator("cleo-sock", "drone_action") is False
+    assert s.role == "viewer" and not disconnected
+
+    # Re-running create-user (a new password) revokes the tokens; another
+    # process's revocation reaches this one's socket on the next stale check.
+    await mem.update_membership(pilot.id, role="pilot")
+    await mem.delete_tokens_for_user(rec.id)                   # what the CLI's revoke_all does in the DB
+    clock["t"] += service.TOKEN_CACHE_S + 1
+    assert await service.verify_token(token) is None
+    assert await socket_guard.require_operator("cleo-sock", "drone_action") is False
+    assert disconnected == ["cleo-sock"]
+
+
+async def test_create_user_rerun_signs_out_existing_sessions():
+    await _user("dina", "operator")
+    token, _, _ = await service.login("dina", "correct-horse-battery", "127.0.0.1")
+    await service.create_user("dina", "a-replaced-password", "operator", memory_only=True)
+    assert await service.verify_token(token) is None
+
+
+# ── rate limit keyed on the account, not the login string ────────────────
+
+async def test_alternating_username_and_email_shares_one_budget():
+    await service.create_user("eli", "correct-horse-battery", "operator", memory_only=True,
+                              email="eli@example.com", email_verified=True)
+    for i in range(service.LOGIN_MAX_FAILURES):
+        with pytest.raises(service.AuthError):
+            await service.login("eli", "wrong-password-here", f"10.9.0.{i}")
+    # The email is a fresh login string, but the same account: in backoff,
+    # refused even with the right password.
+    with pytest.raises(service.RateLimited):
+        await service.login("eli@example.com", "correct-horse-battery", "10.9.1.1")
+    for i in range(service.LOGIN_MAX_FAILURES):
+        with pytest.raises(service.RateLimited):
+            await service.login("eli@example.com", "wrong-password-here", f"10.9.2.{i}")
+
+
+async def test_mixed_username_and_email_failures_reach_backoff(monkeypatch):
+    """5 failures by username and 5 by email on one account: the account is
+    in backoff (and well before the 10th)."""
+    clock = {"t": 9000.0}
+    monkeypatch.setattr(service.time, "monotonic", lambda: clock["t"])
+    await service.create_user("fay", "correct-horse-battery", "operator", memory_only=True,
+                              email="fay@example.com", email_verified=True)
+    outcomes = []
+    for i in range(service.LOGIN_MAX_FAILURES):
+        for login in ("fay", "fay@example.com"):
+            try:
+                await service.login(login, "wrong-password-here", f"10.8.{len(outcomes)}.1")
+            except service.RateLimited:
+                outcomes.append("limited")
+            except service.AuthError:
+                outcomes.append("checked")
+    assert outcomes.count("checked") == service.LOGIN_MAX_FAILURES
+    assert outcomes[service.LOGIN_MAX_FAILURES:] == ["limited"] * service.LOGIN_MAX_FAILURES
+    assert service.username_backoff_s(service.account_key((await service.memory_store()
+                                                          .get_user_by_username("fay")).id)) > 0
+    # After the delay the right password works and clears both keys.
+    clock["t"] += service.USERNAME_BACKOFF_MAX_S
+    token, user, _ = await service.login("fay@example.com", "correct-horse-battery", "10.8.99.1")
+    assert token and service.username_backoff_s(service.account_key(user.id)) == 0.0
+    assert service.username_backoff_s("fay@example.com") == 0.0
+
+
+async def test_password_change_shares_the_account_budget():
+    await _user("gus", "operator")
+    token, user, _ = await service.login("gus", "correct-horse-battery", "127.0.0.1")
+    for i in range(service.LOGIN_MAX_FAILURES):
+        with pytest.raises(service.AuthError):
+            await service.login("gus", "wrong-password-here", f"10.7.0.{i}")
+    with pytest.raises(service.RateLimited):
+        await service.change_password(user, "correct-horse-battery", "a-new-password-1",
+                                      "10.7.1.1", keep_hash=None)

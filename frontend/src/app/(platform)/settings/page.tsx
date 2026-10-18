@@ -7,12 +7,11 @@ import { getUiFont, setUiFont, getUiZoom, setUiZoom, getUiTextSize, setUiTextSiz
 import {
     Sun, Moon, MoonStar, Info, Zap,
     SlidersHorizontal, Video, Bot, Map, Route, Bell, Database, Keyboard, AlertTriangle, Radio,
-    Radar,
+    Radar, UserRound, Users,
     type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatBytes, formatRate, formatEta } from '@/lib/formatBytes'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useMissionStore } from '@/store/mission'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { getVideoSettings, getFeedMode, RES_OPTIONS, FPS_OPTIONS, type VideoRes, type VideoFps, type FeedMode, getCrowdPreset, type CrowdPreset, getCrowdThresholds, getCrowdCustom, normaliseCrowdThresholds, getStandbyUplink, type StandbyUplink, getCaptureProfile, type CaptureProfile } from '@/lib/videoSettings'
@@ -50,6 +49,9 @@ import { probeDroneNetwork, explainResult, type ProbeReport } from '@/lib/netPro
 import { isDesktopApp, nativeUpdater } from '@/lib/nativeBridge'
 import { useAirUnitVideoBridge } from '@/hooks/useAirUnitVideoBridge'
 import { useClientValue, useHydrated } from '@/hooks/useClientValue'
+import { PrefRow } from '@/components/settings/primitives'
+import { DevicesGroup, PasswordGroup, ProfileGroup } from '@/components/settings/AccountSettings'
+import { InvitesGroup, MembersGroup, WorkspaceGroup } from '@/components/settings/WorkspaceSettings'
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
 
@@ -68,28 +70,6 @@ function GroupLabel({ text }: { text: string }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '20px 0 8px' }}>
             <span style={{ fontSize: 10, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.12em', color: 'hsl(var(--app-text-muted))' }}>{text}</span>
             <div style={{ flex: 1, height: 1, background: 'hsl(var(--app-border))' }} />
-        </div>
-    )
-}
-
-function PrefRow({ label, sub, tip, right }: { label: string; sub?: string; tip?: string; right: React.ReactNode }) {
-    return (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '10px 0', borderBottom: '1px solid hsl(var(--app-border))' }}>
-            <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <span style={{ fontSize: 13, color: 'hsl(var(--app-text))' }}>{label}</span>
-                    {tip && (
-                        <Tooltip>
-                            <TooltipTrigger style={{ background: 'none', border: 'none', padding: 0, cursor: 'help', display: 'flex' }}>
-                                <Info size={11} style={{ color: 'hsl(var(--app-text-muted))' }} />
-                            </TooltipTrigger>
-                            <TooltipContent style={{ maxWidth: 220, fontSize: 11, lineHeight: 1.5 }}>{tip}</TooltipContent>
-                        </Tooltip>
-                    )}
-                </div>
-                {sub && <p style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '2px 0 0', lineHeight: 1.4 }}>{sub}</p>}
-            </div>
-            <div style={{ flexShrink: 0 }}>{right}</div>
         </div>
     )
 }
@@ -1912,6 +1892,24 @@ const CATEGORIES: Category[] = [
             { label: 'APPEARANCE', Body: DisplayGroup },
             { label: 'STATUS BAR', Body: StatusBarGroup },
             { label: 'UNITS',      Body: UnitsGroup },
+        ],
+    },
+    {
+        id: 'account', label: 'Account', icon: UserRound,
+        blurb: 'Your profile, password and signed-in devices - saved on the server, not this device',
+        sections: [
+            { label: 'PROFILE',    Body: ProfileGroup },
+            { label: 'PASSWORD',   Body: PasswordGroup },
+            { label: 'MY DEVICES', Body: DevicesGroup },
+        ],
+    },
+    {
+        id: 'workspace', label: 'Workspace', icon: Users,
+        blurb: 'Who is in the active workspace, and invite links for new people',
+        sections: [
+            { label: 'WORKSPACE', Body: WorkspaceGroup },
+            { label: 'MEMBERS',   Body: MembersGroup },
+            { label: 'INVITES',   Body: InvitesGroup },
         ],
     },
     {

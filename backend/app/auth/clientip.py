@@ -81,3 +81,10 @@ def client_ip_from(peer: str | None, cf_connecting_ip: str | None,
         if forwarded:
             return forwarded
     return (peer or "").strip() or "-"
+
+
+def client_ip(request) -> str:
+    """client_ip_from for a FastAPI / Starlette request."""
+    h = request.headers
+    return client_ip_from(request.client.host if request.client else None,
+                          h.get("cf-connecting-ip"), h.get("x-forwarded-for"))
