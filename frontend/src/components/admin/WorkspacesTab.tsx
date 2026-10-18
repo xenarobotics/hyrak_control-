@@ -256,6 +256,15 @@ function WorkspaceDetail({ ws, list, zones, isFounder, onChanged, onDeleted, onS
         void act('head', 'cloud_sim', () => updateWorkspace(ws.id, { features: { cloud_sim: !cloudSim } }),
             cloudSim ? 'Cloud simulator turned off.' : 'Cloud simulator turned on.', onChanged)
     }
+    // Custom models (upload ONNX / Hugging Face) are the same kind of
+    // premium switch (docs/custom_models/DESIGN.md section 0).
+    const customModels = ws.features?.custom_models === true
+    const toggleCustomModels = () => {
+        const verb = customModels ? 'Turn off' : 'Turn on'
+        if (!window.confirm(`${verb} custom models (premium) for ${ws.name}?`)) return
+        void act('head', 'custom_models', () => updateWorkspace(ws.id, { features: { custom_models: !customModels } }),
+            customModels ? 'Custom models turned off. Their models stay stored but cannot run.' : 'Custom models turned on.', onChanged)
+    }
     const remove = () => {
         const typed = window.prompt(`Delete ${ws.name} permanently? Type its name to confirm. Workspaces with clients or drones cannot be deleted.`)
         if (typed === null) return
@@ -274,6 +283,7 @@ function WorkspaceDetail({ ws, list, zones, isFounder, onChanged, onDeleted, onS
                     <Tag label={KIND_LABELS[ws.kind].toUpperCase()} tone={ws.kind === 'platform' ? 'cyan' : 'zinc'} />
                     {ws.disabled && <Tag label="DISABLED" tone="red" />}
                     {cloudSim && <Tag label="CLOUD SIM" tone="cyan" />}
+                    {customModels && <Tag label="CUSTOM MODELS" tone="cyan" />}
                     <span className="ml-auto flex gap-2">
                         {canMembers && <Btn onClick={rename} disabled={busy === 'rename'}>RENAME</Btn>}
                         {isFounder && ws.kind !== 'platform' && (
@@ -285,6 +295,12 @@ function WorkspaceDetail({ ws, list, zones, isFounder, onChanged, onDeleted, onS
                             <Btn onClick={toggleCloudSim} disabled={busy === 'cloud_sim'}
                                 title="Premium: a per-session simulator on the HYRAK server">
                                 {cloudSim ? 'CLOUD SIM OFF' : 'CLOUD SIM ON'}
+                            </Btn>
+                        )}
+                        {isFounder && ws.kind !== 'platform' && (
+                            <Btn onClick={toggleCustomModels} disabled={busy === 'custom_models'}
+                                title="Premium: upload ONNX models or import them from Hugging Face">
+                                {customModels ? 'CUSTOM MODELS OFF' : 'CUSTOM MODELS ON'}
                             </Btn>
                         )}
                         {canDelete && ws.kind !== 'platform' && (

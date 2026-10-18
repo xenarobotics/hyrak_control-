@@ -12,7 +12,15 @@ export interface PersonData {
 export interface Detection {
     name: string
     box: [number, number, number, number]
+    /** 0..1, when the analyser sends it (custom models do). */
+    score?: number
 }
+
+/** One class of a classify model's answer (custom models). */
+export interface ClassScore { name: string; score: number }
+
+/** A custom model's alert rule firing on a frame. */
+export interface AlertHit { label: string; score: number; at?: number }
 
 export interface CVResult {
     mode: string
@@ -34,6 +42,10 @@ export interface CVResult {
     // Source frame size the box coordinates refer to (for canvas scaling)
     frame_w?: number
     frame_h?: number
+    // Custom models (custom:<id>): classify answers, best first, and the
+    // alert rule's hits on this frame. Detect models use detections/objects.
+    predictions?: ClassScore[]
+    alert_hits?: AlertHit[]
     // Object detection
     objects?: Record<string, number>
     detections?: Detection[]

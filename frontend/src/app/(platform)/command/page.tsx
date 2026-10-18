@@ -52,7 +52,7 @@ import { AiDrawer } from '@/components/command/AiDrawer'
 import { AiView } from '@/components/command/AiView'
 import { AiPanel } from '@/components/command/AiPanel'
 import { useAiModule } from '@/components/command/useAiModule'
-import { MODES } from '@/components/vision/ModeSelector'
+import { useLibraryEntry } from '@/components/models/useModelLibrary'
 import { ViewOnlyFence } from '@/components/layout/ViewOnly'
 import { useLiveScope } from '@/hooks/useLiveScope'
 
@@ -349,7 +349,7 @@ function DevCommand() {
     const noAvoid = swarmEnabled
     const activeTab: DockTab = noAvoid && layout.tab === 'avoid' ? 'telemetry' : layout.tab
     const mapBig = layout.big === 'map'
-    const runningMod = MODES.find(m => m.value === ai.mode)
+    const runningMod = useLibraryEntry(ai.mode)
     const toggleModule = (m: string) => {
         const starting = m !== ai.mode
         ai.toggle(m)
@@ -367,9 +367,9 @@ function DevCommand() {
                         <button onClick={() => update({ tab: 'ai', dockHidden: false })} title="Show the module's panel"
                             className="h-full pl-2.5 pr-2 flex items-center gap-1.5" style={{ color: runningMod.color }}>
                             <runningMod.icon size={14} />
-                            <span className="font-bold tracking-wider">AI {runningMod.label.toUpperCase()}</span>
+                            <span className="font-bold tracking-wider">AI {runningMod.name.toUpperCase()}</span>
                         </button>
-                        <button onClick={ai.stop} aria-label={`Stop ${runningMod.label}`} title="Stop the module"
+                        <button onClick={ai.stop} aria-label={`Stop ${runningMod.name}`} title="Stop the module"
                             className="h-full w-8 flex items-center justify-center border-l text-zinc-300 hover:text-white"
                             style={{ borderColor: `${runningMod.color}44` }}>
                             <X size={13} />
@@ -424,7 +424,7 @@ function DevCommand() {
                     {mounted && ai.running && (
                         <div style={boxFor('ai')}>
                             <AiView />
-                            {layout.big !== 'ai' && pipChrome('ai', `AI ${runningMod?.label.toUpperCase() ?? ''}`)}
+                            {layout.big !== 'ai' && pipChrome('ai', `AI ${runningMod?.name.toUpperCase() ?? ''}`)}
                         </div>
                     )}
                     {mounted && !viewOnly && (

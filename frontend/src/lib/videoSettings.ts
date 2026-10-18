@@ -107,7 +107,9 @@ export function overlayCapableModes(): string[] {
 }
 
 export function wantsClientOverlay(mode: string): boolean {
-    return getFeedMode() === 'overlay' && OVERLAY_CAPABLE.includes(mode)
+    return getFeedMode() === 'overlay'
+        // Custom models send object-detection-shaped results, drawn here.
+        && (OVERLAY_CAPABLE.includes(mode) || mode.startsWith('custom:'))
 }
 
 export function getVideoSettings(): { res: VideoRes; fps: VideoFps } {

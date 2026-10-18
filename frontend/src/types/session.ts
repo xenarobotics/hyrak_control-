@@ -19,6 +19,9 @@ export type AnalysisMode =
     // Frontend-only mode: drives the reconstruction sidecar via /api/recon,
     // never sent to the session's vision pipeline as an analysis mode.
     | '3d-reconstruction'
+    // A workspace or HYRAK catalogue model (Custom Models, docs/custom_models
+    // DESIGN.md section 0). Results use the object-detection cv_results shape.
+    | `custom:${string}`
 
 export type ConnectionStatus =
     | 'disconnected'
