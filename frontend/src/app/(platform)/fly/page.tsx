@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils'
 import { SurfaceCard } from '@/components/layout/SurfaceCard'
 import { useHydrated } from '@/hooks/useClientValue'
 import { useAccess } from '@/hooks/useAccess'
+import { ViewOnlyFence } from '@/components/layout/ViewOnly'
 
 // Leaflet touches `window` - no SSR
 const FleetMap = dynamic(() => import('@/components/swarm/FleetMap'), {
@@ -239,12 +240,12 @@ export default function FlyPage() {
                         </SurfaceCard>
 
                         <SurfaceCard title="FLIGHT CONTROLS">
-                            <DroneControls />
+                            <ViewOnlyFence><DroneControls /></ViewOnlyFence>
                         </SurfaceCard>
 
                         {!swarmEnabled && (
                             <SurfaceCard title="AVOIDANCE">
-                                <AvoidancePanel />
+                                <ViewOnlyFence note={false}><AvoidancePanel /></ViewOnlyFence>
                             </SurfaceCard>
                         )}
 
@@ -266,7 +267,7 @@ export default function FlyPage() {
 
                         <div className="shrink-0 pb-1">
                             <Separator className="mb-3" style={{ background: 'hsl(var(--app-border))' }} />
-                            <EmergencyStop />
+                            <ViewOnlyFence note={false}><EmergencyStop /></ViewOnlyFence>
                         </div>
 
                     </div>

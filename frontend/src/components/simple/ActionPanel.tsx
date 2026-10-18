@@ -14,6 +14,8 @@ import type { FlightState } from './useFlightState'
 import { HoldButton } from './HoldButton'
 import { SetupPanel } from './SetupPanel'
 import { setParams, type AvoidanceStatus } from '@/lib/avoidance'
+import { useLiveScope } from '@/hooks/useLiveScope'
+import { ViewOnlyNote } from '@/components/layout/ViewOnly'
 
 const HEIGHTS = [
     { m: 3, label: 'Low', sub: '3 m' },
@@ -58,6 +60,9 @@ export function ActionPanel({ s, avoid }: { s: FlightState; avoid: AvoidanceStat
     const [problem, setProblem] = useState<string | null>(null)
     const [starting, setStarting] = useState(false)
     const wantTakeoff = useRef<number | null>(null)
+    // Customer-only accounts (docs/ACCESS_MODEL.md section 8a): viewers get
+    // no flying buttons at all, and nobody is sent to the staff-only planner.
+    const { customer, viewOnly } = useLiveScope()
 
     // Indoors: snap the height down on the outdoor -> indoor edge (during
     // render, not in an effect).
@@ -127,6 +132,9 @@ export function ActionPanel({ s, avoid }: { s: FlightState; avoid: AvoidanceStat
     if (s.phase === 'no-server' || s.phase === 'no-drone' || s.phase === 'connecting') {
         return <SetupPanel />
     }
+    // Hidden rather than disabled: the hold-to-stop button works on pointer
+    // events, which a disabled control does not reliably swallow.
+    if (viewOnly) return <ViewOnlyNote tone="simple" />
 
     return (
         <div className="flex flex-col gap-5">
@@ -183,7 +191,7 @@ export function ActionPanel({ s, avoid }: { s: FlightState; avoid: AvoidanceStat
                             sub={`Takes off and flies the ${s.routeStops} planned stops by itself`}>
                             Fly the planned route
                         </BigButton>
-                    ) : (
+                    ) : customer ? null : (
                         <Link href="/mission" className="text-[16px] underline underline-offset-4 inline-flex items-center min-h-[44px]" style={{ color: 'var(--s-blue)' }}>
                             Plan a route for the drone to fly by itself
                         </Link>

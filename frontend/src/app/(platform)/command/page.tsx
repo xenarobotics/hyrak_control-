@@ -53,6 +53,8 @@ import { AiView } from '@/components/command/AiView'
 import { AiPanel } from '@/components/command/AiPanel'
 import { useAiModule } from '@/components/command/useAiModule'
 import { MODES } from '@/components/vision/ModeSelector'
+import { ViewOnlyFence } from '@/components/layout/ViewOnly'
+import { useLiveScope } from '@/hooks/useLiveScope'
 
 const mapLoading = () => (
     <div className="w-full h-full flex items-center justify-center bg-zinc-900">
@@ -192,6 +194,9 @@ function DevCommand() {
     const [drawerOpen, setDrawerOpen] = useState(false)
     const ai = useAiModule()
     const swarmEnabled = useSwarmStore(s => s.enabled)
+    // Workspace viewers (docs/ACCESS_MODEL.md section 8a) watch only: the
+    // command surfaces below are fenced and the AI drawer is not offered.
+    const { viewOnly } = useLiveScope()
     const avoid = useAvoidanceLive()
     const dockDrag = useRef<{ x: number; w: number } | null>(null)
     const stageRef = useRef<HTMLDivElement>(null)
@@ -383,7 +388,9 @@ function DevCommand() {
             <div className="flex flex-1 min-h-0 gap-2">
                 {/* ── Action rail ─────────────────────────────────────────── */}
                 <div className="shrink-0 rounded-xl border p-1.5 overflow-y-auto" style={PANEL}>
-                    <ActionRail avoid={avoid} />
+                    <ViewOnlyFence compact>
+                        <ActionRail avoid={avoid} />
+                    </ViewOnlyFence>
                 </div>
 
                 {/* ── Stage ───────────────────────────────────────────────── */}
@@ -417,7 +424,7 @@ function DevCommand() {
                             {layout.big !== 'ai' && pipChrome('ai', `AI ${runningMod?.label.toUpperCase() ?? ''}`)}
                         </div>
                     )}
-                    {mounted && (
+                    {mounted && !viewOnly && (
                         <AiDrawer open={drawerOpen} onOpen={() => setDrawerOpen(true)}
                             onClose={() => setDrawerOpen(false)} mode={ai.mode} onToggle={toggleModule} />
                     )}
@@ -453,20 +460,20 @@ function DevCommand() {
                                         </div>
                                         {layout.radar && <ObstacleRadar avoid={avoid} />}
                                         {layout.depth && <DepthStrip avoid={avoid} />}
-                                        <AvoidancePanel />
+                                        <ViewOnlyFence><AvoidancePanel /></ViewOnlyFence>
                                     </>
                                 )}
-                                {activeTab === 'ai' && <AiPanel onStop={ai.stop} />}
+                                {activeTab === 'ai' && <ViewOnlyFence><AiPanel onStop={ai.stop} /></ViewOnlyFence>}
                                 {activeTab === 'telemetry' && <TelemetryPanel />}
                                 {activeTab === 'setup' && (
                                     <>
-                                        {!swarmEnabled && <IndoorNavCard avoid={avoid} />}
+                                        {!swarmEnabled && <ViewOnlyFence note={false}><IndoorNavCard avoid={avoid} /></ViewOnlyFence>}
                                         {mounted && swarmEnabled
                                             ? <p className="text-xs font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>
                                                 Swarm mode - manage the fleet on the Fly tab.</p>
                                             : <DeviceSelector />}
-                                        <div className="border-t pt-4" style={{ borderColor: 'hsl(var(--app-border))' }}>
-                                            <DroneControls />
+                                        <div className="border-t pt-4 flex flex-col gap-2" style={{ borderColor: 'hsl(var(--app-border))' }}>
+                                            <ViewOnlyFence><DroneControls /></ViewOnlyFence>
                                         </div>
                                     </>
                                 )}

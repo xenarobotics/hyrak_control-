@@ -25,6 +25,8 @@ import {
     videoSourcesFor, sourceGroupsFor,
 } from '@/lib/videoSource'
 import { useAccess } from '@/hooks/useAccess'
+import { useLiveScope } from '@/hooks/useLiveScope'
+import { VIEW_ONLY_TEXT } from '@/components/layout/ViewOnly'
 import { isDesktopApp } from '@/lib/nativeBridge'
 import { Camera, Satellite, Plug, PlugZap, Loader, RefreshCw, Plus } from 'lucide-react'
 import { useClientValue } from '@/hooks/useClientValue'
@@ -78,6 +80,9 @@ export function StatusBarLinks() {
     // Customer-only accounts get the customer-safe sources (lib/videoSource).
     const { isCustomer } = useAccess()
     const catalogue = videoSourcesFor(isCustomer)
+    // Connecting the drone link is a command: viewers watch only.
+    const { viewOnly } = useLiveScope()
+    const linkBlocked = !isConnected && (sitlNeedsDesktop || viewOnly)
 
     const {
         cameras, selectedCameraId, setSelectedCameraId, scanCameras,
@@ -218,8 +223,9 @@ export function StatusBarLinks() {
 
             <button
                 onClick={isConnected ? () => { void disconnect() } : connect}
-                disabled={isConnecting || disconnecting || (!isConnected && sitlNeedsDesktop)}
-                title={sitlNeedsDesktop && !isConnected
+                disabled={isConnecting || disconnecting || linkBlocked}
+                title={viewOnly && !isConnected ? VIEW_ONLY_TEXT
+                    : sitlNeedsDesktop && !isConnected
                     ? 'SITL needs the desktop app - a browser tab cannot reach udp:14540'
                     : isConnected ? 'Disconnect telemetry' : 'Connect telemetry'}
                 style={{
@@ -230,7 +236,7 @@ export function StatusBarLinks() {
                     border: `1px solid ${isConnected ? '#f8717160' : '#4ade8060'}`,
                     color: isConnected ? '#f87171' : '#4ade80',
                     cursor: 'pointer', whiteSpace: 'nowrap',
-                    opacity: (isConnecting || disconnecting || (!isConnected && sitlNeedsDesktop)) ? 0.4 : 1,
+                    opacity: (isConnecting || disconnecting || linkBlocked) ? 0.4 : 1,
                 }}
             >
                 {isConnecting || disconnecting

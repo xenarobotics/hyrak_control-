@@ -19,6 +19,9 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { PX4_META, getGroupFromKey, humanizeParamKey, type PX4Group, type PX4Meta } from '@/lib/px4-params-meta'
 import { getRfDownlinkPort, setRfDownlinkPort, getRfUplinkPort, setRfUplinkPort, getRfUplinkHost, setRfUplinkHost } from '@/lib/rfBridge'
+import { useLiveScope } from '@/hooks/useLiveScope'
+import { disconnectTelemetryLink } from '@/hooks/useDrone'
+import { ViewOnlyFence } from '@/components/layout/ViewOnly'
 
 function ls<T>(key: string, fallback: T): T {
     if (typeof window === 'undefined') return fallback
@@ -630,6 +633,10 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
     const [downlinkPort, setDownlinkPort] = useState(() => getRfDownlinkPort())
     const [uplinkPort, setUplinkPort] = useState(() => getRfUplinkPort())
     const [uplinkHost, setUplinkHost] = useState(() => getRfUplinkHost())
+    // A typed MAVLink address or the RF bridge makes the SERVER bind a port:
+    // staff-only (docs/ACCESS_MODEL.md section 8a). Customers connect from
+    // the Fly tab through a relay on their own device.
+    const { customer } = useLiveScope()
     const connected = telStatus === 'connected'
     const connect    = useCallback(() => {
         lsSet('hyrak-mav-address', address)
@@ -663,7 +670,13 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                             {connected ? 'Connected' : 'No link'}
                         </div>
                     </div>
-                    {!connected && (
+                    {customer && !connected && (
+                        <p style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', lineHeight: 1.6, margin: 0 }}>
+                            Connect your drone from the Fly tab: a radio plugged into this device, or SITL
+                            through the HYRAK desktop app.
+                        </p>
+                    )}
+                    {!connected && !customer && (
                         <Field label="MAVLINK ADDRESS" tip="Connection string for your autopilot.">
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                                 <div style={{ display: 'flex', gap: 6 }}>
@@ -690,7 +703,7 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                         operation - telemetry looks perfect and commands vanish
                         - so "what is it actually using?" has to be answerable
                         without disconnecting first. */}
-                    {address === RF_BRIDGE_ADDR && (
+                    {address === RF_BRIDGE_ADDR && !customer && (
                         <Field label="RF BRIDGE PORTS" tip="UDP ports the ground station's wfb_rx/wfb_tx use - see communication/start-gs.sh. The uplink HOST matters once the decoder is not on this machine: downlink arrives from anywhere (we bind 0.0.0.0), but the uplink is sent to a fixed listener, so leaving it on 127.0.0.1 with an off-box decoder gives perfect telemetry and no commands.">
                             <div style={{ display: 'flex', gap: 6 }}>
                                 <div style={{ flex: 1 }}>
@@ -742,13 +755,18 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                             </div>
                         </Field>
                     )}
-                    <div style={{ display: 'flex', gap: 8 }}>
+                    {/* Customers only release a link here; it is made on the Fly tab. */}
+                    {customer ? (connected && (
+                        <button onClick={() => { void disconnectTelemetryLink() }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 0', borderRadius: 8, cursor: 'pointer', fontFamily: 'monospace', fontSize: 12, fontWeight: 700, border: '1px solid', background: 'rgba(248,113,113,.08)', borderColor: 'rgba(248,113,113,.35)', color: '#fca5a5' }}>
+                            <WifiOff size={14} /> Disconnect
+                        </button>
+                    )) : <div style={{ display: 'flex', gap: 8 }}>
                         <button onClick={connected ? disconnect : connect} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 0', borderRadius: 8, cursor: 'pointer', fontFamily: 'monospace', fontSize: 12, fontWeight: 700, border: '1px solid', ...(connected ? { background: 'rgba(248,113,113,.08)', borderColor: 'rgba(248,113,113,.35)', color: '#fca5a5' } : { background: 'rgba(74,222,128,.08)', borderColor: 'rgba(74,222,128,.35)', color: '#4ade80' }) }}>
                             {connected ? <WifiOff size={14} /> : <Wifi size={14} />}
                             {connected ? 'Disconnect' : 'Connect'}
                         </button>
                         {connected && <button onClick={() => { disconnect(); setTimeout(connect, 600) }} style={{ padding: '10px 12px', borderRadius: 8, cursor: 'pointer', background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text-muted))' }}><RotateCcw size={14} /></button>}
-                    </div>
+                    </div>}
                 </Card>
 
                 {/* Right: live telemetry or MAVLink stream */}
@@ -3145,6 +3163,9 @@ export default function ConfigPage() {
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', opacity: !inGrid ? 1 : 0, transform: !inGrid ? 'scale(1)' : 'scale(1.015)', transition: 'opacity 0.2s ease, transform 0.2s ease', pointerEvents: !inGrid ? 'auto' : 'none' }}>
                     <div style={{ flex: 1, overflowY: 'auto', padding: '24px 24px 16px' }}>
                         <SectionHead meta={meta} pct={domainPcts[section]} />
+                        {/* Parameter writes, calibration and reboots are
+                            commands: a workspace viewer reads this page only. */}
+                        <ViewOnlyFence>
                         {section === 'connection' && <ConnectionWorkspace address={address} setAddress={v => { setAddress(v); lsSet('hyrak-mav-address', v) }} />}
                         {section === 'vehicle'    && <VehicleWorkspace v={vehicle} onUpdate={upV} />}
                         {section === 'sensors'    && <SensorsWorkspace />}
@@ -3153,6 +3174,7 @@ export default function ConfigPage() {
                         {section === 'safety'     && <SafetyWorkspace s={safety} onUpdate={upS} />}
                         {section === 'flight'     && <FlightWorkspace f={flight} onUpdate={upF} rthAlt={safety.rthAlt} maxAlt={safety.maxAlt} maxAltEnabled={safety.maxAltEnabled} />}
                         {section === 'parameters' && <ParametersWorkspace />}
+                        </ViewOnlyFence>
                     </div>
                     <SectionTabBar current={section} onSelect={setSection} onBack={goToGrid} tabs={tabs} />
                 </div>
