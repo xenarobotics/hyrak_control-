@@ -112,6 +112,16 @@ async def _browser_offer():
     return {"sdp": sdp, "type": "offer"}
 
 
+@pytest.fixture(autouse=True)
+def staff_guard(monkeypatch):
+    """These tests pin resource ownership, not access: every guard passes as
+    for a staff session (access is covered in test_live_scope.py)."""
+    async def allow(*a, **k):
+        return True
+    monkeypatch.setattr(signaling, "require_session_view", allow)
+    monkeypatch.setattr(signaling, "require_staff", allow)
+
+
 @pytest.fixture
 def quiet_feeds(monkeypatch):
     """feeds.acquire hands out a frame-producing fake; release is recorded."""

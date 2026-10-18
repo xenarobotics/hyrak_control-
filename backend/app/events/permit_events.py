@@ -6,7 +6,7 @@ identified before requesting one. Admin review happens over REST
 """
 import logging
 
-from app.auth.socket_guard import require_operator
+from app.auth.socket_guard import require_operator, require_staff
 
 logger = logging.getLogger("verocore.events.permits")
 
@@ -71,6 +71,7 @@ def register_permit_events(sio, session_manager):
 
     @sio.on("list_my_permits")
     async def on_list_my_permits(sid, data=None):
+        if not await require_staff(sid, "list_my_permits"): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return

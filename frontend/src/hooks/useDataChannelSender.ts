@@ -21,6 +21,7 @@
 // probe (udp_video_source.open_air_unit_video) and fails outright on a silent
 // port, so packets have to already be flowing before the browser's offer.
 
+import { apiFetch } from '@/lib/api'
 import { useEffect, useState } from 'react'
 import { isDesktopApp, nativeBridge, type BridgeEvent } from '@/lib/nativeBridge'
 import { getSocket } from '@/lib/socket'
@@ -130,7 +131,7 @@ function sortRelayUrls(urls: string | string[]): string[] {
 }
 async function fetchIceServersForSender(): Promise<SenderIceServer[]> {
     try {
-        const res = await fetch(`${getServerUrl()}/api/webrtc/ice-servers`, {
+        const res = await apiFetch(`${getServerUrl()}/api/webrtc/ice-servers`, {
             signal: AbortSignal.timeout(5000),
         })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)

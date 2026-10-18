@@ -18,8 +18,9 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.responses import StreamingResponse
 
-from app.auth.deps import require_operator
+from app.auth.deps import require_viewer
 from app.auth.service import AuthUser
+from app.auth.url_tickets import require_user_or_ticket
 from app.config import get_settings
 
 router = APIRouter(prefix="/api/video", tags=["video"])
@@ -101,7 +102,8 @@ _probe_cache: tuple[float, int, list] | None = None   # (when, max_units, units)
 
 
 @router.get("/mesh-units")
-async def mesh_units(max_units: int = Query(8, ge=1, le=64)):
+async def mesh_units(max_units: int = Query(8, ge=1, le=64),
+                     _user: AuthUser = Depends(require_viewer)):
     # Serialised and cached for a second: the DEVICES card and the wall both
     # poll, and two overlapping probes each saw the other's 350 ms socket as
     # "in use" - reporting a dark unit as live and the wall then waiting 5 s
@@ -120,7 +122,8 @@ async def mesh_units(max_units: int = Query(8, ge=1, le=64)):
 
 @router.get("/feeds/{port}/hevc")
 async def feed_hevc(port: int = FeedPort,
-                    _user: AuthUser = Depends(require_operator)):
+                    _user: AuthUser = Depends(
+                        require_user_or_ticket("operator", "/api/video/feeds/{port}/hevc"))):
     """The unit's OWN H.265, bit-exact, as framed Annex-B access units:
     [uint32 len][uint8 key][uint32 seq][AU] - the format the app's
     WebCodecsVideo already parses. Starts at a keyframe (VPS/SPS/PPS in-band)
@@ -145,7 +148,8 @@ async def feed_hevc(port: int = FeedPort,
 
 @router.get("/feeds/{port}/h264")
 async def feed_h264(port: int = FeedPort,
-                    _user: AuthUser = Depends(require_operator)):
+                    _user: AuthUser = Depends(
+                        require_user_or_ticket("operator", "/api/video/feeds/{port}/h264"))):
     """The unit's video transcoded ONCE on the GPU to H.264 with the source's
     colour signalling (full-range BT.709) written into the VUI, framed like
     /hevc. For browsers without an HEVC decoder: WebCodecs decodes H.264 in
@@ -169,6 +173,6 @@ async def feed_h264(port: int = FeedPort,
 
 
 @router.get("/feeds")
-async def feeds_status():
+async def feeds_status(_user: AuthUser = Depends(require_viewer)):
     from app.webrtc import feeds
     return {"feeds": [feeds.status(p) for p in feeds.open_ports()]}

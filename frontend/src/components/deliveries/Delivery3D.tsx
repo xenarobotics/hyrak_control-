@@ -20,6 +20,7 @@
 // - terrain samples are cached per waypoint set, so a rebuild does not
 //   re-fetch elevation tiles it already has
 
+import { apiFetch } from '@/lib/api'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getServerUrl } from '@/lib/server-url'
 import { ZONE_COLORS, type ZoneFeature } from '@/components/admin/zones'
@@ -65,7 +66,7 @@ export default function Delivery3D({ pads, selection, drones, showAirspace }: {
     }>>(new Map())
 
     useEffect(() => {
-        fetch(`${getServerUrl()}/api/zones`)
+        apiFetch(`${getServerUrl()}/api/zones`)
             .then(r => r.json())
             .then(j => setZones((j.features ?? []).filter((z: ZoneFeature) => z.properties.active)))
             .catch(() => { /* airspace stays hidden */ })

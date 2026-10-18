@@ -14,6 +14,7 @@
 // the fleet's single connected drone (sim, station drone). /api/sessions is
 // not consulted: it is becoming admin-only.
 
+import { apiFetch } from '@/lib/api'
 import { useEffect, useState } from 'react'
 import { getServerUrl } from '@/lib/server-url'
 import { useDroneStore } from '@/store/drone'
@@ -42,7 +43,7 @@ async function lookup(): Promise<string | null> {
     const bound = useDroneStore.getState().session?.drone?.id
     if (bound) return bound
     try {
-        const f = await fetch(`${getServerUrl()}/api/fleet`, { signal: AbortSignal.timeout(5000) })
+        const f = await apiFetch(`${getServerUrl()}/api/fleet`, { signal: AbortSignal.timeout(5000) })
         if (f.ok) {
             const j = await f.json() as { fleet?: { db_id?: string; connected?: boolean }[] }
             const fleet = (j.fleet ?? []).filter(d => d.connected && d.db_id)

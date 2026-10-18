@@ -24,7 +24,7 @@ from app.webrtc.signaling import register_webrtc_events
 from app.events.gs_relay_events import register_gs_relay_events
 from app.api.routes import router
 from app.auth import service as auth_service
-from app.auth import socket_guard
+from app.auth import live_scope, socket_guard
 from app.auth.clientip import client_ip_from
 from app.auth.routes import router as auth_router
 
@@ -66,6 +66,9 @@ def create_app() -> socketio.ASGIApp:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        # Downloads are fetched into a blob (they need the bearer), so the
+        # page reads the server's file name from this header.
+        expose_headers=["Content-Disposition"],
     )
     fastapi_app.include_router(auth_router)
     fastapi_app.include_router(router)
@@ -176,6 +179,13 @@ def create_app() -> socketio.ASGIApp:
     # ------------------------------------------------------------------ #
     # Socket.IO lifecycle                                                  #
     # ------------------------------------------------------------------ #
+    def _scope_fields(scope) -> dict:
+        """What session_ready says about the session's workspace: the client
+        shows only what `perms` allow, and `staff` tells it to keep the
+        staff-only surfaces (fleet, mesh units, relays, wall)."""
+        return {"workspace_id": scope.workspace_id, "perms": sorted(scope.perms),
+                "staff": scope.is_staff}
+
     # Socket ids whose session was handed to a newer socket (resume before
     # the old one's ping timeout, audit B8). Their eventual disconnect must
     # not park or tear down the session the new socket now owns.
@@ -189,14 +199,9 @@ def create_app() -> socketio.ASGIApp:
         if user is None:
             logger.warning(f"Rejected {sid[:8]} - not signed in")
             raise socketio.exceptions.ConnectionRefusedError("unauthorized")
-        if user.role == "member":
-            # Customer-only account: no live sessions until phase 2 scopes
-            # them per workspace (docs/ACCESS_MODEL.md section 8). Not
-            # "unauthorized", so the client keeps its (valid) token.
-            logger.warning(f"Rejected {sid[:8]} - {user.username} has no live access yet")
-            raise socketio.exceptions.ConnectionRefusedError("no_live_access")
         # Legacy shared-token sockets have no per-user token to re-check.
         token_hash = auth_service.hash_token(token) if user.id != auth_service.LEGACY_USER_ID else None
+        requested_ws = auth.get("workspace_id") or None
 
         # A socket that dropped and came back reclaims its session - drone
         # link, radio relay, flight record, avoidance - instead of starting
@@ -207,8 +212,28 @@ def create_app() -> socketio.ASGIApp:
         # gone yet - a client that reconnects inside the ping timeout used to
         # get a fresh session while the old one tore its drone link down
         # 90 s later (audit B8).
+        #
+        # Also bound to the SAME WORKSPACE: a session belongs to one
+        # workspace for its whole life (docs/ACCESS_MODEL.md 8a), so a resume
+        # that names a different workspace_id starts a fresh session instead
+        # (the old one is parked and expires as usual). Omitting workspace_id
+        # on resume keeps the session's own. The user's access to it is
+        # re-checked here like on any connect: a customer who lost `view`
+        # cannot reclaim it.
         prior = session_manager.resumable(
             auth.get("resume_session"), user.id, auth.get("resume_secret"))
+        if prior is not None and requested_ws and prior.workspace_id and requested_ws != prior.workspace_id:
+            logger.info(f"Resume of {prior.session_id[:8]} declined: it belongs to workspace "
+                        f"{prior.workspace_id[:8]}, the client asked for {str(requested_ws)[:8]}")
+            prior = None
+        scope = await live_scope.resolve(
+            user, prior.workspace_id if (prior is not None and prior.workspace_id) else requested_ws)
+        if scope is None:
+            # Not "unauthorized", so the client keeps its (valid) token and
+            # can offer the user another workspace.
+            logger.warning(f"Rejected {sid[:8]} - {user.username} has no access to workspace "
+                           f"{requested_ws or '(default)'}")
+            raise socketio.exceptions.ConnectionRefusedError(live_scope.NO_WORKSPACE_ACCESS)
         if prior is not None:
             gone = (time.monotonic() - prior.detached_at) if prior.detached_at is not None else 0.0
             if prior.detached_at is None and prior.socket_id and prior.socket_id != sid:
@@ -225,6 +250,8 @@ def create_app() -> socketio.ASGIApp:
             prior.role = user.role
             prior.token_hash = token_hash
             prior.auth_checked_at = time.monotonic()
+            live_scope.stamp(prior, user, scope)
+            await live_scope.refresh_drone_access(prior)
             for alias in list(prior.sid_aliases):
                 await sio.enter_room(sid, alias)
             prior.sid_aliases.append(sid)
@@ -244,6 +271,7 @@ def create_app() -> socketio.ASGIApp:
                     "telemetry_connected": bool(prior.telemetry_connected),
                     "resume_secret": prior.resume_secret,
                     "user": user.public(),
+                    **_scope_fields(scope),
                 }, to=sid)
             asyncio.create_task(_send_resumed())
             return True
@@ -256,7 +284,14 @@ def create_app() -> socketio.ASGIApp:
         session.token_hash = token_hash
         session.auth_checked_at = time.monotonic()
         session.resume_secret = secrets.token_urlsafe(32)
-        logger.info(f"Connected {sid[:8]} ({user.username}/{user.role}) → session {session.session_id[:8]}")
+        live_scope.stamp(session, user, scope)
+        session_manager.note_owner(session.session_id, user.id)
+        if not scope.is_staff:
+            # The enrolled-face gallery is HYRAK's global data: a customer's
+            # person-tracking matches nobody rather than everyone HYRAK knows.
+            vision_pool.deny_gallery(session.session_id)
+        logger.info(f"Connected {sid[:8]} ({user.username}/{user.role}) → session {session.session_id[:8]} "
+                    f"in workspace {scope.workspace_id[:8]}{'' if scope.is_staff else ' (customer)'}")
 
         # Approximate client location for the admin map. Through the tunnel
         # the socket peer is localhost - the real IP is in CF-Connecting-IP,
@@ -283,6 +318,7 @@ def create_app() -> socketio.ASGIApp:
                     "max_sessions": settings.max_concurrent_sessions,
                     "resume_secret": session.resume_secret,
                     "user": user.public(),
+                    **_scope_fields(scope),
                 },
                 to=sid,
             )
@@ -362,6 +398,7 @@ def create_app() -> socketio.ASGIApp:
         datachannel_video_source.release(session.session_id)
         observer.drop_session(session.session_id)
         await vision_pool.unregister_session(session.session_id)
+        vision_pool.drop_gallery_rule(session.session_id)
         await session_manager.destroy(session.session_id)
         cleanup_session_fleet_state(session.session_id)
 

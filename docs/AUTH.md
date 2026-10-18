@@ -16,11 +16,11 @@ B12, I1, F16, B8, B20, B30 in `docs/AUDIT_2026-10-17.md`.
 |---|---|---|
 | user | `users` table | username (unique, lower-case, no `@`), email (unique, lower-case, optional for old accounts) with `email_verified`, display name, scrypt password hash, disabled flag, last_login_at. **No role column** |
 | membership | `memberships` table | one role on one workspace, optional GeoJSON area and title. See `docs/ACCESS_MODEL.md` section 2 |
-| compatibility role | computed | `member` < `viewer` < `operator` < `admin`, derived from memberships (founder -> admin; HYRAK pilot or manager anywhere -> operator; any other HYRAK membership -> viewer; customer-only -> member, which has no socket and no viewer routes). What `require_user(...)` and the socket guard still compare in phase 1 |
+| compatibility role | computed | `member` < `viewer` < `operator` < `admin`, derived from memberships (founder -> admin; HYRAK pilot, or manager anywhere while the account is staff -> operator; any other HYRAK membership -> viewer; customer-only -> member). What `require_user(...)` and the staff socket guards compare. Only staff hold viewer and above, so every rank check is a staff-only check |
 | token | `auth_tokens` table | 32 random bytes (urlsafe), stored as SHA-256 only; 30-day expiry that slides on use; cached in memory for 60 s together with the user's memberships |
-| session | in memory (`DroneSession`) | stamped with `user_id` / `username` / compatibility `role` at socket connect, plus a random `resume_secret` |
+| session | in memory (`DroneSession`) | stamped with `user_id` / `username` / compatibility `role` at socket connect, the session's `workspace_id`, the user's `perms` on it and `is_staff` (phase 2a), plus a random `resume_secret` |
 
-What each compatibility role can do on the live control paths (phase 1):
+What each compatibility role can do on the live control paths (staff):
 
 * **viewer**: read-only GETs, a socket session (telemetry mirrors, video), nothing that commands a drone. Command events answer with an `error` event `{code: "forbidden"}`.
 * **operator**: everything that flies: `drone_action`, `drone_command`, missions, tracking, swarm, avoidance, vision uploads, calibration, mesh feeds, planner edits.
@@ -29,6 +29,24 @@ What each compatibility role can do on the live control paths (phase 1):
 Workspace, member, invite, zone and drone-assignment routes do not use the
 rank: they ask the permission engine (`app/auth/perms.py`) with the
 caller's memberships.
+
+**Customer sessions (phase 2a, `docs/ACCESS_MODEL.md` 8a).** A
+customer-only account (rank `member`) gets a socket session in one of its
+workspaces and is checked on its perms there, never on the rank: `view`
+for the session's own video, link and params read, `fly` for commands and
+the session's AI pipeline, plus `fly` on the drone's own workspace for
+anything that acts on the vehicle. Every socket event is classified in
+`app/auth/socket_classes.py`; everything not listed as a session event is
+staff only. On REST a customer reaches only the account, workspace, zone
+and audit routes (which check workspace permissions), `GET /api/zones`,
+`/api/zones/check`, `/api/vision/calibration`, `/api/terrain/elevation`,
+`/api/webrtc/ice-servers`, and the crowd / plate reports of their own
+sessions. The socket error codes a client must handle: connect refused
+with `unauthorized` (sign in again) or `no_workspace_access` (pick another
+workspace); `error` events with `code` `forbidden`, `drone_not_in_workspace`,
+`drone_unidentified` or `access_unverified` (staff too: the 60 s re-check
+did not complete within 5 s; commands wait, hold / return / land and the
+session's own video and link do not).
 
 Every accepted command-type socket event and every accepted mutating route writes one line to the `hyrak.audit` logger:
 
@@ -44,7 +62,8 @@ actor and client IP, readable through `GET /api/audit`.
 
 * REST: `Authorization: Bearer <token>`.
 * Socket.IO: `auth: {token, resume_session, resume_secret}`. A refused handshake carries the message `unauthorized`; the frontend clears its token and goes to `/login`.
-* Frontend: `src/lib/auth.ts` (`login`, `logout`, `getToken`, `getUser`, `authHeaders`, `liveAuthHeaders`) and `src/lib/api.ts` (`apiFetch`, redirects to `/login` on 401). The token lives in `localStorage` under `hyrak-auth-token`. `src/hooks/useAuthGate.ts` keeps the platform layout and `/admin` behind the login; `/` stays public.
+* Frontend: `src/lib/auth.ts` (`login`, `logout`, `getToken`, `getUser`, `authHeaders`, `liveAuthHeaders`) and `src/lib/api.ts` (`apiFetch`, redirects to `/login` on 401; `apiDownload` for files; `ticketedUrl` for streams). Every backend call goes through `apiFetch`, except the auth calls themselves, `src/lib/workspaces.ts` in its soft mode (no redirect), the server-feed stream reader in `WebCodecsVideo.tsx` and the public `/releases` fetches.
+* **The token goes only to the configured API base** (`getServerUrl()`), never to another host: not a localhost probe, a desktop preview server, a relay or an air-unit address. On a page served from `dev.xenarobotics.com`, `localhost:8001` is whatever process the viewer runs there. `isApiUrl(url)` / `authHeadersFor(url)` in `src/lib/auth.ts` state the rule, and `apiFetch` enforces it (it drops any `Authorization` for an absolute URL off the API base, and redirects to `/login` only on the API base's 401). The localhost shortcut for the server video feeds (`serverHevcFeed.ts`) probes the public `/api/health` on both bases and uses localhost only when it reports the same per-process `instance` id as the API base; the feed stream then reaches it with a `local` URL ticket for the feed path, not the bearer. The instance id is public, so it does not prove who listens on the viewer's localhost; a `local` ticket is therefore honoured only on a direct loopback connection with no proxy headers (cloudflared adds `CF-Connecting-IP`), and one handed to an impostor cannot be replayed through the public tunnel. An `<img>` or `<a href>` cannot send the header: one-shot media and downloads are fetched into a blob and shown or saved through an object URL (`src/hooks/useApiMedia.ts` `useApiObjectUrl`, `apiDownload`), and long-lived MJPEG streams use URL tickets (below). The token lives in `localStorage` under `hyrak-auth-token`. `src/hooks/useAuthGate.ts` keeps the platform layout and `/admin` behind the login; `/` stays public.
 * Scripts (`simulation/gz_depth_sensor.py`, `gs_relay_agent.py`): put an operator's bearer token in `HYRAK_TOKEN`. Get one with the login call below or from a signed-in browser's `localStorage`.
 
 ```
@@ -73,14 +92,60 @@ sign-up must use the locked address). The full account API
 (profile, password change, devices, invites, reset links) is in
 `docs/ACCESS_MODEL.md` section 7 and its phase 1 notes.
 
+### URL tickets
+
+For a GET that a browser element must load without a header and that runs
+too long for a blob (the recon MJPEG streams in an `<img>`):
+
+```
+POST /api/auth/url-ticket   {"path": "/api/recon/stream/depth"}   (bearer)
+-> {"ticket": "<43 chars>", "expires_at": <unix seconds>}
+GET  /api/recon/stream/depth?ticket=<ticket>
+```
+
+* The ticket is 32 random bytes (urlsafe base64). The server keeps only its
+  SHA-256, in a bounded in-memory map (4096 entries, expired ones pruned on
+  each issue, oldest dropped first).
+* It is bound to the user, to the bearer token that asked for it and to one
+  exact path (no query string, no `..`), and is valid for 60 s from issue.
+  It may be presented any number of times in that window, so an `<img>`
+  can reconnect; after that the client asks for a new one
+  (`useTicketedStream` does this on the `<img>` error event, with backoff).
+  A stream already open keeps running past the 60 s: the check is at
+  request start.
+* Issue refuses (404) a path that no route opted in for, (403) a caller who
+  could not GET it with the bearer, and (403) the legacy shared token,
+  which has no token record to re-check.
+* A route opts in with `Depends(require_user_or_ticket(min_role, template))`
+  (`backend/app/auth/url_tickets.py`), passing its own full path template;
+  today `GET /api/recon/stream/{kind}` (viewer) and
+  `GET /api/video/feeds/{port}/hevc` and `/h264` (operator; the frontend's
+  localhost shortcut for these feeds uses a ticket because the bearer never
+  leaves the API base). Every other route uses
+  `require_user`, which reads headers only and ignores `?ticket=`. The
+  dependency also ignores a ticket on any method but GET / HEAD and on a
+  path its template does not match. A credential header, when present,
+  wins over a ticket.
+* On every use the issuing token is verified again through the normal
+  token check (cache, then store): a logout, a revoked token, a disabled
+  account or a role that dropped below the route's minimum refuses the
+  ticket (401 / 403), and the ticket's user must still be the token's user.
+  A ticket always carries its owner's access, never the presenter's.
+* **One process only.** The map lives in the backend process that issued
+  the ticket, like the login rate limiter and the token cache. With more
+  than one API worker, either keep the stream routes and `url-ticket` on
+  the same sticky worker or move the map to Redis (a key per ticket hash
+  with a 60 s TTL) with the rest of the per-process state (ACCESS_MODEL.md
+  section 9).
+
 ## Revocation on live sockets
 
-The role stamped on a session at connect is not trusted forever. The socket guard re-checks the session's token hash every 60 s (through the service's cache, so it costs nothing in the common case) and refreshes the compatibility role; a token that no longer verifies disconnects the socket. These disconnect every live socket of the user immediately (the session is parked like any other drop; a still-valid token resumes it with the fresh role, a revoked one cannot):
+The role stamped on a session at connect is not trusted forever. The socket guard re-checks the session's token hash every 60 s (through the service's cache, so it costs nothing in the common case) and refreshes the compatibility role, the perms on the session's workspace and the session's drone access; a token that no longer verifies, or a customer who lost `view` on the session's workspace, disconnects the socket. These disconnect every live socket of the user immediately (the session is parked like any other drop; a still-valid token resumes it with the fresh role, a revoked one cannot):
 
 * revoking tokens, disabling, deleting, changing or resetting the password (all other devices are signed out; a password change keeps the current one);
 * a membership change that removes a membership, changes its role or area, or moves the user's compatibility role. Adding a membership or editing only a title just drops the cached token entry, so the next request sees it.
 
-Resume always re-stamps the role from the freshly authenticated user.
+Resume always re-stamps the role and perms from the freshly authenticated user.
 
 **Changes made from the CLI** (`create-user`, `grant`, `grant --remove`)
 run in their own process, so they cannot drop the running server's token
@@ -101,6 +166,12 @@ With the database up, a user or membership query that errors is a refusal (sign-
 ## Session resume
 
 A socket that drops and comes back sends `resume_session` and `resume_secret`. The server hands the session back only if it still exists, the same `user_id` is asking, and the secret matches (constant-time compare). It no longer matters whether the old socket has been noticed as gone: a client reconnecting inside the ping timeout supersedes its old socket, whose late disconnect is then ignored (audit B8).
+
+A session also belongs to one workspace for its whole life: a resume that
+names a different `workspace_id` gets a fresh session (the old one is
+parked and expires as usual), and omitting `workspace_id` keeps the
+session's own. The user's access to that workspace is re-checked on every
+resume, so a customer who lost `view` cannot reclaim the session.
 
 ## Bootstrapping the first founder
 
@@ -185,10 +256,13 @@ Generate a real value with `python3 -c "import secrets; print(secrets.token_urls
 * `backend/app/auth/store.py`: `DbStore` (tables) and `MemoryStore` (platform workspace, env founder, tests).
 * `backend/app/auth/service.py`: login, verify, cache, rate limits, legacy token, account self-service, reset links, startup bootstrap.
 * `backend/app/auth/deps.py`: `require_user(min_role)`, `require_founder`, `optional_user` FastAPI dependencies.
-* `backend/app/auth/socket_guard.py`: `require_operator(sid, event, data)` for socket handlers.
+* `backend/app/auth/url_tickets.py`: URL tickets, `require_user_or_ticket(min_role, template)`.
+* `backend/app/auth/socket_guard.py`: `require_session_view`, `require_session_fly` (customer-reachable events), `require_operator`, `require_admin`, `require_staff` (staff only) for socket handlers.
+* `backend/app/auth/socket_classes.py`: the classification of every socket event, drone events, the hold / return / land safety actions, customer-blocked video sources and AI modes.
+* `backend/app/auth/live_scope.py`: the session's workspace and perms at connect and revalidation, the drone claim, drone access.
 * `backend/app/auth/routes.py`: `/api/auth/*`.
 * `backend/app/auth/audit.py`: `hyrak.audit` lines and `audit_events` rows.
 * `backend/app/auth/cli.py`: `create-user`, `grant`, `list-users`, `hash-password`.
 * `backend/app/workspaces/`: workspaces, members, invites, drone assignment, zone layer rules, staff and audit routes.
 * `backend/alembic/versions/e4b7a2c9d013_users_and_auth_tokens.py`, `backend/alembic/versions/f6c2a8d4e1b7_workspaces_memberships_invites.py`.
-* `backend/tests/test_auth.py`, `test_perms.py`, `test_workspaces.py`, `test_auth_dbstore.py` (opt-in: `HYRAK_TEST_DATABASE_URL` pointing at a disposable migrated database), plus the `auth_headers` fixture in `tests/conftest.py` for route tests.
+* `backend/tests/test_auth.py`, `test_perms.py`, `test_workspaces.py`, `test_live_scope.py`, `test_url_tickets.py`, `test_socket_classes.py`, `test_auth_dbstore.py` (opt-in: `HYRAK_TEST_DATABASE_URL` pointing at a disposable migrated database), plus the `auth_headers` fixture in `tests/conftest.py` for route tests.

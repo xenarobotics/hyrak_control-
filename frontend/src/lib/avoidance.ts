@@ -1,6 +1,7 @@
 // Obstacle-avoidance API client. Detection (enable) and control (arm) are
 // separate calls on purpose - the trust ladder runs detection advisory-only
 // before it ever commands the aircraft.
+import { apiFetch } from '@/lib/api'
 import { getServerUrl } from '@/lib/server-url'
 import { liveAuthHeaders } from '@/lib/auth'
 
@@ -84,19 +85,25 @@ export interface AvoidanceEvent {
     fused_distance_m: number | null
 }
 
-async function j<T>(r: Response): Promise<T> { return r.json() as Promise<T> }
+// Throws on an error answer, like getStatus: a 403 body ({detail}) handed
+// back as data crashed the Command map for customers (avoidance is staff-only
+// in phase 2a, docs/ACCESS_MODEL.md 8a).
+async function j<T>(r: Response): Promise<T> {
+    if (!r.ok) throw new Error(`avoidance HTTP ${r.status}`)
+    return r.json() as Promise<T>
+}
 
 export async function getStatus(droneId: string): Promise<AvoidanceStatus> {
     // Throws on an error answer: callers keep their last good status rather
     // than render an error body as one (the Fly-tab crash of 2026-10-14).
-    const r = await fetch(api(`/${droneId}/status`))
+    const r = await apiFetch(api(`/${droneId}/status`))
     if (!r.ok) throw new Error(`avoidance status HTTP ${r.status}`)
     return r.json()
 }
 
 export async function setEnabled(droneId: string, enabled: boolean,
                                  params?: Partial<AvoidanceParams>): Promise<AvoidanceStatus> {
-    const r = await fetch(api(`/${droneId}/enable`), {
+    const r = await apiFetch(api(`/${droneId}/enable`), {
         method: 'POST', headers: AUTH,
         body: JSON.stringify({ enabled, params }),
     })
@@ -107,7 +114,7 @@ export async function setEnabled(droneId: string, enabled: boolean,
 // Tuning only: never re-sends `enabled` from a possibly stale snapshot (a
 // Detection switched off a second ago would have come back on).
 export async function setParams(droneId: string, params: Partial<AvoidanceParams>): Promise<AvoidanceStatus> {
-    const r = await fetch(api(`/${droneId}/enable`), {
+    const r = await apiFetch(api(`/${droneId}/enable`), {
         method: 'POST', headers: AUTH, body: JSON.stringify({ params }),
     })
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? `HTTP ${r.status}`)
@@ -115,19 +122,19 @@ export async function setParams(droneId: string, params: Partial<AvoidanceParams
 }
 
 export async function setArmed(droneId: string, armed: boolean): Promise<AvoidanceStatus> {
-    return j(await fetch(api(`/${droneId}/arm`), {
+    return j(await apiFetch(api(`/${droneId}/arm`), {
         method: 'POST', headers: AUTH, body: JSON.stringify({ armed }),
     }))
 }
 
 export async function getSensors(droneId: string): Promise<SensorInfo[]> {
-    const d = await j<{ sensors: SensorInfo[] }>(await fetch(api(`/${droneId}/sensors`)))
+    const d = await j<{ sensors: SensorInfo[] }>(await apiFetch(api(`/${droneId}/sensors`)))
     return d.sensors
 }
 
 export async function setSensors(droneId: string,
                                  sensors: Partial<SensorInfo>[]): Promise<SensorInfo[]> {
-    const d = await j<{ sensors: SensorInfo[] }>(await fetch(api(`/${droneId}/sensors`), {
+    const d = await j<{ sensors: SensorInfo[] }>(await apiFetch(api(`/${droneId}/sensors`), {
         method: 'POST', headers: AUTH, body: JSON.stringify({ sensors }),
     }))
     return d.sensors
@@ -135,7 +142,7 @@ export async function setSensors(droneId: string,
 
 export async function getEvents(droneId: string, limit = 50): Promise<AvoidanceEvent[]> {
     const d = await j<{ events: AvoidanceEvent[] }>(
-        await fetch(api(`/${droneId}/events?limit=${limit}`)))
+        await apiFetch(api(`/${droneId}/events?limit=${limit}`)))
     return d.events
 }
 
@@ -156,7 +163,7 @@ export interface LatLng { lat: number; lng: number }
 
 // The drone's LIVE obstacle map (what it's sensing/planning around now).
 export async function getObstacles(droneId: string): Promise<LiveObstacle[]> {
-    const d = await j<{ obstacles: LiveObstacle[] }>(await fetch(api(`/${droneId}/obstacles`)))
+    const d = await j<{ obstacles: LiveObstacle[] }>(await apiFetch(api(`/${droneId}/obstacles`)))
     return d.obstacles
 }
 
@@ -166,26 +173,26 @@ export async function getObstacles(droneId: string): Promise<LiveObstacle[]> {
 export async function getObstaclesAndPath(
     droneId: string): Promise<{ obstacles: LiveObstacle[]; reroutePath: LatLng[] | null; goal: LatLng | null }> {
     const d = await j<{ obstacles: LiveObstacle[]; reroute_path: LatLng[] | null; goal: LatLng | null }>(
-        await fetch(api(`/${droneId}/obstacles`)))
+        await apiFetch(api(`/${droneId}/obstacles`)))
     return { obstacles: d.obstacles, reroutePath: d.reroute_path ?? null, goal: d.goal ?? null }
 }
 
 // The persistent SHARED hazard map (known static obstacles across all flights).
 export async function getHazards(): Promise<KnownHazard[]> {
-    const d = await j<{ hazards: KnownHazard[] }>(await fetch(api('/hazards')))
+    const d = await j<{ hazards: KnownHazard[] }>(await apiFetch(api('/hazards')))
     return d.hazards
 }
 
 export async function addHazard(lat: number, lng: number, radius_m = 5,
                                 top_m = 0): Promise<void> {
-    await fetch(api('/hazards'), {
+    await apiFetch(api('/hazards'), {
         method: 'POST', headers: AUTH,
         body: JSON.stringify({ lat, lng, radius_m, top_m }),
     })
 }
 
 export async function clearHazards(): Promise<number> {
-    const d = await j<{ removed: number }>(await fetch(api('/hazards/clear'), {
+    const d = await j<{ removed: number }>(await apiFetch(api('/hazards/clear'), {
         method: 'POST', headers: AUTH,
     }))
     return d.removed
@@ -222,7 +229,7 @@ export interface PersonCalibration {
 }
 
 export async function startPersonCalibration(droneId: string, heightM: number): Promise<PersonCalibration> {
-    const r = await fetch(api(`/${droneId}/calibrate_person`), {
+    const r = await apiFetch(api(`/${droneId}/calibrate_person`), {
         method: 'POST', headers: AUTH, body: JSON.stringify({ height_m: heightM }),
     })
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? `HTTP ${r.status}`)
@@ -230,11 +237,11 @@ export async function startPersonCalibration(droneId: string, heightM: number): 
 }
 
 export async function cancelPersonCalibration(droneId: string): Promise<void> {
-    await fetch(api(`/${droneId}/calibrate_person`), {
+    await apiFetch(api(`/${droneId}/calibrate_person`), {
         method: 'POST', headers: AUTH, body: JSON.stringify({ cancel: true }),
     })
 }
 
 export async function getPersonCalibration(droneId: string): Promise<PersonCalibration> {
-    return j(await fetch(api(`/${droneId}/calibrate_person`)))
+    return j(await apiFetch(api(`/${droneId}/calibrate_person`)))
 }

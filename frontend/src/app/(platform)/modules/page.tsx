@@ -24,6 +24,7 @@ import { useAttachVideo } from '@/hooks/useAttachVideo'
 import { WebCodecsVideo } from '@/components/video/WebCodecsVideo'
 import { Recon3DView } from '@/components/vision/Recon3DView'
 import { useClientValue } from '@/hooks/useClientValue'
+import { ViewOnlyFence } from '@/components/layout/ViewOnly'
 
 function ResultsPanel() {
     const mode = useDroneStore(s => s.mode)
@@ -184,7 +185,8 @@ export default function ModulesPage() {
                     <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {/* Mode buttons - disabled while streaming */}
                         <div style={{ opacity: isStreaming ? 0.5 : 1, pointerEvents: isStreaming ? 'none' : 'auto' }}>
-                            <ModeSelector />
+                            {/* Starting a module is a command: viewers watch only. */}
+                            <ViewOnlyFence><ModeSelector /></ViewOnlyFence>
                         </div>
 
                         {/* Camera selector - not applicable to server-sourced feeds */}
@@ -481,7 +483,7 @@ export default function ModulesPage() {
                     )}
                 </div>
                 <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-                    <ResultsPanel />
+                    <ViewOnlyFence note={false}><ResultsPanel /></ViewOnlyFence>
                 </div>
             </div>
 

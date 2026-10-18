@@ -60,10 +60,24 @@ export function resolveFeedBase(): Promise<string> {
         const remote = getServerUrl()
         if (typeof window === 'undefined') return (feedBase = remote)
         if (/^https?:\/\/(localhost|127\.0\.0\.1)/.test(remote)) return (feedBase = remote)
+        const instanceOf = async (base: string, ms = 800): Promise<string | null> => {
+            const r = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(ms), cache: 'no-store' })
+            if (!r.ok) return null
+            const j = await r.json() as { instance?: unknown }
+            return typeof j.instance === 'string' ? j.instance : null
+        }
+        let remoteInstance: string | null = null
+        try { remoteInstance = await instanceOf(remote, 5000) } catch { /* remote slow: no shortcut */ }
+        if (!remoteInstance) return (feedBase = remote)
         for (const base of LOCAL_BASES) {
             try {
-                const r = await fetch(`${base}/api/video/feeds`, { signal: AbortSignal.timeout(800), cache: 'no-store' })
-                if (r.ok) { console.info('[feed] backend reachable locally, streaming from', base); return (feedBase = base) }
+                // Public /api/health, no token: whatever listens on the
+                // viewer's localhost is not necessarily our backend, and the
+                // bearer never leaves the API base (isApiUrl in lib/auth).
+                // Same per-process instance id as the API base = the same
+                // backend; the stream then reaches it with a path-bound URL
+                // ticket (WebCodecsVideo), which only that process honours.
+                if (await instanceOf(base) === remoteInstance) { console.info('[feed] backend reachable locally, streaming from', base); return (feedBase = base) }
             } catch { /* not local */ }
         }
         return (feedBase = remote)

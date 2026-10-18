@@ -74,6 +74,7 @@ class DroneSession:
     # session_ready and must come back with resume_session - a session id
     # alone never reclaims a drone. superseded_sids: sockets this session
     # left behind when the client reconnected before their timeout.
+    # For customer sessions the check is on `perms` below, not `role`.
     user_id: Optional[str]    = None
     username: Optional[str]   = None
     role: Optional[str]       = None
@@ -85,6 +86,28 @@ class DroneSession:
     # not on the next page load.
     token_hash: Optional[str] = None
     auth_checked_at: float    = 0.0
+
+    # The workspace this session belongs to (docs/ACCESS_MODEL.md 8a) and
+    # what the user may do there. A session belongs to exactly one
+    # workspace for its whole life, resume included; switching workspace in
+    # the UI opens a new socket. is_staff picks the guard: staff sessions
+    # are checked against the compatibility `role`, customer sessions
+    # against `perms`. memberships are the user's, refreshed with the role,
+    # for the drone check (a drone can sit in another workspace).
+    workspace_id: Optional[str] = None
+    perms: frozenset          = field(default_factory=frozenset)
+    is_staff: bool            = False
+    memberships: tuple        = ()
+    # May this session command the drone on its link: True / False once
+    # the drone's identity and workspace are known, None before that (or
+    # when it cannot be known: no UID, registry offline). See
+    # app/auth/live_scope.py.
+    drone_fly: Optional[bool] = None
+    # Whether the CURRENT link is simulator-type (live_scope.SIM_LINK: a
+    # direct udp address a staff connect_telemetry opened), set with the
+    # identity. Drone ownership is skipped only when this AND the registry
+    # record's stored is_simulated are both true.
+    link_simulated: bool      = False
 
     # Swarm fleet: drone_id → TelemetryManager (populated when swarm mode is used)
     fleet: dict               = field(default_factory=dict)

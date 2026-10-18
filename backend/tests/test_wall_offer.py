@@ -36,7 +36,14 @@ class _Track(MediaStreamTrack):
 
 
 @pytest.fixture
-def sio():
+def sio(monkeypatch):
+    # Staff-only since phase 2a; these tests pin input handling and feed
+    # ownership, so the guard passes (access is covered in test_live_scope.py).
+    from app.auth import socket_guard
+
+    async def allow(*a, **k):
+        return True
+    monkeypatch.setattr(socket_guard, "require_staff", allow)
     s = _Sio()
     wall.register(s)
     yield s

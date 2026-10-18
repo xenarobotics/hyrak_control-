@@ -25,8 +25,9 @@ export const AUTH_CHANGE_EVENT = 'hyrak-auth-change'
  * The compatibility role (docs/ACCESS_MODEL.md section 8): computed by the
  * server from memberships so the live control paths keep their rank check.
  * founder -> admin, HYRAK pilot or any manager -> operator, other HYRAK
- * memberships -> viewer, customer-only -> member (no live access in phase 1:
- * no socket, no platform pages, only /account).
+ * memberships -> viewer, customer-only -> member. Since phase 2a a member
+ * reaches the live app through workspace permissions instead (isCustomer and
+ * the active workspace's perms); with no viewable workspace it gets /account.
  */
 export type Role = 'member' | 'viewer' | 'operator' | 'admin'
 export interface AuthUser {
@@ -73,6 +74,15 @@ export function getAccess(): AuthAccess | null {
 export function isStaff(user: AuthUser | null = getUser()): boolean {
     if (!user) return false
     return user.is_staff ?? user.role === 'admin'
+}
+
+/**
+ * A customer-only account: no membership on the HYRAK workspace. Read from
+ * the server's explicit flag only, so an older server that sends no flag
+ * keeps every account on the staff path it had before.
+ */
+export function isCustomer(user: AuthUser | null = getUser()): boolean {
+    return !!user && user.is_staff === false
 }
 
 export function isFounder(user: AuthUser | null = getUser()): boolean {
@@ -130,10 +140,36 @@ export function deviceLabel(): string {
     return os ? `${browser} on ${os}` : browser
 }
 
-/** Bearer header for a REST call: `fetch(url, { headers: authHeaders() })`. */
+/**
+ * THE TOKEN GOES ONLY TO THE CONFIGURED API BASE (getServerUrl()). Never
+ * attach it to another host: a localhost probe, a desktop preview server, a
+ * relay or an air-unit address. On a page served from dev.xenarobotics.com,
+ * "localhost:8001" is whatever process the viewer happens to run there, not
+ * necessarily our backend. apiFetch enforces this; a hand-built fetch to an
+ * absolute URL should use authHeadersFor(url). A different host that must
+ * reach a protected stream gets a path-bound URL ticket instead (urlTicket
+ * in src/lib/api.ts).
+ */
+export function isApiUrl(url: string): boolean {
+    try {
+        const base = new URL(getServerUrl())
+        const u = new URL(url, base)
+        return u.origin === base.origin
+    } catch {
+        return false
+    }
+}
+
+/** Bearer header for a REST call: `fetch(url, { headers: authHeaders() })`.
+ *  Only for URLs on the API base (see isApiUrl). */
 export function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
     const token = getToken()
     return token ? { ...extra, Authorization: `Bearer ${token}` } : { ...extra }
+}
+
+/** authHeaders() when `url` is on the API base, otherwise just `extra`. */
+export function authHeadersFor(url: string, extra: Record<string, string> = {}): Record<string, string> {
+    return isApiUrl(url) ? authHeaders(extra) : { ...extra }
 }
 
 /**

@@ -1,5 +1,6 @@
 'use client'
 
+import { apiFetch } from '@/lib/api'
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { getSocket } from '@/lib/socket'
 import { getServerUrl } from '@/lib/server-url'
@@ -24,7 +25,7 @@ const STUN_ONLY: RTCIceServer[] = [
 // short-lived Cloudflare TURN credentials so none live in frontend code.
 async function fetchIceServers(): Promise<RTCIceServer[]> {
     try {
-        const res = await fetch(`${getServerUrl()}/api/webrtc/ice-servers`, {
+        const res = await apiFetch(`${getServerUrl()}/api/webrtc/ice-servers`, {
             signal: AbortSignal.timeout(5000),
         })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)

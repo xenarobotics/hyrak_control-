@@ -511,14 +511,16 @@ def test_depth_scan_route_rejects_absurd_and_stale_bodies(auth_headers):
     assert r.status_code == 200 and r.json()["ok"] is False and "stale" in r.json()["reason"]
 
 
-def test_status_route_does_not_create_phantom_controllers():
+def test_status_route_does_not_create_phantom_controllers(auth_headers):
     """UI#2: GET status for any id created a disabled controller."""
     from fastapi.testclient import TestClient
     from fastapi import FastAPI
     from app.avoidance import routes
     from app.avoidance.core import controller as avoidance
     app = FastAPI(); app.include_router(routes.router)
-    r = TestClient(app).get("/api/avoidance/never-seen-id/status")
+    # Staff-only since phase 2a (docs/ACCESS_MODEL.md 8a).
+    assert TestClient(app).get("/api/avoidance/never-seen-id/status").status_code == 401
+    r = TestClient(app).get("/api/avoidance/never-seen-id/status", headers=auth_headers("viewer"))
     assert r.status_code == 200 and r.json()["enabled"] is False
     assert isinstance(r.json()["sensors"], list)            # the shape the panels read
     assert not avoidance.has_controller("never-seen-id")

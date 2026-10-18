@@ -170,10 +170,15 @@ def compat_role(memberships: Iterable) -> str:
     ms = list(memberships)
     if is_founder(ms):
         return "admin"
+    # Manager counts only while the account is still staff. It is granted
+    # only to staff, but an account removed from HYRAK keeps its manager
+    # rows until someone cleans them up, and the compatibility rank is what
+    # every staff-only path checks (phase 2a: operator and above = staff).
+    staff = is_staff(ms)
     for m in ms:
         if getattr(m, "workspace_disabled", False):
             continue
-        if (m.role == PILOT and _is_platform_membership(m)) or m.role == MANAGER:
+        if (m.role == PILOT and _is_platform_membership(m)) or (m.role == MANAGER and staff):
             return "operator"
     # Any other HYRAK membership (viewer, airspace) is staff and keeps the
     # viewer rank. A customer-only account gets "member", below viewer: the

@@ -1,5 +1,6 @@
 'use client'
 
+import { apiFetch } from '@/lib/api'
 import { useEffect, useState } from 'react'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { getLocalRelayUrl, setLocalRelayUrl, DEFAULT_LOCAL_RELAY_URL } from '@/lib/localRfRelay'
@@ -23,6 +24,8 @@ import { getServerUrl } from '@/lib/server-url'
 import { visibleInterval } from '@/lib/poll'
 import { useHydrated } from '@/hooks/useClientValue'
 import Link from 'next/link'
+import { useLiveScope } from '@/hooks/useLiveScope'
+import { ViewOnlyNote } from '@/components/layout/ViewOnly'
 
 export function DeviceSelector() {
     const mounted = useHydrated()
@@ -45,7 +48,7 @@ export function DeviceSelector() {
         let alive = true
         const poll = async () => {
             try {
-                const j = await fetch(`${getServerUrl()}/api/video/mesh-units?max_units=8`).then(r => r.json())
+                const j = await apiFetch(`${getServerUrl()}/api/video/mesh-units?max_units=8`).then(r => r.json())
                 if (alive) setMeshUnits((j.units ?? []).filter((u: MeshUnit) => u.live || u.in_use || u.port === airPort))
             } catch { /* backend away */ }
         }
@@ -56,7 +59,7 @@ export function DeviceSelector() {
         if (videoSourceNow !== 'air_unit_udp') return
         return visibleInterval(async () => {
             try {
-                const j = await fetch(`${getServerUrl()}/api/video/mesh-units?max_units=8`).then(r => r.json())
+                const j = await apiFetch(`${getServerUrl()}/api/video/mesh-units?max_units=8`).then(r => r.json())
                 setMeshUnits((j.units ?? []).filter((u: MeshUnit) => u.live || u.in_use || u.port === airPort))
             } catch { /* backend away */ }
         }, 3000)
@@ -111,6 +114,9 @@ export function DeviceSelector() {
     const [siyiTarget, setSiyiTarget] = useState(() => getSiyiTelemetryTarget())
     const [rfFanout, setRfFanout] = useState(() => getRfFanoutPort())
     const [rfUplinkHost, setRfUplinkHostState] = useState(() => getRfUplinkHost())
+    // Connecting the drone link is a command: viewers watch only
+    // (docs/ACCESS_MODEL.md section 8a). The camera above stays theirs.
+    const { viewOnly } = useLiveScope()
 
     if (!mounted) {
         return <div className="space-y-3 min-h-[190px]" />
@@ -413,6 +419,8 @@ export function DeviceSelector() {
                             : <><WifiOff size={12} /> DISCONNECT</>}
                     </Button>
                 </div>
+            ) : viewOnly ? (
+                <ViewOnlyNote />
             ) : (
                 <Button
                     size="sm"

@@ -1,6 +1,7 @@
 import asyncio
 import hmac
 import logging
+from collections import OrderedDict
 from typing import Optional
 from app.sessions.models import DroneSession, AnalysisMode
 from app.telemetry.manager import TelemetryManager
@@ -32,6 +33,12 @@ class SessionManager:
         # already only touches ITS OWN managers' mavsdk_servers.)
         self._fleets: dict[str, dict[int, TelemetryManager]] = {}
         self._fleet_users: set[str] = set()
+        # session_id -> user_id, kept AFTER the session is destroyed: the
+        # session's crowd / plate report stays downloadable by its own user
+        # (docs/ACCESS_MODEL.md 8a) after the live session is gone. Bounded,
+        # and in memory only: after a restart those reports are staff-only
+        # until per-workspace history lands (phase 2b).
+        self._owners: "OrderedDict[str, str]" = OrderedDict()
 
     # ------------------------------------------------------------------ #
     # Session lifecycle                                                    #
@@ -89,6 +96,20 @@ class SessionManager:
             logger.warning(f"Resume of {session_id[:8]} refused: bad resume_secret")
             return None
         return prior
+
+    OWNERS_KEPT = 10_000
+
+    def note_owner(self, session_id: str, user_id: Optional[str]) -> None:
+        if not user_id:
+            return
+        self._owners[session_id] = user_id
+        self._owners.move_to_end(session_id)
+        while len(self._owners) > self.OWNERS_KEPT:
+            self._owners.popitem(last=False)
+
+    def owner_of(self, session_id: str) -> Optional[str]:
+        """The user who opened this session (live or ended), if known."""
+        return self._owners.get(session_id)
 
     def get_by_socket(self, socket_id: str) -> Optional[DroneSession]:
         for s in self._sessions.values():

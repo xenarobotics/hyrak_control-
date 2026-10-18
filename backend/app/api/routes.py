@@ -137,10 +137,17 @@ def _validate(model, body):
         raise HTTPException(status_code=400, detail=errs or "invalid body")
 
 
+# A random id per backend process. The frontend's localhost shortcut for
+# the server video feeds compares it with the API base's, so it only streams
+# from a local port that IS this backend (frontend/src/lib/serverHevcFeed.ts).
+_INSTANCE_ID = __import__("secrets").token_hex(8)
+
+
 @router.get("/health")
 async def health():
     return {
         "status": "ok",
+        "instance": _INSTANCE_ID,
         "version": "0.1.0",
         "device": settings.device,
         "gpu_count": settings.gpu_count,
@@ -149,7 +156,7 @@ async def health():
 
 
 @router.get("/webrtc/ice-servers")
-async def ice_servers():
+async def ice_servers(_user: AuthUser = Depends(require_signed_in)):
     """STUN + TURN list for RTCPeerConnection. TURN credentials are minted
     short-lived from the Cloudflare key in .env - needed on networks that
     block UDP (campus WiFi), where STUN-only ICE can never connect."""
@@ -193,6 +200,8 @@ async def get_sessions(request: Request, _user: AuthUser = Depends(require_admin
             "drone_address": s.drone_address,
             "hardware_uid": s.hardware_uid,
             "drone": s.drone,
+            "workspace_id": s.workspace_id,
+            "staff": s.is_staff,
             "live": live,
             "approx_location": s.approx_location,
         })
@@ -220,7 +229,7 @@ async def get_sessions(request: Request, _user: AuthUser = Depends(require_admin
 
 
 @router.get("/drones")
-async def get_drones():
+async def get_drones(_user: AuthUser = Depends(require_viewer)):
     """Every drone ever seen by the platform (persistent registry)."""
     from app.registry import drones as drone_registry
     return {"drones": await drone_registry.list_drones()}
@@ -229,7 +238,7 @@ async def get_drones():
 # ── Zones ────────────────────────────────────────────────────────────────
 
 @router.get("/zones")
-async def get_zones():
+async def get_zones(_user: AuthUser = Depends(require_signed_in)):
     """All zones as a GeoJSON FeatureCollection (inactive included)."""
     from sqlalchemy import select
     from app.db import db_available, get_session
@@ -335,6 +344,7 @@ async def zones_check(
     lat: float = Query(...),
     lng: float = Query(...),
     alt: float = Query(None),
+    _user: AuthUser = Depends(require_signed_in),
 ):
     """Zone class at a point - used by clients and for quick testing."""
     from app.zones import engine as zone_engine
@@ -360,7 +370,7 @@ def _parse_geometry(body: dict):
 
 
 @router.get("/planner/meta")
-async def planner_meta():
+async def planner_meta(_user: AuthUser = Depends(require_viewer)):
     """The vocabulary a planner UI needs: feature categories and the
     profile list."""
     from app.planner import profiles as profile_mod
@@ -381,7 +391,7 @@ async def planner_meta():
 
 
 @router.get("/map-features")
-async def get_map_features():
+async def get_map_features(_user: AuthUser = Depends(require_viewer)):
     """All land-use features as a GeoJSON FeatureCollection."""
     from sqlalchemy import select
     from app.db import db_available, get_session
@@ -686,13 +696,14 @@ async def plan_mission(
 async def get_missions(
     status: str = Query(None),
     drone_id: str = Query(None),
+    _user: AuthUser = Depends(require_viewer),
 ):
     from app.planner import service as mission_service
     return {"missions": await mission_service.list_missions(status=status, drone_id=drone_id)}
 
 
 @router.get("/missions/{mission_id}")
-async def get_mission(mission_id: str):
+async def get_mission(mission_id: str, _user: AuthUser = Depends(require_viewer)):
     from app.planner import service as mission_service
     mission = await mission_service.get(mission_id)
     if mission is None:
@@ -727,7 +738,7 @@ async def patch_mission(
 
 
 @router.get("/pads")
-async def get_pads():
+async def get_pads(_user: AuthUser = Depends(require_viewer)):
     from sqlalchemy import select
     from app.db import db_available, get_session
     from app.db.models import Pad
@@ -873,14 +884,15 @@ async def patch_api_key(
 
 
 @router.get("/tasks")
-async def get_tasks(status: str = Query(None), archived: int = Query(0)):
+async def get_tasks(status: str = Query(None), archived: int = Query(0),
+                    _user: AuthUser = Depends(require_viewer)):
     from app.tasks import service as task_service
     return {"tasks": await task_service.list_tasks(
         status=status, include_archived=bool(archived))}
 
 
 @router.get("/tasks/{ref}")
-async def get_task(ref: str):
+async def get_task(ref: str, _user: AuthUser = Depends(require_viewer)):
     from app.tasks import service as task_service
     task = await task_service.get_task(ref)
     if task is None:
@@ -973,7 +985,7 @@ async def plan_return_mission(
 
 
 @router.get("/fleet")
-async def get_fleet_status():
+async def get_fleet_status(_user: AuthUser = Depends(require_viewer)):
     """The server-owned delivery fleet - live status per station drone."""
     from app.fleet import service as fleet_service
     return {"fleet": fleet_service.status()}
@@ -1134,7 +1146,8 @@ async def replan_task(
 # ── Flights ──────────────────────────────────────────────────────────────
 
 @router.get("/drones/{drone_id}/flights")
-async def get_drone_flights(drone_id: str, limit: int = Query(30, le=200)):
+async def get_drone_flights(drone_id: str, limit: int = Query(30, le=200),
+                            _user: AuthUser = Depends(require_viewer)):
     from sqlalchemy import select
     from app.db import db_available, get_session
     from app.db.models import Flight
@@ -1151,7 +1164,7 @@ async def get_drone_flights(drone_id: str, limit: int = Query(30, le=200)):
 
 
 @router.get("/flights/{flight_id}/download")
-async def download_flight(flight_id: str):
+async def download_flight(flight_id: str, _user: AuthUser = Depends(require_viewer)):
     """Full 1 Hz flight track as CSV."""
     from fastapi.responses import PlainTextResponse
     from sqlalchemy import select
@@ -1194,8 +1207,21 @@ async def download_flight(flight_id: str):
 # everything on explicit operator request. Nothing is ever deleted as a
 # side effect of viewing or downloading it.
 
+def _own_session_or_staff(request: Request, session_id: str, user: AuthUser) -> None:
+    """Session reports (docs/ACCESS_MODEL.md 8a): staff, or the user who
+    opened that session. 404 otherwise, so another account's session ids
+    cannot be probed."""
+    if user.has_role("viewer"):
+        return
+    sm = getattr(request.app.state, "session_manager", None)
+    if sm is None or sm.owner_of(session_id) != user.id:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+
 @router.get("/sessions/{session_id}/crowd-report/download")
-async def download_crowd_report(session_id: str):
+async def download_crowd_report(session_id: str, request: Request,
+                                user: AuthUser = Depends(require_signed_in)):
+    _own_session_or_staff(request, session_id, user)
     from app.vision.persistence import export_crowd_report
     report = await export_crowd_report(session_id)
 
@@ -1258,7 +1284,9 @@ def _plate_grade(ev: dict) -> str:
 
 
 @router.get("/sessions/{session_id}/plate-report/download")
-async def download_plate_report(session_id: str):
+async def download_plate_report(session_id: str, request: Request,
+                                user: AuthUser = Depends(require_signed_in)):
+    _own_session_or_staff(request, session_id, user)
     from app.vision.persistence import export_plate_report
     events = await export_plate_report(session_id)
 
@@ -1315,19 +1343,19 @@ async def download_plate_report(session_id: str):
 
 
 @router.get("/vision/crowd-history")
-async def crowd_history(limit: int = Query(10, le=50)):
+async def crowd_history(limit: int = Query(10, le=50), _user: AuthUser = Depends(require_viewer)):
     from app.vision.persistence import list_crowd_history
     return await list_crowd_history(limit=limit)
 
 
 @router.get("/vision/plate-history")
-async def plate_history(limit: int = Query(50, le=200)):
+async def plate_history(limit: int = Query(50, le=200), _user: AuthUser = Depends(require_viewer)):
     from app.vision.persistence import list_plate_history
     return {"events": await list_plate_history(limit=limit)}
 
 
 @router.get("/vision/plate-history/{event_id}/image")
-async def plate_history_image(event_id: str):
+async def plate_history_image(event_id: str, _user: AuthUser = Depends(require_viewer)):
     from fastapi.responses import FileResponse
     from app.vision.persistence import get_plate_image_path
     path = await get_plate_image_path(event_id)
@@ -1359,7 +1387,7 @@ async def clear_plate_history_route(_user: AuthUser = Depends(require_operator))
 
 
 @router.get("/vision/calibration")
-async def get_calibration():
+async def get_calibration(_user: AuthUser = Depends(require_signed_in)):
     """Field definitions plus current effective values."""
     from app.vision import calibration
     return calibration.schema()
@@ -1416,7 +1444,7 @@ async def reset_calibration(_user: AuthUser = Depends(require_operator)):
 
 
 @router.get("/vision/face-gallery")
-async def face_gallery_list():
+async def face_gallery_list(_user: AuthUser = Depends(require_viewer)):
     """Enrolled people with photo counts."""
     from app.vision.persistence import list_persons
     return {"persons": await list_persons()}
@@ -1558,6 +1586,7 @@ async def face_gallery_clear(_user: AuthUser = Depends(require_operator)):
 async def face_gallery_sightings(
     session_id: str | None = Query(None),
     limit: int = Query(200, le=1000),
+    _user: AuthUser = Depends(require_viewer),
 ):
     """Gallery-match audit trail - what the system claimed, when."""
     from app.vision.persistence import list_sightings
@@ -1577,7 +1606,7 @@ async def face_gallery_clear_sightings(
 # ── Permits ──────────────────────────────────────────────────────────────
 
 @router.get("/permits")
-async def get_permits(status: str = Query(None)):
+async def get_permits(status: str = Query(None), _user: AuthUser = Depends(require_viewer)):
     """Permit list for the admin console."""
     from app.permits import service
     return {"permits": await service.list_permits(status=status)}
@@ -1597,7 +1626,7 @@ async def decide_permit(
 
 
 @router.get("/flights/{flight_id}")
-async def get_flight(flight_id: str):
+async def get_flight(flight_id: str, _user: AuthUser = Depends(require_viewer)):
     """Flight summary + full 1 Hz track."""
     from sqlalchemy import select
     from app.db import db_available, get_session
@@ -1738,7 +1767,7 @@ async def upload_reference_photo(
 async def get_terrain_elevation(
     lats: str = Query(..., description="Comma-separated latitudes"),
     lngs: str = Query(..., description="Comma-separated longitudes"),
-    _user: AuthUser = Depends(require_viewer),
+    _user: AuthUser = Depends(require_signed_in),
 ):
     """
     Returns terrain elevation (metres MSL) for a list of lat/lng points.

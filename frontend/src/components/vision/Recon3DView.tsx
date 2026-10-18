@@ -10,10 +10,12 @@
 // Coordinates: the engine's world frame is the first camera's OpenCV frame
 // (x right, y DOWN, z forward). Rendered as (x, -y, z) so up is up.
 
+import { apiFetch } from '@/lib/api'
 import { useEffect, useRef, useState } from 'react'
 import { getServerUrl } from '@/lib/server-url'
 import { visibleInterval } from '@/lib/poll'
 import { useDroneStore } from '@/store/drone'
+import { useTicketedStream } from '@/hooks/useApiMedia'
 import { RotateCcw, Video } from 'lucide-react'
 
 const api = (p: string) => `${getServerUrl()}/api/recon${p}`
@@ -68,6 +70,9 @@ export function Recon3DView() {
     const canvasRef = useRef<HTMLCanvasElement | null>(null)
     const [nPoints, setNPoints] = useState(0)
     const [showPip, setShowPip] = useState(true)
+    // The engine's MJPEG echo in an <img>: a 60 s URL ticket, since an <img>
+    // cannot send the bearer; refreshed whenever the stream drops.
+    const pipStream = useTicketedStream(showPip ? '/api/recon/stream/video' : null)
     // The analyzer publishes engine/tracking state as the mode's results, so
     // the map view can say what is happening instead of looking blank.
     const cv = useDroneStore(s => s.cvResults)
@@ -95,7 +100,7 @@ export function Recon3DView() {
         let alive = true
         const pollCloud = async () => {
             try {
-                const r = await fetch(api('/map_preview?max_points=20000'))
+                const r = await apiFetch(api('/map_preview?max_points=20000'))
                 if (!r.ok || !alive) return
                 const j = await r.json()
                 if (!j.n) return
@@ -127,7 +132,7 @@ export function Recon3DView() {
         }
         const pollTraj = async () => {
             try {
-                const r = await fetch(api('/trajectory'))
+                const r = await apiFetch(api('/trajectory'))
                 if (!r.ok || !alive) return
                 const j = await r.json()
                 if (j.traj?.length) {
@@ -382,9 +387,12 @@ export function Recon3DView() {
                 }}>
                     {/* The engine's echo of what it receives - also live proof
                         that frames are reaching the reconstruction. */}
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={api('/stream/video')} alt="camera"
-                        style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                    {pipStream.src && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={pipStream.src} alt="camera"
+                            onError={pipStream.onError} onLoad={pipStream.onLoad}
+                            style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                    )}
                 </div>
             )}
         </div>

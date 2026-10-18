@@ -1,9 +1,14 @@
 'use client'
 
-// /admin - HYRAK operations console. Staff only: anyone with a membership
+// /admin - HYRAK operations console for staff: anyone with a membership
 // on the HYRAK workspace (docs/ACCESS_MODEL.md section 5). Founders see
 // every tab; other staff see the tabs their memberships allow, and the
 // server re-checks every call.
+//
+// Organization console (section 8a): customer owners and admins (anyone
+// with members.manage on a workspace, not staff) get SPACES, ZONES (site
+// layer, inside their operating area) and AUDIT for their own workspaces,
+// titled "Organization console", with a way back to the app.
 //
 // Left rail tabs:
 //   MAP     - live map of every connected client. GPS fix = solid marker;
@@ -23,10 +28,11 @@
 // Open this in its OWN tab: it marks its socket session as admin on the
 // backend so it doesn't count as a client.
 
+import { apiDownload, apiFetch } from '@/lib/api'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
 import dynamic from 'next/dynamic'
-import { Map as MapIcon, Plane, Shield, FileCheck, X, Search, Building2, Users, ScrollText } from 'lucide-react'
+import { Map as MapIcon, Plane, Shield, FileCheck, X, Search, Building2, Users, ScrollText, ArrowLeft } from 'lucide-react'
 import { connectSocket, getSocket } from '@/lib/socket'
 import { liveAuthHeaders } from '@/lib/auth'
 import { useAuthGate } from '@/hooks/useAuthGate'
@@ -155,19 +161,28 @@ function jitter(id: string, v: number): number {
 }
 
 export default function AdminPage() {
-    const gate = useAuthGate('staff')
-    const { isFounder, workspaces } = useAccess()
+    const gate = useAuthGate('console')
+    const { isFounder, isStaff, workspaces, user } = useAccess()
+    // Not staff, yet past the gate: a customer owner or admin.
+    const org = !!user && !isStaff
     // The live session map, socket mirrors and drone registry still sit
     // behind the compatibility admin role on the server: founders only.
     const anyPerm = (p: Perm) => workspaces.some(w => hasPerm(w, p))
     const visibleTabs = TABS.filter(t => {
         switch (t.key) {
             case 'overview': case 'drones': case 'staff': return isFounder
-            case 'permits': return isFounder || anyPerm('permits.approve')
+            case 'permits': return !org && (isFounder || anyPerm('permits.approve'))
             case 'audit': return isFounder || anyPerm('audit.view')
             default: return true
         }
     })
+    const permitsVisible = visibleTabs.some(t => t.key === 'permits')
+    useEffect(() => {
+        if (!org) return
+        const before = document.title
+        document.title = 'Organization console - HYRAK'
+        return () => { document.title = before }
+    }, [org])
     const [pickedTab, setTab] = useState<Tab | null>(null)
     const tab: Tab = visibleTabs.find(t => t.key === pickedTab)?.key ?? visibleTabs[0]?.key ?? 'workspaces'
     const [sessions, setSessions] = useState<SessionInfo[]>([])
@@ -226,8 +241,8 @@ export default function AdminPage() {
         const poll = async () => {
             try {
                 const [sRes, dRes] = await Promise.all([
-                    fetch(`${getServerUrl()}/api/sessions`, { headers: AUTH }),
-                    fetch(`${getServerUrl()}/api/drones`),
+                    apiFetch(`${getServerUrl()}/api/sessions`, { headers: AUTH }),
+                    apiFetch(`${getServerUrl()}/api/drones`),
                 ])
                 const sData = await sRes.json()
                 const dData = await dRes.json()
@@ -255,7 +270,8 @@ export default function AdminPage() {
     // Zones: fetch on mount + every 30s + after edits
     const refreshZones = useCallback(async () => {
         try {
-            const res = await fetch(`${getServerUrl()}/api/zones`)
+            // Signed in: 2a makes zone reads "any signed-in account".
+            const res = await apiFetch(`${getServerUrl()}/api/zones`, { headers: AUTH })
             const data = await res.json()
             const next = data.features ?? []
             setZones(prev =>
@@ -272,7 +288,7 @@ export default function AdminPage() {
     // Permits: poll while the PERMITS tab is open (plus once on mount for the badge)
     const refreshPermits = useCallback(async () => {
         try {
-            const res = await fetch(`${getServerUrl()}/api/permits`)
+            const res = await apiFetch(`${getServerUrl()}/api/permits`)
             const data = await res.json()
             const next = data.permits ?? []
             setPermits(prev =>
@@ -280,16 +296,17 @@ export default function AdminPage() {
         } catch { /* keep last */ }
     }, [])
     useEffect(() => {
+        if (!permitsVisible) return
         // eslint-disable-next-line react-hooks/set-state-in-effect -- refresh sets state only after its fetch resolves; the rule does not follow the await
         void refreshPermits()
         if (tab !== 'permits') return
         const id = setInterval(refreshPermits, 5000)
         return () => clearInterval(id)
-    }, [tab, refreshPermits])
+    }, [tab, refreshPermits, permitsVisible])
 
     const decidePermit = useCallback(async (id: string, approve: boolean) => {
         try {
-            await fetch(`${getServerUrl()}/api/permits/${id}/decision`, {
+            await apiFetch(`${getServerUrl()}/api/permits/${id}/decision`, {
                 method: 'POST',
                 headers: JSON_AUTH,
                 body: JSON.stringify({ approve }),
@@ -301,7 +318,7 @@ export default function AdminPage() {
     // Flights: refetch when the selected drone changes; refresh while viewing
     const refreshFlights = useCallback(async (droneId: string) => {
         try {
-            const res = await fetch(`${getServerUrl()}/api/drones/${droneId}/flights`)
+            const res = await apiFetch(`${getServerUrl()}/api/drones/${droneId}/flights`)
             const data = await res.json()
             setFlights(data.flights ?? [])
         } catch { /* keep last */ }
@@ -330,7 +347,7 @@ export default function AdminPage() {
         })
         if (close) return
         try {
-            const res = await fetch(`${getServerUrl()}/api/flights/${flightId}`)
+            const res = await apiFetch(`${getServerUrl()}/api/flights/${flightId}`)
             if (res.ok) setFlightDetail(await res.json())
         } catch { /* ignore */ }
     }, [])
@@ -388,7 +405,7 @@ export default function AdminPage() {
         const name = window.prompt(`Rename ${d.name}`, d.name)?.trim()
         if (!name || name === d.name) return
         try {
-            await fetch(`${getServerUrl()}/api/drones/${d.id}`, {
+            await apiFetch(`${getServerUrl()}/api/drones/${d.id}`, {
                 method: 'PATCH',
                 headers: JSON_AUTH,
                 body: JSON.stringify({ name }),
@@ -495,7 +512,7 @@ export default function AdminPage() {
         <div className="h-screen flex bg-zinc-950 text-zinc-200 font-mono overflow-hidden">
             {/* ── Left rail ────────────────────────────────────────────── */}
             <aside className="w-16 shrink-0 flex flex-col items-center py-4 gap-1 border-r border-zinc-800 bg-zinc-950 z-10">
-                <div className="mb-5" title="HYRAK OPS">
+                <div className="mb-5" title={org ? 'Organization console' : 'HYRAK OPS'}>
                     <Image src="/brand/icon.png" alt="HYRAK" width={26} height={26} />
                 </div>
                 {visibleTabs.map(({ key, label, full, icon: Icon }) => {
@@ -524,16 +541,31 @@ export default function AdminPage() {
                         </button>
                     )
                 })}
-                <div className="mt-auto text-center text-[9px] text-zinc-600">
-                    <div className={(telemSessions.length + fleetDrones.length) > 0 ? 'text-emerald-400' : ''}>
-                        ● {telemSessions.length + fleetDrones.length}
+                {/* The live count is founder data; the organization console
+                    has its way back to the app in its header instead. */}
+                {!org && (
+                    <div className="mt-auto text-center text-[9px] text-zinc-600">
+                        <div className={(telemSessions.length + fleetDrones.length) > 0 ? 'text-emerald-400' : ''}>
+                            ● {telemSessions.length + fleetDrones.length}
+                        </div>
+                        LIVE
                     </div>
-                    LIVE
-                </div>
+                )}
             </aside>
 
             {/* ── Main area ────────────────────────────────────────────── */}
-            <main className="flex-1 relative flex min-w-0">
+            <main className={'flex-1 relative flex min-w-0' + (org ? ' pt-10' : '')}>
+                {org && (
+                    <header className="absolute top-0 inset-x-0 h-10 flex items-center gap-3 px-4 border-b border-zinc-800">
+                        <h1 className="text-[11px] tracking-[0.2em] text-zinc-300">ORGANIZATION CONSOLE</h1>
+                        <span className="text-[10px] text-zinc-600 truncate">
+                            {user?.display_name || user?.username}
+                        </span>
+                        <a href="/command" className="ml-auto flex items-center gap-1.5 text-[10px] tracking-widest text-cyan-400 hover:text-cyan-300">
+                            <ArrowLeft size={12} /> BACK TO THE APP
+                        </a>
+                    </header>
+                )}
                 {tab === 'overview' && (
                     <>
                         <div className="flex-1 relative min-w-0">
@@ -854,12 +886,14 @@ export default function AdminPage() {
                                                                     <FlightTrackMap track={flightDetail.track} />
                                                                 </div>
                                                                 <div className="flex items-center gap-3 text-[9px]">
-                                                                    <a
-                                                                        href={`${getServerUrl()}/api/flights/${f.id}/download`}
+                                                                    {/* A button, not <a href>: the route needs the bearer. */}
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => { void apiDownload(`/api/flights/${f.id}/download`, `flight_${f.id}.csv`) }}
                                                                         className="px-2 py-1 rounded border border-zinc-700 text-zinc-300 hover:border-cyan-600 hover:text-cyan-400"
                                                                     >
                                                                         ⬇ DOWNLOAD CSV
-                                                                    </a>
+                                                                    </button>
                                                                     {f.crossed_orange && (
                                                                         <span className="text-amber-500">● crossed orange zone</span>
                                                                     )}

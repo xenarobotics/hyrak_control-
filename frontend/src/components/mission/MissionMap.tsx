@@ -1,5 +1,6 @@
 'use client'
 
+import { apiFetch } from '@/lib/api'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   MapContainer,
@@ -20,6 +21,8 @@ import { useSwarmStore } from '@/store/swarm'
 import { MAP_LAYERS, WP_META } from '@/types/mission'
 import type { Waypoint, MapLayer } from '@/types/mission'
 import { getServerUrl } from '@/lib/server-url'
+import { authHeaders } from '@/lib/auth'
+import { useAccess } from '@/hooks/useAccess'
 import { visibleInterval } from '@/lib/poll'
 import { getHazards, getObstaclesAndPath, addHazard, type KnownHazard, type LiveObstacle, type LatLng } from '@/lib/avoidance'
 import { ZONE_COLORS, zoneRings, type ZoneFeature } from '@/components/admin/zones'
@@ -32,7 +35,7 @@ function FlightZonesOverlay() {
     let alive = true
     const load = async () => {
       try {
-        const res = await fetch(`${getServerUrl()}/api/zones`)
+        const res = await apiFetch(`${getServerUrl()}/api/zones`, { headers: authHeaders() })
         const data = await res.json()
         if (alive) setZones(data.features ?? [])
       } catch { /* zones stay hidden if backend unreachable */ }
@@ -69,18 +72,24 @@ function AvoidanceOverlay({ show, reload, home, drone }: {
   const [obstacles, setObstacles] = useState<LiveObstacle[]>([])
   const [reroutes, setReroutes] = useState<LatLng[][]>([])
   const [goals, setGoals] = useState<LatLng[]>([])
+  // Avoidance is staff-only in phase 2a: a customer's map draws no overlay
+  // and never polls routes that answer 403.
+  const { isCustomer } = useAccess()
+  const on = show && !isCustomer
   useEffect(() => {
-    if (!show) return
+    if (!on) return
     let alive = true
     const load = async () => {
       try {
         const hz = await getHazards()
-        const st = await fetch(`${getServerUrl()}/api/avoidance/status`).then(r => r.json())
-        const ids: string[] = (st.drones ?? []).map((d: { drone_id: string }) => d.drone_id)
+        const sr = await apiFetch(`${getServerUrl()}/api/avoidance/status`)
+        if (!sr.ok) throw new Error(`avoidance status HTTP ${sr.status}`)
+        const st = await sr.json()
+        const ids: string[] = (Array.isArray(st.drones) ? st.drones : []).map((d: { drone_id: string }) => d.drone_id)
         const per = await Promise.all(ids.map(id =>
           getObstaclesAndPath(id).catch(() => ({ obstacles: [], reroutePath: null, goal: null }))))
         if (alive) {
-          setHazards(hz)
+          setHazards(Array.isArray(hz) ? hz : [])
           setObstacles(per.flatMap(p => p.obstacles))
           setReroutes(per.map(p => p.reroutePath).filter((p): p is LatLng[] => !!p && p.length > 1))
           setGoals(per.map(p => p.goal).filter((g): g is LatLng => !!g))
@@ -91,8 +100,8 @@ function AvoidanceOverlay({ show, reload, home, drone }: {
     const stop = visibleInterval(load, 1500)   // fast poll so the reroute updates live
     // Without this a poll in flight at unmount set state on a dead overlay.
     return () => { alive = false; stop() }
-  }, [show, reload])
-  if (!show) return null
+  }, [on, reload])
+  if (!on) return null
   const start = home ?? drone     // mission start = the drone's home / launch point
   return (
     <>

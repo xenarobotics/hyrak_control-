@@ -8,8 +8,9 @@ Mutating routes require a signed-in operator (app/auth) like the rest of the API
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from app.auth.deps import require_operator
+from app.auth.deps import require_operator, require_viewer
 from app.auth.service import AuthUser
+from app.auth.url_tickets import require_user_or_ticket
 from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
@@ -21,7 +22,7 @@ router = APIRouter(prefix="/api/recon")
 
 
 @router.get("/engine")
-async def engine_state() -> dict:
+async def engine_state(_user: AuthUser = Depends(require_viewer)) -> dict:
     import asyncio
     # to_thread: engine_state may probe the port (2 s worst case).
     return await asyncio.to_thread(service.engine_state)
@@ -110,8 +111,12 @@ async def scan_session(
 
 
 @router.get("/stream/{kind}")
-async def stream_proxy(kind: str):
-    """MJPEG passthrough - the live camera / depth feed for the panel."""
+async def stream_proxy(kind: str, _user: AuthUser = Depends(
+        require_user_or_ticket("viewer", "/api/recon/stream/{kind}"))):
+    """MJPEG passthrough - the live camera / depth feed for the panel.
+
+    An <img> cannot send the bearer, so this route also accepts a 60 s URL
+    ticket (?ticket=, from POST /api/auth/url-ticket) for this exact path."""
     if kind not in ("video", "depth"):
         raise HTTPException(status_code=404, detail="unknown stream")
 
@@ -132,7 +137,7 @@ async def stream_proxy(kind: str):
 
 
 @router.get("/download")
-async def download_proxy(path: str):
+async def download_proxy(path: str, _user: AuthUser = Depends(require_viewer)):
     """Serve a finished scan file straight from the shared data root.
 
     Deliberately does NOT go through the engine: the files are on disk the
@@ -152,7 +157,7 @@ async def download_proxy(path: str):
                         headers={"Content-Disposition": f'attachment; filename="{f.name}"'})
 
 
-# Read-only passthroughs - same no-auth policy as the rest of the API's GETs.
+# Read-only passthroughs - staff only (viewer) like every other recon GET.
 # Registered LAST: FastAPI matches in declaration order, and this catch-all
 # would otherwise swallow /download and /engine.
 _GETS = {
@@ -164,7 +169,7 @@ _GETS = {
 
 
 @router.get("/{name}")
-async def read_proxy(name: str, request: Request):
+async def read_proxy(name: str, request: Request, _user: AuthUser = Depends(require_viewer)):
     path = _GETS.get(name)
     if path is None:
         raise HTTPException(status_code=404, detail="unknown recon endpoint")

@@ -6,6 +6,7 @@
 // route planned afterwards. ZONES (law) stay on the /admin page - this
 // edits PREFERENCE, which is exactly the separation the tier model wants.
 
+import { apiFetch } from '@/lib/api'
 import { useCallback, useEffect, useState } from 'react'
 import {
     MapContainer, TileLayer, Polygon, Polyline, CircleMarker, Tooltip, useMap, useMapEvents,
@@ -85,7 +86,7 @@ export default function RegionEditor() {
 
     const refresh = useCallback(async () => {
         try {
-            const r = await fetch(api('/map-features'))
+            const r = await apiFetch(api('/map-features'))
             setFeatures(((await r.json()).features ?? []))
         } catch { /* transient */ }
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -93,7 +94,7 @@ export default function RegionEditor() {
 
     useEffect(() => {
         refresh()
-        fetch(api('/planner/meta')).then(r => r.json())
+        apiFetch(api('/planner/meta')).then(r => r.json())
             .then(j => { if (j.categories?.length) setCategories(j.categories) })
             .catch(() => { /* fall back to the static list */ })
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -110,7 +111,7 @@ export default function RegionEditor() {
         setSaving(true); setError('')
         const ring = [...points.map(([lat, lng]) => [lng, lat]), [points[0][1], points[0][0]]]
         try {
-            const r = await fetch(api('/map-features'), {
+            const r = await apiFetch(api('/map-features'), {
                 method: 'POST', headers: AUTH,
                 body: JSON.stringify({
                     name: name || `${category} region`,
@@ -126,7 +127,7 @@ export default function RegionEditor() {
     }
 
     const toggle = async (f: FeatureGJ) => {
-        await fetch(api(`/map-features/${f.properties.id}`), {
+        await apiFetch(api(`/map-features/${f.properties.id}`), {
             method: 'PATCH', headers: AUTH,
             body: JSON.stringify({ active: !f.properties.active }),
         }).catch(() => {})
@@ -135,7 +136,7 @@ export default function RegionEditor() {
 
     const remove = async (f: FeatureGJ) => {
         if (!window.confirm(`Delete "${f.properties.name}"?`)) return
-        await fetch(api(`/map-features/${f.properties.id}`), {
+        await apiFetch(api(`/map-features/${f.properties.id}`), {
             method: 'DELETE', headers: AUTH,
         }).catch(() => {})
         await refresh()

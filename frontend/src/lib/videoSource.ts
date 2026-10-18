@@ -1,3 +1,5 @@
+import { getUser, isCustomer } from './auth'
+
 // Where the video feed for a stream comes from - the browser's own camera
 // (default), the backend reading a UDP RTP/H.265 stream directly from a
 // custom RF air unit (see backend/app/webrtc/udp_video_source.py and
@@ -223,11 +225,39 @@ export function needsCameraSelection(v: VideoSource): boolean {
     return v === 'camera'
 }
 
+// ── Customer-only accounts (docs/ACCESS_MODEL.md section 8a) ─────────────
+//
+// A customer's session reaches only its own workspace, so every source the
+// SERVER opens or allocates for is staff-only: the server reading a UDP port
+// or pulling an RTSP URL (it would reach whatever the server's network
+// reaches, and the mesh units / video wall ride on air_unit_udp), and every
+// mode that needs a relay listener (allocate_video_relay is staff-only).
+// The two DataChannel modes are staff-only too: the server feeds the pushed
+// RTP into a loopback port from one fixed pool (5800-5900) shared by every
+// session, and datachannel_video_offer is a staff event.
+// What is left produces a WebRTC track in this browser and needs nothing
+// from the server but the session's own peer connection: the browser's own
+// camera (including the desktop's virtual webcam) and RTSP decoded on this
+// machine (rtsp_camera). The server re-checks every one of these.
+export const STAFF_ONLY_SOURCES: readonly VideoSource[] = [
+    'air_unit_udp', 'siyi_rtsp',                        // the server opens the stream
+    'rtsp_relay', 'air_unit_srt', 'air_unit_gst',       // relay allocation
+    'hyrak_receiver',                                   // ground decoder (relay allocation)
+    'rtsp_datachannel', 'air_unit_datachannel',         // shared loopback port pool
+]
+
+export function isStaffOnlySource(v: VideoSource): boolean {
+    return STAFF_ONLY_SOURCES.includes(v)
+}
+
 export function getVideoSource(): VideoSource {
     if (typeof window === 'undefined') return 'camera'
     try {
         const v = localStorage.getItem(KEY)
-        return (SOURCES as string[]).includes(v ?? '') ? (v as VideoSource) : 'camera'
+        const picked = (SOURCES as string[]).includes(v ?? '') ? (v as VideoSource) : 'camera'
+        // A choice left over from a staff session in this browser never
+        // reaches a customer's stream: they get the webcam instead.
+        return isStaffOnlySource(picked) && isCustomer(getUser()) ? 'camera' : picked
     } catch {
         return 'camera'
     }
@@ -694,6 +724,17 @@ export const VIDEO_SOURCES: SourceSpec[] = [
 /** Group names in catalogue order, de-duplicated. Adding a source with a new
  *  group is now enough to make it appear. */
 export const SOURCE_GROUPS = [...new Set(VIDEO_SOURCES.map(s => s.group))]
+
+/** The catalogue a picker shows: everything for staff, the customer-safe
+ *  sources for a customer-only account (see STAFF_ONLY_SOURCES). */
+export function videoSourcesFor(customer: boolean): SourceSpec[] {
+    return customer ? VIDEO_SOURCES.filter(s => !isStaffOnlySource(s.value)) : VIDEO_SOURCES
+}
+
+/** Group names that still have a source in `videoSourcesFor(customer)`. */
+export function sourceGroupsFor(customer: boolean): SourceSpec['group'][] {
+    return [...new Set(videoSourcesFor(customer).map(s => s.group))]
+}
 
 export function specFor(source: VideoSource): SourceSpec | undefined {
     return VIDEO_SOURCES.find(s => s.value === source)

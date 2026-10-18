@@ -16,7 +16,8 @@ import { getSocket } from '@/lib/socket'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { AlertCircle, Download, Trash2 } from 'lucide-react'
 import { FollowControls } from '@/components/vision/FollowControls'
-import { fetchPlateHistory, plateImageUrl, downloadSessionReport, clearHistory, toFileStamp, shortLocation, type PlateHistoryRow } from '@/lib/visionReports'
+import { fetchPlateHistory, plateImagePath, downloadSessionReport, clearHistory, toFileStamp, shortLocation, type PlateHistoryRow } from '@/lib/visionReports'
+import { useApiObjectUrl } from '@/hooks/useApiMedia'
 
 const LABEL: React.CSSProperties = {
     fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6,
@@ -326,16 +327,7 @@ export function VehiclePlateTrackingPanel() {
                                         display: 'flex', gap: 8, padding: 8, borderRadius: 8,
                                         background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
                                     }}>
-                                        {ev.image_path ? (
-                                            // eslint-disable-next-line @next/next/no-img-element
-                                            <img
-                                                src={plateImageUrl(ev.id)}
-                                                alt={ev.plate_text || 'vehicle'}
-                                                style={{ width: 52, height: 40, objectFit: 'cover', borderRadius: 5, flexShrink: 0 }}
-                                            />
-                                        ) : (
-                                            <div style={{ width: 52, height: 40, borderRadius: 5, background: 'hsl(var(--app-border))', flexShrink: 0 }} />
-                                        )}
+                                        <PlateThumb eventId={ev.image_path ? ev.id : null} alt={ev.plate_text || 'vehicle'} />
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, flex: 1 }}>
                                             <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
                                                 {ev.vehicle_id && (
@@ -394,4 +386,14 @@ export function VehiclePlateTrackingPanel() {
             </div>
         </div>
     )
+}
+
+/** The plate crop. The image route needs the bearer, which an <img> cannot
+ *  send, so it is fetched into an object URL (revoked on unmount). */
+function PlateThumb({ eventId, alt }: { eventId: string | null; alt: string }) {
+    const src = useApiObjectUrl(eventId ? plateImagePath(eventId) : null)
+    const box: React.CSSProperties = { width: 52, height: 40, borderRadius: 5, flexShrink: 0 }
+    if (!src) return <div style={{ ...box, background: 'hsl(var(--app-border))' }} />
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={src} alt={alt} style={{ ...box, objectFit: 'cover' }} />
 }

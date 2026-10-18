@@ -63,6 +63,16 @@ export interface ActionResult {
     report?: RcTakeoverReport
 }
 
+/** A command the server refused on access grounds (docs/ACCESS_MODEL.md
+ *  section 8a): `forbidden` (the role in this workspace does not allow it)
+ *  or `drone_not_in_workspace` (the drone belongs to another workspace).
+ *  `msg` is the server's own words and is shown as is. */
+export interface CommandRefusal {
+    code: 'forbidden' | 'drone_not_in_workspace'
+    msg: string
+    at: number
+}
+
 /** Whether the transmitter can take the aircraft back, answered from the
  *  aircraft's parameters before takeoff rather than discovered in the air. */
 export interface RcTakeoverReport {
@@ -96,6 +106,7 @@ interface DroneStore {
     // Mission feedback
     missionUploadResult: MissionUploadResult | null
     lastActionResult: ActionResult | null
+    commandRefusal: CommandRefusal | null
     droneMissionOffer: DroneMissionWaypoint[] | null   // waypoints downloaded from drone on connect
 
     /** The command that has been sent and not yet answered, so a button can
@@ -132,6 +143,7 @@ interface DroneStore {
     setCvResults: (r: CVResult | null) => void
     setMissionUploadResult: (r: MissionUploadResult | null) => void
     setLastActionResult: (r: ActionResult | null) => void
+    setCommandRefusal: (r: CommandRefusal | null) => void
     setDroneMissionOffer: (wps: DroneMissionWaypoint[] | null) => void
     reset: () => void
 }
@@ -172,6 +184,7 @@ export const useDroneStore = create<DroneStore>((set) => ({
     modelLoading: false,
     missionUploadResult: null,
     lastActionResult: null,
+    commandRefusal: null,
     droneMissionOffer: null,
     pendingAction: null,
     fcMessages: [],
@@ -223,6 +236,8 @@ export const useDroneStore = create<DroneStore>((set) => ({
         }
         return next
     }),
+    // A refused command will never be acknowledged: stop its spinner too.
+    setCommandRefusal: (r) => set(r ? { commandRefusal: r, pendingAction: null } : { commandRefusal: null }),
     setDroneMissionOffer: (wps) => set({ droneMissionOffer: wps }),
     addFcMessage: (m) => set(state => {
         // Trim from the FRONT. A failsafe loop or a chatty boot can emit
@@ -246,6 +261,7 @@ export const useDroneStore = create<DroneStore>((set) => ({
         modelLoading: false,
         missionUploadResult: null,
         lastActionResult: null,
+        commandRefusal: null,
         droneMissionOffer: null,
         pendingAction: null,
         fcMessages: [],

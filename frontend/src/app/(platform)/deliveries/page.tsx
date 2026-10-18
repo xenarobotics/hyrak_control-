@@ -10,6 +10,7 @@
 //   PADS   - the named locations clients order between
 //   KEYS   - client application API keys (plaintext shown exactly once)
 
+import { apiFetch } from '@/lib/api'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
 import {
@@ -267,7 +268,7 @@ function OrdersTab() {
 
     const refresh = useCallback(async () => {
         try {
-            const r = await fetch(api(`/tasks${showArchivedRef.current ? '?archived=1' : ''}`))
+            const r = await apiFetch(api(`/tasks${showArchivedRef.current ? '?archived=1' : ''}`))
             const j = await jsonOf<{ tasks: TaskT[] }>(r)
             setTasks(j.tasks ?? [])
         } catch { /* backend away - keep the last board */ }
@@ -278,7 +279,7 @@ function OrdersTab() {
 
     const loadDetail = useCallback(async (id: string) => {
         try {
-            const r = await fetch(api(`/tasks/${id}`))
+            const r = await apiFetch(api(`/tasks/${id}`))
             if (r.ok) setDetail((await r.json()).task)
         } catch { /* transient */ }
     }, [])
@@ -294,7 +295,7 @@ function OrdersTab() {
     // markers, and the drones side panel.
     const pollSessions = useCallback(async () => {
         try {
-            const r = await fetch(api('/sessions'))
+            const r = await apiFetch(api('/sessions'))
             const j = await jsonOf<SessionsBody>(r)
             const live: MapDroneLive[] = []
             const ids = new Set<string>()
@@ -336,7 +337,7 @@ function OrdersTab() {
                 const cached = routeCache.get(t.id)
                 if (cached && cached.status === t.status) continue
                 try {
-                    const r = await fetch(api(`/tasks/${t.id}`))
+                    const r = await apiFetch(api(`/tasks/${t.id}`))
                     if (!r.ok || cancelled) continue
                     const full = (await r.json()).task as TaskT
                     setRouteCache(prev => new Map(prev).set(t.id, full))
@@ -359,11 +360,11 @@ function OrdersTab() {
         pollSessions()
         const stopRefresh = visibleInterval(refresh, 8000)
         const stopSessions = visibleInterval(pollSessions, 3000)
-        fetch(api('/drones')).then(r => r.json())
+        apiFetch(api('/drones')).then(r => r.json())
             .then(j => setDrones(j.drones ?? [])).catch(() => {})
-        fetch(api('/pads')).then(r => r.json())
+        apiFetch(api('/pads')).then(r => r.json())
             .then(j => setPads((j.pads ?? []).filter((p: PadT) => p.active))).catch(() => {})
-        fetch(api('/planner/meta')).then(r => r.json())
+        apiFetch(api('/planner/meta')).then(r => r.json())
             .then(j => setProfiles(j.profiles ?? [])).catch(() => {})
         return () => { stopRefresh(); stopSessions() }
     }, [refresh, pollSessions])
@@ -377,7 +378,7 @@ function OrdersTab() {
     async function act(taskId: string, body: Record<string, unknown>) {
         setBusy(true); setError('')
         try {
-            const r = await fetch(api(`/tasks/${taskId}`), {
+            const r = await apiFetch(api(`/tasks/${taskId}`), {
                 method: 'PATCH', headers: AUTH, body: JSON.stringify(body),
             })
             if (!r.ok) setError((await jsonOf(r)).detail ?? 'Action failed')
@@ -390,7 +391,7 @@ function OrdersTab() {
     async function archive(taskId: string, archived: boolean) {
         setBusy(true); setError('')
         try {
-            const r = await fetch(api(`/tasks/${taskId}`), {
+            const r = await apiFetch(api(`/tasks/${taskId}`), {
                 method: 'PATCH', headers: AUTH, body: JSON.stringify({ archived }),
             })
             if (!r.ok) setError((await jsonOf(r)).detail ?? 'Archive failed')
@@ -403,7 +404,7 @@ function OrdersTab() {
         if (!window.confirm('Delete this order permanently? Flight history and missions are kept.')) return
         setBusy(true); setError('')
         try {
-            const r = await fetch(api(`/tasks/${taskId}`), {
+            const r = await apiFetch(api(`/tasks/${taskId}`), {
                 method: 'DELETE', headers: AUTH,
             })
             if (!r.ok) setError((await jsonOf(r)).detail ?? 'Delete failed')
@@ -416,7 +417,7 @@ function OrdersTab() {
     async function replan(taskId: string) {
         setBusy(true); setError('')
         try {
-            const r = await fetch(api(`/tasks/${taskId}/replan`), {
+            const r = await apiFetch(api(`/tasks/${taskId}/replan`), {
                 method: 'POST', headers: AUTH,
             })
             const j = await jsonOf(r)
@@ -526,7 +527,7 @@ function OrdersTab() {
         if (task.drone_id && fleetIds.has(task.drone_id)) {
             setStarting({ taskId: task.id, leg, phase: 'uploading' })
             try {
-                const r = await fetch(api(`/fleet/${task.drone_id}/fly`), {
+                const r = await apiFetch(api(`/fleet/${task.drone_id}/fly`), {
                     method: 'POST', headers: AUTH,
                     // Couple the order advance to the flight start: the server
                     // moves the order to nextStatus in the same request, so a
@@ -1060,7 +1061,7 @@ function NewOrderForm({ pads, profiles, onDone, onError }: {
     async function submit() {
         setBusy(true)
         try {
-            const r = await fetch(api('/tasks'), {
+            const r = await apiFetch(api('/tasks'), {
                 method: 'POST', headers: AUTH,
                 body: JSON.stringify({
                     pickup, dropoff,
@@ -1134,9 +1135,9 @@ function DronesPanel() {
     const refresh = useCallback(async () => {
         try {
             const [dr, se, ta] = await Promise.all([
-                fetch(api('/drones')).then(r => r.json()),
-                fetch(api('/sessions')).then(r => r.json()),
-                fetch(api('/tasks')).then(r => r.json()),
+                apiFetch(api('/drones')).then(r => r.json()),
+                apiFetch(api('/sessions')).then(r => r.json()),
+                apiFetch(api('/tasks')).then(r => r.json()),
             ])
             setDrones(dr.drones ?? [])
             setTasks(ta.tasks ?? [])
@@ -1212,7 +1213,7 @@ function DronesPanel() {
         setError('')
         setRet({ droneId, phase: 'planning' })
         try {
-            const r = await fetch(api(`/drones/${droneId}/return-mission`), {
+            const r = await apiFetch(api(`/drones/${droneId}/return-mission`), {
                 method: 'POST', headers: AUTH,
             })
             const j = await jsonOf<{ mission: { waypoints: WaypointT[] } }>(r)
@@ -1224,7 +1225,7 @@ function DronesPanel() {
             setRet({ droneId, phase: 'uploading' })
             if (fleetIds.has(droneId)) {
                 // Station drone - flown by the server, no browser radio needed.
-                const fr = await fetch(api(`/fleet/${droneId}/fly`), {
+                const fr = await apiFetch(api(`/fleet/${droneId}/fly`), {
                     method: 'POST', headers: AUTH,
                     body: JSON.stringify({ waypoints }),
                 })
@@ -1259,7 +1260,7 @@ function DronesPanel() {
     async function connectFleet() {
         setConnectingFleet(true); setError('')
         try {
-            const r = await fetch(api('/fleet/connect'), {
+            const r = await apiFetch(api('/fleet/connect'), {
                 method: 'POST', headers: AUTH, body: JSON.stringify({ count: fleetCount }),
             })
             if (!r.ok) setError((await jsonOf(r)).detail ?? 'Fleet connect failed')
@@ -1398,7 +1399,7 @@ function DronesPanel() {
                     onClick={async () => {
                         setError('')
                         try {
-                            const r = await fetch(api('/fleet/adopt'), {
+                            const r = await apiFetch(api('/fleet/adopt'), {
                                 method: 'POST', headers: AUTH,
                                 body: JSON.stringify({ port: parseInt(adoptPort) }),
                             })
@@ -1459,7 +1460,7 @@ function ProfilesTab() {
 
     const refresh = useCallback(async () => {
         try {
-            const r = await fetch(api('/planner/meta'))
+            const r = await apiFetch(api('/planner/meta'))
             const j = await jsonOf<{ profiles: FullProfileT[] }>(r)
             setProfiles(j.profiles ?? [])
         } catch { /* transient */ }
@@ -1482,7 +1483,7 @@ function ProfilesTab() {
         setBusy(p.id); setError(''); setSaved('')
         const rules = { ...(p.rules ?? {}), orange: { ...(p.rules?.orange ?? {}), policy: e.orange } }
         try {
-            const r = await fetch(api(`/route-profiles/${p.id}`), {
+            const r = await apiFetch(api(`/route-profiles/${p.id}`), {
                 method: 'PATCH', headers: AUTH,
                 body: JSON.stringify({
                     default_alt_m: alt,
@@ -1589,7 +1590,7 @@ function PadsTab() {
 
     const refresh = useCallback(async () => {
         try {
-            const r = await fetch(api('/pads'))
+            const r = await apiFetch(api('/pads'))
             setPads((await r.json()).pads ?? [])
         } catch { /* transient */ }
     }, [])
@@ -1599,7 +1600,7 @@ function PadsTab() {
     async function create() {
         setBusy(true); setError('')
         try {
-            const r = await fetch(api('/pads'), {
+            const r = await apiFetch(api('/pads'), {
                 method: 'POST', headers: AUTH,
                 body: JSON.stringify({ name, kind, lat: parseFloat(lat), lng: parseFloat(lng), notes }),
             })
@@ -1610,7 +1611,7 @@ function PadsTab() {
     }
 
     async function toggle(p: PadT) {
-        await fetch(api(`/pads/${p.id}`), {
+        await apiFetch(api(`/pads/${p.id}`), {
             method: 'PATCH', headers: AUTH,
             body: JSON.stringify({ active: !p.active }),
         }).catch(() => {})
@@ -1619,7 +1620,7 @@ function PadsTab() {
 
     async function remove(p: PadT) {
         if (!window.confirm(`Delete "${p.name}"? Orders that used it keep its name.`)) return
-        const r = await fetch(api(`/pads/${p.id}`), { method: 'DELETE', headers: AUTH })
+        const r = await apiFetch(api(`/pads/${p.id}`), { method: 'DELETE', headers: AUTH })
             .catch(() => null)
         if (!r || !r.ok) setError((r && (await jsonOf(r)).detail) || 'Delete failed')
         refresh()
@@ -1738,7 +1739,7 @@ function KeysTab() {
 
     const refresh = useCallback(async () => {
         try {
-            const r = await fetch(api('/api-keys'), { headers: AUTH })
+            const r = await apiFetch(api('/api-keys'), { headers: AUTH })
             setKeys((await r.json()).keys ?? [])
         } catch { /* transient */ }
     }, [])
@@ -1748,7 +1749,7 @@ function KeysTab() {
     async function mint() {
         setBusy(true); setError('')
         try {
-            const r = await fetch(api('/api-keys'), {
+            const r = await apiFetch(api('/api-keys'), {
                 method: 'POST', headers: AUTH, body: JSON.stringify({ name }),
             })
             const j = await jsonOf<{ key: string }>(r)
@@ -1761,7 +1762,7 @@ function KeysTab() {
     async function setActive(k: KeyT, active: boolean) {
         if (!active && !window.confirm(
             `Revoke "${k.name}"? Its clients lose /v1 access immediately.`)) return
-        const r = await fetch(api(`/api-keys/${k.id}`), {
+        const r = await apiFetch(api(`/api-keys/${k.id}`), {
             method: 'PATCH', headers: AUTH, body: JSON.stringify({ active }),
         }).catch(() => null)
         if (!r || !r.ok) setError((r && (await jsonOf(r)).detail) || 'Update failed')

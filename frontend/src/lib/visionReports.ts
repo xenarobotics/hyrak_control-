@@ -4,6 +4,7 @@
 // helpers back the "previous sessions" history panel plus the optional
 // manual export/clear actions.
 
+import { apiFetch } from '@/lib/api'
 import { authHeaders } from '@/lib/auth'
 import { getServerUrl } from './server-url'
 
@@ -52,7 +53,7 @@ export interface PlateHistoryRow {
 
 export async function fetchCrowdHistory(limit = 10): Promise<{ sessions: CrowdSessionSummary[]; alerts: CrowdAlertRow[] }> {
     try {
-        const res = await fetch(`${getServerUrl()}/api/vision/crowd-history?limit=${limit}`)
+        const res = await apiFetch(`${getServerUrl()}/api/vision/crowd-history?limit=${limit}`)
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return await res.json()
     } catch (e) {
@@ -63,7 +64,7 @@ export async function fetchCrowdHistory(limit = 10): Promise<{ sessions: CrowdSe
 
 export async function fetchPlateHistory(limit = 50): Promise<PlateHistoryRow[]> {
     try {
-        const res = await fetch(`${getServerUrl()}/api/vision/plate-history?limit=${limit}`)
+        const res = await apiFetch(`${getServerUrl()}/api/vision/plate-history?limit=${limit}`)
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = await res.json()
         return data.events ?? []
@@ -73,8 +74,9 @@ export async function fetchPlateHistory(limit = 50): Promise<PlateHistoryRow[]> 
     }
 }
 
-export function plateImageUrl(eventId: string): string {
-    return `${getServerUrl()}/api/vision/plate-history/${eventId}/image`
+/** API path of a plate crop; needs the bearer (see useApiObjectUrl). */
+export function plateImagePath(eventId: string): string {
+    return `/api/vision/plate-history/${encodeURIComponent(eventId)}/image`
 }
 
 // Human-readable stamp for filenames/labels - "when this happened", not a
@@ -97,17 +99,19 @@ export function shortLocation(lat: number | null, lng: number | null): string | 
 // be pulled individually.
 export async function downloadSessionReport(sessionId: string, kind: 'crowd-report' | 'plate-report', label?: string) {
     try {
-        const res = await fetch(`${getServerUrl()}/api/sessions/${sessionId}/${kind}/download`)
+        // Fixed name (time-stamped), not the server's session-id name.
+        const name = `${kind.replace('-', '_')}_${label ?? toFileStamp()}.zip`
+        const res = await apiFetch(`${getServerUrl()}/api/sessions/${sessionId}/${kind}/download`)
         if (!res.ok) return
-        const blob = await res.blob()
-        const url = URL.createObjectURL(blob)
+        const url = URL.createObjectURL(await res.blob())
         const a = document.createElement('a')
         a.href = url
-        a.download = `${kind.replace('-', '_')}_${label ?? toFileStamp()}.zip`
+        a.download = name
         document.body.appendChild(a)
         a.click()
         a.remove()
-        URL.revokeObjectURL(url)
+        // Revoking in the same tick can cancel the save in some browsers.
+        setTimeout(() => URL.revokeObjectURL(url), 60_000)
     } catch (e) {
         console.warn(`${kind} download failed:`, e)
     }
@@ -118,7 +122,7 @@ export async function downloadSessionReport(sessionId: string, kind: 'crowd-repo
 // mutating call.
 export async function clearHistory(kind: 'crowd-history' | 'plate-history'): Promise<boolean> {
     try {
-        const res = await fetch(`${getServerUrl()}/api/vision/${kind}`, {
+        const res = await apiFetch(`${getServerUrl()}/api/vision/${kind}`, {
             method: 'DELETE',
             headers: authHeaders(),
         })

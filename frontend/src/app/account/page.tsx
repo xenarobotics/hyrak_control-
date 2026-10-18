@@ -1,17 +1,19 @@
 'use client'
 
-// /account - the whole app for a customer-only account in phase 1
-// (docs/ACCESS_MODEL.md section 8): profile, password, devices and the
-// active workspace's members and invites. Deliberately outside the
-// (platform) group: that layout opens the live socket, which the server
-// refuses for these accounts until phase 2 scopes live sessions per
-// workspace. Staff can open it too; they get a link back to the app.
+// /account - the whole app for an account with no live access: profile,
+// password, devices and the active workspace's members and invites.
+// Deliberately outside the (platform) group, which opens the live socket.
+// Since phase 2a (docs/ACCESS_MODEL.md section 8a) customers with `view`
+// on a workspace use the live app; this page is for accounts that can view
+// none (no membership yet, or only disabled workspaces). Anyone with live
+// access can still open it and gets a link back to the app.
 
 import Image from 'next/image'
 import Link from 'next/link'
 import { useAuthGate } from '@/hooks/useAuthGate'
 import { useAccess } from '@/hooks/useAccess'
-import { logout } from '@/lib/auth'
+import { isCustomer, logout } from '@/lib/auth'
+import { hasLiveAccess } from '@/hooks/useAuthGate'
 import { DevicesGroup, PasswordGroup, ProfileGroup } from '@/components/settings/AccountSettings'
 import { InvitesGroup, MembersGroup, WorkspaceGroup } from '@/components/settings/WorkspaceSettings'
 import { S_LABEL, SButton } from '@/components/settings/primitives'
@@ -27,7 +29,7 @@ const SECTIONS: { label: string; Body: () => React.ReactNode }[] = [
 
 export default function AccountPage() {
     const gate = useAuthGate('member')
-    const { user } = useAccess()
+    const { user, workspaces } = useAccess()
 
     if (gate !== 'ok') {
         return (
@@ -38,7 +40,10 @@ export default function AccountPage() {
         )
     }
 
-    const member = user?.role === 'member'
+    // The "next release" notice is only for an account that truly has no
+    // viewable workspace; anyone with live access gets the way back instead.
+    const live = !!user && hasLiveAccess(user, workspaces)
+    const appHref = user && isCustomer(user) ? '/command' : '/fly'
     return (
         <div style={{ height: '100%', overflowY: 'auto', background: 'hsl(var(--app-bg))', color: 'hsl(var(--app-text))' }}>
             <div style={{ maxWidth: 760, margin: '0 auto', padding: '24px 16px 48px', display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -51,13 +56,13 @@ export default function AccountPage() {
                             {user?.display_name || user?.username}
                         </p>
                     </div>
-                    {!member && (
-                        <Link href="/fly" style={{ fontSize: 12, fontFamily: 'monospace', color: '#22d3ee' }}>Back to the app</Link>
+                    {live && (
+                        <Link href={appHref} style={{ fontSize: 12, fontFamily: 'monospace', color: '#22d3ee' }}>Back to the app</Link>
                     )}
                     <SButton onClick={() => { void logout().then(() => window.location.assign('/login')) }}>Sign out</SButton>
                 </header>
 
-                {member && (
+                {user && !live && (
                     <p style={{
                         margin: 0, padding: '10px 14px', borderRadius: 10, fontSize: 12, lineHeight: 1.5,
                         border: '1px solid #f59e0b60', background: '#f59e0b14',

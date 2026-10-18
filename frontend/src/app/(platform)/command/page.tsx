@@ -28,6 +28,7 @@ import dynamic from 'next/dynamic'
 import { Maximize2, Minimize2, PanelRightClose, PanelRightOpen, X } from 'lucide-react'
 import { getSocket } from '@/lib/socket'
 import { useSwarmStore } from '@/store/swarm'
+import { useAccess } from '@/hooks/useAccess'
 import { useDroneStore } from '@/store/drone'
 import { useMissionStore } from '@/store/mission'
 import { getVideoSource } from '@/lib/videoSource'
@@ -53,6 +54,8 @@ import { AiView } from '@/components/command/AiView'
 import { AiPanel } from '@/components/command/AiPanel'
 import { useAiModule } from '@/components/command/useAiModule'
 import { MODES } from '@/components/vision/ModeSelector'
+import { ViewOnlyFence } from '@/components/layout/ViewOnly'
+import { useLiveScope } from '@/hooks/useLiveScope'
 
 const mapLoading = () => (
     <div className="w-full h-full flex items-center justify-center bg-zinc-900">
@@ -192,6 +195,10 @@ function DevCommand() {
     const [drawerOpen, setDrawerOpen] = useState(false)
     const ai = useAiModule()
     const swarmEnabled = useSwarmStore(s => s.enabled)
+    const { isCustomer } = useAccess()
+    // Workspace viewers (docs/ACCESS_MODEL.md section 8a) watch only: the
+    // command surfaces below are fenced and the AI drawer is not offered.
+    const { viewOnly } = useLiveScope()
     const avoid = useAvoidanceLive()
     const dockDrag = useRef<{ x: number; w: number } | null>(null)
     const stageRef = useRef<HTMLDivElement>(null)
@@ -339,7 +346,9 @@ function DevCommand() {
 
     const dockHidden = mounted && layout.dockHidden
     // Swarm mode has no AVOID tab: a persisted 'avoid' left the dock blank.
-    const activeTab: DockTab = swarmEnabled && layout.tab === 'avoid' ? 'telemetry' : layout.tab
+    // Customers have none either: avoidance is staff-only in phase 2a.
+    const noAvoid = swarmEnabled || isCustomer
+    const activeTab: DockTab = noAvoid && layout.tab === 'avoid' ? 'telemetry' : layout.tab
     const mapBig = layout.big === 'map'
     const runningMod = MODES.find(m => m.value === ai.mode)
     const toggleModule = (m: string) => {
@@ -383,7 +392,9 @@ function DevCommand() {
             <div className="flex flex-1 min-h-0 gap-2">
                 {/* ── Action rail ─────────────────────────────────────────── */}
                 <div className="shrink-0 rounded-xl border p-1.5 overflow-y-auto" style={PANEL}>
-                    <ActionRail avoid={avoid} />
+                    <ViewOnlyFence compact>
+                        <ActionRail avoid={avoid} />
+                    </ViewOnlyFence>
                 </div>
 
                 {/* ── Stage ───────────────────────────────────────────────── */}
@@ -417,7 +428,7 @@ function DevCommand() {
                             {layout.big !== 'ai' && pipChrome('ai', `AI ${runningMod?.label.toUpperCase() ?? ''}`)}
                         </div>
                     )}
-                    {mounted && (
+                    {mounted && !viewOnly && (
                         <AiDrawer open={drawerOpen} onOpen={() => setDrawerOpen(true)}
                             onClose={() => setDrawerOpen(false)} mode={ai.mode} onToggle={toggleModule} />
                     )}
@@ -433,7 +444,7 @@ function DevCommand() {
                         <aside className="shrink-0 flex flex-col min-h-0 rounded-xl border overflow-hidden"
                             style={{ width: layout.dockW, background: 'hsl(var(--app-surface))', borderColor: 'hsl(var(--app-border))' }}>
                             <div className="flex shrink-0 border-b" style={{ borderColor: 'hsl(var(--app-border))' }}>
-                                {TABS.filter(tb => !(tb.id === 'avoid' && swarmEnabled)).map(tb => (
+                                {TABS.filter(tb => !(tb.id === 'avoid' && noAvoid)).map(tb => (
                                     <button key={tb.id} onClick={() => update({ tab: tb.id })}
                                         className={cn('flex-1 py-2.5 text-[10px] font-mono tracking-widest border-b-2 transition-colors',
                                             activeTab === tb.id ? 'border-cyan-400 text-cyan-400' : 'border-transparent')}
@@ -443,7 +454,7 @@ function DevCommand() {
                                 ))}
                             </div>
                             <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-4">
-                                {activeTab === 'avoid' && !swarmEnabled && (
+                                {activeTab === 'avoid' && !noAvoid && (
                                     <>
                                         <div className="flex gap-2">
                                             <Toggle on={layout.radar} label="RADAR" onClick={() => update({ radar: !layout.radar })}
@@ -453,20 +464,20 @@ function DevCommand() {
                                         </div>
                                         {layout.radar && <ObstacleRadar avoid={avoid} />}
                                         {layout.depth && <DepthStrip avoid={avoid} />}
-                                        <AvoidancePanel />
+                                        <ViewOnlyFence><AvoidancePanel /></ViewOnlyFence>
                                     </>
                                 )}
-                                {activeTab === 'ai' && <AiPanel onStop={ai.stop} />}
+                                {activeTab === 'ai' && <ViewOnlyFence><AiPanel onStop={ai.stop} /></ViewOnlyFence>}
                                 {activeTab === 'telemetry' && <TelemetryPanel />}
                                 {activeTab === 'setup' && (
                                     <>
-                                        {!swarmEnabled && <IndoorNavCard avoid={avoid} />}
+                                        {!noAvoid && <ViewOnlyFence note={false}><IndoorNavCard avoid={avoid} /></ViewOnlyFence>}
                                         {mounted && swarmEnabled
                                             ? <p className="text-xs font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>
                                                 Swarm mode - manage the fleet on the Fly tab.</p>
                                             : <DeviceSelector />}
-                                        <div className="border-t pt-4" style={{ borderColor: 'hsl(var(--app-border))' }}>
-                                            <DroneControls />
+                                        <div className="border-t pt-4 flex flex-col gap-2" style={{ borderColor: 'hsl(var(--app-border))' }}>
+                                            <ViewOnlyFence><DroneControls /></ViewOnlyFence>
                                         </div>
                                     </>
                                 )}

@@ -75,8 +75,13 @@ def _parse_ice(raw) -> list[RTCIceServer]:
 def register(sio) -> None:
     from app.webrtc.signaling import _sort_relay_urls, _add_ice_candidate
 
+    from app.auth.socket_guard import require_staff
+
+    # Staff only (docs/ACCESS_MODEL.md 8a): the wall reads mesh-unit feeds
+    # off shared server ports.
     @sio.on("wall_offer")
     async def on_wall_offer(sid, data):
+        if not await require_staff(sid, "wall_offer"): return
         # Everything that can reject the request happens inside this try, so
         # bad input reaches the client as wall_error rather than a traceback
         # in the log and a wall stuck on "connecting" (audit B28).
@@ -146,6 +151,7 @@ def register(sio) -> None:
 
     @sio.on("wall_ice_candidate")
     async def on_wall_ice(sid, data):
+        if not await require_staff(sid, "wall_ice_candidate"): return
         ent = _walls.get(sid)
         if not ent or not isinstance(data, dict) or not data.get("candidate"):
             return
@@ -156,4 +162,5 @@ def register(sio) -> None:
 
     @sio.on("wall_close")
     async def on_wall_close(sid, data=None):
+        if not await require_staff(sid, "wall_close"): return
         await close_for_sid(sid)

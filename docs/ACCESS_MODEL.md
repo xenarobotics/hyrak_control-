@@ -1,6 +1,6 @@
 # Access model: workspaces, roles, portals
 
-Status: design agreed 2026-10-18; phase 1 backend built on `feat/workspaces` (see "Phase 1 as built" in section 7).
+Status: design agreed 2026-10-18; phase 1 backend built on `feat/workspaces` (see "Phase 1 as built" in section 7); phase 2a backend built on `feat/live-scope` (see "Phase 2a as built" in section 8a).
 Supersedes the flat viewer / operator / admin model in `docs/AUTH.md`
 (login, tokens, rate limits and revocation from that document stay as they are).
 
@@ -342,8 +342,9 @@ vision history, recordings) still use the existing rank check. They see a
 | any other HYRAK membership (viewer, airspace) | viewer |
 | customer memberships only, or none | member (below viewer) |
 
-`member` passes no live-path check: no socket (refused with
-`no_live_access`), no viewer routes. The live paths are not scoped per
+`member` passes no compatibility-rank check: no viewer routes, no staff
+socket events. (Phase 1 also refused its socket with `no_live_access`;
+phase 2a replaces that with the workspace check in section 8a.) The live paths are not scoped per
 workspace yet, so a viewer rank would let a customer watch HYRAK's and other
 customers' drones. Account, workspace and zone-write routes use
 `require_signed_in` and decide with workspace permissions instead. A staff
@@ -356,6 +357,313 @@ open live sessions or command drones yet; HYRAK staff fly as today. Phase 2 scop
 (`fly` on that workspace), gives customers flying rights on their own drones,
 scopes recordings / vision history / flights per workspace, and adds TOTP.
 Phase 3 adds Google sign-in and outgoing email.
+
+## 8a. Phase 2a: customers in the live app (enough for Custom Models)
+
+Goal: a customer pilot opens Fly / AI / Config for **their own** workspace,
+connects their own drone and camera, runs AI modes (and later their own
+models) on their own video, and commands their own drone. Nothing shared
+with other workspaces is reachable. Staff keep working exactly as today.
+
+### Who gets what
+
+| account | console (/admin) | live app |
+|---|---|---|
+| founder | everything | everything (as today) |
+| manager / service operator | SPACES, ZONES, AUDIT for the workspaces they manage | as today (compat operator) |
+| other HYRAK staff | SPACES / ZONES / PERMITS / AUDIT as their memberships allow | as today (compat rank) |
+| customer owner / admin | **organization console**: SPACES, ZONES (site layer) and AUDIT, scoped to their workspaces | Fly, AI, Config, Settings for the active workspace |
+| customer pilot | none | Fly, AI, Config, Settings; commands own drone |
+| customer viewer | none | Fly, AI, Config, Settings read-only (video, telemetry, AI overlays) |
+
+Customers never see: Command-tab fleet aside / swarm, Mission and Deliver
+tabs, "Gazebo sim on server", mesh units, ground decoder relays, video wall,
+the fleet, other sessions, global vision history, other workspaces' flights.
+
+### Socket sessions
+
+* Handshake `auth: {token, workspace_id?, resume_session?, resume_secret?}`.
+  Staff: `workspace_id` optional, defaults to HYRAK. Customer-only accounts:
+  must have `view` on `workspace_id` (default: their first workspace with
+  `view`), else refused with `no_workspace_access`.
+* The session is stamped with `workspace_id`, the user's perms on it and
+  `is_staff`; `session_ready` carries `{workspace_id, perms, staff}`.
+  Revalidation (every 60 s and on membership change) refreshes the perms
+  and disconnects a session that lost `view`.
+* Switching the active workspace in the UI reconnects the socket (a session
+  belongs to exactly one workspace).
+
+### Every socket event is classified (default deny for customers)
+
+| class | guard | examples |
+|---|---|---|
+| session view | `view` on the session workspace (staff: signed in) | WebRTC offer / ICE / stop_stream for the session's own stream, own telemetry, own params read |
+| session command | `fly` on the session workspace (staff: compat operator) **and** drone access (below) | drone_action, drone_command, offboard, tracking, AI mode / params, calibration, own telemetry link connect |
+| staff only | compat rank as today | fleet / swarm, server-side links (udp:14600 Gazebo on server), mesh units, gs relay, allocate/release_video_relay, wall_offer/close, admin_hello / watch_session, permits, deliveries |
+
+Existing guards (`require_operator`, `require_admin`) keep meaning
+**staff only**; only events explicitly moved to the session guards become
+reachable for customers. A test enumerates every registered socket handler
+and fails if one is not in the classification table, so a new event cannot
+ship unclassified.
+
+### Drone access
+
+* On telemetry connect the registry records the drone with the session's
+  workspace: an **unassigned** drone is claimed by that workspace (audit
+  `drone.claimed`). Simulated drones are never claimed and never block.
+* A drone that belongs to a workspace where the user lacks `fly` is
+  read-only for that session: commands answer `{code: "drone_not_in_workspace"}`
+  with a message naming the fix (ask its owner to move it).
+* **Safety exception**: hold, return-to-launch and land are never refused
+  for a session that holds the drone's link, whoever owns it. Blocking a
+  safety command on a link the pilot physically holds is worse than any
+  ownership rule.
+
+### REST
+
+* Global data becomes staff-only (compat viewer): vision history (crowd,
+  plates and plate images, faces, sightings), flights and their downloads,
+  `/api/drones`, `/api/fleet`, sessions, missions, tasks, pads.
+* Session reports (`/sessions/{id}/crowd-report`, `plate-report`): the
+  session's own user or staff.
+* `/api/zones` GET and terrain: any signed-in account.
+* Org console data comes from the existing `/api/workspaces*`, zones and
+  `/api/audit` routes, which already check workspace permissions.
+
+### Phase 2a as built (backend, `feat/live-scope`)
+
+The contract above holds, with these decisions and deviations the
+frontend should code against.
+
+**Handshake.** `auth: {token, workspace_id?, resume_session?, resume_secret?}`.
+
+* Staff without `workspace_id` land on HYRAK. A staff account may also
+  name a workspace, but only one it has `view` on (HYRAK itself is always
+  allowed, so an airspace manager without `view` still gets a session).
+  A HYRAK pilot naming a customer workspace is refused. A staff session
+  stays a staff session (compatibility rank) whatever workspace it names.
+* Customer-only accounts without `workspace_id` get the first of their own
+  memberships (in grant order) whose workspace gives `view`. Inherited
+  workspaces can be named (an IITH pilot may open a session in IITH's
+  client).
+* Refusals (socket.io `connect_error` message): `unauthorized` (no or bad
+  token: sign in again) and `no_workspace_access` (signed in, but no
+  `view` on the named or any workspace, or the workspace is disabled or
+  unknown: keep the token, offer another workspace or the `/account`
+  page). `no_live_access` is gone.
+* `session_ready` (new and resumed) adds
+  `{workspace_id, perms: [sorted perm names], staff: bool}` next to the
+  existing `session_id, device, gpu_count, max_sessions, resume_secret,
+  user` (and `resumed, away_s, telemetry_connected` on a resume).
+* **Resume is bound to the same user and the same workspace.** Omitting
+  `workspace_id` on resume keeps the session's own; naming a different
+  one starts a fresh session (the old one is parked and expires as
+  usual). The workspace access is re-checked on resume: a customer who
+  lost `view` gets `no_workspace_access`.
+* Revalidation (60 s, or immediately on a membership change that reduces
+  access, through the existing revocation listener) refreshes perms and
+  drone access; a customer session that lost `view` is disconnected (the
+  session parks; its drone link runs out the 90 s grace and then drops,
+  so PX4's link-loss failsafe takes over). One re-check per session runs
+  at a time and every event arriving meanwhile waits for its answer. A
+  re-check the store does not answer within 5 s (or that errors) leaves
+  the session unverified: session-view events continue on the last known
+  perms, every command and staff event is refused with `access_unverified`,
+  except hold / return / land on a held link; the next event retries.
+* Customer sessions never load the enrolled-face gallery (it is HYRAK's
+  global data): person-tracking and traffic modes match nobody.
+
+**Socket error codes** (`error` event `{msg, event, code}`; for
+`drone_action` also an `action_result` `{action, ok: false, error, code}`):
+`forbidden` (the session lacks the perm, or a staff-only event / video
+source / AI mode), `drone_not_in_workspace` (the drone on the link belongs
+to a workspace where the user lacks `fly`), `access_unverified` (the
+periodic access re-check could not reach the account store in time:
+retry in a few seconds; hold / return / land still pass),
+`drone_unidentified` (customer
+session holds a link whose drone is not identified yet: no UID read yet,
+FC reported none, or the registry is offline). Staff-only socket acks
+(`allocate_video_relay`, `datachannel_video_offer`, ...) answer
+`{error, code: "forbidden"}`.
+
+**Event classification** (`backend/app/auth/socket_classes.py`; a test
+walks every handler socketio registered and also checks each handler
+calls the guard of its class): 56 handlers on the default namespace and 4
+on `/gs-relay`.
+
+| class | count | events |
+|---|---|---|
+| lifecycle | 2 | connect, disconnect |
+| session view | 7 | offer, ice_candidate, stop_stream, serial_uplink, disconnect_telemetry, fetch_params, get_param |
+| session command | 19 | connect_browser_serial, drone_action, drone_command, set_param, set_tracking, set_vehicle_tracking, set_follow_vehicle, set_follow_person, set_multi_follow, select_person, set_pd_params, set_altitude_mode, set_altitude_nudge, set_tracking_params, set_analysis_mode, set_profile_override, set_zone_names, set_enhance_params, clear_reference |
+| staff | 28 + 4 | connect_telemetry, connect_rf_bridge, start_rc_monitor, upload_mission, set_gallery_mode, enrol_person_live, set_crowd_thresholds, allocate_video_relay, release_video_relay, datachannel_video_offer, datachannel_video_stats, wall_offer, wall_ice_candidate, wall_close, admin_hello, watch_session, unwatch_session, request_permit, list_my_permits, the 9 swarm events, and the 4 `/gs-relay` agent events |
+
+Notes on the split:
+
+* Of the session commands, the 13 that act on the vehicle (drone_action,
+  drone_command, set_param and the follow / tracking controls) also need
+  drone access; the other 6 (connect_browser_serial and the AI pipeline
+  controls) do not.
+* `disconnect_telemetry` is session view: dropping your own link is always
+  allowed. `serial_uplink` is session view: bytes reach only the
+  session's own bridge, and blocking them would cut the link's downlink.
+* Staff for a reason other than the table above: `upload_mission` and
+  permits (customer mission planning is 2b), `set_crowd_thresholds`
+  (persists to the server-wide calibration file), `set_gallery_mode` and
+  `enrol_person_live` (global face gallery), 3D reconstruction as an
+  analysis mode (one engine process for the server; refused in
+  `set_analysis_mode` for customers). `rc_channels` now goes only to the
+  sockets that called `start_rc_monitor` (it was a broadcast to every
+  socket).
+* Formerly ungated events moved behind a staff guard: start_rc_monitor,
+  allocate / release_video_relay, datachannel_video_offer / stats,
+  wall_offer / wall_ice_candidate / wall_close, unwatch_session,
+  list_my_permits. Formerly ungated events now behind a session guard:
+  offer, ice_candidate, stop_stream, serial_uplink, fetch_params,
+  get_param.
+
+**Telemetry links a customer can use:** only `connect_browser_serial`, a
+per-session loopback bridge on an ephemeral port fed by the socket's own
+`serial_uplink` bytes. That covers every client-side relay: Web Serial,
+the desktop's SITL relay ("SITL", the client's own udp:14540), and the
+desktop's native serial, native RF, local RF agent and SIYI relays.
+`connect_telemetry` (any address the server can reach, including "Gazebo
+sim on server" on udp:14600) and `connect_rf_bridge` (the shared RF bridge
+and ground-station relay) are staff only.
+
+**Video sources a customer can use:** only the WebRTC track their own
+browser sends (`videoSource` "camera" or any other client-side source;
+the server consumes it from the peer connection). Every server-sourced
+`videoSource` is refused for customers with `forbidden`, because each has
+the server open something: `siyi_rtsp` (the server dials an RTSP URL),
+`air_unit_udp` (a shared UDP feed port), `rtsp_relay`, `air_unit_srt`,
+`air_unit_gst`, `hyrak_receiver` (a public relay port from
+allocate_video_relay), `rtsp_datachannel`, `air_unit_datachannel` (a
+loopback port from a fixed pool shared by all sessions). A customer's
+offer also has its `iceServers` replaced by the server's own list, so the
+server never dials a TURN host the customer typed.
+
+**Drone access as built.**
+
+* "Unassigned" means **never seen by the registry**: drones default to
+  the HYRAK workspace (phase 1), and every drone seen before 2a was seen
+  by staff, so a known drone on HYRAK is HYRAK's and is never claimed. The
+  first connect of a new real drone puts it in the session's workspace;
+  `drone.claimed` is audited when that is a customer workspace. A known
+  drone is moved only by `POST /api/drones/{id}/workspace`.
+* The ownership check is skipped only for a **simulated drone**: the
+  registry record carries the stored `is_simulated` flag **and** the
+  session's current link is simulator-type. Only one link is
+  simulator-type: a direct udp address the server dials on a staff
+  `connect_telemetry` (the Gazebo sim on this server, udp:14600). Every
+  client-side relay (`connect_browser_serial`) and the RF bridge are never
+  simulator-type, though MAVSDK sees loopback udp for both; the link kind
+  comes from the handler that opened the link, never from the client's
+  payload (`live_scope.link_kind_for`). Either condition alone is not
+  enough: a real drone on WiFi UDP telemetry is on a udp link too, and a
+  SITL UID repeats across instances.
+* A new record is stored as simulated (and left unclaimed, on HYRAK) only
+  when a staff session first sees it on a simulator-type link. Records
+  created or first seen through a customer session's link are never
+  simulated, so a customer cannot launder a real drone into "simulated". A
+  customer's desktop SITL arrives through the relay bridge, so it is
+  treated as a real drone: the first workspace to connect a given SITL UID
+  claims it, and a SITL UID already registered to HYRAK is read-only for
+  customers until staff move it.
+* The check applies to staff sessions too (a HYRAK pilot does not command
+  a customer's drone). **HYRAK's drones are flown only by accounts with
+  `fly` on the HYRAK workspace by the perms** (founders, HYRAK pilots);
+  the compatibility operator rank is no shortcut. A manager whose own
+  HYRAK membership is viewer flies the drones of the customer workspaces
+  they manage, and flies HYRAK's drones (including customer drones still
+  sitting on HYRAK from before 2a) only by also holding a HYRAK pilot
+  membership. Staff are still not held back while a drone is unidentified.
+  The legacy shared token flies HYRAK drones only.
+* `drone_identity` (sent once the UID is read) carries `drone_fly`:
+  `true` = this session may command the drone, `false` = read-only here,
+  `null` = unknown (customers cannot command until it is known).
+  `/api/sessions` (founders) shows each session's `workspace_id` and
+  `staff`.
+* **Safety exception:** `drone_action` with `hold`, `pause_mission`,
+  `return` or `land`, or `set_mode` with `HOLD` / `RETURN` /
+  `LAND`, passes both the workspace `fly` check and drone access whenever
+  the session holds a telemetry link. It is audited with a `(safety)`
+  suffix when it bypassed either. `rtl_home` is deliberately not in the
+  set: it takes a caller-chosen altitude, so it is a goto, not a return.
+
+**REST as built.**
+
+* Staff only (compat viewer): `GET /api/drones`, `/api/fleet`,
+  `/api/missions`, `/api/missions/{id}`, `/api/pads`, `/api/tasks`,
+  `/api/tasks/{ref}`, `/api/permits`, `/api/planner/meta`,
+  `/api/map-features`, `/api/drones/{id}/flights`, `/api/flights/{id}`,
+  `/api/flights/{id}/download`, `/api/vision/crowd-history`,
+  `/api/vision/plate-history`, `/api/vision/plate-history/{id}/image`,
+  `/api/vision/face-gallery`, `/api/vision/sightings`, every
+  `GET /api/avoidance/*`, `/api/video/mesh-units`, `/api/video/feeds`,
+  `GET /api/latency-probe` and `/stats`, every `GET /api/recon/*`. Writes
+  already needed operator or admin.
+* Any signed-in account: `GET /api/zones`, `/api/zones/check`,
+  `/api/vision/calibration` (read-only; customers' AI modes run with it),
+  `/api/terrain/elevation`, `/api/webrtc/ice-servers`.
+* Session reports (`/api/sessions/{id}/crowd-report/download`,
+  `plate-report/download`): staff, or the user who opened the session;
+  404 for anyone else. The owner is remembered in memory (bounded), so
+  after a server restart a pre-restart report is staff-only.
+* Still public: `GET /api/health`, `/api/auth/login`, `/api/auth/logout`,
+  `GET /api/auth/invites/{token}`, `POST /api/auth/invites/{token}/accept`
+  (signed out or in), `POST /api/auth/reset/{token}`, the `/v1` partner
+  API (API key checked in every handler), `/releases/*` (desktop
+  installers and update manifests).
+* The org console needs nothing new: `/api/workspaces*`, the zone writes
+  and `/api/audit` already scope an owner or admin to their subtree
+  (tested in `test_live_scope.py` and `test_workspaces.py`).
+* `start.sh` probes `/api/health` for readiness (it used `/api/fleet`).
+* **The frontend sends the bearer everywhere.** Every backend call goes
+  through `apiFetch` (`src/lib/api.ts`), which adds the token and sends
+  the browser to `/login` on a 401: the zone, drone, permit, flight,
+  map-feature, planner, task, pad, fleet, sessions, vision history /
+  calibration / face gallery / sightings, avoidance, mesh-unit, recon and
+  ICE-server reads, and the writes that already carried the token. The
+  exceptions are deliberate: the auth calls themselves,
+  `src/lib/workspaces.ts` in its soft mode (no redirect), the
+  `/api/video/feeds` stream reader in `WebCodecsVideo.tsx` and the public
+  `/releases` fetches.
+* The bearer goes only to the configured API base (`getServerUrl()`):
+  `apiFetch` drops it for any other host, and `isApiUrl` /
+  `authHeadersFor` in `src/lib/auth.ts` state the rule. The localhost
+  shortcut for the server video feeds probes the public `/api/health`
+  (which now carries a per-process `instance` id) and streams from
+  localhost only when it is the same process as the API base, with a URL
+  ticket for the feed path instead of the bearer. Desktop preview servers
+  get no credential at all.
+* Elements that cannot send a header: the plate crop
+  (`/api/vision/plate-history/{id}/image`) is fetched into a blob and shown
+  through an object URL revoked on unmount (`useApiObjectUrl`); the flight
+  CSV, the session report zips and the recon result files are fetched into
+  a blob and saved through an object URL revoked a minute after the click
+  (`apiDownload`; the backend now exposes `Content-Disposition` to CORS so
+  the server's file name survives). The recon MJPEG streams
+  (`/api/recon/stream/video`, `/depth`) use **URL tickets**:
+  `POST /api/auth/url-ticket {path}` returns a 60 s ticket bound to the
+  user, the token and that exact path, reusable within the window so the
+  `<img>` can reconnect, re-checked against the token on every use, and
+  accepted only by routes that opted in with `require_user_or_ticket` (the
+  recon streams, viewer; the `/api/video/feeds/{port}/hevc` and `/h264`
+  streams, operator, for the localhost shortcut above). Details in `docs/AUTH.md` "URL tickets".
+* Video sources: the frontend hides the two DataChannel modes
+  (`rtsp_datachannel`, `air_unit_datachannel`) from customers as well, to
+  match the backend (`datachannel_video_offer` is staff-only because of the
+  shared 5800-5900 loopback pool). Customers keep `camera` (including the
+  desktop's virtual webcam) and `rtsp_camera` (RTSP decoded on their own
+  machine): both produce a WebRTC track in the browser and need no
+  server-sourced `videoSource` or relay allocation.
+
+### Not in 2a (phase 2b)
+
+Customer mission planning, customer flight history and recordings per
+workspace, customer fleet views, TOTP for founders and managers.
 
 ## 9. Scaling to a dedicated server
 
