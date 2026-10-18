@@ -65,6 +65,46 @@ export interface CustomModel {
     step?: string | null
     progress?: number | null
     alert?: AlertRule | null
+    /** Sensitivity: show a box from this score (0..1). Default 0.25. */
+    threshold?: number
+    /** Only these class names show; null or missing: all. */
+    classes_shown?: string[] | null
+    /** Small objects: split each frame into tiles. Default off. */
+    tiling?: Tiling
+}
+
+export type Tiling = 'off' | 'auto' | '2x2' | '3x3'
+
+/** The three run settings, as the Settings section and Add's More options edit them. */
+export interface RunSettings {
+    threshold: number
+    classes_shown: string[] | null
+    tiling: Tiling
+}
+
+export const DEFAULT_THRESHOLD = 0.25
+
+export function runSettingsOf(m: CustomModel | null | undefined): RunSettings {
+    const t = m?.threshold
+    return {
+        threshold: typeof t === 'number' && Number.isFinite(t) ? t : DEFAULT_THRESHOLD,
+        classes_shown: Array.isArray(m?.classes_shown) ? m!.classes_shown : null,
+        tiling: m?.tiling ?? 'off',
+    }
+}
+
+/** Model passes per frame for a tiling (the full frame plus the tiles). */
+export function passesFor(tiling: Tiling | string | null | undefined, frameWidth?: number): number {
+    if (tiling === '2x2') return 5
+    if (tiling === '3x3') return 10
+    if (tiling === 'auto') return frameWidth != null && frameWidth <= 1280 ? 1 : 5
+    return 1
+}
+
+export const TILING_WORDS: Record<Exclude<Tiling, 'off'>, { label: string; line: string }> = {
+    auto: { label: 'Auto', line: 'Splits into 4 tiles only when the video is wider than 1280 px.' },
+    '2x2': { label: '2x2', line: '4 tiles plus the whole frame: about 5 times the work.' },
+    '3x3': { label: '3x3', line: '9 tiles plus the whole frame: about 10 times the work. For tiny objects.' },
 }
 
 /** A built-in mode as the server lists it under `hyrak`. Catalogue models
@@ -191,6 +231,10 @@ export interface ModelPatch {
     task?: ModelTask
     /** Beyond section 0: the optional alert rule, null to clear it. */
     alert?: AlertRule | null
+    threshold?: number
+    /** null shows every class again. */
+    classes_shown?: string[] | null
+    tiling?: Tiling
 }
 
 export async function updateModel(id: string, patch: ModelPatch): Promise<Result<CustomModel>> {

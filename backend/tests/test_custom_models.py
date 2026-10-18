@@ -568,7 +568,8 @@ async def test_a_model_that_dies_on_load_fails_cleanly(env, onnx_files, tmp_path
 # ── the catalogue: reduced cards, pinned versions ────────────────────────
 
 CATALOGUE_KEYS = {"id", "kind", "run_mode", "name", "description", "icon", "task", "status",
-                  "runnable", "published", "labels", "threshold", "version"}
+                  "runnable", "published", "labels", "threshold", "classes_shown", "tiling",
+                  "version"}
 
 
 async def sky_owner(env, w, name="skyowner"):

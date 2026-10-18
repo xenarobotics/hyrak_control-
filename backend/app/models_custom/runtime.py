@@ -8,7 +8,7 @@ shares it; another workspace running the same catalogue model gets its own.
 
   * Frames go through a shared buffer file (/dev/shm when it exists): the
     analyzer writes the frame's pixels into it and sends ("infer", h, w, c,
-    threshold) over a socketpair; the answer is the decoded result. One
+    threshold, {tiling, classes}) over a socketpair; the answer is the decoded result. One
     request at a time per runner (a lock); each session's analyzer already
     keeps only its newest frame, so frames that arrive meanwhile are
     dropped there, not queued here.
@@ -20,6 +20,10 @@ shares it; another workspace running the same catalogue model gets its own.
   * Idle stop: when the last session releases it, it is stopped after
     custom_models_runner_idle_s unless a session takes it again first.
   * At most custom_models_max_runners run at once (`busy` otherwise).
+  * Live settings: a PATCH of a model's sensitivity, shown classes, tiling
+    or alert lands in `set_live` and the analyzers of the owning
+    workspace read it on their next frame (no restart). Catalogue runs keep
+    the published snapshot's settings.
 
 Everything here is blocking and thread-safe: it is called from the
 analyzer's executor thread (frames) and from the pool's load executor.
@@ -70,6 +74,10 @@ class RunSpec:
     threshold: float = 0.25
     alert: Optional[dict] = None
     labels: list = field(default_factory=list)
+    # Only these class names reach cv_results, counts and alerts (None: all).
+    classes_shown: Optional[list] = None
+    # Small objects: "off", "auto", "2x2" or "3x3" (runner.py tile_grid).
+    tiling: str = "off"
     # sha256 of each file next to model_path, checked before every start.
     files: dict = field(default_factory=dict)
     # Run from the HYRAK catalogue's pinned copy (not the workspace's own).
@@ -252,9 +260,10 @@ class Runner:
         return p.pid if p is not None and p.poll() is None else None
 
     # frames ---------------------------------------------------------------
-    def infer(self, frame_bgr, threshold: float) -> dict:
-        """Run one frame (uint8 HxWx3, at most MAX_W x MAX_H). Raises
-        RunnerError on a crash, a timeout or while restarting."""
+    def infer(self, frame_bgr, threshold: float, options: Optional[dict] = None) -> dict:
+        """Run one frame (uint8 HxWx3, at most MAX_W x MAX_H). `options`:
+        {"tiling", "classes": [class ids] | None}. Raises RunnerError on a
+        crash, a timeout or while restarting."""
         h, w = frame_bgr.shape[:2]
         c = frame_bgr.shape[2] if frame_bgr.ndim == 3 else 1
         n = h * w * c
@@ -266,7 +275,7 @@ class Runner:
             dst[:] = frame_bgr.reshape(-1)
             del dst                       # no view may outlive the buffer (close() refuses)
             try:
-                self._conn.send(("infer", h, w, c, float(threshold)))
+                self._conn.send(("infer", h, w, c, float(threshold), dict(options or {})))
                 timeout = float(get_settings().custom_models_infer_timeout_s)
                 if not self._conn.poll(timeout):
                     self._crashed_locked("timeout", f"no answer in {timeout:.0f} s")
@@ -398,6 +407,21 @@ class RunnerPool:
 
 
 _pool = RunnerPool()
+
+# model id -> the owning workspace's current run settings (threshold,
+# classes_shown, tiling, alert), set by a PATCH, read by analyzers per frame.
+_live: dict[str, dict] = {}
+
+
+def set_live(model_id: str, settings: Optional[dict]) -> None:
+    if settings is None:
+        _live.pop(model_id, None)
+    else:
+        _live[model_id] = dict(settings)
+
+
+def live(model_id: str) -> Optional[dict]:
+    return _live.get(model_id)
 
 
 def pool() -> RunnerPool:

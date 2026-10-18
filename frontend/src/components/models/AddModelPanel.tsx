@@ -10,7 +10,9 @@
 //                    inspected as you paste; an ONNX picker only when the
 //                    repo has several)
 //   2. Confirm       what the server detected, in plain words: the task, the
-//                    class names (editable chips) and a name
+//                    class names (editable chips) and a name, plus "More
+//                    options" (sensitivity, shown classes, small-object
+//                    tiling) closed, with defaults new users can ignore
 //   3. Test and save the automatic check's progress, then a preview with
 //                    boxes and a speed sentence, then Save or Run now
 //
@@ -21,7 +23,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-    ArrowLeft, Check, CheckCircle2, Circle, Copy, FileBox, Layers, Link2, Loader, Lock, Play, Search, Sparkles, Upload, X, Boxes, ShieldCheck,
+    ArrowLeft, Check, CheckCircle2, ChevronRight, Circle, Copy, FileBox, Layers, Link2, Loader, Lock, Play, Search, Sparkles, Upload, X, Boxes, ShieldCheck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatBytes } from '@/lib/formatBytes'
@@ -29,11 +31,12 @@ import { useApiObjectUrl } from '@/hooks/useApiMedia'
 import {
     accessRequestText, CHECK_STEPS, checkStepOf, currentVersionOf, deleteModel, getModel, importHuggingFace,
     inspectHuggingFace, labelsOf, parseHfLink, preflightFile, previewPath, retestModel, speedSentence,
-    TASK_WORDS, updateModel, uploadModel,
-    type ApiProblem, type CustomModel, type HfInspect, type ModelTask, type Premium,
+    runSettingsOf, TASK_WORDS, updateModel, uploadModel,
+    type ApiProblem, type CustomModel, type HfInspect, type ModelTask, type Premium, type RunSettings,
 } from '@/lib/models'
 import { useModelsStore } from '@/store/models'
 import { ClassChips } from './ClassChips'
+import { SettingsFields } from './ModelSettings'
 import { AllModelsTab, RecommendedTab, type AddState, type AddTarget } from './BrowseModels'
 import { Callout, Hint, SlideOver, css as s } from './ui'
 
@@ -170,6 +173,7 @@ function AddFlow({ open, onOpenChange, workspaceId, onSaved, addState, reason, w
     const [labels, setLabels] = useState<string[]>([])
     const [task, setTask] = useState<ModelTask>('detect')
     const [detectedTask, setDetectedTask] = useState<ModelTask | null>(null)
+    const [runSettings, setRunSettings] = useState<RunSettings>(() => runSettingsOf(null))
     const [filled, setFilled] = useState(false)
     const [busy, setBusy] = useState(false)
     const [stepErr, setStepErr] = useState<ApiProblem | null>(null)
@@ -180,6 +184,7 @@ function AddFlow({ open, onOpenChange, workspaceId, onSaved, addState, reason, w
         setInspect({ state: 'idle' }); setHfFile(null); setChooseErr(null); setUpload(null)
         setImporting(false); setSubmitErr(null); setModel(null); setName(''); setNameErr(null)
         setLabels([]); setTask('detect'); setDetectedTask(null); setFilled(false); setBusy(false)
+        setRunSettings(runSettingsOf(null))
         setStepErr(null); setSaveNote(null)
         setSource(initialSource); setLockAsk(false); setAdding(null); setBrowseErr(null)
     }, [initialSource])
@@ -239,6 +244,7 @@ function AddFlow({ open, onOpenChange, workspaceId, onSaved, addState, reason, w
         setLabels(labelsOf(model))
         setTask(model.task)
         setDetectedTask(model.task)
+        setRunSettings(runSettingsOf(model))
         setFilled(true)
     }, [model, filled])
 
@@ -377,7 +383,12 @@ function AddFlow({ open, onOpenChange, workspaceId, onSaved, addState, reason, w
         const err = validateName(name)
         if (err) { setNameErr(err); document.getElementById('cm-add-name')?.focus(); return }
         setBusy(true); setStepErr(null)
-        const r = await updateModel(model.id, { name: name.trim(), labels, task })
+        const shown = runSettings.classes_shown?.filter(l => labels.includes(l)) ?? null
+        const r = await updateModel(model.id, {
+            name: name.trim(), labels, task,
+            threshold: runSettings.threshold, tiling: runSettings.tiling,
+            classes_shown: shown && shown.length && shown.length < labels.length ? shown : null,
+        })
         if (!r.ok) { setBusy(false); setStepErr(r.error); return }
         let m = r.data
         if (detectedTask && task !== detectedTask) {
@@ -617,7 +628,13 @@ function AddFlow({ open, onOpenChange, workspaceId, onSaved, addState, reason, w
                     <div className={s.section}>
                         <span className={s.label}>{task === 'classify' ? 'Answers it can give' : 'Things it finds'} ({labels.length})</span>
                         <p className={s.help}>Click a name to change how it shows on the video.</p>
-                        <ClassChips labels={labels} onChange={setLabels} />
+                        <ClassChips labels={labels} onChange={next => {
+                            // A renamed class keeps its on/off state in More options.
+                            setRunSettings(v => v.classes_shown ? {
+                                ...v, classes_shown: v.classes_shown.map(n => { const i = labels.indexOf(n); return i >= 0 ? next[i] : n }),
+                            } : v)
+                            setLabels(next)
+                        }} />
                     </div>
 
                     <div className={s.field}>
@@ -632,6 +649,14 @@ function AddFlow({ open, onOpenChange, workspaceId, onSaved, addState, reason, w
                             ? <p id="cm-add-name-err" className={s.fieldErr} role="alert">{nameErr}</p>
                             : <p id="cm-add-name-help" className={s.help}>Shown on the model card and on the video.</p>}
                     </div>
+
+                    <details className={s.details}>
+                        <summary className={s.label}><ChevronRight size={12} className={s.disclosureIcon} aria-hidden />More options</summary>
+                        <p className={s.help} style={{ margin: '6px 0 12px' }}>Optional. The defaults suit most models, and you can change these later on the model.</p>
+                        <SettingsFields value={runSettings} task={task} labels={labels} idPrefix="cm-add-set"
+                            latencyMs={null}
+                            onChange={p => setRunSettings(v => ({ ...v, ...p }))} />
+                    </details>
 
                     {stepErr && (
                         <Callout tone="bad" title={stepErr.message}
