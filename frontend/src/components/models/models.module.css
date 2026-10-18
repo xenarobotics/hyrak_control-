@@ -123,7 +123,6 @@
   color: var(--cm-ink);
   font-size: var(--cm-small); font-weight: 600;
   white-space: nowrap; cursor: pointer;
-  transition: background-color 120ms ease-out, border-color 120ms ease-out, filter 120ms ease-out;
 }
 .btn:hover { background: var(--cm-panel-2); }
 .btn:focus-visible { outline: 2px solid var(--cm-accent); outline-offset: 2px; }
@@ -186,7 +185,7 @@
   padding: 10px;
   background: var(--cm-panel); border: 1px solid var(--cm-line);
   border-radius: var(--cm-radius);
-  transition: border-color 120ms ease-out, background-color 120ms ease-out;
+
 }
 .card[data-running='true'] { border-color: var(--cm-accent-line); background: var(--cm-accent-soft); }
 .card[data-clickable='true']:hover { border-color: var(--cm-accent-line); }
@@ -294,7 +293,7 @@
   padding: 22px 14px; text-align: center; cursor: pointer;
   border: 1.5px dashed var(--cm-line); border-radius: var(--cm-radius);
   background: var(--cm-panel-2); color: var(--cm-ink-2);
-  transition: border-color 120ms ease-out, background-color 120ms ease-out;
+
 }
 .drop:hover, .drop[data-over='true'] { border-color: var(--cm-accent); background: var(--cm-accent-soft); }
 .drop:focus-visible { outline: 2px solid var(--cm-accent); outline-offset: 2px; }
@@ -319,7 +318,7 @@
 
 /* progress */
 .bar { height: 6px; border-radius: 3px; background: var(--cm-panel-2); border: 1px solid var(--cm-line); overflow: hidden; }
-.bar > i { display: block; height: 100%; background: var(--cm-accent); transition: width 160ms linear; }
+.bar > i { display: block; height: 100%; background: var(--cm-accent); }
 .checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .checklist li { display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: center; font-size: var(--cm-text); color: var(--cm-ink-2); }
 .checklist li[data-state='done'] { color: var(--cm-ink); }
@@ -390,6 +389,8 @@
   border: none; border-bottom: 1px solid var(--cm-accent); outline: none;
 }
 .normal .renameShow, .normal .renameInput { line-height: 34px; }
+/* After `all: unset` above, which would otherwise drop the shared cell. */
+.renameBox > .renameShow, .renameBox > .renameInput { grid-area: 1 / 1; }
 
 /* destructive confirm inside a panel */
 .confirm { padding: 12px; border-radius: var(--cm-radius-sm); border: 1px solid color-mix(in srgb, var(--cm-bad) 50%, transparent); background: var(--cm-bad-soft); display: flex; flex-direction: column; gap: 10px; }
