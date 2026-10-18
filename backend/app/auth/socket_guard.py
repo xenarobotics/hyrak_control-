@@ -26,12 +26,18 @@ Which guard an event uses is decided in one table, app/auth/socket_classes.py:
     rank, which only staff hold (a customer-only account ranks "member").
     Everything not explicitly moved to the session guards stays here.
 
+A re-check that the store does not answer within REVALIDATE_TIMEOUT_S
+leaves the session UNVERIFIED: session-view events go on with the last
+known perms, every command and staff event is refused with
+`access_unverified`, except hold / return / land on a held link.
+
 Refusals get an `error` event (with a `code`) and False; accepted commands
 get an audit line and True. Configured once from server.py so the event
 modules keep their single guard line and nothing else.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -43,11 +49,16 @@ logger = logging.getLogger("verocore.auth.socket")
 
 _sio = None
 _session_manager = None
-_revalidating: set = set()
+# session_id -> the re-check in flight for it (see check_session).
+_inflight: dict = {}
+# How long a re-check may wait on the store before the session counts as
+# UNVERIFIED.
+REVALIDATE_TIMEOUT_S = 5.0
 
 FORBIDDEN = "forbidden"
 DRONE_NOT_IN_WORKSPACE = "drone_not_in_workspace"
 DRONE_UNIDENTIFIED = "drone_unidentified"
+ACCESS_UNVERIFIED = "access_unverified"
 
 
 def configure(sio, session_manager) -> None:
@@ -74,64 +85,99 @@ async def _drop(session, why: str) -> None:
             pass
 
 
-async def revalidate(session) -> bool:
-    """Re-check the session's token, role and workspace perms when its last
-    check is stale. Returns False (and disconnects the socket) when the
-    token no longer verifies or a customer lost `view` on the workspace."""
+# What a re-check concluded. OK: the stamp is fresh. DENIED: token gone or
+# view lost, the socket has been disconnected. UNVERIFIED: the store did not
+# answer in time (or errored) - the stamp is stale and cannot be confirmed.
+OK, DENIED, UNVERIFIED = "ok", "denied", "unverified"
+
+
+async def check_session(session) -> str:
+    """Bring the session's stamp up to date when it is older than
+    SOCKET_REVALIDATE_S, and say how that went (OK / DENIED / UNVERIFIED).
+
+    One re-check per session at a time: socket.io runs every event in its
+    own task, so a stream (relay bytes, joystick) arriving while the store
+    is slow would otherwise start one lookup per packet. Every caller that
+    arrives while a check is in flight awaits THAT check and gets its
+    answer - none of them proceeds on the stale stamp in the meantime."""
     token_hash = getattr(session, "token_hash", None)
     if not token_hash:
-        return True          # legacy shared token: nothing to re-check
+        return OK            # legacy shared token: nothing to re-check
     now = time.monotonic()
     if now - (getattr(session, "auth_checked_at", 0.0) or 0.0) < SOCKET_REVALIDATE_S:
-        return True
-    if session.session_id in _revalidating:
-        # One re-check per session at a time: socket.io runs every event in
-        # its own task, so a stream (relay bytes, joystick) arriving while
-        # the store is slow would otherwise start one check per packet. The
-        # check in flight disconnects if it has to.
-        return True
-    _revalidating.add(session.session_id)
+        return OK
+    key = session.session_id
+    task = _inflight.get(key)
+    if task is None:
+        task = asyncio.ensure_future(_revalidate(session, token_hash, now))
+        _inflight[key] = task
+
+        def _forget(t, key=key):
+            if _inflight.get(key) is t:
+                _inflight.pop(key, None)
+        task.add_done_callback(_forget)
+    # Shielded: a caller that is cancelled must not cancel the check the
+    # other callers are waiting on.
+    return await asyncio.shield(task)
+
+
+async def revalidate(session) -> bool:
+    """check_session as a yes / no for callers that only need to know whether
+    the session still stands: False only when it was DENIED (and
+    disconnected). UNVERIFIED counts as standing - see the guards for what
+    each one allows on a stamp that could not be re-checked."""
+    return await check_session(session) != DENIED
+
+
+async def _bounded(coro):
+    return await asyncio.wait_for(coro, timeout=REVALIDATE_TIMEOUT_S)
+
+
+async def _revalidate(session, token_hash: str, now: float) -> str:
     try:
-        return await _revalidate(session, token_hash, now)
-    finally:
-        _revalidating.discard(session.session_id)
-
-
-async def _revalidate(session, token_hash: str, now: float) -> bool:
-    user = await verify_token_hash(token_hash)
+        user = await _bounded(verify_token_hash(token_hash))
+    except Exception as e:          # TimeoutError included
+        logger.warning(f"Session {session.session_id[:8]}: token re-check did not complete "
+                       f"({type(e).__name__}: {e}) - commands held back until it does")
+        return UNVERIFIED
     if user is None or user.id != session.user_id:
         await _drop(session, "token no longer valid")
-        return False
+        return DENIED
     if session.workspace_id is None:
         # A session stamped before workspaces (tests, or an old build that
         # never set one): the phase 1 rule, staff only.
         if not role_at_least(user.role, "viewer"):
             await _drop(session, "no live access")
-            return False
+            return DENIED
     else:
         try:
-            scope = await live_scope.rescope(user, session.workspace_id)
+            scope = await _bounded(live_scope.rescope(user, session.workspace_id))
         except Exception as e:
-            # Keep the previous scope through a database blip rather than
-            # drop a pilot mid-flight; the next check tries again.
-            logger.warning(f"Session {session.session_id[:8]}: workspace re-check failed ({e}) - "
-                           f"keeping the previous perms")
-        else:
-            if scope is None:
-                await _drop(session, f"lost view on workspace {session.workspace_id}")
-                return False
-            if scope.perms != session.perms:
-                logger.info(f"Session {session.session_id[:8]}: perms on {scope.workspace_id[:8]} "
-                            f"-> {sorted(scope.perms)}")
-            live_scope.stamp(session, user, scope)
+            # Not confirmed either way. The guards decide what a stale stamp
+            # still allows; the next event tries again.
+            logger.warning(f"Session {session.session_id[:8]}: workspace re-check did not complete "
+                           f"({type(e).__name__}: {e}) - commands held back until it does")
+            return UNVERIFIED
+        if scope is None:
+            await _drop(session, f"lost view on workspace {session.workspace_id}")
+            return DENIED
+        if scope.perms != session.perms:
+            logger.info(f"Session {session.session_id[:8]}: perms on {scope.workspace_id[:8]} "
+                        f"-> {sorted(scope.perms)}")
+        live_scope.stamp(session, user, scope)
     if user.role != session.role:
         logger.info(f"Session {session.session_id[:8]}: role {session.role} -> {user.role}")
     session.role = user.role
     session.username = user.username
     session.memberships = tuple(user.memberships)
     session.auth_checked_at = now
-    await live_scope.refresh_drone_access(session)
-    return True
+    try:
+        # Best effort: on a slow store the previous drone answer stands.
+        await _bounded(live_scope.refresh_drone_access(session))
+    except Exception as e:
+        logger.warning(f"Session {session.session_id[:8]}: drone access re-check did not "
+                       f"complete ({type(e).__name__}) - keeping the previous answer")
+    return OK
 
 
 async def _refuse(sid: str, session, event: str, msg: str, code: str = FORBIDDEN,
@@ -150,6 +196,11 @@ async def _refuse(sid: str, session, event: str, msg: str, code: str = FORBIDDEN
     return False
 
 
+_UNVERIFIED_MSG = ("Your access could not be re-checked just now (the server's account store "
+                   "is slow to answer), so commands are held back. Hold, return and land still "
+                   "work. Try again in a few seconds.")
+
+
 def _audit(session, event: str, data, note: str = "") -> None:
     drone = None
     if isinstance(data, dict):
@@ -166,8 +217,14 @@ def _is_staff_session(session) -> bool:
 
 async def require_role(sid: str, min_role: str, event: str, data=None, *, quiet: bool = False) -> bool:
     session = session_for(sid)
-    if session is not None and not await revalidate(session):
-        return False
+    if session is not None:
+        state = await check_session(session)
+        if state == DENIED:
+            return False
+        if state == UNVERIFIED:
+            # Staff events change state or reach shared resources: not on a
+            # stamp that could not be re-checked.
+            return await _refuse(sid, session, event, _UNVERIFIED_MSG, ACCESS_UNVERIFIED)
     role = getattr(session, "role", None) if session else None
     # The compatibility rank is held only by staff (perms.compat_role), so
     # this alone keeps these events staff-only; a scoped customer session
@@ -203,7 +260,12 @@ async def require_session_view(sid: str, event: str, data=None) -> bool:
     session = session_for(sid)
     if session is None:
         return await _refuse(sid, None, event, "No session")
-    if not await revalidate(session):
+    # UNVERIFIED passes on the last known perms on purpose: these events
+    # only show the session its own video, link and params, and cutting the
+    # video or the link's downlink because the store was slow for a moment
+    # would hurt the pilot more than it protects anyone. A DENIED session
+    # is already disconnected.
+    if await check_session(session) == DENIED:
         return False
     if _is_staff_session(session) or perms.VIEW in (session.perms or frozenset()):
         return True
@@ -222,10 +284,16 @@ async def require_session_fly(sid: str, event: str, data=None, *, quiet: bool = 
     session = session_for(sid)
     if session is None:
         return await _refuse(sid, None, event, "No session", data=data)
-    if not await revalidate(session):
-        return False
-    staff = _is_staff_session(session)
+    state = await check_session(session)
     safety = (event == "drone_action" and classes.is_safety_action(data) and _holds_link(session))
+    if state == DENIED:
+        # Disconnected: there is no socket left to answer, safety or not.
+        # The parked link runs out its grace and PX4's link-loss failsafe
+        # takes over.
+        return False
+    if state == UNVERIFIED and not safety:
+        return await _refuse(sid, session, event, _UNVERIFIED_MSG, ACCESS_UNVERIFIED, data)
+    staff = _is_staff_session(session)
     if staff:
         may_fly = role_at_least(session.role or "member", "operator")
     else:
@@ -253,6 +321,6 @@ async def require_session_fly(sid: str, event: str, data=None, *, quiet: bool = 
                 DRONE_UNIDENTIFIED, data)
 
     if not quiet:
-        bypassed = safety and (not may_fly or session.drone_fly is not True)
+        bypassed = safety and (state != OK or not may_fly or session.drone_fly is not True)
         _audit(session, event, data, " (safety)" if bypassed else "")
     return True

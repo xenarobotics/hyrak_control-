@@ -10,6 +10,7 @@ exception; the HTTP routes for REST scoping. Accounts and workspaces are
 made through the HTTP API, like the frontend would.
 """
 import asyncio
+import inspect
 from types import SimpleNamespace
 
 import pytest
@@ -226,13 +227,15 @@ async def test_customer_is_refused_by_every_staff_handler(live):
     await connect(live, "p", w.pat[1])
     h = live.sio.handlers["/"]
     from app.auth import socket_classes
+    # Every staff event, called with a plausible payload: each must refuse
+    # with `forbidden` before doing anything.
     staff_events = [e for e, c in socket_classes.EVENTS.items() if c == socket_classes.STAFF]
     payloads = {"allocate_video_relay": {}, "release_video_relay": {},
                 "datachannel_video_offer": {"sdp": "v=0"}, "datachannel_video_stats": {}}
     for ev in staff_events:
         before = len(live.rec.emitted)
         fn = h[ev]
-        params = list(__import__("inspect").signature(fn).parameters)
+        params = list(inspect.signature(fn).parameters)
         args = ("p",) if len(params) == 1 else ("p", payloads.get(ev, {"x": 1}))
         out = await fn(*args)
         new = live.rec.emitted[before:]
@@ -499,21 +502,72 @@ async def test_org_owner_console_is_scoped_to_their_subtree(live):
     assert cl.get(f"/api/audit?workspace_id={w.iith['id']}", headers=hdr(w.pat[1])).status_code == 403
 
 
-async def test_one_revalidation_per_session_at_a_time(live, monkeypatch):
-    """A stream (serial_uplink, joystick) arriving while the store is slow
-    starts one re-check, not one per packet."""
-    w = await world(live)
-    await connect(live, "p", w.pat[1])
-    s = session(live, "p")
-    calls = []
+async def _slow_verify(monkeypatch, calls, *, delay, revoke=False):
     real = socket_guard.verify_token_hash
 
     async def slow(h):
         calls.append(h)
-        await asyncio.sleep(0.05)
-        return await real(h)
+        await asyncio.sleep(delay)
+        return None if revoke else await real(h)
     monkeypatch.setattr(socket_guard, "verify_token_hash", slow)
+
+
+async def test_concurrent_callers_share_one_revalidation_and_its_answer(live, monkeypatch):
+    """A stream arriving while the store is slow starts one re-check, and
+    every caller waits for its answer instead of passing on the stale stamp."""
+    w = await world(live)
+    await connect(live, "p", w.pat[1])
+    s = session(live, "p")
+    calls = []
+    await _slow_verify(monkeypatch, calls, delay=0.05)
+    # Demoted to viewer while the stamp still says pilot.
+    ok(live.cl.patch(f"/api/workspaces/{w.iith['id']}/members/{w.pat_m['id']}",
+                     headers=hdr(w.founder[1]), json={"role": "viewer"}))
     s.auth_checked_at = 0.0
-    results = await asyncio.gather(*(socket_guard.require_session_view("p", "serial_uplink")
+    results = await asyncio.gather(*(socket_guard.require_session_fly("p", "set_analysis_mode", {})
                                      for _ in range(10)))
-    assert all(results) and len(calls) == 1 and s.auth_checked_at > 0
+    assert results == [False] * 10 and len(calls) == 1
+    assert s.perms == frozenset({"view"}) and s.auth_checked_at > 0
+    assert not socket_guard._inflight
+
+
+async def test_a_revoked_token_denies_every_waiting_caller(live, monkeypatch):
+    w = await world(live)
+    await connect(live, "p", w.pat[1])
+    hold_link(live, "p")
+    s = session(live, "p")
+    calls = []
+    await _slow_verify(monkeypatch, calls, delay=0.05, revoke=True)
+    s.auth_checked_at = 0.0
+    results = await asyncio.gather(
+        *(socket_guard.require_session_view("p", "serial_uplink") for _ in range(5)),
+        *(socket_guard.require_session_fly("p", "drone_action", {"action": "land"}) for _ in range(5)),
+        socket_guard.require_session_fly("p", "set_analysis_mode", {}))
+    assert results == [False] * 11 and len(calls) == 1
+    assert live.rec.disconnected == ["p"]
+
+
+async def test_a_timed_out_recheck_holds_commands_but_not_safety_or_view(live, monkeypatch):
+    w = await world(live)
+    await connect(live, "p", w.pat[1])
+    await connect(live, "op", w.hp[1])
+    for sid in ("p", "op"):
+        s = hold_link(live, sid, {"id": "d1", "workspace_id": w.iith["id"], "is_simulated": False})
+        s.drone_fly = True
+    calls = []
+    await _slow_verify(monkeypatch, calls, delay=1.0)
+    monkeypatch.setattr(socket_guard, "REVALIDATE_TIMEOUT_S", 0.05)
+    fly = socket_guard.require_session_fly
+    for sid in ("p", "op"):
+        session(live, sid).auth_checked_at = 0.0
+        assert await fly(sid, "drone_action", {"action": "arm"}) is False
+        assert errors(live, sid)[-1]["code"] == "access_unverified"
+        assert await fly(sid, "set_analysis_mode", {}) is False
+        for data in ({"action": "land"}, {"action": "return"}, {"action": "hold"},
+                     {"action": "rtl_home"}, {"action": "set_mode", "mode": "LAND"}):
+            assert await fly(sid, "drone_action", data) is True, (sid, data)
+        assert await socket_guard.require_session_view(sid, "serial_uplink") is True
+        assert session(live, sid).auth_checked_at == 0.0          # still stale: retried next time
+    assert await socket_guard.require_operator("op", "connect_telemetry") is False
+    assert errors(live, "op")[-1]["code"] == "access_unverified"
+    assert live.rec.disconnected == []

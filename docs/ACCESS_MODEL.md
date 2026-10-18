@@ -465,8 +465,12 @@ frontend should code against.
   access, through the existing revocation listener) refreshes perms and
   drone access; a customer session that lost `view` is disconnected (the
   session parks; its drone link runs out the 90 s grace and then drops,
-  so PX4's link-loss failsafe takes over). A database error during the
-  re-check keeps the previous perms instead of dropping a pilot.
+  so PX4's link-loss failsafe takes over). One re-check per session runs
+  at a time and every event arriving meanwhile waits for its answer. A
+  re-check the store does not answer within 5 s (or that errors) leaves
+  the session unverified: session-view events continue on the last known
+  perms, every command and staff event is refused with `access_unverified`,
+  except hold / return / land on a held link; the next event retries.
 * Customer sessions never load the enrolled-face gallery (it is HYRAK's
   global data): person-tracking and traffic modes match nobody.
 
@@ -474,7 +478,10 @@ frontend should code against.
 `drone_action` also an `action_result` `{action, ok: false, error, code}`):
 `forbidden` (the session lacks the perm, or a staff-only event / video
 source / AI mode), `drone_not_in_workspace` (the drone on the link belongs
-to a workspace where the user lacks `fly`), `drone_unidentified` (customer
+to a workspace where the user lacks `fly`), `access_unverified` (the
+periodic access re-check could not reach the account store in time:
+retry in a few seconds; hold / return / land still pass),
+`drone_unidentified` (customer
 session holds a link whose drone is not identified yet: no UID read yet,
 FC reported none, or the registry is offline). Staff-only socket acks
 (`allocate_video_relay`, `datachannel_video_offer`, ...) answer

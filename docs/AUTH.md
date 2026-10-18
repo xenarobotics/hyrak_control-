@@ -43,8 +43,10 @@ and audit routes (which check workspace permissions), `GET /api/zones`,
 `/api/webrtc/ice-servers`, and the crowd / plate reports of their own
 sessions. The socket error codes a client must handle: connect refused
 with `unauthorized` (sign in again) or `no_workspace_access` (pick another
-workspace); `error` events with `code` `forbidden`, `drone_not_in_workspace`
-or `drone_unidentified`.
+workspace); `error` events with `code` `forbidden`, `drone_not_in_workspace`,
+`drone_unidentified` or `access_unverified` (staff too: the 60 s re-check
+did not complete within 5 s; commands wait, hold / return / land and the
+session's own video and link do not).
 
 Every accepted command-type socket event and every accepted mutating route writes one line to the `hyrak.audit` logger:
 
