@@ -155,7 +155,11 @@ def test_staff_and_founder_flags():
 def test_compat_role_mapping():
     assert P.compat_role([on(HYRAK, "founder")]) == "admin"
     assert P.compat_role([on(HYRAK, "pilot")]) == "operator"
-    assert P.compat_role([on(IITH, "manager")]) == "operator"
+    # Manager ranks operator only while the account is staff: it is granted
+    # only to staff, and an ex-staff account must not keep the staff rank
+    # through a leftover manager row (phase 2a: operator = staff only).
+    assert P.compat_role([on(IITH, "manager"), on(HYRAK, "viewer")]) == "operator"
+    assert P.compat_role([on(IITH, "manager")]) == "member"
     assert P.compat_role([on(HYRAK, "viewer")]) == "viewer"
     assert P.compat_role([on(HYRAK, "airspace", box(0, 0, 1, 1))]) == "viewer"
     assert P.compat_role([on(IITH, "owner")]) == "member"     # customer: no live paths
