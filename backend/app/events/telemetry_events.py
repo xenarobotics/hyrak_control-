@@ -5,6 +5,7 @@ from app.sessions import observer
 from app.auth import socket_classes
 from app.auth.socket_guard import (
     command_session, require_operator, require_session_fly, require_session_view, require_staff,
+    takeover_stops,
 )
 from app.sessions.manager import SessionManager
 from app.telemetry import serial_bridge
@@ -381,6 +382,10 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         session.link_simulated = False
         session_manager.attach_telemetry(session.session_id, manager)
         session.drone_address = address
+        # A relinked radio during a takeover: the new link is locked too.
+        from app.sessions import takeover as _takeover
+        if _takeover.is_taken_over(session.session_id):
+            _takeover.lock_link(manager, True)
         from app.auth import live_scope as _live_scope
         session.link_kind = _live_scope.link_kind_for(
             origin, address, has_bridge=serial_bridge.get_bridge(session.session_id) is not None)
@@ -537,6 +542,10 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             return
         bridge = serial_bridge.get_bridge(session.session_id)
         if bridge:
+            # Taken over by HYRAK operations: the relay keeps carrying the
+            # downlink, minus any command / setpoint frames (the residual
+            # risk is in docs/ACCESS_MODEL.md 8b "Takeover").
+            bridge.set_command_filter(takeover_stops(session, "serial_uplink") is not None)
             bridge.uplink(bytes(data))
 
     @sio.on("disconnect_telemetry")

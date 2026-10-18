@@ -217,6 +217,39 @@ def _is_staff_session(session) -> bool:
     return bool(session.is_staff)
 
 
+def takeover_stops(session, event: str):
+    """The one takeover check for the socket paths (docs/ACCESS_MODEL.md 8b
+    "Takeover"): the Takeover that refuses `event` from this session, or
+    None. A taken-over session may not send any session command (safety
+    actions included) nor touch its link (socket_classes.TAKEOVER_LINK_EVENTS);
+    it may still watch and read. Relinking a radio is allowed while there is
+    no link at all. For serial_uplink the answer means "filter the relay"
+    (its downlink keeps flowing), never "refuse"."""
+    if session is None:
+        return None
+    t = takeover.blocking(session.session_id, actor_session_id=session.session_id)
+    if t is None:
+        return None
+    if event == "connect_browser_serial" and not _holds_link(session):
+        return None
+    if event == "serial_uplink":
+        return t          # not refused: filtered (serial_bridge.CommandFilter)
+    if event in classes.TAKEOVER_LINK_EVENTS or classes.classify(event) == classes.SESSION_COMMAND:
+        return t
+    return None
+
+
+async def _refuse_taken_over(sid: str, session, event: str, data=None) -> bool:
+    held = takeover.holder(session.session_id)
+    who = held.username if held is not None else "staff"
+    return await _refuse(
+        sid, session, event,
+        f"HYRAK operations ({who}) has taken control of this drone. Your commands, "
+        "hold, return and land included, and changes to the drone link are held back "
+        "until they release it.",
+        TAKEN_OVER, data)
+
+
 async def require_role(sid: str, min_role: str, event: str, data=None, *, quiet: bool = False) -> bool:
     session = session_for(sid)
     if session is not None:
@@ -234,6 +267,10 @@ async def require_role(sid: str, min_role: str, event: str, data=None, *, quiet:
     staff_ok = session is not None and (session.workspace_id is None or session.is_staff)
     if session is None or not role or not role_at_least(role, min_role) or not staff_ok:
         return await _refuse(sid, session, event, f"{event} requires the {min_role} role")
+    if takeover_stops(session, event) is not None:
+        # A staff session can be taken over too (a founder taking a HYRAK
+        # pilot's drone): its link and mission events stop like a customer's.
+        return await _refuse_taken_over(sid, session, event, data)
     if not quiet:
         _audit(session, event, data)
     return True
@@ -269,6 +306,10 @@ async def require_session_view(sid: str, event: str, data=None) -> bool:
     # is already disconnected.
     if await check_session(session) == DENIED:
         return False
+    if event in classes.TAKEOVER_LINK_EVENTS and takeover_stops(session, event) is not None:
+        # disconnect_telemetry: cutting the link would cut staff off the
+        # drone they now command.
+        return await _refuse_taken_over(sid, session, event, data)
     if _is_staff_session(session) or perms.VIEW in (session.perms or frozenset()):
         return True
     return await _refuse(sid, session, event, f"{event} needs view access on this workspace")
@@ -295,15 +336,8 @@ async def require_session_fly(sid: str, event: str, data=None, *, quiet: bool = 
         # The parked link runs out its grace and PX4's link-loss failsafe
         # takes over.
         return False
-    held = takeover.holder(session.session_id)
-    if held is not None and event not in classes.TAKEOVER_EXEMPT:
-        # Staff hold control: nothing from the session itself reaches the
-        # drone, hold / return / land included (staff own the decision).
-        return await _refuse(
-            sid, session, event,
-            f"HYRAK operations ({held.username}) has taken control of this drone. Your "
-            "commands, hold, return and land included, are held back until they release it.",
-            TAKEN_OVER, data)
+    if takeover_stops(session, event) is not None:
+        return await _refuse_taken_over(sid, session, event, data)
     if state == UNVERIFIED and not safety:
         return await _refuse(sid, session, event, _UNVERIFIED_MSG, ACCESS_UNVERIFIED, data)
     staff = _is_staff_session(session)

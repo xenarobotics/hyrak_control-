@@ -131,10 +131,16 @@ DRONE_EVENTS = frozenset({
 # takeover. Everything else stays bound to the caller's own session.
 ROUTABLE_EVENTS = frozenset({"drone_action", "drone_command"})
 
-# What a session in TAKEOVER may no longer send: every session command
-# except relinking its own radio (connect_browser_serial), safety actions
-# included - staff own the decision while they hold control.
-TAKEOVER_EXEMPT = frozenset({"connect_browser_serial"})
+# What a session in TAKEOVER may no longer send (socket_guard.takeover_stops):
+# every SESSION_COMMAND, safety actions included - staff own the decision
+# while they hold control - plus these, which would cut, replace or reprogram
+# the link staff now command through. connect_browser_serial is let through
+# only while the session has no link at all (relinking a dropped radio gives
+# staff their link back).
+TAKEOVER_LINK_EVENTS = frozenset({
+    "disconnect_telemetry", "connect_browser_serial",
+    "connect_telemetry", "connect_rf_bridge", "upload_mission",
+})
 
 # drone_action names that are never refused for a session holding the
 # drone's link, whoever owns the drone and whatever the session's perms

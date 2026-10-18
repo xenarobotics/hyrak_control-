@@ -96,6 +96,11 @@ class TelemetryManager:
     # Class-level defaults for the fields __init__ sets below, so a manager
     # assembled without __init__ (the test doubles) still has them.
     _last_sp: Optional[tuple] = None
+    # HYRAK operations hold this link (docs/ACCESS_MODEL.md 8b "Takeover",
+    # app/sessions/takeover.py): no automated source - AI follow, avoidance,
+    # the Offboard re-send loop - may put a setpoint or start Offboard.
+    # Staff commands (mode changes, actions, manual control) are unaffected.
+    automation_locked: bool = False
     _target_sysid: int = 1
     _target_sysid_learned: bool = False
 
@@ -2217,6 +2222,10 @@ class TelemetryManager:
         Starts Offboard mode.
         Must send at least one setpoint before calling this.
         """
+        if self.automation_locked:
+            logger.warning("Offboard refused - HYRAK operations hold this drone (takeover)")
+            self.last_action_error = "HYRAK operations have taken control of this drone"
+            return False
         if self._pilot_override_mode is not None:
             # REFUSING HERE IS THE WHOLE POINT OF THE LATCH. The pilot took the
             # aircraft; every follow control in the UI is still on screen and
@@ -2311,6 +2320,8 @@ class TelemetryManager:
                     continue
                 if self._pilot_override_mode is not None:
                     continue   # the pilot has the aircraft: nothing goes out
+                if self.automation_locked:
+                    continue   # HYRAK operations hold it (takeover): nothing goes out
                 last = self._last_velocity_cmd_t
                 if last <= 0.0:
                     continue
@@ -2461,7 +2472,7 @@ class TelemetryManager:
         """World-frame velocity + absolute heading setpoint (Offboard) - the
         avoidance local planner's command. Same pilot latch and watchdog
         bookkeeping as send_velocity_command."""
-        if not self._connected or self._pilot_override_mode is not None:
+        if not self._connected or self._pilot_override_mode is not None or self.automation_locked:
             return
         self._last_velocity_cmd_t = time.monotonic()
         self._last_ned_sp = (float(north_m_s), float(east_m_s), float(down_m_s), float(yaw_deg))
@@ -2555,7 +2566,7 @@ class TelemetryManager:
         never command a vertical component themselves - actively maintain
         altitude instead of relying on it staying put by coincidence.
         """
-        if not self._connected:
+        if not self._connected or self.automation_locked:
             return
         if self._pilot_override_mode is not None:
             # BELT AND BRACES. The trackers are stopped by the override

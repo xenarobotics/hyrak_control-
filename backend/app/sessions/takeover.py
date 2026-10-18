@@ -66,6 +66,49 @@ def is_taken_over(target_session_id: Optional[str]) -> bool:
     return holder(target_session_id) is not None
 
 
+def blocking(target_session_id: Optional[str], *, actor_session_id: Optional[str] = None,
+             actor_user_id: Optional[str] = None) -> Optional[Takeover]:
+    """THE one check every path that writes to a vehicle or its link asks
+    (socket guards, the radio uplink filter, avoidance REST writes): the
+    takeover that stops this actor, or None. The holder is never stopped -
+    by its staff session (socket paths) or by its user (REST, which has no
+    session)."""
+    t = holder(target_session_id)
+    if t is None:
+        return None
+    if actor_session_id is not None and actor_session_id == t.staff_session_id:
+        return None
+    if actor_session_id is None and actor_user_id is not None and actor_user_id == t.user_id:
+        return None
+    return t
+
+
+def blocking_drone(drone_id: Optional[str], sessions, *, actor_session_id: Optional[str] = None,
+                   actor_user_id: Optional[str] = None) -> Optional[Takeover]:
+    """blocking() for a drone id: any taken-over session whose link is to
+    that drone. `sessions` is the session manager's list."""
+    if not drone_id:
+        return None
+    for s in sessions:
+        if (getattr(s, "drone", None) or {}).get("id") != drone_id:
+            continue
+        t = blocking(s.session_id, actor_session_id=actor_session_id, actor_user_id=actor_user_id)
+        if t is not None:
+            return t
+    return None
+
+
+def lock_link(manager, locked: bool) -> None:
+    """Stop (or restart) every automated command source on this link: AI
+    follow setpoints, avoidance, the Offboard re-send loop. Read by
+    TelemetryManager (automation_locked) and the avoidance loop."""
+    if manager is not None:
+        try:
+            manager.automation_locked = bool(locked)
+        except Exception:
+            pass
+
+
 def held_by(staff_session_id: str) -> list[Takeover]:
     return [t for t in _by_target.values() if t.staff_session_id == staff_session_id]
 

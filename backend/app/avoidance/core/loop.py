@@ -453,7 +453,7 @@ async def _tick() -> None:
             if c.intervened:
                 try:
                     mgr, _, _, _ = _resolve_link(c.drone_id)
-                    if mgr is not None:
+                    if mgr is not None and not getattr(mgr, "automation_locked", False):
                         await executor.apply_local(
                             mgr, c, avoidance.Decision("hold", avoidance.AvoidanceState.HOLDING,
                                                        "loop error - holding"), -1)
@@ -468,6 +468,10 @@ _stale_hold: set[str] = set()
 
 async def _tick_one(c, now: float) -> None:
     manager, pose, in_air, mode = _resolve_link(c.drone_id)
+    if manager is not None and getattr(manager, "automation_locked", False):
+        # HYRAK operations hold this drone (takeover): avoidance does not
+        # command it. The staff holder decides.
+        return
     if manager is not None:
         _ensure_pose_feed(c, manager)
         # Environment (indoor / outdoor) is decided on the ground as well:

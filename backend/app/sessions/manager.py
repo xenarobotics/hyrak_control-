@@ -134,6 +134,15 @@ class SessionManager:
     def all_sessions(self) -> list[DroneSession]:
         return list(self._sessions.values())
 
+    def is_observer_only(self, session: DroneSession) -> bool:
+        """A console observer that flies nothing. Observer status never hides
+        a session that holds a drone link or sends video: those are always
+        listed for monitoring and can be taken over (docs/ACCESS_MODEL.md
+        8b), whatever admin_hello said."""
+        return (bool(session.is_admin)
+                and session.session_id not in self._telemetry
+                and not session.is_streaming)
+
     # ------------------------------------------------------------------ #
     # Telemetry                                                            #
     # ------------------------------------------------------------------ #
@@ -145,6 +154,8 @@ class SessionManager:
             return False
         self._telemetry[session_id] = manager
         self._sessions[session_id].telemetry_connected = True
+        # A session with a drone link is never a hidden observer.
+        self._sessions[session_id].is_admin = False
         return True
 
     def get_telemetry(self, session_id: str) -> Optional[TelemetryManager]:

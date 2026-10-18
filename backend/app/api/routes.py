@@ -221,7 +221,7 @@ def _session_row(sm, s, scope) -> dict:
 async def _live_sessions(sm, scope, workspace_ids=None) -> list[dict]:
     rows = []
     for s in sm.all_sessions():
-        if s.is_admin:
+        if sm.is_observer_only(s):
             continue
         if not scope.can(s.workspace_id):
             continue

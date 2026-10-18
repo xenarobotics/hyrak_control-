@@ -82,6 +82,8 @@ async def end_takeover(t, reason: str) -> None:
     from app.auth import service as auth
     target = _session_manager.get(t.target_session_id) if _session_manager is not None else None
     drone = (target.drone or {}) if target is not None else {}
+    if target is not None:
+        takeover.lock_link(_session_manager.get_telemetry(target.session_id), False)
     actor = SimpleNamespace(id=t.user_id, username=t.username)
     await audit.record(auth.write_store(), actor, "session.release",
                        workspace_id=t.workspace_id, target_type="session",
@@ -132,7 +134,7 @@ def register_admin_events(sio, session_manager: SessionManager):
         """The watched session if the console socket may see it, else None."""
         me = session_for(sid)
         target = session_manager.get(session_id) if session_id else None
-        if me is None or target is None or target.is_admin:
+        if me is None or target is None or session_manager.is_observer_only(target):
             return None
         scope = await data_scope.session_scope_now(me)
         return target if scope.can(target.workspace_id) else None
@@ -141,9 +143,19 @@ def register_admin_events(sio, session_manager: SessionManager):
     async def on_admin_hello(sid, data=None):
         if not await require_staff(sid, "admin_hello", data, quiet=False): return
         session = session_manager.get_by_socket(sid)
-        if session:
-            session.is_admin = True
-            logger.info(f"Console observer joined: {sid[:8]} ({session.username})")
+        if not session:
+            return
+        if session_manager.get_telemetry(session.session_id) is not None or session.is_streaming:
+            # A session flying a drone or sending video cannot turn itself
+            # into an unlisted observer (it would hide from monitoring and
+            # from takeover). Open the console in its own tab.
+            await sio.emit("error", {"msg": "This session holds a drone link or video, so it "
+                                            "cannot be a console observer. Open the console "
+                                            "in its own tab.",
+                                     "event": "admin_hello", "code": "forbidden"}, to=sid)
+            return
+        session.is_admin = True
+        logger.info(f"Console observer joined: {sid[:8]} ({session.username})")
 
     @sio.on("watch_session")
     async def on_watch_session(sid, data):
@@ -178,7 +190,7 @@ def register_admin_events(sio, session_manager: SessionManager):
         me = session_for(sid)
         session_id = (data or {}).get("session_id") if isinstance(data, dict) else None
         target = session_manager.get(session_id) if session_id else None
-        if (target is None or target is me or target.is_admin
+        if (target is None or target is me or session_manager.is_observer_only(target)
                 or not await takeover_allowed(me, target)):
             await _takeover_refused(sid, "takeover_session",
                                     "That session is not one you can take control of")
@@ -206,6 +218,9 @@ def register_admin_events(sio, session_manager: SessionManager):
                                ip=me.client_ip or "")
             logger.warning(f"TAKEOVER: {me.username} took control of session "
                            f"{target.session_id[:8]} ({target.username}, drone {drone.get('name')})")
+            # Every automated source on the link stops: AI follow,
+            # avoidance, the Offboard re-send loop. The staff holder decides.
+            takeover.lock_link(session_manager.get_telemetry(target.session_id), True)
             await _stop_ai_steering(session_manager, target)
         await notify_takeover(target, t)
         await sio.emit("takeover_result", {"ok": True, "session_id": target.session_id,
@@ -241,7 +256,7 @@ async def _stop_ai_steering(session_manager, target) -> None:
     the drone in HOLD rather than leave PX4 waiting for the offboard-loss
     failsafe. Anything else keeps flying as it is."""
     tel = session_manager.get_telemetry(target.session_id)
-    if tel is None or not getattr(tel, "_offboard_active", False):
+    if tel is None or getattr(tel, "_offboard_active", False) is not True:
         return
     try:
         ok = await tel.set_flight_mode("HOLD")

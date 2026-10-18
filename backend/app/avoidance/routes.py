@@ -19,6 +19,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.auth import live_scope, perms
+from app.sessions import takeover
 from app.auth.deps import require_operator, require_signed_in, require_viewer
 from app.auth.service import AuthUser
 from app.config import get_settings
@@ -38,15 +39,27 @@ def _drone_access(write: bool):
     """Staff by rank, customers by drone access (see the module doc)."""
     async def dep(drone_id: str, request: Request,
                   user: AuthUser = Depends(require_signed_in)) -> AuthUser:
+        sm = getattr(request.app.state, "session_manager", None)
         if user.is_staff or user.id == live_scope.auth.LEGACY_USER_ID:
             need = "operator" if write else "viewer"
             if not user.has_role(need):
                 raise HTTPException(status_code=403, detail=f"Requires the {need} role")
-            return user
-        sm = getattr(request.app.state, "session_manager", None)
-        if not await live_scope.user_drone_access(
+        elif not await live_scope.user_drone_access(
                 user, drone_id, perms.FLY if write else perms.VIEW, sm):
             raise HTTPException(status_code=404, detail="Drone not found")
+        if write and sm is not None:
+            # Taken over by HYRAK operations: only the holder changes this
+            # drone's avoidance (the same rule as the socket paths).
+            did = drone_id
+            if did == "auto":
+                on = [c for c in avoidance._controllers.values() if c.enabled]
+                did = on[0].drone_id if len(on) == 1 else None
+            held = takeover.blocking_drone(did, sm.all_sessions(), actor_user_id=user.id)
+            if held is not None:
+                raise HTTPException(status_code=423, detail={
+                    "code": "taken_over",
+                    "msg": f"HYRAK operations ({held.username}) have taken control of this "
+                           "drone; its avoidance is theirs until they release it."})
         return user
     dep.__name__ = "drone_write" if write else "drone_read"
     return dep
