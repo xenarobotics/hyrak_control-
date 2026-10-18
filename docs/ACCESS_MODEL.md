@@ -1,6 +1,6 @@
 # Access model: workspaces, roles, portals
 
-Status: design agreed 2026-10-18, phase 1 being built on `feat/workspaces`.
+Status: design agreed 2026-10-18; phase 1 backend built on `feat/workspaces` (see "Phase 1 as built" in section 7).
 Supersedes the flat viewer / operator / admin model in `docs/AUTH.md`
 (login, tokens, rate limits and revocation from that document stay as they are).
 
@@ -239,6 +239,91 @@ Workspaces:
 
 Zones: `GET /zones` unchanged plus `layer`, `workspace_id`. POST/PATCH take
 `layer` and `workspace_id` and apply section 3.
+
+### Phase 1 as built (backend, `feat/workspaces`)
+
+The contract above holds, with these additions and deviations the frontend
+should code against:
+
+* **Response wrappers.** Lists and objects come wrapped: `{workspaces}`,
+  `{workspace}`, `{members}`, `{member}`, `{invites}`, `{drones}`,
+  `{drone}`, `{staff}`, `{events}`, `{user}`. `GET /auth/sessions` is a
+  bare list. `POST /workspaces/{id}/invites` returns `{invite, url}`;
+  `POST /auth/users/{id}/reset-link` returns `{url, expires_at}`.
+* **Links.** `url` is a path (`/invite/<token>`, `/reset/<token>`) unless
+  `PUBLIC_APP_URL` is set in `.env`, in which case it is absolute. The
+  frontend should prefix its own origin when it gets a path.
+* **`user` objects.** Login, `/auth/me` and invite sign-up return
+  `{id, username, email, email_verified, display_name, is_founder, is_staff, role}`.
+  `PATCH /auth/me` and the founder routes return the account record
+  `{id, username, email, email_verified, display_name, disabled, created_at, last_login_at}`
+  (founder routes add `memberships` and the compatibility `role`). Member
+  rows' `user` also carries `email_verified`.
+* **Verified emails.** `users.email_verified` is true only after accepting
+  an email-locked invite with exactly that address, or when a founder sets
+  the address (`PATCH /auth/users/{id}` accepts `email` for founders; `""`
+  clears it). `PATCH /auth/me` accepts `display_name` only: `email` is
+  400 until outgoing email brings verification links. Only verified
+  addresses resolve: sign-in by email, `POST /workspaces/{id}/members`
+  with an email `login` (otherwise 404 "use the username"), and
+  email-locked invites (signed in: your verified email must match;
+  signed out: you must sign up with the locked address).
+* **Workspace entries** (`/auth/me`, `GET /workspaces`) also carry
+  `disabled` and `created_at`. `disabled` is resolved down the tree: a
+  client of a disabled organization is disabled. On a disabled workspace
+  only founders and managers keep any permission.
+* **Status codes.** A wrong current password on `POST /auth/me/password`
+  is **403**, not 401 (the frontend treats 401 as "signed out"). It
+  returns `{ok, other_sessions_ended}`; `POST /auth/sessions/revoke-others`
+  returns `{ok, ended}`. Sessions also carry `expires_at`.
+* **Invites.** Bad, used, revoked or expired tokens are 404; 5 bad tokens
+  per IP per 15 min then 429. Accept while signed in returns
+  `{membership: {id, workspace_id, workspace_name, workspace_kind, role, area, title}}`;
+  a stale bearer on accept is 401 (not a silent signed-out accept).
+  Email mismatch is 403; "already a member", "account with this email
+  exists, sign in first" and "username taken" are 409. Without
+  `username` one is derived from the email. Revoking an invite needs the
+  right to grant its role. **`manager` cannot be invited** (409): it is
+  granted only to existing staff accounts with `POST /workspaces/{id}/members`.
+* **Areas.** Only `airspace` (required) and `manager` (optional)
+  memberships and invites carry an `area`; on any other role it is 400.
+  All GeoJSON (areas, operating areas, zone geometry) must be a valid
+  Polygon / MultiPolygon in lng/lat range with at most 2000 vertices.
+* **Members.** `GET /workspaces/{id}/members` items also have `disabled`;
+  `user.email` is null unless the caller has `members.manage`. Inherited
+  rows come from customer ancestors only: platform memberships (founders,
+  HYRAK staff) are not listed on customer workspaces. Editing a
+  membership needs the right to touch its old role and grant its new one
+  (so an admin cannot edit an owner's title either). The last-owner and
+  last-founder rules count only enabled accounts.
+* **Workspaces.** PATCH `name` needs `members.manage`; `disabled` needs
+  `workspace.operating_area` (staff), and HYRAK can be neither disabled
+  nor deleted (409). **DELETE also refuses while zones belong to the
+  workspace** (409), besides children and drones: silently dropping its
+  area zones would remove airspace restrictions.
+* **Drones.** `GET /workspaces/{id}/drones` lists drones assigned
+  directly to that workspace (not its subtree). Moving a drone answers
+  404 when its current workspace (or the target) is invisible to the
+  caller, 403 when `drones.manage` is missing on either.
+* **Audit.** `workspace_id` is required for non-founders (400) and
+  includes that workspace's subtree; `before` is an event `id`; events are
+  newest first with `{id, at, actor_id, actor_name, workspace_id, action,
+  target_type, target_id, detail, ip}`.
+* **Zones.** `layer` defaults to `regulatory` and `workspace_id` to HYRAK;
+  a regulatory zone must sit on HYRAK (400). A refused edit on a customer
+  workspace the caller cannot see is 404. PATCH may move `layer` /
+  `workspace_id` and then needs rights on both the old and the new
+  placement; geometry still changes only by delete + redraw.
+* **Founder account routes.** `POST /auth/users` stays as the old admin
+  form (`{username, password, role, email?, display_name?}` with `role` in
+  viewer / operator / admin, mapped to a HYRAK membership; the email is
+  verified). `PATCH /auth/users/{id}` also accepts `password` and
+  `email`; a `role` there is refused with 400. Deleting the last founder
+  is 409.
+* **Database down.** Reads fall back to the in-memory platform workspace
+  and env founder; every write answers 503.
+* **Not yet scoped:** `permits.approve` is in the engine but permit routes
+  still use the compatibility admin rank (phase 2, with the live paths).
 
 ## 8. Phasing and what phase 1 does not do yet
 
