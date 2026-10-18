@@ -1325,3 +1325,87 @@ class AuditEvent(Base):
     target_id: Mapped[str] = mapped_column(String(64), default="", server_default="")
     detail: Mapped[Optional[dict]] = mapped_column(JSONB_COL, nullable=True)
     ip: Mapped[str] = mapped_column(String(64), default="", server_default="")
+
+
+class CustomModel(Base):
+    """
+    A model in a workspace's library (docs/custom_models/DESIGN.md section 0):
+    an uploaded ONNX file or one from a public Hugging Face repo. Its files
+    and checks live in model_versions; `current_version` is the newest
+    version that passed its check (the one that runs), while `status`,
+    `error` and `error_hint` describe the newest version, so a failed
+    re-upload says what is wrong while the previous version keeps running.
+    `published` puts it in the HYRAK catalogue (founders only), visible to
+    every workspace. `settings` holds the run options: score threshold and
+    the optional alert rule.
+    """
+    __tablename__ = "models"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    task: Mapped[str] = mapped_column(String(16), default="", server_default="")
+    source: Mapped[str] = mapped_column(String(16))
+    hf_repo: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    hf_revision: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    hf_file: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    status: Mapped[str] = mapped_column(String(12), default="checking")
+    error: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    error_hint: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    current_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    published: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"),
+                                            index=True)
+    settings: Mapped[dict] = mapped_column(JSONB_COL, nullable=False, default=dict,
+                                           server_default=text("'{}'"))
+    created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    __table_args__ = (
+        CheckConstraint("source IN ('upload', 'huggingface')", name="ck_models_source"),
+        CheckConstraint("status IN ('checking', 'ready', 'failed')", name="ck_models_status"),
+    )
+
+
+class CustomModelVersion(Base):
+    """
+    One received file of a model: v1 from the first upload or import, v2
+    from the next, and so on. What the check found (task, input shape,
+    labels, the inspection details) and measured (latency on our GPU, GPU
+    memory) is kept per version, as is the version's own check status.
+    """
+    __tablename__ = "model_versions"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    model_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("models.id", ondelete="CASCADE"), index=True)
+    n: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    size_bytes: Mapped[int] = mapped_column(BigInteger, default=0, server_default=text("0"))
+    file_name: Mapped[str] = mapped_column(String(300), default="", server_default="")
+    hf_revision: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(12), default="checking")
+    error: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    error_hint: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    task: Mapped[str] = mapped_column(String(16), default="", server_default="")
+    input_shape: Mapped[Optional[list]] = mapped_column(JSONB_COL, nullable=True)
+    labels: Mapped[list] = mapped_column(JSONB_COL, nullable=False, default=list,
+                                         server_default=text("'[]'"))
+    details: Mapped[dict] = mapped_column(JSONB_COL, nullable=False, default=dict,
+                                          server_default=text("'{}'"))
+    latency_ms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    gpu_mem_mb: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    preview_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("model_id", "n", name="uq_model_versions_model_n"),
+        CheckConstraint("status IN ('checking', 'ready', 'failed')",
+                        name="ck_model_versions_status"),
+    )

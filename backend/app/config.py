@@ -446,6 +446,29 @@ class Settings(BaseSettings):
     cloud_sim_default_lat: float = Field(default=17.596569)
     cloud_sim_default_lon: float = Field(default=78.125203)
 
+    # Custom models (docs/custom_models/DESIGN.md section 0). Files live at
+    # <hyrak_data_dir>/workspaces/<workspace_id>/models/<model_id>/v<n>/.
+    # One knob per limit, so per-workspace quotas can replace them later.
+    hyrak_data_dir: Path = Field(default=ROOT_DIR / "backend" / "data")
+    custom_models_max_mb: int = Field(default=500)           # upload and Hugging Face download
+    custom_models_max_per_workspace: int = Field(default=50)
+    # Checking runs in a separate process; these bound it.
+    custom_models_inspect_timeout_s: float = Field(default=120.0)
+    custom_models_test_timeout_s: float = Field(default=240.0)
+    custom_models_parallel_checks: int = Field(default=1)
+    # Hugging Face: public repos only, no token is ever sent.
+    custom_models_hf_endpoint: str = Field(default="https://huggingface.co")
+    custom_models_hf_timeout_s: float = Field(default=20.0)
+    custom_models_hf_download_timeout_s: float = Field(default=900.0)
+    # Runners: one process per running model and workspace.
+    custom_models_use_gpu: bool = Field(default=True)
+    custom_models_max_runners: int = Field(default=4)
+    custom_models_gpu_mem_limit_mb: int = Field(default=2048)   # per runner (CUDA arena)
+    custom_models_cpu_threads: int = Field(default=2)           # per runner
+    custom_models_runner_idle_s: float = Field(default=60.0)
+    custom_models_runner_start_timeout_s: float = Field(default=120.0)
+    custom_models_infer_timeout_s: float = Field(default=10.0)
+
     # Desktop app installers + electron-updater's manifest files
     # (latest.yml / latest-mac.yml / latest-linux.yml), served straight off
     # disk at /releases - see desktop/package.json's "generic" publish

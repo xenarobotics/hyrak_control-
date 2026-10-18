@@ -44,6 +44,9 @@ releases/*
 # ── Captured data (plate crop images — retained on disk, referenced by ─────
 # ── plate_events rows in Postgres; not source, not committed) ───────────────
 backend/.data/
+# Customer model files (docs/custom_models/DESIGN.md section 0): HYRAK_DATA_DIR
+# defaults to backend/data, one folder per workspace.
+backend/data/
 # Runtime capture data at the repo root too — plate crops, enrolment shots,
 # face gallery originals. Referenced by DB rows, backed up separately (see
 # docs/DISASTER_RECOVERY.md), never source.
