@@ -483,6 +483,7 @@ export default function ModulesPage() {
                 open={addOpen}
                 onOpenChange={setAddOpen}
                 premium={lib.premium}
+                canManage={access.canManage}
                 workspaceId={access.workspace?.id ?? null}
                 workspaceName={access.workspace?.name ?? null}
                 onSaved={(m: CustomModel) => {

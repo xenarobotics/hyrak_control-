@@ -111,7 +111,7 @@ export interface ModelStatusEvent {
     progress?: number | null
 }
 
-export interface ApiProblem { message: string; hint: string | null; status: number }
+export interface ApiProblem { message: string; hint: string | null; status: number; code?: string | null }
 
 export type Result<T> = { ok: true; data: T } | { ok: false; error: ApiProblem }
 
@@ -139,7 +139,7 @@ export function problemFrom(data: unknown, status: number): ApiProblem {
     }
     const message = (typeof detail === 'string' && detail.trim()) ? detail.trim()
         : pick('error', 'message', 'detail') ?? fallback
-    return { message, hint: pick('hint', 'error_hint'), status }
+    return { message, hint: pick('hint', 'error_hint'), status, code: pick('code') }
 }
 
 async function call<T>(path: string, init: Parameters<typeof apiJson>[1] = {}): Promise<Result<T>> {
@@ -241,6 +241,132 @@ export async function importHuggingFace(body: {
 }): Promise<Result<CustomModel>> {
     const r = await call<unknown>('/api/models/huggingface', { method: 'POST', json: body })
     return r.ok ? { ok: true, data: unwrap(r.data) } : r
+}
+
+// ── browse: recommended list and Hugging Face search ──────────────────
+
+/** One HYRAK-curated model (GET /api/models/huggingface/recommended). */
+export interface RecommendedModel {
+    repo: string
+    file: string
+    name: string
+    category: string
+    task: ModelTask
+    /** One plain sentence. */
+    what: string
+    license: string
+    /** Set for licences with commercial strings attached. */
+    license_note: string | null
+    classes_preview: string[]
+    /** Frames per second measured on HYRAK, when verified. */
+    fps: number | null
+    verified_at: string | null
+    url: string
+    /** This workspace's model id when it already has this one. */
+    added: string | null
+}
+
+export interface RecommendedList {
+    premium: Premium
+    can_manage: boolean
+    categories: { name: string; models: RecommendedModel[] }[]
+}
+
+export type SearchTask = 'all' | 'detect' | 'classify'
+
+/** One search result card (GET /api/models/huggingface/search). */
+export interface HfSearchCard {
+    repo: string
+    name: string
+    url: string
+    task: ModelTask | 'segment' | null
+    downloads: number
+    likes: number
+    updated: string | null
+    license: string | null
+    license_note: string | null
+    onnx_files: string[]
+    suggested_file: string | null
+    /** HYRAK can add it today. */
+    runnable: boolean
+    /** Why not, in plain words, when not runnable. */
+    reason: string | null
+    added: string | null
+}
+
+export interface HfSearchResult {
+    query: string
+    task: SearchTask
+    page: number
+    has_more: boolean
+    results: HfSearchCard[]
+    premium: Premium
+    can_manage: boolean
+}
+
+export async function getRecommended(workspaceId: string | null): Promise<Result<RecommendedList>> {
+    const q = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''
+    const r = await call<Partial<RecommendedList>>(`/api/models/huggingface/recommended${q}`)
+    if (!r.ok) return r
+    return {
+        ok: true,
+        data: {
+            premium: { enabled: !!r.data.premium?.enabled, reason: r.data.premium?.reason ?? null },
+            can_manage: !!r.data.can_manage,
+            categories: Array.isArray(r.data.categories) ? r.data.categories : [],
+        },
+    }
+}
+
+export async function searchHuggingFace(opts: {
+    q: string; task: SearchTask; page?: number; workspaceId: string | null; signal?: AbortSignal
+}): Promise<Result<HfSearchResult>> {
+    const params = new URLSearchParams({ q: opts.q, task: opts.task, page: String(opts.page ?? 1) })
+    if (opts.workspaceId) params.set('workspace_id', opts.workspaceId)
+    try {
+        const res = await apiFetch(`/api/models/huggingface/search?${params}`, { signal: opts.signal })
+        let data: unknown = {}
+        try { data = await res.json() } catch { /* non-JSON */ }
+        if (!res.ok) return { ok: false, error: problemFrom(data, res.status) }
+        const d = data as Partial<HfSearchResult>
+        return {
+            ok: true,
+            data: {
+                query: d.query ?? opts.q, task: d.task ?? opts.task, page: d.page ?? 1,
+                has_more: !!d.has_more, results: Array.isArray(d.results) ? d.results : [],
+                premium: { enabled: !!d.premium?.enabled, reason: d.premium?.reason ?? null },
+                can_manage: !!d.can_manage,
+            },
+        }
+    } catch (e) {
+        if ((e as Error)?.name === 'AbortError') throw e
+        return { ok: false, error: problemFrom(null, 0) }
+    }
+}
+
+/** True for "Hugging Face is busy" and "too many searches": wait and retry. */
+export const isRateLimited = (e: ApiProblem) =>
+    e.status === 429 || e.code === 'hf_rate_limited' || e.code === 'search_rate_limited'
+
+/** 12345 -> "12.3k". */
+export function compactCount(n: number): string {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`
+    if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`
+    return String(n)
+}
+
+/** ISO date -> "3 days ago" / "5 months ago". */
+export function ago(iso: string | null): string | null {
+    if (!iso) return null
+    const t = Date.parse(iso)
+    if (!Number.isFinite(t)) return null
+    const days = Math.max(0, Math.round((Date.now() - t) / 86_400_000))
+    if (days < 1) return 'today'
+    if (days < 30) return `${days} day${days === 1 ? '' : 's'} ago`
+    const months = Math.round(days / 30)
+    if (months < 12) return `${months} month${months === 1 ? '' : 's'} ago`
+    const years = Math.round(days / 365)
+    return `${years} year${years === 1 ? '' : 's'} ago`
 }
 
 /** POST /api/models as multipart, with upload progress and a cancel.

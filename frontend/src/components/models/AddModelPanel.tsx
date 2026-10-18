@@ -2,7 +2,10 @@
 
 // Add model: one slide-over, three steps (DESIGN.md section 0, rule 2).
 //
-//   1. Choose        drop an .onnx file, or paste a Hugging Face link (it is
+//   1. Choose        three ways in, as tabs: Recommended (HYRAK's picks,
+//                    one click), Search Hugging Face (vision models, one
+//                    click on the runnable ones), or Upload a file (drop an
+//                    .onnx file, or paste a Hugging Face link; it is
 //                    inspected as you paste; an ONNX picker only when the
 //                    repo has several)
 //   2. Confirm       what the server detected, in plain words: the task, the
@@ -12,11 +15,12 @@
 //
 // The model exists on the server from the moment it is uploaded, so closing
 // the panel never loses it: it stays in Our models with its status. Without
-// the premium feature the same panel explains what the feature is instead.
+// the premium feature (or without models.manage) the panel still browses,
+// so people see what they would get; Add explains the lock instead.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-    Check, CheckCircle2, Circle, Copy, FileBox, Link2, Loader, Lock, Upload, X, Boxes, ShieldCheck,
+    ArrowLeft, Check, CheckCircle2, Circle, Copy, FileBox, Link2, Loader, Lock, Search, Sparkles, Upload, X, Boxes, ShieldCheck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatBytes } from '@/lib/formatBytes'
@@ -29,6 +33,7 @@ import {
 } from '@/lib/models'
 import { useModelsStore } from '@/store/models'
 import { ClassChips } from './ClassChips'
+import { RecommendedTab, SearchTab, type AddState, type AddTarget } from './BrowseModels'
 import { Callout, Hint, SlideOver, css as s } from './ui'
 
 type Stage = 'choose' | 'confirm' | 'test'
@@ -38,32 +43,38 @@ const STAGES: { key: Stage; label: string }[] = [
     { key: 'test', label: '3. Test and save' },
 ]
 
+export type AddSource = 'recommended' | 'search' | 'upload'
+const SOURCES: { key: AddSource; label: string; short: string; icon: typeof Search }[] = [
+    { key: 'recommended', label: 'Recommended', short: 'Recommended', icon: Sparkles },
+    { key: 'search', label: 'Search Hugging Face', short: 'Search', icon: Search },
+    { key: 'upload', label: 'Upload a file', short: 'Upload', icon: Upload },
+]
+
 type Inspect =
     | { state: 'idle' }
     | { state: 'loading'; repo: string }
     | { state: 'ok'; data: HfInspect }
     | { state: 'error'; repo: string; error: ApiProblem }
 
-export function AddModelPanel({ open, onOpenChange, premium, workspaceId, workspaceName, onSaved }: {
+export function AddModelPanel({ open, onOpenChange, premium, workspaceId, workspaceName, onSaved, canManage = true }: {
     open: boolean
     onOpenChange: (open: boolean) => void
     premium: Premium
     workspaceId: string | null
     workspaceName: string | null
     onSaved: (m: CustomModel) => void
+    /** models.manage on the workspace; without it the panel only browses. */
+    canManage?: boolean
 }) {
-    if (!premium.enabled) {
-        return <LockedPanel open={open} onOpenChange={onOpenChange} reason={premium.reason}
-            workspaceId={workspaceId} workspaceName={workspaceName} />
-    }
-    return <AddFlow open={open} onOpenChange={onOpenChange} workspaceId={workspaceId} onSaved={onSaved} />
+    const addState: AddState = !canManage ? 'none' : premium.enabled ? 'add' : 'locked'
+    return <AddFlow open={open} onOpenChange={onOpenChange} workspaceId={workspaceId} onSaved={onSaved}
+        addState={addState} reason={premium.reason} workspaceName={workspaceName} />
 }
 
 // ── premium lock ───────────────────────────────────────────────────────
 
-function LockedPanel({ open, onOpenChange, reason, workspaceId, workspaceName }: {
-    open: boolean; onOpenChange: (o: boolean) => void; reason: string | null
-    workspaceId: string | null; workspaceName: string | null
+function LockedContent({ reason, workspaceId, workspaceName, onBack }: {
+    reason: string | null; workspaceId: string | null; workspaceName: string | null; onBack?: () => void
 }) {
     const [copied, setCopied] = useState<'ok' | 'failed' | null>(null)
     const text = accessRequestText(workspaceName, workspaceId)
@@ -71,19 +82,14 @@ function LockedPanel({ open, onOpenChange, reason, workspaceId, workspaceName }:
         try { await navigator.clipboard.writeText(text); setCopied('ok') } catch { setCopied('failed') }
     }
     return (
-        <SlideOver open={open} onOpenChange={onOpenChange}
-            title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Lock size={16} aria-hidden />Add your own models</span>}
-            description="A premium feature HYRAK turns on for your workspace."
-            foot={<>
-                <span className={s.spacer} />
-                <button type="button" className={s.btn} onClick={() => onOpenChange(false)}>Close</button>
-                <button type="button" className={cn(s.btn, s.primary)} onClick={copy}>
-                    <Copy size={13} aria-hidden /> Copy request for HYRAK
-                </button>
-            </>}>
+        <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Lock size={16} aria-hidden style={{ color: 'var(--cm-accent)' }} />
+                <strong style={{ color: 'var(--cm-ink)' }}>Adding models is a premium feature</strong>
+            </div>
             <ul className={s.lockList}>
                 <li><Boxes size={16} aria-hidden /><span>Run a model trained for your job, like spotting cracks, counting crops or finding your equipment.</span></li>
-                <li><Upload size={16} aria-hidden /><span>Bring it as an .onnx file or a Hugging Face link. HYRAK checks and tests it for you.</span></li>
+                <li><Upload size={16} aria-hidden /><span>Pick one HYRAK recommends, search Hugging Face, or upload an .onnx file. HYRAK checks and tests it for you.</span></li>
                 <li><ShieldCheck size={16} aria-hidden /><span>It runs on the HYRAK server like the built-in models, with the same boxes on the video.</span></li>
             </ul>
             <Callout tone="info" title="How to get it">
@@ -98,17 +104,34 @@ function LockedPanel({ open, onOpenChange, reason, workspaceId, workspaceName }:
                 {copied === 'ok' && <p className={s.help} role="status">Copied. Paste it in an email or message to your HYRAK contact.</p>}
                 {copied === 'failed' && <p className={s.help} role="status">Copying is blocked in this browser. Select the text above and copy it by hand.</p>}
             </div>
-        </SlideOver>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" className={cn(s.btn, s.primary)} onClick={copy}>
+                    <Copy size={13} aria-hidden /> Copy request for HYRAK
+                </button>
+                {onBack && (
+                    <button type="button" className={s.btn} onClick={onBack}>
+                        <ArrowLeft size={13} aria-hidden /> Back to models
+                    </button>
+                )}
+            </div>
+        </>
     )
 }
 
 // ── the add flow ───────────────────────────────────────────────────────
 
-function AddFlow({ open, onOpenChange, workspaceId, onSaved }: {
+function AddFlow({ open, onOpenChange, workspaceId, onSaved, addState, reason, workspaceName }: {
     open: boolean; onOpenChange: (o: boolean) => void; workspaceId: string | null
     onSaved: (m: CustomModel) => void
+    addState: AddState; reason: string | null; workspaceName: string | null
 }) {
     const [stage, setStage] = useState<Stage>('choose')
+    // Step 1: where the model comes from
+    const [source, setSource] = useState<AddSource>('recommended')
+    const [lockAsk, setLockAsk] = useState(false)
+    const [adding, setAdding] = useState<string | null>(null)
+    const [browseErr, setBrowseErr] = useState<ApiProblem | null>(null)
+    const searchInput = useRef<HTMLInputElement>(null)
     // Step 1
     const [file, setFile] = useState<File | null>(null)
     const [fileErr, setFileErr] = useState<ApiProblem | null>(null)
@@ -142,6 +165,7 @@ function AddFlow({ open, onOpenChange, workspaceId, onSaved }: {
         setImporting(false); setSubmitErr(null); setModel(null); setName(''); setNameErr(null)
         setLabels([]); setTask('detect'); setDetectedTask(null); setFilled(false); setBusy(false)
         setStepErr(null); setSaveNote(null)
+        setSource('recommended'); setLockAsk(false); setAdding(null); setBrowseErr(null)
     }, [])
 
     // A fresh panel every time it opens; an upload in flight stops on close.
@@ -185,6 +209,43 @@ function AddFlow({ open, onOpenChange, workspaceId, onSaved }: {
         setDetectedTask(model.task)
         setFilled(true)
     }, [model, filled])
+
+    // "/" jumps to the Hugging Face search, wherever the panel is in step 1.
+    useEffect(() => {
+        if (!open || stage !== 'choose') return
+        const key = (e: KeyboardEvent) => {
+            const t = e.target as HTMLElement | null
+            if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return
+            if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+            e.preventDefault()
+            setLockAsk(false)
+            setSource('search')
+            setTimeout(() => searchInput.current?.focus(), 0)
+        }
+        window.addEventListener('keydown', key)
+        return () => window.removeEventListener('keydown', key)
+    }, [open, stage])
+
+    // ── step 1: one click from Recommended or Search ──
+    const addFromHub = async (t: AddTarget) => {
+        if (adding) return
+        setBrowseErr(null)
+        setAdding(t.repo)
+        const r = await importHuggingFace({ workspace_id: workspaceId, repo: t.repo, file: t.file, name: t.name ?? null })
+        setAdding(null)
+        if (!r.ok) { setBrowseErr(r.error); return }
+        created(r.data)
+    }
+
+    const pickSource = (k: AddSource) => { setSource(k); setLockAsk(false); setBrowseErr(null) }
+    const onTabKey = (e: React.KeyboardEvent) => {
+        if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
+        e.preventDefault()
+        const i = SOURCES.findIndex(x => x.key === source)
+        const next = SOURCES[(i + (e.key === 'ArrowRight' ? 1 : SOURCES.length - 1)) % SOURCES.length].key
+        pickSource(next)
+        setTimeout(() => document.getElementById(`cm-src-${next}`)?.focus(), 0)
+    }
 
     // ── step 1: Hugging Face link, inspected as it is pasted ──
     const parsed = useMemo(() => parseHfLink(link), [link])
@@ -339,7 +400,17 @@ function AddFlow({ open, onOpenChange, workspaceId, onSaved }: {
 
     // ── footers ──
     let foot: React.ReactNode
-    if (stage === 'choose') {
+    const browsing = source !== 'upload' || addState !== 'add' || lockAsk
+    if (stage === 'choose' && browsing) {
+        foot = (
+            <>
+                <span className={s.help} style={{ flex: 1 }}>
+                    {addState === 'none' ? 'Ask a workspace admin to add a model you like.' : null}
+                </span>
+                <button type="button" className={s.btn} onClick={() => close(false)}>Close</button>
+            </>
+        )
+    } else if (stage === 'choose') {
         foot = upload ? (
             <>
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }} role="status">
@@ -387,10 +458,42 @@ function AddFlow({ open, onOpenChange, workspaceId, onSaved }: {
     }
 
     return (
-        <SlideOver open={open} onOpenChange={close} title="Add a model"
-            description="Bring a model trained for your job. HYRAK checks it and runs it on the live video."
-            head={stepper} foot={foot}>
+        <SlideOver open={open} onOpenChange={close} title={addState === 'none' ? 'Browse models' : 'Add a model'}
+            description={addState === 'none'
+                ? 'Models HYRAK recommends, and vision models from Hugging Face.'
+                : 'Pick one HYRAK recommends, find one on Hugging Face, or bring your own. HYRAK checks it and runs it on the live video.'}
+            head={addState === 'add' ? stepper : undefined} foot={foot}>
             {stage === 'choose' && (
+                <div className={s.tabs} role="tablist" aria-label="Where the model comes from" onKeyDown={onTabKey}>
+                    {SOURCES.map(x => {
+                        const Icon = x.icon
+                        return (
+                            <button key={x.key} id={`cm-src-${x.key}`} type="button" role="tab"
+                                aria-selected={source === x.key} aria-controls="cm-src-panel"
+                                tabIndex={source === x.key ? 0 : -1} onClick={() => pickSource(x.key)}>
+                                <Icon size={13} aria-hidden />
+                                <span className={s.tabLong}>{x.label}</span>
+                                <span className={s.tabShort} aria-hidden>{x.short}</span>
+                            </button>
+                        )
+                    })}
+                </div>
+            )}
+            {stage === 'choose' && (
+                <div id="cm-src-panel" role="tabpanel" aria-labelledby={`cm-src-${source}`}
+                    style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                    {lockAsk || (source === 'upload' && addState === 'locked') ? (
+                        <LockedContent reason={reason} workspaceId={workspaceId} workspaceName={workspaceName}
+                            onBack={lockAsk ? () => setLockAsk(false) : undefined} />
+                    ) : source === 'upload' && addState === 'none' ? (
+                        <div className={cn(s.inset, s.empty)}>
+                            <h3>Uploading needs a workspace admin</h3>
+                            <p className={s.muted}>Your role can browse and run models. Ask an owner or admin of the workspace to upload one.</p>
+                            <button type="button" className={s.btn} onClick={() => pickSource('recommended')}>
+                                <Sparkles size={13} aria-hidden /> Browse recommended models
+                            </button>
+                        </div>
+                    ) : source === 'upload' ? (
                 <ChooseStep {...{
                     file, fileErr, link, linkErr, inspect, hfFile, chooseErr, submitErr, upload,
                     fileInput, linkInput,
@@ -399,6 +502,32 @@ function AddFlow({ open, onOpenChange, workspaceId, onSaved }: {
                     onLink: (v: string) => { setLink(v); setLinkErr(null); setChooseErr(null); setSubmitErr(null); if (v) { setFile(null); setFileErr(null) } },
                     onLinkBlur, onLinkFocus: () => setLinkErr(null), onHfFile: setHfFile,
                 }} />
+                    ) : (
+                        <>
+                            {addState === 'locked' && (
+                                <Callout tone="info" title="Browse freely. Adding models is a premium feature."
+                                    actions={<button type="button" className={s.btn} onClick={() => setLockAsk(true)}>
+                                        <Lock size={13} aria-hidden /> See how to get it
+                                    </button>}>
+                                    <span>Ask HYRAK to turn on Custom models for this workspace. The HYRAK models keep working.</span>
+                                </Callout>
+                            )}
+                            {browseErr && (
+                                <Callout tone={browseErr.status === 429 ? 'warn' : 'bad'} title={browseErr.message}>
+                                    <Hint text={browseErr.hint} />
+                                </Callout>
+                            )}
+                            {source === 'recommended' ? (
+                                <RecommendedTab workspaceId={workspaceId} addState={addState} adding={adding}
+                                    onAdd={addFromHub} onLocked={() => setLockAsk(true)}
+                                    onSearch={() => pickSource('search')} />
+                            ) : (
+                                <SearchTab workspaceId={workspaceId} addState={addState} adding={adding}
+                                    onAdd={addFromHub} onLocked={() => setLockAsk(true)} inputRef={searchInput} />
+                            )}
+                        </>
+                    )}
+                </div>
             )}
 
             {stage === 'confirm' && (earlyFailure && failure ? (
