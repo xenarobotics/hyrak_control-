@@ -589,7 +589,10 @@ def _resolve(sc, workspace_id, *, write: bool) -> str:
 def _owned_or_404(sc, row_ws: str | None, *, write: bool, what: str) -> None:
     """A row of another workspace is 404 unless the caller may read it; a
     readable one they may not write is 403."""
-    if not sc.visible(row_ws or "") or not sc.can_read(row_ws):
+    from app.auth.store import PLATFORM_WORKSPACE_ID
+    readable = (sc.readable_global() if (row_ws or PLATFORM_WORKSPACE_ID) == PLATFORM_WORKSPACE_ID
+                else sc.visible(row_ws or "") and sc.can_read(row_ws))
+    if not readable:
         raise HTTPException(status_code=404, detail=f"{what} not found")
     if write and not sc.can_write(row_ws):
         raise HTTPException(status_code=403, detail=f"You cannot change this {what.lower()}")
