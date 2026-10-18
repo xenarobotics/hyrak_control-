@@ -189,8 +189,12 @@ async def create_workspace(actor: AuthUser, *, name: str, kind: str, parent_id: 
 _UNSET = object()
 
 
+# Paid extras a founder can switch on per workspace (docs/ACCESS_MODEL.md 8b).
+FEATURES = frozenset({"cloud_sim"})
+
+
 async def patch_workspace(actor: AuthUser, workspace_id: str, *, name=None,
-                          operating_area=_UNSET, disabled=None, ip: str) -> dict:
+                          operating_area=_UNSET, disabled=None, features=None, ip: str) -> dict:
     store = auth.write_store()
     ms = await _fresh_memberships(actor)
     tree = await _tree(store)
@@ -212,6 +216,14 @@ async def patch_workspace(actor: AuthUser, workspace_id: str, *, name=None,
         if not perms.can(ms, ws, perms.WORKSPACE_OPERATING_AREA):
             raise Refused(403, "Only HYRAK staff (a founder or the manager) disable a workspace")
         fields["disabled"] = bool(disabled)
+    if features is not None:
+        # A paid entitlement: founders only, never the customer or a manager.
+        if not perms.is_founder(ms):
+            raise Refused(403, "Only a founder switches workspace features on or off")
+        if not isinstance(features, dict) or not set(features) <= FEATURES \
+                or not all(isinstance(v, bool) for v in features.values()):
+            raise Refused(400, f"features takes true/false for: {', '.join(sorted(FEATURES))}")
+        fields["features"] = {**(ws.features or {}), **features}
     if not fields:
         return _describe(ms, ws)
     out = await store.update_workspace(workspace_id, **fields)

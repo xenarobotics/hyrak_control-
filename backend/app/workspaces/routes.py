@@ -64,6 +64,7 @@ class PatchWorkspaceBody(BaseModel):
     name: Optional[str] = Field(default=None, max_length=120)
     operating_area: Optional[dict] = None      # explicit null clears it
     disabled: Optional[bool] = None
+    features: Optional[dict] = None            # founders: {"cloud_sim": true}
 
 
 @router.patch("/workspaces/{workspace_id}")
@@ -73,7 +74,8 @@ async def patch_workspace(workspace_id: str, body: PatchWorkspaceBody, request: 
     if "operating_area" in body.model_fields_set:
         kw["operating_area"] = body.operating_area
     ws = await _run(service.patch_workspace(user, workspace_id, name=body.name,
-                                            disabled=body.disabled, ip=client_ip(request), **kw))
+                                            disabled=body.disabled, features=body.features,
+                                            ip=client_ip(request), **kw))
     return {"workspace": ws}
 
 

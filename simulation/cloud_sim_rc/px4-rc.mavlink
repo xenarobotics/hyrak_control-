@@ -1,0 +1,21 @@
+#!/bin/sh
+# shellcheck disable=SC2154
+# HYRAK cloud SITL (simulation/cloud_sim.sh): replaces PX4's stock
+# px4-rc.mavlink for cloud instances only. rcS sources px4-rc.mavlink
+# through PATH, and cloud_sim.sh puts this folder first.
+#
+# ONE link: PX4 binds udp:$HYRAK_MAV_LOCAL and sends to the backend's
+# loopback listener 127.0.0.1:$HYRAK_MAV_REMOTE. The stock file would also
+# open a GCS link to udp:14550 (the owner's QGC), an offboard link to
+# 14540+i and payload / gimbal links; a cloud instance opens none of them.
+if [ -z "$HYRAK_MAV_LOCAL" ] || [ -z "$HYRAK_MAV_REMOTE" ]; then
+	echo "ERROR [cloud_sim] HYRAK_MAV_LOCAL / HYRAK_MAV_REMOTE not set - no MAVLink link"
+else
+	mavlink start -x -u $HYRAK_MAV_LOCAL -o $HYRAK_MAV_REMOTE -t 127.0.0.1 -r 4000000 -f
+	mavlink stream -r 50 -s POSITION_TARGET_LOCAL_NED -u $HYRAK_MAV_LOCAL
+	mavlink stream -r 50 -s LOCAL_POSITION_NED -u $HYRAK_MAV_LOCAL
+	mavlink stream -r 50 -s GLOBAL_POSITION_INT -u $HYRAK_MAV_LOCAL
+	mavlink stream -r 50 -s ATTITUDE -u $HYRAK_MAV_LOCAL
+	mavlink stream -r 50 -s ATTITUDE_QUATERNION -u $HYRAK_MAV_LOCAL
+	mavlink stream -r 20 -s RC_CHANNELS -u $HYRAK_MAV_LOCAL
+fi

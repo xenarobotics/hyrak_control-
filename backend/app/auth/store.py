@@ -109,14 +109,20 @@ class WorkspaceRecord:
     disabled: bool = False
     created_by: Optional[str] = None
     created_at: datetime = field(default_factory=utcnow)
+    # Paid extras a founder switched on, e.g. {"cloud_sim": True}.
+    features: dict = field(default_factory=dict)
 
     def public(self) -> dict:
         return {
             "id": self.id, "kind": self.kind, "name": self.name,
             "parent_id": self.parent_id, "path": self.path,
             "operating_area": self.operating_area, "disabled": self.disabled,
+            "features": dict(self.features or {}),
             "created_at": _iso(self.created_at),
         }
+
+    def has_feature(self, name: str) -> bool:
+        return (self.features or {}).get(name) is True
 
 
 @dataclass
@@ -762,7 +768,7 @@ class DbStore:
             row = Workspace(id=ws.id, kind=ws.kind, name=ws.name, parent_id=ws.parent_id,
                             path=ws.path, operating_area=ws.operating_area,
                             disabled=ws.disabled, created_by=ws.created_by,
-                            created_at=ws.created_at)
+                            created_at=ws.created_at, features=dict(ws.features or {}))
             db.add(row)
             await db.commit()
             return _workspace_of(row)
@@ -1108,7 +1114,7 @@ def _workspace_of(row) -> WorkspaceRecord:
     return WorkspaceRecord(id=row.id, kind=row.kind, name=row.name, parent_id=row.parent_id,
                            path=row.path, operating_area=row.operating_area,
                            disabled=bool(row.disabled), created_by=row.created_by,
-                           created_at=row.created_at)
+                           created_at=row.created_at, features=dict(row.features or {}))
 
 
 def _membership_of(m, w) -> MembershipRecord:
