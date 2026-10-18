@@ -534,6 +534,14 @@ class Flight(Base):
         String(36), ForeignKey("drones.id"), index=True
     )
     session_id: Mapped[str] = mapped_column(String(36))
+    # The workspace this row belongs to (docs/ACCESS_MODEL.md 8b), stamped
+    # at record time from the drone's workspace (the session's when the drone is unknown). A plain indexed string, not a FK:
+    # history must never fail to write, and a deleted workspace's rows stay
+    # readable by founders. Rows from before phase 2b are HYRAK's.
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), index=True,
+        default=PLATFORM_WORKSPACE_ID, server_default=PLATFORM_WORKSPACE_ID,
+    )
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_s: Mapped[float] = mapped_column(Float, default=0.0)
@@ -549,6 +557,8 @@ class Flight(Base):
         return {
             "id": self.id,
             "drone_id": self.drone_id,
+            "session_id": self.session_id,
+            "workspace_id": self.workspace_id,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "ended_at": self.ended_at.isoformat() if self.ended_at else None,
             "duration_s": self.duration_s,
@@ -707,6 +717,14 @@ class CrowdSnapshot(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(String(36), index=True)
+    # The workspace this row belongs to (docs/ACCESS_MODEL.md 8b), stamped
+    # at record time from the session's workspace. A plain indexed string, not a FK:
+    # history must never fail to write, and a deleted workspace's rows stay
+    # readable by founders. Rows from before phase 2b are HYRAK's.
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), index=True,
+        default=PLATFORM_WORKSPACE_ID, server_default=PLATFORM_WORKSPACE_ID,
+    )
     t: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     current_count: Mapped[int] = mapped_column(Integer, default=0)
     peak_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -730,6 +748,14 @@ class CrowdAlert(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(String(36), index=True)
+    # The workspace this row belongs to (docs/ACCESS_MODEL.md 8b), stamped
+    # at record time from the session's workspace. A plain indexed string, not a FK:
+    # history must never fail to write, and a deleted workspace's rows stay
+    # readable by founders. Rows from before phase 2b are HYRAK's.
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), index=True,
+        default=PLATFORM_WORKSPACE_ID, server_default=PLATFORM_WORKSPACE_ID,
+    )
     t: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     level: Mapped[str] = mapped_column(String(10), default="orange")
     section_idx: Mapped[int] = mapped_column(Integer, default=-1)
@@ -739,6 +765,7 @@ class CrowdAlert(Base):
     def to_dict(self) -> dict:
         return {
             "session_id": self.session_id,
+            "workspace_id": self.workspace_id,
             "t": self.t.isoformat() if self.t else None,
             "level": self.level,
             "section_idx": self.section_idx,
@@ -760,6 +787,14 @@ class PlateEvent(Base):
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     session_id: Mapped[str] = mapped_column(String(36), index=True)
+    # The workspace this row belongs to (docs/ACCESS_MODEL.md 8b), stamped
+    # at record time from the session's workspace. A plain indexed string, not a FK:
+    # history must never fail to write, and a deleted workspace's rows stay
+    # readable by founders. Rows from before phase 2b are HYRAK's.
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), index=True,
+        default=PLATFORM_WORKSPACE_ID, server_default=PLATFORM_WORKSPACE_ID,
+    )
     track_id: Mapped[int] = mapped_column(Integer, default=0)
     # This module's own persistent identity for the vehicle (e.g. "VH-000042"),
     # distinct from track_id: ByteTrack ids reset on occlusion, this survives -
@@ -822,6 +857,7 @@ class PlateEvent(Base):
         return {
             "id": self.id,
             "session_id": self.session_id,
+            "workspace_id": self.workspace_id,
             "track_id": self.track_id,
             "vehicle_id": self.vehicle_id,
             "plate_text": self.plate_text,
@@ -975,6 +1011,14 @@ class PersonSighting(Base):
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     session_id: Mapped[str] = mapped_column(String(36), index=True)
+    # The workspace this row belongs to (docs/ACCESS_MODEL.md 8b), stamped
+    # at record time from the session's workspace. A plain indexed string, not a FK:
+    # history must never fail to write, and a deleted workspace's rows stay
+    # readable by founders. Rows from before phase 2b are HYRAK's.
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), index=True,
+        default=PLATFORM_WORKSPACE_ID, server_default=PLATFORM_WORKSPACE_ID,
+    )
     person_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("persons.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -994,6 +1038,7 @@ class PersonSighting(Base):
         return {
             "id": self.id,
             "session_id": self.session_id,
+            "workspace_id": self.workspace_id,
             "person_id": self.person_id,
             "person_name": self.person_name,
             "t": self.t.isoformat() if self.t else None,
