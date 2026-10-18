@@ -199,7 +199,7 @@ export function StatusBarLinks() {
                     : 'Which radio or bridge carries telemetry'}
             >
                 {options.map(o => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
+                    <option key={o.value} value={o.value} disabled={o.disabled} title={o.note}>{o.label}</option>
                 ))}
             </select>
 
