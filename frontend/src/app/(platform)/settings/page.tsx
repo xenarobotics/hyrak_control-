@@ -1,5 +1,6 @@
 'use client'
 
+import { apiFetch } from '@/lib/api'
 import { useUiMode } from '@/hooks/useUiMode'
 import { useState, useEffect } from 'react'
 import { useTheme } from '@/lib/theme'
@@ -1805,20 +1806,25 @@ function LinkGroup() {
 
 function SensorsGroup() {
     const sessionId = useDroneStore(s => s.session?.session_id)
-    const [droneId, setDroneId] = useState<string | null>(null)
+    const boundDroneId = useDroneStore(s => s.session?.drone?.id ?? null)
+    const [listedDroneId, setDroneId] = useState<string | null>(null)
+    // The session's own drone first: /api/sessions lists every client and
+    // is admin-only, so other accounts only get the bound drone.
+    const droneId = boundDroneId ?? listedDroneId
     const [sensors, setSensors] = useState<SensorInfo[]>([])
     const [params, setParams] = useState<AvoidanceParams | null>(null)
     const [enabled, setEnabledState] = useState(false)
 
     useEffect(() => {
+        if (boundDroneId) return
         let alive = true
-        fetch(`${getServerUrl()}/api/sessions`).then(r => r.json()).then(j => {
+        apiFetch(`${getServerUrl()}/api/sessions`).then(r => r.json()).then(j => {
             if (!alive) return
             const mine = (j.sessions ?? []).find((s: { session_id?: string }) => s.session_id === sessionId)
             setDroneId(mine?.drone?.id ?? null)
         }).catch(() => {})
         return () => { alive = false }
-    }, [sessionId])
+    }, [sessionId, boundDroneId])
 
     useEffect(() => {
         if (!droneId) return

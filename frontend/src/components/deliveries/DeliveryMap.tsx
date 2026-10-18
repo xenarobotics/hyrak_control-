@@ -6,6 +6,7 @@
 // live drone. Clicking a drone opens its status card (with the live camera
 // when this session is streaming). Renders state only - never mutates it.
 
+import { apiFetch } from '@/lib/api'
 import { useEffect, useMemo, useState } from 'react'
 import { MapContainer, TileLayer, Marker, Polyline, Polygon, useMap } from 'react-leaflet'
 import L from 'leaflet'
@@ -161,7 +162,7 @@ function featurePolys(f: FeatureGJ): [number, number][][][] {
 function LandUseOverlay() {
     const [features, setFeatures] = useState<FeatureGJ[]>([])
     useEffect(() => {
-        fetch(`${getServerUrl()}/api/map-features`)
+        apiFetch(`${getServerUrl()}/api/map-features`)
             .then(r => r.json())
             .then(j => setFeatures((j.features ?? []).filter((f: FeatureGJ) => f.properties.active)))
             .catch(() => { /* overlay stays hidden */ })
@@ -189,7 +190,7 @@ function ZonesOverlay() {
         let alive = true
         const load = async () => {
             try {
-                const r = await fetch(`${getServerUrl()}/api/zones`)
+                const r = await apiFetch(`${getServerUrl()}/api/zones`)
                 const j = await r.json()
                 if (alive) setZones(j.features ?? [])
             } catch { /* zones stay hidden if backend unreachable */ }

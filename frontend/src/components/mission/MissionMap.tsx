@@ -1,5 +1,6 @@
 'use client'
 
+import { apiFetch } from '@/lib/api'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   MapContainer,
@@ -33,7 +34,7 @@ function FlightZonesOverlay() {
     let alive = true
     const load = async () => {
       try {
-        const res = await fetch(`${getServerUrl()}/api/zones`, { headers: authHeaders() })
+        const res = await apiFetch(`${getServerUrl()}/api/zones`, { headers: authHeaders() })
         const data = await res.json()
         if (alive) setZones(data.features ?? [])
       } catch { /* zones stay hidden if backend unreachable */ }
@@ -76,7 +77,7 @@ function AvoidanceOverlay({ show, reload, home, drone }: {
     const load = async () => {
       try {
         const hz = await getHazards()
-        const st = await fetch(`${getServerUrl()}/api/avoidance/status`).then(r => r.json())
+        const st = await apiFetch(`${getServerUrl()}/api/avoidance/status`).then(r => r.json())
         const ids: string[] = (st.drones ?? []).map((d: { drone_id: string }) => d.drone_id)
         const per = await Promise.all(ids.map(id =>
           getObstaclesAndPath(id).catch(() => ({ obstacles: [], reroutePath: null, goal: null }))))

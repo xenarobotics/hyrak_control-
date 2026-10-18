@@ -7,8 +7,10 @@
 // the engine's live state (via cvResults), scan options for the NEXT run,
 // and finished maps with download links + an offline best-quality reprocess.
 
+import { apiDownload, apiFetch } from '@/lib/api'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useDroneStore } from '@/store/drone'
+import { useTicketedStream } from '@/hooks/useApiMedia'
 import { getServerUrl } from '@/lib/server-url'
 import { liveAuthHeaders } from '@/lib/auth'
 import { visibleInterval } from '@/lib/poll'
@@ -49,18 +51,33 @@ export function Reconstruction3DPanel() {
     const [scanBusy, setScanBusy] = useState<string>('')   // session being reprocessed
     const [scanPhase, setScanPhase] = useState('')
     const [error, setError] = useState('')
+    const [downloading, setDownloading] = useState('')
+    const downloadResult = useCallback(async (path: string, name: string) => {
+        setDownloading(path)
+        try {
+            const ok = await apiDownload(`/api/recon/download?path=${encodeURIComponent(path)}`, name)
+            if (!ok) setError(`Could not download ${name}`)
+        } catch {
+            setError(`Could not download ${name}: the server did not answer`)
+        } finally {
+            setDownloading('')
+        }
+    }, [])
 
     const live = cvResults?.tracking_state !== undefined
+    // MJPEG in an <img>: no header possible, so a 60 s URL ticket, asked
+    // for only while the analysis runs (the feed exists only then).
+    const depthStream = useTicketedStream(live ? '/api/recon/stream/depth' : null)
     const track = cvResults?.tracking_state ?? 'n/a'
     const trackColor = TRACK_COLORS[track] ?? 'hsl(var(--app-text-muted))'
 
     const refreshEngine = useCallback(async () => {
-        try { setEngine(await (await fetch(api('/engine'))).json()) }
+        try { setEngine(await (await apiFetch(api('/engine'))).json()) }
         catch { setEngine(null) }
     }, [])
     const refreshResults = useCallback(async () => {
         try {
-            const r = await fetch(api('/results'))
+            const r = await apiFetch(api('/results'))
             if (r.ok) setResults(await r.json())
         } catch { /* engine down - keep last list */ }
     }, [])
@@ -94,7 +111,7 @@ export function Reconstruction3DPanel() {
         if (!scanBusy) return
         const t = setInterval(async () => {
             try {
-                const s = await (await fetch(api('/scan_status'))).json()
+                const s = await (await apiFetch(api('/scan_status'))).json()
                 setScanPhase(s.phase ?? s.state ?? '')
                 if (s.state === 'done' || s.state === 'failed' || !s.running) {
                     setScanBusy(''); setScanPhase('')
@@ -108,7 +125,7 @@ export function Reconstruction3DPanel() {
     const setOption = async (body: Record<string, unknown>) => {
         setError('')
         try {
-            const r = await fetch(api('/options'), {
+            const r = await apiFetch(api('/options'), {
                 method: 'POST', headers: AUTH, body: JSON.stringify(body),
             })
             if (!r.ok) setError((await jsonOf(r)).detail ?? 'Option change failed')
@@ -119,7 +136,7 @@ export function Reconstruction3DPanel() {
     const exportNow = async () => {
         setError('')
         try {
-            const r = await fetch(api('/session/export'), { method: 'POST', headers: AUTH })
+            const r = await apiFetch(api('/session/export'), { method: 'POST', headers: AUTH })
             if (!r.ok) setError((await jsonOf(r)).detail ?? 'Export failed')
             await refreshResults()
         } catch { setError('Backend unreachable') }
@@ -128,7 +145,7 @@ export function Reconstruction3DPanel() {
     const reprocess = async (session: string) => {
         setError(''); setScanBusy(session)
         try {
-            const r = await fetch(api('/scan_session'), {
+            const r = await apiFetch(api('/scan_session'), {
                 method: 'POST', headers: AUTH, body: JSON.stringify({ session }),
             })
             if (!r.ok) { setError((await jsonOf(r)).detail ?? 'Reprocess failed'); setScanBusy('') }
@@ -176,9 +193,12 @@ export function Reconstruction3DPanel() {
                     }}>
                         {/* Depth map - the network's per-frame view of the scene;
                             the full 3D map is the center pane. */}
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={api('/stream/depth')} alt="depth"
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        {depthStream.src && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={depthStream.src} alt="depth"
+                                onError={depthStream.onError} onLoad={depthStream.onLoad}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        )}
                     </div>
                     <button onClick={exportNow}
                         style={{
@@ -288,23 +308,25 @@ export function Reconstruction3DPanel() {
                         )}
                     </div>
                     {r.files.map(f => (
-                        <a key={f.path}
-                            href={api(`/download?path=${encodeURIComponent(f.path)}`)}
-                            download={f.name}
-                            target="_blank" rel="noopener noreferrer"
+                        // A button, not <a href download>: the route needs the
+                        // bearer, so the file is fetched into a blob first.
+                        <button key={f.path} type="button"
+                            onClick={() => { void downloadResult(f.path, f.name) }}
+                            disabled={downloading === f.path}
                             style={{
-                                display: 'flex', alignItems: 'center', gap: 6,
-                                fontSize: 10, fontFamily: 'monospace',
-                                color: 'hsl(var(--app-text-muted))',
+                                display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+                                fontSize: 10, fontFamily: 'monospace', textAlign: 'left',
+                                color: 'hsl(var(--app-text-muted))', background: 'none',
+                                border: 'none', cursor: downloading === f.path ? 'wait' : 'pointer',
                                 textDecoration: 'none', padding: '2px 0',
                             }}>
                             <Download size={10} />
                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis',
                                 whiteSpace: 'nowrap' }}>{f.name}</span>
                             <span style={{ marginLeft: 'auto', flexShrink: 0 }}>
-                                {f.size_mb} MB
+                                {downloading === f.path ? 'downloading' : `${f.size_mb} MB`}
                             </span>
-                        </a>
+                        </button>
                     ))}
                 </div>
             ))}

@@ -5,6 +5,7 @@
 // picture a gst window shows. Only usable where Chromium can decode HEVC
 // (the desktop shell enables PlatformHEVCDecoderSupport; hardware only), so
 // support is probed once and everything falls back to WebRTC without it.
+import { authHeaders } from '@/lib/auth'
 import { useEffect, useState } from 'react'
 import { getServerUrl, LOCAL_API_URL, DEFAULT_API_PORT } from '@/lib/server-url'
 import { getAirUnitVideoPort, getVideoSource } from '@/lib/videoSource'
@@ -62,7 +63,12 @@ export function resolveFeedBase(): Promise<string> {
         if (/^https?:\/\/(localhost|127\.0\.0\.1)/.test(remote)) return (feedBase = remote)
         for (const base of LOCAL_BASES) {
             try {
-                const r = await fetch(`${base}/api/video/feeds`, { signal: AbortSignal.timeout(800), cache: 'no-store' })
+                // The bearer (GET /api/video/feeds is staff-only since phase 2a),
+                // but no apiFetch: a 401 from a different local backend must
+                // not sign the user out of the real one.
+                const r = await fetch(`${base}/api/video/feeds`, {
+                    signal: AbortSignal.timeout(800), cache: 'no-store', headers: authHeaders(),
+                })
                 if (r.ok) { console.info('[feed] backend reachable locally, streaming from', base); return (feedBase = base) }
             } catch { /* not local */ }
         }

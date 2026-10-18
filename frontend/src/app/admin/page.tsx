@@ -28,6 +28,7 @@
 // Open this in its OWN tab: it marks its socket session as admin on the
 // backend so it doesn't count as a client.
 
+import { apiDownload, apiFetch } from '@/lib/api'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
 import dynamic from 'next/dynamic'
@@ -240,8 +241,8 @@ export default function AdminPage() {
         const poll = async () => {
             try {
                 const [sRes, dRes] = await Promise.all([
-                    fetch(`${getServerUrl()}/api/sessions`, { headers: AUTH }),
-                    fetch(`${getServerUrl()}/api/drones`),
+                    apiFetch(`${getServerUrl()}/api/sessions`, { headers: AUTH }),
+                    apiFetch(`${getServerUrl()}/api/drones`),
                 ])
                 const sData = await sRes.json()
                 const dData = await dRes.json()
@@ -270,7 +271,7 @@ export default function AdminPage() {
     const refreshZones = useCallback(async () => {
         try {
             // Signed in: 2a makes zone reads "any signed-in account".
-            const res = await fetch(`${getServerUrl()}/api/zones`, { headers: AUTH })
+            const res = await apiFetch(`${getServerUrl()}/api/zones`, { headers: AUTH })
             const data = await res.json()
             const next = data.features ?? []
             setZones(prev =>
@@ -287,7 +288,7 @@ export default function AdminPage() {
     // Permits: poll while the PERMITS tab is open (plus once on mount for the badge)
     const refreshPermits = useCallback(async () => {
         try {
-            const res = await fetch(`${getServerUrl()}/api/permits`)
+            const res = await apiFetch(`${getServerUrl()}/api/permits`)
             const data = await res.json()
             const next = data.permits ?? []
             setPermits(prev =>
@@ -305,7 +306,7 @@ export default function AdminPage() {
 
     const decidePermit = useCallback(async (id: string, approve: boolean) => {
         try {
-            await fetch(`${getServerUrl()}/api/permits/${id}/decision`, {
+            await apiFetch(`${getServerUrl()}/api/permits/${id}/decision`, {
                 method: 'POST',
                 headers: JSON_AUTH,
                 body: JSON.stringify({ approve }),
@@ -317,7 +318,7 @@ export default function AdminPage() {
     // Flights: refetch when the selected drone changes; refresh while viewing
     const refreshFlights = useCallback(async (droneId: string) => {
         try {
-            const res = await fetch(`${getServerUrl()}/api/drones/${droneId}/flights`)
+            const res = await apiFetch(`${getServerUrl()}/api/drones/${droneId}/flights`)
             const data = await res.json()
             setFlights(data.flights ?? [])
         } catch { /* keep last */ }
@@ -346,7 +347,7 @@ export default function AdminPage() {
         })
         if (close) return
         try {
-            const res = await fetch(`${getServerUrl()}/api/flights/${flightId}`)
+            const res = await apiFetch(`${getServerUrl()}/api/flights/${flightId}`)
             if (res.ok) setFlightDetail(await res.json())
         } catch { /* ignore */ }
     }, [])
@@ -404,7 +405,7 @@ export default function AdminPage() {
         const name = window.prompt(`Rename ${d.name}`, d.name)?.trim()
         if (!name || name === d.name) return
         try {
-            await fetch(`${getServerUrl()}/api/drones/${d.id}`, {
+            await apiFetch(`${getServerUrl()}/api/drones/${d.id}`, {
                 method: 'PATCH',
                 headers: JSON_AUTH,
                 body: JSON.stringify({ name }),
@@ -885,12 +886,14 @@ export default function AdminPage() {
                                                                     <FlightTrackMap track={flightDetail.track} />
                                                                 </div>
                                                                 <div className="flex items-center gap-3 text-[9px]">
-                                                                    <a
-                                                                        href={`${getServerUrl()}/api/flights/${f.id}/download`}
+                                                                    {/* A button, not <a href>: the route needs the bearer. */}
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => { void apiDownload(`/api/flights/${f.id}/download`, `flight_${f.id}.csv`) }}
                                                                         className="px-2 py-1 rounded border border-zinc-700 text-zinc-300 hover:border-cyan-600 hover:text-cyan-400"
                                                                     >
                                                                         ⬇ DOWNLOAD CSV
-                                                                    </a>
+                                                                    </button>
                                                                     {f.crossed_orange && (
                                                                         <span className="text-amber-500">● crossed orange zone</span>
                                                                     )}

@@ -232,13 +232,18 @@ export function needsCameraSelection(v: VideoSource): boolean {
 // or pulling an RTSP URL (it would reach whatever the server's network
 // reaches, and the mesh units / video wall ride on air_unit_udp), and every
 // mode that needs a relay listener (allocate_video_relay is staff-only).
-// What is left is the browser's own camera, RTSP decoded on this machine,
-// and the two DataChannel modes, where this device pushes into its own
-// session. The server re-checks every one of these.
+// The two DataChannel modes are staff-only too: the server feeds the pushed
+// RTP into a loopback port from one fixed pool (5800-5900) shared by every
+// session, and datachannel_video_offer is a staff event.
+// What is left produces a WebRTC track in this browser and needs nothing
+// from the server but the session's own peer connection: the browser's own
+// camera (including the desktop's virtual webcam) and RTSP decoded on this
+// machine (rtsp_camera). The server re-checks every one of these.
 export const STAFF_ONLY_SOURCES: readonly VideoSource[] = [
     'air_unit_udp', 'siyi_rtsp',                        // the server opens the stream
     'rtsp_relay', 'air_unit_srt', 'air_unit_gst',       // relay allocation
     'hyrak_receiver',                                   // ground decoder (relay allocation)
+    'rtsp_datachannel', 'air_unit_datachannel',         // shared loopback port pool
 ]
 
 export function isStaffOnlySource(v: VideoSource): boolean {

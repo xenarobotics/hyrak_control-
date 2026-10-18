@@ -35,3 +35,52 @@ export async function apiJson<T = Record<string, unknown>>(path: string, init: A
     try { data = await res.json() } catch { /* empty or HTML body */ }
     return { ok: res.ok, status: res.status, data }
 }
+
+/** How long a download's object URL outlives the click. Revoking at once
+ *  can cancel the save in some browsers; a minute is plenty to start it. */
+const DOWNLOAD_URL_TTL_MS = 60_000
+
+function filenameFrom(res: Response): string | null {
+    const cd = res.headers.get('Content-Disposition') ?? ''
+    const star = /filename\*=UTF-8''([^;]+)/i.exec(cd)
+    if (star) { try { return decodeURIComponent(star[1].trim()) } catch { /* fall through */ } }
+    const plain = /filename="?([^";]+)"?/i.exec(cd)
+    return plain ? plain[1].trim() : null
+}
+
+/**
+ * Download a file that needs the bearer: an <a href> cannot send the
+ * header, so fetch it into a blob and click an object URL. The server's
+ * Content-Disposition name wins over `fallbackName`. Returns false on a
+ * non-OK answer (401 already went to /login through apiFetch).
+ */
+export async function apiDownload(path: string, fallbackName: string): Promise<boolean> {
+    const res = await apiFetch(path)
+    if (!res.ok) return false
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filenameFrom(res) ?? fallbackName
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_URL_TTL_MS)
+    return true
+}
+
+/**
+ * A short-lived URL for a GET route that must load without a header (an
+ * MJPEG stream in an <img>): POST /api/auth/url-ticket, then `?ticket=`.
+ * The ticket is bound to this exact path and lasts 60 s, but may be used
+ * again within that window, so an <img> reconnect can reuse it; after that
+ * ask for a new URL. Null when the server refused (no access, or the route
+ * does not take tickets).
+ */
+export async function ticketedUrl(path: string): Promise<string | null> {
+    const { ok, data } = await apiJson<{ ticket?: string }>('/api/auth/url-ticket', {
+        method: 'POST', json: { path },
+    })
+    if (!ok || !data.ticket) return null
+    return `${getServerUrl()}${path}?ticket=${encodeURIComponent(data.ticket)}`
+}

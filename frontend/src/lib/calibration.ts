@@ -9,6 +9,7 @@
 // declared here. Declaring "hfov is 1-179" in both languages is how the two
 // drift apart and the form starts accepting values the backend rejects.
 
+import { apiFetch } from '@/lib/api'
 import { authHeaders as bearerHeaders } from '@/lib/auth'
 import { getServerUrl } from './server-url'
 
@@ -43,7 +44,7 @@ function authHeaders(): HeadersInit {
 
 export async function fetchCalibration(): Promise<CalibrationSchema | null> {
     try {
-        const r = await fetch(`${getServerUrl()}/api/vision/calibration`)
+        const r = await apiFetch(`${getServerUrl()}/api/vision/calibration`)
         if (!r.ok) return null
         return await r.json()
     } catch {
@@ -96,7 +97,7 @@ export async function fetchFollowTuning(): Promise<FollowTuning | null> {
 export async function saveCalibration(
     updates: Record<string, number | string>,
 ): Promise<CalibrationSchema> {
-    const r = await fetch(`${getServerUrl()}/api/vision/calibration`, {
+    const r = await apiFetch(`${getServerUrl()}/api/vision/calibration`, {
         method: 'PUT',
         headers: authHeaders(),
         body: JSON.stringify(updates),
@@ -109,7 +110,7 @@ export async function saveCalibration(
 }
 
 export async function resetCalibration(): Promise<CalibrationSchema> {
-    const r = await fetch(`${getServerUrl()}/api/vision/calibration`, {
+    const r = await apiFetch(`${getServerUrl()}/api/vision/calibration`, {
         method: 'DELETE',
         headers: authHeaders(),
     })

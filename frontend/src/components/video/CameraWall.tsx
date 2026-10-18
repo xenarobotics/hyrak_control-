@@ -6,6 +6,7 @@
 // feed track per port (feeds.py) and answers with a mid -> port map so each
 // incoming track can be labelled. Tapping a tile makes that unit the main
 // view (air-unit port + stream restart) and closes the wall.
+import { apiFetch } from '@/lib/api'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getSocket } from '@/lib/socket'
 import { getServerUrl } from '@/lib/server-url'
@@ -16,7 +17,7 @@ type MeshUnit = { id: number; port: number; live: boolean; in_use: boolean; kbps
 
 async function iceServers(): Promise<RTCIceServer[]> {
     try {
-        const r = await fetch(`${getServerUrl()}/api/webrtc/ice-servers`, { signal: AbortSignal.timeout(5000) })
+        const r = await apiFetch(`${getServerUrl()}/api/webrtc/ice-servers`, { signal: AbortSignal.timeout(5000) })
         const j = await r.json()
         if (Array.isArray(j.iceServers) && j.iceServers.length) return j.iceServers
     } catch { /* stun only */ }
@@ -36,7 +37,7 @@ export function CameraWall({ onClose }: { onClose: () => void }) {
     // Which units are up right now (probed from the actual sockets).
     useEffect(() => {
         let alive = true
-        fetch(`${getServerUrl()}/api/video/mesh-units?max_units=8`, { signal: AbortSignal.timeout(8000) })
+        apiFetch(`${getServerUrl()}/api/video/mesh-units?max_units=8`, { signal: AbortSignal.timeout(8000) })
             .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
             .then((j: { units?: MeshUnit[] }) => {
                 if (!alive) return

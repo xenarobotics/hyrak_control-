@@ -1,5 +1,6 @@
 'use client'
 
+import { apiFetch } from '@/lib/api'
 import { useEffect, useState } from 'react'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { getLocalRelayUrl, setLocalRelayUrl, DEFAULT_LOCAL_RELAY_URL } from '@/lib/localRfRelay'
@@ -47,7 +48,7 @@ export function DeviceSelector() {
         let alive = true
         const poll = async () => {
             try {
-                const j = await fetch(`${getServerUrl()}/api/video/mesh-units?max_units=8`).then(r => r.json())
+                const j = await apiFetch(`${getServerUrl()}/api/video/mesh-units?max_units=8`).then(r => r.json())
                 if (alive) setMeshUnits((j.units ?? []).filter((u: MeshUnit) => u.live || u.in_use || u.port === airPort))
             } catch { /* backend away */ }
         }
@@ -58,7 +59,7 @@ export function DeviceSelector() {
         if (videoSourceNow !== 'air_unit_udp') return
         return visibleInterval(async () => {
             try {
-                const j = await fetch(`${getServerUrl()}/api/video/mesh-units?max_units=8`).then(r => r.json())
+                const j = await apiFetch(`${getServerUrl()}/api/video/mesh-units?max_units=8`).then(r => r.json())
                 setMeshUnits((j.units ?? []).filter((u: MeshUnit) => u.live || u.in_use || u.port === airPort))
             } catch { /* backend away */ }
         }, 3000)

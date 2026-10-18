@@ -11,6 +11,7 @@
 //   DepthStrip     the forward 90 degrees of the same sectors as a parking-
 //                  sensor bar: how close things are, left to right.
 
+import { apiFetch } from '@/lib/api'
 import { useEffect, useState } from 'react'
 import { getServerUrl } from '@/lib/server-url'
 import { useDroneStore } from '@/store/drone'
@@ -37,7 +38,7 @@ export function ObstacleRadar({ avoid, rangeM = 15 }: { avoid: AvoidanceStatus |
         let alive = true
         const tick = () => {
             if (document.visibilityState !== 'visible') return
-            fetch(`${getServerUrl()}/api/avoidance/${id}/obstacles`).then(r => r.json())
+            apiFetch(`${getServerUrl()}/api/avoidance/${id}/obstacles`).then(r => r.json())
                 .then(j => { if (alive) setObs(j.obstacles ?? []) }).catch(() => { /* keep last */ })
         }
         tick()

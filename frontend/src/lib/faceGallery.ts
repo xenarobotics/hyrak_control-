@@ -9,6 +9,7 @@
 // and the only dataset in the system with no automatic expiry, so deletion is
 // always explicit and always the operator's decision.
 
+import { apiFetch } from '@/lib/api'
 import { authHeaders as bearerHeaders } from '@/lib/auth'
 import { getServerUrl } from './server-url'
 
@@ -37,7 +38,7 @@ function authHeaders(): HeadersInit {
 
 export async function fetchGallery(): Promise<GalleryPerson[]> {
     try {
-        const r = await fetch(`${getServerUrl()}/api/vision/face-gallery`)
+        const r = await apiFetch(`${getServerUrl()}/api/vision/face-gallery`)
         if (!r.ok) return []
         return (await r.json()).persons ?? []
     } catch {
@@ -53,7 +54,7 @@ export async function enrolPhotos(
     const form = new FormData()
     for (const f of files) form.append('files', f)
     const qs = new URLSearchParams({ name, notes })
-    const r = await fetch(
+    const r = await apiFetch(
         `${getServerUrl()}/api/vision/face-gallery/enrol?${qs}`,
         { method: 'POST', headers: authHeaders(), body: form },
     )
@@ -70,7 +71,7 @@ export async function enrolFolder(path: string): Promise<{
     total: number
     persons: Record<string, { enrolled: number; total: number; failed: { filename: string; reason: string }[] }>
 }> {
-    const r = await fetch(
+    const r = await apiFetch(
         `${getServerUrl()}/api/vision/face-gallery/enrol-folder?path=${encodeURIComponent(path)}`,
         { method: 'POST', headers: authHeaders() },
     )
@@ -81,7 +82,7 @@ export async function enrolFolder(path: string): Promise<{
 }
 
 export async function setPersonActive(personId: string, active: boolean): Promise<void> {
-    const r = await fetch(
+    const r = await apiFetch(
         `${getServerUrl()}/api/vision/face-gallery/${personId}?active=${active}`,
         { method: 'PATCH', headers: authHeaders() },
     )
@@ -89,7 +90,7 @@ export async function setPersonActive(personId: string, active: boolean): Promis
 }
 
 export async function deletePerson(personId: string): Promise<void> {
-    const r = await fetch(
+    const r = await apiFetch(
         `${getServerUrl()}/api/vision/face-gallery/${personId}`,
         { method: 'DELETE', headers: authHeaders() },
     )
@@ -97,7 +98,7 @@ export async function deletePerson(personId: string): Promise<void> {
 }
 
 export async function clearGallery(): Promise<void> {
-    const r = await fetch(`${getServerUrl()}/api/vision/face-gallery`, {
+    const r = await apiFetch(`${getServerUrl()}/api/vision/face-gallery`, {
         method: 'DELETE', headers: authHeaders(),
     })
     if (!r.ok) throw new Error(`Could not clear gallery (${r.status})`)
@@ -120,7 +121,7 @@ export async function fetchSightings(sessionId?: string, limit = 100): Promise<S
     try {
         const qs = new URLSearchParams({ limit: String(limit) })
         if (sessionId) qs.set('session_id', sessionId)
-        const r = await fetch(`${getServerUrl()}/api/vision/sightings?${qs}`)
+        const r = await apiFetch(`${getServerUrl()}/api/vision/sightings?${qs}`)
         if (!r.ok) return []
         return (await r.json()).sightings ?? []
     } catch {

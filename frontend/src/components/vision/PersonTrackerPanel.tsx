@@ -1,5 +1,6 @@
 'use client'
 
+import { apiFetch } from '@/lib/api'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useDroneStore } from '@/store/drone'
 import { getSocket } from '@/lib/socket'
@@ -238,7 +239,7 @@ export function PersonTrackerPanel() {
         form.append('file', file)
 
         try {
-            const res = await fetch(
+            const res = await apiFetch(
                 `${getServerUrl()}/api/reference-photo?session_id=${encodeURIComponent(sessionId)}`,
                 {
                     method: 'POST',
