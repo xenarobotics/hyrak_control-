@@ -420,8 +420,7 @@ async def create_hf(actor, *, workspace_id: Optional[str], repo_text: str,
     await _audit(actor, "model.version" if existing else "model.create", rec, ip,
                  source="huggingface", repo=repo, revision=info.sha, file=f.path, version=n)
     fetch = {"repo": repo, "sha": info.sha, "file": f.path, "extra": extra}
-    _steps[rec.id] = "downloading"
-    await notify.model_status(rec, step="downloading", version=n)
+    _steps[rec.id] = "downloading"         # the check pushes it
     _start_check(rec.id, n, fetch=fetch)
     return await _card(rec)
 
