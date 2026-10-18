@@ -26,7 +26,8 @@ _DKLEN = 32
 # exactly what n=2**15, r=8 needs, so it has to be raised explicitly.
 _MAXMEM = 64 * 1024 * 1024
 
-MIN_PASSWORD_LENGTH = 8
+# NIST 800-63B: length, no composition rules (docs/ACCESS_MODEL.md section 4).
+MIN_PASSWORD_LENGTH = 10
 
 
 def _derive(password: str, salt: bytes) -> bytes:
