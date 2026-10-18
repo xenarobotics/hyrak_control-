@@ -310,6 +310,17 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
 
         if result:
             annotated_bgr, meta = result
+            # Detections on the map (app/mapdetect): every mode's boxes are
+            # placed on the ground with the telemetry of their own capture.
+            # Popped first so the snapshot never reaches the client.
+            capture = meta.pop("_capture", None)
+            try:
+                from app.mapdetect import live as _map_live
+                _map_live.ingest(self.session_id, mode.value, meta, capture, annotated_bgr)
+            except Exception as e:
+                from app.vision.base import warn_limited
+                warn_limited(f"mapdetect:{self.session_id}",
+                             f"Map detections failed for session {self.session_id[:8]}: {e!r}")
             self._frame_cache[mode.value] = annotated_bgr
             self._meta_cache[mode.value] = meta
 

@@ -79,6 +79,10 @@ EVENTS: dict[str, str] = {
     "set_enhance_params": SESSION_COMMAND,
     "clear_reference": SESSION_COMMAND,
 
+    # ── detections on the map (app/mapdetect) ───────────────────────────
+    "set_map_camera": SESSION_VIEW,       # this session's own projection only
+    "set_map_recording": SESSION_COMMAND,  # writes history: fly on the workspace
+
     # ── staff only ──────────────────────────────────────────────────────
     "connect_telemetry": STAFF,       # arbitrary address: server Gazebo udp:14600, LAN, anything
     "connect_rf_bridge": STAFF,       # the one shared RF bridge / ground-station relay
@@ -120,6 +124,9 @@ PUSHED_EVENTS: dict[str, str] = {
     "model_status": "workspace",
     # A custom model's alert rule fired: the one session running it.
     "model_alert": "session",
+    # Detections on the map: deltas of the one live session's sightings,
+    # to that session's own socket.
+    "map_sightings": "session",
 }
 
 # Other namespaces: the ground-station relay agent (a script, operator token).

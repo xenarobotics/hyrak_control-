@@ -32,6 +32,7 @@ import { ModelLibrary } from '@/components/models/ModelLibrary'
 import { AddModelPanel, type AddSource } from '@/components/models/AddModelPanel'
 import { ModelDetailPanel } from '@/components/models/ModelDetailPanel'
 import { CustomResultsPanel } from '@/components/models/CustomResultsPanel'
+import { MapDetectionsControls } from '@/components/mapdetect/MapDetectionsUi'
 import { useModelAccess, useModelLibrary, useModeName, type LibraryEntry } from '@/components/models/useModelLibrary'
 import { css, Callout, useCmClass } from '@/components/models/ui'
 import { customMode, isCustomMode, type CustomModel } from '@/lib/models'
@@ -486,6 +487,9 @@ export default function ModulesPage() {
                     </div>
                     <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
                         <ViewOnlyFence note={false}><ResultsPanel /></ViewOnlyFence>
+                        {/* Outside the fence: a viewer may still show or hide the
+                            detections on their own map. Recording is gated inside. */}
+                        <div style={{ marginTop: 10 }}><MapDetectionsControls /></div>
                     </div>
                 </section>
             )}

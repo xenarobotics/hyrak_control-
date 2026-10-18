@@ -536,6 +536,15 @@ class BaseAnalyzer(ABC):
                     # Monotonic stamps for the latency probe (app/latency_probe.py).
                     meta["captured_at_mono"] = context.captured_at
                     meta["decided_at_mono"] = time.monotonic()
+                    # Detections on the map (app/mapdetect): the telemetry of the
+                    # moment THIS frame was captured, and its size, for the
+                    # ground projection. Private (underscore): stream_track
+                    # pops it before the result is emitted.
+                    meta["_capture"] = {
+                        "telemetry": context.telemetry,
+                        "width": context.width, "height": context.height,
+                        "wall_time": time.time() - (time.monotonic() - context.captured_at),
+                    }
 
                 if client_id in self._clients:
                     async with self._clients[client_id]["lock"]:

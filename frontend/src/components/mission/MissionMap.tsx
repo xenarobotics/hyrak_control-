@@ -28,6 +28,7 @@ import { PLAN_FIT_EVENT } from '@/lib/planning'
 import { visibleInterval } from '@/lib/poll'
 import { getHazards, getObstaclesAndPath, addHazard, type KnownHazard, type LiveObstacle, type LatLng } from '@/lib/avoidance'
 import { ZONE_COLORS, zoneRings, type ZoneFeature } from '@/components/admin/zones'
+import { LiveSightingsLayer, SightingsLegend } from '@/components/mapdetect/MapDetectionsUi'
 
 // ── Flight zones (green/orange/red) - pilots plan around these ─────────────
 
@@ -534,7 +535,12 @@ function WaypointMarker({ wp, index, readOnly = false }: { wp: Waypoint; index: 
  */
 // `layer`: force a base layer for this instance (Normal mode uses the plain
 // street map) without touching the operator's saved choice.
-export default function MissionMap({ readOnly = false, follow = false, compact = false, layer }: { readOnly?: boolean; follow?: boolean; compact?: boolean; layer?: MapLayer } = {}) {
+export default function MissionMap({ readOnly = false, follow = false, compact = false, layer, detectionsLegendStyle }: {
+  readOnly?: boolean; follow?: boolean; compact?: boolean; layer?: MapLayer
+  /** Where the detections legend sits (default: top right, clear of the
+   *  Command window's corner pictures). */
+  detectionsLegendStyle?: React.CSSProperties
+} = {}) {
   const rawWaypoints       = useMissionStore(s => s.waypoints)
   const homePosition       = useMissionStore(s => s.homePosition)
   const getRtlWaypoint     = useMissionStore(s => s.getRtlWaypoint)
@@ -693,6 +699,9 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
         <Marker position={[rtlWp.lat, rtlWp.lng]} icon={rtlIcon} />
       )}
 
+      {/* AI detections placed on the ground (app/mapdetect) */}
+      <LiveSightingsLayer />
+
       {/* Live drone - glides between telemetry samples */}
       <SmoothDroneMarker />
 
@@ -786,6 +795,11 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
         )
       })}
     </MapContainer>
+
+      {/* Detections legend: counts per class, show, clear. A count chip on
+          a minimap. */}
+      <SightingsLegend compact={compact}
+        style={compact ? { left: 6, bottom: 6 } : (detectionsLegendStyle ?? { right: 12, top: 12 })} />
 
       {/* Avoidance overlay control - toggle visibility, legend, click-to-pin.
           Avoidance is staff-only (docs/ACCESS_MODEL.md 8a). */}

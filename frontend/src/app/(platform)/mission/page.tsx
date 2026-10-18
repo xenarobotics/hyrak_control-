@@ -666,7 +666,10 @@ export default function MissionPage() {
       style={{ borderColor: 'hsl(var(--app-border))' }}>
 
       {/* Full-bleed map - 2D or 3D */}
-      {mapView === '3d' ? <MissionMap3D readOnly={readOnly} /> : <MissionMap readOnly={readOnly} />}
+      {mapView === '3d' ? <MissionMap3D readOnly={readOnly} /> : <MissionMap readOnly={readOnly}
+        // The side panels own both bottom corners here: the detections
+        // legend sits centred above the stats bar instead.
+        detectionsLegendStyle={{ bottom: 84, left: '50%', transform: 'translateX(-50%)' }} />}
 
       {/* Hidden file input */}
       <input ref={fileRef} type="file" accept=".plan,.json" className="hidden" onChange={onFileChange} />

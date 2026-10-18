@@ -1415,3 +1415,61 @@ class CustomModelVersion(Base):
         CheckConstraint("status IN ('checking', 'ready', 'failed')",
                         name="ck_model_versions_status"),
     )
+
+
+class MapSighting(Base):
+    """
+    One object a model saw, placed on the map (app/mapdetect): many frames of
+    the same thing folded into one row with a count, first/last seen and the
+    best score. Written only while the operator has "Record to map" on; the
+    live map works from memory without it.
+
+    Positions are ESTIMATES projected from the drone's GPS, height and camera
+    angle (app/mapdetect/geo.py has the assumptions); accuracy_m is the
+    typical error. flight_id is the flight that was armed at the time (None
+    when recorded on the ground). workspace_id is the session's, stamped at
+    record time, a plain indexed string like the other history tables
+    (docs/ACCESS_MODEL.md 8b).
+    """
+    __tablename__ = "map_sightings"
+    __table_args__ = (
+        CheckConstraint("task IN ('detect', 'classify')", name="ck_map_sightings_task"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True,
+                                    default=lambda: str(uuid.uuid4()))
+    session_id: Mapped[str] = mapped_column(String(36), index=True)
+    flight_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), index=True,
+        default=PLATFORM_WORKSPACE_ID, server_default=PLATFORM_WORKSPACE_ID,
+    )
+    drone_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    source: Mapped[str] = mapped_column(String(80), default="")
+    model_name: Mapped[str] = mapped_column(String(120), default="")
+    label: Mapped[str] = mapped_column(String(80))
+    task: Mapped[str] = mapped_column(String(16), default="detect")
+    lat: Mapped[float] = mapped_column(Float)
+    lng: Mapped[float] = mapped_column(Float)
+    accuracy_m: Mapped[float] = mapped_column(Float)
+    count: Mapped[int] = mapped_column(Integer, default=1)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    best_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    agl_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    angle_source: Mapped[str] = mapped_column(String(16), default="")
+    # A small JPEG of the best frame's box, as a data URL (a few kB).
+    thumb: Mapped[Optional[str]] = mapped_column(String(60000), nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id, "session_id": self.session_id, "flight_id": self.flight_id,
+            "workspace_id": self.workspace_id, "drone_id": self.drone_id,
+            "source": self.source, "model_name": self.model_name, "label": self.label,
+            "task": self.task, "lat": self.lat, "lon": self.lng,
+            "accuracy_m": self.accuracy_m, "count": self.count,
+            "first_seen": self.first_seen.timestamp() if self.first_seen else None,
+            "last_seen": self.last_seen.timestamp() if self.last_seen else None,
+            "best_score": self.best_score, "agl_m": self.agl_m,
+            "angle_source": self.angle_source, "thumb": self.thumb,
+        }

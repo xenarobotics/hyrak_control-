@@ -94,6 +94,8 @@ def create_app() -> socketio.ASGIApp:
     fastapi_app.include_router(latency_probe_router)
     from app.models_custom.routes import router as models_router
     fastapi_app.include_router(models_router)
+    from app.mapdetect.routes import router as map_sightings_router
+    fastapi_app.include_router(map_sightings_router)
 
     # Desktop app installers + electron-updater manifests - plain static
     # files, no auth (same tier as a public download page). Directory is
@@ -433,6 +435,9 @@ def create_app() -> socketio.ASGIApp:
             logger.error(f"Session {session.session_id[:8]}: cloud sim stop failed: {e}")
         close_bridge(session.session_id)
         close_swarm_relay_bridge(session.session_id)
+        # Recorded map sightings are saved before the flight row closes.
+        from app.mapdetect import live as map_live
+        await map_live.end_session(session.session_id)
         from app.flights import recorder
         await recorder.end_flight(session.session_id)
         from app.zones import monitor as zone_monitor
@@ -486,6 +491,8 @@ def create_app() -> socketio.ASGIApp:
     register_gs_relay_events(sio)
     from app.models_custom import notify as model_notify
     model_notify.configure(sio, session_manager, vision_pool)
+    from app.mapdetect.events import register_map_events
+    register_map_events(sio, session_manager)
 
     # ------------------------------------------------------------------ #
     # Mount                                                                #
