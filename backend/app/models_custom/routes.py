@@ -78,6 +78,22 @@ async def hf_inspect(repo: str = Query(..., max_length=300),
     return await _run(service.hf_inspect(user, repo, workspace_id))
 
 
+@router.get("/huggingface/recommended")
+async def hf_recommended(workspace_id: Optional[str] = Query(None),
+                         user: AuthUser = Depends(require_signed_in)):
+    """HYRAK's curated list by use case; `added` is the workspace's model id
+    when it already has that entry."""
+    return await _run(service.hf_recommended(user, workspace_id))
+
+
+@router.get("/huggingface/search")
+async def hf_search(q: str = Query("", max_length=100), task: str = Query("all"),
+                    page: int = Query(1, ge=1, le=50), workspace_id: Optional[str] = Query(None),
+                    user: AuthUser = Depends(require_signed_in)):
+    """Vision models on Hugging Face as cards, runnable ones first."""
+    return await _run(service.hf_search(user, workspace_id, q, task, page))
+
+
 class HfBody(BaseModel):
     workspace_id: Optional[str] = None
     repo: str = Field(min_length=1, max_length=300)

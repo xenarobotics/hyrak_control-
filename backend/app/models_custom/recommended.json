@@ -1,0 +1,44 @@
+{
+  "_comment": "HYRAK-curated Hugging Face models for the model browser, grouped by use case. Every entry is checked at startup (app/models_custom/browse.validate_recommended): repo owner/name, file ends in .onnx, category one of the six listed there, task detect or classify, fps a number or null, verified_at YYYY-MM-DD or null (null = not yet run through the HYRAK check). license_note null means the server fills it for AGPL and cc-by-nc licences. PLACEHOLDER entries: replace with the verified list.",
+  "models": [
+    {
+      "repo": "Xenova/detr-resnet-50",
+      "file": "onnx/model.onnx",
+      "name": "Everyday objects (DETR)",
+      "category": "General purpose",
+      "task": "detect",
+      "what": "Finds 80 kinds of everyday things like people, cars, bikes and dogs.",
+      "license": "apache-2.0",
+      "license_note": null,
+      "classes_preview": ["person", "car", "bicycle", "dog"],
+      "fps": null,
+      "verified_at": null
+    },
+    {
+      "repo": "Xenova/yolos-tiny",
+      "file": "onnx/model.onnx",
+      "name": "Small object finder (YOLOS tiny)",
+      "category": "Roads and vehicles",
+      "task": "detect",
+      "what": "A small, quick model that finds cars, trucks, buses and people on the road.",
+      "license": "apache-2.0",
+      "license_note": null,
+      "classes_preview": ["car", "truck", "bus", "person"],
+      "fps": null,
+      "verified_at": null
+    },
+    {
+      "repo": "Xenova/vit-base-patch16-224",
+      "file": "onnx/model.onnx",
+      "name": "Picture namer (ViT)",
+      "category": "General purpose",
+      "task": "classify",
+      "what": "Looks at the whole picture and says which of 1000 kinds of thing it shows.",
+      "license": "apache-2.0",
+      "license_note": null,
+      "classes_preview": ["sports car", "tractor", "lakeside", "street sign"],
+      "fps": null,
+      "verified_at": null
+    }
+  ]
+}

@@ -8,17 +8,22 @@ Hugging Face: public model repos only, pinned to a commit.
   * Only what a model needs is fetched: the chosen .onnx, its external
     weights file when the repo has one beside it, and config.json /
     preprocessor_config.json / a labels.txt (small files only).
-  * No token is ever sent (a private or gated repo is refused with a
-    message), every request has a timeout, and the download stops as soon
-    as it passes the size limit.
+  * Anonymous unless the owner set HF_TOKEN (higher rate limits); either
+    way a private or gated repo is refused with a message. The token is
+    never logged. Every request has a timeout, and the download stops as
+    soon as it passes the size limit.
+  * HTTP 429 from the Hub becomes `hf_rate_limited` everywhere (inspect,
+    download, search), and for a short while after one no further call
+    goes out, so a busy Hub is not hammered.
 
-The two network calls (`_model_info`, `_stream`) are module functions so
-tests replace them.
+The network calls (`_model_info`, `_stream`, `_list_models`) are module
+functions so tests replace them.
 """
 from __future__ import annotations
 
 import asyncio
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import AsyncIterator, Optional
@@ -82,17 +87,45 @@ class RepoInfo:
         return next((f for f in self.files if f.path == path), None)
 
 
+def token():
+    """The owner's HF_TOKEN, or False (anonymous). Never logged."""
+    t = get_settings().hf_token.get_secret_value().strip()
+    return t or False
+
+
+# After a 429 no call goes out until this monotonic time.
+_COOLDOWN_S = 30.0
+_cooldown_until = 0.0
+
+
+def _check_cooldown() -> None:
+    if time.monotonic() < _cooldown_until:
+        raise ModelFailure("hf_rate_limited", "waiting after an HTTP 429", status=429)
+
+
+def _rate_limited(detail: str) -> ModelFailure:
+    global _cooldown_until
+    _cooldown_until = time.monotonic() + _COOLDOWN_S
+    return ModelFailure("hf_rate_limited", detail[:500], status=429)
+
+
+def reset_cooldown() -> None:
+    global _cooldown_until
+    _cooldown_until = 0.0
+
+
 def _model_info(repo: str, timeout: float):
-    """huggingface_hub.HfApi().model_info, anonymous. Replaced in tests."""
+    """huggingface_hub.HfApi().model_info. Replaced in tests."""
     from huggingface_hub import HfApi
-    return HfApi(endpoint=get_settings().custom_models_hf_endpoint, token=False).model_info(
-        repo, files_metadata=True, timeout=timeout, token=False)
+    return HfApi(endpoint=get_settings().custom_models_hf_endpoint, token=token()).model_info(
+        repo, files_metadata=True, timeout=timeout, token=token())
 
 
 async def resolve(repo: str) -> RepoInfo:
     """Commit sha and file list of a public model repo."""
     s = get_settings()
     timeout = float(s.custom_models_hf_timeout_s)
+    _check_cooldown()
     try:
         info = await asyncio.wait_for(asyncio.to_thread(_model_info, repo, timeout),
                                       timeout=timeout + 5)
@@ -130,6 +163,8 @@ def _map_hub_error(e: Exception) -> ModelFailure:
     if name == "GatedRepoError":
         return ModelFailure("hf_gated", text)
     status = getattr(getattr(e, "response", None), "status_code", None)
+    if status == 429:
+        return _rate_limited(text)
     if status in (401, 403, 404):
         return ModelFailure("hf_not_found", text)
     return ModelFailure("hf_unreachable", text)
@@ -184,12 +219,16 @@ def file_url(repo: str, sha: str, path: str) -> str:
 
 
 async def _stream(url: str, timeout: float) -> AsyncIterator[bytes]:
-    """The file's bytes, anonymously. Replaced in tests."""
+    """The file's bytes (with HF_TOKEN when set). Replaced in tests."""
     import httpx
     t = httpx.Timeout(timeout, connect=15.0)
-    async with httpx.AsyncClient(timeout=t, follow_redirects=True,
-                                 headers={"User-Agent": "hyrak-models/1"}) as client:
+    headers = {"User-Agent": "hyrak-models/1"}
+    if token():
+        headers["Authorization"] = f"Bearer {token()}"
+    async with httpx.AsyncClient(timeout=t, follow_redirects=True, headers=headers) as client:
         async with client.stream("GET", url) as r:
+            if r.status_code == 429:
+                raise _rate_limited(f"HTTP 429 for {url}")
             if r.status_code in (401, 403, 404):
                 raise ModelFailure("hf_not_found", f"HTTP {r.status_code} for {url}")
             if r.status_code >= 400:
@@ -204,6 +243,7 @@ async def download(repo: str, sha: str, path: str, dest: Path, *, limit: int,
     bytes (too_large) and after `deadline_s` (hf_download_failed)."""
     s = get_settings()
     deadline_s = float(deadline_s or s.custom_models_hf_download_timeout_s)
+    _check_cooldown()
     w = storage.AtomicWriter(dest, limit=limit)
 
     async def pull():

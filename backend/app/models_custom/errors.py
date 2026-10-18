@@ -157,6 +157,12 @@ KNOWN_FAILURES: dict[str, tuple[str, str]] = {
     "hf_download_failed": (
         "The model could not be downloaded from Hugging Face.",
         "Try again in a minute. If it keeps happening, download the file and upload it."),
+    "hf_rate_limited": (
+        "Hugging Face is busy right now (too many requests).",
+        "Wait a minute and try again."),
+    "search_rate_limited": (
+        "That was a lot of searches in a short time.",
+        "Wait a minute and try again."),
 
     # Access.
     "not_entitled": (
