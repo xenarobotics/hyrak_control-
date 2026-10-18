@@ -158,6 +158,15 @@ export function useDrone() {
         // with a code: `forbidden` and `drone_not_in_workspace`. Their message
         // names the fix, so it goes to the pilot as the server wrote it.
         const onServerError = (data: { code?: string; msg?: string }) => {
+            // The normal end of a client-overlay stream (the camera or relay
+            // track ended; backend webrtc/signaling.py _drive) also arrives as
+            // `error`, beside the stream_stopped that useWebRTC handles. It is
+            // not a failure, and it is not about telemetry: a connect waiting
+            // here must not be marked failed because the video stopped.
+            if (!data?.code && data?.msg === 'video source ended') {
+                console.info('Video source ended')
+                return
+            }
             console.error('Server error', data?.code ?? '', data?.msg)
             if (data?.code === 'forbidden' || data?.code === 'drone_not_in_workspace') {
                 store.setCommandRefusal({
