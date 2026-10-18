@@ -1,6 +1,6 @@
 # Access model: workspaces, roles, portals
 
-Status: design agreed 2026-10-18; phase 1 backend built on `feat/workspaces` (see "Phase 1 as built" in section 7).
+Status: design agreed 2026-10-18; phase 1 backend built on `feat/workspaces` (see "Phase 1 as built" in section 7); phase 2a backend built on `feat/live-scope` (see "Phase 2a as built" in section 8a).
 Supersedes the flat viewer / operator / admin model in `docs/AUTH.md`
 (login, tokens, rate limits and revocation from that document stay as they are).
 
@@ -342,8 +342,9 @@ vision history, recordings) still use the existing rank check. They see a
 | any other HYRAK membership (viewer, airspace) | viewer |
 | customer memberships only, or none | member (below viewer) |
 
-`member` passes no live-path check: no socket (refused with
-`no_live_access`), no viewer routes. The live paths are not scoped per
+`member` passes no compatibility-rank check: no viewer routes, no staff
+socket events. (Phase 1 also refused its socket with `no_live_access`;
+phase 2a replaces that with the workspace check in section 8a.) The live paths are not scoped per
 workspace yet, so a viewer rank would let a customer watch HYRAK's and other
 customers' drones. Account, workspace and zone-write routes use
 `require_signed_in` and decide with workspace permissions instead. A staff
@@ -429,6 +430,175 @@ ship unclassified.
 * `/api/zones` GET and terrain: any signed-in account.
 * Org console data comes from the existing `/api/workspaces*`, zones and
   `/api/audit` routes, which already check workspace permissions.
+
+### Phase 2a as built (backend, `feat/live-scope`)
+
+The contract above holds, with these decisions and deviations the
+frontend should code against.
+
+**Handshake.** `auth: {token, workspace_id?, resume_session?, resume_secret?}`.
+
+* Staff without `workspace_id` land on HYRAK. A staff account may also
+  name a workspace, but only one it has `view` on (HYRAK itself is always
+  allowed, so an airspace manager without `view` still gets a session).
+  A HYRAK pilot naming a customer workspace is refused. A staff session
+  stays a staff session (compatibility rank) whatever workspace it names.
+* Customer-only accounts without `workspace_id` get the first of their own
+  memberships (in grant order) whose workspace gives `view`. Inherited
+  workspaces can be named (an IITH pilot may open a session in IITH's
+  client).
+* Refusals (socket.io `connect_error` message): `unauthorized` (no or bad
+  token: sign in again) and `no_workspace_access` (signed in, but no
+  `view` on the named or any workspace, or the workspace is disabled or
+  unknown: keep the token, offer another workspace or the `/account`
+  page). `no_live_access` is gone.
+* `session_ready` (new and resumed) adds
+  `{workspace_id, perms: [sorted perm names], staff: bool}` next to the
+  existing `session_id, device, gpu_count, max_sessions, resume_secret,
+  user` (and `resumed, away_s, telemetry_connected` on a resume).
+* **Resume is bound to the same user and the same workspace.** Omitting
+  `workspace_id` on resume keeps the session's own; naming a different
+  one starts a fresh session (the old one is parked and expires as
+  usual). The workspace access is re-checked on resume: a customer who
+  lost `view` gets `no_workspace_access`.
+* Revalidation (60 s, or immediately on a membership change that reduces
+  access, through the existing revocation listener) refreshes perms and
+  drone access; a customer session that lost `view` is disconnected (the
+  session parks; its drone link runs out the 90 s grace and then drops,
+  so PX4's link-loss failsafe takes over). A database error during the
+  re-check keeps the previous perms instead of dropping a pilot.
+* Customer sessions never load the enrolled-face gallery (it is HYRAK's
+  global data): person-tracking and traffic modes match nobody.
+
+**Socket error codes** (`error` event `{msg, event, code}`; for
+`drone_action` also an `action_result` `{action, ok: false, error, code}`):
+`forbidden` (the session lacks the perm, or a staff-only event / video
+source / AI mode), `drone_not_in_workspace` (the drone on the link belongs
+to a workspace where the user lacks `fly`), `drone_unidentified` (customer
+session holds a link whose drone is not identified yet: no UID read yet,
+FC reported none, or the registry is offline). Staff-only socket acks
+(`allocate_video_relay`, `datachannel_video_offer`, ...) answer
+`{error, code: "forbidden"}`.
+
+**Event classification** (`backend/app/auth/socket_classes.py`; a test
+walks every handler socketio registered and also checks each handler
+calls the guard of its class): 56 handlers on the default namespace and 4
+on `/gs-relay`.
+
+| class | count | events |
+|---|---|---|
+| lifecycle | 2 | connect, disconnect |
+| session view | 7 | offer, ice_candidate, stop_stream, serial_uplink, disconnect_telemetry, fetch_params, get_param |
+| session command | 19 | connect_browser_serial, drone_action, drone_command, set_param, set_tracking, set_vehicle_tracking, set_follow_vehicle, set_follow_person, set_multi_follow, select_person, set_pd_params, set_altitude_mode, set_altitude_nudge, set_tracking_params, set_analysis_mode, set_profile_override, set_zone_names, set_enhance_params, clear_reference |
+| staff | 28 + 4 | connect_telemetry, connect_rf_bridge, start_rc_monitor, upload_mission, set_gallery_mode, enrol_person_live, set_crowd_thresholds, allocate_video_relay, release_video_relay, datachannel_video_offer, datachannel_video_stats, wall_offer, wall_ice_candidate, wall_close, admin_hello, watch_session, unwatch_session, request_permit, list_my_permits, the 9 swarm events, and the 4 `/gs-relay` agent events |
+
+Notes on the split:
+
+* Of the session commands, the 13 that act on the vehicle (drone_action,
+  drone_command, set_param and the follow / tracking controls) also need
+  drone access; the other 6 (connect_browser_serial and the AI pipeline
+  controls) do not.
+* `disconnect_telemetry` is session view: dropping your own link is always
+  allowed. `serial_uplink` is session view: bytes reach only the
+  session's own bridge, and blocking them would cut the link's downlink.
+* Staff for a reason other than the table above: `upload_mission` and
+  permits (customer mission planning is 2b), `set_crowd_thresholds`
+  (persists to the server-wide calibration file), `set_gallery_mode` and
+  `enrol_person_live` (global face gallery), 3D reconstruction as an
+  analysis mode (one engine process for the server; refused in
+  `set_analysis_mode` for customers). `rc_channels` now goes only to the
+  sockets that called `start_rc_monitor` (it was a broadcast to every
+  socket).
+* Formerly ungated events moved behind a staff guard: start_rc_monitor,
+  allocate / release_video_relay, datachannel_video_offer / stats,
+  wall_offer / wall_ice_candidate / wall_close, unwatch_session,
+  list_my_permits. Formerly ungated events now behind a session guard:
+  offer, ice_candidate, stop_stream, serial_uplink, fetch_params,
+  get_param.
+
+**Telemetry links a customer can use:** only `connect_browser_serial`, a
+per-session loopback bridge on an ephemeral port fed by the socket's own
+`serial_uplink` bytes. That covers every client-side relay: Web Serial,
+the desktop's SITL relay ("SITL", the client's own udp:14540), and the
+desktop's native serial, native RF, local RF agent and SIYI relays.
+`connect_telemetry` (any address the server can reach, including "Gazebo
+sim on server" on udp:14600) and `connect_rf_bridge` (the shared RF bridge
+and ground-station relay) are staff only.
+
+**Video sources a customer can use:** only the WebRTC track their own
+browser sends (`videoSource` "camera" or any other client-side source;
+the server consumes it from the peer connection). Every server-sourced
+`videoSource` is refused for customers with `forbidden`, because each has
+the server open something: `siyi_rtsp` (the server dials an RTSP URL),
+`air_unit_udp` (a shared UDP feed port), `rtsp_relay`, `air_unit_srt`,
+`air_unit_gst`, `hyrak_receiver` (a public relay port from
+allocate_video_relay), `rtsp_datachannel`, `air_unit_datachannel` (a
+loopback port from a fixed pool shared by all sessions). A customer's
+offer also has its `iceServers` replaced by the server's own list, so the
+server never dials a TURN host the customer typed.
+
+**Drone access as built.**
+
+* "Unassigned" means **never seen by the registry**: drones default to
+  the HYRAK workspace (phase 1), and every drone seen before 2a was seen
+  by staff, so a known drone on HYRAK is HYRAK's and is never claimed. The
+  first connect of a new real drone puts it in the session's workspace;
+  `drone.claimed` is audited when that is a customer workspace. A known
+  drone is moved only by `POST /api/drones/{id}/workspace`.
+* Simulated drones (the server-side detection: a direct `udp` address
+  with no relay bridge, i.e. staff links) are never claimed and never
+  block. A customer's desktop SITL arrives through the relay bridge, so it
+  is treated as a real drone: the first workspace to connect a given SITL
+  UID claims it, and a SITL UID already registered to HYRAK is read-only
+  for customers until staff move it.
+* The check applies to staff sessions too (a HYRAK pilot does not command
+  a customer's drone), except that staff keep today's behaviour while a
+  drone is still unidentified. The legacy shared token flies HYRAK drones
+  only.
+* **Safety exception:** `drone_action` with `hold`, `pause_mission`,
+  `return`, `rtl_home` or `land`, or `set_mode` with `HOLD` / `RETURN` /
+  `LAND`, passes both the workspace `fly` check and drone access whenever
+  the session holds a telemetry link. It is audited with a `(safety)`
+  suffix when it bypassed either.
+
+**REST as built.**
+
+* Staff only (compat viewer): `GET /api/drones`, `/api/fleet`,
+  `/api/missions`, `/api/missions/{id}`, `/api/pads`, `/api/tasks`,
+  `/api/tasks/{ref}`, `/api/permits`, `/api/planner/meta`,
+  `/api/map-features`, `/api/drones/{id}/flights`, `/api/flights/{id}`,
+  `/api/flights/{id}/download`, `/api/vision/crowd-history`,
+  `/api/vision/plate-history`, `/api/vision/plate-history/{id}/image`,
+  `/api/vision/face-gallery`, `/api/vision/sightings`, every
+  `GET /api/avoidance/*`, `/api/video/mesh-units`, `/api/video/feeds`,
+  `GET /api/latency-probe` and `/stats`, every `GET /api/recon/*`. Writes
+  already needed operator or admin.
+* Any signed-in account: `GET /api/zones`, `/api/zones/check`,
+  `/api/vision/calibration` (read-only; customers' AI modes run with it),
+  `/api/terrain/elevation`, `/api/webrtc/ice-servers`.
+* Session reports (`/api/sessions/{id}/crowd-report/download`,
+  `plate-report/download`): staff, or the user who opened the session;
+  404 for anyone else. The owner is remembered in memory (bounded), so
+  after a server restart a pre-restart report is staff-only.
+* Still public: `GET /api/health`, `/api/auth/login`, `/api/auth/logout`,
+  `GET /api/auth/invites/{token}`, `POST /api/auth/invites/{token}/accept`
+  (signed out or in), `POST /api/auth/reset/{token}`, the `/v1` partner
+  API (API key checked in every handler), `/releases/*` (desktop
+  installers and update manifests).
+* The org console needs nothing new: `/api/workspaces*`, the zone writes
+  and `/api/audit` already scope an owner or admin to their subtree
+  (tested in `test_live_scope.py` and `test_workspaces.py`).
+* `start.sh` probes `/api/health` for readiness (it used `/api/fleet`).
+* **Frontend must send the bearer** on every route above that it fetched
+  without one (plain `fetch` instead of `apiFetch`): `/api/drones`,
+  `/api/zones`, `/api/permits`, `/api/flights/*`, `/api/map-features`,
+  `/api/vision/*` history / calibration / face gallery / sightings,
+  `/api/fleet`, `/api/video/mesh-units` and `/feeds`,
+  `/api/avoidance/*`, `/api/recon/*`, `/api/webrtc/ice-servers`, the
+  session report downloads. `<img src>` and `<a href>` uses (plate images,
+  flight CSV download, reconstruction MJPEG streams and file downloads)
+  cannot carry a header: they need a fetch-to-blob (or, for the MJPEG
+  streams, a stream reader or a short-lived signed URL, not built yet).
 
 ### Not in 2a (phase 2b)
 

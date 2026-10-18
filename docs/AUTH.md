@@ -16,11 +16,11 @@ B12, I1, F16, B8, B20, B30 in `docs/AUDIT_2026-10-17.md`.
 |---|---|---|
 | user | `users` table | username (unique, lower-case, no `@`), email (unique, lower-case, optional for old accounts) with `email_verified`, display name, scrypt password hash, disabled flag, last_login_at. **No role column** |
 | membership | `memberships` table | one role on one workspace, optional GeoJSON area and title. See `docs/ACCESS_MODEL.md` section 2 |
-| compatibility role | computed | `member` < `viewer` < `operator` < `admin`, derived from memberships (founder -> admin; HYRAK pilot or manager anywhere -> operator; any other HYRAK membership -> viewer; customer-only -> member, which has no socket and no viewer routes). What `require_user(...)` and the socket guard still compare in phase 1 |
+| compatibility role | computed | `member` < `viewer` < `operator` < `admin`, derived from memberships (founder -> admin; HYRAK pilot, or manager anywhere while the account is staff -> operator; any other HYRAK membership -> viewer; customer-only -> member). What `require_user(...)` and the staff socket guards compare. Only staff hold viewer and above, so every rank check is a staff-only check |
 | token | `auth_tokens` table | 32 random bytes (urlsafe), stored as SHA-256 only; 30-day expiry that slides on use; cached in memory for 60 s together with the user's memberships |
-| session | in memory (`DroneSession`) | stamped with `user_id` / `username` / compatibility `role` at socket connect, plus a random `resume_secret` |
+| session | in memory (`DroneSession`) | stamped with `user_id` / `username` / compatibility `role` at socket connect, the session's `workspace_id`, the user's `perms` on it and `is_staff` (phase 2a), plus a random `resume_secret` |
 
-What each compatibility role can do on the live control paths (phase 1):
+What each compatibility role can do on the live control paths (staff):
 
 * **viewer**: read-only GETs, a socket session (telemetry mirrors, video), nothing that commands a drone. Command events answer with an `error` event `{code: "forbidden"}`.
 * **operator**: everything that flies: `drone_action`, `drone_command`, missions, tracking, swarm, avoidance, vision uploads, calibration, mesh feeds, planner edits.
@@ -29,6 +29,22 @@ What each compatibility role can do on the live control paths (phase 1):
 Workspace, member, invite, zone and drone-assignment routes do not use the
 rank: they ask the permission engine (`app/auth/perms.py`) with the
 caller's memberships.
+
+**Customer sessions (phase 2a, `docs/ACCESS_MODEL.md` 8a).** A
+customer-only account (rank `member`) gets a socket session in one of its
+workspaces and is checked on its perms there, never on the rank: `view`
+for the session's own video, link and params read, `fly` for commands and
+the session's AI pipeline, plus `fly` on the drone's own workspace for
+anything that acts on the vehicle. Every socket event is classified in
+`app/auth/socket_classes.py`; everything not listed as a session event is
+staff only. On REST a customer reaches only the account, workspace, zone
+and audit routes (which check workspace permissions), `GET /api/zones`,
+`/api/zones/check`, `/api/vision/calibration`, `/api/terrain/elevation`,
+`/api/webrtc/ice-servers`, and the crowd / plate reports of their own
+sessions. The socket error codes a client must handle: connect refused
+with `unauthorized` (sign in again) or `no_workspace_access` (pick another
+workspace); `error` events with `code` `forbidden`, `drone_not_in_workspace`
+or `drone_unidentified`.
 
 Every accepted command-type socket event and every accepted mutating route writes one line to the `hyrak.audit` logger:
 
@@ -75,12 +91,12 @@ sign-up must use the locked address). The full account API
 
 ## Revocation on live sockets
 
-The role stamped on a session at connect is not trusted forever. The socket guard re-checks the session's token hash every 60 s (through the service's cache, so it costs nothing in the common case) and refreshes the compatibility role; a token that no longer verifies disconnects the socket. These disconnect every live socket of the user immediately (the session is parked like any other drop; a still-valid token resumes it with the fresh role, a revoked one cannot):
+The role stamped on a session at connect is not trusted forever. The socket guard re-checks the session's token hash every 60 s (through the service's cache, so it costs nothing in the common case) and refreshes the compatibility role, the perms on the session's workspace and the session's drone access; a token that no longer verifies, or a customer who lost `view` on the session's workspace, disconnects the socket. These disconnect every live socket of the user immediately (the session is parked like any other drop; a still-valid token resumes it with the fresh role, a revoked one cannot):
 
 * revoking tokens, disabling, deleting, changing or resetting the password (all other devices are signed out; a password change keeps the current one);
 * a membership change that removes a membership, changes its role or area, or moves the user's compatibility role. Adding a membership or editing only a title just drops the cached token entry, so the next request sees it.
 
-Resume always re-stamps the role from the freshly authenticated user.
+Resume always re-stamps the role and perms from the freshly authenticated user.
 
 **Changes made from the CLI** (`create-user`, `grant`, `grant --remove`)
 run in their own process, so they cannot drop the running server's token
@@ -101,6 +117,12 @@ With the database up, a user or membership query that errors is a refusal (sign-
 ## Session resume
 
 A socket that drops and comes back sends `resume_session` and `resume_secret`. The server hands the session back only if it still exists, the same `user_id` is asking, and the secret matches (constant-time compare). It no longer matters whether the old socket has been noticed as gone: a client reconnecting inside the ping timeout supersedes its old socket, whose late disconnect is then ignored (audit B8).
+
+A session also belongs to one workspace for its whole life: a resume that
+names a different `workspace_id` gets a fresh session (the old one is
+parked and expires as usual), and omitting `workspace_id` keeps the
+session's own. The user's access to that workspace is re-checked on every
+resume, so a customer who lost `view` cannot reclaim the session.
 
 ## Bootstrapping the first founder
 
@@ -185,10 +207,12 @@ Generate a real value with `python3 -c "import secrets; print(secrets.token_urls
 * `backend/app/auth/store.py`: `DbStore` (tables) and `MemoryStore` (platform workspace, env founder, tests).
 * `backend/app/auth/service.py`: login, verify, cache, rate limits, legacy token, account self-service, reset links, startup bootstrap.
 * `backend/app/auth/deps.py`: `require_user(min_role)`, `require_founder`, `optional_user` FastAPI dependencies.
-* `backend/app/auth/socket_guard.py`: `require_operator(sid, event, data)` for socket handlers.
+* `backend/app/auth/socket_guard.py`: `require_session_view`, `require_session_fly` (customer-reachable events), `require_operator`, `require_admin`, `require_staff` (staff only) for socket handlers.
+* `backend/app/auth/socket_classes.py`: the classification of every socket event, drone events, the hold / return / land safety actions, customer-blocked video sources and AI modes.
+* `backend/app/auth/live_scope.py`: the session's workspace and perms at connect and revalidation, the drone claim, drone access.
 * `backend/app/auth/routes.py`: `/api/auth/*`.
 * `backend/app/auth/audit.py`: `hyrak.audit` lines and `audit_events` rows.
 * `backend/app/auth/cli.py`: `create-user`, `grant`, `list-users`, `hash-password`.
 * `backend/app/workspaces/`: workspaces, members, invites, drone assignment, zone layer rules, staff and audit routes.
 * `backend/alembic/versions/e4b7a2c9d013_users_and_auth_tokens.py`, `backend/alembic/versions/f6c2a8d4e1b7_workspaces_memberships_invites.py`.
-* `backend/tests/test_auth.py`, `test_perms.py`, `test_workspaces.py`, `test_auth_dbstore.py` (opt-in: `HYRAK_TEST_DATABASE_URL` pointing at a disposable migrated database), plus the `auth_headers` fixture in `tests/conftest.py` for route tests.
+* `backend/tests/test_auth.py`, `test_perms.py`, `test_workspaces.py`, `test_live_scope.py`, `test_socket_classes.py`, `test_auth_dbstore.py` (opt-in: `HYRAK_TEST_DATABASE_URL` pointing at a disposable migrated database), plus the `auth_headers` fixture in `tests/conftest.py` for route tests.
