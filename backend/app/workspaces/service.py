@@ -760,7 +760,38 @@ async def patch_zone(actor: AuthUser, zone_id: str, fields: dict, *, ip: str) ->
     await audit.record(store, actor, "zone.update", workspace_id=out.workspace_id,
                        target_type="zone", target_id=zone_id,
                        detail={k: v for k, v in changes.items()}, ip=ip)
+    await _supersede_permits(store, actor, z, changes, ip=ip)
     return out.to_feature()
+
+
+# A change to any of these alters what flying through the zone means, so
+# permits approved against the old zone stop counting (docs/ACCESS_MODEL.md
+# 8b). Geometry changes are delete + redraw: the new zone has a new id that
+# no permit names.
+_PERMIT_RELEVANT = ("zone_class", "permission_required", "floor_m", "ceiling_m")
+
+
+async def _supersede_permits(store, actor: AuthUser, before: ZoneRecord, changes: dict, *,
+                             ip: str) -> None:
+    changed = [k for k in _PERMIT_RELEVANT
+               if k in changes and changes[k] != getattr(before, k)]
+    if not changed:
+        return
+    from app.permits import service as permit_service
+    reason = f"zone {before.name} changed ({', '.join(changed)})"
+    try:
+        superseded = await permit_service.supersede_for_zone(before.id, reason)
+    except Exception as e:
+        # The permits stay approved in the table, but the evaluation-time
+        # check (permits.honoured_zone_ids) still refuses a zone that became
+        # stricter, so this is not a silent pass.
+        logger.error(f"zone {before.id}: could not supersede its permits: {e}")
+        return
+    for p in superseded:
+        await audit.record(store, actor, "permit.supersede", workspace_id=p["workspace_id"],
+                           target_type="permit", target_id=p["id"],
+                           detail={"zone_id": before.id, "zone": before.name, "changed": changed},
+                           ip=ip)
 
 
 async def delete_zone(actor: AuthUser, zone_id: str, *, ip: str) -> None:

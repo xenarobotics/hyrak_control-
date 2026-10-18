@@ -105,6 +105,17 @@ def geometries(ids) -> dict:
     return {z["id"]: z["geom"] for z in zones if z["id"] in want}
 
 
+def zone_info(ids) -> dict:
+    """{zone id: {zone_class, permission_required}} for the loaded (active)
+    zones among `ids` - the live state permits are checked against."""
+    want = set(ids)
+    with _lock:
+        zones = _zones
+    return {z["id"]: {"zone_class": z["zone_class"],
+                      "permission_required": z.get("permission_required", True)}
+            for z in zones if z["id"] in want}
+
+
 def _alt_applies(z: dict, alt_m: float | None) -> bool:
     if alt_m is None:
         return True

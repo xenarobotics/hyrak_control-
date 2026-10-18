@@ -169,6 +169,19 @@ async def test_missions_belong_to_their_workspace(cl):
     all_ids = {x["id"] for x in ok(await cl.get("/api/missions", headers=w.f.h))["missions"]}
     assert m["id"] in all_ids and mc["id"] not in all_ids
     ok(await cl.patch(f"/api/missions/{m['id']}", headers=w.f.h, json={"name": "By founder"}))
+    # HYRAK's own missions are not shared vocabulary: a customer neither
+    # lists nor opens them.
+    hm = ok(await cl.post("/api/missions", headers=w.f.h, json={
+        "name": "Delivery leg", "waypoints": CLEAR}))["mission"]
+    assert hm["workspace_id"] == "00000000-0000-0000-0000-000000000001"
+    for who in (w.pat, w.vic, w.sam):
+        assert (await cl.get(f"/api/missions/{hm['id']}", headers=who.h)).status_code == 404
+        assert (await cl.patch(f"/api/missions/{hm['id']}", headers=who.h,
+                               json={"name": "x"})).status_code == 404
+        listed = ok(await cl.get("/api/missions", headers=who.h))["missions"]
+        assert hm["id"] not in {x["id"] for x in listed}
+        assert (await cl.get("/api/missions?workspace_id=00000000-0000-0000-0000-000000000001",
+                             headers=who.h)).status_code == 403
     # A drone named on a plan must be the workspace's.
     assert (await cl.post("/api/missions", headers=w.pat.h, json={
         "name": "x", "waypoints": CLEAR, "drone_id": str(uuid.uuid4())})).status_code == 409
@@ -388,3 +401,51 @@ async def test_prohibited_red_zone_admits_no_request(cl):
     assert r.status_code == 409 and "prohibited" in r.json()["detail"]
     check = ok(await cl.post("/api/zones/check-path", headers=w.pat.h, json={"waypoints": CROSS_RED}))
     assert check["needs"] == "prohibited"
+
+
+async def test_editing_a_zone_supersedes_its_approved_permits(cl):
+    import random
+    from app.permits import service as permits
+    w = await world(cl)
+    drone = await _drone(w.iith["id"])
+    # A fresh red zone in IITH's area at a random spot (the test database
+    # keeps zones from earlier runs; the route reloads them all).
+    lat0, lng0 = 17.2 + random.random() * 0.6, 78.2 + random.random() * 0.6
+    z = ok(await cl.post("/api/zones", headers=w.f.h, json={
+        "name": "Test red", "zone_class": "red",
+        "geometry": box(lng0, lat0, lng0 + 0.002, lat0 + 0.002)}))["zone"]
+    zid = z["properties"]["id"]
+    try:
+        path = [{"lat": lat0 - 0.001, "lng": lng0 + 0.001, "altitude": 20.0},
+                {"lat": lat0 + 0.003, "lng": lng0 + 0.001, "altitude": 20.0}]
+        now = permits.now_utc()
+        p = ok(await cl.post("/api/permits", headers=w.pat.h, json={
+            "description": "Crossing", "waypoints": path, "drone_id": drone["id"],
+            "valid_until": (now + timedelta(hours=1)).isoformat()}))["permit"]
+        assert [x["id"] for x in p["zones"]] == [zid]
+        ok(await cl.post(f"/api/permits/{p['id']}/decision", headers=w.f.h, json={"approve": True}))
+        assert (await permits.gate_upload(drone, path, ack_orange=False))["ok"]
+
+        # A rename changes nothing about the permit.
+        ok(await cl.patch(f"/api/zones/{zid}", headers=w.f.h, json={"name": "Renamed"}))
+        assert ok(await cl.get(f"/api/permits/{p['id']}", headers=w.pat.h))["permit"]["status"] == "approved"
+        # Raising the floor does: superseded, audited, no longer honoured.
+        gen = permits.generation()
+        ok(await cl.patch(f"/api/zones/{zid}", headers=w.f.h, json={"floor_m": 5}))
+        got = ok(await cl.get(f"/api/permits/{p['id']}", headers=w.pat.h))["permit"]
+        assert got["status"] == "superseded" and "floor_m" in got["decision_note"]
+        assert permits.generation() > gen
+        assert len(await _audit(cl, w, "permit.supersede")) == 1
+        assert (await permits.gate_upload(drone, path, ack_orange=False))["blocked"] == "red"
+        # Superseded is final: it cannot be approved again.
+        assert (await cl.post(f"/api/permits/{p['id']}/decision", headers=w.f.h,
+                              json={"approve": True})).status_code == 409
+        # A pending request on a zone made prohibited cannot be approved.
+        p2 = ok(await cl.post("/api/permits", headers=w.pat.h, json={
+            "description": "Again", "waypoints": path, "drone_id": drone["id"],
+            "valid_until": (now + timedelta(hours=1)).isoformat()}))["permit"]
+        ok(await cl.patch(f"/api/zones/{zid}", headers=w.f.h, json={"permission_required": False}))
+        r = await cl.post(f"/api/permits/{p2['id']}/decision", headers=w.f.h, json={"approve": True})
+        assert r.status_code == 409 and "prohibited" in r.json()["detail"]
+    finally:
+        ok(await cl.delete(f"/api/zones/{zid}", headers=w.f.h))

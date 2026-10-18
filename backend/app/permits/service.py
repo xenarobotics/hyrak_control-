@@ -18,6 +18,12 @@ in-flight zone monitor, only while it is approved, inside its window, for
 a drone currently assigned to its workspace, and only for the zones it
 names (a red zone drawn after approval is not covered).
 
+Zones change. A permit records each zone's class (refreshed at approval);
+editing a zone's class, permission_required or altitudes marks every
+approved permit naming it `superseded` (supersede_for_zone, audited), and
+at use a zone is exempted only while the live zone is no stricter than
+recorded and still admits a permit (honoured_zone_ids).
+
 Who decides: anyone with `permits.approve` covering the restricted airspace
 the flight uses (perms.check_area over the flight's footprint inside the
 named zones): founders anywhere, airspace managers inside their area,
@@ -35,7 +41,8 @@ import math
 from datetime import datetime, timezone
 from typing import Iterable, Optional
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, type_coerce
+from sqlalchemy.dialects.postgresql import JSONB
 
 from app.db import db_available, get_session
 from app.db.models import PLATFORM_WORKSPACE_ID, Permit
@@ -47,9 +54,15 @@ logger = logging.getLogger("verocore.permits")
 _TOL_DEG = 1.1e-5
 _TOL_ALT = 0.5
 
-PENDING, APPROVED, DENIED, REVOKED, WITHDRAWN = (
-    "pending", "approved", "denied", "revoked", "withdrawn")
-STATUSES = (PENDING, APPROVED, DENIED, REVOKED, WITHDRAWN)
+PENDING, APPROVED, DENIED, REVOKED, WITHDRAWN, SUPERSEDED = (
+    "pending", "approved", "denied", "revoked", "withdrawn", "superseded")
+STATUSES = (PENDING, APPROVED, DENIED, REVOKED, WITHDRAWN, SUPERSEDED)
+_SEVERITY = {"green": 0, "orange": 1, "red": 2}
+
+
+class PermitCheckUnavailable(Exception):
+    """The permits for a drone could not be read just now. Callers that
+    would let a flight into restricted airspace refuse (fail closed)."""
 # Not stored: an approved permit whose window has ended.
 EXPIRED = "expired"
 
@@ -158,6 +171,34 @@ def zone_ids(p: dict) -> set:
     return {z.get("id") for z in (p.get("zones") or []) if isinstance(z, dict)}
 
 
+def _live(ids, live: Optional[dict]) -> dict:
+    if live is not None:
+        return live
+    from app.zones import engine as zone_engine
+    return zone_engine.zone_info(ids)
+
+
+def honoured_zone_ids(p: dict, live: Optional[dict] = None) -> set:
+    """The zones this permit still exempts, judged against the live zones
+    (`live`: {id: {zone_class, permission_required}}, default the engine).
+    Never one that is now red without permission_required, nor one whose
+    class is stricter than the class recorded on the permit. A zone no
+    longer loaded (deleted, inactive) exempts nothing because nothing
+    flags it."""
+    recorded = {z.get("id"): z for z in (p.get("zones") or []) if isinstance(z, dict)}
+    live = _live(recorded.keys(), live)
+    out = set()
+    for zid, rec in recorded.items():
+        now = live.get(zid)
+        if now is None:
+            continue
+        if now["zone_class"] == "red" and not now.get("permission_required", True):
+            continue
+        if _SEVERITY.get(now["zone_class"], 2) > _SEVERITY.get(rec.get("zone_class"), 0):
+            continue
+        out.add(zid)
+    return out
+
 def _m2deg(lat: float) -> float:
     return 1.0 / (111_320 * max(0.2, math.cos(math.radians(lat))))
 
@@ -199,10 +240,12 @@ def restricted_footprint(p: dict, zone_geoms: dict):
 
 
 def covers_path(p: dict, waypoints: list[dict], required: set,
-                alt_slack: float = 0.0) -> bool:
+                alt_slack: float = 0.0, live: Optional[dict] = None) -> bool:
     """Does this permit cover flying `waypoints` through the zones in
     `required`? (Window and drone are checked separately.)"""
     if not required <= zone_ids(p):
+        return False
+    if required and not required <= honoured_zone_ids(p, live):
         return False
     if p.get("area"):
         fp = footprint(p, widen_m=AREA_SLACK_M)
@@ -214,10 +257,11 @@ def covers_path(p: dict, waypoints: list[dict], required: set,
 
 
 def permitted_zone_ids_at(permits: Iterable[dict], lat: float, lng: float,
-                          now: Optional[datetime] = None) -> set:
+                          now: Optional[datetime] = None, live: Optional[dict] = None) -> set:
     """Zones the aircraft at (lat, lng) may be in right now, by the in-window
     permits among `permits`: an area permit's zones while inside its area,
-    a mission permit's while within ON_PATH_M of its path."""
+    a mission permit's while within ON_PATH_M of its path; only those the
+    live zones still allow (honoured_zone_ids)."""
     from shapely.geometry import Point
     now = now or now_utc()
     pt = Point(lng, lat)
@@ -227,7 +271,7 @@ def permitted_zone_ids_at(permits: Iterable[dict], lat: float, lng: float,
             continue
         fp = footprint(p, widen_m=AREA_SLACK_M if p.get("area") else ON_PATH_M)
         if fp is not None and fp.covers(pt):
-            out |= zone_ids(p)
+            out |= honoured_zone_ids(p, live)
     return out
 
 
@@ -364,7 +408,13 @@ async def find_approved(drone, waypoints: list[dict], required: Optional[set] = 
         required = {z["id"] for z in red + orange}
     now = now_utc()
     best = None
-    for p in await usable_for_drone(drone):
+    if not db_available():
+        raise PermitCheckUnavailable("the permit database is offline")
+    try:
+        rows = await usable_for_drone(drone)
+    except Exception as e:
+        raise PermitCheckUnavailable(str(e)) from e
+    for p in rows:
         if not (in_window(p, now) and applies_to_drone(p, drone)):
             continue
         if not covers_path(p, waypoints, required, alt_slack):
@@ -394,9 +444,20 @@ async def gate_upload(drone, waypoints: list[dict], *, ack_orange: bool,
                 "msg": f"Mission crosses PROHIBITED (red) zone: {names} - no permit can be issued"}
     red_ids, orange_ids = {z["id"] for z in red}, {z["id"] for z in orange}
     permit = None
-    if red_ids or orange_ids:
-        permit = await find_approved(drone, waypoints, required=red_ids,
-                                     wanted=red_ids | orange_ids, alt_slack=alt_slack)
+    if (red_ids or orange_ids) and drone:
+        try:
+            permit = await find_approved(drone, waypoints, required=red_ids,
+                                         wanted=red_ids | orange_ids, alt_slack=alt_slack)
+        except PermitCheckUnavailable as e:
+            # Fail closed: without a fresh read no permit counts. Orange can
+            # still be acknowledged; red waits until permits can be read.
+            logger.warning(f"upload gate: permits unreadable ({e})")
+            if red_ids:
+                names = ", ".join(z["name"] for z in red)
+                return {"ok": False, "blocked": "red", "zones": zones, "can_request": False,
+                        "prohibited": False, "permit_check_failed": True,
+                        "msg": f"Mission crosses NO-FLY (red) zone: {names} - its permit could "
+                               "not be checked just now (database unreachable). Try again shortly"}
     if red_ids and permit is None:
         names = ", ".join(z["name"] for z in red)
         return {"ok": False, "blocked": "red", "zones": zones, "can_request": bool(drone),
@@ -413,7 +474,7 @@ async def gate_upload(drone, waypoints: list[dict], *, ack_orange: bool,
 
 _NEXT = {
     PENDING: {APPROVED, DENIED, WITHDRAWN},
-    APPROVED: {REVOKED, WITHDRAWN},
+    APPROVED: {REVOKED, WITHDRAWN, SUPERSEDED},
 }
 
 
@@ -421,9 +482,25 @@ def transition_ok(current: str, new: str) -> bool:
     return new in _NEXT.get(current, set())
 
 
+def record_live_zones(zones: list[dict], live: Optional[dict] = None) -> tuple[list[dict], list[dict]]:
+    """At approval: the permit's zones with their CURRENT class and
+    permission_required (what the approver actually approves), and the ones
+    that now admit no permit at all."""
+    live = _live({z.get("id") for z in zones}, live)
+    out, prohibited = [], []
+    for z in zones:
+        now = live.get(z.get("id"))
+        z = dict(z, **now) if now else dict(z)
+        if z.get("zone_class") == "red" and not z.get("permission_required", True):
+            prohibited.append(z)
+        out.append(z)
+    return out, prohibited
+
+
 async def set_status(permit_id: str, status: str, *, actor_id: Optional[str] = None,
                      actor_name: str = "", note: str = "",
-                     expect: Optional[str] = None) -> tuple[dict | None, str]:
+                     expect: Optional[str] = None,
+                     zones: Optional[list] = None) -> tuple[dict | None, str]:
     """Move a permit along its lifecycle. Decisions (approve, deny, revoke)
     record the decider; a withdrawal records only the time. `expect` is the
     status the caller checked rights against (a concurrent change refuses).
@@ -441,6 +518,8 @@ async def set_status(permit_id: str, status: str, *, actor_id: Optional[str] = N
         if not transition_ok(permit.status, status):
             return None, f"A {permit.status} permit cannot become {status}"
         permit.status = status
+        if zones is not None:
+            permit.zones = zones
         if status != WITHDRAWN:
             permit.decided_by = actor_id
             permit.decided_by_name = (actor_name or "")[:120]
@@ -451,3 +530,29 @@ async def set_status(permit_id: str, status: str, *, actor_id: Optional[str] = N
     _bump()
     logger.info(f"Permit {permit_id[:8]} {status}")
     return d, ""
+
+
+async def supersede_for_zone(zone_id: str, reason: str) -> list[dict]:
+    """A zone's rules changed (class, permission_required, altitudes): every
+    approved permit naming it stops counting at once, as `superseded`, and
+    has to be requested again against the zone as it is now. Returns the
+    superseded permits (the caller audits them)."""
+    if not db_available():
+        return []
+    async with get_session() as db:
+        rows = (await db.execute(
+            select(Permit).where(Permit.status == APPROVED,
+                                 type_coerce(Permit.zones, JSONB).contains([{"id": zone_id}]))
+            .with_for_update()
+        )).scalars().all()
+        for p in rows:
+            p.status = SUPERSEDED
+            p.decided_at = now_utc()
+            p.decision_note = (f"Superseded: {reason}")[:500]
+        if rows:
+            await db.commit()
+        out = [p.to_dict() for p in rows]
+    _bump()
+    if out:
+        logger.info(f"Zone {zone_id[:8]} changed: superseded permits {[p['id'][:8] for p in out]}")
+    return out

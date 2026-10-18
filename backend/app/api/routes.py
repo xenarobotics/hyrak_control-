@@ -586,12 +586,18 @@ def _resolve(sc, workspace_id, *, write: bool) -> str:
         raise _zone_refused(e)
 
 
-def _owned_or_404(sc, row_ws: str | None, *, write: bool, what: str) -> None:
+def _owned_or_404(sc, row_ws: str | None, *, write: bool, what: str,
+                  global_ok: bool = False) -> None:
     """A row of another workspace is 404 unless the caller may read it; a
-    readable one they may not write is 403."""
+    readable one they may not write is 403. global_ok: the row is shared
+    vocabulary (pads, route profiles), so HYRAK's are readable by every
+    planner; never for per-flight rows (missions, permits)."""
     from app.auth.store import PLATFORM_WORKSPACE_ID
-    readable = (sc.readable_global() if (row_ws or PLATFORM_WORKSPACE_ID) == PLATFORM_WORKSPACE_ID
-                else sc.visible(row_ws or "") and sc.can_read(row_ws))
+    row_ws = row_ws or PLATFORM_WORKSPACE_ID
+    if global_ok and row_ws == PLATFORM_WORKSPACE_ID:
+        readable = sc.readable_global()
+    else:
+        readable = sc.visible(row_ws) and sc.can_read(row_ws)
     if not readable:
         raise HTTPException(status_code=404, detail=f"{what} not found")
     if write and not sc.can_write(row_ws):
@@ -681,7 +687,7 @@ async def patch_route_profile(
         ).scalar_one_or_none()
         if profile is None:
             raise HTTPException(status_code=404, detail="Profile not found")
-        _owned_or_404(sc, profile.workspace_id, write=True, what="Profile")
+        _owned_or_404(sc, profile.workspace_id, write=True, what="Profile", global_ok=True)
         if "name" in body and str(body["name"]).strip() and not profile.builtin:
             profile.name = str(body["name"]).strip()[:120]
         if "description" in body:
@@ -724,7 +730,7 @@ async def delete_route_profile(
         ).scalar_one_or_none()
         if profile is None:
             raise HTTPException(status_code=404, detail="Profile not found")
-        _owned_or_404(sc, profile.workspace_id, write=True, what="Profile")
+        _owned_or_404(sc, profile.workspace_id, write=True, what="Profile", global_ok=True)
         if profile.builtin:
             raise HTTPException(status_code=400, detail="Builtin profiles cannot be deleted - deactivate instead")
         # Missions keep the profile's name (denormalised for exactly this).
@@ -1057,7 +1063,7 @@ async def patch_pad(
         ).scalar_one_or_none()
         if pad is None:
             raise HTTPException(status_code=404, detail="Pad not found")
-        _owned_or_404(sc, pad.workspace_id, write=True, what="Pad")
+        _owned_or_404(sc, pad.workspace_id, write=True, what="Pad", global_ok=True)
         if "name" in body and str(body["name"]).strip():
             pad.name = str(body["name"]).strip()[:120]
         if "lat" in body and coords.lat is not None:
@@ -1095,7 +1101,7 @@ async def delete_pad(
         ).scalar_one_or_none()
         if pad is None:
             raise HTTPException(status_code=404, detail="Pad not found")
-        _owned_or_404(sc, pad.workspace_id, write=True, what="Pad")
+        _owned_or_404(sc, pad.workspace_id, write=True, what="Pad", global_ok=True)
         used = (
             await db.execute(
                 select(Task.id).where(

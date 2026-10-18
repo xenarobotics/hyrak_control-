@@ -10,6 +10,8 @@
   * Decide (approve, deny, revoke): permits.approve covering the restricted
     airspace the flight uses, never on your own request (founders excepted).
   * Withdraw: `plan` on the permit's workspace, or the requester.
+  * Superseded (not a route): a zone edit that changes what the permit
+    approved (app/workspaces/service.patch_zone).
 
 Every request, decision and withdrawal writes an audit_events row.
 """
@@ -250,8 +252,18 @@ async def _decide(user: AuthUser, permit_id: str, body: dict, ip: str) -> dict:
     else:
         raise Refused(409, f"This permit is {p['status']}; there is nothing to decide")
     note = str(body.get("note") or "")
+    zones = None
+    if new == service.APPROVED:
+        # Approve the zones as they are NOW: their current class is what the
+        # permit records, and the evaluation never exempts a zone that later
+        # becomes stricter than that (service.honoured_zone_ids).
+        zones, prohibited = service.record_live_zones(p["zones"] or [])
+        if prohibited:
+            raise Refused(409, "Since the request, a zone it crosses became prohibited (no permits): "
+                               + ", ".join(z.get("name", "") for z in prohibited))
     out, err = await service.set_status(permit_id, new, actor_id=user.id,
-                                        actor_name=user.username, note=note, expect=p["status"])
+                                        actor_name=user.username, note=note, expect=p["status"],
+                                        zones=zones)
     if out is None:
         raise Refused(409, err)
     action = {service.APPROVED: "permit.approve", service.DENIED: "permit.deny",

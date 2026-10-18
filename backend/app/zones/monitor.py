@@ -20,7 +20,8 @@ aircraft is on that permit's path or inside its area - no warning, no
 pushback. Everything else about the zone still applies, and the moment the
 window ends, the permit is revoked, or the aircraft leaves the permitted
 footprint, the zone counts again. The permits are cached per session and
-refetched every PERMIT_REFRESH_S or at once after any permit write.
+refetched every PERMIT_REFRESH_S or at once after any permit write; when a
+refetch fails, no permit counts (fail closed, see _permits_for).
 
 This layer rides the cloud link - the PX4 geofence uploaded at connect
 (app/zones/fence.py) remains the hard backstop if the link drops.
@@ -43,6 +44,8 @@ _PUSH_EXTRA_M = 20.0     # how far beyond the red boundary to push out
 
 _SEVERITY = {"green": 0, "orange": 1, "red": 2}
 PERMIT_REFRESH_S = 15.0
+# A cached answer older than this is not used when a refresh fails.
+PERMIT_MAX_STALE_S = 30.0
 _PERMIT_FETCH_TIMEOUT_S = 1.0
 
 # session_id → monitor state
@@ -56,11 +59,26 @@ def drop(session_id: str) -> None:
     _permit_cache.pop(session_id, None)
 
 
+async def _fetch(drone: dict) -> list[dict]:
+    """A fresh read of the drone's approved permits. Raises
+    PermitCheckUnavailable when it cannot be had."""
+    if not permit_service.db_available():
+        raise permit_service.PermitCheckUnavailable("the permit database is offline")
+    try:
+        permits = await asyncio.wait_for(permit_service.usable_for_drone(drone),
+                                         timeout=_PERMIT_FETCH_TIMEOUT_S)
+    except Exception as e:
+        raise permit_service.PermitCheckUnavailable(str(e) or type(e).__name__) from e
+    return [p for p in permits if permit_service.applies_to_drone(p, drone)]
+
+
 async def _permits_for(session) -> list[dict]:
     """The approved permits for the session's drone (current workspace),
-    cached. A slow or failed fetch keeps the last answer for the same drone
-    and workspace; the window is checked at use, so an expiry still bites
-    on time."""
+    cached for PERMIT_REFRESH_S. Fails closed: a failed fetch leaves the
+    cache as it was (the next tick retries), and the cached answer is used
+    only while no permit has been written since (same generation) and it
+    is younger than PERMIT_MAX_STALE_S; otherwise no permit counts. The
+    window is checked at use, so an expiry bites on time either way."""
     drone = getattr(session, "drone", None) or None
     if not drone or not drone.get("id"):
         return []
@@ -68,24 +86,34 @@ async def _permits_for(session) -> list[dict]:
     c = _permit_cache.get(session.session_id)
     same = c is not None and (c["drone_id"], c["workspace_id"]) == key
     now = time.monotonic()
-    if same and c["gen"] == permit_service.generation() and now - c["at"] < PERMIT_REFRESH_S:
-        return c["permits"]
     gen = permit_service.generation()
+    if same and c["gen"] == gen and now - c["at"] < PERMIT_REFRESH_S:
+        return c["permits"]
     try:
-        permits = await asyncio.wait_for(permit_service.usable_for_drone(drone),
-                                         timeout=_PERMIT_FETCH_TIMEOUT_S)
-    except Exception as e:
+        permits = await _fetch(drone)
+    except permit_service.PermitCheckUnavailable as e:
         logger.debug(f"permit fetch for {session.session_id[:8]} failed: {e}")
-        permits = c["permits"] if same else []
-    permits = [p for p in permits if permit_service.applies_to_drone(p, drone)]
+        if same and c["gen"] == gen and now - c["at"] < PERMIT_MAX_STALE_S:
+            return c["permits"]
+        return []
+    # Stamped with the generation read BEFORE the fetch: a write that lands
+    # during it makes the next tick fetch again.
     _permit_cache[session.session_id] = {"drone_id": key[0], "workspace_id": key[1],
                                          "gen": gen, "at": now, "permits": permits}
     return permits
 
 
-async def permitted_zone_ids(session, lat: float, lng: float) -> set:
-    """Zones the session's drone may be in at (lat, lng) right now."""
-    permits = await _permits_for(session)
+async def permitted_zone_ids(session, lat: float, lng: float, *, fresh: bool = False) -> set:
+    """Zones the session's drone may be in at (lat, lng) right now. fresh:
+    read the permits now instead of the cache (arm / takeoff); raises
+    PermitCheckUnavailable when that read fails."""
+    if fresh:
+        drone = getattr(session, "drone", None) or None
+        if not drone or not drone.get("id"):
+            return set()
+        permits = await _fetch(drone)
+    else:
+        permits = await _permits_for(session)
     if not permits:
         return set()
     return permit_service.permitted_zone_ids_at(permits, lat, lng)

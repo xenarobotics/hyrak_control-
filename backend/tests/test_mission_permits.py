@@ -202,7 +202,7 @@ def test_permit_follows_the_drones_current_workspace():
     assert not permits.applies_to_drone(permit(), None)
 
 
-def test_mission_permit_covers_only_its_path_and_zones():
+def test_mission_permit_covers_only_its_path_and_zones(zones):
     p = permit()
     assert permits.covers_path(p, CROSS_RED, {"red1"})
     nudged = [dict(w, lat=w["lat"] + 5e-6) for w in CROSS_RED]                  # GPS noise
@@ -213,7 +213,7 @@ def test_mission_permit_covers_only_its_path_and_zones():
     assert not permits.covers_path(p, CROSS_RED, {"red1", "red2"})
 
 
-def test_area_permit_covers_any_path_inside_it():
+def test_area_permit_covers_any_path_inside_it(zones):
     p = permit(area=box(78.118, 17.588, 78.123, 17.594), waypoints=[], mission_hash="")
     assert permits.covers_path(p, CROSS_RED, {"red1"})
     zigzag = CROSS_RED + [{"lat": 17.5915, "lng": 78.1195, "altitude": 30.0}]
@@ -222,7 +222,7 @@ def test_area_permit_covers_any_path_inside_it():
     assert not permits.covers_path(p, outside, {"red1"})
 
 
-def test_permitted_zones_only_on_the_permitted_footprint():
+def test_permitted_zones_only_on_the_permitted_footprint(zones):
     p = permit()
     on_path = permits.permitted_zone_ids_at([p], 17.591, 78.121, NOW)
     assert on_path == {"red1"}
@@ -296,6 +296,7 @@ def stored(monkeypatch):
     async def usable(drone):
         return [p for p in rows if p["status"] == "approved"]
     monkeypatch.setattr(permits, "usable_for_drone", usable)
+    monkeypatch.setattr(permits, "db_available", lambda: True)
     return rows
 
 
@@ -380,6 +381,7 @@ async def _monitor_in_red(monkeypatch, permits_for_drone):
         pushed.append((lat, lng))
     monkeypatch.setattr(monitor, "emit_admin_alert", alert)
     monkeypatch.setattr(permits, "usable_for_drone", usable)
+    monkeypatch.setattr(permits, "db_available", lambda: True)
     monkeypatch.setattr(monitor, "_pushback", push)
     sess = SimpleNamespace(session_id="s-mon", socket_id="sock", drone=dict(DRONE), zone_lock=False)
     monitor.drop("s-mon")
@@ -411,6 +413,158 @@ async def test_monitor_counts_an_expired_permit_as_none(zones, monkeypatch):
     expired = fresh(valid_until=(now - timedelta(seconds=1)).isoformat())
     sess, _, _ = await _monitor_in_red(monkeypatch, [expired])
     assert sess.zone_lock is True
+
+
+# ── Fail closed: the monitor's permit cache ───────────────────────────────
+
+class _Fetches:
+    """usable_for_drone stand-in: returns `rows`, or raises while `fail`."""
+
+    def __init__(self, rows):
+        self.rows, self.fail, self.calls = rows, False, 0
+
+    async def __call__(self, drone):
+        self.calls += 1
+        if self.fail:
+            raise ConnectionError("db down")
+        return [p for p in self.rows if p["status"] == "approved"]
+
+
+@pytest.fixture
+def cache(monkeypatch, zones):
+    from app.zones import monitor
+    rows = [fresh()]
+    f = _Fetches(rows)
+    monkeypatch.setattr(permits, "usable_for_drone", f)
+    monkeypatch.setattr(permits, "db_available", lambda: True)
+    sess = SimpleNamespace(session_id="s-cache", drone=dict(DRONE))
+    monitor.drop("s-cache")
+    yield monitor, sess, f, rows
+    monitor.drop("s-cache")
+
+
+async def test_cached_permit_is_dropped_when_a_write_lands_and_the_refetch_fails(cache):
+    monitor, sess, f, rows = cache
+    assert await monitor.permitted_zone_ids(sess, 17.591, 78.121) == {"red1"}
+    # Revoked while cached: the write bumps the generation; the refetch fails.
+    rows[0] = dict(rows[0], status="revoked")
+    permits._bump()
+    f.fail = True
+    assert await monitor.permitted_zone_ids(sess, 17.591, 78.121) == set()
+    # And it works out the revocation once the store answers again.
+    f.fail = False
+    assert await monitor.permitted_zone_ids(sess, 17.591, 78.121) == set()
+
+
+async def test_a_failed_refetch_does_not_advance_the_cache(cache, monkeypatch):
+    monitor, sess, f, rows = cache
+    assert await monitor.permitted_zone_ids(sess, 17.591, 78.121) == {"red1"}
+    entry = dict(monitor._permit_cache["s-cache"])
+    # Due for a refresh; the store fails: the old answer (same generation,
+    # not too old) stands, but the cache is not stamped as refreshed.
+    monkeypatch.setattr(monitor, "PERMIT_REFRESH_S", 0.0)
+    f.fail = True
+    calls = f.calls
+    assert await monitor.permitted_zone_ids(sess, 17.591, 78.121) == {"red1"}
+    assert monitor._permit_cache["s-cache"] == entry
+    assert await monitor.permitted_zone_ids(sess, 17.591, 78.121) == {"red1"}
+    assert f.calls == calls + 2                                    # every tick retries
+    # Too old to trust while the store stays down: nothing counts.
+    monkeypatch.setattr(monitor, "PERMIT_MAX_STALE_S", 0.0)
+    assert await monitor.permitted_zone_ids(sess, 17.591, 78.121) == set()
+
+
+async def test_generation_change_empties_the_cached_answer(cache):
+    monitor, sess, f, rows = cache
+    assert await monitor.permitted_zone_ids(sess, 17.591, 78.121) == {"red1"}
+    permits._bump()                                    # any permit write
+    f.fail = True
+    assert await monitor.permitted_zone_ids(sess, 17.591, 78.121) == set()
+
+
+async def test_arm_needs_a_fresh_read(cache):
+    monitor, sess, f, rows = cache
+    assert await monitor.permitted_zone_ids(sess, 17.591, 78.121) == {"red1"}
+    f.fail = True
+    with pytest.raises(permits.PermitCheckUnavailable):
+        await monitor.permitted_zone_ids(sess, 17.591, 78.121, fresh=True)
+
+
+async def test_upload_refuses_red_when_permits_cannot_be_read(zones, stored, monkeypatch):
+    stored.append(fresh())
+
+    async def down(drone):
+        raise ConnectionError("db down")
+    monkeypatch.setattr(permits, "usable_for_drone", down)
+    g = await permits.gate_upload(DRONE, CROSS_RED, ack_orange=True)
+    assert g["blocked"] == "red" and g["permit_check_failed"] and "could not be checked" in g["msg"]
+    # Orange alone can still be acknowledged.
+    assert (await permits.gate_upload(DRONE, CROSS_ORANGE, ack_orange=True))["ok"]
+    monkeypatch.setattr(permits, "db_available", lambda: False)
+    assert (await permits.gate_upload(DRONE, CROSS_RED, ack_orange=True))["permit_check_failed"]
+
+
+async def test_arm_in_red_is_refused_when_permits_cannot_be_read(live, zones, monkeypatch):
+    w = await world(live)
+    await connect(live, "p", w.pat[1])
+    s = session(live, "p")
+    pos = SimpleNamespace(latitude_deg=17.591, longitude_deg=78.121)
+    live.sm._telemetry[s.session_id] = SimpleNamespace(is_connected=True,
+                                                        snapshot=SimpleNamespace(position=pos))
+    s.drone = {"id": "d-own", "workspace_id": w.iith["id"], "is_simulated": False}
+    s.drone_fly = True
+
+    async def down(drone):
+        raise ConnectionError("db down")
+    monkeypatch.setattr(permits, "usable_for_drone", down)
+    monkeypatch.setattr(permits, "db_available", lambda: True)
+    await live.sio.handlers["/"]["drone_action"]("p", {"action": "arm"})
+    res = live.rec.of("action_result", "p")[-1]
+    assert res["ok"] is False and "could not be checked" in res["error"]
+
+
+# ── Zones that became stricter ────────────────────────────────────────────
+
+def test_a_zone_made_prohibited_is_never_exempted(zones):
+    p = permit()
+    live = {"red1": {"zone_class": "red", "permission_required": False}}
+    assert permits.honoured_zone_ids(p, live) == set()
+    assert permits.permitted_zone_ids_at([p], 17.591, 78.121, NOW, live=live) == set()
+    assert not permits.covers_path(p, CROSS_RED, {"red1"}, live=live)
+
+
+def test_a_class_raised_after_approval_is_not_exempted():
+    p = permit(zones=[ORANGE], waypoints=CROSS_ORANGE, mission_hash=permits.mission_hash(CROSS_ORANGE))
+    assert permits.honoured_zone_ids(p, {"or1": {"zone_class": "orange"}}) == {"or1"}
+    assert permits.honoured_zone_ids(p, {"or1": {"zone_class": "red",
+                                                 "permission_required": True}}) == set()
+    # Relaxed (or gone) is no reason to exempt either: a deleted zone flags nothing.
+    assert permits.honoured_zone_ids(p, {"or1": {"zone_class": "green"}}) == {"or1"}
+    assert permits.honoured_zone_ids(p, {}) == set()
+
+
+async def test_gate_and_monitor_use_the_live_zone(stored, monkeypatch):
+    stored.append(fresh())
+    zone_engine.set_zones([{**RED, "permission_required": True,
+                            "geometry": box(78.120, 17.590, 78.122, 17.592)}])
+    try:
+        assert (await permits.gate_upload(DRONE, CROSS_RED, ack_orange=False))["ok"]
+        # The zone is made prohibited after approval: the engine says so at once.
+        zone_engine.set_zones([{**RED, "permission_required": False,
+                                "geometry": box(78.120, 17.590, 78.122, 17.592)}])
+        g = await permits.gate_upload(DRONE, CROSS_RED, ack_orange=False)
+        assert g["blocked"] == "red" and g["prohibited"]
+        assert permits.permitted_zone_ids_at(stored, 17.591, 78.121) == set()
+    finally:
+        zone_engine.set_zones([])
+
+
+def test_approval_records_the_zones_as_they_are_now():
+    zs, prohibited = permits.record_live_zones(
+        [ORANGE, RED], live={"or1": {"zone_class": "red", "permission_required": True},
+                             "red1": {"zone_class": "red", "permission_required": False}})
+    assert [z["zone_class"] for z in zs] == ["red", "red"]
+    assert [z["id"] for z in prohibited] == ["red1"]
 
 
 # ── upload_mission: a session command with drone access ───────────────────

@@ -599,7 +599,24 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             lat, lng = snap.position.latitude_deg, snap.position.longitude_deg
             check = zone_engine.check_point(lat, lng)
             red_here = {z["id"] for z in check["zones"] if z["zone_class"] == "red"}
-            if red_here and not red_here <= await zone_monitor.permitted_zone_ids(session, lat, lng):
+            permitted, unchecked = set(), False
+            if red_here and (session.drone or {}).get("id"):
+                from app.permits.service import PermitCheckUnavailable
+                try:
+                    permitted = await zone_monitor.permitted_zone_ids(session, lat, lng, fresh=True)
+                except PermitCheckUnavailable:
+                    unchecked = True
+            if red_here and unchecked:
+                names = ", ".join(z["name"] for z in check["zones"])
+                await sio.emit("action_result", {
+                    "action": action, "ok": False,
+                    "error": f"Blocked - inside NO-FLY (red) zone: {names}. Its permit could not "
+                             "be checked just now (database unreachable); try again shortly",
+                }, to=sid)
+                logger.warning(f"{action} blocked in red zone for {session.session_id[:8]}: "
+                               "permits unreadable")
+                return
+            if red_here and not red_here <= permitted:
                 names = ", ".join(z["name"] for z in check["zones"])
                 await sio.emit("action_result", {
                     "action": action, "ok": False,
