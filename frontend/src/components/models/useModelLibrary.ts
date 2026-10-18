@@ -173,6 +173,27 @@ export function useModelLibrary() {
     }
 }
 
+/** The library entry for a running mode (built-in or `custom:<id>`), read
+ *  from the store without loading it; null for manual-control. */
+export function useLibraryEntry(mode: string): LibraryEntry | null {
+    const workspace = useModelsStore(s => s.workspace)
+    const hyrak = useModelsStore(s => s.hyrak)
+    return useMemo(() => {
+        if (mode.startsWith('custom:')) {
+            const id = mode.slice(7)
+            const ours = workspace.find(x => x.id === id)
+            if (ours) return entryFromModel(ours, 'ours')
+            const cat = hyrak.find((x): x is CustomModel => (x as CustomModel).id === id && (x as BuiltinEntry).kind !== 'builtin')
+            if (cat) return entryFromModel(cat, 'hyrak')
+            return {
+                key: mode, mode, group: 'ours', name: 'Custom model', blurb: '', icon: Boxes, color: CUSTOM_COLOR,
+                status: 'ready', step: null, progress: null, error: null, hint: null, model: null,
+            }
+        }
+        return builtinEntries([]).find(e => e.mode === mode) ?? null
+    }, [mode, workspace, hyrak])
+}
+
 /** A display name for any mode string, including `custom:<id>`. */
 export function useModeName(mode: string): string {
     const workspace = useModelsStore(s => s.workspace)
