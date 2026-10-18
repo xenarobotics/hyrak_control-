@@ -28,7 +28,7 @@ export function useLiveSightings() {
     // Writing history needs `fly` (customers) or the operator role (staff):
     // viewers see but cannot record or clear.
     const mayEdit = customer ? perms.includes('fly') : hasRole('operator')
-    return { ...st, list, show, modelRunning, mayEdit }
+    return { ...st, list, show, modelRunning, mayEdit, customer }
 }
 
 /** The device's camera setting, live across components. */

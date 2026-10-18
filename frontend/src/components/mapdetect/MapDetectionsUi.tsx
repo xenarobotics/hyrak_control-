@@ -25,15 +25,16 @@ function openVideoSettings() {
 
 /** "Camera angle not set": only while neither a gimbal nor the operator
  *  has said where the camera points. */
-export function CameraAnglePrompt({ tone = 'dark' }: { tone?: 'dark' | 'app' }) {
+export function CameraAnglePrompt({ tone = 'dark', short = false }: { tone?: 'dark' | 'app'; short?: boolean }) {
     const pref = useCameraPref()
     const { camera } = useLiveSightings()
     if (pref.set || camera?.gimbal) return null
     const color = tone === 'dark' ? '#fcd34d' : '#d97706'
     return (
         <p style={{ margin: 0, fontSize: 11, lineHeight: 1.5, color }}>
-            Camera angle not set: positions assume the camera points straight down with an
-            80° lens.{' '}
+            {short
+                ? 'Camera angle not set (assuming straight down). '
+                : 'Camera angle not set: positions assume the camera points straight down with an 80° lens. '}
             <Link href="/settings" onClick={openVideoSettings}
                 style={{ color, textDecoration: 'underline', fontWeight: 600 }}>
                 Set camera angle
@@ -42,17 +43,20 @@ export function CameraAnglePrompt({ tone = 'dark' }: { tone?: 'dark' | 'app' }) 
     )
 }
 
-export function FirstUseNote({ tone = 'dark' }: { tone?: 'dark' | 'app' }) {
+export function FirstUseNote({ tone = 'dark', short = false }: { tone?: 'dark' | 'app'; short?: boolean }) {
     const [show, dismiss] = useFirstUse()
     const { nominalAccuracy } = useLiveSightings()
     if (!show) return null
-    const acc = nominalAccuracy != null
-        ? `about +/- ${nominalAccuracy} m at the current height`
-        : 'a few metres when low and straight down, more when high or looking ahead'
+    const acc = nominalAccuracy != null ? `, about +/- ${nominalAccuracy} m` : ''
+    const text = short
+        ? `Positions are estimates from GPS, height and camera angle${acc}.`
+        : `Positions are estimated from the drone's GPS, height and camera angle${
+            nominalAccuracy != null ? `, about +/- ${nominalAccuracy} m at the current height`
+                : ': a few metres when low and looking straight down, more when high or looking ahead'}.`
     return (
         <p style={{ margin: 0, fontSize: 11, lineHeight: 1.5,
             color: tone === 'dark' ? '#cbd5e1' : 'hsl(var(--app-text-muted))' }}>
-            Positions are estimated from the drone&apos;s GPS, height and camera angle, {acc}.{' '}
+            {text}{' '}
             <button type="button" onClick={dismiss}
                 style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
                     color: 'inherit', textDecoration: 'underline', font: 'inherit' }}>
@@ -123,7 +127,7 @@ export function SightingsLegend({ compact = false, style }: { compact?: boolean;
 
     return (
         <section aria-label="Detections on the map"
-            style={{ ...BOX, position: 'absolute', zIndex: 1000, padding: '8px 10px', width: 214,
+            style={{ ...BOX, position: 'absolute', zIndex: 1000, padding: '8px 10px', width: 236,
                 maxWidth: 'calc(100% - 24px)', ...style }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
@@ -159,8 +163,8 @@ export function SightingsLegend({ compact = false, style }: { compact?: boolean;
                             The map is full (5000 detections). Clear it to keep placing new ones.
                         </p>
                     )}
-                    <FirstUseNote />
-                    <CameraAnglePrompt />
+                    <FirstUseNote short />
+                    <CameraAnglePrompt short />
                     {s.list.length > 0 && s.mayEdit && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <button type="button" onClick={() => void clear()} disabled={clearing}
@@ -184,7 +188,7 @@ export function MapDetectionsControls() {
     if (!s.modelRunning) return null
     const recordDisabled = !s.mayEdit || !s.canRecord || !s.sessionId
     const recordWhy = !s.mayEdit
-        ? 'Recording needs fly access on this workspace.'
+        ? `Recording needs ${s.customer ? 'fly access on this workspace' : 'the operator role'}.`
         : !s.canRecord ? 'Recording is unavailable right now: the database is offline.' : undefined
     const row: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12 }
     return (

@@ -128,6 +128,7 @@ def test_no_gps_says_why_and_places_nothing():
                     {"telemetry": t, "width": W, "height": H}, None, now=1000.0)
     assert len(m.tracker) == 0 and m.reason == "no_gps"
     assert m.state()["status"]["reason"] == "no_gps"
+    assert m.status_dirty          # pushed although nothing was placed
 
 
 def test_frames_over_time_dedup_and_rate_limit():

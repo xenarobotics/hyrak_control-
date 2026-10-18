@@ -124,7 +124,8 @@ export function SightingsLayer({ list }: { list: Sighting[] }) {
                         popupopen: () => setOpenId(g.items[0].id),
                         popupclose: () => setOpenId(id => (id === g.items[0].id ? null : id)),
                     }}>
-                    <Popup autoPan closeButton>
+                    {/* Room for the pages' top toolbars, so the popover never opens under them. */}
+                    <Popup autoPan closeButton autoPanPaddingTopLeft={[24, 150]} autoPanPaddingBottomRight={[24, 24]}>
                         <SightingPopover s={g.items[0]} />
                     </Popup>
                 </Marker>

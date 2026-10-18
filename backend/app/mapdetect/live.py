@@ -71,6 +71,7 @@ class SessionMap:
     unsaved: set = field(default_factory=set)        # to persist
     flight_of: dict = field(default_factory=dict)    # sighting id -> flight id
     cleared: bool = False
+    status_dirty: bool = False                       # reason changed: push even with no sightings
     reason: Optional[str] = None
     gimbal: bool = False
     agl_m: Optional[float] = None
@@ -263,7 +264,10 @@ def ingest(session_id: str, mode: str, meta: Dict[str, Any], capture: Optional[D
                 m.thumb_dirty.add(s.id)
                 thumbs += 1
     # Why nothing could be placed, for the panel; any placement clears it.
-    m.reason = None if placed else reason
+    new_reason = None if placed else reason
+    if new_reason != m.reason:
+        m.status_dirty = True
+    m.reason = new_reason
     _schedule(m, now)
     return m
 
@@ -273,7 +277,7 @@ def _schedule(m: SessionMap, now: float) -> None:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-    if (m.dirty or m.cleared) and now - m.last_push >= PUSH_S:
+    if (m.dirty or m.cleared or m.status_dirty) and now - m.last_push >= PUSH_S:
         m.last_push = now
         loop.create_task(push(m.session_id))
     if m.recording and m.unsaved and now - m.last_flush >= FLUSH_S:
@@ -289,6 +293,7 @@ async def push(session_id: str, *, full: bool = False, payload: Optional[dict] =
     m.dirty.clear()
     m.thumb_dirty.clear()
     m.cleared = False
+    m.status_dirty = False
     if _sio is None or _session_manager is None:
         return payload
     s = _session_manager.get(session_id)

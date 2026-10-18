@@ -535,7 +535,12 @@ function WaypointMarker({ wp, index, readOnly = false }: { wp: Waypoint; index: 
  */
 // `layer`: force a base layer for this instance (Normal mode uses the plain
 // street map) without touching the operator's saved choice.
-export default function MissionMap({ readOnly = false, follow = false, compact = false, layer }: { readOnly?: boolean; follow?: boolean; compact?: boolean; layer?: MapLayer } = {}) {
+export default function MissionMap({ readOnly = false, follow = false, compact = false, layer, detectionsLegendStyle }: {
+  readOnly?: boolean; follow?: boolean; compact?: boolean; layer?: MapLayer
+  /** Where the detections legend sits (default: top right, clear of the
+   *  Command window's corner pictures). */
+  detectionsLegendStyle?: React.CSSProperties
+} = {}) {
   const rawWaypoints       = useMissionStore(s => s.waypoints)
   const homePosition       = useMissionStore(s => s.homePosition)
   const getRtlWaypoint     = useMissionStore(s => s.getRtlWaypoint)
@@ -794,7 +799,7 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
       {/* Detections legend: counts per class, show, clear. A count chip on
           a minimap. */}
       <SightingsLegend compact={compact}
-        style={compact ? { left: 6, bottom: 6 } : { right: 12, bottom: 12 }} />
+        style={compact ? { left: 6, bottom: 6 } : (detectionsLegendStyle ?? { right: 12, top: 12 })} />
 
       {/* Avoidance overlay control - toggle visibility, legend, click-to-pin.
           Avoidance is staff-only (docs/ACCESS_MODEL.md 8a). */}
