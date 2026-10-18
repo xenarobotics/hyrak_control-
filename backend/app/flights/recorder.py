@@ -23,8 +23,25 @@ _SAMPLE_INTERVAL = 1.0
 _active: dict[str, dict] = {}
 
 
-async def on_snapshot(session_id: str, drone_id: str | None, snap: dict) -> None:
-    """Feed every telemetry update here; cheap no-op unless armed."""
+async def _drone_workspace(drone_id: str) -> str | None:
+    """The registry's workspace for a drone, for callers that do not know it
+    (the swarm fleet). None when the registry cannot say."""
+    try:
+        from app.auth import service as auth
+        drone = await auth.read_store().get_drone(drone_id)
+    except Exception:
+        return None
+    return (drone or {}).get("workspace_id")
+
+
+async def on_snapshot(session_id: str, drone_id: str | None, snap: dict,
+                      workspace_id: str | None = None) -> None:
+    """Feed every telemetry update here; cheap no-op unless armed.
+
+    `workspace_id` is the workspace the flight belongs to
+    (docs/ACCESS_MODEL.md 8b): the drone's, else the session's. It is read
+    once, on the arm edge, so moving a drone mid-flight does not split
+    the flight. None files it under HYRAK (the column default)."""
     if not db_available() or not drone_id:
         return
     armed = snap.get("flight_mode", {}).get("is_armed", False)
@@ -48,7 +65,11 @@ async def on_snapshot(session_id: str, drone_id: str | None, snap: dict) -> None
                 "crossed_orange": False,
                 "crossed_red": False,
             }
+            if not workspace_id:
+                workspace_id = await _drone_workspace(drone_id)
             flight = Flight(drone_id=drone_id, session_id=session_id)
+            if workspace_id:
+                flight.workspace_id = workspace_id
             try:
                 async with get_session() as db:
                     db.add(flight)

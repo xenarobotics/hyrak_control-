@@ -33,12 +33,13 @@ class SessionManager:
         # already only touches ITS OWN managers' mavsdk_servers.)
         self._fleets: dict[str, dict[int, TelemetryManager]] = {}
         self._fleet_users: set[str] = set()
-        # session_id -> user_id, kept AFTER the session is destroyed: the
-        # session's crowd / plate report stays downloadable by its own user
-        # (docs/ACCESS_MODEL.md 8a) after the live session is gone. Bounded,
-        # and in memory only: after a restart those reports are staff-only
-        # until per-workspace history lands (phase 2b).
-        self._owners: "OrderedDict[str, str]" = OrderedDict()
+        # session_id -> (user_id, workspace_id), kept AFTER the session is
+        # destroyed. Bounded and in memory only, and no longer what decides
+        # who reads a session's report: the report rows carry the session's
+        # workspace (docs/ACCESS_MODEL.md 8b), which survives a restart. This
+        # map only names the workspace of a session that has written no rows
+        # yet, and stamps rows a vision task writes after the session ended.
+        self._owners: "OrderedDict[str, tuple]" = OrderedDict()
 
     # ------------------------------------------------------------------ #
     # Session lifecycle                                                    #
@@ -99,17 +100,27 @@ class SessionManager:
 
     OWNERS_KEPT = 10_000
 
-    def note_owner(self, session_id: str, user_id: Optional[str]) -> None:
+    def note_owner(self, session_id: str, user_id: Optional[str],
+                   workspace_id: Optional[str] = None) -> None:
         if not user_id:
             return
-        self._owners[session_id] = user_id
+        self._owners[session_id] = (user_id, workspace_id)
         self._owners.move_to_end(session_id)
         while len(self._owners) > self.OWNERS_KEPT:
             self._owners.popitem(last=False)
 
     def owner_of(self, session_id: str) -> Optional[str]:
         """The user who opened this session (live or ended), if known."""
-        return self._owners.get(session_id)
+        entry = self._owners.get(session_id)
+        return entry[0] if entry else None
+
+    def workspace_of(self, session_id: str) -> Optional[str]:
+        """The workspace of this session (live or recently ended), if known."""
+        live = self._sessions.get(session_id)
+        if live is not None and live.workspace_id:
+            return live.workspace_id
+        entry = self._owners.get(session_id)
+        return entry[1] if entry else None
 
     def get_by_socket(self, socket_id: str) -> Optional[DroneSession]:
         for s in self._sessions.values():
@@ -144,6 +155,7 @@ class SessionManager:
         session = self._sessions.get(session_id)
         if session:
             session.telemetry_connected = False
+            session.link_kind = ""
 
     def find_other_telemetry_session(
         self, exclude_session_id: str, address: str

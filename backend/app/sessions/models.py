@@ -108,6 +108,10 @@ class DroneSession:
     # identity. Drone ownership is skipped only when this AND the registry
     # record's stored is_simulated are both true.
     link_simulated: bool      = False
+    # How the current telemetry link was opened (live_scope.link_kind_for:
+    # client_relay, rf_bridge, server_udp, server_direct), "" with no link.
+    # Shown to staff in the session list (docs/ACCESS_MODEL.md 8b).
+    link_kind: str            = ""
 
     # Swarm fleet: drone_id → TelemetryManager (populated when swarm mode is used)
     fleet: dict               = field(default_factory=dict)
