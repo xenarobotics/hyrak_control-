@@ -57,7 +57,9 @@ async function recoverWorkspace(refused: string | null): Promise<void> {
         if (refused) refusedWorkspaces.add(refused)
         const user = await fetchMe()
         if (!user) { redirectToLogin(); return }
-        if (!isCustomer(user)) { socket?.connect(); return }
+        // Staff send no workspace and are never refused for one; retrying
+        // here could only loop.
+        if (!isCustomer(user)) return
         const list = getAccess()?.workspaces ?? []
         const current = list.find(w => w.id === readActiveWorkspaceId())
         const next = current && canView(current) && !refusedWorkspaces.has(current.id)
