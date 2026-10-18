@@ -10,6 +10,7 @@ import { useLibraryEntry } from '@/components/models/useModelLibrary'
 import { CustomResultsPanel } from '@/components/models/CustomResultsPanel'
 import { css as cmCss } from '@/components/models/ui'
 import { ModulePerformance } from '@/components/vision/ModulePerformance'
+import { MapDetectionsControls } from '@/components/mapdetect/MapDetectionsUi'
 
 function Body({ mode }: { mode: string }) {
     if (mode.startsWith('custom:')) return <div className={cmCss.cm}><CustomResultsPanel mode={mode} /></div>
@@ -35,6 +36,7 @@ export function AiPanel({ onStop }: { onStop: () => void }) {
                     STOP</button>
             </div>
             <Body mode={mode} />
+            <MapDetectionsControls />
             <ModulePerformance />
         </>
     )

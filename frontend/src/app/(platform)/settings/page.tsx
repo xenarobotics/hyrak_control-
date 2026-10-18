@@ -55,6 +55,7 @@ import { DevicesGroup, PasswordGroup, ProfileGroup } from '@/components/settings
 import { InvitesGroup, MembersGroup, WorkspaceGroup } from '@/components/settings/WorkspaceSettings'
 import { useAccess } from '@/hooks/useAccess'
 import { FlightHistory } from '@/components/settings/FlightHistory'
+import { MapCameraGroup } from '@/components/mapdetect/MapCameraSettings'
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
 
@@ -1936,7 +1937,7 @@ const CATEGORIES: Category[] = [
     },
     {
         id: 'flights', label: 'Flights', icon: History,
-        blurb: 'Recorded flights of the workspace: replay a track or save it as CSV',
+        blurb: 'Recorded flights of the workspace: replay a track with its detections, or save it as CSV or GeoJSON',
         sections: [{ label: 'FLIGHT HISTORY', Body: FlightHistory }],
     },
     {
@@ -1944,6 +1945,7 @@ const CATEGORIES: Category[] = [
         blurb: 'Where the feed comes from, its quality, and how AI results are drawn',
         sections: [
             { label: 'VIDEO', Body: VideoGroup },
+            { label: 'DETECTIONS ON THE MAP', Body: MapCameraGroup },
             { label: 'CAMERA CALIBRATION', Body: CameraCalibrationGroup, staffOnly: true },
         ],
     },

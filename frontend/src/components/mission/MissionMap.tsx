@@ -28,6 +28,7 @@ import { PLAN_FIT_EVENT } from '@/lib/planning'
 import { visibleInterval } from '@/lib/poll'
 import { getHazards, getObstaclesAndPath, addHazard, type KnownHazard, type LiveObstacle, type LatLng } from '@/lib/avoidance'
 import { ZONE_COLORS, zoneRings, type ZoneFeature } from '@/components/admin/zones'
+import { LiveSightingsLayer, SightingsLegend } from '@/components/mapdetect/MapDetectionsUi'
 
 // ── Flight zones (green/orange/red) - pilots plan around these ─────────────
 
@@ -693,6 +694,9 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
         <Marker position={[rtlWp.lat, rtlWp.lng]} icon={rtlIcon} />
       )}
 
+      {/* AI detections placed on the ground (app/mapdetect) */}
+      <LiveSightingsLayer />
+
       {/* Live drone - glides between telemetry samples */}
       <SmoothDroneMarker />
 
@@ -786,6 +790,11 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
         )
       })}
     </MapContainer>
+
+      {/* Detections legend: counts per class, show, clear. A count chip on
+          a minimap. */}
+      <SightingsLegend compact={compact}
+        style={compact ? { left: 6, bottom: 6 } : { right: 12, bottom: 12 }} />
 
       {/* Avoidance overlay control - toggle visibility, legend, click-to-pin.
           Avoidance is staff-only (docs/ACCESS_MODEL.md 8a). */}
