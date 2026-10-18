@@ -1,6 +1,129 @@
 # Custom Models: design and architecture
 
-Status: DESIGN (2026-10-17). Nothing in this document is built yet.
+## 0. Version 2 (2026-10-18): what is being built now
+
+This section supersedes the rest of the document where they differ. Sections
+1 onward are the original design and stay as background for the later
+sandboxed steps.
+
+### What the customer gets
+
+The AI tab is one **Model library** with three kinds of model, and one way
+to run any of them:
+
+| kind | where it comes from | who can use it |
+|---|---|---|
+| **HYRAK models** (standard) | The built-in AI modes (Objects, People, Person tracking, Crowd, Plates, Depth, ...) plus models HYRAK publishes to its catalogue | Every workspace |
+| **Uploaded models** (premium) | An ONNX file the customer uploads | Workspaces with the `custom_models` feature |
+| **Hugging Face models** (premium) | A public Hugging Face repo that contains an ONNX file, pinned to the exact commit | Workspaces with the `custom_models` feature |
+
+`custom_models` is a per-workspace switch in `workspaces.features`, the same
+pattern as `cloud_sim`: off by default, founders turn it on in the console,
+HYRAK staff can always use it. Quotas, storage limits and GPU limits per
+workspace come later; the code keeps one settings knob per limit so they
+are easy to add.
+
+### Why ONNX only in this step
+
+A model file is either data or code. ONNX (and safetensors) are data: the
+runtime parses them and never executes Python from them. A PyTorch `.pt`
+is a pickle: loading it can run any code. Code packages and
+`requirements.txt` obviously run code. With no human review, a stranger's
+code must only ever run inside a sandbox, which needs rootless podman plus
+the NVIDIA container toolkit (owner installs it with sudo). So:
+
+* **Step 1 (now)**: ONNX models, uploaded or from Hugging Face, tasks
+  *detect objects* and *classify image*. No drone actions; results are
+  overlays, a results panel, and optional alerts ("tell me when a `crack`
+  is seen").
+* **Step 2**: podman sandbox, then `.pt`, safetensors with an architecture,
+  code packages, segmentation, and the behaviour API (drone actions).
+
+Most YOLO, RT-DETR, classification and many Hugging Face vision models
+export to ONNX, so step 1 already covers the common case.
+
+### Simplicity rules for the interface
+
+The audience includes people who have never trained a model. Everything is
+designed for them first, without hiding power from experts.
+
+1. **One library, one Run button.** Built-in modes and custom models look
+   and run the same way: a card, a status, a Run button. No separate
+   "custom" world.
+2. **Three steps to add a model, in one panel**: *Choose a file* (drop an
+   `.onnx` or paste a Hugging Face link) -> *Confirm what it does* (the
+   system detects the task and class names and shows them for a yes/edit)
+   -> *Test and save* (an automatic test run on sample images shows the
+   boxes and the speed). Nothing else is required; everything else has a
+   sensible default.
+3. **Plain words.** "Finds objects and draws boxes", not "detection head";
+   "Runs at 42 frames per second on our GPU", not "latency 23.8 ms".
+   Technical details live behind a "Details" disclosure.
+4. **Errors say what to do.** Every failure names the cause and the fix,
+   e.g. "This file is a PyTorch model (.pt). Export it to ONNX first:
+   `yolo export model=best.pt format=onnx`", "This Hugging Face repo has no
+   .onnx file", "The model expects 3 inputs; HYRAK models need one image
+   input".
+5. **Status is always visible.** Each model card shows Ready, Checking or
+   Needs attention (with the reason), never a silent failure.
+6. **Locked, not hidden.** Without the premium feature the "Add model"
+   button stays visible, opens an explanation of what it is and how to get
+   it (ask HYRAK), and the HYRAK models keep working.
+
+### Lifecycle (automatic, no human in the loop)
+
+1. **Receive**: upload (size limit setting, default 500 MB) or Hugging Face
+   download (public repos, resolved to a commit sha, only `.onnx` plus
+   `config.json` / label files fetched). Stored at
+   `<HYRAK_DATA_DIR>/workspaces/<workspace_id>/models/<model_id>/v<n>/`,
+   checksum recorded.
+2. **Inspect** (in a separate process): open with onnxruntime, read input
+   and output shapes, ONNX metadata (Ultralytics exports store class names
+   there), Hugging Face `config.json` `id2label`. Infer the task
+   (YOLO-style `[1, 4+C, N]` or `[1, N, 4+C(+1)]`, RT-DETR style, or
+   `[1, C]` = classify). Refuse custom ops and external data files that are
+   missing, with a clear message.
+3. **Test run** (separate process): run on bundled sample frames, measure
+   latency and GPU memory, render a preview with boxes. Pass = Ready.
+4. **Run**: a pilot picks the model in the AI tab like any mode; the
+   session runs it through a `CustomModelAnalyzer` (a `BaseAnalyzer`) that
+   sends frames to a per-model runner process (one process per running
+   model, shared by sessions of the same workspace, crash-isolated, auto
+   stopped when idle). Results use the existing `cv_results` shape so the
+   existing overlay draws them.
+5. **Versions**: re-uploading or re-importing makes a new version; the old
+   one keeps working until the new one is Ready.
+
+### Data and API
+
+Tables (migration after `a7d3e9b1c4f2`, revision `d1e2f3a4b5c6`):
+`models` (id, workspace_id, name, description, task, source
+`upload|huggingface`, hf_repo, hf_revision, hf_file, status
+`checking|ready|failed`, error, error_hint, current_version, published
+(HYRAK catalogue), created_by, created_at, updated_at) and `model_versions`
+(id, model_id, n, sha256, size_bytes, input_shape, labels, latency_ms,
+gpu_mem_mb, preview_path, created_at).
+
+Permissions (already in `perms.py`): listing needs `view`, adding /
+editing / deleting / publishing needs `models.manage` (publishing to the
+HYRAK catalogue: founders), running needs `models.run`.
+
+REST, all under `/api/models`:
+* `GET ?workspace_id=` -> `{hyrak: [...built-in modes and catalogue...],
+  workspace: [...], premium: {enabled, reason}}`
+* `POST` (multipart: file + name, workspace_id) -> model in `checking`
+* `GET /huggingface/inspect?repo=` -> repo summary, sha, onnx files, labels
+* `POST /huggingface` `{workspace_id, repo, file?, name?}` -> model in `checking`
+* `GET|PATCH|DELETE /{id}`; PATCH edits name, description, labels, task
+* `GET /{id}/preview` (image, URL ticket or blob), `POST /{id}/retest`
+* `POST /{id}/publish` (founders) puts it in the HYRAK catalogue
+
+Socket: `set_analysis_mode {mode: "custom:<model_id>"}` (already a session
+command); progress pushes `model_status {id, status, step, error, hint}`.
+
+## Original design (2026-10-17)
+
+Status: DESIGN (2026-10-17). Superseded where section 0 differs.
 Audience: Japesh, and whoever implements phases 1-4.
 
 ## 1. What this is
