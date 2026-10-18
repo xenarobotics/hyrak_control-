@@ -353,6 +353,14 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
                         "ts": time.time(), **alert,
                     }))
 
+            # A custom model's alert rule fired: tell this session's own
+            # socket (app/models_custom/analyzer.py).
+            model_alerts = meta.pop("_pending_model_alerts", None)
+            if model_alerts:
+                from app.models_custom import notify as _model_notify
+                for alert in model_alerts:
+                    asyncio.create_task(_model_notify.model_alert(self.session_id, alert))
+
             # ── Send drone command directly to MAVLink ──────────────
             drone_cmd = meta.get("drone_command")
             if drone_cmd and drone_cmd.get("type") == "velocity":

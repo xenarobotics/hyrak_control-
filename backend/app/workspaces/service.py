@@ -189,8 +189,9 @@ async def create_workspace(actor: AuthUser, *, name: str, kind: str, parent_id: 
 _UNSET = object()
 
 
-# Paid extras a founder can switch on per workspace (docs/ACCESS_MODEL.md 8b).
-FEATURES = frozenset({"cloud_sim"})
+# Paid extras a founder can switch on per workspace (docs/ACCESS_MODEL.md 8b):
+# cloud_sim (8c) and custom_models (docs/custom_models/DESIGN.md section 0).
+FEATURES = frozenset({"cloud_sim", "custom_models"})
 
 
 async def patch_workspace(actor: AuthUser, workspace_id: str, *, name=None,
@@ -263,6 +264,9 @@ async def delete_workspace(actor: AuthUser, workspace_id: str, *, ip: str) -> No
                        detail={"name": ws.name, "kind": ws.kind}, ip=ip)
     for m in members:
         await auth.membership_changed(m.user_id, before_compat=None, reduced=True)
+    # Its model library went with it (the rows cascade); the files too.
+    from app.models_custom import service as model_service
+    await model_service.workspace_deleted(workspace_id)
 
 
 # ── Members ───────────────────────────────────────────────────────────────

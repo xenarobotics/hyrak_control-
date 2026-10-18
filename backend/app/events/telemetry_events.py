@@ -776,11 +776,27 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         if not session:
             return
 
-        try:
-            mode = AnalysisMode(data.get("mode", "manual-control"))
-        except ValueError:
-            await sio.emit("error", {"msg": f"Invalid mode: {data.get('mode')}"}, to=sid)
-            return
+        raw_mode = data.get("mode", "manual-control") if isinstance(data, dict) else None
+        if isinstance(raw_mode, str) and raw_mode.startswith("custom:"):
+            # A model from the workspace's library or the HYRAK catalogue
+            # (docs/custom_models/DESIGN.md section 0): models.run, its
+            # workspace (or published) and ready, checked in resolve_run.
+            from app.models_custom import service as model_service
+            from app.models_custom.errors import ModelFailure
+            try:
+                mode = await model_service.resolve_run(session, raw_mode[len("custom:"):])
+            except ModelFailure as e:
+                await sio.emit("error", {"msg": e.message, "hint": e.hint, "event": "set_analysis_mode",
+                                         "code": e.code}, to=sid)
+                await sio.emit("model_status", {"status": "error", "mode": raw_mode,
+                                                "error": e.message, "code": e.code}, to=sid)
+                return
+        else:
+            try:
+                mode = AnalysisMode(raw_mode)
+            except ValueError:
+                await sio.emit("error", {"msg": f"Invalid mode: {raw_mode}"}, to=sid)
+                return
         if session.workspace_id and not session.is_staff and \
                 mode.value in socket_classes.CUSTOMER_BLOCKED_MODES:
             # One reconstruction engine for the whole server: staff only.

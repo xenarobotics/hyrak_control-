@@ -92,6 +92,8 @@ def create_app() -> socketio.ASGIApp:
     fastapi_app.include_router(mesh_units_router)
     from app.latency_probe import router as latency_probe_router
     fastapi_app.include_router(latency_probe_router)
+    from app.models_custom.routes import router as models_router
+    fastapi_app.include_router(models_router)
 
     # Desktop app installers + electron-updater manifests - plain static
     # files, no auth (same tier as a public download page). Directory is
@@ -174,6 +176,12 @@ def create_app() -> socketio.ASGIApp:
         sim_manager.get_manager().warn_if_exposed()
         await sim_manager.get_manager().cleanup_orphans()
         sim_manager.get_manager().start_background()
+        # Custom models: re-run checks a restart interrupted.
+        from app.models_custom import service as model_service
+        try:
+            await model_service.recover()
+        except Exception as e:
+            logger.warning(f"custom models: recovery skipped ({e})")
 
     @fastapi_app.on_event("shutdown")
     async def on_shutdown():
@@ -192,6 +200,8 @@ def create_app() -> socketio.ASGIApp:
         from app.db import close_db
         await close_db()
         await vision_pool.stop_all()
+        from app.models_custom import service as model_service
+        await model_service.shutdown()
         for pid in list(peer_registry._peers.keys()):
             await peer_registry.remove(pid)
 
@@ -472,6 +482,8 @@ def create_app() -> socketio.ASGIApp:
     register_permit_events(sio, session_manager)
     register_webrtc_events(sio, peer_registry, vision_pool, session_manager)
     register_gs_relay_events(sio)
+    from app.models_custom import notify as model_notify
+    model_notify.configure(sio, session_manager, vision_pool)
 
     # ------------------------------------------------------------------ #
     # Mount                                                                #

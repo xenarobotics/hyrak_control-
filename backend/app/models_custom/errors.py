@@ -170,6 +170,19 @@ KNOWN_FAILURES: dict[str, tuple[str, str]] = {
     "not_ready": (
         "This model is not ready to run yet.",
         "Wait for its check to finish, or fix what it reports."),
+    "forbidden": (
+        "Your role in this workspace does not allow this.",
+        "Ask an owner or admin of the workspace (pilots run models; owners and admins add "
+        "them)."),
+    "founders_only": (
+        "Only HYRAK founders put models in the HYRAK catalogue.",
+        "Ask a HYRAK founder to publish it."),
+    "bad_request": (
+        "Something in the request was not valid: {reason}.",
+        "Check the values and try again."),
+    "model_removed": (
+        "The model you were running was removed or is no longer available here.",
+        "Pick another model."),
     "not_found": (
         "This model was not found.",
         "It may have been deleted. Pick another model."),

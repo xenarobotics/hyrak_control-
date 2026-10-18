@@ -111,6 +111,17 @@ EVENTS: dict[str, str] = {
     "swarm_upload_mission": STAFF,
 }
 
+# Server-to-client events with no handler, and who receives them. Not part
+# of the completeness test (nothing to guard), listed so a push that would
+# leak across workspaces is reviewed like a handler.
+PUSHED_EVENTS: dict[str, str] = {
+    # docs/custom_models/DESIGN.md section 0: a library model's check moved on.
+    # Every live socket of the model's own workspace, nobody else.
+    "model_status": "workspace",
+    # A custom model's alert rule fired: the one session running it.
+    "model_alert": "session",
+}
+
 # Other namespaces: the ground-station relay agent (a script, operator token).
 NAMESPACES: dict[str, dict[str, str]] = {
     "/gs-relay": {

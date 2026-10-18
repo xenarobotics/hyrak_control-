@@ -64,7 +64,7 @@ class PatchWorkspaceBody(BaseModel):
     name: Optional[str] = Field(default=None, max_length=120)
     operating_area: Optional[dict] = None      # explicit null clears it
     disabled: Optional[bool] = None
-    features: Optional[dict] = None            # founders: {"cloud_sim": true}
+    features: Optional[dict] = None            # founders: {"custom_models": true, ...}
 
 
 @router.patch("/workspaces/{workspace_id}")

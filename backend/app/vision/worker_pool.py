@@ -141,18 +141,23 @@ class VisionWorkerPool:
         logger.info(f"Session {session_id[:8]}: loading {mode.value}...")
 
         try:
-            from app.vision.modules.__registry__ import ANALYZER_REGISTRY
-            cls = ANALYZER_REGISTRY.get(mode)
-            if not cls:
-                logger.warning(f"No class for mode {mode.value}")
-                self._last_error[session_id] = f"no module for {mode.value}"
-                return False
+            # A custom model (app/models_custom/analyzer.CustomModelMode)
+            # brings its own analyzer; built-in modes come from the registry.
+            build = getattr(mode, "build_analyzer", None)
+            if build is None:
+                from app.vision.modules.__registry__ import ANALYZER_REGISTRY
+                cls = ANALYZER_REGISTRY.get(mode)
+                if not cls:
+                    logger.warning(f"No class for mode {mode.value}")
+                    self._last_error[session_id] = f"no module for {mode.value}"
+                    return False
+                build = cls
 
             # Run blocking model load in thread pool
             loop = asyncio.get_running_loop()
             analyzer = await loop.run_in_executor(
                 None,
-                lambda: cls(results_callback=self._results_callback)
+                lambda: build(results_callback=self._results_callback)
             )
 
             # Register this session with the new analyzer
