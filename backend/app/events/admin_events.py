@@ -8,7 +8,7 @@ admin role (app/auth) - the shared-token era is over.
 """
 import logging
 
-from app.auth.socket_guard import require_admin
+from app.auth.socket_guard import require_admin, require_staff
 from app.sessions import observer
 from app.sessions.manager import SessionManager
 
@@ -61,6 +61,7 @@ def register_admin_events(sio, session_manager: SessionManager):
 
     @sio.on("unwatch_session")
     async def on_unwatch_session(sid, data):
+        if not await require_staff(sid, "unwatch_session"): return
         session_id = (data or {}).get("session_id")
         if not session_id:
             return

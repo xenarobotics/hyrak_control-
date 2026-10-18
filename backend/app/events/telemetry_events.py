@@ -2,7 +2,10 @@ import asyncio
 import time
 import logging
 from app.sessions import observer
-from app.auth.socket_guard import require_operator
+from app.auth import socket_classes
+from app.auth.socket_guard import (
+    require_operator, require_session_fly, require_session_view, require_staff,
+)
 from app.sessions.manager import SessionManager
 from app.telemetry import serial_bridge
 from app.telemetry.rc_monitor import RcChannelMonitor
@@ -141,6 +144,8 @@ async def _execute_drone_action(tel, action: str, data: dict) -> dict:
 
 
 
+RC_MONITOR_ROOM = "rc-monitor"
+
 _ENHANCE_KEYS = frozenset({"preset", "denoise", "sharpen", "contrast", "saturation",
                            "brightness", "gamma", "resolution", "ai_upscale", "fps_cap"})
 
@@ -152,21 +157,25 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
     # ── Raw RC channels, for the Radio & RC page ─────────────────────────
     # One passive monitor for the whole server, started lazily on the first
-    # client that asks for it. Broadcast rather than per-session: channel
-    # values are not secrets, and the aircraft has exactly one transmitter.
+    # client that asks for it. Sent to every socket that asked (one room)
+    # rather than per-session: the monitor listens on a server port, so it
+    # sees whichever aircraft streams there, and that is staff-only (docs/
+    # ACCESS_MODEL.md 8a). It used to be a broadcast to every socket.
     rc_monitor = RcChannelMonitor(
         lambda payload: asyncio.get_event_loop().create_task(
-            sio.emit("rc_channels", payload)
+            sio.emit("rc_channels", payload, room=RC_MONITOR_ROOM)
         )
     )
 
     @sio.on("start_rc_monitor")
-    async def on_start_rc_monitor(sid):
+    async def on_start_rc_monitor(sid, data=None):
         """Ask for live RC channel data. Replies rc_monitor_status with
         {listening, port, live} - `listening` false means the port could not
         be bound; `live` false means bound but nothing is arriving, which is
         what a serial-only link (USB FC) looks like and the page must say so
         rather than show dead bars."""
+        if not await require_staff(sid, "start_rc_monitor"): return
+        await sio.enter_room(sid, RC_MONITOR_ROOM)
         ok = await rc_monitor.start()
         await sio.emit("rc_monitor_status", {
             "listening": ok,
@@ -177,7 +186,16 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
     @sio.on("connect_telemetry")
     async def on_connect_telemetry(sid, data):
+        # Staff only: the address is anything the SERVER can reach - the
+        # Gazebo sim on this server (udp:14600), a LAN radio, a port another
+        # session uses. Customers link through connect_browser_serial.
         if not await require_operator(sid, "connect_telemetry", data): return
+        await _connect_telemetry(sid, data)
+
+    async def _connect_telemetry(sid, data):
+        """The connect flow itself, for an address the caller has already
+        vetted: connect_telemetry's (staff), the RF bridge's (staff), or the
+        session's own loopback bridge (connect_browser_serial)."""
         session = session_manager.get_by_socket(sid)
         if not session:
             await sio.emit("error", {"msg": "No session found"}, to=sid)
@@ -209,6 +227,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             if other_session:
                 other_session.hardware_uid = None
                 other_session.drone = None
+                other_session.drone_fly = None
                 await sio.emit(
                     "telemetry_status",
                     {"status": "disconnected", "message": "Disconnected - another client connected to this drone"},
@@ -349,6 +368,10 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             return
 
         await manager.start()
+        # A new link is a new drone until its identity says otherwise: the
+        # previous drone's access answer must not carry over to it.
+        session.drone = None
+        session.drone_fly = None
         session_manager.attach_telemetry(session.session_id, manager)
         session.drone_address = address
 
@@ -364,7 +387,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             record, in the background so connect isn't delayed. A browser
             radio arrives over a loopback-UDP bridge, so 'udp address' alone
             doesn't mean simulated - the presence of a serial bridge does."""
-            from app.registry import drones as drone_registry
+            from app.auth import live_scope
 
             uid = await manager.get_hardware_uid()
             session.hardware_uid = uid
@@ -373,7 +396,10 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                     address.startswith("udp")
                     and serial_bridge.get_bridge(session.session_id) is None
                 )
-                session.drone = await drone_registry.upsert_seen(uid, is_simulated=is_sim)
+                # Registry upsert plus the claim: a drone never seen before
+                # joins this session's workspace, and drone_fly says whether
+                # this session may command it (docs/ACCESS_MODEL.md 8a).
+                await live_scope.identify_drone(session, uid, is_simulated=is_sim)
             await sio.emit(
                 "drone_identity",
                 {"hardware_uid": uid, "drone": session.drone},
@@ -421,7 +447,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             # default from settings, so the address lives in one place.
             uplink_host=(str(data.get("uplinkHost") or "").strip() or None),
         )
-        await on_connect_telemetry(sid, {"address": bridge.address, "link_kind": "radio"})
+        await _connect_telemetry(sid, {"address": bridge.address, "link_kind": "radio"})
 
     @sio.on("connect_browser_serial")
     async def on_connect_browser_serial(sid, data=None):
@@ -429,7 +455,11 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         The browser reads it via the Web Serial API and relays raw MAVLink
         bytes here; a loopback SerialBridge feeds them to this session's
         mavsdk_server exactly as if the radio were local."""
-        if not await require_operator(sid, "connect_browser_serial", data): return
+        # Customer-reachable: the bridge is a per-session loopback port fed
+        # only by this socket's own serial_uplink bytes, whichever device
+        # relays them (Web Serial, the desktop's SITL / serial / RF / SIYI
+        # relays).
+        if not await require_session_fly(sid, "connect_browser_serial", data): return
         # The client sets its UI to "connecting" the moment it asks, and ONLY a
         # telemetry_status event can move it off that. Any path out of here
         # that doesn't emit one leaves the operator staring at "connecting"
@@ -468,7 +498,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         # Reuse the normal connect flow; the heartbeat mavsdk waits for arrives
         # through serial_uplink events the browser is already pumping.
         try:
-            await on_connect_telemetry(sid, {"address": bridge.address, "link_kind": "radio"})
+            await _connect_telemetry(sid, {"address": bridge.address, "link_kind": "radio"})
         except Exception as e:
             logger.error(f"Session {session.session_id[:8]} telemetry connect raised: {e}")
             serial_bridge.close_bridge(session.session_id)
@@ -486,6 +516,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         """Raw MAVLink bytes read from the user's radio in the browser."""
         if not isinstance(data, (bytes, bytearray)):
             return
+        if not await require_session_view(sid, "serial_uplink"): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return
@@ -495,7 +526,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
     @sio.on("disconnect_telemetry")
     async def on_disconnect_telemetry(sid):
-        if not await require_operator(sid, "disconnect_telemetry", None): return
+        if not await require_session_view(sid, "disconnect_telemetry"): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return
@@ -511,11 +542,12 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         session.telemetry_connected = False
         session.hardware_uid = None
         session.drone = None
+        session.drone_fly = None
         await sio.emit("telemetry_status", {"status": "disconnected"}, to=sid)
 
     @sio.on("drone_command")
     async def on_drone_command(sid, data):
-        if not await require_operator(sid, "drone_command", data, quiet=True): return
+        if not await require_session_fly(sid, "drone_command", data, quiet=True): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return
@@ -538,7 +570,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
     @sio.on("drone_action")
     async def on_drone_action(sid, data):
-        if not await require_operator(sid, "drone_action", data): return
+        if not await require_session_fly(sid, "drone_action", data): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return
@@ -685,7 +717,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
     @sio.on("set_analysis_mode")
     async def on_set_analysis_mode(sid, data):
-        if not await require_operator(sid, "set_analysis_mode", data): return
+        if not await require_session_fly(sid, "set_analysis_mode", data): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return
@@ -694,6 +726,12 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             mode = AnalysisMode(data.get("mode", "manual-control"))
         except ValueError:
             await sio.emit("error", {"msg": f"Invalid mode: {data.get('mode')}"}, to=sid)
+            return
+        if session.workspace_id and not session.is_staff and \
+                mode.value in socket_classes.CUSTOMER_BLOCKED_MODES:
+            # One reconstruction engine for the whole server: staff only.
+            await sio.emit("error", {"msg": f"{mode.value} is not available in this workspace",
+                                     "event": "set_analysis_mode", "code": "forbidden"}, to=sid)
             return
 
         old_mode = session.mode
@@ -739,7 +777,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
     @sio.on("select_person")
     async def on_select_person(sid, data):
-        if not await require_operator(sid, "select_person", data): return
+        if not await require_session_fly(sid, "select_person", data): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return
@@ -778,7 +816,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
     @sio.on("set_pd_params")
     async def on_set_pd_params(sid, data):
-        if not await require_operator(sid, "set_pd_params", data): return
+        if not await require_session_fly(sid, "set_pd_params", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -798,7 +836,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
     async def on_set_altitude_mode(sid, data):
         """Payload: { mode: 'fixed' | 'auto' }
         fixed = hold current altitude; auto = altitude PD follows person vertically."""
-        if not await require_operator(sid, "set_altitude_mode", data): return
+        if not await require_session_fly(sid, "set_altitude_mode", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -813,7 +851,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
     async def on_set_altitude_nudge(sid, data):
         """Payload: { velocity: float }  (−=ascend, +=descend, 0=stop).
         Active only in Fixed altitude mode while tracking. Hold button → send velocity; release → send 0."""
-        if not await require_operator(sid, "set_altitude_nudge", data, quiet=True): return
+        if not await require_session_fly(sid, "set_altitude_nudge", data, quiet=True): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -839,7 +877,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         watching vehicle_fill_pct in the panel and nudging this, not a
         number this handler can assume.
         """
-        if not await require_operator(sid, "set_tracking_params", data): return
+        if not await require_session_fly(sid, "set_tracking_params", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -861,7 +899,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         validates subject and mode - this handler deliberately does not
         second-guess it, so there is one place the rules live.
         """
-        if not await require_operator(sid, "set_profile_override", data): return
+        if not await require_session_fly(sid, "set_profile_override", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -883,7 +921,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         how this gets used - park over a venue, name the cells once, and every
         alert afterwards says "North Gate" instead of "cell 1".
         """
-        if not await require_operator(sid, "set_zone_names", data): return
+        if not await require_session_fly(sid, "set_zone_names", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -910,7 +948,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
     @sio.on("set_enhance_params")
     async def on_set_enhance_params(sid, data):
-        if not await require_operator(sid, "set_enhance_params", data): return
+        if not await require_session_fly(sid, "set_enhance_params", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -1091,7 +1129,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         that vehicle is in frame - locking a track that is not visible would
         commit the aircraft to nothing.
         """
-        if not await require_operator(sid, "set_follow_vehicle", data): return
+        if not await require_session_fly(sid, "set_follow_vehicle", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -1127,7 +1165,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         other modes the same feature would need a second id space to disambiguate
         and would mean something different in each.
         """
-        if not await require_operator(sid, "set_multi_follow", data): return
+        if not await require_session_fly(sid, "set_multi_follow", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -1156,7 +1194,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         tracking) has always done both halves; this handler did only the first,
         which is why vehicle follow looked implemented and did nothing.
         """
-        if not await require_operator(sid, "set_vehicle_tracking", data): return
+        if not await require_session_fly(sid, "set_vehicle_tracking", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -1235,7 +1273,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         Applied on the next face check, not immediately: the person has to be
         identified in frame before there is a body track to follow.
         """
-        if not await require_operator(sid, "set_follow_person", data): return
+        if not await require_session_fly(sid, "set_follow_person", data): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -1250,7 +1288,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
     @sio.on("clear_reference")
     async def on_clear_reference(sid):
         """Clear the stored face embedding and reset tracking for person-tracking mode."""
-        if not await require_operator(sid, "clear_reference", None): return
+        if not await require_session_fly(sid, "clear_reference", None): return
         session = session_manager.get_by_socket(sid)
         if not session or not vision_pool:
             return
@@ -1267,6 +1305,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         then {ok: True, params: {...}, count: N} when done,
         or {ok: False, error: str} on failure.
         """
+        if not await require_session_view(sid, "fetch_params"): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return
@@ -1303,6 +1342,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         Emits param_get_ack: {key, ok, value}. One read, not the 30 s
         everything-download fetch_params runs - the sensors page asks for
         two mount rotations and must not pay that price."""
+        if not await require_session_view(sid, "get_param"): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return
@@ -1324,7 +1364,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         Payload: {key: str, value: number, param_type: 'int'|'float'}
         Emits param_set_ack: {key, ok, value, error?}
         """
-        if not await require_operator(sid, "set_param", data): return
+        if not await require_session_fly(sid, "set_param", data): return
         session = session_manager.get_by_socket(sid)
         if not session:
             return
@@ -1355,7 +1395,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
     @sio.on("set_tracking")
     async def on_set_tracking(sid, data):
-        if not await require_operator(sid, "set_tracking", data): return
+        if not await require_session_fly(sid, "set_tracking", data): return
         logger.info(f"🎯 SET_TRACKING received: active={data.get('active')} sid={sid[:8]}")
         session = session_manager.get_by_socket(sid)
         if not session:

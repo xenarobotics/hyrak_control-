@@ -37,6 +37,11 @@ class VisionWorkerPool:
         self._load_task:        Dict[str, asyncio.Task]     = {}
         # Why the last load failed, for the UI's model_status error.
         self._last_error:       Dict[str, str]              = {}
+        # Sessions that never get the enrolled-face gallery: customer
+        # sessions (docs/ACCESS_MODEL.md 8a). The gallery is HYRAK's global
+        # data, so a customer's person-tracking or traffic mode must not
+        # name people HYRAK (or another customer) enrolled.
+        self._no_gallery: set = set()
 
     def load(self):
         """
@@ -59,6 +64,15 @@ class VisionWorkerPool:
             if self._session_mode.get(session_id) == mode:
                 return analyzer
         return None
+
+    def deny_gallery(self, session_id: str) -> None:
+        self._no_gallery.add(session_id)
+
+    def drop_gallery_rule(self, session_id: str) -> None:
+        self._no_gallery.discard(session_id)
+
+    def gallery_allowed(self, session_id: str) -> bool:
+        return session_id not in self._no_gallery
 
     def get_for_session(self, session_id: str) -> Optional[BaseAnalyzer]:
         return self._session_analyzer.get(session_id)
@@ -152,7 +166,7 @@ class VisionWorkerPool:
             # gallery matching, never the tracker coming up. A failure is
             # logged and left as an empty gallery: matching nobody is a
             # working tracker, an exception here is no tracker at all.
-            if hasattr(analyzer, "set_gallery"):
+            if hasattr(analyzer, "set_gallery") and self.gallery_allowed(session_id):
                 try:
                     from app.vision.persistence import load_face_gallery
                     analyzer.set_gallery(await load_face_gallery())

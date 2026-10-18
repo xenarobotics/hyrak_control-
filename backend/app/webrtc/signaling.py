@@ -15,6 +15,8 @@ from aiortc.contrib.media import MediaRelay
 from aiortc.mediastreams import MediaStreamError
 from aiortc.sdp import candidate_from_sdp
 
+from app.auth import socket_classes
+from app.auth.socket_guard import require_session_view, require_staff
 from app.sessions import observer
 from app.webrtc.peer_registry import PeerRegistry, PeerEntry
 from app.webrtc.stream_track import MultiModeVideoStreamTrack
@@ -310,7 +312,11 @@ def register_webrtc_events(
 
         The host is chosen PER CLIENT rather than fixed: a client sharing a
         network with us is told to push there directly instead of out through
-        `relay_public_host` and back. See `_relay_host_for`."""
+        `relay_public_host` and back. See `_relay_host_for`.
+
+        Staff only: it binds a public relay port (docs/ACCESS_MODEL.md 8a)."""
+        if not await require_staff(sid, "allocate_video_relay"):
+            return {"error": "allocate_video_relay is staff only", "code": "forbidden"}
         session = session_manager.get_by_socket(sid)
         if not session:
             return {"error": "No session"}
@@ -361,6 +367,8 @@ def register_webrtc_events(
 
     @sio.on("release_video_relay")
     async def on_release_video_relay(sid, data=None):
+        if not await require_staff(sid, "release_video_relay"):
+            return {"ok": False, "code": "forbidden"}
         session = session_manager.get_by_socket(sid)
         if not session:
             return {"ok": False}
@@ -381,7 +389,12 @@ def register_webrtc_events(
         Answered as a socket ack rather than an `answer` event, because the
         browser's own negotiation uses that event and the two must not be
         confused for one another.
+
+        Staff only: the ingest takes a loopback port from a fixed pool shared
+        by every session (datachannel_video_source._LOOPBACK_PORT_BASE).
         """
+        if not await require_staff(sid, "datachannel_video_offer"):
+            return {"error": "datachannel_video_offer is staff only", "code": "forbidden"}
         session = session_manager.get_by_socket(sid)
         if not session:
             return {"error": "No session"}
@@ -451,6 +464,8 @@ def register_webrtc_events(
 
     @sio.on("datachannel_video_stats")
     async def on_datachannel_video_stats(sid, data=None):
+        if not await require_staff(sid, "datachannel_video_stats"):
+            return {"error": "datachannel_video_stats is staff only", "code": "forbidden"}
         session = session_manager.get_by_socket(sid)
         if not session:
             return {"error": "No session"}
@@ -460,10 +475,28 @@ def register_webrtc_events(
 
     @sio.on("offer")
     async def on_offer(sid, data):
+        if not await require_session_view(sid, "offer"): return
         session = session_manager.get_by_socket(sid)
         if not session:
             await sio.emit("error", {"msg": "No session"}, to=sid)
             return
+        source = data.get("videoSource", "camera") if isinstance(data, dict) else "camera"
+        if (getattr(session, "workspace_id", None) and not session.is_staff
+                and source in socket_classes.SERVER_VIDEO_SOURCES):
+            # Every server-sourced feed has the SERVER open something (an
+            # RTSP URL, a shared UDP feed port, a relay ingest): staff only.
+            # A customer's video is the track their own browser sends.
+            await sio.emit("error", {"msg": f"Video source {source} is not available in this "
+                                            f"workspace - use a camera on this device",
+                                     "event": "offer", "code": "forbidden"}, to=sid)
+            return
+        if getattr(session, "workspace_id", None) and not session.is_staff and isinstance(data, dict):
+            # The server dials the TURN servers named here. A customer's
+            # offer gets the server's own list (the same one /api/webrtc/
+            # ice-servers hands out) rather than making this host connect to
+            # any address they type.
+            from app.webrtc.turn import get_ice_servers
+            data = {**data, "iceServers": await get_ice_servers()}
 
         # EVERY failure from here on reaches the client as an `error` event.
         # Before this wrapper, a malformed offer (no dict, no sdp, a string
@@ -876,6 +909,7 @@ def register_webrtc_events(
 
     @sio.on("ice_candidate")
     async def on_ice_candidate(sid, data):
+        if not await require_session_view(sid, "ice_candidate"): return
         entry = peer_registry.get_by_socket(sid)
         if not entry:
             return
@@ -897,7 +931,8 @@ def register_webrtc_events(
         await _add_ice_candidate(entry.pc, cand_sdp, sdp_mid, sdp_mline_index)
 
     @sio.on("stop_stream")
-    async def on_stop_stream(sid):
+    async def on_stop_stream(sid, data=None):
+        if not await require_session_view(sid, "stop_stream"): return
         entry = peer_registry.get_by_socket(sid)
         if not entry:
             return
