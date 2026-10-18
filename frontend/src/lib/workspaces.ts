@@ -6,8 +6,9 @@
  * Every call resolves to an ApiResult instead of throwing, and a failure
  * carries the server's own message: the server is the final check on every
  * rule (last owner, area outside, who may grant what), so the UI shows its
- * words rather than guessing. Calls made from the public pages (/invite,
- * /reset) never redirect to /login on a 401.
+ * words rather than guessing. 'soft' calls never redirect to /login on a
+ * 401: the public pages (/invite, /reset), and a password change where a
+ * wrong current password must not sign the person out.
  */
 import { apiFetch } from './api'
 import { authHeaders, type AuthUser } from './auth'
@@ -17,7 +18,7 @@ import type { ZoneClass, ZoneFeature } from '@/components/admin/zones'
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; error: string }
 
-type Mode = 'app' | 'public'
+type Mode = 'app' | 'soft'
 
 function messageFor(status: number, body: unknown): string {
     const detail = (body as { detail?: unknown } | null)?.detail
@@ -159,7 +160,7 @@ export const updateMe = (body: { display_name?: string; email?: string }) =>
     call<{ user?: AuthUser }>('/api/auth/me', { method: 'PATCH', json: body })
 
 export const changePassword = (current_password: string, new_password: string) =>
-    call<unknown>('/api/auth/me/password', { method: 'POST', json: { current_password, new_password } })
+    call<unknown>('/api/auth/me/password', { method: 'POST', json: { current_password, new_password } }, 'soft')
 
 export const listSessions = () => list<SessionRow>('/api/auth/sessions', 'sessions')
 
@@ -174,18 +175,18 @@ export const revokeOtherSessions = () =>
 const tok = (t: string) => encodeURIComponent(t)
 
 export const previewInvite = (token: string) =>
-    call<InvitePreview>(`/api/auth/invites/${tok(token)}`, {}, 'public')
+    call<InvitePreview>(`/api/auth/invites/${tok(token)}`, {}, 'soft')
 
 /** Signed in: empty body, adds the membership to the current account. */
 export const acceptInviteSignedIn = (token: string) =>
-    call<unknown>(`/api/auth/invites/${tok(token)}/accept`, { method: 'POST', json: {} }, 'public')
+    call<unknown>(`/api/auth/invites/${tok(token)}/accept`, { method: 'POST', json: {} }, 'soft')
 
 /** Signed out: creates the account and returns a session like login does. */
 export const acceptInviteSignUp = (token: string, body: { display_name: string; email: string; password: string; username?: string }) =>
-    call<IssuedSession>(`/api/auth/invites/${tok(token)}/accept`, { method: 'POST', json: body }, 'public')
+    call<IssuedSession>(`/api/auth/invites/${tok(token)}/accept`, { method: 'POST', json: body }, 'soft')
 
 export const resetPassword = (token: string, password: string) =>
-    call<unknown>(`/api/auth/reset/${tok(token)}`, { method: 'POST', json: { password } }, 'public')
+    call<unknown>(`/api/auth/reset/${tok(token)}`, { method: 'POST', json: { password } }, 'soft')
 
 // ── Accounts (founders) ──────────────────────────────────────────────────
 

@@ -89,14 +89,14 @@ export function hasPerm(ws: WorkspaceInfo | null | undefined, perm: Perm): boole
 /**
  * Roles the caller may hand out on `ws` ("Who may grant what"). Founders may
  * grant anything; owners, admins and managers grant customer roles in their
- * subtree. `invite` drops the roles an invite cannot carry from this UI:
- * manager goes only to existing staff, and airspace needs an area drawn
- * (both are granted from the console's STAFF tab).
+ * subtree. `pickable` drops airspace, which always needs an area drawn and
+ * is granted from the console's STAFF tab; `invite` also drops manager,
+ * which goes only to existing staff.
  */
 export function grantableRoles(
     ws: WorkspaceInfo | null | undefined,
     isFounder: boolean,
-    opts: { invite?: boolean } = {},
+    opts: { invite?: boolean; pickable?: boolean } = {},
 ): MemberRole[] {
     if (!ws) return []
     const exist = ROLES_FOR_KIND[ws.kind] ?? []
@@ -107,7 +107,8 @@ export function grantableRoles(
     else if (ws.my_role === 'admin') out = ['admin', 'pilot', 'viewer']
     else out = []
     out = out.filter(r => exist.includes(r))
-    if (opts.invite) out = out.filter(r => r !== 'manager' && r !== 'airspace')
+    if (opts.invite || opts.pickable) out = out.filter(r => r !== 'airspace')
+    if (opts.invite) out = out.filter(r => r !== 'manager')
     return out
 }
 

@@ -402,7 +402,7 @@ function MembersSection({ ws, list, members, loadError, canManage, isFounder, se
     canManage: boolean; isFounder: boolean; selfId: string | null
     busy: string | null; act: Act; note: Note; reload: () => Promise<void>
 }) {
-    const grantable = grantableRoles(ws, isFounder)
+    const grantable = grantableRoles(ws, isFounder, { pickable: true })
     const [login, setLogin] = useState('')
     const [title, setTitle] = useState('')
     const [role, setRole] = useState<MemberRole | null>(null)

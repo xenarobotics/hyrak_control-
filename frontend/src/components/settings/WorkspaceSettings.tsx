@@ -88,7 +88,7 @@ export function MembersGroup() {
     const [busy, setBusy] = useState<string | null>(null)
     const [login, setLogin] = useState('')
     const [title, setTitle] = useState('')
-    const grantable = grantableRoles(workspace, isFounder)
+    const grantable = grantableRoles(workspace, isFounder, { pickable: true })
     const [role, setRole] = useState<MemberRole | null>(null)
     const addRole = role && grantable.includes(role) ? role : grantable[grantable.length - 1] ?? null
 
