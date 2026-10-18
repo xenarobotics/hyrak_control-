@@ -224,7 +224,7 @@ async def test_routes_end_to_end_on_postgres(db, monkeypatch):
                          json={"display_name": "X", "email": f"{uid('x')}@x.com", "password": "owner-password"})
         assert r.status_code == 404
         me = (await c.get("/api/auth/me", headers=oh)).json()
-        assert me["memberships"][0]["role"] == "owner" and me["user"]["role"] == "viewer"
+        assert me["memberships"][0]["role"] == "owner" and me["user"]["role"] == "member"
         assert [w["id"] for w in me["workspaces"]] == [ws["id"]]
         r = await c.post("/api/zones", headers=oh, json={"name": "lab", "zone_class": "red",
                                                          "geometry": inside, "layer": "site",
@@ -240,4 +240,77 @@ async def test_routes_end_to_end_on_postgres(db, monkeypatch):
         assert (await c.delete(f"/api/workspaces/{ws['id']}", headers=oh)).status_code == 409   # has a zone
         assert (await c.delete(f"/api/zones/{zid}", headers=oh)).status_code == 200
         assert (await c.delete(f"/api/workspaces/{ws['id']}", headers=oh)).status_code == 200
+    service.reset_for_tests()
+
+
+async def test_registry_claims_only_unseen_real_drones(db):
+    """Phase 2a claim (docs/ACCESS_MODEL.md 8a): a drone the registry has
+    never seen joins the connecting session's workspace; a known drone is
+    never moved; a simulated one is never claimed."""
+    from sqlalchemy import text
+    from app.auth.store import PLATFORM_WORKSPACE_ID, WorkspaceRecord, new_id
+    from app.db import get_session
+    from app.registry import drones as registry
+    plat = await db.get_workspace(PLATFORM_WORKSPACE_ID)
+    wid = new_id()
+    org = await db.create_workspace(WorkspaceRecord(id=wid, kind="organization", name=uid("org"),
+                                                    parent_id=plat.id, path=f"{plat.path}{wid}/"))
+    real, sim, staff = uid("hw"), uid("sitl"), uid("hws")
+    d = await registry.upsert_seen(real, is_simulated=False, claim_workspace_id=org.id)
+    assert d["workspace_id"] == org.id and d["claimed"] is True
+    # Seen again, by anyone: stays put, not "claimed" again.
+    again = await registry.upsert_seen(real, is_simulated=False, claim_workspace_id=PLATFORM_WORKSPACE_ID)
+    assert again["workspace_id"] == org.id and "claimed" not in again
+    s = await registry.upsert_seen(sim, is_simulated=True, claim_workspace_id=org.id)
+    assert s["workspace_id"] == PLATFORM_WORKSPACE_ID and "claimed" not in s
+    # A staff session on HYRAK: the default placement, nothing to audit.
+    h = await registry.upsert_seen(staff, is_simulated=False, claim_workspace_id=PLATFORM_WORKSPACE_ID)
+    assert h["workspace_id"] == PLATFORM_WORKSPACE_ID and "claimed" not in h
+    async with get_session() as ses:
+        await ses.execute(text("DELETE FROM drones WHERE hardware_uid IN (:a, :b, :c)"),
+                          {"a": real, "b": sim, "c": staff})
+        await ses.commit()
+    assert await db.delete_workspace(org.id)
+
+
+async def test_live_scope_and_claim_on_postgres(db, monkeypatch):
+    """The live-session scope, the claim and its audit row, and the drone
+    re-read on revalidation, with Postgres as the store."""
+    from sqlalchemy import text
+    from app.auth import live_scope, service
+    from app.auth.store import (PLATFORM_WORKSPACE_ID, MembershipRecord, UserRecord,
+                                WorkspaceRecord, new_id)
+    from app.db import get_session
+    from app.sessions.manager import SessionManager
+
+    service.reset_for_tests()
+    monkeypatch.setattr(service, "_db_up", lambda: True)
+    plat = await db.get_workspace(PLATFORM_WORKSPACE_ID)
+    wid = new_id()
+    org = await db.create_workspace(WorkspaceRecord(id=wid, kind="organization", name=uid("org"),
+                                                    parent_id=plat.id, path=f"{plat.path}{wid}/"))
+    u = await db.upsert_user(UserRecord(id=new_id(), username=uid("pilot"), password_hash="h"))
+    await db.add_membership(MembershipRecord(id=new_id(), user_id=u.id, workspace_id=org.id, role="pilot"))
+    user = await service._auth_user_for(await db.get_user_by_id(u.id), db)
+    scope = await live_scope.resolve(user, None)
+    assert scope.workspace_id == org.id and not scope.is_staff and "fly" in scope.perms
+    assert await live_scope.resolve(user, PLATFORM_WORKSPACE_ID) is None
+    s = SessionManager().create("sock")
+    s.user_id, s.username = u.id, u.username
+    live_scope.stamp(s, user, scope)
+    hw = uid("hw")
+    drone = await live_scope.identify_drone(s, hw, is_simulated=False)
+    assert drone["workspace_id"] == org.id and s.drone_fly is True
+    rows = await db.list_audit([org.id], 10, None)
+    assert any(r.action == "drone.claimed" and r.target_id == drone["id"] for r in rows)
+    # Moved back to HYRAK by staff: the next refresh makes it read-only.
+    await db.set_drone_workspace(drone["id"], PLATFORM_WORKSPACE_ID)
+    await live_scope.refresh_drone_access(s)
+    assert s.drone_fly is False and s.drone["workspace_id"] == PLATFORM_WORKSPACE_ID
+    async with get_session() as ses:
+        await ses.execute(text("DELETE FROM drones WHERE hardware_uid = :h"), {"h": hw})
+        await ses.execute(text("DELETE FROM audit_events WHERE workspace_id = :w"), {"w": org.id})
+        await ses.commit()
+    await db.delete_user(u.id)
+    assert await db.delete_workspace(org.id)
     service.reset_for_tests()
