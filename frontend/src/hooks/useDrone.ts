@@ -25,6 +25,43 @@ const RESUME_GIVE_UP_MS = 95_000
  *  back to its idle look while the command is still very much alive. */
 const ACTION_PENDING_TIMEOUT_MS = 8000
 
+/** Tears the link down from this end.
+ *
+ *  The backend has handled `disconnect_telemetry` all along
+ *  (events/telemetry_events.py) - it ends the flight recording, drops zone
+ *  monitoring and clears the session's drone - but nothing in the UI ever
+ *  emitted it, and TelemetryConnect hid its whole control block once
+ *  connected. So a link could be established and then never released
+ *  without reloading the page or restarting the backend.
+ *
+ *  Stops the LOCAL relay first. Every connect path other than a plain
+ *  server-side UDP address is really "this device owns the radio and
+ *  forwards MAVLink" - browser Web Serial, native serial, native RF - and
+ *  those keep pumping regardless of what the server thinks. Telling the
+ *  server to forget the link while a relay is still feeding it would have
+ *  it immediately re-establish from the incoming traffic. */
+export async function disconnectTelemetryLink(): Promise<void> {
+    try {
+        if (isBrowserSerialActive()) await stopBrowserSerial()
+        if (isNativeSerialActive()) await stopNativeSerial()
+        if (isNativeRfRelayActive()) await stopNativeRfRelay()
+        // The other three relays are the same shape and were missed:
+        // each one owns a source of MAVLink and keeps pumping it into the
+        // server's serial_uplink after the link is "released". Any of
+        // them still running re-establishes the link from its own traffic,
+        // so Disconnect appears to do nothing at all.
+        if (isLocalRelayActive()) await stopLocalRelay()
+        if (isSiyiTelemetryActive()) await stopSiyiTelemetry()
+        if (isRemoteSitlRelayActive()) await stopRemoteSitlRelay()
+    } catch (err) {
+        // A relay that fails to close cleanly must not block the
+        // disconnect - the server-side teardown is what matters.
+        console.error('Local relay teardown failed', err)
+    }
+    getSocket().emit('disconnect_telemetry')
+    useDroneStore.getState().setTelemetryStatus('disconnected')
+}
+
 export function useDrone() {
     const store = useDroneStore()
 
@@ -116,8 +153,21 @@ export function useDrone() {
         // on "connecting" forever with nothing to show - the connect flow can
         // only ever be un-stuck by a telemetry_status event. Treat it as a
         // failed connect whenever a connect is what we were waiting on.
-        const onServerError = (data: { msg?: string }) => {
-            console.error('Server error', data?.msg)
+        //
+        // Access refusals (docs/ACCESS_MODEL.md section 8a) come the same way,
+        // with a code: `forbidden` and `drone_not_in_workspace`. Their message
+        // names the fix, so it goes to the pilot as the server wrote it.
+        const onServerError = (data: { code?: string; msg?: string }) => {
+            console.error('Server error', data?.code ?? '', data?.msg)
+            if (data?.code === 'forbidden' || data?.code === 'drone_not_in_workspace') {
+                store.setCommandRefusal({
+                    code: data.code,
+                    msg: data.msg || (data.code === 'forbidden'
+                        ? 'Your role in this workspace does not allow that.'
+                        : 'This drone belongs to another workspace. Ask its owner to move it to yours.'),
+                    at: Date.now(),
+                })
+            }
             if (useDroneStore.getState().telemetryStatus === 'connecting') {
                 store.setTelemetryError(data?.msg || 'Connection failed')
                 store.setTelemetryStatus('error')
@@ -355,42 +405,8 @@ export function useDrone() {
         getSocket().emit('connect_telemetry', { address })
     }, [])
 
-    /** Tears the link down from this end.
-     *
-     *  The backend has handled `disconnect_telemetry` all along
-     *  (events/telemetry_events.py) - it ends the flight recording, drops zone
-     *  monitoring and clears the session's drone - but nothing in the UI ever
-     *  emitted it, and TelemetryConnect hid its whole control block once
-     *  connected. So a link could be established and then never released
-     *  without reloading the page or restarting the backend.
-     *
-     *  Stops the LOCAL relay first. Every connect path other than a plain
-     *  server-side UDP address is really "this device owns the radio and
-     *  forwards MAVLink" - browser Web Serial, native serial, native RF - and
-     *  those keep pumping regardless of what the server thinks. Telling the
-     *  server to forget the link while a relay is still feeding it would have
-     *  it immediately re-establish from the incoming traffic. */
-    const disconnectTelemetry = useCallback(async () => {
-        try {
-            if (isBrowserSerialActive()) await stopBrowserSerial()
-            if (isNativeSerialActive()) await stopNativeSerial()
-            if (isNativeRfRelayActive()) await stopNativeRfRelay()
-            // The other three relays are the same shape and were missed:
-            // each one owns a source of MAVLink and keeps pumping it into the
-            // server's serial_uplink after the link is "released". Any of
-            // them still running re-establishes the link from its own traffic,
-            // so Disconnect appears to do nothing at all.
-            if (isLocalRelayActive()) await stopLocalRelay()
-            if (isSiyiTelemetryActive()) await stopSiyiTelemetry()
-            if (isRemoteSitlRelayActive()) await stopRemoteSitlRelay()
-        } catch (err) {
-            // A relay that fails to close cleanly must not block the
-            // disconnect - the server-side teardown is what matters.
-            console.error('Local relay teardown failed', err)
-        }
-        getSocket().emit('disconnect_telemetry')
-        useDroneStore.getState().setTelemetryStatus('disconnected')
-    }, [])
+    /** Tears the link down from this end: see disconnectTelemetryLink. */
+    const disconnectTelemetry = useCallback(() => disconnectTelemetryLink(), [])
 
     // Cloud flow: the radio is on the USER'S device - the browser reads it
     // via Web Serial and relays MAVLink to the backend (lib/browserSerial.ts).

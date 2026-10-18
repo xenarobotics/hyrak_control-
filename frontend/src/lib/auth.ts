@@ -25,8 +25,9 @@ export const AUTH_CHANGE_EVENT = 'hyrak-auth-change'
  * The compatibility role (docs/ACCESS_MODEL.md section 8): computed by the
  * server from memberships so the live control paths keep their rank check.
  * founder -> admin, HYRAK pilot or any manager -> operator, other HYRAK
- * memberships -> viewer, customer-only -> member (no live access in phase 1:
- * no socket, no platform pages, only /account).
+ * memberships -> viewer, customer-only -> member. Since phase 2a a member
+ * reaches the live app through workspace permissions instead (isCustomer and
+ * the active workspace's perms); with no viewable workspace it gets /account.
  */
 export type Role = 'member' | 'viewer' | 'operator' | 'admin'
 export interface AuthUser {
@@ -73,6 +74,15 @@ export function getAccess(): AuthAccess | null {
 export function isStaff(user: AuthUser | null = getUser()): boolean {
     if (!user) return false
     return user.is_staff ?? user.role === 'admin'
+}
+
+/**
+ * A customer-only account: no membership on the HYRAK workspace. Read from
+ * the server's explicit flag only, so an older server that sends no flag
+ * keeps every account on the staff path it had before.
+ */
+export function isCustomer(user: AuthUser | null = getUser()): boolean {
+    return !!user && user.is_staff === false
 }
 
 export function isFounder(user: AuthUser | null = getUser()): boolean {

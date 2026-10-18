@@ -6,12 +6,14 @@
  * whenever lib/auth announces a change. Empty on the server render.
  *
  * The active workspace (the one the customer app is "in") lives here too:
- * persisted per browser, defaulting to the first workspace the person holds
- * a direct membership on. Phase 1 sends workspace ids explicitly in request
- * bodies, so this is only a UI choice, not a header.
+ * persisted per browser (lib/activeWorkspace), defaulting to the first
+ * workspace the person holds a direct membership on. For customers it also
+ * scopes the live socket session (docs/ACCESS_MODEL.md section 8a).
  */
-import { useCallback } from 'react'
-import { AUTH_CHANGE_EVENT, authStorageKey, getAccess, getUser, isFounder, isStaff, type AuthUser } from '@/lib/auth'
+import { useCallback, useMemo } from 'react'
+import { AUTH_CHANGE_EVENT, authStorageKey, getAccess, getUser, isCustomer, isFounder, isStaff, type AuthUser } from '@/lib/auth'
+import { ACTIVE_WORKSPACE_EVENT, readActiveWorkspaceId, resolveActiveWorkspace, viewableWorkspaces } from '@/lib/activeWorkspace'
+import { switchActiveWorkspace } from '@/lib/workspaceSwitch'
 import type { Membership, WorkspaceInfo } from '@/lib/access'
 import { useClientValueOn } from '@/hooks/useClientValue'
 
@@ -21,9 +23,11 @@ export interface AccessSnapshot {
     workspaces: WorkspaceInfo[]
     isFounder: boolean
     isStaff: boolean
+    /** Customer-only account (is_staff === false from the server). */
+    isCustomer: boolean
 }
 
-const EMPTY: AccessSnapshot = { user: null, memberships: [], workspaces: [], isFounder: false, isStaff: false }
+const EMPTY: AccessSnapshot = { user: null, memberships: [], workspaces: [], isFounder: false, isStaff: false, isCustomer: false }
 
 // useSyncExternalStore needs a stable reference while nothing changed: the
 // snapshot is rebuilt only when the stored JSON differs.
@@ -42,6 +46,7 @@ function readSnapshot(): AccessSnapshot {
         workspaces: access?.workspaces ?? [],
         isFounder: isFounder(user),
         isStaff: isStaff(user),
+        isCustomer: isCustomer(user),
     }
     return lastSnap
 }
@@ -50,29 +55,24 @@ export function useAccess(): AccessSnapshot {
     return useClientValueOn(AUTH_CHANGE_EVENT, readSnapshot, EMPTY)
 }
 
-const ACTIVE_KEY = 'hyrak-active-workspace'
-const ACTIVE_EVENT = 'hyrak-active-workspace-change'
-
-// Kept in memory too, so switching still works when storage is blocked.
-let memActive: string | null = null
-
-function readActiveId(): string | null {
-    try { return localStorage.getItem(ACTIVE_KEY) ?? memActive } catch { return memActive }
-}
-
+/**
+ * The active workspace and a setter. For a customer-only account the choice
+ * scopes the live session, so only viewable workspaces are offered and
+ * `setActive` ends the running session and reconnects (lib/workspaceSwitch).
+ */
 export function useActiveWorkspace(): {
     workspace: WorkspaceInfo | null
     workspaces: WorkspaceInfo[]
     setActive: (id: string) => void
 } {
-    const { workspaces } = useAccess()
-    const stored = useClientValueOn(ACTIVE_EVENT, readActiveId, null)
-    const fallback = workspaces.find(w => !w.inherited) ?? workspaces[0] ?? null
-    const workspace = workspaces.find(w => w.id === stored) ?? fallback
-    const setActive = useCallback((id: string) => {
-        memActive = id
-        try { localStorage.setItem(ACTIVE_KEY, id) } catch { /* lasts until reload */ }
-        try { window.dispatchEvent(new Event(ACTIVE_EVENT)) } catch { /* no window */ }
-    }, [])
+    const { workspaces: all, isCustomer } = useAccess()
+    const stored = useClientValueOn(ACTIVE_WORKSPACE_EVENT, readActiveWorkspaceId, null)
+    // A customer with nothing viewable (only disabled workspaces) still sees
+    // them on /account; the live app sends such an account there.
+    const viewable = useMemo(() => viewableWorkspaces(all), [all])
+    const scoped = isCustomer && viewable.length > 0
+    const workspaces = scoped ? viewable : all
+    const workspace = resolveActiveWorkspace(all, stored, scoped)
+    const setActive = useCallback((id: string) => { void switchActiveWorkspace(id) }, [])
     return { workspace, workspaces, setActive }
 }
