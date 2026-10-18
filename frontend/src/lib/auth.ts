@@ -140,10 +140,36 @@ export function deviceLabel(): string {
     return os ? `${browser} on ${os}` : browser
 }
 
-/** Bearer header for a REST call: `fetch(url, { headers: authHeaders() })`. */
+/**
+ * THE TOKEN GOES ONLY TO THE CONFIGURED API BASE (getServerUrl()). Never
+ * attach it to another host: a localhost probe, a desktop preview server, a
+ * relay or an air-unit address. On a page served from dev.xenarobotics.com,
+ * "localhost:8001" is whatever process the viewer happens to run there, not
+ * necessarily our backend. apiFetch enforces this; a hand-built fetch to an
+ * absolute URL should use authHeadersFor(url). A different host that must
+ * reach a protected stream gets a path-bound URL ticket instead (urlTicket
+ * in src/lib/api.ts).
+ */
+export function isApiUrl(url: string): boolean {
+    try {
+        const base = new URL(getServerUrl())
+        const u = new URL(url, base)
+        return u.origin === base.origin
+    } catch {
+        return false
+    }
+}
+
+/** Bearer header for a REST call: `fetch(url, { headers: authHeaders() })`.
+ *  Only for URLs on the API base (see isApiUrl). */
 export function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
     const token = getToken()
     return token ? { ...extra, Authorization: `Bearer ${token}` } : { ...extra }
+}
+
+/** authHeaders() when `url` is on the API base, otherwise just `extra`. */
+export function authHeadersFor(url: string, extra: Record<string, string> = {}): Record<string, string> {
+    return isApiUrl(url) ? authHeaders(extra) : { ...extra }
 }
 
 /**

@@ -62,7 +62,8 @@ actor and client IP, readable through `GET /api/audit`.
 
 * REST: `Authorization: Bearer <token>`.
 * Socket.IO: `auth: {token, resume_session, resume_secret}`. A refused handshake carries the message `unauthorized`; the frontend clears its token and goes to `/login`.
-* Frontend: `src/lib/auth.ts` (`login`, `logout`, `getToken`, `getUser`, `authHeaders`, `liveAuthHeaders`) and `src/lib/api.ts` (`apiFetch`, redirects to `/login` on 401; `apiDownload` for files; `ticketedUrl` for streams). Every backend call goes through `apiFetch`, except the auth calls themselves, `src/lib/workspaces.ts` in its soft mode (no redirect), the local-backend probe in `serverHevcFeed.ts` (bearer, no redirect: a different local server's 401 must not sign you out) and the public `/releases` fetches. An `<img>` or `<a href>` cannot send the header: one-shot media and downloads are fetched into a blob and shown or saved through an object URL (`src/hooks/useApiMedia.ts` `useApiObjectUrl`, `apiDownload`), and long-lived MJPEG streams use URL tickets (below). The token lives in `localStorage` under `hyrak-auth-token`. `src/hooks/useAuthGate.ts` keeps the platform layout and `/admin` behind the login; `/` stays public.
+* Frontend: `src/lib/auth.ts` (`login`, `logout`, `getToken`, `getUser`, `authHeaders`, `liveAuthHeaders`) and `src/lib/api.ts` (`apiFetch`, redirects to `/login` on 401; `apiDownload` for files; `ticketedUrl` for streams). Every backend call goes through `apiFetch`, except the auth calls themselves, `src/lib/workspaces.ts` in its soft mode (no redirect), the server-feed stream reader in `WebCodecsVideo.tsx` and the public `/releases` fetches.
+* **The token goes only to the configured API base** (`getServerUrl()`), never to another host: not a localhost probe, a desktop preview server, a relay or an air-unit address. On a page served from `dev.xenarobotics.com`, `localhost:8001` is whatever process the viewer runs there. `isApiUrl(url)` / `authHeadersFor(url)` in `src/lib/auth.ts` state the rule, and `apiFetch` enforces it (it drops any `Authorization` for an absolute URL off the API base, and redirects to `/login` only on the API base's 401). The localhost shortcut for the server video feeds (`serverHevcFeed.ts`) probes the public `/api/health` on both bases and uses localhost only when it reports the same per-process `instance` id as the API base; the feed stream then reaches it with a URL ticket for the feed path, not the bearer. An `<img>` or `<a href>` cannot send the header: one-shot media and downloads are fetched into a blob and shown or saved through an object URL (`src/hooks/useApiMedia.ts` `useApiObjectUrl`, `apiDownload`), and long-lived MJPEG streams use URL tickets (below). The token lives in `localStorage` under `hyrak-auth-token`. `src/hooks/useAuthGate.ts` keeps the platform layout and `/admin` behind the login; `/` stays public.
 * Scripts (`simulation/gz_depth_sensor.py`, `gs_relay_agent.py`): put an operator's bearer token in `HYRAK_TOKEN`. Get one with the login call below or from a signed-in browser's `localStorage`.
 
 ```
@@ -117,7 +118,10 @@ GET  /api/recon/stream/depth?ticket=<ticket>
   which has no token record to re-check.
 * A route opts in with `Depends(require_user_or_ticket(min_role, template))`
   (`backend/app/auth/url_tickets.py`), passing its own full path template;
-  today only `GET /api/recon/stream/{kind}`. Every other route uses
+  today `GET /api/recon/stream/{kind}` (viewer) and
+  `GET /api/video/feeds/{port}/hevc` and `/h264` (operator; the frontend's
+  localhost shortcut for these feeds uses a ticket because the bearer never
+  leaves the API base). Every other route uses
   `require_user`, which reads headers only and ignores `?ticket=`. The
   dependency also ignores a ticket on any method but GET / HEAD and on a
   path its template does not match. A credential header, when present,

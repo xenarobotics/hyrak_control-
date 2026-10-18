@@ -137,10 +137,17 @@ def _validate(model, body):
         raise HTTPException(status_code=400, detail=errs or "invalid body")
 
 
+# A random id per backend process. The frontend's localhost shortcut for
+# the server video feeds compares it with the API base's, so it only streams
+# from a local port that IS this backend (frontend/src/lib/serverHevcFeed.ts).
+_INSTANCE_ID = __import__("secrets").token_hex(8)
+
+
 @router.get("/health")
 async def health():
     return {
         "status": "ok",
+        "instance": _INSTANCE_ID,
         "version": "0.1.0",
         "device": settings.device,
         "gpu_count": settings.gpu_count,

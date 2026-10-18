@@ -627,10 +627,17 @@ server never dials a TURN host the customer typed.
   calibration / face gallery / sightings, avoidance, mesh-unit, recon and
   ICE-server reads, and the writes that already carried the token. The
   exceptions are deliberate: the auth calls themselves,
-  `src/lib/workspaces.ts` in its soft mode (no redirect), the local-backend
-  probe in `serverHevcFeed.ts` (bearer, but no redirect), the
-  `/api/video/feeds` stream reader (bearer through `authHeaders`) and the
-  public `/releases` fetches.
+  `src/lib/workspaces.ts` in its soft mode (no redirect), the
+  `/api/video/feeds` stream reader in `WebCodecsVideo.tsx` and the public
+  `/releases` fetches.
+* The bearer goes only to the configured API base (`getServerUrl()`):
+  `apiFetch` drops it for any other host, and `isApiUrl` /
+  `authHeadersFor` in `src/lib/auth.ts` state the rule. The localhost
+  shortcut for the server video feeds probes the public `/api/health`
+  (which now carries a per-process `instance` id) and streams from
+  localhost only when it is the same process as the API base, with a URL
+  ticket for the feed path instead of the bearer. Desktop preview servers
+  get no credential at all.
 * Elements that cannot send a header: the plate crop
   (`/api/vision/plate-history/{id}/image`) is fetched into a blob and shown
   through an object URL revoked on unmount (`useApiObjectUrl`); the flight
@@ -643,7 +650,8 @@ server never dials a TURN host the customer typed.
   user, the token and that exact path, reusable within the window so the
   `<img>` can reconnect, re-checked against the token on every use, and
   accepted only by routes that opted in with `require_user_or_ticket` (the
-  recon streams only). Details in `docs/AUTH.md` "URL tickets".
+  recon streams, viewer; the `/api/video/feeds/{port}/hevc` and `/h264`
+  streams, operator, for the localhost shortcut above). Details in `docs/AUTH.md` "URL tickets".
 * Video sources: the frontend hides the two DataChannel modes
   (`rtsp_datachannel`, `air_unit_datachannel`) from customers as well, to
   match the backend (`datachannel_video_offer` is staff-only because of the

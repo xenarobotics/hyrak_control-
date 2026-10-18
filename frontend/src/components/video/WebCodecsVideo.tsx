@@ -21,7 +21,8 @@
 //   [uint32 length][uint8 keyframe][uint32 sequence][Annex-B access unit]
 
 import { useEffect, useRef, useState } from 'react'
-import { authHeaders } from '@/lib/auth'
+import { authHeaders, isApiUrl } from '@/lib/auth'
+import { urlTicket } from '@/lib/api'
 import { codecString } from '@/lib/codecString'
 
 const HEADER_BYTES = 9
@@ -111,11 +112,14 @@ export function WebCodecsVideo({ src, codec: wireCodec = 'h264', className, styl
         ;(async () => {
             try {
                 // The server's /api/video/feeds routes start readers and
-                // transcoders, so they need the operator's bearer token like
-                // every other mutating /api route; local preview servers ignore it.
-                const res = await fetch(src, {
+                // transcoders, so they need an operator. The bearer goes only
+                // to the API base; the same feed on a local backend
+                // (serverHevcFeed's localhost shortcut) gets a 60 s URL ticket
+                // for its path instead, and a desktop preview server gets
+                // nothing. A fresh ticket on every (re)connect.
+                const res = await fetch(await authorisedStreamUrl(src), {
                     signal: abort.signal, cache: 'no-store',
-                    headers: authHeaders(),
+                    headers: isApiUrl(src) ? authHeaders() : {},
                 })
                 if (!res.body) throw new Error('preview stream has no body')
                 const reader = res.body.getReader()
@@ -256,4 +260,17 @@ export function WebCodecsVideo({ src, codec: wireCodec = 'h264', className, styl
             )}
         </>
     )
+}
+
+/** `src` as fetched: unchanged on the API base (the bearer rides in the
+ *  header) and for anything that is not a server feed; a server feed on
+ *  another host carries a URL ticket from the configured API. */
+async function authorisedStreamUrl(src: string): Promise<string> {
+    if (isApiUrl(src)) return src
+    let u: URL
+    try { u = new URL(src) } catch { return src }
+    if (!u.pathname.startsWith('/api/video/feeds/')) return src
+    const ticket = await urlTicket(u.pathname)
+    if (ticket) u.searchParams.set('ticket', ticket)
+    return u.toString()
 }

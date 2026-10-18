@@ -159,9 +159,28 @@ async def test_ticket_follows_a_role_drop(cl, monkeypatch):
     assert cl.get(f"{DEPTH}?ticket={tk}").status_code == 403
 
 
-def test_only_the_recon_streams_opted_in():
+def test_only_the_streams_opted_in():
     import app.reconstruction.routes  # noqa: F401  (registers its template)
-    assert url_tickets.ticket_templates() == ["/api/recon/stream/{kind}"]
+    import app.webrtc.mesh_units  # noqa: F401
+    assert sorted(url_tickets.ticket_templates()) == [
+        "/api/recon/stream/{kind}", "/api/video/feeds/{port}/h264", "/api/video/feeds/{port}/hevc"]
+
+
+async def test_feed_tickets_need_the_feeds_role(cl):
+    """The server feeds start readers and transcoders: operator, like their
+    bearer check. The ticket lets the frontend reach the same backend on
+    localhost without sending it the bearer."""
+    _, vt = await account("hv", "viewer")
+    _, ot = await account("hp", "operator")
+    assert ticket_for(cl, vt, "/api/video/feeds/5600/hevc", 403) is None
+    assert ticket_for(cl, ot, "/api/video/feeds/5600/hevc")
+    assert ticket_for(cl, ot, "/api/video/feeds/5600/h264")
+    assert ticket_for(cl, ot, "/api/video/feeds", 404) is None
+
+
+def test_health_names_the_process(cl):
+    a, b = cl.get("/api/health").json(), cl.get("/api/health").json()
+    assert isinstance(a["instance"], str) and len(a["instance"]) == 16 and a["instance"] == b["instance"]
 
 
 def test_the_map_is_bounded(monkeypatch):

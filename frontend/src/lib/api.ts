@@ -4,7 +4,7 @@
  *
  *     const r = await apiFetch('/api/zones', { method: 'POST', json: { ... } })
  */
-import { authHeaders, redirectToLogin } from './auth'
+import { authHeaders, isApiUrl, redirectToLogin } from './auth'
 import { getServerUrl } from './server-url'
 
 export interface ApiInit extends RequestInit {
@@ -14,17 +14,22 @@ export interface ApiInit extends RequestInit {
 
 export async function apiFetch(path: string, init: ApiInit = {}): Promise<Response> {
     const { json, headers, ...rest } = init
-    const h: Record<string, string> = authHeaders(
-        Object.fromEntries(new Headers(headers ?? {}).entries()),
-    )
+    const url = path.startsWith('http') ? path : `${getServerUrl()}${path}`
+    const onApi = isApiUrl(url)
+    const h: Record<string, string> = Object.fromEntries(new Headers(headers ?? {}).entries())
+    // The token goes to the API base and nowhere else (see isApiUrl), even
+    // when a caller passed it in `headers` itself. Headers() lower-cases the
+    // names, so drop the caller's copy first: two Authorization entries
+    // would be sent joined ("Bearer a, Bearer a") and fail to verify.
+    delete h.authorization
+    if (onApi) Object.assign(h, authHeaders())
     let body = rest.body
     if (json !== undefined) {
         h['Content-Type'] = 'application/json'
         body = JSON.stringify(json)
     }
-    const url = path.startsWith('http') ? path : `${getServerUrl()}${path}`
     const res = await fetch(url, { ...rest, body, headers: h })
-    if (res.status === 401) redirectToLogin()
+    if (res.status === 401 && onApi) redirectToLogin()
     return res
 }
 
@@ -77,10 +82,18 @@ export async function apiDownload(path: string, fallbackName: string): Promise<b
  * ask for a new URL. Null when the server refused (no access, or the route
  * does not take tickets).
  */
-export async function ticketedUrl(path: string): Promise<string | null> {
+export async function ticketedUrl(path: string, base: string = getServerUrl()): Promise<string | null> {
+    const ticket = await urlTicket(path)
+    return ticket ? `${base}${path}?ticket=${encodeURIComponent(ticket)}` : null
+}
+
+/** A URL ticket for `path` from the configured API (POST /api/auth/url-ticket),
+ *  or null when refused. Also the way to reach a protected stream on a
+ *  host other than the API base: the bearer never leaves the API base, a
+ *  ticket is limited to one path for 60 s. */
+export async function urlTicket(path: string): Promise<string | null> {
     const { ok, data } = await apiJson<{ ticket?: string }>('/api/auth/url-ticket', {
         method: 'POST', json: { path },
     })
-    if (!ok || !data.ticket) return null
-    return `${getServerUrl()}${path}?ticket=${encodeURIComponent(data.ticket)}`
+    return ok && data.ticket ? data.ticket : null
 }
