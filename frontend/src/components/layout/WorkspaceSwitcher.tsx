@@ -1,17 +1,21 @@
 'use client'
 
-// Sidebar workspace switcher: the workspace this browser is "in". Only shown
-// when the person can reach more than one workspace (one pilot in their own
-// workspace never sees it). The choice is per browser; nothing is sent to
-// the server until a page acts on a workspace, and then the id goes in the
-// request body.
+// Sidebar workspace switcher: the workspace this browser is "in".
+//
+// Staff: shown when they can reach more than one workspace; the choice is a
+// UI choice (their live session stays on HYRAK).
+//
+// Customer-only accounts (docs/ACCESS_MODEL.md section 8a): always shown,
+// since the active workspace is what their live session can reach, and it
+// lists only workspaces they can view. Picking another one stops the stream,
+// releases the drone link and reconnects the socket (lib/workspaceSwitch).
 
 import { Building2 } from 'lucide-react'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup,
     DropdownMenuRadioItem, DropdownMenuTrigger, DropdownMenuGroup,
 } from '@/components/ui/dropdown-menu'
-import { useActiveWorkspace } from '@/hooks/useAccess'
+import { useAccess, useActiveWorkspace } from '@/hooks/useAccess'
 import { KIND_LABELS, roleLabel } from '@/lib/access'
 import { cn } from '@/lib/utils'
 
@@ -24,7 +28,8 @@ function initials(name: string): string {
 
 export function WorkspaceSwitcher({ normal }: { normal: boolean }) {
     const { workspace, workspaces, setActive } = useActiveWorkspace()
-    if (workspaces.length <= 1 || !workspace) return null
+    const { isCustomer } = useAccess()
+    if (!workspace || (!isCustomer && workspaces.length <= 1)) return null
 
     return (
         <DropdownMenu>
@@ -56,6 +61,11 @@ export function WorkspaceSwitcher({ normal }: { normal: boolean }) {
                     <DropdownMenuLabel className="flex items-center gap-1.5 font-mono text-[10px] tracking-widest">
                         <Building2 size={11} /> WORKSPACE
                     </DropdownMenuLabel>
+                    {isCustomer && workspaces.length > 1 && (
+                        <p className="px-2 pb-1.5 text-[10px] leading-snug text-muted-foreground">
+                            Switching ends the live session: video stops and the drone link is released.
+                        </p>
+                    )}
                     <DropdownMenuRadioGroup value={workspace.id} onValueChange={v => setActive(String(v))}>
                         {workspaces.map(w => (
                             <DropdownMenuRadioItem key={w.id} value={w.id} className="items-start">

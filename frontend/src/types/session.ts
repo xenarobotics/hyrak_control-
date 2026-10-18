@@ -1,3 +1,5 @@
+import type { Perm } from '@/lib/access'
+
 export type AnalysisMode =
     | 'manual-control'
     | 'object-detection'
@@ -59,4 +61,10 @@ export interface SessionInfo {
      *  cleared when the link drops. Null while no drone is bound. */
     drone?: BoundDrone | null
     hardware_uid?: string | null
+    /** Phase 2a (docs/ACCESS_MODEL.md section 8a): the workspace the
+     *  session belongs to, the account's perms on it, and whether the
+     *  account is staff. Absent from an older server. */
+    workspace_id?: string | null
+    perms?: Perm[]
+    staff?: boolean
 }

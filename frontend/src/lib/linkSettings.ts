@@ -1,3 +1,5 @@
+import { getUser, isCustomer } from './auth'
+
 // Persisted defaults for the telemetry / command links.
 //
 // These were previously literals at their point of use - `useState('udp://:14540')`
@@ -69,10 +71,20 @@ export const LINK_CHANGE_EVENT = 'hyrak-link-changed'
  *  | 'air-unit-udp' | 'local-relay' | 'siyi-udp' */
 export const DEFAULT_TELEMETRY_SOURCE = 'sitl'
 
+/** Links a customer-only account never uses (docs/ACCESS_MODEL.md section
+ *  8a): the backend binding a UDP port on its own machine. 'sitl-server' is
+ *  "Gazebo sim on server" (udp:14600) and is NOT the same thing as 'sitl',
+ *  the desktop relay of the client's own SITL (udp:14540), which customers
+ *  keep. The two stay separate options everywhere. */
+export const STAFF_ONLY_LINKS: readonly string[] = ['sitl-server']
+
 export function getTelemetrySource(): string {
     if (typeof window === 'undefined') return DEFAULT_TELEMETRY_SOURCE
     try {
-        return localStorage.getItem(SOURCE_KEY) || DEFAULT_TELEMETRY_SOURCE
+        const v = localStorage.getItem(SOURCE_KEY) || DEFAULT_TELEMETRY_SOURCE
+        // Left over from a staff session in this browser: fall back to the
+        // default rather than offer a link the customer cannot see.
+        return STAFF_ONLY_LINKS.includes(v) && isCustomer(getUser()) ? DEFAULT_TELEMETRY_SOURCE : v
     } catch {
         return DEFAULT_TELEMETRY_SOURCE
     }

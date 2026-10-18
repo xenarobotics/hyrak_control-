@@ -28,6 +28,7 @@ import {
 // for SITL instances and adopted the session's port as a phantom drone.
 export const SERVER_SITL_ADDRESS = 'udp://:14600'
 import { useDrone } from '@/hooks/useDrone'
+import { useAccess } from '@/hooks/useAccess'
 import { getLocalRelayUrl } from '@/lib/localRfRelay'
 import { getSiyiTelemetryTarget, startSiyiTelemetry } from '@/lib/siyiTelemetryRelay'
 import { isDesktopApp } from '@/lib/nativeBridge'
@@ -35,7 +36,8 @@ import { listNativeSerialPorts, type NativeRadio } from '@/lib/nativeSerialRelay
 import {
 
     getTelemetryBaud, setTelemetryBaud,
-    getTelemetrySource, setTelemetrySource, LINK_CHANGE_EVENT,
+    getTelemetrySource, setTelemetrySource, LINK_CHANGE_EVENT, STAFF_ONLY_LINKS,
+    DEFAULT_TELEMETRY_SOURCE,
 } from '@/lib/linkSettings'
 
 export interface LinkOption {
@@ -45,11 +47,14 @@ export interface LinkOption {
 
 export function useTelemetryLink() {
     const desktop = isDesktopApp()
+    // Customer-only accounts never see server-side links (STAFF_ONLY_LINKS).
+    const { isCustomer } = useAccess()
     const [radios, setRadios] = useState<GrantedRadio[]>([])
     const [nativeRadios, setNativeRadios] = useState<NativeRadio[]>([])
     // Read from storage rather than defaulted, so a link picked in the bar is
     // still the one selected after navigating to Fly.
-    const [source, setSourceState] = useState<string>(() => getTelemetrySource())
+    const [storedSource, setSourceState] = useState<string>(() => getTelemetrySource())
+    const source = isCustomer && STAFF_ONLY_LINKS.includes(storedSource) ? DEFAULT_TELEMETRY_SOURCE : storedSource
     const [baud, setBaudState] = useState(() => getTelemetryBaud())
     const [disconnecting, setDisconnecting] = useState(false)
 
@@ -176,9 +181,12 @@ export function useTelemetryLink() {
     /** Every link this shell can offer, in the order DeviceSelector shows
      *  them. One list so the bar and the Fly panel cannot offer different
      *  sets - which is the failure mode of having written it out twice. */
-    const options: LinkOption[] = [
+    const allOptions: LinkOption[] = [
         ...nativeRadios.map((r, i) => ({ value: `nradio-${i}`, label: r.label })),
         ...radios.map((r, i) => ({ value: `radio-${i}`, label: r.label })),
+        // Two different links that both say "sim" - never merge or relabel:
+        // sitl-server is the backend binding udp:14600 on its own machine,
+        // sitl is the desktop relay of the client's own SITL on udp:14540.
         { value: 'sitl-server', label: 'Gazebo sim on server (udp:14600)' },
         { value: 'sitl', label: 'SITL' },
         // Native first: same ground station as local-relay but with no relay
@@ -187,6 +195,7 @@ export function useTelemetryLink() {
         { value: 'local-relay', label: 'Local RF relay (air unit)' },
         { value: 'siyi-udp', label: 'SIYI ground unit (UDP)' },
     ]
+    const options = isCustomer ? allOptions.filter(o => !STAFF_ONLY_LINKS.includes(o.value)) : allOptions
 
     const isSerial = source.startsWith('radio-') || source.startsWith('nradio-')
     const selectedIsFc = source.startsWith('radio-')

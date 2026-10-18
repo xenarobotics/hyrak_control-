@@ -20,6 +20,7 @@ import { useSwarmStore } from '@/store/swarm'
 import { MAP_LAYERS, WP_META } from '@/types/mission'
 import type { Waypoint, MapLayer } from '@/types/mission'
 import { getServerUrl } from '@/lib/server-url'
+import { authHeaders } from '@/lib/auth'
 import { visibleInterval } from '@/lib/poll'
 import { getHazards, getObstaclesAndPath, addHazard, type KnownHazard, type LiveObstacle, type LatLng } from '@/lib/avoidance'
 import { ZONE_COLORS, zoneRings, type ZoneFeature } from '@/components/admin/zones'
@@ -32,7 +33,7 @@ function FlightZonesOverlay() {
     let alive = true
     const load = async () => {
       try {
-        const res = await fetch(`${getServerUrl()}/api/zones`)
+        const res = await fetch(`${getServerUrl()}/api/zones`, { headers: authHeaders() })
         const data = await res.json()
         if (alive) setZones(data.features ?? [])
       } catch { /* zones stay hidden if backend unreachable */ }

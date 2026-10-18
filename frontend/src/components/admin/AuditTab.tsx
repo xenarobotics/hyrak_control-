@@ -53,7 +53,8 @@ export default function AuditTab() {
         const last = events?.[events.length - 1]
         if (!last) return
         setLoadingMore(true)
-        const r = await listAudit({ workspace_id: effective || undefined, limit: PAGE, before: last.at })
+        // `before` is an event id (docs/ACCESS_MODEL.md section 7, Audit).
+        const r = await listAudit({ workspace_id: effective || undefined, limit: PAGE, before: last.id })
         setLoadingMore(false)
         if (!r.ok) { setError(r.error); return }
         setEvents(e => [...(e ?? []), ...r.data])

@@ -27,7 +27,7 @@ import {
     BAUD_OPTIONS, DEFAULT_TELEMETRY_ADDRESS,
 } from '@/lib/linkSettings'
 import { setStatusBarEnabled, setStatusBarLinksEnabled } from '@/lib/statusBarSettings'
-import { VIDEO_SOURCES, SOURCE_GROUPS, specFor, sourceNeeds,
+import { videoSourcesFor, sourceGroupsFor, specFor, sourceNeeds,
     getVideoSource, setVideoSource, getSiyiRtspUrl, setSiyiRtspUrl, getAirUnitVideoPort, setAirUnitVideoPort, getAirUnitFanoutPort, setAirUnitFanoutPort, type VideoSource, getRelayTransport, setRelayTransport, getRelayLatencyMs, setRelayLatencyMs, type RelayTransport, getRtspTransport, setRtspTransport, type RtspTransport, getPreviewFragMode, setPreviewFragMode, type PreviewFragMode, getLiveEdgeClamp, setLiveEdgeClamp, getGstJitterMs, setGstJitterMs, getGstAccel, setGstAccel, type GstAccel,
     getReceiverHost, setReceiverHost, getReceiverTransport, setReceiverTransport,
     getReceiverLatencyMs, setReceiverLatencyMs, getReceiverAccel, setReceiverAccel,
@@ -52,6 +52,7 @@ import { useClientValue, useHydrated } from '@/hooks/useClientValue'
 import { PrefRow } from '@/components/settings/primitives'
 import { DevicesGroup, PasswordGroup, ProfileGroup } from '@/components/settings/AccountSettings'
 import { InvitesGroup, MembersGroup, WorkspaceGroup } from '@/components/settings/WorkspaceSettings'
+import { useAccess } from '@/hooks/useAccess'
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
 
@@ -632,6 +633,8 @@ function RtspPathRow() {
 
 function VideoGroup() {
     const { isStreaming, applyVideoSettings } = useWebRTCContext()
+    // Customer-only accounts get the customer-safe sources (lib/videoSource).
+    const { isCustomer } = useAccess()
     const [res, setRes] = useState<VideoRes>(() => getVideoSettings().res)
     const [fps, setFps] = useState<VideoFps>(() => getVideoSettings().fps)
     const [feed, setFeed] = useState<FeedMode>(() => getFeedMode())
@@ -689,9 +692,9 @@ function VideoGroup() {
                             could not be selected. Exactly the class of bug the
                             data-driven catalogue above was introduced to kill,
                             reintroduced two lines from it. */}
-                        {SOURCE_GROUPS.map(group => (
+                        {sourceGroupsFor(isCustomer).map(group => (
                             <optgroup key={group} label={group}>
-                                {VIDEO_SOURCES.filter(s => s.group === group).map(s => (
+                                {videoSourcesFor(isCustomer).filter(s => s.group === group).map(s => (
                                     <option key={s.value} value={s.value}>
                                         {s.label}{s.desktopOnly ? '  (desktop)' : ''}
                                     </option>
@@ -1690,9 +1693,14 @@ function VisionLimitsGroup() {
 // that each printed their own label. Adding a settings group means adding a
 // line to this table, and it lands in a deliberate category instead of at the
 // bottom of one long scroll.
+//
+// `staffOnly` hides a category or section from customer-only accounts
+// (docs/ACCESS_MODEL.md section 8a): server-wide vision calibration and
+// tuning, server log paths, missions and avoidance stay with staff.
 interface Section {
     label: string                        // divider text within a category
     Body: () => React.JSX.Element
+    staffOnly?: boolean
 }
 interface Category {
     id: string
@@ -1700,6 +1708,7 @@ interface Category {
     icon: LucideIcon
     blurb: string                        // one line under the category heading
     sections: Section[]
+    staffOnly?: boolean
 }
 
 
@@ -1710,6 +1719,8 @@ function LinkGroup() {
     const [address, setAddressState] = useState(() => getTelemetryAddress())
     const [baud, setBaudState] = useState(() => getTelemetryBaud())
     const [busy, setBusy] = useState(false)
+    // A typed MAVLink address is a server-side link: staff only.
+    const { isCustomer } = useAccess()
 
     const connected = telemetryStatus === 'connected'
 
@@ -1750,7 +1761,7 @@ function LinkGroup() {
                     )
                 }
             />
-            <PrefRow
+            {!isCustomer && <PrefRow
                 label="Default MAVLink address"
                 sub="Pre-filled in the Fly tab's connect box"
                 tip="udp://:14540 is PX4 SITL's default. For a real vehicle over a network link use the address the autopilot streams to, e.g. udp://:14550. Serial radios do not use this - pick the port and baud below instead."
@@ -1766,7 +1777,7 @@ function LinkGroup() {
                         }}
                     />
                 }
-            />
+            />}
             <PrefRow
                 label="Radio baud rate"
                 sub="Default for serial telemetry radios"
@@ -1917,7 +1928,7 @@ const CATEGORIES: Category[] = [
         blurb: 'Where the feed comes from, its quality, and how AI results are drawn',
         sections: [
             { label: 'VIDEO', Body: VideoGroup },
-            { label: 'CAMERA CALIBRATION', Body: CameraCalibrationGroup },
+            { label: 'CAMERA CALIBRATION', Body: CameraCalibrationGroup, staffOnly: true },
         ],
     },
     {
@@ -1926,7 +1937,7 @@ const CATEGORIES: Category[] = [
         sections: [{ label: 'COMM LINKS', Body: LinkGroup }],
     },
     {
-        id: 'ai', label: 'AI Modules', icon: Bot,
+        id: 'ai', label: 'AI Modules', icon: Bot, staffOnly: true,
         blurb: 'Per-mode tuning for the vision modules',
         sections: [
             { label: 'FOLLOW TUNING', Body: FollowTuningGroup },
@@ -1940,12 +1951,12 @@ const CATEGORIES: Category[] = [
         sections: [{ label: 'MAP', Body: MapGroup }],
     },
     {
-        id: 'mission', label: 'Mission', icon: Route,
+        id: 'mission', label: 'Mission', icon: Route, staffOnly: true,
         blurb: 'Behaviour when a mission starts',
         sections: [{ label: 'MISSION', Body: MissionGroup }],
     },
     {
-        id: 'avoidance', label: 'Avoidance', icon: Radar,
+        id: 'avoidance', label: 'Avoidance', icon: Radar, staffOnly: true,
         blurb: 'Obstacle sensors and how the drone avoids them',
         sections: [{ label: 'SENSORS & AVOIDANCE', Body: SensorsGroup }],
     },
@@ -1955,7 +1966,7 @@ const CATEGORIES: Category[] = [
         sections: [{ label: 'ALERTS', Body: NotificationsGroup }],
     },
     {
-        id: 'data', label: 'Data & Logs', icon: Database,
+        id: 'data', label: 'Data & Logs', icon: Database, staffOnly: true,
         blurb: 'Telemetry recording and where logs are written',
         sections: [{ label: 'DATA & LOGS', Body: DataGroup }],
     },
@@ -1973,13 +1984,22 @@ const CATEGORIES: Category[] = [
 
 const TAB_KEY = 'hyrak-settings-tab'
 
-function SettingsNav({ active, onSelect }: { active: string; onSelect: (id: string) => void }) {
+function categoriesFor(customer: boolean): Category[] {
+    if (!customer) return CATEGORIES
+    return CATEGORIES
+        .filter(c => !c.staffOnly)
+        .map(c => ({ ...c, sections: c.sections.filter(sec => !sec.staffOnly) }))
+}
+
+function SettingsNav({ categories, active, onSelect }: {
+    categories: Category[]; active: string; onSelect: (id: string) => void
+}) {
     return (
         // Column beside the content on a normal window; a horizontally
         // scrollable row when the pane is too narrow for both (the desktop
         // app can be resized well below a comfortable two-column width).
         <nav className="flex shrink-0 gap-1 overflow-x-auto pb-2 md:sticky md:top-1 md:w-[172px] md:flex-col md:overflow-x-visible md:pb-0">
-            {CATEGORIES.map(({ id, label, icon: Icon }) => (
+            {categories.map(({ id, label, icon: Icon }) => (
                 <button
                     key={id}
                     onClick={() => onSelect(id)}
@@ -2010,15 +2030,16 @@ export default function SettingsPage() {
     // the whole page in one place instead of per-component. The active tab is
     // read the same way, for the same reason.
     const mounted = useHydrated()
-    const savedTab = useClientValue(() => {
-        const saved = ls(TAB_KEY, CATEGORIES[0].id)
-        return CATEGORIES.some(c => c.id === saved) ? saved : CATEGORIES[0].id
-    }, CATEGORIES[0].id)
+    const { isCustomer } = useAccess()
+    const categories = categoriesFor(isCustomer)
+    const savedTab = useClientValue(() => ls(TAB_KEY, CATEGORIES[0].id), CATEGORIES[0].id)
     const [pickedTab, setActiveId] = useState<string | null>(null)
-    const activeId = pickedTab ?? savedTab
+    // A saved tab this account cannot see (a staff category, or one that no
+    // longer exists) falls back to the first one.
+    const active = categories.find(c => c.id === (pickedTab ?? savedTab)) ?? categories[0]
+    const activeId = active.id
 
     const select = (id: string) => { setActiveId(id); lsSet(TAB_KEY, id) }
-    const active = CATEGORIES.find(c => c.id === activeId) ?? CATEGORIES[0]
 
     return (
         <div style={{ height: '100%', overflowY: 'auto' }}>
@@ -2031,7 +2052,7 @@ export default function SettingsPage() {
 
                 {mounted && (
                     <div className="flex flex-col gap-7 md:flex-row">
-                        <SettingsNav active={activeId} onSelect={select} />
+                        <SettingsNav categories={categories} active={activeId} onSelect={select} />
 
                         <div style={{ flex: 1, minWidth: 0, maxWidth: 660 }}>
                             <h2 style={{ fontSize: 14, fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>{active.label}</h2>
