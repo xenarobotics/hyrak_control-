@@ -104,7 +104,7 @@ export default function FleetMap() {
         attributionControl={false}
       >
         <TileLayer url={layer.url} maxZoom={layer.maxZoom} maxNativeZoom={layer.maxNativeZoom} />
-        {layer.overlay && <TileLayer url={layer.overlay} maxZoom={layer.maxZoom} />}
+        {layer.overlays?.map(url => <TileLayer key={url} url={url} maxZoom={layer.maxZoom} maxNativeZoom={layer.maxNativeZoom} />)}
         <FitFleet points={points} fitKey={fitKey} />
 
         {positioned.map(d => {

@@ -4,7 +4,7 @@ import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { useMissionStore } from '@/store/mission'
 import { useDroneStore } from '@/store/drone'
 import { useSwarmStore } from '@/store/swarm'
-import { WP_META } from '@/types/mission'
+import { WP_META, HYBRID_LABEL_TILES } from '@/types/mission'
 import type { Waypoint } from '@/types/mission'
 import type * as CesiumNS from 'cesium'
 
@@ -422,15 +422,18 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
 
       if (destroyed) return
 
-      // ── CartoDB labels overlay (Cesium 1.138+ API: add ImageryLayer directly)
-      viewer.imageryLayers.add(
-        new Cesium.ImageryLayer(
-          new Cesium.UrlTemplateImageryProvider({
-            url: 'https://a.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png',
-            credit: new Cesium.Credit('© OpenStreetMap contributors © CARTO', false),
-          })
+      // ── Esri roads + place labels overlay (Cesium 1.138+ API: add ImageryLayer directly)
+      for (const url of HYBRID_LABEL_TILES) {
+        viewer.imageryLayers.add(
+          new Cesium.ImageryLayer(
+            new Cesium.UrlTemplateImageryProvider({
+              url,
+              maximumLevel: 19,
+              credit: new Cesium.Credit('© Esri', false),
+            })
+          )
         )
-      )
+      }
 
       // ── 3D Buildings / Photorealistic tiles ────────────────────────────
       if (googleKey) {

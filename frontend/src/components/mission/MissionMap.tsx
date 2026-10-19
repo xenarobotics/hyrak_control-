@@ -637,14 +637,15 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
         maxNativeZoom={layerDef.maxNativeZoom}
       />
 
-      {layerDef.overlay && (
+      {layerDef.overlays?.map((url, i) => (
         <TileLayer
-          url={layerDef.overlay}
-          attribution={layerDef.overlayAttribution ?? ''}
+          key={url}
+          url={url}
+          attribution={i === 0 ? layerDef.overlayAttribution ?? '' : ''}
           maxZoom={layerDef.maxZoom}
           maxNativeZoom={layerDef.maxNativeZoom}
         />
-      )}
+      ))}
 
       {!readOnly && <ClickHandler pinMode={pinMode} onPin={pinHazard} />}
       <DronePositionTracker />

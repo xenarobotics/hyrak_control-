@@ -55,7 +55,7 @@ export interface MapLayerDef {
   attribution: string
   maxZoom: number
   maxNativeZoom?: number    // highest zoom the tile server actually has tiles for; above this Leaflet upscales
-  overlay?: string          // optional label overlay URL for hybrid
+  overlays?: string[]       // optional label overlay URLs for hybrid, drawn in order
   overlayAttribution?: string
 }
 
@@ -64,15 +64,24 @@ export interface MapLayerDef {
 // ArcGIS World Imagery is free, requires no API key from any domain, and has
 // good global coverage. The tile URL uses {z}/{y}/{x} (row before column) which
 // is the ArcGIS native format and maps directly to Leaflet's {z}/{y}/{x} tokens.
+// Roads, then place names and boundaries, drawn over satellite imagery
+// (2D Hybrid and the 3D map).
+export const HYBRID_LABEL_TILES = [
+  'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
+  'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+]
+
 export const MAP_LAYERS: MapLayerDef[] = [
   {
-    // CARTO Voyager - the "navigation app" look: soft land tones, clear
-    // road hierarchy, readable labels. Free for light use, no API key.
+    // Esri World Street Map - the "navigation app" look: soft land tones,
+    // clear road hierarchy, readable labels. No API key. (CARTO Voyager was
+    // used here until CARTO started watermarking keyless tiles with
+    // "API KEY REQUIRED".)
     key: 'nav',
     label: 'Nav',
-    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-    maxNativeZoom: 20,
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+    attribution: '&copy; Esri, HERE, Garmin, OpenStreetMap contributors',
+    maxNativeZoom: 19,
     maxZoom: 22,
   },
   {
@@ -106,9 +115,10 @@ export const MAP_LAYERS: MapLayerDef[] = [
     attribution: '&copy; Esri, Maxar, Earthstar Geographics',
     maxNativeZoom: 18,
     maxZoom: 22,
-    // CartoDB light-only labels - reliable, renders roads/places/boundaries over satellite
-    overlay: 'https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png',
-    overlayAttribution: '&copy; CartoDB',
+    // Esri reference layers: roads, then place names and boundaries. Same
+    // provider as the imagery, no API key.
+    overlays: HYBRID_LABEL_TILES,
+    overlayAttribution: '&copy; Esri',
   },
 ]
 
