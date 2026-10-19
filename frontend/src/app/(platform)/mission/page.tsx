@@ -666,7 +666,11 @@ export default function MissionPage() {
       style={{ borderColor: 'hsl(var(--app-border))' }}>
 
       {/* Full-bleed map - 2D or 3D */}
-      {mapView === '3d' ? <MissionMap3D readOnly={readOnly} /> : <MissionMap readOnly={readOnly}
+      {mapView === '3d' ? <MissionMap3D readOnly={readOnly}
+        // The side panels cover both corners: the controls sit on the right
+        // edge, just inside the waypoint panel.
+        navStyle={{ right: rightOpen ? 'calc(224px + 24px)' : 56, top: '50%', transform: 'translateY(-50%)' }} />
+        : <MissionMap readOnly={readOnly}
         // The side panels own both bottom corners here: the detections
         // legend sits centred above the stats bar instead.
         detectionsLegendStyle={{ bottom: 84, left: '50%', transform: 'translateX(-50%)' }} />}

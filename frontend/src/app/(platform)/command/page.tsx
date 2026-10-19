@@ -406,7 +406,7 @@ function DevCommand() {
                     </div>
                     <div style={boxFor('map')}>
                         {mounted && (layout.map3d
-                            ? <MissionMap3D readOnly />
+                            ? <MissionMap3D readOnly showNav={mapBig} />
                             : <MissionMap readOnly follow compact={!mapBig} />)}
                         {!mapBig && pipChrome('map', layout.map3d ? 'MAP 3D' : 'MAP')}
                         {mapBig && (

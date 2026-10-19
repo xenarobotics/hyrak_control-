@@ -7,6 +7,7 @@ import { useSwarmStore } from '@/store/swarm'
 import { WP_META, HYBRID_LABEL_TILES } from '@/types/mission'
 import type { Waypoint } from '@/types/mission'
 import type * as CesiumNS from 'cesium'
+import { Map3DNavControls } from '@/components/mission/Map3DNavControls'
 
 // ── Bezier smooth-path ──────────────────────────────────────────────────────
 
@@ -193,7 +194,13 @@ function makeDroneCanvas(): HTMLCanvasElement {
 // ── Component ───────────────────────────────────────────────────────────────
 
 // readOnly: a flight view (Command window) - no waypoint add/drag/select.
-export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean } = {}) {
+export default function MissionMap3D({ readOnly = false, showNav = true, navStyle }: {
+  readOnly?: boolean
+  /** On-screen zoom / rotate / tilt controls (off for a small corner picture). */
+  showNav?: boolean
+  /** Where the controls sit (default: right edge, under the home button). */
+  navStyle?: React.CSSProperties
+} = {}) {
   const readOnlyRef     = useRef(readOnly)
   readOnlyRef.current = readOnly
   const containerRef    = useRef<HTMLDivElement>(null)
@@ -210,6 +217,10 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
   const handlerRef      = useRef<CesiumNS.ScreenSpaceEventHandler | null>(null)
   // Removes the chase-cam preUpdate listener; set once the viewer is built.
   const chaseCleanupRef = useRef<(() => void) | null>(null)
+  // Removes the window/canvas listeners the pointer handling adds.
+  const inputCleanupRef = useRef<(() => void) | null>(null)
+  // Pauses the chase cam like a gesture does (used by the on-screen controls).
+  const pauseFollowRef  = useRef<(() => void) | null>(null)
   const flewRef         = useRef(false)
   const draggingIdRef   = useRef<string | null>(null)
   const terrainReadyRef = useRef(false)
@@ -240,6 +251,8 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
   // is a ref, so flipping it alone doesn't re-trigger effects that bailed
   // out early because the viewer wasn't ready yet - this state does.
   const [viewerReady, setViewerReady] = useState(false)
+  // The viewer once built, for the on-screen controls.
+  const [navViewer, setNavViewer] = useState<CesiumNS.Viewer | null>(null)
 
   const cameraMode          = useMissionStore(s => s.cameraMode)
   const rawWaypoints        = useMissionStore(s => s.waypoints)
@@ -457,13 +470,38 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
 
       if (destroyed) return
 
-      // ── Mouse input handler ─────────────────────────────────────────────
-      const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas)
+      // ── Camera gestures ─────────────────────────────────────────────────
+      // One mapping for mouse, trackpad and touch:
+      //   drag (one finger)                  pan
+      //   scroll / pinch                     zoom
+      //   right-drag, Ctrl/Shift+drag,       rotate (sideways) and tilt (up/down)
+      //   two-finger drag on touch
+      // Cesium's defaults put zoom on right-drag and rotate on middle-drag or
+      // Ctrl only, which a trackpad cannot reach; the on-screen controls
+      // (NavControls below) cover every gesture with a tap as well.
+      const ctl = viewer.scene.screenSpaceCameraController
+      const CET = Cesium.CameraEventType
+      const MOD = Cesium.KeyboardEventModifier
+      ctl.zoomEventTypes = [CET.WHEEL, CET.PINCH]
+      ctl.tiltEventTypes = [
+        CET.RIGHT_DRAG, CET.MIDDLE_DRAG, CET.PINCH,
+        { eventType: CET.LEFT_DRAG, modifier: MOD.CTRL },
+        { eventType: CET.LEFT_DRAG, modifier: MOD.SHIFT },
+      ]
+      // Free-look (turning the camera in place) reads as "the map got stuck".
+      ctl.lookEventTypes = []
+      const canvas = viewer.scene.canvas
+      const noMenu = (e: Event) => e.preventDefault()
+      canvas.addEventListener('contextmenu', noMenu)
+
+      // ── Pointer input ───────────────────────────────────────────────────
+      const handler = new Cesium.ScreenSpaceEventHandler(canvas)
       handlerRef.current = handler
 
       // Temporarily pause chase cam for 3 s then smoothly return to follow.
       // The user's orbit/zoom is not interrupted - Cesium's own camera controller
       // still handles input; we simply stop overriding it during this window.
+      // Every move of a gesture restarts it, so a long drag never snaps back.
       const startInactivityTimer = () => {
         userInteractingRef.current = true
         if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current)
@@ -474,49 +512,115 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
           perspOffsetRef.current   = null
         }, 3000)
       }
+      pauseFollowRef.current = () => { if (followDroneRef.current) startInactivityTimer() }
 
-      // LEFT_DOWN: pause follow temporarily (not permanently); start waypoint drag if needed.
+      // A press that moves further than this is a pan (or a waypoint drag),
+      // never a click: releasing after panning must not drop a waypoint.
+      const TAP_PX = 8
+      let press: { x: number; y: number } | null = null
+      let pressMoved = false
+      let pinched = false
+      // A right or middle button is held (rotate/tilt drag in progress).
+      let orbitPress = false
+      // Where the dragged waypoint was before the drag, to put it back when
+      // the drag is cancelled (a second finger lands).
+      let dragFrom: CesiumNS.Cartesian3 | null = null
+
+      const setCameraInputs = (on: boolean) => {
+        ctl.enableRotate = on
+        ctl.enableTranslate = on
+        ctl.enableTilt = on
+      }
+      const dragEntity = () => draggingIdRef.current
+        ? viewer.entities.getById(`wp-${draggingIdRef.current}`) : undefined
+
+      // Ends a waypoint drag however the press finished: commits the new spot
+      // when the pointer moved, otherwise it was a tap and selects the
+      // waypoint. Always hands the camera back, so a waypoint can never leave
+      // the map locked (the release may land outside the map, or a touch may
+      // turn into a pinch without a LEFT_UP).
+      const finishDrag = (commit: boolean) => {
+        const id = draggingIdRef.current
+        if (!id) return
+        const entity = dragEntity()
+        if (commit && pressMoved && entity) {
+          const pos = entity.position?.getValue(viewer.clock.currentTime)
+          if (pos) {
+            const carto = Cesium.Cartographic.fromCartesian(pos)
+            useMissionStore.getState().updateWaypoint(id, {
+              lat: Math.round(Cesium.Math.toDegrees(carto.latitude) * 1e7) / 1e7,
+              lng: Math.round(Cesium.Math.toDegrees(carto.longitude) * 1e7) / 1e7,
+            })
+          }
+        } else if (commit) {
+          useMissionStore.getState().selectWaypoint(id)
+        } else if (entity && dragFrom) {
+          entity.position = new Cesium.ConstantPositionProperty(dragFrom)
+        }
+        draggingIdRef.current = null
+        dragFrom = null
+        setCameraInputs(true)
+        canvas.style.cursor = ''
+      }
+      const onWindowRelease = () => { orbitPress = false; finishDrag(true) }
+      const onWindowCancel = () => { orbitPress = false; finishDrag(false) }
+      window.addEventListener('pointerup', onWindowRelease)
+      window.addEventListener('pointercancel', onWindowCancel)
+      window.addEventListener('blur', onWindowCancel)
+      inputCleanupRef.current = () => {
+        window.removeEventListener('pointerup', onWindowRelease)
+        window.removeEventListener('pointercancel', onWindowCancel)
+        window.removeEventListener('blur', onWindowCancel)
+        canvas.removeEventListener('contextmenu', noMenu)
+      }
+
+      // LEFT_DOWN: pause follow temporarily; arm a waypoint drag if pressed on one.
       handler.setInputAction((down: CesiumNS.ScreenSpaceEventHandler.PositionedEvent) => {
+        press = { x: down.position.x, y: down.position.y }
+        pressMoved = false
+        pinched = false
         if (followDroneRef.current) startInactivityTimer()
         const picked = readOnlyRef.current ? null : viewer.scene.pick(down.position)
         if (picked?.id?._id?.startsWith?.('wp-')) {
           draggingIdRef.current = picked.id._id.replace('wp-', '')
-          viewer.scene.screenSpaceCameraController.enableRotate = false
-          viewer.scene.screenSpaceCameraController.enableTranslate = false
-          viewer.scene.screenSpaceCameraController.enableTilt = false
+          dragFrom = dragEntity()?.position?.getValue(viewer.clock.currentTime) ?? null
+          setCameraInputs(false)
         }
       }, Cesium.ScreenSpaceEventType.LEFT_DOWN)
 
-      // MOUSE_MOVE: drag waypoint
+      // MOUSE_MOVE: drag a waypoint, tell a click from a pan, hover cursor.
+      let lastHover = 0
       handler.setInputAction((move: CesiumNS.ScreenSpaceEventHandler.MotionEvent) => {
-        if (!draggingIdRef.current) return
-        const cart = viewer.scene.pickPosition(move.endPosition)
-          ?? viewer.camera.pickEllipsoid(move.endPosition, Cesium.Ellipsoid.WGS84)
-        if (!cart) return
-        const entity = viewer.entities.getById(`wp-${draggingIdRef.current}`)
-        if (entity) entity.position = new Cesium.ConstantPositionProperty(cart)
-      }, Cesium.ScreenSpaceEventType.MOUSE_MOVE)
-
-      // LEFT_UP: end drag or click to add
-      handler.setInputAction((up: CesiumNS.ScreenSpaceEventHandler.PositionedEvent) => {
-        if (draggingIdRef.current) {
-          const entity = viewer.entities.getById(`wp-${draggingIdRef.current}`)
-          if (entity) {
-            const pos = entity.position?.getValue(viewer.clock.currentTime)
-            if (pos) {
-              const carto = Cesium.Cartographic.fromCartesian(pos)
-              useMissionStore.getState().updateWaypoint(draggingIdRef.current!, {
-                lat: Math.round(Cesium.Math.toDegrees(carto.latitude) * 1e7) / 1e7,
-                lng: Math.round(Cesium.Math.toDegrees(carto.longitude) * 1e7) / 1e7,
-              })
-            }
+        if (orbitPress && followDroneRef.current) startInactivityTimer()
+        if (press) {
+          if (!pressMoved && Math.hypot(move.endPosition.x - press.x, move.endPosition.y - press.y) > TAP_PX) {
+            pressMoved = true
           }
-          draggingIdRef.current = null
-          viewer.scene.screenSpaceCameraController.enableRotate = true
-          viewer.scene.screenSpaceCameraController.enableTranslate = true
-          viewer.scene.screenSpaceCameraController.enableTilt = true
+          if (followDroneRef.current) startInactivityTimer()
+          if (!draggingIdRef.current || !pressMoved) return
+          canvas.style.cursor = 'grabbing'
+          const cart = viewer.scene.pickPosition(move.endPosition)
+            ?? viewer.camera.pickEllipsoid(move.endPosition, Cesium.Ellipsoid.WGS84)
+          if (!cart) return
+          const entity = dragEntity()
+          if (entity) entity.position = new Cesium.ConstantPositionProperty(cart)
           return
         }
+        // Hover: show that waypoints can be grabbed (picking is throttled).
+        if (readOnlyRef.current) return
+        const now = performance.now()
+        if (now - lastHover < 80) return
+        lastHover = now
+        const picked = viewer.scene.pick(move.endPosition)
+        canvas.style.cursor = picked?.id?._id?.startsWith?.('wp-') ? 'grab' : ''
+      }, Cesium.ScreenSpaceEventType.MOUSE_MOVE)
+
+      // LEFT_UP: end a drag, or click to select / add.
+      handler.setInputAction((up: CesiumNS.ScreenSpaceEventHandler.PositionedEvent) => {
+        const wasPan = pressMoved || pinched
+        press = null
+        if (draggingIdRef.current) { finishDrag(true); return }
+        if (wasPan) return
 
         // Regular click - select or add waypoint
         if (readOnlyRef.current) return
@@ -541,6 +645,18 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
           store.addWaypoint(lat, lng)
         }
       }, Cesium.ScreenSpaceEventType.LEFT_UP)
+
+      // Touch: a second finger turns the press into a pinch (zoom / rotate /
+      // tilt). Cancel any waypoint drag and give the camera back.
+      handler.setInputAction(() => {
+        pinched = true
+        finishDrag(false)
+        if (followDroneRef.current) startInactivityTimer()
+      }, Cesium.ScreenSpaceEventType.PINCH_START)
+      handler.setInputAction(() => {
+        if (followDroneRef.current) startInactivityTimer()
+      }, Cesium.ScreenSpaceEventType.PINCH_MOVE)
+      handler.setInputAction(() => { press = null }, Cesium.ScreenSpaceEventType.PINCH_END)
 
       // Markers re-sample terrain live every frame (heightReference), but the
       // path line is a one-shot bake. Right after a fly-to, the higher-detail
@@ -710,11 +826,15 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
       // Middle/right drag also temporarily pauses follow; user re-engages by
       // letting the inactivity timer fire or pressing the Follow button again.
       handler.setInputAction(() => {
+        orbitPress = true
         if (followDroneRef.current) startInactivityTimer()
       }, Cesium.ScreenSpaceEventType.MIDDLE_DOWN)
       handler.setInputAction(() => {
+        orbitPress = true
         if (followDroneRef.current) startInactivityTimer()
       }, Cesium.ScreenSpaceEventType.RIGHT_DOWN)
+      handler.setInputAction(() => { orbitPress = false }, Cesium.ScreenSpaceEventType.MIDDLE_UP)
+      handler.setInputAction(() => { orbitPress = false }, Cesium.ScreenSpaceEventType.RIGHT_UP)
       // Scroll adjusts the follow distance so the user can zoom in/out while
       // following. When NOT in follow mode, Cesium's own WHEEL handler (on a
       // separate ScreenSpaceEventHandler) handles zoom normally.
@@ -729,6 +849,7 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
       setViewerReady(true)
       // Store the chaseCamHandler removal callback for cleanup
       chaseCleanupRef.current = () => viewer.scene.preUpdate.removeEventListener(chaseCamHandler)
+      setNavViewer(viewer)
     })
 
     return () => {
@@ -737,6 +858,10 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
       if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current)
       chaseCleanupRef.current?.()
       chaseCleanupRef.current = null
+      inputCleanupRef.current?.()
+      inputCleanupRef.current = null
+      pauseFollowRef.current = null
+      setNavViewer(null)
       handlerRef.current?.destroy()
       viewerRef.current?.destroy()
       viewerRef.current = null
@@ -1184,6 +1309,11 @@ export default function MissionMap3D({ readOnly = false }: { readOnly?: boolean 
   return (
     <div style={{ position: 'absolute', inset: 0 }}>
       <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
+      {showNav && navViewer && CesiumRef.current && (
+        <Map3DNavControls Cesium={CesiumRef.current} viewer={navViewer}
+          onUse={() => pauseFollowRef.current?.()}
+          style={navStyle ?? { right: 8, top: 52 }} />
+      )}
 
       {/* Camera mode is controlled via the Follow split-button in the mission toolbar */}
     </div>
