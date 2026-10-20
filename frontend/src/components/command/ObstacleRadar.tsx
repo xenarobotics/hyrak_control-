@@ -16,10 +16,13 @@ import { useEffect, useState } from 'react'
 import { getServerUrl } from '@/lib/server-url'
 import { useDroneStore } from '@/store/drone'
 import type { AvoidanceStatus } from '@/lib/avoidance'
+import { cn } from '@/lib/utils'
 
 const NO_READING = 65535
 const SECTOR = 5
+// Fill colours on the always-dark scope (overlay set); text tones follow the theme.
 const tone = (m: number) => (m < 2 ? '#f87171' : m < 5 ? '#fbbf24' : '#22d3ee')
+const toneText = (m: number) => (m < 2 ? 'text-app-danger' : m < 5 ? 'text-app-warn' : 'text-app-accent')
 
 interface Obstacle { lat: number; lng: number; radius_m: number; dn_m?: number; de_m?: number }
 
@@ -77,9 +80,9 @@ export function ObstacleRadar({ avoid, rangeM = 15 }: { avoid: AvoidanceStatus |
 
     return (
         <div className="flex flex-col gap-1.5">
-            <div className="flex justify-between text-[10px] font-mono tracking-widest" style={{ color: 'hsl(var(--app-text-muted))' }}>
-                <span>RADAR · {rangeM} m</span>
-                <span style={{ color: nearest != null ? tone(nearest) : undefined }}>
+            <div className="flex justify-between text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">
+                <span>Radar · {rangeM} m</span>
+                <span className={cn('normal-case text-[13px]', nearest != null && toneText(nearest))}>
                     {nearest != null ? `nearest ${nearest.toFixed(1)} m` : 'nothing in range'}</span>
             </div>
             <svg viewBox="-104 -104 208 208" className="w-full max-w-[260px] self-center aspect-square">
@@ -101,12 +104,12 @@ export function ObstacleRadar({ avoid, rangeM = 15 }: { avoid: AvoidanceStatus |
                         stroke="#67e8f9" strokeWidth="2" strokeDasharray="5 4" />
                 )}
                 <path d="M0 -9 L6 7 L0 3 L-6 7 Z" fill="#fb923c" stroke="#0b0e13" strokeWidth="1" />
-                <text x="0" y="-90" fontSize="9" textAnchor="middle" fill="rgba(148,163,184,.7)" fontFamily="monospace">NOSE</text>
-                <text x={100 / 3 + 2} y="-2" fontSize="8" fill="rgba(148,163,184,.6)" fontFamily="monospace">{Math.round(rangeM / 3)}</text>
-                <text x={200 / 3 + 2} y="-2" fontSize="8" fill="rgba(148,163,184,.6)" fontFamily="monospace">{Math.round(rangeM * 2 / 3)}</text>
+                <text x="0" y="-88" fontSize="10" fontWeight="700" textAnchor="middle" fill="#C3CCD8">NOSE</text>
+                <text x={100 / 3 + 2} y="-3" fontSize="10" fontWeight="600" fill="#C3CCD8">{Math.round(rangeM / 3)}</text>
+                <text x={200 / 3 + 2} y="-3" fontSize="10" fontWeight="600" fill="#C3CCD8">{Math.round(rangeM * 2 / 3)}</text>
             </svg>
-            <p className="text-[10px] font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>
-                Wedges: live sensor sectors. Orange: mapped obstacles. Dashed: planner direction.</p>
+            <p className="text-[13px] text-app-text-muted">
+                Wedges: live sensors. Orange: mapped obstacles. Dashed: planned direction.</p>
         </div>
     )
 }
@@ -117,8 +120,8 @@ export function DepthStrip({ avoid, rangeM = 10 }: { avoid: AvoidanceStatus | nu
     const idx = [...Array(9)].map((_, k) => 63 + k).concat([...Array(9)].map((_, k) => k))
     return (
         <div className="flex flex-col gap-1.5">
-            <div className="flex justify-between text-[10px] font-mono tracking-widest" style={{ color: 'hsl(var(--app-text-muted))' }}>
-                <span>FORWARD DEPTH</span><span>45° L · 45° R</span>
+            <div className="flex justify-between text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">
+                <span>Forward depth</span><span className="normal-case">45° L · 45° R</span>
             </div>
             <div className="flex items-end gap-[2px] h-16 rounded-md px-1 pt-1" style={{ background: 'rgba(15,23,32,.9)' }}>
                 {idx.map(i => {
@@ -128,7 +131,7 @@ export function DepthStrip({ avoid, rangeM = 10 }: { avoid: AvoidanceStatus | nu
                         style={{ height: `${h}%`, background: d == null ? 'rgba(148,163,184,.18)' : tone(d) }} />
                 })}
             </div>
-            <p className="text-[10px] font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>
+            <p className="text-[13px] text-app-text-muted">
                 Taller = closer (full height at 0 m, flat beyond {rangeM} m).</p>
         </div>
     )

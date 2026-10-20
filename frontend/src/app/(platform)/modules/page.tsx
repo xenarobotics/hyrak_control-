@@ -10,7 +10,6 @@ import { CvOverlayCanvas } from '@/components/vision/CvOverlayCanvas'
 import { getVideoFit, setVideoFit, type VideoFit } from '@/lib/videoSettings'
 import { ModulePerformance } from '@/components/vision/ModulePerformance'
 import { RecordingControls } from '@/components/video/RecordingControls'
-import { Button } from '@/components/ui/button'
 import {
     VideoOff, Loader, Square,
     ChevronDown, ChevronUp, Maximize, Minimize, Expand, Shrink, Ratio, Crop
@@ -268,14 +267,14 @@ export default function ModulesPage() {
                     <span style={{ flex: serverSourced ? 0 : 1 }} />
                     {isLoading && (
                         <span className={css.muted} role="status" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                            <Loader size={13} className="animate-spin motion-reduce:animate-none" aria-hidden />
+                            <Loader size={14} className="animate-spin motion-reduce:animate-none" aria-hidden />
                             {startPhase === 'model' ? `Loading ${modeName}` : 'Starting video'}
                         </span>
                     )}
                     {(isStreaming || isLoading) && (
                         <ViewOnlyFence note={false}>
                             <button type="button" className={css.btn} onClick={onStop}>
-                                <Square size={12} aria-hidden /> Stop {mode !== 'manual-control' ? modeName : 'video'}
+                                <Square size={13} aria-hidden /> Stop {mode !== 'manual-control' ? modeName : 'video'}
                             </button>
                         </ViewOnlyFence>
                     )}
@@ -305,7 +304,7 @@ export default function ModulesPage() {
                     )}
                     style={{
                         flex: maximized && !isFullscreen ? undefined : 1,
-                        borderRadius: 12,
+                        borderRadius: 10,
                         background: '#000', border: '1px solid hsl(var(--app-border))',
                         minHeight: 0,
                     }}
@@ -345,13 +344,13 @@ export default function ModulesPage() {
                             {lastError ? (
                                 <>
                                     <strong>The video did not start</strong>
-                                    <p style={{ color: '#fca5a5' }}>{lastError}</p>
-                                    <p>Check the video source above, then press Run on a model again.</p>
+                                    <p className={css.idleErr}>{lastError}</p>
+                                    <p>Check the video source above, then press Run again.</p>
                                 </>
                             ) : (
                                 <>
                                     <strong>No video yet</strong>
-                                    <p>Press Run on a model. The video starts by itself and the model marks what it finds.</p>
+                                    <p>Press Run on a model to start it.</p>
                                 </>
                             )}
                         </div>
@@ -359,21 +358,9 @@ export default function ModulesPage() {
 
                     {/* Model loading overlay */}
                     {isStreaming && modelLoading && (
-                        <div style={{
-                            position: 'absolute', inset: 0,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
-                        }}>
-                            <div style={{
-                                display: 'flex', flexDirection: 'column',
-                                alignItems: 'center', gap: 10,
-                                color: 'white', fontFamily: 'monospace',
-                            }}>
-                                <Loader size={28} className="animate-spin" style={{ color: '#60a5fa' }} />
-                                <p style={{ fontSize: 12 }}>
-                                    Loading {modeName}...
-                                </p>
-                            </div>
+                        <div className={css.vidScrim} role="status">
+                            <Loader size={28} className="animate-spin motion-reduce:animate-none" style={{ color: 'var(--overlay-accent)' }} aria-hidden />
+                            <p>Loading {modeName}...</p>
                         </div>
                     )}
 
@@ -382,38 +369,26 @@ export default function ModulesPage() {
                         <div style={{
                             position: 'absolute', bottom: 44, left: 8,
                             width: 100, borderRadius: 6, overflow: 'hidden',
-                            border: '1px solid rgba(255,255,255,0.15)', aspectRatio: '16/9',
+                            border: '1px solid var(--overlay-border)', aspectRatio: '16/9',
                         }}>
                             <video
                                 ref={localVideoRef}
                                 autoPlay playsInline muted
                                 style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                             />
-                            <span style={{
-                                position: 'absolute', bottom: 2, left: 3,
-                                fontSize: 8, background: 'rgba(0,0,0,0.7)', color: '#fff',
-                                padding: '1px 4px', borderRadius: 3, fontFamily: 'monospace',
-                            }}>
-                                RAW
-                            </span>
+                            <span className={css.vidTag}>RAW</span>
                         </div>
                     )}
 
                     {/* Bottom bar */}
-                    <div style={{
-                        position: 'absolute', bottom: 0, left: 0, right: 0,
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        padding: '8px 10px',
-                        background: 'linear-gradient(to top, rgba(0,0,0,0.7), transparent)',
-                        // Over the video, whatever the page palette (Normal
-                        // mode's navy ink would vanish on black).
-                        color: '#e4e4e7',
-                    }}>
+                    {/* Over the video: fixed dark scrim and light text in
+                        every theme (theme ink would vanish on black). */}
+                    <div className={css.vidBar}>
                         {previewOnSrc
                             ? <span />
                             : <RecordingControls videoRef={remoteVideoRef} isStreaming={isStreaming} />}
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <Button size="sm" variant="outline" className="h-7 px-2 text-[10px]"
+                            <button type="button" className={css.vidBtn}
                                 title={videoFit === 'fit'
                                     ? 'Showing the whole frame (letterboxed). Click to fill the panel.'
                                     : 'Filling the panel - a 4:3 or 16:10 camera is cropped. Click to show the whole frame.'}
@@ -421,49 +396,39 @@ export default function ModulesPage() {
                                     const next: VideoFit = videoFit === 'fit' ? 'fill' : 'fit'
                                     setVideoFitState(next); setVideoFit(next)
                                 }}>
-                                {videoFit === 'fit' ? <><Ratio size={12} /> Fit</> : <><Crop size={12} /> Fill</>}
-                            </Button>
-                            <Button size="sm" variant="outline" className="h-7 w-7 p-0"
+                                {videoFit === 'fit' ? <><Ratio size={14} aria-hidden /> Fit</> : <><Crop size={14} aria-hidden /> Fill</>}
+                            </button>
+                            <button type="button" className={css.vidBtn}
                                 aria-label={maximized ? 'Restore video size' : 'Maximize video'}
                                 title={maximized ? 'Restore video size' : 'Maximize video'}
                                 onClick={() => setMaximized(m => !m)}>
-                                {maximized ? <Minimize size={13} /> : <Maximize size={13} />}
-                            </Button>
-                            <Button size="sm" variant="outline" className="h-7 w-7 p-0"
+                                {maximized ? <Minimize size={15} aria-hidden /> : <Maximize size={15} aria-hidden />}
+                            </button>
+                            <button type="button" className={css.vidBtn}
                                 aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
                                 title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
                                 onClick={handleFullscreen}>
-                                {isFullscreen ? <Shrink size={13} /> : <Expand size={13} />}
-                            </Button>
+                                {isFullscreen ? <Shrink size={15} aria-hidden /> : <Expand size={15} aria-hidden />}
+                            </button>
                         </div>
                     </div>
                 </div>
 
                 {/* Performance: a Dev-mode diagnostic. */}
                 {uiMode === 'dev' && (
-                    <div style={{
-                        borderRadius: 10, flexShrink: 0,
-                        background: 'hsl(var(--app-surface))',
-                        border: '1px solid hsl(var(--app-border))',
-                        overflow: 'hidden',
-                    }}>
+                    <div className={css.panel} style={{ flexShrink: 0, overflow: 'hidden' }}>
                         <button
                             type="button"
                             aria-expanded={statsOpen}
                             onClick={() => setStatsOpen(o => !o)}
-                            style={{
-                                width: '100%', display: 'flex', alignItems: 'center',
-                                justifyContent: 'space-between', padding: '7px 12px',
-                                background: 'none', border: 'none', cursor: 'pointer',
-                                color: 'hsl(var(--app-text-muted))', fontSize: 10, fontFamily: 'monospace',
-                                borderBottom: statsOpen ? '1px solid hsl(var(--app-border))' : 'none',
-                            }}
+                            className={css.perfToggle}
+                            style={{ borderBottom: statsOpen ? '1px solid var(--cm-line)' : 'none' }}
                         >
-                            <span>PERFORMANCE</span>
-                            {statsOpen ? <ChevronUp size={12} aria-hidden /> : <ChevronDown size={12} aria-hidden />}
+                            <span className={css.label}>Performance</span>
+                            {statsOpen ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
                         </button>
                         {statsOpen && (
-                            <div style={{ padding: '10px 12px' }}>
+                            <div style={{ padding: 12 }}>
                                 {/* Every row here used to come from pc.getStats(), which
                                     reports NOTHING in overlay mode - no video crosses the
                                     PeerConnection, so FPS/bitrate/RTT/jitter/loss all sat
@@ -480,16 +445,16 @@ export default function ModulesPage() {
             {mode !== 'manual-control' && (
                 <section className={cn(css.panel, css.pageResults)} data-active="true" aria-label="Results">
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                        <span className={css.label} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modeName}</span>
+                        <h2 className={css.panelTitle}>{modeName}</h2>
                         {cvResults && (
                             <span className={cn(css.chip, css.chipOk)}><span className={css.dot} aria-hidden />Live</span>
                         )}
                     </div>
-                    <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+                    <div style={{ flex: 1, overflow: 'auto', minHeight: 0, minWidth: 0 }}>
                         <ViewOnlyFence note={false}><ResultsPanel /></ViewOnlyFence>
                         {/* Outside the fence: a viewer may still show or hide the
                             detections on their own map. Recording is gated inside. */}
-                        <div style={{ marginTop: 10 }}><MapDetectionsControls /></div>
+                        <div style={{ marginTop: 12 }}><MapDetectionsControls /></div>
                     </div>
                 </section>
             )}

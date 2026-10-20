@@ -9,6 +9,10 @@
 // pinned ("Pin it on the map") draw as a pin and are never grouped.
 //
 // Lives inside a react-leaflet <MapContainer>.
+//
+// The popover sits in Leaflet's white popup in both themes, so its colours
+// are fixed dark-on-white values (none of them in globals.css's light-mode
+// remap list).
 
 import { useMemo, useState } from 'react'
 import { Circle, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
@@ -32,7 +36,7 @@ function bubbleIcon(n: number, color: string): L.DivIcon {
     return L.divIcon({
         className: '',
         html: `<div style="width:${sz}px;height:${sz}px;border-radius:50%;background:${color};`
-            + `border:2px solid #fff;color:#0b0f17;font:700 11px/1 var(--font-geist-mono,monospace);`
+            + `border:2px solid #fff;color:#0b0f17;font:800 12px/1 var(--font-nunito,Nunito),system-ui,sans-serif;font-variant-numeric:tabular-nums;`
             + `display:flex;align-items:center;justify-content:center;`
             + `box-shadow:0 1px 6px rgba(0,0,0,.55);cursor:pointer">${n}</div>`,
         iconSize: [sz, sz],
@@ -84,17 +88,18 @@ function useGroups(list: Sighting[]): Group[] {
 export function SightingPopover({ s }: { s: Sighting }) {
     const color = classColor(s.label)
     return (
-        <div style={{ minWidth: 180, maxWidth: 230, fontSize: 12, lineHeight: 1.45, color: '#111827' }}>
+        <div style={{ minWidth: 180, maxWidth: 230, fontSize: 13, lineHeight: 1.45, color: '#111827',
+            fontFamily: 'var(--font-nunito, Nunito), system-ui, sans-serif', fontVariantNumeric: 'tabular-nums' }}>
             {s.thumb && (
                 // eslint-disable-next-line @next/next/no-img-element -- a data: URL crop, nothing to optimise
                 <img src={s.thumb} alt={`Best view of the ${s.label}`}
                     style={{ display: 'block', maxWidth: '100%', maxHeight: 110, borderRadius: 6, marginBottom: 6 }} />
             )}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 13 }}>
-                <span style={{ width: 9, height: 9, borderRadius: '50%', background: color, flexShrink: 0 }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 15 }}>
+                <span style={{ width: 10, height: 10, borderRadius: '50%', background: color, flexShrink: 0 }} />
                 <span style={{ textTransform: 'capitalize' }}>{s.label}</span>
                 {s.best_score != null && (
-                    <span style={{ marginLeft: 'auto', fontWeight: 600, color: '#4b5563' }}>
+                    <span style={{ marginLeft: 'auto', fontWeight: 700, color: '#334155' }}>
                         {Math.round(s.best_score * 100)}%</span>
                 )}
             </div>
@@ -104,20 +109,20 @@ export function SightingPopover({ s }: { s: Sighting }) {
                 </p>
             )}
             <dl style={{ margin: '6px 0 0', display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: 10, rowGap: 2 }}>
-                <dt style={{ color: '#6b7280' }}>Seen</dt>
+                <dt style={{ color: '#475569', fontWeight: 600 }}>Seen</dt>
                 <dd style={{ margin: 0 }}>
                     {fmtTime(s.first_seen)}
                     {s.last_seen && s.first_seen && s.last_seen - s.first_seen >= 1 ? ` - ${fmtTime(s.last_seen)}` : ''}
                     {s.count > 1 ? ` (${s.count} frames)` : ''}
                 </dd>
-                <dt style={{ color: '#6b7280' }}>Position</dt>
+                <dt style={{ color: '#475569', fontWeight: 600 }}>Position</dt>
                 <dd style={{ margin: 0 }}>about +/- {s.accuracy_m} m</dd>
-                <dt style={{ color: '#6b7280' }}>Model</dt>
+                <dt style={{ color: '#475569', fontWeight: 600 }}>Model</dt>
                 <dd style={{ margin: 0 }}>{s.model_name || s.source}</dd>
             </dl>
             {s.angle_source === 'default' && (
-                <p style={{ margin: '6px 0 0', color: '#92400e' }}>
-                    Camera angle not set, so this assumes the camera points straight down.
+                <p style={{ margin: '6px 0 0', color: '#92400e', fontWeight: 600 }}>
+                    Camera angle not set: assumes straight down.
                 </p>
             )}
         </div>

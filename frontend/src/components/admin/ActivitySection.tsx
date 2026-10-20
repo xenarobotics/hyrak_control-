@@ -82,14 +82,14 @@ export function ActivitySection({ workspaceId }: { workspaceId: string }) {
             {error && <Empty>{error}</Empty>}
             {!data && !error && <Empty>Loading activity</Empty>}
             {data && (
-                <div className="divide-y divide-zinc-900 text-[10px]">
+                <div className="divide-y divide-app-border text-[13px]">
                     <div className="p-3 space-y-1.5">
-                        <div className="tracking-widest text-zinc-500">LIVE SESSIONS - {data.sessions.length}</div>
-                        {data.sessions.length === 0 && <div className="text-zinc-600">Nobody is connected right now.</div>}
+                        <div className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Live sessions - {data.sessions.length}</div>
+                        {data.sessions.length === 0 && <div className="text-app-text-muted">Nobody is connected right now.</div>}
                         {data.sessions.map(s => (
-                            <div key={s.session_id} className="flex items-center gap-2 text-zinc-300">
+                            <div key={s.session_id} className="flex items-center gap-2 min-h-8 text-app-text">
                                 <span className="truncate">{s.username ?? '?'}{s.role ? ` (${s.role})` : ''}</span>
-                                <span className="text-zinc-600 truncate">{s.workspace_name}</span>
+                                <span className="text-app-text-muted truncate">{s.workspace_name}</span>
                                 <span className="truncate">{s.drone?.name ?? (s.telemetry_connected ? 'identifying' : 'no drone')}</span>
                                 {s.in_air ? <Tag label="IN AIR" tone="amber" /> : s.armed ? <Tag label="ARMED" tone="red" /> : null}
                                 {s.video && <Tag label="VIDEO" tone="emerald" />}
@@ -99,13 +99,13 @@ export function ActivitySection({ workspaceId }: { workspaceId: string }) {
                         ))}
                     </div>
                     <div className="p-3 space-y-1.5">
-                        <div className="tracking-widest text-zinc-500">RECENT FLIGHTS - {data.flights.length}</div>
-                        {data.flights.length === 0 && <div className="text-zinc-600">No flights recorded yet.</div>}
+                        <div className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Recent flights - {data.flights.length}</div>
+                        {data.flights.length === 0 && <div className="text-app-text-muted">No flights recorded yet.</div>}
                         {data.flights.map(f => (
-                            <div key={f.id} className="flex items-center gap-3 text-zinc-300">
+                            <div key={f.id} className="flex items-center gap-3 min-h-8 text-app-text tabular-nums">
                                 <span>{when(f.started_at)}</span>
-                                <span className="text-zinc-500 truncate">{f.drone_name ?? f.drone_id.slice(0, 8)}</span>
-                                <span className="text-zinc-500">
+                                <span className="text-app-text-muted truncate">{f.drone_name ?? f.drone_id.slice(0, 8)}</span>
+                                <span className="text-app-text-muted">
                                     {f.in_progress ? 'in flight' : `${Math.round(f.duration_s)} s`} · {f.max_alt_m.toFixed(0)} m · {(f.distance_m / 1000).toFixed(2)} km
                                 </span>
                             </div>
@@ -113,13 +113,13 @@ export function ActivitySection({ workspaceId }: { workspaceId: string }) {
                     </div>
                     {data.audit && (
                         <div className="p-3 space-y-1.5">
-                            <div className="tracking-widest text-zinc-500">RECENT AUDIT - {data.audit.length}</div>
-                            {data.audit.length === 0 && <div className="text-zinc-600">No audit events yet.</div>}
+                            <div className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Recent audit - {data.audit.length}</div>
+                            {data.audit.length === 0 && <div className="text-app-text-muted">No audit events yet.</div>}
                             {data.audit.map(a => (
-                                <div key={a.id} className="flex items-center gap-3 text-zinc-300">
-                                    <span className="text-zinc-500">{when(a.at)}</span>
-                                    <span className={a.action.startsWith('session.') ? 'text-red-400' : ''}>{a.action}</span>
-                                    <span className="text-zinc-500 truncate">{a.actor_name}</span>
+                                <div key={a.id} className="flex items-center gap-3 min-h-8 text-app-text tabular-nums">
+                                    <span className="text-app-text-muted">{when(a.at)}</span>
+                                    <span className={a.action.startsWith('session.') ? 'text-app-danger' : ''}>{a.action}</span>
+                                    <span className="text-app-text-muted truncate">{a.actor_name}</span>
                                 </div>
                             ))}
                         </div>

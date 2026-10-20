@@ -64,7 +64,7 @@ export function AiView() {
             {isStreaming && overlayActive && mode !== '3d-reconstruction' && <CvOverlayCanvas fit={fit} />}
             {isStreaming && mode === '3d-reconstruction' && <Recon3DView />}
             {!isStreaming && (
-                <div className="absolute inset-0 flex items-center justify-center text-[11px] font-mono text-zinc-500">
+                <div className="absolute inset-0 flex items-center justify-center text-[13px] text-overlay-muted">
                     AI view starts with the video
                 </div>
             )}

@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from 'react'
 import { CloudOff } from 'lucide-react'
+import { FOCUS, DISABLED } from './flightStyles'
 import {
     getLocalState, hasLocalLink, isCloudUp, sendLocalCommand, subscribeLocal,
     type LocalCommand,
@@ -16,6 +17,9 @@ import {
 const wallClock = () => Date.now()
 
 const RESULT: Record<number, string> = { 0: 'accepted', 1: 'temporarily rejected', 2: 'denied', 3: 'unsupported', 4: 'failed', 5: 'in progress' }
+
+const K = 'text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted'
+const V = 'text-[14px] font-bold'
 
 export function LocalLinkPanel() {
     // The clock is state, not read during render: ticked by the link's own
@@ -40,35 +44,36 @@ export function LocalLinkPanel() {
     }
 
     return (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 w-[min(92vw,460px)] rounded-lg border border-amber-500/60 bg-background/95 shadow-xl backdrop-blur px-3 py-2.5 text-xs font-mono">
-            <div className="flex items-center gap-2 text-amber-500 font-semibold">
-                <CloudOff size={14} />
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 w-[min(92vw,460px)] rounded-[14px] border-2 border-app-warn bg-app-raised text-app-text shadow-[var(--app-shadow)] px-4 py-3 text-[13px]" role="alertdialog" aria-label="Cloud unreachable, local link">
+            <div className="flex items-center gap-2 text-app-warn text-[14px] font-bold">
+                <CloudOff size={16} />
                 CLOUD UNREACHABLE - LOCAL LINK
-                <span className="ml-auto font-normal text-muted-foreground">reconnecting…</span>
+                <span className="ml-auto text-[13px] font-normal text-app-text-muted">reconnecting…</span>
             </div>
-            <div className="mt-1.5 text-muted-foreground">
+            <div className="mt-1.5 text-app-text-muted">
                 This machine is keeping the aircraft&apos;s link alive and can command it directly.
             </div>
             <div className="mt-2 grid grid-cols-4 gap-2">
-                <div><div className="text-muted-foreground">MODE</div><div className="font-semibold">{s.mode}</div></div>
-                <div><div className="text-muted-foreground">STATE</div><div className={s.armed ? 'text-red-500 font-semibold' : ''}>{s.armed ? 'ARMED' : 'DISARMED'}</div></div>
-                <div><div className="text-muted-foreground">ALT</div><div>{s.altM !== null ? `${s.altM.toFixed(1)} m` : '-'}</div></div>
-                <div><div className="text-muted-foreground">BATT</div><div>{s.batteryPct !== null ? `${s.batteryPct}%` : '-'}</div></div>
+                <div><div className={K}>Mode</div><div className={V}>{s.mode}</div></div>
+                <div><div className={K}>State</div><div className={`${V} ${s.armed ? 'text-app-danger' : ''}`}>{s.armed ? 'ARMED' : 'DISARMED'}</div></div>
+                <div><div className={K}>Alt</div><div className={V}>{s.altM !== null ? `${s.altM.toFixed(1)} m` : '-'}</div></div>
+                <div><div className={K}>Batt</div><div className={V}>{s.batteryPct !== null ? `${s.batteryPct}%` : '-'}</div></div>
             </div>
-            <div className={`mt-1 ${fresh ? 'text-green-500' : 'text-red-500'}`}>
+            <div className={`mt-1.5 font-semibold ${fresh ? 'text-app-ok' : 'text-app-danger'}`}>
                 {age === null ? 'no packets from the aircraft yet'
                     : fresh ? `aircraft link OK (${age.toFixed(1)} s)` : `no packets from the aircraft for ${age.toFixed(0)} s`}
             </div>
             <div className="mt-2 grid grid-cols-3 gap-2">
                 {(['hold', 'rtl', 'land'] as LocalCommand[]).map(c => (
                     <button key={c} onClick={() => send(c)} disabled={s.sysid === null}
-                        className="rounded border border-border py-1.5 font-semibold hover:bg-accent disabled:opacity-40">
+                        title={s.sysid === null ? 'Waiting for the aircraft to be heard' : undefined}
+                        className={`h-10 rounded-md border border-app-warn text-[14px] font-bold text-app-text hover:bg-app-warn-soft ${FOCUS} ${DISABLED}`}>
                         {c === 'hold' ? 'HOLD' : c === 'rtl' ? 'RETURN' : 'LAND'}
                     </button>
                 ))}
             </div>
             {sent && (
-                <div className="mt-1.5 text-muted-foreground">
+                <div className="mt-1.5 text-app-text-muted">
                     {sent.cmd.toUpperCase()} sent locally{ack ? ` - aircraft: ${RESULT[ack.result] ?? `result ${ack.result}`}` : ' - waiting for the aircraft'}
                 </div>
             )}

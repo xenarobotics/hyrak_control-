@@ -27,33 +27,38 @@ export default function AltitudeProfile({ waypoints }: { waypoints: Waypoint[] }
     }, [plan])
 
     if (plan.length < 2) {
-        return <div className="text-[10px] text-gray-500 px-1 py-3">Add two or more waypoints to see the altitude profile.</div>
+        return <div className="text-[13px] text-app-text-muted px-1 py-3">Add two or more waypoints to see the profile.</div>
     }
     const pts = plan.map((w, i) => `${(geo.cum[i] / geo.total) * 1000},${100 - (w.altitude / geo.maxAlt) * 100}`)
     const area = `M0,100 L${pts.join(' L')} L1000,100 Z`
     return (
-        <div className="font-mono">
-            <div className="flex justify-between text-[9px] text-gray-500 mb-1">
-                <span>ALTITUDE PROFILE</span>
-                <span>max {Math.max(...plan.map(w => w.altitude))} m · {fmtM(geo.total)}</span>
+        <div>
+            <div className="flex items-baseline justify-between gap-2 mb-1">
+                <span className="text-xs font-bold uppercase tracking-[0.05em] text-app-text-muted">Altitude profile</span>
+                <span className="text-[13px] text-app-text tabular-nums">
+                    <b className="font-bold">{Math.max(...plan.map(w => w.altitude))}</b>
+                    <span className="text-xs text-app-text-muted"> m max</span>
+                    <span className="text-app-text-muted"> · </span>
+                    <b className="font-bold">{fmtM(geo.total)}</b>
+                </span>
             </div>
             <div className="relative h-20">
-                <svg viewBox="0 0 1000 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full" aria-hidden="true">
-                    <path d={area} fill="rgba(59,130,246,.14)" />
-                    <polyline points={pts.join(' ')} fill="none" stroke="#60a5fa" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+                <svg viewBox="0 0 1000 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full text-app-accent" aria-hidden="true">
+                    <path d={area} fill="currentColor" fillOpacity={0.14} />
+                    <polyline points={pts.join(' ')} fill="none" stroke="currentColor" strokeWidth="2" vectorEffect="non-scaling-stroke" />
                 </svg>
                 {plan.map((w, i) => (
                     <span key={w.id} title={`Item ${i + 1} (${w.type}) - ${w.altitude} m at ${fmtM(geo.cum[i])}`}
-                        className="absolute rounded-full -translate-x-1/2 -translate-y-1/2"
+                        className={`absolute rounded-full -translate-x-1/2 -translate-y-1/2 border border-app-surface ${
+                            w.type === 'takeoff' ? 'bg-app-ok' : w.type === 'land' ? 'bg-app-danger' : 'bg-app-accent'}`}
                         style={{
                             left: `${(geo.cum[i] / geo.total) * 100}%`,
                             top: `${100 - (w.altitude / geo.maxAlt) * 100}%`,
-                            width: 7, height: 7,
-                            background: w.type === 'takeoff' ? '#4ade80' : w.type === 'land' ? '#f87171' : '#bfdbfe',
+                            width: 8, height: 8,
                         }} />
                 ))}
             </div>
-            <div className="flex justify-between text-[8px] text-gray-600 mt-0.5"><span>0 m</span><span>{fmtM(geo.total)}</span></div>
+            <div className="flex justify-between text-xs text-app-text-muted tabular-nums mt-0.5"><span>0 m</span><span>{fmtM(geo.total)}</span></div>
         </div>
     )
 }

@@ -17,6 +17,9 @@ import { MAP_LAYERS } from '@/types/mission'
 import { ZONE_COLORS, zoneRings, type ZoneFeature } from '@/components/admin/zones'
 import Delivery3D, { warmCesium } from './Delivery3D'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
+import { X } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { FOCUS, FOCUS_OVERLAY, OVERLAY, PANEL } from '@/components/mission/ui'
 
 export type MapPad = {
     id: string; name: string; lat: number; lng: number; kind?: 'pad' | 'station'
@@ -47,54 +50,65 @@ const LEG_COLOR = { pickup: '#f59e0b', delivery: '#22d3ee' } as const
 
 // ── Icons ────────────────────────────────────────────────────────────────
 // Labels get a dark chip behind them so they read on street AND satellite.
+// Marker HTML is drawn on map tiles, so it uses the always-dark overlay set
+// (CSS variables, which the light-mode hex remap in globals.css cannot hit).
+
+const OV = {
+    text: 'var(--overlay-text)', muted: 'var(--overlay-muted)', scrim: 'var(--overlay-scrim)',
+    border: 'var(--overlay-border)', ok: 'var(--overlay-ok)', danger: 'var(--overlay-danger)',
+    warn: 'var(--overlay-warn)', accent: 'var(--overlay-accent)',
+}
+const MARKER_FONT = "var(--font-nunito),Nunito,system-ui,sans-serif"
+const tint = (c: string, pct: number) => `color-mix(in srgb, ${c} ${pct}%, transparent)`
 
 function labelChip(text: string, color: string) {
-    return `<div style="position:absolute;top:14px;left:50%;transform:translateX(-50%);
-        white-space:nowrap;font:600 9px monospace;color:${color};
-        background:rgba(10,10,14,.78);padding:1px 5px;border-radius:4px;
-        border:1px solid ${color}44">${text}</div>`
+    return `<div style="position:absolute;top:16px;left:50%;transform:translateX(-50%);
+        white-space:nowrap;font:700 12px/16px ${MARKER_FONT};color:${OV.text};
+        background:${OV.scrim};padding:1px 6px;border-radius:6px;
+        border:1px solid ${tint(color, 60)}">${text}</div>`
 }
 
 function padIcon(label: string, highlight: 'pickup' | 'dropoff' | null,
                  kind: 'pad' | 'station' = 'pad') {
-    const color = highlight === 'pickup' ? '#4ade80'
-        : highlight === 'dropoff' ? '#f87171'
-            : kind === 'station' ? '#fbbf24' : '#06b6d4'
-    const tag = highlight === 'pickup' ? 'PICKUP' : highlight === 'dropoff' ? 'DROP' : ''
+    const color = highlight === 'pickup' ? OV.ok
+        : highlight === 'dropoff' ? OV.danger
+            : kind === 'station' ? OV.warn : OV.accent
+    const tag = highlight === 'pickup' ? 'Pickup' : highlight === 'dropoff' ? 'Drop' : ''
     const shape = kind === 'station'
         ? `<div style="width:16px;height:16px;border-radius:4px;background:${color};
             display:flex;align-items:center;justify-content:center;
-            font:800 10px monospace;color:#000;
-            box-shadow:0 0 0 2px rgba(0,0,0,.45), 0 0 8px ${color}88">H</div>`
+            font:800 12px/1 ${MARKER_FONT};color:#111;
+            box-shadow:0 0 0 2px rgba(0,0,0,.45), 0 0 8px ${tint(color, 53)}">H</div>`
         : `<div style="width:14px;height:14px;border-radius:50%;
-            background:${color}33;border:2.5px solid ${color};box-sizing:border-box;
+            background:${tint(color, 20)};border:2.5px solid ${color};box-sizing:border-box;
             box-shadow:0 0 0 2px rgba(0,0,0,.35)"></div>`
     return L.divIcon({
         className: '', iconSize: [16, 16], iconAnchor: [8, 8],
         html: `<div style="position:relative">
             ${shape}
-            ${tag ? `<div style="position:absolute;top:-15px;left:50%;transform:translateX(-50%);
-                font:700 8px monospace;color:${color};letter-spacing:.5px">${tag}</div>` : ''}
+            ${tag ? `<div style="position:absolute;top:-20px;left:50%;transform:translateX(-50%);
+                white-space:nowrap;font:800 12px/16px ${MARKER_FONT};color:${color};
+                background:${OV.scrim};padding:0 5px;border-radius:6px">${tag}</div>` : ''}
             ${labelChip(label, color)}
         </div>`,
     })
 }
 
 function endpointIcon(kind: 'takeoff' | 'land') {
-    const color = kind === 'takeoff' ? '#4ade80' : '#f87171'
+    const color = kind === 'takeoff' ? OV.ok : OV.danger
     return L.divIcon({
         className: '', iconSize: [20, 20], iconAnchor: [10, 10],
         html: `<div style="width:20px;height:20px;border-radius:50%;
-            background:${color};color:#000;display:flex;align-items:center;
-            justify-content:center;font:800 10px monospace;
-            box-shadow:0 0 0 2px rgba(0,0,0,.4), 0 0 8px ${color}aa">
+            background:${color};color:#111;display:flex;align-items:center;
+            justify-content:center;font:800 12px/1 ${MARKER_FONT};
+            box-shadow:0 0 0 2px rgba(0,0,0,.4), 0 0 8px ${tint(color, 67)}">
             ${kind === 'takeoff' ? '▲' : '▼'}</div>`,
     })
 }
 
 function droneIcon(d: MapDroneLive, focused: boolean) {
-    const color = d.in_air ? '#fbbf24' : '#34d399'
-    const batColor = d.battery < 25 ? '#f87171' : d.battery < 40 ? '#fbbf24' : '#a1a1aa'
+    const color = d.in_air ? OV.warn : OV.ok
+    const batColor = d.battery < 25 ? OV.danger : d.battery < 40 ? OV.warn : OV.muted
     return L.divIcon({
         className: '', iconSize: [26, 26], iconAnchor: [13, 13],
         html: `<div style="position:relative">
@@ -106,11 +120,12 @@ function droneIcon(d: MapDroneLive, focused: boolean) {
                     <path d="M12 2 L19 21 L12 16 L5 21 Z"/>
                 </svg></div>
             <div style="position:absolute;top:22px;left:50%;transform:translateX(-50%);
-                white-space:nowrap;font:600 9px monospace;color:#e4e4e7;
-                background:rgba(10,10,14,.82);padding:1px 5px 2px;border-radius:4px;
-                border:1px solid ${focused ? color : 'rgba(255,255,255,.15)'}">
-                ${d.name}${d.order_no ? ` <span style="color:#22d3ee">${d.order_no}</span>` : ''}
-                <div style="margin-top:1px;height:3px;border-radius:2px;background:rgba(255,255,255,.15);overflow:hidden">
+                white-space:nowrap;font:700 12px/16px ${MARKER_FONT};color:${OV.text};
+                font-variant-numeric:tabular-nums;
+                background:${OV.scrim};padding:1px 6px 3px;border-radius:6px;
+                border:1px solid ${focused ? color : OV.border}">
+                ${d.name}${d.order_no ? ` <span style="color:${OV.accent}">${d.order_no}</span>` : ''}
+                <div style="margin-top:2px;height:3px;border-radius:2px;background:${OV.border};overflow:hidden">
                     <div style="width:${Math.max(0, Math.min(100, d.battery))}%;height:100%;background:${batColor}"></div>
                 </div>
             </div>
@@ -267,46 +282,49 @@ function DroneCard({ drone, onClose }: { drone: MapDroneLive; onClose: () => voi
     const videoRef = (el: HTMLVideoElement | null) => {
         if (el) el.srcObject = remoteStream ?? localStream
     }
-    const batColor = drone.battery < 25 ? '#f87171' : drone.battery < 40 ? '#fbbf24' : '#4ade80'
+    const batTone = drone.battery < 25 ? 'danger' : drone.battery < 40 ? 'warn' : 'ok'
+    const batBg = { danger: 'bg-app-danger', warn: 'bg-app-warn', ok: 'bg-app-ok' }[batTone]
+    const batText = { danger: 'text-app-danger', warn: 'text-app-warn', ok: 'text-app-ok' }[batTone]
     return (
-        <div className="absolute bottom-2 left-2 z-[600] w-[240px] rounded-lg border overflow-hidden shadow-xl"
-            style={{ background: 'hsl(var(--app-surface))', borderColor: 'hsl(var(--app-border))' }}>
+        <div className={`${PANEL} absolute bottom-2 left-2 z-[600] w-[260px] max-w-[calc(100%-16px)] overflow-hidden`}>
             {showVideo ? (
                 <div className="relative">
                     <video ref={videoRef} autoPlay muted playsInline
                         className="w-full aspect-video object-cover bg-black" />
-                    <span className="absolute top-1 left-1.5 flex items-center gap-1 text-[9px] font-mono text-white/90">
-                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> LIVE
+                    <span className={`${OVERLAY} absolute top-1.5 left-1.5 flex items-center gap-1.5 h-6 px-2 rounded-full text-xs font-bold`}>
+                        <span className="w-1.5 h-1.5 rounded-full animate-pulse motion-reduce:animate-none"
+                            style={{ background: 'var(--overlay-danger)' }} aria-hidden /> Live
                     </span>
                 </div>
             ) : (
-                <div className="w-full aspect-video flex items-center justify-center bg-black/60">
-                    <p className="text-[10px] font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>
+                <div className="w-full aspect-video flex items-center justify-center bg-app-surface-2">
+                    <p className="text-[13px] text-app-text-muted">
                         {drone.is_session ? 'Camera not streaming' : 'No camera on this link yet'}
                     </p>
                 </div>
             )}
-            <div className="p-2.5">
+            <div className="p-3">
                 <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full"
-                        style={{ background: drone.in_air ? '#fbbf24' : '#4ade80' }} />
-                    <span className="font-mono text-xs">{drone.name}</span>
-                    <button className="ml-auto text-xs opacity-60 hover:opacity-100" onClick={onClose}>✕</button>
+                    <span className={cn('w-2 h-2 rounded-full shrink-0', drone.in_air ? 'bg-app-warn' : 'bg-app-ok')} aria-hidden />
+                    <span className="text-base font-bold truncate">{drone.name}</span>
+                    <button className={cn('ml-auto -mr-1 w-8 h-8 inline-flex items-center justify-center rounded-[6px] text-app-text-muted hover:text-app-text hover:bg-app-surface-2 transition-colors duration-[120ms]', FOCUS)}
+                        onClick={onClose} aria-label="Close drone card" title="Close">
+                        <X size={16} />
+                    </button>
                 </div>
                 {/* Battery bar with the 20% reserve line - below it the drone
                     must be heading home, not taking work. */}
-                <div className="mt-2 relative h-1.5 rounded-full overflow-hidden"
-                    style={{ background: 'hsl(var(--app-border))' }}>
-                    <div className="h-full rounded-full"
-                        style={{ width: `${Math.min(100, Math.max(0, drone.battery))}%`, background: batColor }} />
-                    <div className="absolute top-0 h-full w-px" style={{ left: '20%', background: '#f87171' }} />
+                <div className="mt-2 relative h-1.5 rounded-full overflow-hidden bg-app-border"
+                    title="Battery, with the 20% reserve line">
+                    <div className={cn('h-full rounded-full', batBg)}
+                        style={{ width: `${Math.min(100, Math.max(0, drone.battery))}%` }} />
+                    <div className="absolute top-0 h-full w-px bg-app-danger" style={{ left: '20%' }} />
                 </div>
-                <div className="mt-1.5 flex items-center gap-2 text-[10px] font-mono"
-                    style={{ color: 'hsl(var(--app-text-muted))' }}>
-                    <span style={{ color: batColor }}>{Math.round(drone.battery)}%</span>
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-app-text-muted tabular-nums">
+                    <span className={cn('font-bold', batText)}>{Math.round(drone.battery)}%</span>
                     <span>{drone.mode}</span>
-                    <span>{drone.in_air ? 'IN AIR' : 'GROUND'}</span>
-                    {drone.order_no && <span className="text-cyan-500">{drone.order_no}</span>}
+                    <span>{drone.in_air ? 'In air' : 'On ground'}</span>
+                    {drone.order_no && <span className="font-semibold text-app-accent">{drone.order_no}</span>}
                 </div>
             </div>
         </div>
@@ -315,12 +333,15 @@ function DroneCard({ drone, onClose }: { drone: MapDroneLive; onClose: () => voi
 
 // ── Shared control styles ────────────────────────────────────────────────
 
-const activeBtn = { background: '#06b6d4', color: '#000', border: '1px solid #06b6d4' }
-const idleBtn = {
-    background: 'hsl(var(--app-surface))',
-    color: 'hsl(var(--app-text-muted))',
-    border: '1px solid hsl(var(--app-border))',
-}
+// Map buttons sit on the tiles: always-dark overlay chips, accent when on.
+// Plain concatenation (not cn): tailwind-merge cannot tell the custom
+// colour utilities apart and would drop one of them.
+const mapBtn = (on: boolean) =>
+    'inline-flex items-center h-8 px-3 rounded-[6px] border bg-overlay-scrim backdrop-blur-[6px] ' +
+    'text-[13px] font-semibold whitespace-nowrap transition-colors duration-[120ms] hover:bg-[rgba(8,12,18,0.88)] ' +
+    FOCUS_OVERLAY + ' ' +
+    (on ? 'text-[color:var(--overlay-accent)] border-[color:var(--overlay-accent)]'
+        : 'text-overlay-text border-overlay-border')
 
 function ModeButtons({ mode, setMode }: {
     mode: '2d' | '3d'; setMode: (m: '2d' | '3d') => void
@@ -329,8 +350,8 @@ function ModeButtons({ mode, setMode }: {
         <>
             {(['2d', '3d'] as const).map(m => (
                 <button key={m} onClick={() => setMode(m)}
-                    className="px-2 py-1 rounded text-[10px] font-mono border"
-                    style={mode === m ? activeBtn : idleBtn}>
+                    aria-pressed={mode === m}
+                    className={mapBtn(mode === m)}>
                     {m.toUpperCase()}
                 </button>
             ))}
@@ -369,15 +390,15 @@ export default function DeliveryMap({ pads, selection, drones, routes = [] }: {
     if (mode === '3d') {
         return (
             <div className="relative h-full w-full rounded-lg overflow-hidden border"
-                style={{ borderColor: 'hsl(var(--app-border))', background: '#000' }}>
+                style={{ borderColor: 'hsl(var(--app-border))', background: '#05070a' }}>
                 <Delivery3D pads={pads} selection={selection} drones={drones}
                     showAirspace={showAirspace} />
-                <div className="absolute top-2 right-2 z-[500] flex gap-1">
+                <div className="absolute top-2 right-2 z-[500] flex flex-wrap justify-end gap-1 max-w-[calc(100%-16px)]">
                     <button onClick={() => setShowAirspace(v => !v)}
                         title="Show restricted airspace as 3D volumes (zone floor to ceiling)"
-                        className="px-2 py-1 rounded text-[10px] font-mono border"
-                        style={showAirspace ? activeBtn : idleBtn}>
-                        AIRSPACE
+                        aria-pressed={showAirspace}
+                        className={mapBtn(showAirspace)}>
+                        Airspace
                     </button>
                     <ModeButtons mode={mode} setMode={setMode} />
                 </div>
@@ -427,43 +448,40 @@ export default function DeliveryMap({ pads, selection, drones, routes = [] }: {
                 ))}
             </MapContainer>
 
-            <div className="absolute top-2 right-2 z-[500] flex gap-1">
+            <div className="absolute top-2 right-2 z-[500] flex flex-wrap justify-end gap-1 max-w-[calc(100%-16px)]">
                 {(['nav', 'street', 'satellite'] as const).map(k => (
                     <button key={k} onClick={() => setLayerKey(k)}
-                        className="px-2 py-1 rounded text-[10px] font-mono border"
-                        style={layerKey === k ? activeBtn : idleBtn}>
-                        {k.toUpperCase()}
+                        aria-pressed={layerKey === k}
+                        className={mapBtn(layerKey === k)}>
+                        {k === 'nav' ? 'Nav' : k === 'street' ? 'Street' : 'Satellite'}
                     </button>
                 ))}
                 <button onClick={() => setShowLandUse(v => !v)}
                     title="Show the land-use data the route profiles read"
-                    className="px-2 py-1 rounded text-[10px] font-mono border"
-                    style={showLandUse ? activeBtn : idleBtn}>
-                    LAND USE
+                    aria-pressed={showLandUse}
+                    className={mapBtn(showLandUse)}>
+                    Land use
                 </button>
                 <ModeButtons mode={mode} setMode={setMode} />
             </div>
 
             {/* Legend - the map must explain itself */}
-            <div className="absolute top-2 left-2 z-[500] px-2.5 py-1.5 rounded-md border flex flex-col gap-1"
-                style={{ background: 'hsl(var(--app-surface))', borderColor: 'hsl(var(--app-border))' }}>
+            <div className={`${OVERLAY} absolute top-2 left-2 z-[500] px-3 py-2 rounded-[10px] flex flex-col gap-1 text-xs font-semibold`}>
                 {([
-                    ['#22d3ee', 'delivery leg', false],
-                    ['#f59e0b', 'pickup leg', true],
+                    [LEG_COLOR.delivery, 'Delivery leg', false],
+                    [LEG_COLOR.pickup, 'Pickup leg', true],
                 ] as const).map(([c, t, dash]) => (
-                    <span key={t} className="flex items-center gap-1.5 text-[9px] font-mono"
-                        style={{ color: 'hsl(var(--app-text-muted))' }}>
-                        <span className="inline-block w-5 h-0"
+                    <span key={t} className="flex items-center gap-2">
+                        <span className="inline-block w-5 h-0" aria-hidden
                             style={{ borderTop: `2px ${dash ? 'dashed' : 'solid'} ${c}` }} />
                         {t}
                     </span>
                 ))}
-                <span className="flex items-center gap-1.5 text-[9px] font-mono"
-                    style={{ color: 'hsl(var(--app-text-muted))' }}>
-                    <span className="inline-block w-2.5 h-2.5 rounded-[3px]"
-                        style={{ background: '#fbbf24' }} /> station
-                    <span className="inline-block w-2.5 h-2.5 rounded-full ml-1"
-                        style={{ border: '2px solid #06b6d4' }} /> pad
+                <span className="flex items-center gap-2">
+                    <span className="inline-block w-2.5 h-2.5 rounded-[3px]" aria-hidden
+                        style={{ background: 'var(--overlay-warn)' }} /> Station
+                    <span className="inline-block w-2.5 h-2.5 rounded-full ml-1" aria-hidden
+                        style={{ border: '2px solid var(--overlay-accent)' }} /> Pad
                 </span>
             </div>
 
@@ -479,55 +497,48 @@ export default function DeliveryMap({ pads, selection, drones, routes = [] }: {
                     Math.hypot((d.lat - st.lat) * 111320,
                         (d.lng - st.lng) * 111320 * Math.cos(st.lat * Math.PI / 180)) < 40)
                 return (
-                    <div className="absolute bottom-2 left-2 z-[600] w-[230px] rounded-lg border p-2.5 shadow-xl"
-                        style={{ background: 'hsl(var(--app-surface))', borderColor: 'hsl(var(--app-border))' }}>
-                        <div className="flex items-center gap-1.5">
-                            <span className="w-2.5 h-2.5 rounded-[3px]" style={{ background: '#fbbf24' }} />
-                            <span className="font-mono text-xs">{st.name}</span>
-                            <button className="ml-auto text-xs opacity-60 hover:opacity-100"
-                                onClick={() => setStationId(null)}>✕</button>
+                    <div className={`${PANEL} absolute bottom-2 left-2 z-[600] w-[260px] max-w-[calc(100%-16px)] p-3`}>
+                        <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-[3px] shrink-0 bg-app-warn" aria-hidden />
+                            <span className="text-base font-bold truncate">{st.name}</span>
+                            <button className={cn('ml-auto -mr-1 w-8 h-8 inline-flex items-center justify-center rounded-[6px] text-app-text-muted hover:text-app-text hover:bg-app-surface-2 transition-colors duration-[120ms]', FOCUS)}
+                                onClick={() => setStationId(null)} aria-label="Close station card" title="Close">
+                                <X size={16} />
+                            </button>
                         </div>
                         {here.length === 0 ? (
-                            <p className="mt-2 text-[10px] font-mono"
-                                style={{ color: 'hsl(var(--app-text-muted))' }}>
+                            <p className="mt-2 text-[13px] text-app-text-muted">
                                 No drones at this station.
                             </p>
                         ) : (
                             <div className="mt-2 flex flex-col gap-1">
                                 {here.map(d => (
                                     <button key={d.id}
-                                        className="flex items-center gap-1.5 text-[10px] font-mono rounded px-1 py-0.5 hover:bg-zinc-500/10 text-left"
+                                        className={cn('flex items-center gap-2 h-8 text-[13px] rounded-[6px] px-2 hover:bg-app-surface-2 text-left tabular-nums transition-colors duration-[120ms]', FOCUS)}
                                         onClick={() => setPinnedId(d.id)}>
-                                        <span className="w-1.5 h-1.5 rounded-full"
-                                            style={{ background: d.in_air ? '#fbbf24' : '#4ade80' }} />
-                                        <span>{d.name}</span>
-                                        <span className="ml-auto"
-                                            style={{ color: d.battery < 25 ? '#f87171' : '#4ade80' }}>
+                                        <span className={cn('w-2 h-2 rounded-full shrink-0', d.in_air ? 'bg-app-warn' : 'bg-app-ok')} aria-hidden />
+                                        <span className="font-semibold truncate">{d.name}</span>
+                                        <span className={cn('ml-auto font-bold', d.battery < 25 ? 'text-app-danger' : 'text-app-ok')}>
                                             {Math.round(d.battery)}%
                                         </span>
-                                        <span style={{ color: 'hsl(var(--app-text-muted))' }}>
+                                        <span className="text-app-text-muted">
                                             {d.order_no ?? (d.in_air ? 'flying' : 'idle')}
                                         </span>
                                     </button>
                                 ))}
                             </div>
                         )}
-                        <p className="mt-1.5 text-[9px]" style={{ color: 'hsl(var(--app-text-muted))' }}>
-                            LINKS: {here.length} connected - tap a drone for detail
+                        <p className="mt-2 text-[13px] text-app-text-muted">
+                            {here.length} connected · tap a drone for detail
                         </p>
                     </div>
                 )
             })()}
 
             {selection && (
-                <div className="absolute bottom-2 right-2 z-[500] px-2.5 py-1.5 rounded-md border text-[11px] font-mono"
-                    style={{
-                        background: 'hsl(var(--app-surface))',
-                        borderColor: 'hsl(var(--app-border))',
-                        color: 'hsl(var(--app-text))',
-                    }}>
-                    {selection.order_no}: {selection.pickup.name}
-                    <span style={{ color: 'hsl(var(--app-text-muted))' }}> to </span>
+                <div className={`${OVERLAY} absolute bottom-2 right-2 z-[500] max-w-[calc(100%-16px)] px-3 py-1.5 rounded-[10px] text-[13px] font-semibold truncate`}>
+                    <span className="font-bold">{selection.order_no}</span>: {selection.pickup.name}
+                    <span className="text-overlay-muted font-normal"> to </span>
                     {selection.dropoff.name}
                 </div>
             )}

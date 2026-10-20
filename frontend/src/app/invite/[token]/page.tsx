@@ -52,7 +52,7 @@ export default function InvitePage() {
         return (
             <AuthFrame title="Invite link" sub="HYRAK">
                 <AuthError text={loadError} />
-                <Link href="/login" style={{ ...AUTH_NOTE, textDecoration: 'underline' }}>Go to sign in</Link>
+                <Link href="/login" style={{ ...AUTH_NOTE, color: 'var(--app-accent)', fontWeight: 600, textDecoration: 'underline' }}>Go to sign in</Link>
             </AuthFrame>
         )
     }
@@ -120,7 +120,7 @@ function JoinSignedIn({ token, preview, role, sub, meta, name, onSignedOut, onJo
                 Join {preview.workspace_name} as {role}
             </AuthButton>
             <button type="button" onClick={() => void switchAccount()}
-                style={{ ...AUTH_NOTE, background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', textDecoration: 'underline' }}>
+                style={{ ...AUTH_NOTE, minHeight: 32, background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', textDecoration: 'underline' }}>
                 Not you? Sign out and create a new account
             </button>
         </AuthFrame>
@@ -173,23 +173,23 @@ function JoinSignUp({ token, preview, sub, meta, onJoined }: {
     return (
         <AuthFrame title={`Join ${preview.workspace_name}`} sub={sub} onSubmit={e => void onSubmit(e)}>
             {meta && <p style={AUTH_NOTE}>{meta}</p>}
-            <AuthField id="inv-name" label="YOUR NAME" autoComplete="name" autoFocus
+            <AuthField id="inv-name" label="Your name" autoComplete="name" autoFocus
                 value={name} onChange={e => setName(e.target.value)} onBlur={() => touch('name')}
                 error={show('name')} />
-            <AuthField id="inv-email" label="EMAIL" type="email" autoComplete="email" autoCapitalize="none" spellCheck={false}
+            <AuthField id="inv-email" label="Email" type="email" autoComplete="email" autoCapitalize="none" spellCheck={false}
                 value={email} onChange={e => setEmail(e.target.value)} onBlur={() => touch('email')}
                 error={show('email')}
                 hint={preview.email_locked ? 'This invite is for one email address. Use the one it was sent to.' : 'You sign in with this.'} />
-            <AuthField id="inv-password" label="PASSWORD" type="password" autoComplete="new-password"
+            <AuthField id="inv-password" label="Password" type="password" autoComplete="new-password"
                 value={password} onChange={e => setPassword(e.target.value)} onBlur={() => touch('password')}
                 error={show('password')} hint="At least 10 characters. A short sentence works well." />
-            <AuthField id="inv-confirm" label="CONFIRM PASSWORD" type="password" autoComplete="new-password"
+            <AuthField id="inv-confirm" label="Confirm password" type="password" autoComplete="new-password"
                 value={confirm} onChange={e => setConfirm(e.target.value)} onBlur={() => touch('confirm')}
                 error={show('confirm')} />
             <AuthError text={error} />
             <AuthButton busy={busy} busyText="Creating account">Create account and join</AuthButton>
             <p style={AUTH_NOTE}>
-                Already have an account? <Link href={`/login?next=${next}`} style={{ textDecoration: 'underline' }}>Sign in</Link> and
+                Already have an account? <Link href={`/login?next=${next}`} style={{ color: 'var(--app-accent)', fontWeight: 600, textDecoration: 'underline' }}>Sign in</Link> and
                 you come straight back here to join.
             </p>
         </AuthFrame>

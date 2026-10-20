@@ -797,7 +797,7 @@ function HfSummary({ inspect, hfFile, onHfFile, onEdit }: {
                     <strong style={{ display: 'block', overflowWrap: 'anywhere' }}>{d.repo}</strong>
                     <span className={s.help}>
                         {d.labels?.length ? `${d.labels.length} classes found. ` : ''}
-                        {d.sha ? <>Version <span className={s.mono}>{d.sha.slice(0, 7)}</span></> : null}
+                        {d.sha ? <>Version <span className={s.code}>{d.sha.slice(0, 7)}</span></> : null}
                     </span>
                 </span>
             </div>
@@ -807,7 +807,7 @@ function HfSummary({ inspect, hfFile, onHfFile, onEdit }: {
                     {d.onnx_files.map(f => (
                         <label key={f.path} className={s.choice} style={{ gridTemplateColumns: '18px 1fr auto' }}>
                             <input type="radio" name="cm-hf-file" checked={hfFile === f.path} onChange={() => onHfFile(f.path)} />
-                            <span className={s.mono} style={{ overflowWrap: 'anywhere', fontSize: 'var(--cm-small)' }}>{f.path}</span>
+                            <span className={s.code} style={{ overflowWrap: 'anywhere', fontSize: 'var(--cm-small)' }}>{f.path}</span>
                             <span className={s.help}>{f.size_bytes ? formatBytes(f.size_bytes) : ''}</span>
                         </label>
                     ))}
@@ -860,7 +860,7 @@ function TestStep({ model, status, step, failure, busy, stepErr, saveNote, onRet
                                 {state === 'done' ? <CheckCircle2 size={18} aria-hidden style={{ color: 'var(--cm-ok)' }} />
                                     : state === 'now' ? <Loader size={18} className="animate-spin motion-reduce:animate-none" aria-hidden style={{ color: 'var(--cm-accent)' }} />
                                         : state === 'failed' ? <X size={18} aria-hidden />
-                                            : <Circle size={18} aria-hidden style={{ opacity: 0.4 }} />}
+                                            : <Circle size={18} aria-hidden style={{ color: 'hsl(var(--app-text-subtle))' }} />}
                                 <span>{x.label}</span>
                                 <span className={s.help}>{state === 'done' ? 'Done' : state === 'now' ? 'Working' : state === 'failed' ? 'Stopped' : ''}</span>
                             </li>

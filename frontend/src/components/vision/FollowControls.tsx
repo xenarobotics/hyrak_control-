@@ -17,6 +17,7 @@ import { getSocket } from '@/lib/socket'
 import { useDroneStore } from '@/store/drone'
 import { AlertTriangle, Crosshair, Square, MoveVertical, Info, Mountain, Users, X } from 'lucide-react'
 import type { GroupFraming } from '@/types/vision'
+import { TONE, LABEL as LABEL_BASE, MUTED, TEXT, BORDER_STRONG, SURFACE, SURFACE_2, NUM, SECONDARY, chip, FOCUS } from './panelStyle'
 
 export type FollowKind = 'vehicle' | 'person'
 
@@ -24,16 +25,32 @@ const DIST_MIN = 0.08
 const DIST_MAX = 0.70
 const DIST_STEP = 0.06
 
-const LABEL: React.CSSProperties = {
-    fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))',
-}
+const LABEL: React.CSSProperties = LABEL_BASE
 
 function Hint({ text }: { text: string }) {
     return (
         <span style={{ display: 'flex' }} title={text}>
-            <Info size={10} style={{ color: 'hsl(var(--app-text-muted))', cursor: 'help' }} />
+            <Info size={13} style={{ color: MUTED, cursor: 'help' }} />
         </span>
     )
+}
+
+// Selected state is accent; the Follow / Stop button that starts or stops
+// the chase is amber: it moves the drone.
+const ACC = TONE.accent
+const WARN = TONE.warn
+const BAD = TONE.danger
+
+/** A small segmented toggle button (on/off, fixed/auto). */
+function seg(active: boolean): React.CSSProperties {
+    return {
+        minHeight: 28, padding: '0 10px', borderRadius: 6, fontSize: 13, fontWeight: 600,
+        cursor: 'pointer', textTransform: 'capitalize',
+        border: `1px solid ${active ? ACC.fg : BORDER_STRONG}`,
+        background: active ? ACC.bg : 'transparent',
+        color: active ? ACC.fg : MUTED,
+        transition: 'color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out)',
+    }
 }
 
 export function FollowControls({
@@ -145,8 +162,8 @@ export function FollowControls({
 
     if (selectedLabel === null) {
         return (
-            <div style={{ ...LABEL, textAlign: 'center', padding: '6px 0' }}>
-                tap a {kind === 'vehicle' ? 'vehicle' : 'person'} on the video to select
+            <div style={{ ...SECONDARY, textAlign: 'center', padding: '6px 0' }}>
+                Tap a {kind === 'vehicle' ? 'vehicle' : 'person'} on the video to select it
             </div>
         )
     }
@@ -156,58 +173,63 @@ export function FollowControls({
 
     return (
         <div style={{
-            display: 'flex', flexDirection: 'column', gap: 7,
-            padding: '8px 10px', borderRadius: 8,
-            background: 'rgba(56,160,255,0.10)',
-            border: '1px solid rgba(56,160,255,0.35)',
+            display: 'flex', flexDirection: 'column', gap: 8,
+            padding: '10px 12px', borderRadius: 10,
+            background: ACC.bg, border: `1px solid ${ACC.border}`,
         }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-                <Crosshair size={13} style={{ color: '#38a0ff' }} />
-                <span style={{ fontWeight: 700, color: '#38a0ff' }}>{selectedLabel}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+                <Crosshair size={14} style={{ color: ACC.fg }} aria-hidden />
+                <span style={{ fontWeight: 700, color: TEXT, ...NUM }}>{selectedLabel}</span>
                 {lockState && (
-                    <span style={{ ...LABEL, marginLeft: 'auto', textTransform: 'uppercase' }}>
+                    <span style={{ ...LABEL, marginLeft: 'auto' }}>
                         {lockState}
                     </span>
                 )}
             </div>
             {lockMessage && (
-                <div style={{ fontSize: 10, fontFamily: 'monospace', color: '#fbbf24' }}>
+                <div style={{ fontSize: 13, lineHeight: '18px', color: WARN.fg, fontWeight: 600 }}>
                     {lockMessage}
                 </div>
             )}
             {armError && (
                 <div style={{
-                    display: 'flex', gap: 5, alignItems: 'flex-start',
-                    fontSize: 10, lineHeight: 1.45, color: '#f87171',
+                    display: 'flex', gap: 6, alignItems: 'flex-start',
+                    fontSize: 13, lineHeight: '18px', color: BAD.fg, fontWeight: 600,
                 }}>
-                    <AlertTriangle size={11} style={{ marginTop: 1, flexShrink: 0 }} />
+                    <AlertTriangle size={13} style={{ marginTop: 2, flexShrink: 0 }} aria-hidden />
                     <span>{armError}</span>
                 </div>
             )}
 
             {/* Selecting frames a target; flying at it is a second, explicit
-                decision - arming is what starts PX4 Offboard. */}
-            <div style={{ display: 'flex', gap: 6 }}>
+                decision - arming is what starts PX4 Offboard. Amber: it moves
+                the drone. */}
+            <div style={{ display: 'flex', gap: 8 }}>
                 <button
+                    className={FOCUS}
                     onClick={() => arm(!tracking)}
+                    title={tracking ? 'Stop flying after the target' : 'Fly after the target (starts Offboard)'}
                     style={{
-                        flex: 1, padding: '7px 0', borderRadius: 7, fontSize: 11,
-                        fontWeight: 600, cursor: 'pointer',
-                        border: `1px solid ${tracking ? '#f87171' : '#38a0ff'}`,
-                        background: tracking ? 'rgba(248,113,113,0.15)' : 'rgba(56,160,255,0.15)',
-                        color: tracking ? '#f87171' : '#38a0ff',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                        flex: 1, minHeight: 32, borderRadius: 6, fontSize: 13,
+                        fontWeight: 700, cursor: 'pointer',
+                        border: `1px solid ${tracking ? BAD.fg : WARN.fg}`,
+                        background: tracking ? BAD.bg : WARN.bg,
+                        color: tracking ? BAD.fg : WARN.fg,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                        transition: 'color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out)',
                     }}
                 >
-                    {tracking ? <><Square size={11} /> Stop following</>
-                              : <><Crosshair size={11} /> Follow</>}
+                    {tracking ? <><Square size={13} aria-hidden /> Stop following</>
+                              : <><Crosshair size={13} aria-hidden /> Follow</>}
                 </button>
                 <button
+                    className={FOCUS}
                     onClick={onRelease}
+                    title="Drop the selection"
                     style={{
-                        padding: '7px 10px', borderRadius: 7, fontSize: 11,
-                        cursor: 'pointer', border: '1px solid hsl(var(--app-border))',
-                        background: 'transparent', color: 'hsl(var(--app-text-muted))',
+                        minHeight: 32, padding: '0 12px', borderRadius: 6, fontSize: 13, fontWeight: 600,
+                        cursor: 'pointer', border: `1px solid ${BORDER_STRONG}`,
+                        background: SURFACE, color: TEXT,
                     }}
                 >
                     Release
@@ -218,20 +240,16 @@ export function FollowControls({
             {multi && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <Users size={11} style={{ color: 'hsl(var(--app-text-muted))' }} />
-                        <span style={LABEL}>Multi-follow</span>
-                        <Hint text="Keep SEVERAL subjects in frame at once. Nobody is centred - that is impossible for two moving subjects - so instead the drone backs off and climbs enough to contain them all, and holds still while they fit. With this on, tapping a subject on the video adds them to the group; tapping a member again drops them." />
+                        <Users size={13} style={{ color: MUTED }} aria-hidden />
+                        <span style={LABEL}>Group follow</span>
+                        <Hint text="Keep several subjects in frame at once. The drone backs off and climbs until they all fit, then holds. While on, tap a subject on the video to add or drop them." />
                         <button
+                            className={FOCUS}
                             onClick={() => getSocket().emit('set_multi_follow', { enabled: !multi.enabled })}
-                            style={{
-                                marginLeft: 'auto', padding: '3px 10px', borderRadius: 6,
-                                fontSize: 10, cursor: 'pointer',
-                                border: `1px solid ${multi.enabled ? '#38a0ff' : 'hsl(var(--app-border))'}`,
-                                background: multi.enabled ? 'rgba(56,160,255,0.15)' : 'transparent',
-                                color: multi.enabled ? '#38a0ff' : 'hsl(var(--app-text-muted))',
-                            }}
+                            aria-pressed={multi.enabled}
+                            style={{ ...seg(multi.enabled), marginLeft: 'auto' }}
                         >
-                            {multi.enabled ? 'on' : 'off'}
+                            {multi.enabled ? 'On' : 'Off'}
                         </button>
                     </div>
 
@@ -242,15 +260,12 @@ export function FollowControls({
                                     <span
                                         key={id}
                                         title={i === 0
-                                            ? 'Primary - the plate, name and hold distance are read from this one'
-                                            : 'Tap to drop from the group'}
+                                            ? 'Primary: plate, name and hold distance come from this one'
+                                            : 'Tap the x to drop from the group'}
                                         style={{
-                                            display: 'flex', alignItems: 'center', gap: 4,
-                                            padding: '2px 5px 2px 7px', borderRadius: 5,
-                                            fontSize: 10, fontFamily: 'monospace',
-                                            border: `1px solid ${i === 0 ? '#38a0ff' : 'hsl(var(--app-border))'}`,
-                                            background: i === 0 ? 'rgba(56,160,255,0.15)' : 'transparent',
-                                            color: i === 0 ? '#38a0ff' : 'hsl(var(--app-text))',
+                                            ...chip(i === 0 ? 'accent' : 'muted'),
+                                            ...(i === 0 ? {} : { color: TEXT }),
+                                            paddingRight: multi.members.length > 1 ? 2 : 8,
                                         }}
                                     >
                                         {multi.labelFor(id)}
@@ -259,24 +274,27 @@ export function FollowControls({
                                             appears to offer. Release is what does that. */}
                                         {multi.members.length > 1 && (
                                             <button
+                                                className={FOCUS}
                                                 onClick={() => getSocket().emit('set_follow_vehicle', { track_id: id })}
+                                                aria-label="Drop from group"
                                                 style={{
-                                                    display: 'flex', border: 'none', background: 'none',
-                                                    cursor: 'pointer', padding: 0,
-                                                    color: 'hsl(var(--app-text-muted))',
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                    width: 20, height: 20, border: 'none', background: 'none',
+                                                    cursor: 'pointer', padding: 0, borderRadius: 999,
+                                                    color: MUTED,
                                                 }}
-                                            ><X size={10} /></button>
+                                            ><X size={12} aria-hidden /></button>
                                         )}
                                     </span>
                                 ))}
-                                <span style={{ ...LABEL, fontSize: 9.5, marginLeft: 'auto' }}>
+                                <span style={{ ...SECONDARY, ...NUM, marginLeft: 'auto' }}>
                                     {multi.members.length} / {multi.max}
                                 </span>
                             </div>
-                            <div style={{ ...LABEL, fontSize: 9.5, lineHeight: 1.4 }}>
+                            <div style={SECONDARY}>
                                 {multi.members.length < multi.max
                                     ? 'Tap another subject on the video to add them.'
-                                    : 'Group is full - drop one to add another.'}
+                                    : 'Group is full. Drop one to add another.'}
                             </div>
                             {multi.framing && <GroupFramingReadout f={multi.framing} />}
                         </>
@@ -294,55 +312,53 @@ export function FollowControls({
             {!(multi?.enabled && multi.members.length > 1) &&
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <MoveVertical size={11} style={{ color: 'hsl(var(--app-text-muted))', transform: 'rotate(90deg)' }} />
+                    <MoveVertical size={13} style={{ color: MUTED, transform: 'rotate(90deg)' }} aria-hidden />
                     <span style={LABEL}>Distance</span>
-                    <Hint text="Frame height = 100%. The drone moves forward/backward to keep the target filling this much of the frame. There is no single right value - apparent size depends on viewing angle as well as range - so watch 'actual' and nudge until they agree." />
-                    <span style={{ marginLeft: 'auto', fontSize: 10, fontFamily: 'monospace', color: '#38a0ff' }}>
-                        target {targetPct}%
+                    <Hint text="How much of the frame height the target should fill. The drone moves in or back to match. Watch 'now' and nudge until the two agree." />
+                    <span style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 700, color: TEXT, ...NUM }}>
+                        {targetPct}%
                         {actualFillPct != null && (
-                            <span style={{ marginLeft: 6, color: wayOff ? '#f87171' : 'hsl(var(--app-text-muted))' }}>
-                                actual {actualFillPct.toFixed(0)}%
+                            <span style={{ marginLeft: 6, fontWeight: 600, color: wayOff ? BAD.fg : MUTED }}>
+                                now {actualFillPct.toFixed(0)}%
                             </span>
                         )}
                     </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <button onClick={() => applyDist(dist - DIST_STEP)} title="Hold further back"
-                        style={stepBtn}>−</button>
+                    <button className={FOCUS} onClick={() => applyDist(dist - DIST_STEP)} title="Hold further back"
+                        aria-label="Hold further back" style={stepBtn}>−</button>
                     <input
+                        className={FOCUS}
                         type="range" min={DIST_MIN * 100} max={DIST_MAX * 100} step={1}
                         value={targetPct}
                         onChange={e => applyDist(Number(e.target.value) / 100)}
-                        style={{ flex: 1, accentColor: '#38a0ff', cursor: 'pointer' }}
+                        aria-label="Follow distance"
+                        style={{ flex: 1, accentColor: 'var(--app-accent)', cursor: 'pointer', minHeight: 24 }}
                     />
-                    <button onClick={() => applyDist(dist + DIST_STEP)} title="Hold closer"
-                        style={stepBtn}>+</button>
+                    <button className={FOCUS} onClick={() => applyDist(dist + DIST_STEP)} title="Hold closer"
+                        aria-label="Hold closer" style={stepBtn}>+</button>
                 </div>
                 {wayOff && (
-                    <div style={{ fontSize: 9.5, color: '#f87171', lineHeight: 1.4 }}>
-                        Actual is well {actualFillPct! > targetPct ? 'above' : 'below'} target - the drone
-                        will keep moving {actualFillPct! > targetPct ? 'back' : 'in'} until they meet.
+                    <div style={{ fontSize: 13, lineHeight: '18px', color: BAD.fg }}>
+                        Well {actualFillPct! > targetPct ? 'above' : 'below'} target. The drone keeps
+                        moving {actualFillPct! > targetPct ? 'back' : 'in'} until they meet.
                     </div>
                 )}
             </div>}
 
             {/* ── Altitude ─────────────────────────────────────────────── */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Mountain size={11} style={{ color: 'hsl(var(--app-text-muted))' }} />
+                <Mountain size={13} style={{ color: MUTED }} aria-hidden />
                 <span style={LABEL}>Altitude</span>
-                <Hint text="Fixed holds the height Follow armed at, moving only on the nudge buttons or auto-elevate. Auto changes altitude to keep the target vertically centred. Fixed is usually right: with a fixed downward-tilted camera, a target high or low in frame mostly means far or near, which the distance control already handles." />
+                <Hint text="Fixed holds the height Follow started at (nudge or auto-elevate change it). Auto climbs or descends to keep the target centred. Fixed is usually right." />
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
                     {(['fixed', 'auto'] as const).map(m => (
                         <button
                             key={m}
+                            className={FOCUS}
+                            aria-pressed={altitudeMode === m}
                             onClick={() => getSocket().emit('set_altitude_mode', { mode: m })}
-                            style={{
-                                padding: '3px 10px', borderRadius: 6, fontSize: 10,
-                                cursor: 'pointer', textTransform: 'capitalize',
-                                border: `1px solid ${altitudeMode === m ? '#38a0ff' : 'hsl(var(--app-border))'}`,
-                                background: altitudeMode === m ? 'rgba(56,160,255,0.15)' : 'transparent',
-                                color: altitudeMode === m ? '#38a0ff' : 'hsl(var(--app-text-muted))',
-                            }}
+                            style={seg(altitudeMode === m)}
                         >
                             {m}
                         </button>
@@ -351,27 +367,30 @@ export function FollowControls({
             </div>
             {altitudeMode !== 'auto' && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ ...LABEL, fontSize: 9.5 }}>nudge</span>
+                    <span style={SECONDARY}>Nudge</span>
                     {([['▲', -0.8], ['▼', 0.8]] as const).map(([glyph, v]) => (
                         <button
                             key={glyph}
+                            className={FOCUS}
+                            aria-label={v < 0 ? 'Climb (hold)' : 'Descend (hold)'}
+                            title="Hold to move"
                             onPointerDown={() => getSocket().emit('set_altitude_nudge', { velocity: v })}
                             onPointerUp={() => getSocket().emit('set_altitude_nudge', { velocity: 0 })}
                             onPointerLeave={() => getSocket().emit('set_altitude_nudge', { velocity: 0 })}
-                            style={{ ...stepBtn, width: 34 }}
+                            style={{ ...stepBtn, width: 36, color: WARN.fg, borderColor: WARN.border, background: WARN.bg }}
                         >{glyph}</button>
                     ))}
-                    <span style={{ ...LABEL, fontSize: 9 }}>hold to move</span>
+                    <span style={SECONDARY}>hold to move</span>
                 </div>
             )}
 
             {elevate && (elevate.elevating || elevate.blocked_by) && (
                 <div style={{
-                    display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 10,
-                    lineHeight: 1.5, color: elevate.elevating ? '#38a0ff' : '#f87171',
+                    display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 13,
+                    lineHeight: '18px', color: elevate.elevating ? WARN.fg : BAD.fg,
                 }}>
-                    <MoveVertical size={11} style={{ marginTop: 1, flexShrink: 0 }} />
-                    <span><b>{elevate.elevating ? 'Auto-elevating' : 'Cannot climb'}</b>{' - '}{elevate.reason}</span>
+                    <MoveVertical size={13} style={{ marginTop: 2, flexShrink: 0 }} aria-hidden />
+                    <span><b>{elevate.elevating ? 'Auto-elevating' : 'Cannot climb'}</b>{': '}{elevate.reason}</span>
                 </div>
             )}
         </div>
@@ -389,23 +408,20 @@ export function FollowControls({
 function GroupFramingReadout({ f }: { f: GroupFraming }) {
     const bad = f.action === 'unframeable'
     const busy = f.action === 'widen' || f.action === 'close'
-    const color = bad ? '#f87171' : busy ? '#fbbf24' : 'hsl(var(--app-text-muted))'
+    const color = bad ? BAD.fg : busy ? WARN.fg : MUTED
     const tight = (v: number, max: number) => v > max * 0.9
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10 }}>
-                <span style={{
-                    fontFamily: 'monospace', fontWeight: 700, color,
-                    textTransform: 'uppercase', letterSpacing: 0.3,
-                }}>
-                    {bad ? 'cannot frame all' : f.action}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                <span style={{ ...LABEL, color }}>
+                    {bad ? 'Cannot frame all' : f.action}
                 </span>
-                <span style={{ marginLeft: 'auto', fontFamily: 'monospace', fontSize: 9.5 }}>
-                    <span style={{ color: tight(f.fill_w_pct, f.max_fill_w_pct) ? '#fbbf24' : 'hsl(var(--app-text-muted))' }}>
+                <span style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 600, ...NUM }}>
+                    <span style={{ color: tight(f.fill_w_pct, f.max_fill_w_pct) ? WARN.fg : MUTED }}>
                         W {f.fill_w_pct.toFixed(0)}/{f.max_fill_w_pct.toFixed(0)}%
                     </span>
-                    <span style={{ marginLeft: 6, color: tight(f.fill_h_pct, f.max_fill_h_pct) ? '#fbbf24' : 'hsl(var(--app-text-muted))' }}>
+                    <span style={{ marginLeft: 6, color: tight(f.fill_h_pct, f.max_fill_h_pct) ? WARN.fg : MUTED }}>
                         H {f.fill_h_pct.toFixed(0)}/{f.max_fill_h_pct.toFixed(0)}%
                     </span>
                 </span>
@@ -415,9 +431,8 @@ function GroupFramingReadout({ f }: { f: GroupFraming }) {
                 see, so without this line a silent loss looks like normal
                 operation. */}
             {f.members_visible < f.members_total && (
-                <div style={{ fontSize: 9.5, color: '#fbbf24', lineHeight: 1.4 }}>
-                    {f.members_visible} of {f.members_total} in frame - holding rather than
-                    closing in, so the missing one stays recoverable.
+                <div style={{ fontSize: 13, color: WARN.fg, lineHeight: '18px' }}>
+                    {f.members_visible} of {f.members_total} in frame. Holding so the missing one stays recoverable.
                 </div>
             )}
             {/* HOW MUCH ROOM THE WIDEN HAS LEFT, and which bound is
@@ -425,18 +440,18 @@ function GroupFramingReadout({ f }: { f: GroupFraming }) {
                 aircraft somewhere, so "backing off" without a budget beside it
                 gives no sense of how much further it intends to go. */}
             {(f.action === 'widen' || f.action === 'unframeable') && (
-                <div style={{ fontSize: 9.5, fontFamily: 'monospace', lineHeight: 1.4,
-                              color: f.widen_budget.by === 'time' ? '#fbbf24' : 'hsl(var(--app-text-muted))' }}>
+                <div style={{ fontSize: 13, lineHeight: '18px', ...NUM,
+                              color: f.widen_budget.by === 'time' ? WARN.fg : MUTED }}>
                     {f.widen_budget.by === 'distance'
-                        ? `widened ${(f.widen_budget.spent_m ?? 0).toFixed(0)} / ${f.widen_budget.limit_m.toFixed(0)} m`
-                        : `widened ${f.widen_budget.spent_s.toFixed(0)} / ${f.widen_budget.limit_s.toFixed(0)}s - no GPS fix, bounded by time not distance`}
+                        ? `Backed off ${(f.widen_budget.spent_m ?? 0).toFixed(0)} / ${f.widen_budget.limit_m.toFixed(0)} m`
+                        : `Backed off ${f.widen_budget.spent_s.toFixed(0)} / ${f.widen_budget.limit_s.toFixed(0)} s (no GPS fix, limited by time)`}
                 </div>
             )}
-            <div style={{ fontSize: 9.5, color, lineHeight: 1.4 }}>{f.reason}</div>
+            <div style={{ fontSize: 13, color, lineHeight: '18px' }}>{f.reason}</div>
             {bad && f.required_range_m != null && (
-                <div style={{ fontSize: 9.5, color: '#f87171', lineHeight: 1.4 }}>
-                    Would need about {f.required_range_m.toFixed(0)} m of range - at which
-                    plates and faces stop being readable. Drop a member or release.
+                <div style={{ fontSize: 13, color: BAD.fg, lineHeight: '18px' }}>
+                    Needs about {f.required_range_m.toFixed(0)} m of range, too far to read plates
+                    or faces. Drop a member or release.
                 </div>
             )}
         </div>
@@ -444,10 +459,10 @@ function GroupFramingReadout({ f }: { f: GroupFraming }) {
 }
 
 const stepBtn: React.CSSProperties = {
-    width: 26, height: 26, borderRadius: 6, flexShrink: 0,
+    width: 32, height: 32, borderRadius: 6, flexShrink: 0,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    border: '1px solid hsl(var(--app-border))',
-    background: 'hsl(var(--app-surface-2))',
-    cursor: 'pointer', fontSize: 14, lineHeight: 1,
-    color: 'hsl(var(--app-text))',
+    border: `1px solid ${BORDER_STRONG}`,
+    background: SURFACE_2,
+    cursor: 'pointer', fontSize: 16, fontWeight: 700, lineHeight: 1,
+    color: TEXT,
 }

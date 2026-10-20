@@ -205,9 +205,9 @@ export function AttachmentEditor({ open, droneId, initial, onClose, onSaved }: {
                 <section className={a.step} aria-labelledby="att-states">
                     <div className={a.stepHead}>
                         <span className={s.label} id="att-states">States</span>
-                        <span className={s.mono} style={{ fontSize: 10, color: 'var(--cm-ink-2)' }}>{draft.actions.length}/{MAX_STATES}</span>
+                        <span className={s.mono} style={{ fontSize: 12, color: 'var(--cm-ink-2)' }}>{draft.actions.length}/{MAX_STATES}</span>
                         {draft.actions.length < MAX_STATES && (
-                            <button type="button" className={cn(s.btn, s.ghost)} style={{ marginLeft: 'auto', height: 26 }} onClick={addState}>
+                            <button type="button" className={cn(s.btn, s.ghost)} style={{ marginLeft: 'auto' }} onClick={addState}>
                                 <Plus size={13} aria-hidden /> Add state
                             </button>
                         )}

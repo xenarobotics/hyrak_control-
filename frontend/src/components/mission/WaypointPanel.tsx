@@ -6,6 +6,8 @@ import { useDroneStore } from '@/store/drone'
 import { WP_META } from '@/types/mission'
 import type { Waypoint } from '@/types/mission'
 import { ChevronUp, ChevronDown, Trash2, MapPin, GripVertical, Navigation, Home, ChevronsUpDown } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { FOCUS, LABEL } from '@/components/mission/ui'
 
 // ── Distance helper (Haversine) ─────────────────────────────────────────────
 
@@ -56,25 +58,24 @@ export default function WaypointPanel({ readOnly = false }: { readOnly?: boolean
           of the Mission Plan panel's own collapse arrow */}
       <button
         onClick={() => setListOpen(o => !o)}
-        className="flex items-center justify-between px-1 py-1 select-none"
+        aria-expanded={listOpen}
+        className={cn('flex items-center justify-between h-8 px-1.5 rounded-[6px] select-none hover:bg-app-surface-2 transition-colors duration-[120ms]', FOCUS)}
+        title={listOpen ? 'Hide the list' : 'Show the list'}
       >
-        <span className="text-[9px] font-mono tracking-widest font-bold" style={{ color: '#6b7280' }}>
-          WAYPOINTS
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="text-[9px] font-mono font-bold tabular-nums px-1 py-0.5 rounded"
-            style={{ background: 'rgba(255,255,255,.06)', color: '#9ca3af' }}>
-            {orderable.length}
-          </span>
-          <ChevronsUpDown size={11} color="#6b7280" />
+        <span className={LABEL}>Waypoints</span>
+        <span className="flex items-center gap-1.5 text-app-text-muted">
+          <span className="text-xs font-bold tabular-nums">{orderable.length}</span>
+          <ChevronsUpDown size={14} aria-hidden />
         </span>
       </button>
 
       {listOpen && (orderable.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-3 py-8 px-4 text-center">
-          <MapPin size={26} color="#6b7280" />
-          <p className="text-[11px] font-mono font-semibold" style={{ color: '#6b7280' }}>
-            Click anywhere on the map<br />to add waypoints
+        <div className="flex flex-col items-center justify-center gap-2 py-6 px-3 text-center">
+          <span className="w-10 h-10 rounded-[10px] flex items-center justify-center bg-app-accent-soft text-app-accent">
+            <MapPin size={20} aria-hidden />
+          </span>
+          <p className="text-[13px] font-semibold text-app-text-muted">
+            {readOnly ? 'No waypoints yet' : 'Click the map to add waypoints'}
           </p>
         </div>
       ) : (
@@ -113,141 +114,123 @@ export default function WaypointPanel({ readOnly = false }: { readOnly?: boolean
                   setDragOver(null)
                 }}
                 onClick={() => selectWaypoint(wp.id)}
-                className="group flex items-center gap-1.5 rounded-lg px-2 py-2.5 transition-all select-none cursor-pointer"
-                style={{
-                  background: isCurrent
-                    ? 'rgba(34,197,94,.12)'
-                    : active
-                    ? 'rgba(59,130,246,.12)'
-                    : isOver
-                    ? 'rgba(168,85,247,.1)'
-                    : 'transparent',
-                  border: isCurrent
-                    ? '1px solid rgba(34,197,94,.45)'
-                    : active
-                    ? '1px solid rgba(59,130,246,.3)'
-                    : isOver
-                    ? '1px solid rgba(168,85,247,.45)'
-                    : '1px solid transparent',
-                  transform: isOver ? 'translateY(-1px)' : 'translateY(0)',
-                }}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectWaypoint(wp.id) } }}
+                role="button" tabIndex={0} aria-pressed={active}
+                aria-label={`${meta.label} ${i + 1}, ${wp.altitude} m`}
+                className={cn('group flex items-center gap-1.5 rounded-[6px] px-1.5 py-1.5 min-h-10 border select-none cursor-pointer transition-colors duration-[120ms]', FOCUS,
+                  isCurrent ? 'bg-app-ok-soft border-app-ok/50'
+                  : active ? 'bg-app-accent-soft border-app-accent/50'
+                  : isOver ? 'bg-app-surface-2 border-app-border-strong border-dashed'
+                  : 'border-transparent hover:bg-app-surface-2')}
               >
                 {/* Drag grip - stops click propagation so it doesn't select the WP */}
-                <span
+                {!readOnly && <span
                   title="Drag to reorder"
-                  className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing"
-                  style={{ color: '#4b5563' }}
+                  className="shrink-0 text-app-text-subtle opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-[120ms] cursor-grab active:cursor-grabbing"
                   onClick={e => e.stopPropagation()}
                 >
-                  <GripVertical size={13} />
-                </span>
+                  <GripVertical size={14} aria-hidden />
+                </span>}
 
                 {/* Number badge */}
                 <div
-                  className="shrink-0 flex items-center justify-center rounded-full text-[10px] font-bold"
+                  className={cn('shrink-0 flex items-center justify-center rounded-full text-xs font-extrabold tabular-nums',
+                    active ? 'text-white' : 'text-app-text bg-app-surface-2')}
                   style={{
-                    width: 24, height: 24,
-                    background: active ? meta.color : 'rgba(255,255,255,.06)',
+                    width: 26, height: 26,
                     border: `2px solid ${meta.color}`,
-                    color: active ? '#fff' : meta.color,
+                    ...(active ? { background: meta.color } : {}),
                   }}
+                  aria-hidden
                 >
                   {i + 1}
                 </div>
 
                 {/* Label + distance */}
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-0 leading-tight">
                   <div className="flex items-center gap-1.5">
-                    {isCurrent && <Navigation size={10} color="#4ade80" className="shrink-0" />}
-                    <span className="text-[11px] font-mono font-bold truncate"
-                      style={{ color: isCurrent ? '#4ade80' : '#e5e7eb' }}>
+                    {isCurrent && <Navigation size={12} className="shrink-0 text-app-ok" aria-label="Flying to" />}
+                    <span className={cn('text-[14px] font-bold truncate', isCurrent ? 'text-app-ok' : 'text-app-text')}>
                       {meta.label}
                     </span>
-                    <span className="text-[10px] font-mono font-semibold" style={{ color: '#9ca3af' }}>
-                      {wp.altitude}m
+                    <span className="text-[13px] font-semibold tabular-nums text-app-text-muted">
+                      {wp.altitude} m
                     </span>
                   </div>
                   {legDist !== null && (
-                    <span className="text-[9px] font-mono font-medium" style={{ color: '#6b7280' }}>
-                      {fmtDist(legDist)}
+                    <span className="text-xs tabular-nums text-app-text-muted" title="Distance from the previous waypoint">
+                      +{fmtDist(legDist)}
                     </span>
                   )}
                 </div>
 
                 {/* Reorder arrows + delete - appear on hover / when active */}
                 {!readOnly && <div
-                  className="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                  style={active ? { opacity: 1 } : undefined}
+                  className={cn('shrink-0 flex items-center transition-opacity duration-[120ms] group-hover:opacity-100 group-focus-within:opacity-100',
+                    active ? 'opacity-100' : 'opacity-0')}
                 >
-                  <span
-                    title="Move up one step"
-                    className="p-1 rounded-md cursor-pointer"
-                    style={{ background: 'rgba(255,255,255,.08)', color: '#d1d5db' }}
+                  <button
+                    type="button"
+                    title="Move up" aria-label="Move up"
+                    disabled={i === 0}
+                    className={cn('w-6 h-7 flex items-center justify-center rounded-[6px] text-app-text-muted hover:text-app-text hover:bg-app-raised disabled:text-app-text-subtle disabled:hover:bg-transparent', FOCUS)}
                     onClick={e => { e.stopPropagation(); if (i > 0) moveWaypoint(rawIdx, waypoints.indexOf(orderable[i - 1])) }}
                   >
-                    <ChevronUp size={11} />
-                  </span>
-                  <span
-                    title="Move down one step"
-                    className="p-1 rounded-md cursor-pointer"
-                    style={{ background: 'rgba(255,255,255,.08)', color: '#d1d5db' }}
+                    <ChevronUp size={14} aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    title="Move down" aria-label="Move down"
+                    disabled={i === orderable.length - 1}
+                    className={cn('w-6 h-7 flex items-center justify-center rounded-[6px] text-app-text-muted hover:text-app-text hover:bg-app-raised disabled:text-app-text-subtle disabled:hover:bg-transparent', FOCUS)}
                     onClick={e => { e.stopPropagation(); if (i < orderable.length - 1) moveWaypoint(rawIdx, waypoints.indexOf(orderable[i + 1])) }}
                   >
-                    <ChevronDown size={11} />
-                  </span>
-                  <span
-                    title="Remove waypoint"
-                    className="p-1 rounded-md cursor-pointer"
-                    style={{ background: 'rgba(248,113,113,.15)', color: '#fca5a5' }}
+                    <ChevronDown size={14} aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    title="Remove waypoint" aria-label="Remove waypoint"
+                    className={cn('w-6 h-7 flex items-center justify-center rounded-[6px] text-app-danger hover:bg-app-danger-soft', FOCUS)}
                     onClick={e => { e.stopPropagation(); removeWaypoint(wp.id) }}
                   >
-                    <Trash2 size={11} />
-                  </span>
+                    <Trash2 size={14} aria-hidden />
+                  </button>
                 </div>}
               </div>
             )
           })}
-
-          {/* Hint row */}
-          {orderable.length > 1 && !readOnly && (
-            <p className="text-[9px] font-mono text-center pt-1 pb-0.5" style={{ color: '#374151' }}>
-              ⠿ drag to reorder · ↑↓ move one step
-            </p>
-          )}
         </div>
       ))}
 
       {/* ── RTL - separate, non-reorderable, always visible ──────────────── */}
-      <div className="mt-1 pt-2 border-t" style={{ borderColor: 'rgba(255,255,255,.08)' }}>
+      <div className="mt-1 pt-2 border-t border-app-border">
         <div
           onClick={() => selectWaypoint(rtlActive ? null : RTL_SENTINEL_ID)}
-          className="group flex items-center gap-1.5 rounded-lg px-2 py-2.5 transition-all select-none cursor-pointer"
-          style={{
-            background: rtlActive ? 'rgba(168,85,247,.12)' : 'transparent',
-            border: rtlActive ? '1px solid rgba(168,85,247,.4)' : '1px solid transparent',
-          }}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectWaypoint(rtlActive ? null : RTL_SENTINEL_ID) } }}
+          role="button" tabIndex={0} aria-pressed={rtlActive}
+          title="Return-to-launch point. Click to edit."
+          className={cn('group flex items-center gap-2 rounded-[6px] px-1.5 py-1.5 min-h-10 border select-none cursor-pointer transition-colors duration-[120ms]', FOCUS,
+            rtlActive ? 'bg-app-accent-soft border-app-accent/50' : 'border-transparent hover:bg-app-surface-2')}
         >
           <div
-            className="shrink-0 flex items-center justify-center rounded-full"
+            className={cn('shrink-0 flex items-center justify-center rounded-full', rtlActive ? 'text-white' : 'text-app-text bg-app-surface-2')}
             style={{
-              width: 24, height: 24,
-              background: rtlActive ? '#a855f7' : 'rgba(255,255,255,.06)',
+              width: 26, height: 26,
               border: '2px solid #a855f7',
-              color: rtlActive ? '#fff' : '#a855f7',
+              ...(rtlActive ? { background: '#a855f7' } : {}),
             }}
+            aria-hidden
           >
-            <Home size={12} />
+            <Home size={13} />
           </div>
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 leading-tight">
             <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-mono font-bold" style={{ color: '#e5e7eb' }}>RTL</span>
-              <span className="text-[10px] font-mono font-semibold" style={{ color: '#9ca3af' }}>
-                {rtlWp.altitude}m
+              <span className="text-[14px] font-bold text-app-text">Return home</span>
+              <span className="text-[13px] font-semibold tabular-nums text-app-text-muted">
+                {rtlWp.altitude} m
               </span>
             </div>
-            <span className="text-[9px] font-mono font-medium" style={{ color: '#6b7280' }}>
-              Return-to-launch point · click to edit
-            </span>
+            <span className="text-xs text-app-text-muted">RTL point</span>
           </div>
         </div>
       </div>

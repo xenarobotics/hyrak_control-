@@ -5,6 +5,7 @@ import { useDroneStore } from '@/store/drone'
 import { getSocket } from '@/lib/socket'
 import { Info, Maximize2, Gauge } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { LABEL, MUTED, TEXT, SURFACE_2, BORDER_STRONG, TILE, SECONDARY, NUM, chip, btn, FOCUS, TONE } from './panelStyle'
 
 type Preset = 'natural' | 'vivid' | 'cinematic' | 'flat' | 'custom'
 type Denoise = 'off' | 'light' | 'medium' | 'strong'
@@ -46,16 +47,15 @@ const PRESET_VALUES: Record<Exclude<Preset, 'custom'>, Pick<EnhanceParams, 'cont
 
 function Row({ label, tooltip, children }: { label: string; tooltip: string; children: React.ReactNode }) {
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
-                    {label}
-                </span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={LABEL}>{label}</span>
                 <Tooltip>
-                    <TooltipTrigger style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'help' }}>
-                        <Info size={11} style={{ color: 'hsl(var(--app-text-muted))' }} />
+                    <TooltipTrigger aria-label={`About ${label.toLowerCase()}`} className={FOCUS}
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, background: 'none', border: 'none', padding: 0, cursor: 'help', borderRadius: 6 }}>
+                        <Info size={13} style={{ color: MUTED }} aria-hidden />
                     </TooltipTrigger>
-                    <TooltipContent style={{ maxWidth: 230, fontSize: 11, lineHeight: 1.5 }}>
+                    <TooltipContent style={{ maxWidth: 240, fontSize: 13, lineHeight: 1.5 }}>
                         {tooltip}
                     </TooltipContent>
                 </Tooltip>
@@ -72,12 +72,12 @@ function StyledSelect<T extends string>({
         <select
             value={value}
             onChange={e => onChange(e.target.value as T)}
+            className={FOCUS}
             style={{
-                width: '100%', padding: '6px 8px', borderRadius: 8,
-                background: 'hsl(var(--app-surface-2))',
-                border: '1px solid hsl(var(--app-border))',
-                color: 'hsl(var(--app-text))',
-                fontSize: 11, fontFamily: 'monospace',
+                width: '100%', height: 32, padding: '0 8px', borderRadius: 6,
+                background: SURFACE_2,
+                border: `1px solid ${BORDER_STRONG}`,
+                color: TEXT, fontSize: 14,
             }}
         >
             {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -93,9 +93,10 @@ function ParamSlider({
             <input
                 type="range" min={min} max={max} step={step} value={value}
                 onChange={e => onChange(parseFloat(e.target.value))}
-                style={{ flex: 1, accentColor: '#fbbf24' }}
+                className={FOCUS}
+                style={{ flex: 1, minHeight: 24, accentColor: 'var(--app-accent)' }}
             />
-            <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text))', width: 36, textAlign: 'right' }}>
+            <span style={{ fontSize: 13, fontWeight: 700, ...NUM, color: TEXT, width: 40, textAlign: 'right' }}>
                 {format(value)}
             </span>
         </div>
@@ -135,21 +136,19 @@ export function EnhancePanel() {
     }
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
             {/* Resolution readout */}
             <div style={{
-                display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px',
-                borderRadius: 10, background: 'hsl(var(--app-surface-2))',
-                border: '1px solid hsl(var(--app-border))',
+                ...TILE, display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px',
             }}>
-                <Maximize2 size={14} style={{ color: '#fbbf24', flexShrink: 0 }} />
-                <div style={{ flex: 1, fontFamily: 'monospace', fontSize: 11 }}>
-                    <div style={{ color: 'hsl(var(--app-text-muted))' }}>
-                        Input: <span style={{ color: 'hsl(var(--app-text))' }}>{inputRes}</span>
+                <Maximize2 size={16} style={{ color: 'var(--app-accent)', flexShrink: 0 }} aria-hidden />
+                <div style={{ flex: 1, ...SECONDARY, ...NUM }}>
+                    <div>
+                        In: <span style={{ color: TEXT, fontWeight: 700 }}>{inputRes}</span>
                     </div>
-                    <div style={{ color: 'hsl(var(--app-text-muted))', marginTop: 2 }}>
-                        Output: <span style={{ color: upscaled ? '#fbbf24' : 'hsl(var(--app-text))' }}>{outputRes}</span>
+                    <div style={{ marginTop: 2 }}>
+                        Out: <span style={{ color: upscaled ? TONE.accent.fg : TEXT, fontWeight: 700 }}>{outputRes}</span>
                         {upscaleMethod === 'ai' && ' (AI upscaled)'}
                         {upscaleMethod === 'lanczos' && ' (resized up)'}
                     </div>
@@ -157,17 +156,12 @@ export function EnhancePanel() {
             </div>
 
             {reused && (
-                <div style={{
-                    display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px',
-                    background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
-                    borderRadius: 8, fontSize: 11, fontFamily: 'monospace',
-                    color: 'hsl(var(--app-text-muted))', width: 'fit-content',
-                }}>
-                    <Gauge size={12} /> reusing last enhanced frame
-                </div>
+                <span style={chip('muted')}>
+                    <Gauge size={13} aria-hidden /> Reusing the last frame
+                </span>
             )}
 
-            <Row label="DENOISE" tooltip="Removes speckle/snow-style noise from a glitchy analog (non-digital) FPV link, while keeping edges sharp. Off for a clean digital feed - denoising a feed that has no noise just softens detail for nothing.">
+            <Row label="Denoise" tooltip="Removes snow and speckle from an analog video link. Leave off for a clean digital feed: it only softens detail there.">
                 <StyledSelect
                     value={params.denoise}
                     onChange={(v: Denoise) => update({ denoise: v })}
@@ -180,11 +174,11 @@ export function EnhancePanel() {
                 />
             </Row>
 
-            <Row label="SHARPEN" tooltip="Unsharp mask - boosts edge contrast to make detail pop. Too much creates a harsh, over-processed look with visible halos around edges.">
+            <Row label="Sharpen" tooltip="Makes edges crisper. Too much adds halos around edges.">
                 <ParamSlider value={params.sharpen} min={0} max={1} step={0.05} format={v => v.toFixed(2)} onChange={v => update({ sharpen: v })} />
             </Row>
 
-            <Row label="LOOK" tooltip="Quick color-grade presets. Picking one sets Contrast/Saturation/Brightness/Gamma below - adjust any of them afterward and this switches to Custom.">
+            <Row label="Look" tooltip="Colour presets. Picking one sets the four sliders below; moving a slider switches this to Custom.">
                 <StyledSelect
                     value={params.preset}
                     onChange={(v: Preset) => applyPreset(v)}
@@ -198,23 +192,23 @@ export function EnhancePanel() {
                 />
             </Row>
 
-            <Row label="CONTRAST" tooltip="Difference between dark and light areas. Higher = punchier, but can clip detail in shadows/highlights.">
+            <Row label="Contrast" tooltip="Difference between dark and light areas. Too high loses detail in shadows and highlights.">
                 <ParamSlider value={params.contrast} min={0.5} max={1.8} step={0.05} format={v => v.toFixed(2)} onChange={v => update({ contrast: v })} />
             </Row>
 
-            <Row label="SATURATION" tooltip="Color intensity. Higher = more vivid colors, lower = closer to grayscale.">
+            <Row label="Saturation" tooltip="Colour strength. Lower is closer to black and white.">
                 <ParamSlider value={params.saturation} min={0} max={2} step={0.05} format={v => v.toFixed(2)} onChange={v => update({ saturation: v })} />
             </Row>
 
-            <Row label="BRIGHTNESS" tooltip="Flat offset added to every pixel. Use for a feed that's consistently too dark or too bright.">
+            <Row label="Brightness" tooltip="Lightens or darkens the whole picture evenly.">
                 <ParamSlider value={params.brightness} min={-40} max={40} step={1} format={v => v.toFixed(0)} onChange={v => update({ brightness: v })} />
             </Row>
 
-            <Row label="GAMMA" tooltip="Reshapes the brightness curve - values below 1 brighten midtones/shadows without blowing out highlights, values above 1 darken them. Different from Brightness, which shifts everything equally.">
+            <Row label="Gamma" tooltip="Below 1 brightens shadows without washing out highlights; above 1 darkens them.">
                 <ParamSlider value={params.gamma} min={0.5} max={1.8} step={0.05} format={v => v.toFixed(2)} onChange={v => update({ gamma: v })} />
             </Row>
 
-            <Row label="OUTPUT RESOLUTION" tooltip="Resizes the output with a sharp Lanczos resize. Not AI-generated detail - it cannot invent detail the source doesn't have, but it's a clean, sharp result at zero added latency, safe for live flying. Ignored when AI Upscale below is on.">
+            <Row label="Output size" tooltip="A sharp resize with no added delay, safe for live flying. It cannot add detail the camera did not capture. Ignored when AI upscale is on.">
                 <StyledSelect
                     value={params.resolution}
                     onChange={(v: Resolution) => update({ resolution: v })}
@@ -226,7 +220,7 @@ export function EnhancePanel() {
                 />
             </Row>
 
-            <Row label="AI UPSCALE" tooltip="Real learned super-resolution (FSRCNN) instead of a plain resize - genuinely reconstructs detail rather than just stretching pixels. Measured on this machine: ~6-13 fps, CPU-bound (this build of OpenCV has no GPU path for it). It updates at its own pace and FPS Limit's caching covers the gap, so the live feed itself never stalls - but the enhanced image only refreshes a few times a second, not every frame. Overrides Output Resolution above. For full 24-30fps smoothness, use Output Resolution's plain resize instead.">
+            <Row label="AI upscale" tooltip="Rebuilds detail with an AI model (FSRCNN). Runs at about 6 to 13 fps on this server, so the enhanced picture refreshes a few times a second while the live feed keeps running. Overrides Output size.">
                 <StyledSelect
                     value={params.ai_upscale}
                     onChange={(v: AiUpscale) => update({ ai_upscale: v })}
@@ -238,18 +232,15 @@ export function EnhancePanel() {
                 />
             </Row>
 
-            <Row label="FPS LIMIT" tooltip="Caps how often this enhancement pipeline re-processes a frame, to save CPU/GPU load. It does NOT change your camera's actual frame rate - frames between updates just reuse the last enhanced result. Lower this (5-10) when AI Upscale is on, since each AI-upscaled frame is much more expensive to compute.">
+            <Row label="FPS limit" tooltip="How often a frame is enhanced, to save server load. The camera frame rate does not change. Use 5 to 10 with AI upscale.">
                 <ParamSlider value={params.fps_cap} min={5} max={60} step={5} format={v => v.toFixed(0)} onChange={v => update({ fps_cap: v })} />
             </Row>
 
             <button
+                type="button"
                 onClick={() => { setParams(DEFAULTS); emit(DEFAULTS) }}
-                style={{
-                    fontSize: 10, fontFamily: 'monospace', padding: '5px 10px',
-                    borderRadius: 6, border: '1px solid hsl(var(--app-border))',
-                    background: 'none', cursor: 'pointer',
-                    color: 'hsl(var(--app-text-muted))', alignSelf: 'flex-end',
-                }}
+                className={FOCUS}
+                style={{ ...btn(), alignSelf: 'flex-end' }}
             >
                 Reset to defaults
             </button>

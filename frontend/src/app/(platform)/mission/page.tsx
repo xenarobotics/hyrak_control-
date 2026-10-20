@@ -26,6 +26,10 @@ import { useSessionAttachments } from '@/lib/attachments'
 import { waypointActionHazard } from '@/components/attachments/WaypointActions'
 import { cn } from '@/lib/utils'
 import {
+  FOCUS, FOCUS_OVERLAY, PANEL, POPOVER, DIALOG, BACKDROP, OVERLAY, TITLE, LABEL, CHIP,
+  BTN, BTN_PRIMARY, BTN_ACCENT, BTN_WARN, BTN_WARN_SOLID, BTN_DANGER, INPUT, SEG, segBtn,
+} from '@/components/mission/ui'
+import {
   Upload, Trash2, FileUp, FileDown,
   Map as MapIcon, Satellite, Mountain, Layers,
   ChevronLeft, ChevronRight,
@@ -36,57 +40,37 @@ import {
 } from 'lucide-react'
 
 // Leaflet accesses `window` - no SSR
-const MissionMap = dynamic(() => import('@/components/mission/MissionMap'), {
-  ssr: false,
-  loading: () => (
-    <div className="w-full h-full flex items-center justify-center"
-      style={{ background: '#0a0a0a' }}>
-      <p className="text-xs font-mono" style={{ color: '#555' }}>Loading map...</p>
-    </div>
-  ),
-})
-
-const MissionMap3D = dynamic(() => import('@/components/mission/MissionMap3D'), {
-  ssr: false,
-  loading: () => (
-    <div className="w-full h-full flex items-center justify-center"
-      style={{ background: '#0a0a0a' }}>
-      <p className="text-xs font-mono" style={{ color: '#555' }}>Loading 3D map...</p>
-    </div>
-  ),
-})
-
-// ── Solid dark panel - no more pure translucent ─────────────────────────────
-
-function Panel({ children, className, style }: {
-  children: React.ReactNode
-  className?: string
-  style?: React.CSSProperties
-}) {
+function MapLoading({ label }: { label: string }) {
   return (
-    <div
-      className={cn('rounded-xl border', className)}
-      style={{
-        background: 'rgba(17, 19, 24, .94)',
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
-        borderColor: 'rgba(255, 255, 255, .08)',
-        ...style,
-      }}
-    >
-      {children}
+    <div className="w-full h-full flex items-center justify-center bg-app-bg">
+      <p className="flex items-center gap-2 text-[13px] text-app-text-muted">
+        <Loader2 size={14} className="animate-spin motion-reduce:animate-none" aria-hidden /> {label}
+      </p>
     </div>
   )
 }
 
+const MissionMap = dynamic(() => import('@/components/mission/MissionMap'), {
+  ssr: false,
+  loading: () => <MapLoading label="Loading map…" />,
+})
+
+const MissionMap3D = dynamic(() => import('@/components/mission/MissionMap3D'), {
+  ssr: false,
+  loading: () => <MapLoading label="Loading 3D map…" />,
+})
+
+/** Width of the two side panels (plan, waypoint editor). */
+const SIDE_W = 224
+
 // ── Map layer icons ─────────────────────────────────────────────────────────
 
 const LAYER_ICONS: Record<MapLayer, React.ReactNode> = {
-  nav:       <Navigation size={12} />,
-  street:    <MapIcon size={12} />,
-  satellite: <Satellite size={12} />,
-  terrain:   <Mountain size={12} />,
-  hybrid:    <Layers size={12} />,
+  nav:       <Navigation size={14} aria-hidden />,
+  street:    <MapIcon size={14} aria-hidden />,
+  satellite: <Satellite size={14} aria-hidden />,
+  terrain:   <Mountain size={14} aria-hidden />,
+  hybrid:    <Layers size={14} aria-hidden />,
 }
 
 // ── Format helpers ──────────────────────────────────────────────────────────
@@ -238,6 +222,8 @@ export default function MissionPage() {
   const [approvedPermits, setApprovedPermits] = useState<MyPermit[]>([])
   const [showPermits, setShowPermits] = useState(false)
   const [showAvoidPanel, setShowAvoidPanel] = useState(false)
+  // Where the 2D map portals its avoidance legend (the left column).
+  const [legendHost, setLegendHost] = useState<HTMLDivElement | null>(null)
 
   // In swarm mode permits belong to the ACTIVE fleet drone - every permit
   // request/list call must name it explicitly.
@@ -538,9 +524,9 @@ export default function MissionPage() {
 
   // Status strip layout helpers
   const statusBarVisible = missionExecuting || missionPaused
-  const toolbarTop = statusBarVisible ? 'top-6' : 'top-3'
-  const panelTop   = statusBarVisible ? 'top-6' : 'top-3'
-  const toastTop   = statusBarVisible ? 'top-20' : 'top-16'
+  const toolbarTop = statusBarVisible ? 'top-12' : 'top-3'
+  const panelTop   = statusBarVisible ? 'top-12' : 'top-3'
+  const toastTop   = statusBarVisible ? 'top-[104px]' : 'top-16'
 
   // Wind speed from EKF2
   const windN = telemetry?.wind_north_m_s ?? 0
@@ -678,64 +664,43 @@ export default function MissionPage() {
   }, [waypoints, telStatus, terrainFollow, autoHeading, planHasHazardActions, allowAttachments])
 
   return (
-    <div className="relative w-full h-full overflow-hidden rounded-xl border"
-      style={{ borderColor: 'hsl(var(--app-border))' }}>
+    <div className="relative w-full h-full overflow-hidden rounded-[10px] border border-app-border">
 
       {/* Full-bleed map - 2D or 3D */}
       {mapView === '3d' ? <MissionMap3D readOnly={readOnly}
         // The side panels cover both corners: the controls sit on the right
         // edge, just inside the waypoint panel.
-        navStyle={{ right: rightOpen ? 'calc(224px + 24px)' : 56, top: '50%', transform: 'translateY(-50%)' }} />
+        navStyle={{ right: rightOpen ? `calc(${SIDE_W}px + 24px)` : 56, top: '50%', transform: 'translateY(-50%)' }} />
         : <MissionMap readOnly={readOnly}
         // The side panels own both bottom corners here: the detections
-        // legend sits centred above the stats bar instead.
-        detectionsLegendStyle={{ bottom: 84, left: '50%', transform: 'translateX(-50%)' }} />}
+        // legend sits centred above the stats bar instead, and the
+        // avoidance legend joins the left column (no overlap).
+        detectionsLegendStyle={{ bottom: 84, left: '50%', transform: 'translateX(-50%)' }}
+        avoidanceLegendHost={legendHost} />}
 
       {/* Hidden file input */}
       <input ref={fileRef} type="file" accept=".plan,.json" className="hidden" onChange={onFileChange} />
 
       {/* ── Fleet mission console (swarm mode, general missions) ──────── */}
-      {!isCustomer && <FleetMissionPanel leftOffset={leftOpen ? 'calc(224px + 24px)' : '12px'} />}
+      {!isCustomer && <FleetMissionPanel leftOffset={leftOpen ? `calc(${SIDE_W}px + 24px)` : '12px'} />}
 
       {/* ── Upload error toast (not connected etc.) ──────────────────── */}
       {uploadError && (
-        <div
-          className={`absolute ${toastTop} left-1/2 -translate-x-1/2 z-[2500] flex items-center gap-2.5 px-4 py-2.5 rounded-xl font-mono text-[11px] font-bold shadow-2xl`}
-          style={{
-            background: 'rgba(120,53,15,.95)',
-            border: '1px solid rgba(251,191,36,.4)',
-            color: '#fde68a',
-            backdropFilter: 'blur(8px)',
-          }}
-        >
-          <WifiOff size={14} />
+        <div role="alert"
+          className={cn(`absolute ${toastTop} left-1/2 -translate-x-1/2 z-[2500] flex items-center gap-2.5 px-4 py-2.5 text-[14px] font-semibold max-w-[calc(100%-32px)]`,
+            POPOVER, 'border-app-warn/60')}>
+          <WifiOff size={16} className="text-app-warn shrink-0" aria-hidden />
           {uploadError}
         </div>
       )}
-
-      {/* ── Obstacle avoidance (same panel as the Fly tab; staff only) ──── */}
-      {!isCustomer && <div className="absolute bottom-16 left-3 z-[2400] font-mono">
-        {showAvoidPanel && (
-          <div className="mb-2 w-72 rounded-xl border p-3"
-            style={{ background: 'rgba(17, 19, 24, .94)', backdropFilter: 'blur(12px)', borderColor: 'rgba(255, 255, 255, .08)' }}>
-            <AvoidancePanel />
-          </div>
-        )}
-        <button onClick={() => setShowAvoidPanel(v => !v)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[10px] tracking-widest"
-          style={{ background: 'rgba(17, 19, 24, .9)', borderColor: showAvoidPanel ? '#22d3ee55' : 'rgba(255,255,255,.08)', color: showAvoidPanel ? '#22d3ee' : '#a1a1aa' }}
-          title="Obstacle avoidance: detection, steering, response, tuning">
-          <ShieldCheck size={12} /> AVOIDANCE
-        </button>
-      </div>}
 
       {/* ── Airspace check + altitude profile (above the stats bar) ─────── */}
       {!(rtlReturning && swarmEnabled) && (
         <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-[1100] flex flex-col items-center gap-2 w-[min(640px,calc(100%-32px))]">
           {showProfile && (
-            <Panel className="w-full px-3 py-2">
+            <div className={cn(PANEL, 'w-full px-3 py-2')}>
               <AltitudeProfile waypoints={waypoints} />
-            </Panel>
+            </div>
           )}
           {!swarmEnabled && (
             <AirspaceStrip workspaceId={planWorkspaceId} droneId={boundDrone?.id ?? null}
@@ -775,89 +740,33 @@ export default function MissionPage() {
           }} />
       )}
 
-      {/* ── Approved red-zone mission profiles ─────────────────────────── */}
-      {approvedPermits.length > 0 && (
-        <div className="absolute bottom-16 right-3 z-[2400] font-mono">
-          {showPermits && (
-            <div
-              className="mb-2 w-72 rounded-xl border overflow-hidden"
-              style={{
-                background: 'rgba(17, 19, 24, .94)',
-                backdropFilter: 'blur(12px)',
-                borderColor: 'rgba(255, 255, 255, .08)',
-              }}
-            >
-              <div className="px-3 py-2 text-[10px] tracking-widest text-zinc-500 border-b border-zinc-800">
-                APPROVED MISSION PROFILES
-              </div>
-              <div className="max-h-56 overflow-y-auto">
-                {approvedPermits.map(p => (
-                  <button
-                    key={p.id}
-                    onClick={() => loadPermitMission(p)}
-                    className="w-full text-left px-3 py-2 text-[10px] border-b border-zinc-900 hover:bg-zinc-900/60"
-                  >
-                    <div className="text-zinc-200 truncate">&ldquo;{p.description}&rdquo;</div>
-                    <div className="text-zinc-600 mt-0.5">
-                      {p.waypoints.length} waypoints - click to load (fly as approved; edits
-                      invalidate the permit)
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          <button
-            onClick={() => setShowPermits(v => !v)}
-            className="ml-auto flex items-center gap-1.5 px-3 py-2 rounded-xl border text-[10px] font-bold"
-            style={{
-              background: 'rgba(21, 128, 61, .9)',
-              border: '1px solid rgba(34, 197, 94, .45)',
-              color: '#dcfce7',
-              backdropFilter: 'blur(8px)',
-            }}
-          >
-            ✓ PERMITTED MISSIONS ({approvedPermits.length})
-          </button>
-        </div>
-      )}
-
       {/* ── Mission upload result toast ───────────────────────────────── */}
       {missionUploadResult && (
-        <div
-          className={`absolute ${toastTop} left-1/2 -translate-x-1/2 z-[2500] flex items-center gap-2.5 px-4 py-2.5 rounded-xl font-mono text-[11px] font-bold shadow-2xl`}
-          style={{
-            background: missionUploadResult.ok ? 'rgba(21,128,61,.95)' : 'rgba(185,28,28,.95)',
-            border: `1px solid ${missionUploadResult.ok ? 'rgba(34,197,94,.5)' : 'rgba(248,113,113,.5)'}`,
-            color: '#fff',
-            backdropFilter: 'blur(8px)',
-          }}
-        >
+        <div role="status"
+          className={cn(`absolute ${toastTop} left-1/2 -translate-x-1/2 z-[2500] flex items-center gap-2.5 px-4 py-2.5 text-[14px] font-semibold max-w-[calc(100%-32px)]`,
+            POPOVER, missionUploadResult.ok ? 'border-app-ok/60' : 'border-app-danger/60')}>
           {missionUploadResult.ok
-            ? <Check size={14} />
-            : <AlertTriangle size={14} />}
+            ? <Check size={16} className="text-app-ok shrink-0" aria-hidden />
+            : <AlertTriangle size={16} className="text-app-danger shrink-0" aria-hidden />}
           {missionUploadResult.msg}
           {missionUploadResult.ok && missionUploadResult.terrain_follow && (
-            <span style={{ color: '#86efac' }}>· Terrain follow ON</span>
+            <span className={cn(CHIP, 'text-app-ok bg-app-ok-soft border-app-ok/40')}>Terrain follow on</span>
           )}
         </div>
       )}
 
       {/* ── Mission status strip - absolute top of screen, pushes toolbar down ── */}
       {missionExecuting && !rtlLandConfirmVisible && (
-        <div
-          className="absolute top-0 left-0 right-0 z-[3000] flex items-center gap-3 px-4 py-1"
-          style={{ background: 'rgba(21,128,61,.92)', backdropFilter: 'blur(8px)' }}
-        >
-          <Navigation size={11} color="#4ade80" />
-          <span className="text-[10px] font-mono font-bold" style={{ color: '#86efac' }}>MISSION ACTIVE</span>
-          <span className="text-[10px] font-mono" style={{ color: '#fff' }}>
+        <div role="status"
+          className="absolute top-0 left-0 right-0 z-[3000] flex items-center gap-3 h-10 px-4 border-b border-app-ok/50 bg-app-surface/95 backdrop-blur-md shadow-[var(--app-shadow)]">
+          <Navigation size={14} className="text-app-ok shrink-0" aria-hidden />
+          <span className="text-[13px] font-bold text-app-ok whitespace-nowrap">Mission running</span>
+          <span className="text-[13px] font-semibold tabular-nums text-app-text whitespace-nowrap">
             WP {missionCurrentIndex + 1} / {waypoints.length}
           </span>
-          <div className="flex-1 h-1 rounded-full" style={{ background: 'rgba(255,255,255,.2)' }}>
-            <div className="h-1 rounded-full transition-all" style={{
+          <div className="flex-1 h-1.5 rounded-full bg-app-surface-2 overflow-hidden">
+            <div className="h-full rounded-full bg-app-ok" style={{
               width: `${waypoints.length > 0 ? ((missionCurrentIndex + 1) / waypoints.length) * 100 : 0}%`,
-              background: '#4ade80',
             }} />
           </div>
           <button
@@ -865,117 +774,82 @@ export default function MissionPage() {
               if (!followDrone) { setMapView('3d'); setFollowDrone(true) }
               else setFollowDrone(false)
             }}
-            className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-bold"
-            style={{
-              background: followDrone ? 'rgba(59,130,246,.35)' : 'rgba(255,255,255,.12)',
-              color: followDrone ? '#93c5fd' : '#d1d5db',
-              border: followDrone ? '1px solid rgba(59,130,246,.5)' : '1px solid transparent',
-            }}
+            aria-pressed={followDrone}
+            className={cn(followDrone ? BTN_ACCENT : BTN, 'h-7')}
           >
-            <Crosshair size={11} /> {followDrone ? 'Following' : 'Follow'}
+            <Crosshair size={13} aria-hidden /> {followDrone ? 'Following' : 'Follow'}
           </button>
-          <button
-            onClick={() => sendAction('pause_mission')}
-            className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-bold"
-            style={{ background: 'rgba(255,255,255,.15)', color: '#fff' }}
-          >
-            <PauseCircle size={11} /> Pause
+          <button onClick={() => sendAction('pause_mission')} className={cn(BTN_WARN, 'h-7')}>
+            <PauseCircle size={13} aria-hidden /> Pause
           </button>
         </div>
       )}
 
       {missionPaused && !rtlLandConfirmVisible && (
-        <div
-          className="absolute top-0 left-0 right-0 z-[3000] flex items-center gap-3 px-4 py-1"
-          style={{ background: 'rgba(120,53,15,.92)', backdropFilter: 'blur(8px)' }}
-        >
-          <PauseCircle size={11} color="#fbbf24" />
-          <span className="text-[10px] font-mono font-bold" style={{ color: '#fde68a' }}>MISSION PAUSED</span>
-          <span className="text-[10px] font-mono" style={{ color: '#fcd34d' }}>
+        <div role="status"
+          className="absolute top-0 left-0 right-0 z-[3000] flex items-center gap-3 h-10 px-4 border-b border-app-warn/50 bg-app-surface/95 backdrop-blur-md shadow-[var(--app-shadow)]">
+          <PauseCircle size={14} className="text-app-warn shrink-0" aria-hidden />
+          <span className="text-[13px] font-bold text-app-warn whitespace-nowrap">Mission paused</span>
+          <span className="text-[13px] font-semibold tabular-nums text-app-text whitespace-nowrap">
             WP {missionCurrentIndex + 1} / {waypoints.length}
           </span>
-          <div className="flex-1 h-1 rounded-full" style={{ background: 'rgba(255,255,255,.15)' }}>
-            <div className="h-1 rounded-full" style={{
+          <div className="flex-1 h-1.5 rounded-full bg-app-surface-2 overflow-hidden">
+            <div className="h-full rounded-full bg-app-warn" style={{
               width: `${waypoints.length > 0 ? ((missionCurrentIndex + 1) / waypoints.length) * 100 : 0}%`,
-              background: '#fbbf24',
             }} />
           </div>
-          <button
-            onClick={() => setShowStartConfirm(true)}
-            className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-bold"
-            style={{ background: 'rgba(255,255,255,.15)', color: '#fde68a' }}
-          >
-            <PlayCircle size={11} /> Resume
+          <button onClick={() => setShowStartConfirm(true)} className={cn(BTN_WARN, 'h-7')}>
+            <PlayCircle size={13} aria-hidden /> Resume
           </button>
         </div>
       )}
 
       {/* Fleet RTL progress chip - visible while the group is returning */}
       {rtlReturning && swarmEnabled && fleetRtlArrived && !rtlLandConfirmVisible && (
-        <div
-          className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[2400] flex items-center gap-2 px-3 py-1.5 rounded-xl border font-mono text-[10px] font-bold"
-          style={{
-            background: 'rgba(17,19,24,.94)',
-            borderColor: 'rgba(192,132,252,.35)',
-            color: '#e9d5ff',
-            backdropFilter: 'blur(8px)',
-          }}
-        >
-          <Home size={12} color="#c084fc" />
-          RTL - {fleetRtlArrived.n}/{fleetRtlArrived.total} AT HOME
+        <div role="status"
+          className={cn('absolute bottom-16 left-1/2 -translate-x-1/2 z-[2400] flex items-center gap-2 h-9 px-3 text-[13px] font-bold', PANEL)}>
+          <Home size={14} className="text-app-warn" aria-hidden />
+          Returning home <span className="tabular-nums">{fleetRtlArrived.n}/{fleetRtlArrived.total}</span> arrived
         </div>
       )}
 
       {/* RTL confirm-land popup - shown when drone arrives at RTL point */}
       {rtlLandConfirmVisible && (
-        <div
-          className="absolute inset-0 z-[3500] flex items-center justify-center"
-          style={{ background: 'rgba(0,0,0,.65)', backdropFilter: 'blur(4px)' }}
-        >
-          <div
-            className="rounded-2xl border w-80 shadow-2xl overflow-hidden"
-            style={{ background: 'rgba(17,19,24,.97)', borderColor: 'rgba(192,132,252,.35)' }}
-          >
-            {/* Header */}
-            <div
-              className="flex items-center gap-2.5 px-4 py-3 border-b"
-              style={{ borderColor: 'rgba(192,132,252,.2)', background: 'rgba(88,28,135,.4)' }}
-            >
-              <Home size={16} color="#c084fc" />
-              <span className="text-[12px] font-mono font-bold" style={{ color: '#e9d5ff' }}>
-                CONFIRM LANDING
+        <div className={cn('absolute inset-0 z-[3500] flex items-center justify-center p-4', BACKDROP)}>
+          <div role="dialog" aria-modal="true" aria-labelledby="rtl-land-title" className={cn(DIALOG, 'w-full max-w-[360px] overflow-hidden')}>
+            <div className="flex items-center gap-3 px-5 pt-5">
+              <span className="w-9 h-9 rounded-[10px] flex items-center justify-center bg-app-warn-soft text-app-warn shrink-0">
+                <Home size={18} aria-hidden />
               </span>
+              <h2 id="rtl-land-title" className={TITLE}>Confirm landing</h2>
             </div>
-            {/* Body */}
-            <div className="px-4 py-4 space-y-3">
-              <p className="text-[11px] font-mono" style={{ color: '#d1d5db' }}>
+            <div className="px-5 py-4 space-y-3">
+              <p className="text-[14px] text-app-text">
                 {swarmEnabled && returningCount > 1
-                  ? `${returningCount} drones have reached their home positions. Confirm the areas are clear before allowing them to land.`
-                  : 'Drone has reached the landing zone. Confirm the area is clear before allowing it to land.'}
+                  ? `${returningCount} drones are home. Check the ground is clear.`
+                  : 'The drone is over the landing spot. Check the ground is clear.'}
               </p>
-              <ul className="space-y-1.5 pt-1">
+              <ul className="space-y-1.5">
                 {[
-                  'Landing area free of people and obstacles',
+                  'No people or obstacles below',
                   'Ground is flat and stable',
-                  'Ready to take manual override if needed',
+                  'Ready to take over by hand',
                 ].map((item, i) => (
-                  <li key={i} className="flex items-center gap-2 text-[10px] font-mono" style={{ color: '#9ca3af' }}>
-                    <span style={{ color: '#c084fc' }}>▸</span>
+                  <li key={i} className="flex items-center gap-2 text-[13px] text-app-text-muted">
+                    <Check size={14} className="text-app-warn shrink-0" aria-hidden />
                     {item}
                   </li>
                 ))}
               </ul>
             </div>
-            {/* Actions */}
-            <div className="flex gap-2 px-4 pb-4">
+            <div className="flex gap-2 px-5 pb-5">
               <button
                 onClick={() => {
                   rtlDismissedRef.current = true
                   setRtlLandConfirmVisible(false)
                   setRtlReturning(false)
                 }}
-                className="flex-1 py-2 rounded-lg text-[11px] font-mono font-bold"
-                style={{ background: 'rgba(255,255,255,.08)', color: '#9ca3af', border: '1px solid rgba(255,255,255,.1)' }}
+                className={cn(BTN, 'flex-1 h-10')}
               >
                 Dismiss
               </button>
@@ -993,10 +867,9 @@ export default function MissionPage() {
                     sendAction('land')
                   }
                 }}
-                className="flex-1 py-2 rounded-lg text-[11px] font-mono font-bold flex items-center justify-center gap-1.5"
-                style={{ background: 'rgba(192,132,252,.25)', color: '#e9d5ff', border: '1px solid rgba(192,132,252,.4)' }}
+                className={cn(BTN_WARN_SOLID, 'flex-[1.4] h-10')}
               >
-                <Home size={13} /> Ground Clear - Land{swarmEnabled && returningCount > 1 ? ` (${returningCount})` : ''}
+                <Home size={15} aria-hidden /> Land now{swarmEnabled && returningCount > 1 ? ` (${returningCount})` : ''}
               </button>
             </div>
           </div>
@@ -1004,125 +877,81 @@ export default function MissionPage() {
       )}
 
       {/* ── Top centre toolbar - shifts down when mission status strip is visible ── */}
-      <div className={`absolute ${toolbarTop} z-[2000] flex items-center gap-2 flex-wrap justify-center transition-all duration-200`}
-        style={{ left: leftOpen ? 'calc(224px + 24px)' : '24px', right: rightOpen ? 'calc(224px + 24px)' : '24px' }}>
+      <div className={`absolute ${toolbarTop} z-[2000] flex items-center gap-2 flex-wrap justify-center transition-[left,right] duration-200`}
+        style={{ left: leftOpen ? `calc(${SIDE_W}px + 24px)` : '24px', right: rightOpen ? `calc(${SIDE_W}px + 24px)` : '24px' }}>
         {readOnly && (
-          <Panel className="flex items-center gap-1.5 px-3 py-2" style={{ borderColor: 'rgba(251,191,36,.35)' }}>
-            <Eye size={12} color="#fbbf24" />
-            <span className="text-[10px] font-mono font-bold" style={{ color: '#fcd34d' }}>View only</span>
-            <span className="text-[9px] font-mono text-gray-400">your role cannot change plans</span>
-          </Panel>
+          <div className={cn(PANEL, 'flex items-center gap-2 h-11 px-3 border-app-warn/50')}
+            title="Your role can view plans but not change them">
+            <Eye size={15} className="text-app-warn" aria-hidden />
+            <span className="text-[13px] font-bold text-app-warn">View only</span>
+          </div>
         )}
 
         {/* Default altitude & speed */}
-        {!readOnly && <Panel className="flex items-center gap-3 px-3 py-2">
-          <label className="flex items-center gap-1.5">
-            <ArrowUpDown size={12} color="#9ca3af" />
-            <span className="text-[9px] font-mono font-bold text-gray-400">ALT</span>
+        {!readOnly && <div className={cn(PANEL, 'flex items-center gap-3 h-11 px-3')}>
+          <label className="flex items-center gap-1.5" title="Altitude for new waypoints">
+            <ArrowUpDown size={14} className="text-app-text-muted" aria-hidden />
+            <span className="text-xs font-bold uppercase tracking-[0.05em] text-app-text-muted">Alt</span>
             <input
               type="number" min={1} max={120} step={1} value={defaultAlt}
               onChange={e => setDefaultAlt(Number(e.target.value))}
-              className="w-10 text-[11px] font-mono font-bold text-center outline-none tabular-nums rounded px-1 py-0.5"
-              style={{ background: 'rgba(255,255,255,.08)', color: '#fff', border: '1px solid rgba(255,255,255,.12)' }}
+              className={cn(INPUT, 'w-14 text-center font-bold')}
             />
-            <span className="text-[9px] font-mono text-gray-500">m</span>
+            <span className="text-[13px] text-app-text-muted">m</span>
           </label>
-          <div className="w-px h-4 bg-gray-700" />
-          <label className="flex items-center gap-1.5">
-            <Gauge size={12} color="#9ca3af" />
-            <span className="text-[9px] font-mono font-bold text-gray-400">SPD</span>
+          <div className="w-px h-5 bg-app-border" />
+          <label className="flex items-center gap-1.5" title="Speed for new waypoints">
+            <Gauge size={14} className="text-app-text-muted" aria-hidden />
+            <span className="text-xs font-bold uppercase tracking-[0.05em] text-app-text-muted">Speed</span>
             <input
               type="number" min={0.5} max={15} step={0.5} value={defaultSpd}
               onChange={e => setDefaultSpd(Number(e.target.value))}
-              className="w-10 text-[11px] font-mono font-bold text-center outline-none tabular-nums rounded px-1 py-0.5"
-              style={{ background: 'rgba(255,255,255,.08)', color: '#fff', border: '1px solid rgba(255,255,255,.12)' }}
+              className={cn(INPUT, 'w-14 text-center font-bold')}
             />
-            <span className="text-[9px] font-mono text-gray-500">m/s</span>
+            <span className="text-[13px] text-app-text-muted">m/s</span>
           </label>
-        </Panel>}
+        </div>}
 
         {/* 2D / 3D toggle */}
-        <Panel className="flex items-center rounded-lg overflow-hidden p-0">
+        <div className={cn(PANEL, 'flex items-center h-11 px-1.5')}>
+          <div className={SEG} role="group" aria-label="Map view">
+            <button onClick={() => { setMapView('2d'); setFollowDrone(false) }}
+              aria-pressed={mapView === '2d'} className={cn(segBtn(mapView === '2d'), 'h-8')}>
+              <Square size={13} aria-hidden /> 2D
+            </button>
+            <button onClick={() => setMapView('3d')}
+              aria-pressed={mapView === '3d'} className={cn(segBtn(mapView === '3d'), 'h-8')}>
+              <Box size={13} aria-hidden /> 3D
+            </button>
+          </div>
+        </div>
+
+        {/* Terrain Follow / Auto Heading toggles */}
+        <div className={cn(PANEL, 'flex items-center gap-1 h-11 px-1.5')}>
           <button
-            onClick={() => { setMapView('2d'); setFollowDrone(false) }}
-            className="flex items-center gap-1 px-2.5 py-2 transition-colors"
-            style={{
-              background: mapView === '2d' ? 'rgba(59,130,246,.25)' : 'transparent',
-              color: mapView === '2d' ? '#93c5fd' : '#6b7280',
-              fontWeight: mapView === '2d' ? 700 : 500,
-              borderRight: '1px solid rgba(255,255,255,.06)',
-            }}
+            onClick={() => setTerrainFollow(!terrainFollow)}
+            aria-pressed={terrainFollow}
+            className={cn(segBtn(terrainFollow), 'h-8')}
+            title="Terrain follow: keep the same height above the ground along the route"
           >
-            <Square size={12} />
-            <span className="text-[10px] font-mono font-bold">2D</span>
+            <Waves size={14} aria-hidden />
+            Terrain follow
           </button>
           <button
-            onClick={() => setMapView('3d')}
-            className="flex items-center gap-1 px-2.5 py-2 transition-colors"
-            style={{
-              background: mapView === '3d' ? 'rgba(59,130,246,.25)' : 'transparent',
-              color: mapView === '3d' ? '#93c5fd' : '#6b7280',
-              fontWeight: mapView === '3d' ? 700 : 500,
-            }}
+            onClick={() => setAutoHeading(!autoHeading)}
+            aria-pressed={autoHeading}
+            className={cn(segBtn(autoHeading), 'h-8')}
+            title="Auto heading: each waypoint faces the direction of travel when uploaded"
           >
-            <Box size={12} />
-            <span className="text-[10px] font-mono font-bold">3D</span>
+            <Compass size={14} aria-hidden />
+            Auto heading
           </button>
-        </Panel>
-
-        {/* Terrain Follow toggle */}
-        <button
-          onClick={() => setTerrainFollow(!terrainFollow)}
-          className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl transition-colors select-none"
-          style={{
-            background: terrainFollow ? 'rgba(34,197,94,.12)' : 'rgba(17,19,24,.94)',
-            backdropFilter: 'blur(12px)',
-            WebkitBackdropFilter: 'blur(12px)',
-            border: terrainFollow ? '1.5px solid rgba(34,197,94,.45)' : '1px solid rgba(255,255,255,.08)',
-          }}
-        >
-          <Waves size={12} color={terrainFollow ? '#4ade80' : '#6b7280'} />
-          <span
-            className="text-[10px] font-mono font-bold"
-            style={{ color: terrainFollow ? '#4ade80' : '#6b7280' }}
-          >
-            Terrain Follow
-          </span>
-          <div
-            className="w-1.5 h-1.5 rounded-full"
-            style={{ background: terrainFollow ? '#4ade80' : '#374151' }}
-          />
-        </button>
-
-        {/* Auto Heading toggle */}
-        <button
-          onClick={() => setAutoHeading(!autoHeading)}
-          className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl transition-colors select-none"
-          style={{
-            background: autoHeading ? 'rgba(251,191,36,.12)' : 'rgba(17,19,24,.94)',
-            backdropFilter: 'blur(12px)',
-            WebkitBackdropFilter: 'blur(12px)',
-            border: autoHeading ? '1.5px solid rgba(251,191,36,.45)' : '1px solid rgba(255,255,255,.08)',
-          }}
-          title="When on, each waypoint's heading is set to face the direction of travel at upload time"
-        >
-          <Compass size={12} color={autoHeading ? '#fbbf24' : '#6b7280'} />
-          <span className="text-[10px] font-mono font-bold" style={{ color: autoHeading ? '#fbbf24' : '#6b7280' }}>
-            Auto Heading
-          </span>
-          <div className="w-1.5 h-1.5 rounded-full" style={{ background: autoHeading ? '#fbbf24' : '#374151' }} />
-        </button>
+        </div>
 
         {/* Follow Drone - split button: left = toggle, right = camera mode dropdown */}
         {isConnected && telemetry?.position && telemetry.position.latitude_deg !== 0 && (
           <div
-            className="relative flex items-center rounded-xl select-none"
-            style={{
-              background: followDrone ? 'rgba(59,130,246,.18)' : 'rgba(17,19,24,.94)',
-              backdropFilter: 'blur(12px)',
-              WebkitBackdropFilter: 'blur(12px)',
-              border: followDrone ? '1.5px solid rgba(59,130,246,.55)' : '1px solid rgba(255,255,255,.08)',
-            }}
+            className={cn(PANEL, 'relative flex items-center gap-0.5 h-11 px-1.5 select-none', followDrone && 'border-app-accent/60')}
             onMouseDown={e => e.stopPropagation()}
           >
             {/* Toggle half */}
@@ -1131,60 +960,50 @@ export default function MissionPage() {
                 if (!followDrone) { setMapView('3d'); setFollowDrone(true) }
                 else setFollowDrone(false)
               }}
-              className="flex items-center gap-1.5 px-2.5 py-2 transition-colors"
-              title="Chase cam: 3D view tracks behind drone. Click map to release."
+              aria-pressed={followDrone}
+              className={cn(segBtn(followDrone), 'h-8')}
+              title="Chase cam: the 3D view follows the drone. Click the map to let go."
             >
-              <Crosshair size={12} color={followDrone ? '#93c5fd' : '#6b7280'} />
-              <span className="text-[10px] font-mono font-bold" style={{ color: followDrone ? '#93c5fd' : '#6b7280' }}>
-                {followDrone
-                  ? (cameraMode === 'perspective' ? 'Perspective' : 'Following')
-                  : 'Follow'}
-              </span>
+              <Crosshair size={14} aria-hidden />
+              {followDrone
+                ? (cameraMode === 'perspective' ? 'Perspective' : 'Following')
+                : 'Follow'}
             </button>
-            {/* Separator + chevron - always shown so user can pre-select mode before enabling follow */}
-            <div className="w-px h-4" style={{ background: followDrone ? 'rgba(59,130,246,.4)' : 'rgba(255,255,255,.1)' }} />
+            {/* Chevron - always shown so user can pre-select mode before enabling follow */}
             <button
               onClick={() => setShowCamDropdown(s => !s)}
-              className="px-1.5 py-2 flex items-center"
+              className={cn(segBtn(false), 'h-8 w-8 px-0')}
               title="Camera mode"
-              style={{ color: followDrone ? '#93c5fd' : '#6b7280' }}
+              aria-label="Camera mode"
+              aria-expanded={showCamDropdown}
             >
-              <ChevronDown size={11} />
+              <ChevronDown size={14} aria-hidden />
             </button>
             {/* Camera mode dropdown - always accessible */}
             {showCamDropdown && (
-              <div
-                className="absolute top-full mt-1.5 left-0 rounded-xl border shadow-2xl z-[2200] overflow-hidden"
-                style={{ background: 'rgba(17,19,24,.97)', borderColor: 'rgba(59,130,246,.3)', minWidth: 172 }}
-              >
-                <p className="text-[8px] font-mono tracking-widest px-3 pt-2.5 pb-1" style={{ color: '#4b5563' }}>
-                  CAMERA MODE
-                </p>
+              <div className={cn(POPOVER, 'absolute top-full mt-1.5 left-0 z-[2200] overflow-hidden p-1.5 min-w-[200px]')}>
+                <p className={cn(LABEL, 'px-2 pt-1 pb-1.5')}>Camera mode</p>
                 {([
-                  { value: 'follow'      as const, label: 'Chase',       desc: 'Follow behind drone' },
-                  { value: 'perspective' as const, label: 'Perspective', desc: 'Lock current view angle' },
-                ]).map(opt => (
-                  <button
-                    key={opt.value}
-                    onClick={() => { setCameraMode(opt.value); setShowCamDropdown(false) }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors"
-                    style={{
-                      background: cameraMode === opt.value ? 'rgba(59,130,246,.18)' : 'transparent',
-                    }}
-                  >
-                    <div style={{
-                      width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
-                      background: cameraMode === opt.value ? '#3b82f6' : '#374151',
-                    }} />
-                    <div>
-                      <p className="text-[10px] font-mono font-bold" style={{ color: cameraMode === opt.value ? '#93c5fd' : '#d1d5db' }}>
-                        {opt.label}
-                      </p>
-                      <p className="text-[9px] font-mono" style={{ color: '#6b7280' }}>{opt.desc}</p>
-                    </div>
-                  </button>
-                ))}
-                <div className="h-2" />
+                  { value: 'follow'      as const, label: 'Chase',       desc: 'Follow behind the drone' },
+                  { value: 'perspective' as const, label: 'Perspective', desc: 'Keep the current angle' },
+                ]).map(opt => {
+                  const on = cameraMode === opt.value
+                  return (
+                    <button
+                      key={opt.value}
+                      onClick={() => { setCameraMode(opt.value); setShowCamDropdown(false) }}
+                      aria-pressed={on}
+                      className={cn('w-full flex items-center gap-2.5 px-2 py-1.5 rounded-[6px] text-left transition-colors duration-[120ms]', FOCUS,
+                        on ? 'bg-app-accent-soft' : 'hover:bg-app-surface-2')}
+                    >
+                      <span className={cn('w-2 h-2 rounded-full shrink-0', on ? 'bg-app-accent' : 'bg-app-border-strong')} aria-hidden />
+                      <span>
+                        <span className={cn('block text-[14px] font-bold', on ? 'text-app-accent' : 'text-app-text')}>{opt.label}</span>
+                        <span className="block text-[13px] text-app-text-muted">{opt.desc}</span>
+                      </span>
+                    </button>
+                  )
+                })}
               </div>
             )}
           </div>
@@ -1193,56 +1012,46 @@ export default function MissionPage() {
         {/* Connection status chip */}
         {swarmEnabled && activeDrone ? (
           // Swarm mode: show which drone is active instead of the connect button
-          <div
-            className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-[10px] font-mono font-bold"
-            style={{
-              background: 'rgba(34,211,238,.1)',
-              border: '1px solid rgba(34,211,238,.35)',
-              color: '#67e8f9',
-              backdropFilter: 'blur(12px)',
-            }}
-          >
-            <div className="w-1.5 h-1.5 rounded-full" style={{ background: activeDrone.connected ? activeDrone.color : '#71717a' }} />
+          <div className={cn(PANEL, 'flex items-center gap-2 h-11 px-3 text-[13px] font-bold')} title="Plans below belong to this drone">
+            <span className="w-2.5 h-2.5 rounded-full" style={{ background: activeDrone.connected ? activeDrone.color : 'hsl(var(--app-text-subtle))' }} aria-hidden />
             {activeDrone.name}
           </div>
         ) : !isConnected && isCustomer ? (
           // Customers connect their own drone (radio / desktop relay) from
           // the link controls on the Fly / Command view.
-          <Link href="/command"
-            className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-[10px] font-mono font-bold"
-            style={{ background: 'rgba(17,19,24,.94)', border: '1px solid rgba(255,255,255,.1)', color: '#d1d5db' }}>
-            <WifiOff size={11} /> No drone connected - connect one
-          </Link>
+          <div className={cn(PANEL, 'flex items-center h-11 px-1.5')}>
+            <Link href="/command" className={cn(BTN, 'h-8')} title="No drone connected. Connect one on the Command tab.">
+              <WifiOff size={14} className="text-app-danger" aria-hidden /> Connect a drone
+            </Link>
+          </div>
         ) : !isConnected ? (
-          <button
-            onClick={() => telStatus !== 'connecting' && connectTelemetry(sitlAddress)}
-            className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-[10px] font-mono font-bold"
-            style={{
-              background: telStatus === 'connecting' ? 'rgba(251,191,36,.12)' : 'rgba(239,68,68,.12)',
-              border: `1px solid ${telStatus === 'connecting' ? 'rgba(251,191,36,.35)' : 'rgba(239,68,68,.35)'}`,
-              color: telStatus === 'connecting' ? '#fcd34d' : '#f87171',
-              backdropFilter: 'blur(12px)',
-              cursor: telStatus === 'connecting' ? 'default' : 'pointer',
-            }}
-          >
-            {telStatus === 'connecting'
-              ? <><Loader2 size={11} className="animate-spin" /> Connecting…</>
-              : <><WifiOff size={11} /> Connect SITL</>}
-          </button>
+          <div className={cn(PANEL, 'flex items-center h-11 px-1.5')}>
+            <button
+              onClick={() => telStatus !== 'connecting' && connectTelemetry(sitlAddress)}
+              aria-busy={telStatus === 'connecting'}
+              className={cn(BTN, 'h-8', telStatus === 'connecting' && 'cursor-default')}
+              title={telStatus === 'connecting' ? 'Connecting to the simulator' : 'No drone link. Connect the simulator (SITL).'}
+            >
+              {telStatus === 'connecting'
+                ? <><Loader2 size={14} className="animate-spin motion-reduce:animate-none text-app-warn" aria-hidden /> Connecting…</>
+                : <><WifiOff size={14} className="text-app-danger" aria-hidden /> Connect SITL</>}
+            </button>
+          </div>
         ) : null}
 
         {/* Actions */}
-        <Panel className="flex items-center gap-1 px-2 py-1.5">
-          <ToolBtn icon={<FolderOpen size={13} />} label={loadedPlan ? `Plans: ${loadedPlan.name.slice(0, 16)}` : 'Plans'}
+        <div className={cn(PANEL, 'flex items-center gap-1.5 min-h-11 px-1.5 py-1.5 flex-wrap justify-center')}>
+          <ToolBtn icon={<FolderOpen size={14} />} label={loadedPlan ? `Plans: ${loadedPlan.name.slice(0, 16)}` : 'Plans'}
             onClick={() => { setShowPermitList(false); setShowLibrary(v => !v) }} />
-          {!readOnly && <ToolBtn icon={<FileUp size={13} />}  label="Import" onClick={handleImport} />}
-          <ToolBtn icon={<FileDown size={13} />} label="Export" onClick={handleExport} disabled={waypoints.length === 0} />
-          <div className="w-px h-5 mx-0.5 bg-gray-700" />
+          {!readOnly && <ToolBtn icon={<FileUp size={14} />}  label="Import" onClick={handleImport} />}
+          <ToolBtn icon={<FileDown size={14} />} label="Export" onClick={handleExport}
+            disabled={waypoints.length === 0} why="Add waypoints first" />
+          <div className="w-px h-5 mx-0.5 bg-app-border" />
           {/* Set takeoff at drone's current position */}
           {!readOnly && isConnected && telemetry?.position && telemetry.position.latitude_deg !== 0 && (
             <ToolBtn
-              icon={<Navigation size={13} />}
-              label="Takeoff Here"
+              icon={<Navigation size={14} />}
+              label="Takeoff here"
               onClick={() => {
                 const lat = telemetry!.position!.latitude_deg
                 const lng = telemetry!.position!.longitude_deg
@@ -1261,7 +1070,7 @@ export default function MissionPage() {
               shared point would stack the whole fleet on one spot. */}
           {isConnected && canFly && (
             <ToolBtn
-              icon={<Home size={13} />}
+              icon={<Home size={14} />}
               label="RTL"
               onClick={() => {
                 if (swarmEnabled) {
@@ -1285,41 +1094,43 @@ export default function MissionPage() {
                 rtlDismissedRef.current = false
                 setRtlReturning(true)
               }}
-              danger
+              tone="warn"
+              tip="Return to launch: fly back to the RTL point now"
             />
           )}
-          {canFly && <div className="w-px h-5 mx-0.5 bg-gray-700" />}
+          {canFly && <div className="w-px h-5 mx-0.5 bg-app-border" />}
           {canFly && <div className="relative">
             <ToolBtn
               icon={isUploading
-                ? <Loader2 size={13} className="animate-spin" />
-                : <Upload size={13} />}
+                ? <Loader2 size={14} className="animate-spin motion-reduce:animate-none" />
+                : <Upload size={14} />}
               label={isUploading ? 'Uploading…' : 'Upload'}
               onClick={handleUpload}
               disabled={waypoints.length === 0 || isUploading}
-              accent
+              why={isUploading ? 'Upload in progress' : 'Add waypoints first'}
+              tone="primary"
+              tip={missionUploaded ? 'This plan is on the drone' : 'Send this plan to the drone'}
             />
             {missionUploaded && !isUploading && (
-              <div
-                className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border"
-                style={{ background: '#4ade80', borderColor: '#0a0a0a' }}
+              <span
+                className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-app-ok border-2 border-app-surface"
+                title="Uploaded" aria-label="Uploaded"
               />
             )}
           </div>}
           {canFly && planHasHazardActions && (
             <label
-              className="flex items-center gap-1.5 rounded-md px-2 py-1.5 cursor-pointer select-none"
-              style={{ background: 'rgba(251,191,36,.10)', border: '1px solid rgba(251,191,36,.35)', color: '#fde68a' }}
+              className="flex items-center gap-2 h-8 rounded-[6px] px-2.5 cursor-pointer select-none border border-app-warn/50 bg-app-warn-soft text-app-warn"
               title="This plan has attachment actions that can hurt someone (drop, open, lower, spray). Without this tick they are refused. The other safety checks still apply."
             >
               <input type="checkbox" checked={allowAttachments} onChange={e => setAllowAttachments(e.target.checked)}
-                className="h-3 w-3" style={{ accentColor: '#fbbf24' }} />
-              <span className="text-[10px] font-mono font-bold">Allow attachment actions in this mission</span>
+                className={cn('h-4 w-4 accent-[var(--app-warn)]', FOCUS)} />
+              <span className="text-[13px] font-bold">Allow attachment actions</span>
             </label>
           )}
           {/* Pause stays for anyone holding the link (a safety action). */}
           {(canFly || missionExecuting) && <ToolBtn
-            icon={missionExecuting ? <PauseCircle size={13} /> : <PlayCircle size={13} />}
+            icon={missionExecuting ? <PauseCircle size={14} /> : <PlayCircle size={14} />}
             label={missionExecuting ? 'Pause' : missionPaused ? 'Resume' : 'Start'}
             onClick={() => {
               if (missionExecuting) {
@@ -1330,216 +1141,246 @@ export default function MissionPage() {
               }
             }}
             disabled={waypoints.length === 0 || !isConnected}
-            accent
+            why={waypoints.length === 0 ? 'Add waypoints first' : 'Connect a drone first'}
+            tone="warn"
           />}
-          {!readOnly && <div className="w-px h-5 mx-0.5 bg-gray-700" />}
+          {!readOnly && <div className="w-px h-5 mx-0.5 bg-app-border" />}
           {!readOnly && <ToolBtn
-            icon={<Trash2 size={13} />} label="Clear" onClick={() => { clearMission(); setLoadedPlan(null) }}
-            disabled={waypoints.length === 0} danger
+            icon={<Trash2 size={14} />} label="Clear" onClick={() => { clearMission(); setLoadedPlan(null) }}
+            disabled={waypoints.length === 0} why="Nothing to clear" tone="danger"
+            tip="Remove every waypoint from this plan"
           />}
-        </Panel>
+        </div>
       </div>
 
-      {/* ── Left panel - waypoint list ────────────────────────────────── */}
-      <div className={cn(
-        `absolute ${panelTop} bottom-14 left-3 z-[1000] transition-all duration-200`,
-        leftOpen ? 'w-56' : 'w-0',
-      )}>
+      {/* ── Left column - plan panel, avoidance legend, footer controls ── */}
+      <div
+        className={`absolute ${panelTop} bottom-3 left-3 z-[1000] flex flex-col gap-2 pointer-events-none`}
+        style={{ width: leftOpen ? SIDE_W : 'auto' }}
+      >
         {leftOpen && (
-          <Panel className="h-full flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between px-3 pt-3 pb-2">
-              <p className="text-[10px] font-mono tracking-widest font-bold text-gray-400">
-                MISSION PLAN
-              </p>
+          <section aria-label="Mission plan" className={cn(PANEL, 'min-h-0 flex flex-col overflow-hidden pointer-events-auto')}>
+            <div className="flex items-center justify-between gap-2 px-3 pt-3 pb-2">
+              <h2 className={TITLE}>Mission plan</h2>
               <div className="flex items-center gap-1.5 min-w-0">
                 {/* Whose plan is this? Each fleet drone has its own waypoint list */}
                 {swarmEnabled && activeDrone && (
-                  <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded truncate"
-                    style={{ background: activeDrone.color + '25', color: activeDrone.color }}>
-                    {activeDrone.name}
+                  <span className={cn(CHIP, 'truncate max-w-[96px]')} title={`Plan for ${activeDrone.name}`}>
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: activeDrone.color }} aria-hidden />
+                    <span className="truncate">{activeDrone.name}</span>
                   </span>
                 )}
-                <span className="text-[10px] font-mono font-bold tabular-nums px-1.5 py-0.5 rounded"
-                  style={{ background: 'rgba(255,255,255,.08)', color: '#fff' }} suppressHydrationWarning>
+                <span className={CHIP} title="Waypoints in this plan" suppressHydrationWarning>
                   {waypoints.length}
                 </span>
               </div>
             </div>
             {loadedPlan && (
-              <p className="px-3 -mt-1 pb-1 text-[9px] font-mono truncate" style={{ color: '#93c5fd' }} title="Opened from the saved missions">
+              <p className="px-3 -mt-1 pb-2 text-[13px] font-semibold text-app-accent truncate" title="Opened from saved missions">
                 {loadedPlan.name}
               </p>
             )}
-            <div className="flex-1 overflow-y-auto px-1.5 pb-2">
+            <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
               <WaypointPanel readOnly={readOnly} />
             </div>
             {/* Settings section */}
-            <div className="px-3 py-2 border-t" style={{ borderColor: 'rgba(255,255,255,.08)' }}>
-              <p className="text-[8px] font-mono tracking-widest font-bold mb-2" style={{ color: '#4b5563' }}>
-                SETTINGS
-              </p>
+            <div className="px-3 pt-2.5 pb-2 border-t border-app-border shrink-0">
+              <p className={cn(LABEL, 'mb-1')}>Settings</p>
               {/* Auto-follow on mission start */}
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <p className="text-[9px] font-mono font-bold" style={{ color: '#d1d5db' }}>Auto-follow on start</p>
-                  <p className="text-[8px] font-mono" style={{ color: '#6b7280' }}>3D chase cam when mission begins</p>
-                </div>
-                <button
-                  onClick={() => setAutoFollowOnMission(!autoFollowOnMission)}
-                  className="relative flex-shrink-0 w-8 h-4 rounded-full transition-colors"
-                  style={{ background: autoFollowOnMission ? '#3b82f6' : '#374151' }}
+              <button
+                role="switch" aria-checked={autoFollowOnMission}
+                onClick={() => setAutoFollowOnMission(!autoFollowOnMission)}
+                className={cn('w-full min-h-9 flex items-center justify-between gap-2 rounded-[6px] -mx-1 px-1 text-left', FOCUS)}
+                title="Switch to the 3D chase cam when a mission starts"
+              >
+                <span className="text-[14px] font-semibold text-app-text">Follow on start</span>
+                <span
+                  className={cn('relative shrink-0 w-9 h-5 rounded-full transition-colors duration-[180ms]',
+                    autoFollowOnMission ? 'bg-app-accent' : 'bg-app-border-strong')}
+                  aria-hidden
                 >
-                  <div
-                    className="absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform duration-150"
+                  <span
+                    className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-[180ms]"
                     style={{ transform: autoFollowOnMission ? 'translateX(16px)' : 'translateX(0)' }}
                   />
-                </button>
-              </div>
+                </span>
+              </button>
             </div>
             {/* Survey planner at bottom of left panel */}
-            {!readOnly && <div className="px-2 pb-2 pt-1 border-t" style={{ borderColor: 'rgba(255,255,255,.08)' }}>
+            {!readOnly && <div className="px-2 pb-2 pt-2 border-t border-app-border shrink-0">
               <SurveyPlanner />
             </div>}
-          </Panel>
+          </section>
         )}
+
+        <div className="flex-1" />
+
+        {/* The 2D map's avoidance legend lands here (portal), stacked
+            above the footer so nothing overlaps the plan panel. */}
+        {mapView === '2d' && <div ref={setLegendHost} className="pointer-events-auto empty:hidden" />}
+
+        {/* Footer: collapse toggle + avoidance (staff only) */}
+        <div className="relative flex items-center gap-2 pointer-events-auto">
+          <button
+            onClick={() => setLeftOpen(o => !o)}
+            className={cn(OVERLAY, FOCUS_OVERLAY, 'w-8 h-8 rounded-[6px] flex items-center justify-center hover:bg-[rgba(8,12,18,0.88)] transition-colors duration-[120ms]')}
+            aria-label={leftOpen ? 'Hide mission plan' : 'Show mission plan'}
+            title={leftOpen ? 'Hide mission plan' : 'Show mission plan'}
+          >
+            {leftOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+          </button>
+          {!isCustomer && <>
+            <button onClick={() => setShowAvoidPanel(v => !v)}
+              aria-expanded={showAvoidPanel}
+              className={cn(OVERLAY, FOCUS_OVERLAY, 'flex items-center gap-1.5 h-8 px-3 rounded-full text-[13px] font-bold transition-colors duration-[120ms]',
+                showAvoidPanel && 'border-[color:var(--overlay-accent)]')}
+              style={showAvoidPanel ? { color: 'var(--overlay-accent)' } : undefined}
+              title="Obstacle avoidance: detection, steering, response, tuning">
+              <ShieldCheck size={14} aria-hidden /> Avoidance
+            </button>
+            {showAvoidPanel && (
+              <div className={cn(PANEL, 'absolute bottom-full left-0 mb-2 w-72 max-w-[calc(100vw-32px)] p-3 z-[2400]')}>
+                <AvoidancePanel />
+              </div>
+            )}
+          </>}
+        </div>
       </div>
 
-      {/* Left collapse toggle */}
-      <button
-        onClick={() => setLeftOpen(o => !o)}
-        className="absolute bottom-16 left-3 z-[1000] rounded-lg p-1.5 transition-colors"
-        style={{
-          background: 'rgba(17, 19, 24, .92)',
-          border: '1px solid rgba(255,255,255,.1)',
-          color: '#fff',
-        }}
+      {/* ── Right column - waypoint editor + footer ───────────────────── */}
+      <div
+        className={`absolute ${panelTop} bottom-3 right-3 z-[1000] flex flex-col items-end gap-2 pointer-events-none`}
+        style={{ width: rightOpen ? SIDE_W : 'auto' }}
       >
-        {leftOpen ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
-      </button>
-
-      {/* ── Right panel - waypoint editor ─────────────────────────────── */}
-      <div className={cn(
-        `absolute ${panelTop} bottom-14 right-3 z-[1000] transition-all duration-200`,
-        rightOpen ? 'w-56' : 'w-0',
-      )}>
         {rightOpen && (
-          <Panel className="h-full flex flex-col overflow-hidden">
+          <section aria-label="Waypoint" className={cn(PANEL, 'w-full min-h-0 flex flex-col overflow-hidden pointer-events-auto')}>
             <div className="px-3 pt-3 pb-2">
-              <p className="text-[10px] font-mono tracking-widest font-bold text-gray-400">
-                WAYPOINT
-              </p>
+              <h2 className={TITLE}>Waypoint</h2>
             </div>
-            <div className="flex-1 overflow-y-auto px-2 pb-3">
+            <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
               {/* Viewers inspect a waypoint; every field is disabled. */}
               <fieldset disabled={readOnly} className="min-w-0 border-0 p-0 m-0">
                 <WaypointEditor />
               </fieldset>
             </div>
-          </Panel>
+          </section>
         )}
-      </div>
 
-      {/* Right collapse toggle */}
-      <button
-        onClick={() => setRightOpen(o => !o)}
-        className="absolute bottom-16 right-3 z-[1000] rounded-lg p-1.5 transition-colors"
-        style={{
-          background: 'rgba(17, 19, 24, .92)',
-          border: '1px solid rgba(255,255,255,.1)',
-          color: '#fff',
-        }}
-      >
-        {rightOpen ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
-      </button>
+        <div className="flex-1" />
+
+        <div className="relative flex items-center gap-2 pointer-events-auto">
+          {/* ── Approved red-zone mission profiles ─────────────────────── */}
+          {approvedPermits.length > 0 && (
+            <>
+              <button
+                onClick={() => setShowPermits(v => !v)}
+                aria-expanded={showPermits}
+                className={cn(OVERLAY, FOCUS_OVERLAY, 'flex items-center gap-1.5 h-8 px-3 rounded-full text-[13px] font-bold')}
+                title="Missions approved for a restricted zone"
+              >
+                <Check size={14} style={{ color: 'var(--overlay-ok)' }} aria-hidden />
+                Permitted <span className="tabular-nums">({approvedPermits.length})</span>
+              </button>
+              {showPermits && (
+                <div className={cn(POPOVER, 'absolute bottom-full right-0 mb-2 w-72 max-w-[calc(100vw-32px)] overflow-hidden z-[2400]')}>
+                  <div className={cn(LABEL, 'px-3 py-2.5 border-b border-app-border')}>
+                    Approved missions
+                  </div>
+                  <div className="max-h-56 overflow-y-auto">
+                    {approvedPermits.map(p => (
+                      <button
+                        key={p.id}
+                        onClick={() => loadPermitMission(p)}
+                        className={cn('w-full text-left px-3 py-2.5 border-b border-app-border last:border-b-0 hover:bg-app-surface-2 transition-colors duration-[120ms]', FOCUS)}
+                        title="Load it and fly as approved. Editing it voids the permit."
+                      >
+                        <div className="text-[14px] font-semibold text-app-text truncate">{p.description}</div>
+                        <div className="text-[13px] text-app-text-muted mt-0.5 tabular-nums">
+                          {p.waypoints.length} waypoints
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+          <button
+            onClick={() => setRightOpen(o => !o)}
+            className={cn(OVERLAY, FOCUS_OVERLAY, 'w-8 h-8 rounded-[6px] flex items-center justify-center hover:bg-[rgba(8,12,18,0.88)] transition-colors duration-[120ms]')}
+            aria-label={rightOpen ? 'Hide waypoint editor' : 'Show waypoint editor'}
+            title={rightOpen ? 'Hide waypoint editor' : 'Show waypoint editor'}
+          >
+            {rightOpen ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+          </button>
+        </div>
+      </div>
 
       {/* ── Start mission confirmation dialog ────────────────────────── */}
       {showStartConfirm && (
-        <div
-          className="absolute inset-0 z-[3000] flex items-center justify-center"
-          style={{ background: 'rgba(0,0,0,.65)', backdropFilter: 'blur(4px)' }}
-        >
-          <div
-            className="rounded-2xl border w-80 shadow-2xl overflow-hidden"
-            style={{
-              background: 'rgba(17,19,24,.97)',
-              borderColor: 'rgba(251,191,36,.35)',
-            }}
-          >
+        <div className={cn('absolute inset-0 z-[3000] flex items-center justify-center p-4', BACKDROP)}>
+          <div role="dialog" aria-modal="true" aria-labelledby="start-confirm-title" className={cn(DIALOG, 'w-full max-w-[360px] overflow-hidden')}>
             {/* Header */}
-            <div
-              className="flex items-center gap-2.5 px-4 py-3 border-b"
-              style={{ borderColor: 'rgba(251,191,36,.2)', background: 'rgba(120,53,15,.4)' }}
-            >
-              <AlertTriangle size={16} color="#fbbf24" />
-              <span className="text-[12px] font-mono font-bold" style={{ color: '#fde68a' }}>
-                PRE-FLIGHT CAUTION
+            <div className="flex items-center gap-3 px-5 pt-5">
+              <span className="w-9 h-9 rounded-[10px] flex items-center justify-center bg-app-warn-soft text-app-warn shrink-0">
+                <AlertTriangle size={18} aria-hidden />
               </span>
+              <h2 id="start-confirm-title" className={TITLE}>
+                {missionPaused ? 'Resume mission?' : 'Start mission?'}
+              </h2>
             </div>
 
             {/* Status row */}
-            <div className="flex gap-2 px-4 pt-3">
-              <div className="flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-mono font-bold"
-                style={{
-                  background: isArmed ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)',
-                  border: `1px solid ${isArmed ? 'rgba(34,197,94,.35)' : 'rgba(239,68,68,.35)'}`,
-                  color: isArmed ? '#4ade80' : '#f87171',
-                }}>
-                <div className="w-1.5 h-1.5 rounded-full" style={{ background: isArmed ? '#4ade80' : '#f87171' }} />
-                {isArmed ? 'ARMED' : 'DISARMED'}
-              </div>
-              <div className="flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-mono font-bold"
-                style={{
-                  background: missionUploaded ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)',
-                  border: `1px solid ${missionUploaded ? 'rgba(34,197,94,.35)' : 'rgba(239,68,68,.35)'}`,
-                  color: missionUploaded ? '#4ade80' : '#f87171',
-                }}>
-                <div className="w-1.5 h-1.5 rounded-full" style={{ background: missionUploaded ? '#4ade80' : '#f87171' }} />
-                {missionUploaded ? 'UPLOADED' : 'NOT UPLOADED'}
-              </div>
+            <div className="flex flex-wrap gap-2 px-5 pt-3">
+              <span className={cn(CHIP, isArmed ? 'text-app-ok bg-app-ok-soft border-app-ok/40' : 'text-app-danger bg-app-danger-soft border-app-danger/40')}>
+                {isArmed ? <Check size={12} aria-hidden /> : <AlertTriangle size={12} aria-hidden />}
+                {isArmed ? 'Armed' : 'Disarmed'}
+              </span>
+              <span className={cn(CHIP, missionUploaded ? 'text-app-ok bg-app-ok-soft border-app-ok/40' : 'text-app-danger bg-app-danger-soft border-app-danger/40')}>
+                {missionUploaded ? <Check size={12} aria-hidden /> : <AlertTriangle size={12} aria-hidden />}
+                {missionUploaded ? 'Uploaded' : 'Not uploaded'}
+              </span>
             </div>
 
             {/* Body */}
-            <div className="px-4 py-3 space-y-2">
+            <div className="px-5 py-4 space-y-3">
               {!missionUploaded && !missionPaused ? (
-                <p className="text-[11px] font-mono" style={{ color: '#f87171' }}>
-                  Upload the mission to the drone first before starting.
+                <p className="text-[14px] font-semibold text-app-danger">
+                  Upload the mission to the drone first.
                 </p>
               ) : missionPaused ? (
-                <p className="text-[11px] font-mono" style={{ color: '#fcd34d' }}>
+                <p className="text-[14px] text-app-text">
                   {isArmed
-                    ? 'Drone is in HOLD. Mission will resume from current waypoint.'
-                    : 'Drone is disarmed. It will be armed, then mission will resume.'}
+                    ? 'The drone is holding. It resumes from the current waypoint.'
+                    : 'The drone arms, then resumes from the current waypoint.'}
                 </p>
               ) : !isArmed ? (
-                <p className="text-[11px] font-mono" style={{ color: '#fcd34d' }}>
-                  Drone will be armed automatically, then mission will start.
+                <p className="text-[14px] text-app-text">
+                  The drone arms, then starts the mission.
                 </p>
               ) : (
-                <p className="text-[11px] font-mono" style={{ color: '#d1d5db' }}>
-                  Drone is armed and ready. Mission will start immediately.
+                <p className="text-[14px] text-app-text">
+                  The drone is armed. The mission starts right away.
                 </p>
               )}
-              <ul className="space-y-1 pt-1">
-                {['Airspace clear of obstacles and people', 'GPS lock confirmed (HDOP &lt; 1.5)', 'All waypoints and altitudes verified', 'Ready to take manual override'].map((item, i) => (
-                  <li key={i} className="flex items-center gap-2 text-[10px] font-mono" style={{ color: '#9ca3af' }}>
-                    <span style={{ color: '#fbbf24' }}>▸</span>
-                    <span dangerouslySetInnerHTML={{ __html: item }} />
+              <ul className="space-y-1.5">
+                {['Airspace clear of people and obstacles', 'GPS lock confirmed (HDOP < 1.5)', 'Waypoints and altitudes checked', 'Ready to take over by hand'].map((item, i) => (
+                  <li key={i} className="flex items-center gap-2 text-[13px] text-app-text-muted">
+                    <Check size={14} className="text-app-warn shrink-0" aria-hidden />
+                    <span>{item}</span>
                   </li>
                 ))}
               </ul>
             </div>
 
             {/* Actions */}
-            <div className="flex gap-2 px-4 pb-4">
-              <button
-                onClick={() => setShowStartConfirm(false)}
-                className="flex-1 py-2 rounded-lg text-[11px] font-mono font-bold"
-                style={{ background: 'rgba(255,255,255,.08)', color: '#9ca3af', border: '1px solid rgba(255,255,255,.1)' }}
-              >
+            <div className="flex gap-2 px-5 pb-5">
+              <button onClick={() => setShowStartConfirm(false)} className={cn(BTN, 'flex-1 h-10')}>
                 Cancel
               </button>
               <button
                 disabled={!missionUploaded && !missionPaused}
+                title={!missionUploaded && !missionPaused ? 'Upload the mission first' : undefined}
                 onClick={() => {
                   if (!missionUploaded && !missionPaused) return
                   setShowStartConfirm(false)
@@ -1551,17 +1392,11 @@ export default function MissionPage() {
                     sendAction(isArmed ? 'restart_mission' : 'arm_and_restart_mission')
                   }
                 }}
-                className="flex-1 py-2 rounded-lg text-[11px] font-mono font-bold flex items-center justify-center gap-1.5"
-                style={{
-                  background: (missionUploaded || missionPaused) ? 'rgba(59,130,246,.25)' : 'rgba(107,114,128,.12)',
-                  color: (missionUploaded || missionPaused) ? '#93c5fd' : '#6b7280',
-                  border: `1px solid ${(missionUploaded || missionPaused) ? 'rgba(59,130,246,.4)' : 'rgba(107,114,128,.2)'}`,
-                  cursor: (missionUploaded || missionPaused) ? 'pointer' : 'not-allowed',
-                }}
+                className={cn(BTN_WARN_SOLID, 'flex-[1.4] h-10')}
               >
-                <PlayCircle size={13} />
-                {missionPaused ? (isArmed ? 'Resume' : 'Arm & Resume')
-                               : (isArmed ? 'Start Mission' : 'Arm & Start')}
+                <PlayCircle size={15} aria-hidden />
+                {missionPaused ? (isArmed ? 'Resume' : 'Arm & resume')
+                               : (isArmed ? 'Start mission' : 'Arm & start')}
               </button>
             </div>
           </div>
@@ -1570,33 +1405,26 @@ export default function MissionPage() {
 
       {/* ── Drone mission offer popup (QGC-style) ─────────────────────── */}
       {droneMissionOffer && droneMissionOffer.length > 0 && (
-        <div className="absolute inset-0 z-[3000] flex items-center justify-center"
-          style={{ background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(4px)' }}>
-          <div className="rounded-2xl border w-80 shadow-2xl overflow-hidden"
-            style={{ background: 'rgba(17,19,24,.97)', borderColor: 'rgba(59,130,246,.35)' }}>
-            <div className="flex items-center gap-2.5 px-4 py-3 border-b"
-              style={{ borderColor: 'rgba(59,130,246,.2)', background: 'rgba(30,58,138,.35)' }}>
-              <Navigation size={16} color="#93c5fd" />
-              <span className="text-[12px] font-mono font-bold" style={{ color: '#93c5fd' }}>
-                MISSION ON DRONE
+        <div className={cn('absolute inset-0 z-[3000] flex items-center justify-center p-4', BACKDROP)}>
+          <div role="dialog" aria-modal="true" aria-labelledby="drone-offer-title" className={cn(DIALOG, 'w-full max-w-[360px] overflow-hidden')}>
+            <div className="flex items-center gap-3 px-5 pt-5">
+              <span className="w-9 h-9 rounded-[10px] flex items-center justify-center bg-app-accent-soft text-app-accent shrink-0">
+                <Navigation size={18} aria-hidden />
               </span>
+              <h2 id="drone-offer-title" className={TITLE}>Mission on the drone</h2>
             </div>
-            <div className="px-4 py-4">
-              <p className="text-[11px] font-mono" style={{ color: '#d1d5db' }}>
-                The drone has an existing mission with{' '}
-                <span style={{ color: '#93c5fd', fontWeight: 700 }}>{droneMissionOffer.length} waypoints</span>.
-                Load it into the planner?
+            <div className="px-5 py-4 space-y-1.5">
+              <p className="text-[14px] text-app-text">
+                The drone already has a{' '}
+                <span className="font-bold text-app-accent tabular-nums">{droneMissionOffer.length}-waypoint</span>{' '}
+                mission. Load it here?
               </p>
-              <p className="text-[10px] font-mono mt-1.5" style={{ color: '#6b7280' }}>
-                Choosing &ldquo;Discard&rdquo; keeps your current plan unchanged.
+              <p className="text-[13px] text-app-text-muted">
+                Discard keeps your current plan.
               </p>
             </div>
-            <div className="flex gap-2 px-4 pb-4">
-              <button
-                onClick={() => setDroneMissionOffer(null)}
-                className="flex-1 py-2 rounded-lg text-[11px] font-mono font-bold"
-                style={{ background: 'rgba(255,255,255,.08)', color: '#9ca3af', border: '1px solid rgba(255,255,255,.1)' }}
-              >
+            <div className="flex gap-2 px-5 pb-5">
+              <button onClick={() => setDroneMissionOffer(null)} className={cn(BTN, 'flex-1 h-10')}>
                 Discard
               </button>
               <button
@@ -1617,10 +1445,9 @@ export default function MissionPage() {
                   markPlanUploaded(st.activePlanKey, planSignature(st.waypoints))
                   setDroneMissionOffer(null)
                 }}
-                className="flex-1 py-2 rounded-lg text-[11px] font-mono font-bold flex items-center justify-center gap-1.5"
-                style={{ background: 'rgba(59,130,246,.25)', color: '#93c5fd', border: '1px solid rgba(59,130,246,.4)' }}
+                className={cn(BTN_PRIMARY, 'flex-[1.4] h-10')}
               >
-                <Upload size={13} /> Load Mission
+                <FileDown size={15} aria-hidden /> Load mission
               </button>
             </div>
           </div>
@@ -1628,101 +1455,85 @@ export default function MissionPage() {
       )}
 
       {/* ── Bottom bar - stats + map layer switcher ───────────────────── */}
-      <Panel className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-3 px-4 py-2">
-        {/* Map layer segmented control */}
-        <div className="flex items-center rounded-lg overflow-hidden"
-          style={{ background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.08)' }}>
+      <div className={cn(PANEL, 'absolute bottom-3 left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-3 px-2 py-1.5 max-w-[calc(100%-24px)] overflow-x-auto')}>
+        {/* Map layer segmented control: icons with tooltips, the active
+            layer also shows its name (no clipped labels). */}
+        <div className={SEG} role="group" aria-label="Base map">
           {MAP_LAYERS.map(l => {
             const active = mapLayer === l.key
             return (
               <button
                 key={l.key}
                 onClick={() => setMapLayer(l.key)}
-                className="flex items-center gap-1 px-2.5 py-1.5 transition-colors"
-                style={{
-                  background: active ? 'rgba(59,130,246,.25)' : 'transparent',
-                  color: active ? '#93c5fd' : '#6b7280',
-                  fontWeight: active ? 700 : 500,
-                  borderRight: '1px solid rgba(255,255,255,.06)',
-                }}
+                aria-pressed={active}
+                aria-label={l.label}
+                className={cn(segBtn(active), 'h-8', active ? 'px-2.5' : 'w-8 px-0')}
                 title={l.label}
               >
                 {LAYER_ICONS[l.key]}
-                <span className="text-[9px] font-mono">{l.label}</span>
+                {active && <span>{l.label}</span>}
               </button>
             )
           })}
         </div>
 
-        <div className="w-px h-6 bg-gray-700" />
-
         <button onClick={() => setShowProfile(v => !v)} title="Altitude profile"
           aria-pressed={showProfile}
-          className="flex items-center gap-1 px-2 py-1 rounded-md text-[9px] font-mono font-bold"
-          style={{ background: showProfile ? 'rgba(59,130,246,.25)' : 'rgba(255,255,255,.06)', color: showProfile ? '#93c5fd' : '#9ca3af' }}>
-          <LineChart size={11} /> Profile
+          className={cn(segBtn(showProfile), 'h-8 border border-app-border', !showProfile && 'bg-app-surface-2')}>
+          <LineChart size={14} aria-hidden /> Profile
         </button>
-        <div className="w-px h-6 bg-gray-700" />
-        <Stat icon={<MapIcon size={12} />}      label="Waypoints" value={String(missionStats.waypointCount)} />
-        <div className="w-px h-6 bg-gray-700" />
-        <Stat icon={<Route size={12} />}        label="Distance"  value={fmtDist(missionStats.totalDistanceM)} />
-        <div className="w-px h-6 bg-gray-700" />
-        <Stat icon={<Clock size={12} />}        label="Est. time" value={fmtTime(missionStats.estimatedTimeS)} />
-        <div className="w-px h-6 bg-gray-700" />
-        <Stat icon={<ArrowUpDown size={12} />}  label="Max alt"   value={`${missionStats.maxAltitude} m`} />
+        <div className="w-px h-7 bg-app-border shrink-0" />
+        <Stat icon={<MapIcon size={14} />}      label="Waypoints" value={String(missionStats.waypointCount)} />
+        <Stat icon={<Route size={14} />}        label="Distance"  value={fmtDist(missionStats.totalDistanceM)} />
+        <Stat icon={<Clock size={14} />}        label="Est. time" value={fmtTime(missionStats.estimatedTimeS)} />
+        <Stat icon={<ArrowUpDown size={14} />}  label="Max alt"   value={`${missionStats.maxAltitude} m`} />
         {/* Battery warning - only shown when drone connected */}
         {batteryPct !== null && (
-          <>
-            <div className="w-px h-6 bg-gray-700" />
-            <Stat
-              icon={<Battery size={12} color={batteryWarning ? '#f87171' : '#9ca3af'} />}
-              label="Battery"
-              value={`${batteryPct.toFixed(0)}%`}
-              warn={batteryWarning}
-              warnMsg={`Est. mission uses ~${estBatteryDraw}%`}
-            />
-          </>
+          <Stat
+            icon={<Battery size={14} />}
+            label="Battery"
+            value={`${batteryPct.toFixed(0)}%`}
+            warn={batteryWarning}
+            warnMsg={`Est. mission uses ~${estBatteryDraw}%`}
+          />
         )}
         {/* Wind - only shown when drone connected and wind > 0.5 m/s */}
         {windSpeed > 0.5 && (
-          <>
-            <div className="w-px h-6 bg-gray-700" />
-            <Stat
-              icon={<Wind size={12} color={windSpeed > 8 ? '#f87171' : '#9ca3af'} />}
-              label="Wind"
-              value={`${windSpeed.toFixed(1)} m/s`}
-              warn={windSpeed > 8}
-              warnMsg="Strong wind - check flight safety"
-            />
-          </>
+          <Stat
+            icon={<Wind size={14} />}
+            label="Wind"
+            value={`${windSpeed.toFixed(1)} m/s`}
+            warn={windSpeed > 8}
+            warnMsg="Strong wind - check flight safety"
+          />
         )}
-      </Panel>
+      </div>
     </div>
   )
 }
 
 // ── Sub-components ──────────────────────────────────────────────────────────
 
-function ToolBtn({ icon, label, onClick, disabled, accent, danger }: {
+function ToolBtn({ icon, label, onClick, disabled, why, tone, tip }: {
   icon: React.ReactNode; label: string; onClick: () => void
-  disabled?: boolean; accent?: boolean; danger?: boolean
+  disabled?: boolean
+  /** Tooltip while disabled: why it cannot be used. */
+  why?: string
+  tone?: 'primary' | 'warn' | 'danger'
+  /** Tooltip while enabled (defaults to the label). */
+  tip?: string
 }) {
-  let color = '#e5e7eb'  // gray-200 - bright white-ish
-  let bg = 'rgba(255,255,255,.06)'
-  let hoverBg = 'rgba(255,255,255,.14)'
-  if (accent) { color = '#93c5fd'; bg = 'rgba(59,130,246,.15)'; hoverBg = 'rgba(59,130,246,.28)' }
-  if (danger) { color = '#fca5a5'; bg = 'rgba(248,113,113,.12)'; hoverBg = 'rgba(248,113,113,.24)' }
+  const cls = tone === 'primary' ? BTN_PRIMARY : tone === 'warn' ? BTN_WARN : tone === 'danger' ? BTN_DANGER : BTN
+  const title = disabled ? (why ?? label) : (tip ?? label)
+  // A disabled button gets no pointer events in some browsers, so the
+  // tooltip sits on a wrapper.
   return (
-    <button
-      onClick={onClick} disabled={disabled} title={label}
-      className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 transition-colors disabled:opacity-30 disabled:pointer-events-none"
-      style={{ color, background: bg }}
-      onMouseEnter={e => { if (!disabled) (e.currentTarget.style.background = hoverBg) }}
-      onMouseLeave={e => { (e.currentTarget.style.background = bg) }}
-    >
-      {icon}
-      <span className="text-[10px] font-mono font-bold">{label}</span>
-    </button>
+    <span title={title} className="inline-flex">
+      <button onClick={onClick} disabled={disabled} className={cls} aria-label={disabled && why ? `${label} (${why})` : undefined}>
+        {icon}
+        <span>{label}</span>
+      </button>
+    </span>
   )
 }
 
@@ -1731,11 +1542,13 @@ function Stat({ icon, label, value, warn, warnMsg }: {
   warn?: boolean; warnMsg?: string
 }) {
   return (
-    <div className="flex items-center gap-1.5" title={warn && warnMsg ? warnMsg : undefined}>
-      <span style={{ color: warn ? '#f87171' : '#6b7280' }}>{icon}</span>
-      <div>
-        <p className="text-[8px] font-mono tracking-wider font-semibold" style={{ color: warn ? '#fca5a5' : '#6b7280' }}>{label}</p>
-        <p className="text-[11px] font-mono font-bold tabular-nums" style={{ color: warn ? '#fca5a5' : '#fff' }} suppressHydrationWarning>{value}</p>
+    <div className="flex items-center gap-2 shrink-0" title={warn && warnMsg ? warnMsg : undefined}>
+      <span className={warn ? 'text-app-danger' : 'text-app-text-muted'} aria-hidden>{icon}</span>
+      <div className="leading-tight">
+        <p className={cn('text-xs font-semibold whitespace-nowrap', warn ? 'text-app-danger' : 'text-app-text-muted')}>
+          {label}{warn && <AlertTriangle size={11} className="inline ml-1 -mt-0.5" aria-label="warning" />}
+        </p>
+        <p className={cn('text-[15px] font-bold tabular-nums whitespace-nowrap', warn ? 'text-app-danger' : 'text-app-text')} suppressHydrationWarning>{value}</p>
       </div>
     </div>
   )

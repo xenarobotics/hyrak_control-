@@ -50,8 +50,7 @@ export function SpeedTape({ height = 200 }: Props) {
                                 {isMajor && (
                                     <text
                                         x={6} y={y - 2}
-                                        fontSize={9} fill="rgba(255,255,255,0.6)"
-                                        fontFamily="monospace"
+                                        fontSize={12} fill="#C3CCD8" fontWeight={600}
                                         stroke="rgba(0,0,0,0.9)" strokeWidth={2.5}
                                         style={{ paintOrder: 'stroke fill' }}
                                     >
@@ -73,7 +72,7 @@ export function SpeedTape({ height = 200 }: Props) {
                 />
                 <text
                     x={w / 2 - 2} y={cy + 4}
-                    fontSize={11} fill="white" fontFamily="monospace"
+                    fontSize={12} fill="white"
                     textAnchor="middle" fontWeight="bold"
                     stroke="rgba(0,0,0,0.9)" strokeWidth={2.5}
                     style={{ paintOrder: 'stroke fill' }}
@@ -85,8 +84,8 @@ export function SpeedTape({ height = 200 }: Props) {
             <div style={{
                 position: 'absolute', bottom: -16, left: '50%',
                 transform: 'translateX(-50%)',
-                fontSize: 9, fontFamily: 'monospace',
-                color: 'rgba(255,255,255,0.5)',
+                fontSize: 12, 
+                color: 'var(--overlay-muted)',
                 whiteSpace: 'nowrap',
             }}>
                 m/s

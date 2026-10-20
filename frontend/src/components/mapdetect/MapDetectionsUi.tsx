@@ -16,6 +16,7 @@ import {
 } from '@/lib/mapSightings'
 import { useCameraPref, useFirstUse, useLiveSightings } from './useLiveSightings'
 import { SightingsLayer } from './SightingsLayer'
+import { FOCUS, FOCUS_OVERLAY } from '@/components/mission/ui'
 
 const SETTINGS_TAB_KEY = 'hyrak-settings-tab'
 
@@ -29,13 +30,13 @@ export function CameraAnglePrompt({ tone = 'dark', short = false }: { tone?: 'da
     const pref = useCameraPref()
     const { camera } = useLiveSightings()
     if (pref.set || camera?.gimbal) return null
-    const color = tone === 'dark' ? '#fcd34d' : '#d97706'
+    const color = tone === 'dark' ? 'var(--overlay-warn)' : 'var(--app-warn)'
     return (
-        <p style={{ margin: 0, fontSize: 11, lineHeight: 1.5, color }}>
+        <p style={{ margin: 0, fontSize: 13, lineHeight: 1.45, color, fontWeight: 600 }}>
             {short
                 ? 'Camera angle not set (assuming straight down). '
                 : 'Camera angle not set: positions assume the camera points straight down with an 80° lens. '}
-            <Link href="/settings" onClick={openVideoSettings}
+            <Link href="/settings" onClick={openVideoSettings} className={tone === 'dark' ? FOCUS_OVERLAY : FOCUS}
                 style={{ color, textDecoration: 'underline', fontWeight: 600 }}>
                 Set camera angle
             </Link>
@@ -54,10 +55,10 @@ export function FirstUseNote({ tone = 'dark', short = false }: { tone?: 'dark' |
             nominalAccuracy != null ? `, about +/- ${nominalAccuracy} m at the current height`
                 : ': a few metres when low and looking straight down, more when high or looking ahead'}.`
     return (
-        <p style={{ margin: 0, fontSize: 11, lineHeight: 1.5,
-            color: tone === 'dark' ? '#cbd5e1' : 'hsl(var(--app-text-muted))' }}>
+        <p style={{ margin: 0, fontSize: 13, lineHeight: 1.45,
+            color: tone === 'dark' ? 'var(--overlay-muted)' : 'hsl(var(--app-text-muted))' }}>
             {text}{' '}
-            <button type="button" onClick={dismiss}
+            <button type="button" onClick={dismiss} className={tone === 'dark' ? FOCUS_OVERLAY : FOCUS}
                 style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
                     color: 'inherit', textDecoration: 'underline', font: 'inherit' }}>
                 Hide tip
@@ -71,27 +72,28 @@ function ClassRows({ list }: { list: Sighting[] }) {
         <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
             {countsByLabel(list).map(([label, n]) => (
                 <li key={label} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                    <span aria-hidden style={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0,
-                        background: classColor(label), border: '1.5px solid #fff' }} />
+                    <span aria-hidden style={{ width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
+                        background: classColor(label), border: '1.5px solid var(--overlay-text)' }} />
                     <span style={{ textTransform: 'capitalize', flex: 1, minWidth: 0, overflow: 'hidden',
                         textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
-                    <span style={{ fontVariantNumeric: 'tabular-nums', color: '#e5e7eb' }}>{n}</span>
+                    <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--overlay-text)' }}>{n}</span>
                 </li>
             ))}
         </ul>
     )
 }
 
+// Drawn on map tiles: the always-dark overlay set (same in both themes).
 const BOX: React.CSSProperties = {
-    background: 'rgba(10,12,18,0.86)', border: '1px solid rgba(255,255,255,0.10)', borderRadius: 8,
-    color: '#cbd5e1', fontSize: 11, boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
-    fontFamily: 'var(--font-geist-mono,monospace)',
+    background: 'var(--overlay-scrim)', border: '1px solid var(--overlay-border)', borderRadius: 10,
+    color: 'var(--overlay-text)', fontSize: 13, boxShadow: '0 4px 16px rgba(0,0,0,0.35)',
+    backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
 }
 
 const SMALL_BTN: React.CSSProperties = {
-    padding: '3px 8px', borderRadius: 5, border: '1px solid rgba(255,255,255,0.16)',
-    background: 'rgba(255,255,255,0.04)', color: '#e5e7eb', cursor: 'pointer',
-    fontFamily: 'inherit', fontSize: 10.5, fontWeight: 600,
+    minHeight: 32, padding: '0 12px', borderRadius: 6, border: '1px solid var(--overlay-border)',
+    background: 'rgba(255,255,255,0.06)', color: 'var(--overlay-text)', cursor: 'pointer',
+    fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
 }
 
 /**
@@ -108,10 +110,10 @@ export function SightingsLegend({ compact = false, style }: { compact?: boolean;
     if (compact) {
         if (!s.show || s.list.length === 0) return null
         return (
-            <div style={{ ...BOX, position: 'absolute', zIndex: 1000, padding: '3px 7px', display: 'flex',
-                alignItems: 'center', gap: 5, pointerEvents: 'none', ...style }}
+            <div style={{ ...BOX, position: 'absolute', zIndex: 1000, padding: '2px 8px', display: 'flex',
+                alignItems: 'center', gap: 4, pointerEvents: 'none', fontSize: 12, fontWeight: 700, borderRadius: 999, ...style }}
                 aria-label={`${s.list.length} detections on the map`}>
-                <MapPin size={11} /> {s.list.length}
+                <MapPin size={12} /> {s.list.length}
             </div>
         )
     }
@@ -127,40 +129,44 @@ export function SightingsLegend({ compact = false, style }: { compact?: boolean;
 
     return (
         <section aria-label="Detections on the map"
-            style={{ ...BOX, position: 'absolute', zIndex: 1000, padding: '8px 10px', width: 236,
+            style={{ ...BOX, position: 'absolute', zIndex: 1000, padding: '8px 8px 10px 12px', width: 236,
                 maxWidth: 'calc(100% - 24px)', ...style }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
-                    fontWeight: 700, color: '#e5e7eb', flex: 1 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', minHeight: 32,
+                    fontWeight: 700, fontSize: 14, color: 'var(--overlay-text)', flex: 1 }}>
                     <input type="checkbox" checked={s.show} onChange={e => s.setShow(e.target.checked)}
-                        style={{ accentColor: '#22d3ee', cursor: 'pointer' }} />
+                        className={FOCUS_OVERLAY}
+                        style={{ accentColor: 'var(--overlay-accent)', cursor: 'pointer', width: 16, height: 16 }} />
                     Detections
-                    {s.list.length > 0 && <span style={{ fontWeight: 400, color: '#94a3b8' }}>{s.list.length}</span>}
+                    {s.list.length > 0 && <span style={{ fontWeight: 700, fontSize: 12, padding: '0 7px', borderRadius: 999,
+                        border: '1px solid var(--overlay-border)', color: 'var(--overlay-text)', fontVariantNumeric: 'tabular-nums' }}>{s.list.length}</span>}
                 </label>
                 {s.recording && (
                     <span title="Saved with the flight (Settings > Flights)"
-                        style={{ display: 'flex', alignItems: 'center', gap: 3, color: '#f87171', fontSize: 10 }}>
-                        <Dot size={8} fill="#f87171" /> REC
+                        style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--overlay-danger)', fontSize: 12, fontWeight: 700 }}>
+                        <Dot size={8} fill="currentColor" /> Rec
                     </span>
                 )}
                 <button type="button" onClick={() => setCollapsed(c => !c)}
                     aria-label={collapsed ? 'Expand the detections legend' : 'Collapse the detections legend'}
                     aria-expanded={!collapsed}
-                    style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 2, display: 'flex' }}>
-                    {collapsed ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                    className={FOCUS_OVERLAY}
+                    style={{ background: 'none', border: 'none', color: 'var(--overlay-muted)', cursor: 'pointer', width: 32, height: 32,
+                        borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {collapsed ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                 </button>
             </div>
             {!collapsed && s.show && (
                 <div style={{ marginTop: 7, display: 'flex', flexDirection: 'column', gap: 7 }}>
                     {s.list.length > 0 ? <ClassRows list={s.list} /> : (
-                        <p style={{ margin: 0, lineHeight: 1.5 }}>
-                            {s.reason ? REASON_TEXT[s.reason] : 'No detections yet - run a model and fly over the area.'}
+                        <p style={{ margin: 0, lineHeight: 1.45, color: 'var(--overlay-muted)' }}>
+                            {s.reason ? REASON_TEXT[s.reason] : 'No detections yet. Run a model and fly over the area.'}
                         </p>
                     )}
-                    {s.list.length > 0 && s.reason && <p style={{ margin: 0, lineHeight: 1.5, color: '#fcd34d' }}>{REASON_TEXT[s.reason]}</p>}
+                    {s.list.length > 0 && s.reason && <p style={{ margin: 0, lineHeight: 1.45, fontWeight: 600, color: 'var(--overlay-warn)' }}>{REASON_TEXT[s.reason]}</p>}
                     {s.capped && (
-                        <p style={{ margin: 0, lineHeight: 1.5, color: '#fcd34d' }}>
-                            The map is full (5000 detections). Clear it to keep placing new ones.
+                        <p style={{ margin: 0, lineHeight: 1.45, fontWeight: 600, color: 'var(--overlay-warn)' }}>
+                            Map full (5000). Clear it to place new ones.
                         </p>
                     )}
                     <FirstUseNote short />
@@ -170,10 +176,11 @@ export function SightingsLegend({ compact = false, style }: { compact?: boolean;
                             <button type="button" onClick={() => void clear()} disabled={clearing}
                                 aria-busy={clearing}
                                 title={s.recording ? 'Empties this map. Recorded detections stay in Settings > Flights.' : 'Empties this map.'}
-                                style={{ ...SMALL_BTN, opacity: clearing ? 0.6 : 1 }}>
+                                className={FOCUS_OVERLAY}
+                                style={{ ...SMALL_BTN, cursor: clearing ? 'wait' : 'pointer', color: clearing ? 'var(--overlay-muted)' : SMALL_BTN.color }}>
                                 {clearing ? 'Clearing...' : 'Clear map'}
                             </button>
-                            {clearFailed && <span role="alert" style={{ color: '#fca5a5' }}>Not cleared. Try again.</span>}
+                            {clearFailed && <span role="alert" style={{ color: 'var(--overlay-danger)', fontWeight: 600 }}>Not cleared. Try again.</span>}
                         </div>
                     )}
                 </div>
@@ -190,32 +197,31 @@ export function MapDetectionsControls() {
     const recordWhy = !s.mayEdit
         ? `Recording needs ${s.customer ? 'fly access on this workspace' : 'the operator role'}.`
         : !s.canRecord ? 'Recording is unavailable right now: the database is offline.' : undefined
-    const row: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12 }
+    const row: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 14, minHeight: 32 }
     return (
         <section aria-label="Detections on the map"
-            className="rounded-lg border p-3 flex flex-col gap-2"
-            style={{ borderColor: 'hsl(var(--app-border))', background: 'hsl(var(--app-surface-2) / 0.5)' }}>
-            <div className="flex items-center gap-2 text-[11px] font-mono font-semibold tracking-wider"
-                style={{ color: 'hsl(var(--app-text-muted))' }}>
-                <MapPin size={12} /> MAP
-                {s.list.length > 0 && <span className="ml-auto font-normal">{s.list.length} placed</span>}
+            className="rounded-[10px] border border-app-border bg-app-surface-2 p-3 flex flex-col gap-1">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.05em] text-app-text-muted">
+                <MapPin size={13} /> Map
+                {s.list.length > 0 && <span className="ml-auto normal-case tracking-normal text-[13px] font-semibold text-app-text tabular-nums">{s.list.length} placed</span>}
             </div>
             <label style={row}>
                 <input type="checkbox" checked={s.show} onChange={e => s.setShow(e.target.checked)}
-                    style={{ accentColor: '#22d3ee' }} />
+                    className={FOCUS} style={{ accentColor: 'var(--app-accent)', width: 16, height: 16 }} />
                 <span style={{ color: 'hsl(var(--app-text))' }}>Show detections on map</span>
             </label>
-            <label style={{ ...row, cursor: recordDisabled ? 'default' : 'pointer', opacity: recordDisabled ? 0.6 : 1 }}
+            <label style={{ ...row, cursor: recordDisabled ? 'not-allowed' : 'pointer' }}
                 title={recordWhy}>
                 <input type="checkbox" checked={s.recording} disabled={recordDisabled}
-                    onChange={e => setRecording(e.target.checked)} style={{ accentColor: '#f87171' }} />
-                <span style={{ color: 'hsl(var(--app-text))' }}>Record to map</span>
-                <span style={{ fontSize: 10.5, color: 'hsl(var(--app-text-muted))' }}>
+                    onChange={e => setRecording(e.target.checked)} className={FOCUS}
+                    style={{ accentColor: 'var(--app-danger)', width: 16, height: 16 }} />
+                <span style={{ color: recordDisabled ? 'hsl(var(--app-text-muted))' : 'hsl(var(--app-text))' }}>Record to map</span>
+                <span style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))' }}>
                     {s.recording ? 'saving with this flight' : 'saves them for later'}
                 </span>
             </label>
-            {recordWhy && <p style={{ margin: 0, fontSize: 11, color: 'hsl(var(--app-text-muted))' }}>{recordWhy}</p>}
-            {s.reason && <p style={{ margin: 0, fontSize: 11, color: '#d97706' }}>{REASON_TEXT[s.reason]}</p>}
+            {recordWhy && <p style={{ margin: 0, fontSize: 13, color: 'hsl(var(--app-text-muted))' }}>{recordWhy}</p>}
+            {s.reason && <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--app-warn)' }}>{REASON_TEXT[s.reason]}</p>}
             <FirstUseNote tone="app" />
             <CameraAnglePrompt tone="app" />
         </section>

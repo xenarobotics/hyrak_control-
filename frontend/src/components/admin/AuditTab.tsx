@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react'
 import { useAccess } from '@/hooks/useAccess'
 import { hasPerm, type WorkspaceInfo } from '@/lib/access'
 import { fmtWhen, listAudit, listWorkspaces, type AuditEvent } from '@/lib/workspaces'
-import { Btn, Empty, INPUT_CLS, Notice } from '@/components/admin/console'
+import { Btn, Empty, INPUT_CLS, Notice, TH_CLS, TR_CLS } from '@/components/admin/console'
 
 const PAGE = 100
 
@@ -67,42 +67,42 @@ export default function AuditTab() {
         <div className="flex-1 overflow-y-auto p-5">
             <div className="max-w-5xl mx-auto space-y-3">
                 <div className="flex items-center gap-3">
-                    <h2 className="text-xs tracking-widest text-zinc-500">AUDIT LOG</h2>
+                    <h2 className="text-[18px] font-bold text-app-text">Audit log</h2>
                     <select value={effective} onChange={e => { setWsId(e.target.value); setEvents(null) }}
                         aria-label="Filter by workspace" className={`${INPUT_CLS} ml-auto`}>
                         {isFounder && <option value="">all workspaces</option>}
                         {options.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                     </select>
-                    <Btn onClick={() => setTick(t => t + 1)}>REFRESH</Btn>
+                    <Btn onClick={() => setTick(t => t + 1)}>Refresh</Btn>
                 </div>
                 <Notice error={error} />
                 {!isFounder && options.length === 0 && <Empty>None of your workspaces lets you view its audit log.</Empty>}
                 {events === null && !error && (isFounder || options.length > 0) && <Empty>Loading events…</Empty>}
                 {events?.length === 0 && <Empty>No events yet.</Empty>}
                 {events && events.length > 0 && (
-                    <div className="border border-zinc-800 rounded overflow-x-auto">
-                        <table className="w-full text-[10px]">
+                    <div className="border border-app-border rounded-[10px] bg-app-surface overflow-x-auto">
+                        <table className="w-full text-[13px]">
                             <thead>
-                                <tr className="text-left text-zinc-500 tracking-widest border-b border-zinc-800">
-                                    <th className="px-3 py-2 font-normal">WHEN</th>
-                                    <th className="px-3 py-2 font-normal">WHO</th>
-                                    <th className="px-3 py-2 font-normal">ACTION</th>
-                                    <th className="px-3 py-2 font-normal">WORKSPACE</th>
-                                    <th className="px-3 py-2 font-normal">TARGET</th>
-                                    <th className="px-3 py-2 font-normal">DETAIL</th>
+                                <tr className="border-b border-app-border bg-app-surface-2">
+                                    <th className={TH_CLS}>When</th>
+                                    <th className={TH_CLS}>Who</th>
+                                    <th className={TH_CLS}>Action</th>
+                                    <th className={TH_CLS}>Workspace</th>
+                                    <th className={TH_CLS}>Target</th>
+                                    <th className={TH_CLS}>Detail</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-zinc-900">
+                            <tbody>
                                 {events.map(ev => (
-                                    <tr key={ev.id} className="align-top hover:bg-zinc-900/40">
-                                        <td className="px-3 py-1.5 text-zinc-400 whitespace-nowrap">{fmtWhen(ev.at)}</td>
-                                        <td className="px-3 py-1.5 text-zinc-200 whitespace-nowrap">{ev.actor_name ?? '-'}</td>
-                                        <td className="px-3 py-1.5 text-cyan-400 whitespace-nowrap">{ev.action}</td>
-                                        <td className="px-3 py-1.5 text-zinc-400 whitespace-nowrap">{wsName(ev.workspace_id)}</td>
-                                        <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap">
+                                    <tr key={ev.id} className={`${TR_CLS} align-top`}>
+                                        <td className="px-3 py-2 text-app-text-muted whitespace-nowrap tabular-nums">{fmtWhen(ev.at)}</td>
+                                        <td className="px-3 py-2 text-app-text whitespace-nowrap">{ev.actor_name ?? '-'}</td>
+                                        <td className="px-3 py-2 font-code text-[12px] text-app-text whitespace-nowrap">{ev.action}</td>
+                                        <td className="px-3 py-2 text-app-text-muted whitespace-nowrap">{wsName(ev.workspace_id)}</td>
+                                        <td className="px-3 py-2 text-app-text-muted whitespace-nowrap">
                                             {ev.target_type ?? ''}{ev.target_id ? ` ${ev.target_id.slice(0, 8)}` : ''}
                                         </td>
-                                        <td className="px-3 py-1.5 text-zinc-600 break-all" title={ev.ip ? `from ${ev.ip}` : undefined}>
+                                        <td className="px-3 py-2 text-app-text-muted break-all" title={ev.ip ? `from ${ev.ip}` : undefined}>
                                             {detailText(ev.detail)}
                                         </td>
                                     </tr>
@@ -112,7 +112,7 @@ export default function AuditTab() {
                     </div>
                 )}
                 {more && (
-                    <Btn onClick={() => void older()} disabled={loadingMore}>{loadingMore ? 'LOADING…' : 'LOAD OLDER'}</Btn>
+                    <Btn onClick={() => void older()} disabled={loadingMore}>{loadingMore ? 'Loading…' : 'Load older'}</Btn>
                 )}
             </div>
         </div>

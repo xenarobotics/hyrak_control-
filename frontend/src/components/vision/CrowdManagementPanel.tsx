@@ -9,28 +9,21 @@ import { fetchCrowdHistory, downloadSessionReport, clearHistory, canClearHistory
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Users, Download, Trash2, MapPin } from 'lucide-react'
 import { FollowControls } from '@/components/vision/FollowControls'
+import { TONE, LABEL, READOUT, SECONDARY, NUM, TILE, TEXT, MUTED, BORDER, FOCUS, type Tone } from '@/components/vision/panelStyle'
 
-const LEVEL_STYLE: Record<string, { bg: string; border: string; fg: string; label: string }> = {
-    green:  { bg: '#0f2e1a', border: '#22c55e', fg: '#4ade80', label: 'LIGHT' },
-    orange: { bg: '#3a2408', border: '#f59e0b', fg: '#fbbf24', label: 'MODERATE' },
-    red:    { bg: '#3a0f0f', border: '#ef4444', fg: '#f87171', label: 'DENSE' },
-}
+const LEVEL_TONE: Record<string, Tone> = { green: 'ok', orange: 'warn', red: 'danger' }
+const LEVEL_STYLE: Record<string, { bg: string; border: string; fg: string; label: string }> = Object.fromEntries(
+    Object.entries({ green: 'Light', orange: 'Moderate', red: 'Dense' }).map(([k, label]) => {
+        const t = TONE[LEVEL_TONE[k]]
+        return [k, { bg: t.bg, border: t.border, fg: t.fg, label }]
+    }),
+)
 
 function StatTile({ label, value }: { label: string; value: number | string }) {
     return (
-        <div style={{
-            flex: 1, padding: '10px 8px', textAlign: 'center',
-            background: 'hsl(var(--app-surface-2))',
-            border: '1px solid hsl(var(--app-border))',
-            borderRadius: 10,
-        }}>
-            <div style={{
-                fontSize: 22, fontWeight: 700, fontFamily: 'var(--font-geist-mono)',
-                color: 'hsl(var(--app-text))',
-            }}>
-                {value}
-            </div>
-            <div style={{ fontSize: 10, color: 'hsl(var(--app-text-muted))', marginTop: 2 }}>{label}</div>
+        <div style={{ ...TILE, flex: 1, padding: '12px 8px', textAlign: 'center' }}>
+            <div style={READOUT}>{value}</div>
+            <div style={{ ...LABEL, marginTop: 4 }}>{label}</div>
         </div>
     )
 }
@@ -44,11 +37,8 @@ function TrendSpark({ history, trend }: {
 }) {
     if (history.length < 2) {
         return (
-            <div style={{
-                fontSize: 10, fontFamily: 'monospace', textAlign: 'center',
-                color: 'hsl(var(--app-text-muted))', padding: '6px 0',
-            }}>
-                building trend…
+            <div style={{ ...SECONDARY, textAlign: 'center', padding: '6px 0' }}>
+                Building the trend...
             </div>
         )
     }
@@ -62,17 +52,12 @@ function TrendSpark({ history, trend }: {
     }).join(' ')
     const rising = (trend ?? 0) > 0.5
     const falling = (trend ?? 0) < -0.5
-    const col = rising ? '#fbbf24' : falling ? '#4ade80' : 'hsl(var(--app-text-muted))'
+    const col = rising ? TONE.warn.fg : falling ? TONE.ok.fg : MUTED
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                <span style={{
-                    fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6,
-                    color: 'hsl(var(--app-text-muted))',
-                }}>
-                    Trend
-                </span>
-                <span style={{ marginLeft: 'auto', fontSize: 11, fontFamily: 'monospace', color: col }}>
+                <span style={LABEL}>Trend</span>
+                <span style={{ ...NUM, marginLeft: 'auto', fontSize: 13, fontWeight: 700, color: col }}>
                     {trend == null ? '-'
                         : `${trend > 0 ? '+' : ''}${trend.toFixed(0)}/min`}
                     {rising ? '  rising' : falling ? '  easing' : '  steady'}
@@ -84,10 +69,10 @@ function TrendSpark({ history, trend }: {
                           vectorEffect="non-scaling-stroke" />
             </svg>
             <div style={{
-                display: 'flex', justifyContent: 'space-between',
-                fontSize: 9, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))',
+                ...NUM, display: 'flex', justifyContent: 'space-between',
+                fontSize: 12, color: MUTED,
             }}>
-                <span>peak {max}</span>
+                <span>Peak {max}</span>
                 <span>{Math.round((history[history.length - 1].t - history[0].t) / 60)} min</span>
             </div>
         </div>
@@ -115,15 +100,17 @@ function ZoneNames({ names, counts }: {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
             <button
+                type="button"
                 onClick={() => setOpen(o => !o)}
+                aria-expanded={open}
+                className={FOCUS}
                 style={{
-                    display: 'flex', alignItems: 'center', gap: 6, padding: 0,
+                    ...LABEL, display: 'flex', alignItems: 'center', gap: 6, padding: 0,
+                    minHeight: 28, borderRadius: 6,
                     background: 'none', border: 'none', cursor: 'pointer',
-                    fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6,
-                    color: 'hsl(var(--app-text-muted))',
                 }}
             >
-                <MapPin size={11} />
+                <MapPin size={12} aria-hidden />
                 Zones {named > 0 && `(${named} named)`}
                 <span style={{ marginLeft: 'auto' }}>{open ? '−' : '+'}</span>
             </button>
@@ -138,12 +125,13 @@ function ZoneNames({ names, counts }: {
                             onChange={e => save(i, e.target.value)}
                             placeholder={`zone ${i}`}
                             title={`Grid cell ${i}${counts?.[i] ? ` - ${counts[i]} people now` : ''}`}
+                            className={FOCUS}
                             style={{
-                                width: '100%', padding: '4px 6px', borderRadius: 6,
-                                fontSize: 10, minWidth: 0,
-                                border: `1px solid ${counts?.[i] ? '#22d3ee55' : 'hsl(var(--app-border))'}`,
-                                background: 'hsl(var(--app-surface-2))',
-                                color: 'hsl(var(--app-text))',
+                                width: '100%', minHeight: 32, padding: '4px 8px', borderRadius: 6,
+                                fontSize: 13, minWidth: 0,
+                                border: `1px solid ${counts?.[i] ? TONE.accent.border : BORDER}`,
+                                background: 'hsl(var(--app-surface))',
+                                color: TEXT,
                             }}
                         />
                     ))}
@@ -267,50 +255,40 @@ export function CrowdManagementPanel() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1, minHeight: 0, overflow: 'auto' }}>
                 <div style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                    padding: '14px 10px', borderRadius: 12,
+                    padding: '14px 10px', borderRadius: 10,
                     background: style.bg, border: `1px solid ${style.border}`,
                 }}>
-                    <Users size={18} style={{ color: style.fg }} />
-                    <span style={{
-                        fontSize: 15, fontWeight: 700, letterSpacing: '0.06em',
-                        fontFamily: 'var(--font-geist-mono)', color: style.fg,
-                    }}>
+                    <Users size={20} style={{ color: style.fg }} aria-hidden />
+                    <span style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.1, color: style.fg }}>
                         {style.label}
                     </span>
                 </div>
 
                 <div style={{ display: 'flex', gap: 8 }}>
-                    <StatTile label="CURRENT" value={cvResults?.current_count ?? 0} />
-                    <StatTile label="PEAK" value={cvResults?.peak_count ?? 0} />
-                </div>
-
-                    <div style={{
-                    display: 'flex', justifyContent: 'space-between', fontSize: 10.5,
-                    padding: '8px 10px', borderRadius: 8,
-                    background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
-                    fontFamily: 'monospace',
-                }}>
-                    <span style={{ color: '#4ade80' }}>GREEN ≤{lightMax}</span>
-                    <span style={{ color: '#fbbf24' }}>ORANGE ≤{moderateMax}</span>
-                    <span style={{ color: '#f87171' }}>RED {moderateMax + 1}+</span>
+                    <StatTile label="Now" value={cvResults?.current_count ?? 0} />
+                    <StatTile label="Peak" value={cvResults?.peak_count ?? 0} />
                 </div>
 
                 <div style={{
-                    fontSize: 10.5, color: 'hsl(var(--app-text-muted))', lineHeight: 1.5,
-                    padding: '8px 10px', borderRadius: 8,
-                    background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
-                }}>
-                    Distinct tracks seen this session: <b>{cvResults?.distinct_tracks_seen ?? 0}</b>.
-                    This can overcount if the drone revisits the same area - it is
-                    not a certified footfall figure.
+                    ...TILE, ...NUM, display: 'flex', justifyContent: 'space-between', gap: 6,
+                    fontSize: 12, fontWeight: 700, padding: '8px 10px',
+                }} title="People per view for each level. Change it in Settings.">
+                    <span style={{ color: TONE.ok.fg }}>Light ≤{lightMax}</span>
+                    <span style={{ color: TONE.warn.fg }}>Moderate ≤{moderateMax}</span>
+                    <span style={{ color: TONE.danger.fg }}>Dense {moderateMax + 1}+</span>
+                </div>
+
+                <div style={{ ...TILE, ...SECONDARY, padding: '8px 10px' }}
+                    title="Can overcount if the drone flies over the same area again. Not a certified footfall figure.">
+                    People seen this session: <b style={{ ...NUM, color: TEXT }}>{cvResults?.distinct_tracks_seen ?? 0}</b> (estimate)
                 </div>
 
                 {!cvResults && (
                     <div style={{
                         flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        color: 'hsl(var(--app-text-muted))', fontSize: 12, fontFamily: 'monospace',
+                        ...SECONDARY,
                     }}>
-                        Start stream to begin monitoring
+                        Press Run to start counting
                     </div>
                 )}
             </div>
@@ -318,18 +296,19 @@ export function CrowdManagementPanel() {
             {/* ── Recent (bottom half) - always visible, no tab click ──── */}
             <div style={{
                 flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 6,
-                borderTop: '1px solid hsl(var(--app-border))', paddingTop: 8,
+                borderTop: `1px solid ${BORDER}`, paddingTop: 8,
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <p style={{ fontSize: 10, color: 'hsl(var(--app-text-muted))', fontFamily: 'monospace', margin: 0, letterSpacing: '0.06em' }}>
-                        RECENT SESSIONS
-                    </p>
+                    <p style={{ ...LABEL, margin: 0 }}>Recent sessions</p>
                     {canClearHistory() && <button
                         onClick={() => clearHistory('crowd-history').then(ok => { if (ok) loadHistory() })}
+                        type="button"
                         title="Clear all history"
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'hsl(var(--app-text-muted))', display: 'flex' }}
+                        aria-label="Clear all history"
+                        className={FOCUS}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: MUTED, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 6 }}
                     >
-                        <Trash2 size={12} />
+                        <Trash2 size={14} aria-hidden />
                     </button>}
                 </div>
                 <ScrollArea style={{ flex: 1 }}>
@@ -337,38 +316,38 @@ export function CrowdManagementPanel() {
                         {sessions.map(s => (
                             <div key={s.session_id} style={{
                                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                                padding: '7px 10px', borderRadius: 8,
-                                background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
+                                ...TILE, padding: '8px 10px',
                             }}>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                                    <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text))' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                                    <span style={{ ...NUM, fontSize: 13, fontWeight: 600, color: TEXT }}>
                                         {s.started ? new Date(s.started).toLocaleString() : '-'}
                                     </span>
-                                    <span style={{ fontSize: 10, color: 'hsl(var(--app-text-muted))' }}>peak {s.peak_count}</span>
+                                    <span style={{ ...NUM, fontSize: 12, color: MUTED }}>Peak {s.peak_count}</span>
                                 </div>
                                 <button
                                     onClick={() => downloadSessionReport(s.session_id, 'crowd-report', toFileStamp(s.started))}
+                                    type="button"
                                     title="Download this session's report"
-                                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'hsl(var(--app-text-muted))', display: 'flex' }}
+                                    aria-label="Download this session's report"
+                                    className={FOCUS}
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: MUTED, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 6, flexShrink: 0 }}
                                 >
-                                    <Download size={13} />
+                                    <Download size={14} aria-hidden />
                                 </button>
                             </div>
                         ))}
                         {alerts.slice(0, 8).map((a, i) => (
                             <div key={`a${i}`} style={{
-                                padding: '6px 10px', borderRadius: 8, fontSize: 10, lineHeight: 1.4,
-                                background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
-                                color: 'hsl(var(--app-text-muted))',
+                                ...TILE, ...SECONDARY, padding: '6px 10px',
                             }}>
-                                <span style={{ color: '#f87171', fontFamily: 'monospace' }}>{a.t ? new Date(a.t).toLocaleTimeString() : ''}</span>
+                                <span style={{ ...NUM, color: TONE.danger.fg, fontWeight: 700 }}>{a.t ? new Date(a.t).toLocaleTimeString() : ''}</span>
                                 {' - '}{a.message}
                             </div>
                         ))}
                         {sessions.length === 0 && alerts.length === 0 && (
                             <div style={{
                                 display: 'flex', alignItems: 'center', justifyContent: 'center', height: 80,
-                                color: 'hsl(var(--app-text-muted))', fontSize: 11, fontFamily: 'monospace', textAlign: 'center',
+                                ...SECONDARY, textAlign: 'center',
                             }}>
                                 No previous sessions yet
                             </div>

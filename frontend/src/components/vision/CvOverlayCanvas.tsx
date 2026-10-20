@@ -94,6 +94,17 @@ function drawBrackets(
 // burn-in. Three things do the work: rounded corners, a translucent rather
 // than opaque ground (so it sits ON the image instead of punching a hole in
 // it), and colour carried by the text rather than a filled block.
+// Label font: the app's own face (Nunito unless the user picked another in
+// Settings), read from the page so canvas text matches the UI. Tabular digits
+// are not available to canvas, but Nunito's figures are near-uniform. Read
+// once per draw: getComputedStyle is cheap next to the frame itself.
+function overlayFont(H: number): string {
+    const family = typeof document !== 'undefined'
+        ? getComputedStyle(document.body).fontFamily || 'system-ui, sans-serif'
+        : 'system-ui, sans-serif'
+    return `700 ${Math.max(14, Math.round(H * 0.017))}px ${family}`
+}
+
 function drawBadge(
     ctx: CanvasRenderingContext2D, text: string, x: number, y: number,
     fg = C.white, _bg?: string,
@@ -106,7 +117,7 @@ function drawBadge(
     const top = y - th - padY
 
     ctx.save()
-    ctx.fillStyle = 'rgba(12,16,22,0.66)'
+    ctx.fillStyle = 'rgba(8,12,18,0.72)' // --overlay-scrim
     ctx.beginPath(); ctx.roundRect(x, top, w, h, r); ctx.fill()
     ctx.strokeStyle = fg
     ctx.globalAlpha = 0.35
@@ -338,7 +349,7 @@ function drawPersonTracking(ctx: CanvasRenderingContext2D, r: CVResult, W: numbe
     }
     if (status) {
         ctx.save()
-        ctx.font = `600 ${Math.max(13, Math.round(H * 0.0155))}px 'Geist Mono', 'SF Mono', 'JetBrains Mono', ui-monospace, 'Cascadia Code', Menlo, monospace`
+        ctx.font = overlayFont(H)
         const m = ctx.measureText(status)
         drawBadge(ctx, status, W - m.width - 24, 28, C.scan)
         ctx.restore()
@@ -931,7 +942,7 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
                   )
                 : r
 
-            ctx.font = `600 ${Math.max(13, Math.round(H * 0.0155))}px 'Geist Mono', 'SF Mono', 'JetBrains Mono', ui-monospace, 'Cascadia Code', Menlo, monospace`
+            ctx.font = overlayFont(H)
             ctx.textBaseline = 'alphabetic'
 
             switch (mode) {

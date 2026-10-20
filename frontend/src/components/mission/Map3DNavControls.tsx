@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Plus, Minus, RotateCcw, RotateCw, ChevronsUp, ChevronsDown, Navigation2 } from 'lucide-react'
 import type * as CesiumNS from 'cesium'
+import { FOCUS_OVERLAY } from '@/components/mission/ui'
 
 type CesiumModule = typeof CesiumNS
 
@@ -112,26 +113,26 @@ export function Map3DNavControls({ Cesium, viewer, onUse, style }: {
     <button type="button" aria-label={label} title={label}
       onPointerDown={hold(dH, dP, z)} onPointerUp={stop} onPointerLeave={stop} onPointerCancel={stop}
       onContextMenu={e => e.preventDefault()}
-      className="w-8 h-8 flex items-center justify-center text-zinc-300 hover:text-white hover:bg-white/10 active:bg-white/20 transition-colors touch-none select-none">
+      className={`w-8 h-8 flex items-center justify-center text-overlay-muted hover:text-overlay-text hover:bg-white/10 active:bg-white/20 transition-colors duration-[120ms] touch-none select-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--overlay-accent)]`}>
       {icon}
     </button>
   )
 
-  const panel = 'rounded-lg overflow-hidden border border-white/10 shadow-lg'
-  const panelBg = { background: 'rgba(17, 19, 24, .88)', backdropFilter: 'blur(6px)' }
+  const panel = 'rounded-[10px] overflow-hidden border border-overlay-border shadow-lg'
+  const panelBg = { background: 'var(--overlay-scrim)', backdropFilter: 'blur(6px)' }
 
   return (
     <div className="absolute z-[5] flex flex-col items-center gap-2 select-none" style={style}
       onPointerDown={e => e.stopPropagation()}>
       <button type="button" onClick={() => { onUse?.(); northUp(Cesium, viewer) }}
         aria-label="Turn north up" title={'North up\n\nDrag: move   Scroll or pinch: zoom\nRight-drag, Ctrl+drag or two fingers: rotate and tilt'}
-        className={`${panel} w-9 h-9 flex items-center justify-center hover:bg-white/10`} style={panelBg}>
+        className={`${panel} w-9 h-9 flex items-center justify-center hover:bg-white/10 transition-colors duration-[120ms] ${FOCUS_OVERLAY}`} style={panelBg}>
         <Navigation2 size={15} className="text-rose-400"
           style={{ transform: `rotate(${-headingDeg}deg)`, transition: 'transform 80ms linear' }} fill="currentColor" />
       </button>
       <div className={`${panel} flex flex-col`} style={panelBg}>
         {btn('Zoom in', <Plus size={15} />, 0, 0, ZOOM_STEP)}
-        <div className="h-px bg-white/10" />
+        <div className="h-px bg-overlay-border" />
         {btn('Zoom out', <Minus size={15} />, 0, 0, -ZOOM_STEP)}
       </div>
       <div className={`${panel} grid grid-cols-2`} style={panelBg}>

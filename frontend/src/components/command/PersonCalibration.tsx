@@ -8,6 +8,8 @@
 
 import { useEffect, useState } from 'react'
 import { Loader2, Ruler } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { FOCUS } from '@/components/controls/flightStyles'
 import {
     cancelPersonCalibration, getPersonCalibration, startPersonCalibration, type PersonCalibration as Cal,
 } from '@/lib/avoidance'
@@ -30,28 +32,27 @@ export function PersonCalibration({ droneId }: { droneId: string }) {
         setErr(null)
         try { setCal(await startPersonCalibration(droneId, height)) } catch (e) { setErr((e as Error).message) }
     }
-    const tone = cal?.state === 'done' ? '#86efac' : cal?.state === 'failed' ? '#fca5a5' : '#a1a1aa'
+    const tone = cal?.state === 'done' ? 'text-app-ok' : cal?.state === 'failed' || err ? 'text-app-danger' : 'text-app-text-muted'
 
     return (
         <div className="px-2 pb-2 flex flex-col gap-1.5">
             <div className="flex items-center gap-1.5">
-                <label className="text-[10px] text-zinc-400" htmlFor="cal-h">Person height</label>
+                <label className="text-[13px] text-app-text-muted" htmlFor="cal-h">Person height</label>
                 <input id="cal-h" type="number" min={1} max={2.3} step={0.01} value={height} disabled={running}
                     onChange={e => setHeight(Number(e.target.value) || 1.7)}
-                    className="w-16 h-7 rounded border border-white/15 bg-black/40 px-1.5 text-[11px] text-zinc-100" />
-                <span className="text-[10px] text-zinc-500">m</span>
+                    className={cn('w-16 h-8 rounded-md border border-app-border-strong bg-app-surface px-1.5 text-[14px] text-app-text disabled:text-app-text-subtle disabled:border-dashed', FOCUS)} />
+                <span className="text-[12px] text-app-text-muted">m</span>
                 <button onClick={running ? () => { void cancelPersonCalibration(droneId) } : () => { void start() }}
-                    className="ml-auto h-7 px-2 rounded border text-[10px] font-bold tracking-wider flex items-center gap-1"
-                    style={running
-                        ? { borderColor: 'rgba(252,165,165,.5)', color: '#fca5a5' }
-                        : { borderColor: 'rgba(34,211,238,.55)', color: '#a5f3fc', background: 'rgba(34,211,238,.1)' }}>
-                    {running ? <><Loader2 size={11} className="animate-spin" /> CANCEL</> : <><Ruler size={11} /> CALIBRATE</>}
+                    className={cn('ml-auto h-8 px-2.5 rounded-md border text-[13px] font-bold flex items-center gap-1.5', FOCUS,
+                        running ? 'border-app-danger text-app-danger hover:bg-app-danger-soft'
+                            : 'border-app-accent text-app-accent bg-app-accent-soft hover:brightness-110')}>
+                    {running ? <><Loader2 size={14} className="animate-spin" /> Cancel</> : <><Ruler size={14} /> Calibrate</>}
                 </button>
             </div>
-            <p className="text-[9.5px] leading-snug" style={{ color: tone }}>
+            <p className={cn('text-[13px] leading-snug', tone)}>
                 {err ?? (cal && cal.state !== 'idle'
                     ? `${cal.reason ?? ''}${running ? ` (${cal.samples ?? 0}/10)` : ''}`
-                    : 'Stand 3-8 m from the camera, whole body in view, then tap CALIBRATE.')}
+                    : 'Stand 3-8 m from the camera, whole body in view, then tap Calibrate.')}
             </p>
         </div>
     )

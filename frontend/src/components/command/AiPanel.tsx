@@ -5,6 +5,8 @@
 // (lock a person, follow, thresholds...) behave identically here.
 
 import { useDroneStore } from '@/store/drone'
+import { cn } from '@/lib/utils'
+import { FOCUS } from '@/components/controls/flightStyles'
 import { panelFor } from '@/components/vision/ModeSelector'
 import { useLibraryEntry } from '@/components/models/useModelLibrary'
 import { CustomResultsPanel } from '@/components/models/CustomResultsPanel'
@@ -21,7 +23,7 @@ export function AiPanel({ onStop }: { onStop: () => void }) {
     const mode = useDroneStore(s => s.mode)
     const m = useLibraryEntry(mode)
     if (!m) {
-        return <p className="text-xs font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>
+        return <p className="text-[13px] text-app-text-muted">
             Start a module from the AI drawer (the AI tab on the left edge of the view).</p>
     }
     const Icon = m.icon
@@ -29,11 +31,11 @@ export function AiPanel({ onStop }: { onStop: () => void }) {
         <>
             <div className="flex items-center gap-2">
                 <Icon size={16} style={{ color: m.color }} />
-                <span className="text-sm font-mono font-semibold" style={{ color: m.color }}>{m.name}</span>
-                <span className="text-[10px] font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>{m.blurb}</span>
+                <span className="text-[16px] font-bold text-app-text">{m.name}</span>
+                <span className="text-[13px] text-app-text-muted truncate">{m.blurb}</span>
                 <button onClick={onStop}
-                    className="ml-auto h-7 px-2.5 rounded-md border text-[10px] font-mono tracking-widest text-red-300 border-red-400/40 hover:bg-red-500/10">
-                    STOP</button>
+                    className={cn('ml-auto shrink-0 h-8 px-3 rounded-md border border-app-danger text-[13px] font-bold text-app-danger hover:bg-app-danger-soft', FOCUS)}>
+                    Stop</button>
             </div>
             <Body mode={mode} />
             <MapDetectionsControls />

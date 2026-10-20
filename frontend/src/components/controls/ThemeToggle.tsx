@@ -3,6 +3,7 @@
 import { useTheme } from '@/lib/theme'
 import { Sun, Moon } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { FOCUS } from './flightStyles'
 import { useHydrated } from '@/hooks/useClientValue'
 
 export function ThemeToggle() {
@@ -23,13 +24,14 @@ export function ThemeToggle() {
             onClick={() => setTheme(isDark ? 'light' : 'dark')}
             title={isDark ? 'Light mode' : 'Dark mode'}
             className={cn(
-                'flex flex-col items-center gap-1 w-12 py-2 rounded-lg text-xs transition-colors',
-                'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300',
-                'hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                'flex flex-col items-center gap-1 w-12 py-2 rounded-md transition-colors duration-[var(--dur-fast)]',
+                'text-app-text-muted hover:text-app-text hover:bg-app-surface-2',
+                FOCUS,
             )}
+            aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
         >
             {isDark ? <Sun size={18} /> : <Moon size={18} />}
-            <span className="text-[10px] font-mono">{isDark ? 'Light' : 'Dark'}</span>
+            <span className="text-[12px] font-semibold">{isDark ? 'Light' : 'Dark'}</span>
         </button>
     )
 }

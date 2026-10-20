@@ -1,0 +1,5 @@
+/* Focus ring and hover for the inline-styled controls in the result panels.
+   Over video use .focusOverlay (fixed accent, always-dark surface). */
+.focus:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 2px; }
+.focusOverlay:focus-visible { outline: 2px solid var(--overlay-accent); outline-offset: 2px; }
+.hover:hover:not(:disabled) { filter: brightness(1.08); }

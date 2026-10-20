@@ -29,21 +29,21 @@ export function CommandRefusalBanner() {
     if (!refusal) return null
     return (
         <div role="alert"
-            className="fixed top-16 left-1/2 -translate-x-1/2 z-[3000] flex max-w-[min(560px,calc(100vw-32px))] items-start gap-2.5 px-4 py-2.5 rounded-xl font-mono text-[11px] shadow-2xl"
+            className="fixed top-16 left-1/2 -translate-x-1/2 z-[3000] flex max-w-[min(560px,calc(100vw-32px))] items-start gap-2.5 px-4 py-2.5 rounded-[10px] text-[13px] shadow-2xl"
             style={{
-                background: 'rgba(120, 53, 15, .96)', border: '1px solid rgba(251, 191, 36, .55)',
-                color: '#fde68a', backdropFilter: 'blur(8px)',
+                background: 'rgba(120, 53, 15, .97)', border: '1px solid rgba(251, 191, 36, .55)',
+                color: '#fde68a',
             }}>
-            <Ban size={15} className="shrink-0 mt-px" />
+            <Ban size={18} className="shrink-0 mt-0.5" aria-hidden />
             <span className="flex flex-col gap-0.5 min-w-0">
-                <span className="font-bold tracking-wider">
-                    {refusal.code === 'drone_not_in_workspace' ? 'DRONE IN ANOTHER WORKSPACE' : 'NOT ALLOWED'}
+                <span className="text-[14px] font-bold">
+                    {refusal.code === 'drone_not_in_workspace' ? 'Drone is in another workspace' : 'Not allowed'}
                 </span>
                 <span className="leading-relaxed" style={{ color: '#fef3c7' }}>{refusal.msg}</span>
             </span>
-            <button onClick={() => setRefusal(null)} aria-label="Dismiss"
-                className="shrink-0 p-0.5 rounded hover:bg-white/10">
-                <X size={13} />
+            <button type="button" onClick={() => setRefusal(null)} aria-label="Dismiss" title="Dismiss"
+                className="-my-1 -mr-2 flex size-8 shrink-0 items-center justify-center rounded-md transition-colors duration-[120ms] hover:bg-white/10">
+                <X size={16} />
             </button>
         </div>
     )

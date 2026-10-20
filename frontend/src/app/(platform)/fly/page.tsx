@@ -17,7 +17,7 @@ import { getVideoSource } from '@/lib/videoSource'
 import { Separator } from '@/components/ui/separator'
 import { ChevronRight, ChevronLeft, Radio, Video, Map as MapIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { SurfaceCard } from '@/components/layout/SurfaceCard'
+import { FOCUS, FOCUS_OVERLAY, OVERLAY_BTN } from '@/components/controls/flightStyles'
 import { useHydrated } from '@/hooks/useClientValue'
 import { useAccess } from '@/hooks/useAccess'
 import { ViewOnlyFence } from '@/components/layout/ViewOnly'
@@ -27,9 +27,8 @@ import { AttachmentStrip } from '@/components/attachments/AttachmentStrip'
 const FleetMap = dynamic(() => import('@/components/swarm/FleetMap'), {
     ssr: false,
     loading: () => (
-        <div className="w-full h-full flex items-center justify-center rounded-xl border"
-            style={{ borderColor: 'hsl(var(--app-border))' }}>
-            <p className="text-xs font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>Loading map…</p>
+        <div className="w-full h-full flex items-center justify-center rounded-[10px] border border-app-border">
+            <p className="text-[13px] text-app-text-muted">Loading map…</p>
         </div>
     ),
 })
@@ -47,21 +46,15 @@ function FleetDeviceSummary() {
 
     if (droneList.length === 0) {
         return (
-            <div
-                className="text-[10px] font-mono text-center py-2 leading-relaxed"
-                style={{ color: 'hsl(var(--app-text-muted))' }}
-            >
-                {scanStatus === 'scanning' ? 'Scanning for drones…' : 'No drones found. Use Fleet panel →'}
+            <div className="text-[13px] text-center py-2 text-app-text-muted">
+                {scanStatus === 'scanning' ? 'Scanning for drones…' : 'No drones found. Use the Fleet panel.'}
             </div>
         )
     }
 
     return (
         <div className="flex flex-col gap-1.5">
-            <div
-                className="text-[9px] font-mono mb-0.5"
-                style={{ color: 'hsl(var(--app-text-muted))' }}
-            >
+            <div className="text-[13px] mb-0.5 text-app-text-muted">
                 {connected.length}/{droneList.length} connected - tap to control
             </div>
             {droneList.map(drone => {
@@ -70,35 +63,39 @@ function FleetDeviceSummary() {
                     <button
                         key={drone.id}
                         onClick={() => setActiveDrone(isActive ? null : drone.id)}
-                        className="flex items-center gap-2 w-full rounded-lg px-2.5 py-2 text-left transition-all"
-                        style={{
-                            background: isActive ? drone.color + '18' : 'hsl(var(--app-bg))',
-                            border: `1px solid ${isActive ? drone.color + '60' : 'hsl(var(--app-border))'}`,
-                        }}
+                        aria-pressed={isActive}
+                        className={cn('flex items-center gap-2 w-full min-h-9 rounded-md px-2.5 py-2 text-left transition-colors duration-[var(--dur-fast)] border', FOCUS,
+                            isActive ? '' : 'bg-app-bg border-app-border hover:border-app-border-strong')}
+                        style={isActive ? { background: drone.color + '18', borderColor: drone.color + '90' } : undefined}
                     >
                         <div
-                            className="w-2 h-2 rounded-full shrink-0"
-                            style={{ background: drone.connected ? drone.color : '#52525b' }}
+                            className="w-2.5 h-2.5 rounded-full shrink-0"
+                            style={{ background: drone.connected ? drone.color : 'hsl(var(--app-text-subtle))' }}
                         />
-                        <span
-                            className="flex-1 text-xs font-mono truncate"
-                            style={{ color: isActive ? drone.color : 'hsl(var(--app-text))' }}
-                        >
+                        <span className="flex-1 text-[14px] font-semibold truncate text-app-text">
                             {drone.name}
                         </span>
                         {isActive && (
-                            <span
-                                className="text-[8px] font-mono font-bold px-1 rounded"
-                                style={{ background: drone.color + '30', color: drone.color }}
-                            >
+                            <span className="text-[12px] font-bold px-1.5 rounded-md border border-app-accent text-app-accent bg-app-accent-soft">
                                 CTRL
                             </span>
                         )}
-                        <Radio size={10} style={{ color: drone.connected ? drone.color : '#52525b', flexShrink: 0 }} />
+                        <Radio size={14} className={drone.connected ? '' : 'text-app-text-subtle'}
+                            style={{ color: drone.connected ? drone.color : undefined, flexShrink: 0 }} />
                     </button>
                 )
             })}
         </div>
+    )
+}
+
+/** A titled card on the Fly side panel. */
+function Panel({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
+    return (
+        <section className={cn('rounded-[10px] border border-app-border bg-app-surface shadow-[var(--app-shadow)] p-4 flex flex-col gap-3', className)}>
+            <h2 className="text-[16px] font-bold leading-tight text-app-text">{title}</h2>
+            {children}
+        </section>
     )
 }
 
@@ -123,32 +120,28 @@ export default function FlyPage() {
     }, [])
 
     return (
-        <div className="flex flex-col h-full gap-3">
+        // Below 768px the page stacks and scrolls: readouts, video (16:9,
+        // never collapsed), then the panel, with the emergency stop pinned.
+        <div className="flex flex-col h-full gap-3 overflow-y-auto md:overflow-hidden">
 
             {/* OSD bar */}
-            <div className="rounded-xl border shrink-0 overflow-hidden"
-                style={{
-                    background: 'hsl(var(--app-surface))',
-                    borderColor: 'hsl(var(--app-border))',
-                }}
-            >
+            <div className="rounded-[10px] border border-app-border bg-app-surface shadow-[var(--app-shadow)] shrink-0">
                 <OSDBar />
             </div>
 
             {/* Main */}
-            <div className="flex flex-1 gap-3 min-h-0">
+            <div className="flex flex-col md:flex-row md:flex-1 gap-3 md:min-h-0">
 
                 {/* Main area: video, or the live fleet map in swarm mode */}
-                <div className="relative flex-1 min-w-0 flex">
+                <div className="relative shrink-0 aspect-video min-h-[200px] md:aspect-auto md:min-h-0 md:shrink md:flex-1 min-w-0 flex">
                     {mounted && swarmEnabled && mainView === 'map'
                         ? <FleetMap />
                         : wallOn ? <CameraWall onClose={() => setWallOn(false)} /> : <VideoStream />}
                     {mounted && !wallOn && getVideoSource() === 'air_unit_udp' && !(swarmEnabled && mainView === 'map') && (
                         <button onClick={() => setWallOn(true)}
-                            className="absolute right-3 top-3 z-20 px-2 py-1 rounded border text-[10px] font-mono tracking-widest"
-                            style={{ background: 'rgba(17,19,24,.85)', borderColor: 'rgba(255,255,255,.12)', color: '#a1a1aa' }}
+                            className={cn(OVERLAY_BTN, FOCUS_OVERLAY, 'absolute right-3 bottom-14 z-20')}
                             title="Show every mesh unit that is delivering video">
-                            WALL
+                            Wall
                         </button>
                     )}
 
@@ -166,21 +159,16 @@ export default function FlyPage() {
 
                     {/* VIDEO / MAP toggle - swarm mode only */}
                     {mounted && swarmEnabled && (
-                        <div
-                            className="absolute top-2 left-2 z-[1100] flex rounded-lg overflow-hidden border"
-                            style={{ borderColor: 'hsl(var(--app-border))', background: 'rgba(0,0,0,.55)' }}
-                        >
-                            {([['video', Video, 'VIDEO'], ['map', MapIcon, 'MAP']] as const).map(([key, Icon, label]) => (
+                        <div className="absolute top-2 left-2 z-[1100] flex gap-0.5 p-0.5 rounded-md border border-overlay-border bg-overlay-scrim backdrop-blur-[6px]">
+                            {([['video', Video, 'Video'], ['map', MapIcon, 'Map']] as const).map(([key, Icon, label]) => (
                                 <button
                                     key={key}
                                     onClick={() => setMainView(key)}
-                                    className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-mono font-bold transition-colors"
-                                    style={{
-                                        background: mainView === key ? 'rgba(34,211,238,.25)' : 'transparent',
-                                        color: mainView === key ? '#22d3ee' : '#a1a1aa',
-                                    }}
+                                    aria-pressed={mainView === key}
+                                    className={cn('flex items-center gap-1.5 h-8 px-3 rounded text-[13px] font-bold transition-colors duration-[var(--dur-fast)]', FOCUS_OVERLAY,
+                                        mainView === key ? 'bg-[rgba(34,211,238,.22)] text-[var(--overlay-accent)]' : 'text-overlay-muted hover:text-overlay-text')}
                                 >
-                                    <Icon size={11} />
+                                    <Icon size={14} />
                                     {label}
                                 </button>
                             ))}
@@ -190,21 +178,22 @@ export default function FlyPage() {
                 {/* Collapse toggle */}
                 <button
                     onClick={() => setPanelCollapsed(p => !p)}
-                    className="self-center shrink-0 rounded-lg p-1 border transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                    style={{ borderColor: 'hsl(var(--app-border))' }}
+                    className={cn('hidden md:flex self-center shrink-0 h-8 w-8 items-center justify-center rounded-md border border-app-border-strong text-app-text-muted hover:text-app-text hover:bg-app-surface-2 transition-colors duration-[var(--dur-fast)]', FOCUS)}
                     title={panelCollapsed ? 'Expand panel' : 'Collapse panel'}
+                    aria-label={panelCollapsed ? 'Expand panel' : 'Collapse panel'}
+                    aria-expanded={!panelCollapsed}
                 >
-                    {panelCollapsed ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
+                    {panelCollapsed ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
                 </button>
 
                 {/* Right panel */}
                 <div className={cn(
-                    'flex flex-col gap-3 shrink-0 transition-all duration-300 overflow-hidden',
-                    panelCollapsed ? 'w-0 opacity-0' : 'w-64 lg:w-72 xl:w-80 opacity-100'
+                    'flex flex-col gap-3 shrink-0 w-full md:overflow-hidden transition-opacity duration-[var(--dur-slow)]',
+                    panelCollapsed ? 'md:w-0 md:opacity-0' : 'md:w-72 xl:w-80 md:opacity-100'
                 )}>
-                    <div className="flex flex-col gap-3 h-full overflow-y-auto pr-0.5">
+                    <div className="flex flex-col gap-3 md:h-full md:overflow-y-auto md:pr-0.5">
 
-                        <SurfaceCard title="DEVICES">
+                        <Panel title="Devices">
                             {mounted && swarmEnabled ? (
                                 // In swarm mode: show fleet summary instead of single-drone selector
                                 <FleetDeviceSummary />
@@ -212,67 +201,62 @@ export default function FlyPage() {
                                 <DeviceSelector />
                             )}
                             {!isCustomer && <div
-                                className="flex items-center justify-between pt-2 mt-1 border-t"
-                                style={{ borderColor: 'hsl(var(--app-border))' }}
+                                className="flex items-center justify-between pt-3 mt-1 border-t border-app-border"
                             >
-                                <span className="text-xs font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>
-                                    Swarm Mode
+                                <span id="fly-swarm-label" className="text-[14px] font-semibold text-app-text">
+                                    Swarm mode
                                 </span>
                                 <button
                                     onClick={() => setSwarmEnabled(!swarmEnabled)}
                                     role="switch"
                                     aria-checked={mounted && swarmEnabled}
+                                    aria-labelledby="fly-swarm-label"
                                     className={cn(
-                                        'relative w-10 h-[22px] rounded-full transition-colors duration-200 shrink-0',
-                                        'border focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60',
+                                        'relative w-11 h-6 rounded-full transition-colors duration-[var(--dur)] shrink-0 border',
+                                        'after:absolute after:-inset-1.5 after:content-[""]',
+                                        FOCUS,
                                         mounted && swarmEnabled
-                                            ? 'bg-cyan-500 border-cyan-400'
-                                            : 'bg-zinc-300 dark:bg-zinc-700 border-zinc-400/40 dark:border-zinc-600'
+                                            ? 'bg-app-accent border-app-accent'
+                                            : 'bg-app-surface-2 border-app-border-strong'
                                     )}
                                     title={mounted && swarmEnabled ? 'Disable swarm mode' : 'Enable swarm mode'}
                                 >
                                     <span className={cn(
-                                        'absolute left-0 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-white',
-                                        'shadow-md transition-transform duration-200',
-                                        mounted && swarmEnabled ? 'translate-x-[21px]' : 'translate-x-[3px]'
+                                        'absolute left-0 top-1/2 -translate-y-1/2 w-[18px] h-[18px] rounded-full',
+                                        'shadow-md transition-transform duration-[var(--dur)]',
+                                        mounted && swarmEnabled ? 'translate-x-[21px] bg-white' : 'translate-x-[2px] bg-app-text-muted'
                                     )} />
                                 </button>
                             </div>}
-                        </SurfaceCard>
+                        </Panel>
 
-                        <SurfaceCard title="FLIGHT CONTROLS">
+                        <Panel title="Flight controls">
                             <ViewOnlyFence><DroneControls /></ViewOnlyFence>
-                        </SurfaceCard>
+                        </Panel>
 
                         {/* Hidden when the drone has no attachments, and for viewers. */}
                         {!swarmEnabled && (
-                            <AttachmentStrip frame={strip => <SurfaceCard title="ATTACHMENTS">{strip}</SurfaceCard>} />
+                            <AttachmentStrip frame={strip => <Panel title="Attachments">{strip}</Panel>} />
                         )}
 
                         {!swarmEnabled && (
-                            <SurfaceCard title="AVOIDANCE">
+                            <Panel title="Avoidance">
                                 <ViewOnlyFence note={false}><AvoidancePanel /></ViewOnlyFence>
-                            </SurfaceCard>
+                            </Panel>
                         )}
 
-                        <div className="rounded-xl border flex flex-col flex-1 min-h-0"
-                            style={{
-                                background: 'hsl(var(--app-surface))',
-                                borderColor: 'hsl(var(--app-border))',
-                            }}
-                        >
-                            <p className="text-[10px] font-mono tracking-widest px-4 pt-3 pb-2 shrink-0"
-                                style={{ color: 'hsl(var(--app-text-muted))' }}
-                            >
-                                TELEMETRY DATA
-                            </p>
-                            <div className="flex-1 overflow-y-auto px-4 pb-3 min-h-0">
+                        <div className="rounded-[10px] border border-app-border bg-app-surface shadow-[var(--app-shadow)] flex flex-col md:flex-1 md:min-h-0">
+                            <h2 className="text-[16px] font-bold text-app-text px-4 pt-4 pb-2 shrink-0">
+                                Telemetry
+                            </h2>
+                            <div className="md:flex-1 md:overflow-y-auto px-4 pb-4 md:min-h-0">
                                 <TelemetryPanel />
                             </div>
                         </div>
 
-                        <div className="shrink-0 pb-1">
-                            <Separator className="mb-3" style={{ background: 'hsl(var(--app-border))' }} />
+                        {/* Pinned to the bottom of the screen on phones, so it is always reachable. */}
+                        <div className="shrink-0 pb-1 sticky bottom-0 z-10 bg-app-bg pt-2 md:static md:pt-0">
+                            <Separator className="mb-3 hidden md:block bg-app-border" />
                             <ViewOnlyFence note={false}><EmergencyStop /></ViewOnlyFence>
                         </div>
 

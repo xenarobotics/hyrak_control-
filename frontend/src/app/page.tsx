@@ -19,11 +19,12 @@ function CopyCommand({ text }: { text: string }) {
                 setCopied(true)
                 setTimeout(() => setCopied(false), 1500)
             }}
-            className="w-full flex items-center justify-between gap-2 text-[11px] font-mono px-2.5 py-2 rounded-lg border transition-colors"
-            style={{ borderColor: 'hsl(var(--app-border))', background: 'hsl(var(--app-surface-2))', color: 'hsl(var(--app-text))' }}
+            aria-label={copied ? 'Copied' : 'Copy command'}
+            title={copied ? 'Copied' : 'Copy command'}
+            className="w-full min-h-8 flex items-center justify-between gap-2 text-[12px] font-code px-3 py-2 rounded-md border border-app-border bg-app-surface-2 text-app-text transition-colors"
         >
             <span className="truncate">{text}</span>
-            {copied ? <Check size={11} style={{ color: '#22d3ee' }} /> : <Copy size={11} style={{ color: 'hsl(var(--app-text-muted))' }} />}
+            {copied ? <Check size={14} className="shrink-0 text-app-accent" /> : <Copy size={14} className="shrink-0 text-app-text-muted" />}
         </button>
     )
 }
@@ -49,30 +50,26 @@ function DesktopDownloadCard() {
 
     return (
         <div
-            className="group flex flex-col items-start gap-3 rounded-xl border p-6 text-left transition-colors hover:border-cyan-500"
-            style={{ background: 'hsl(var(--app-surface))', borderColor: 'hsl(var(--app-border))' }}
+            className="group flex flex-col items-start gap-3 rounded-[10px] border border-app-border bg-app-surface p-6 text-left shadow-[var(--app-shadow)] transition-colors hover:border-app-accent"
         >
-            <div
-                className="flex items-center justify-center w-9 h-9 rounded-lg"
-                style={{ background: 'hsl(var(--app-surface-2))' }}
-            >
-                <Download size={16} style={{ color: 'hsl(var(--app-text))' }} />
+            <div className="flex items-center justify-center w-10 h-10 rounded-[10px] bg-app-accent-soft text-app-accent">
+                <Download size={20} />
             </div>
             <div>
-                <div className="text-sm font-mono font-semibold mb-1">Download Desktop App</div>
-                <p className="text-xs font-mono leading-relaxed" style={{ color: 'hsl(var(--app-text-muted))' }}>
-                    SITL, drone swarms, custom air units, RTSP cameras, multi-camera setups. Installs once, updates itself.
+                <h2 className="text-[16px] font-bold mb-1">Download the desktop app</h2>
+                <p className="text-[13px] leading-relaxed text-app-text-muted">
+                    For simulators, swarms, air units and RTSP cameras. Updates itself.
                 </p>
             </div>
 
             {mounted && (
                 <Select value={platform} onValueChange={v => v && setPlatform(v as Platform)}>
-                    <SelectTrigger className="h-8 w-full text-xs font-mono">
+                    <SelectTrigger className="h-9 w-full text-[14px]" aria-label="Platform">
                         <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                         {PLATFORM_OPTIONS.map(p => (
-                            <SelectItem key={p} value={p} className="text-xs font-mono">
+                            <SelectItem key={p} value={p} className="text-[14px]">
                                 {PLATFORM_LABELS[p]}
                             </SelectItem>
                         ))}
@@ -88,18 +85,17 @@ function DesktopDownloadCard() {
                 <a
                     href={asset.url}
                     download
-                    className="w-full flex items-center justify-center gap-1.5 text-xs font-mono py-2 rounded-lg font-semibold transition-colors"
-                    style={{ background: '#22d3ee', color: 'black' }}
+                    className="w-full min-h-10 flex items-center justify-center gap-1.5 text-[14px] py-2 rounded-md font-bold bg-app-accent text-app-accent-ink transition-opacity hover:opacity-90"
                 >
                     Download{asset.sizeBytes ? ` (${formatBytes(asset.sizeBytes)})` : ''}
                 </a>
             ) : (
                 <button
                     disabled
-                    className="w-full flex items-center justify-center gap-1.5 text-xs font-mono py-2 rounded-lg font-semibold cursor-not-allowed"
-                    style={{ background: 'hsl(var(--app-surface-2))', color: 'hsl(var(--app-text-muted))' }}
+                    title={mounted && loading ? 'Looking for the latest build' : 'No desktop build for this platform yet'}
+                    className="w-full min-h-10 flex items-center justify-center gap-1.5 text-[14px] py-2 rounded-md font-semibold cursor-not-allowed border border-dashed border-app-border-strong bg-app-surface-2 text-app-text-muted"
                 >
-                    {mounted && loading ? <Loader2 size={12} className="animate-spin" /> : 'No build published yet'}
+                    {mounted && loading ? <Loader2 size={16} className="animate-spin" /> : 'No build published yet'}
                 </button>
             )}
 
@@ -110,8 +106,8 @@ function DesktopDownloadCard() {
                 "Permission denied" once and wonder if the download's bad. */}
             {asset && (platform === 'linux' || platform === 'linux-arm64') && (
                 <div className="w-full flex flex-col gap-1.5">
-                    <p className="text-[10px] font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>
-                        First run - AppImages need the executable bit set manually:
+                    <p className="text-[13px] text-app-text-muted">
+                        First run: make the AppImage executable.
                     </p>
                     <CopyCommand text={`chmod +x ${asset.fileName} && ./${asset.fileName}`} />
                 </div>
@@ -125,12 +121,11 @@ export default function LandingPage() {
 
     return (
         <div
-            className="min-h-screen flex flex-col items-center justify-center px-6"
-            style={{ background: 'hsl(var(--app-bg))', color: 'hsl(var(--app-text))' }}
+            className="min-h-screen flex flex-col items-center justify-center px-4 py-12 sm:px-6 bg-app-bg text-app-text"
         >
-            <div className="flex flex-col items-center gap-2 mb-14">
-                <span className="text-3xl font-mono font-bold tracking-[0.2em]">HYRAK</span>
-                <span className="text-sm font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>
+            <div className="flex flex-col items-center gap-2 mb-12">
+                <h1 className="text-[28px] leading-[34px] font-extrabold tracking-[0.06em]">HYRAK</h1>
+                <span className="text-[14px] text-app-text-muted">
                     Cloud-native drone intelligence
                 </span>
             </div>
@@ -139,25 +134,18 @@ export default function LandingPage() {
                 {/* Browser */}
                 <button
                     onClick={() => router.push('/fly')}
-                    className="group flex flex-col items-start gap-3 rounded-xl border p-6 text-left transition-colors hover:border-cyan-500 h-full"
-                    style={{ background: 'hsl(var(--app-surface))', borderColor: 'hsl(var(--app-border))' }}
+                    className="group flex flex-col items-start gap-3 rounded-[10px] border border-app-border bg-app-surface p-6 text-left shadow-[var(--app-shadow)] transition-colors hover:border-app-accent h-full"
                 >
-                    <div
-                        className="flex items-center justify-center w-9 h-9 rounded-lg"
-                        style={{ background: 'hsl(var(--app-surface-2))' }}
-                    >
-                        <Globe size={16} style={{ color: 'hsl(var(--app-text))' }} />
+                    <div className="flex items-center justify-center w-10 h-10 rounded-[10px] bg-app-accent-soft text-app-accent">
+                        <Globe size={20} />
                     </div>
                     <div>
-                        <div className="text-sm font-mono font-semibold mb-1">Continue in Browser</div>
-                        <p className="text-xs font-mono leading-relaxed" style={{ color: 'hsl(var(--app-text-muted))' }}>
-                            Camera, a single drone or telemetry radio, AI modules. Works instantly - nothing to install.
+                        <h2 className="text-[16px] font-bold mb-1">Continue in the browser</h2>
+                        <p className="text-[13px] leading-relaxed text-app-text-muted">
+                            One drone or radio, camera and AI. Nothing to install.
                         </p>
                     </div>
-                    <span
-                        className="mt-auto text-xs font-mono transition-colors group-hover:text-cyan-400"
-                        style={{ color: 'hsl(var(--app-text-muted))' }}
-                    >
+                    <span className="mt-auto text-[14px] font-semibold text-app-accent">
                         Open Fly →
                     </span>
                 </button>
@@ -166,7 +154,7 @@ export default function LandingPage() {
                 <DesktopDownloadCard />
             </div>
 
-            <p className="mt-14 text-[10px] font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>
+            <p className="mt-12 text-[13px] text-app-text-muted">
                 Same account, same missions, either way.
             </p>
         </div>

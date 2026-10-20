@@ -24,6 +24,7 @@ import { apiFetch } from '@/lib/api'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getServerUrl } from '@/lib/server-url'
 import { ZONE_COLORS, type ZoneFeature } from '@/components/admin/zones'
+import { bodyFont } from '@/components/mission/ui'
 import type { MapDroneLive, MapPad, MapSelection } from './DeliveryMap'
 import type * as CesiumNS from 'cesium'
 
@@ -198,7 +199,7 @@ export default function Delivery3D({ pads, selection, drones, showAirspace }: {
                     disableDepthTestDistance: Number.POSITIVE_INFINITY,
                 },
                 label: {
-                    text: p.name, font: '11px monospace',
+                    text: p.name, font: `700 13px ${bodyFont()}`,
                     fillColor: Cesium.Color.fromCssColorString(hl),
                     outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
                     style: Cesium.LabelStyle.FILL_AND_OUTLINE,
@@ -268,8 +269,8 @@ export default function Delivery3D({ pads, selection, drones, showAirspace }: {
                     },
                 })
                 const ends: [typeof wps[0], string, string][] = [
-                    [wps[0], '#4ade80', 'TAKEOFF'],
-                    [wps[wps.length - 1], '#f87171', 'LAND'],
+                    [wps[0], '#4ade80', 'Takeoff'],
+                    [wps[wps.length - 1], '#f87171', 'Land'],
                 ]
                 for (const [w, color, text] of ends) {
                     viewer.entities.add({
@@ -281,7 +282,7 @@ export default function Delivery3D({ pads, selection, drones, showAirspace }: {
                             disableDepthTestDistance: Number.POSITIVE_INFINITY,
                         },
                         label: {
-                            text, font: '10px monospace',
+                            text, font: `800 12px ${bodyFont()}`,
                             fillColor: Cesium.Color.fromCssColorString(color),
                             outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
                             style: Cesium.LabelStyle.FILL_AND_OUTLINE,
@@ -361,7 +362,7 @@ export default function Delivery3D({ pads, selection, drones, showAirspace }: {
                         disableDepthTestDistance: Number.POSITIVE_INFINITY,
                     },
                     label: {
-                        text: `${d.name} ${Math.round(d.battery)}%`, font: '10px monospace',
+                        text: `${d.name} ${Math.round(d.battery)}%`, font: `700 12px ${bodyFont()}`,
                         fillColor: Cesium.Color.fromCssColorString('#e4e4e7'),
                         outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
                         style: Cesium.LabelStyle.FILL_AND_OUTLINE,

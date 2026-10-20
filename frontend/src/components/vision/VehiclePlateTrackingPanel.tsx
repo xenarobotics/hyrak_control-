@@ -18,22 +18,13 @@ import { AlertCircle, Download, Trash2 } from 'lucide-react'
 import { FollowControls } from '@/components/vision/FollowControls'
 import { fetchPlateHistory, plateImagePath, downloadSessionReport, clearHistory, canClearHistory, toFileStamp, shortLocation, type PlateHistoryRow } from '@/lib/visionReports'
 import { useApiObjectUrl } from '@/hooks/useApiMedia'
-
-const LABEL: React.CSSProperties = {
-    fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6,
-    color: 'hsl(var(--app-text-muted))',
-}
+import { TONE, LABEL, SECONDARY, NUM, TILE, TEXT, MUTED, BORDER, FOCUS, chip, btn } from '@/components/vision/panelStyle'
 
 const DIST_DEFAULT = 0.22
 
 function Chip({ children, tone = 'muted' }: { children: React.ReactNode; tone?: 'muted' | 'cyan' }) {
     return (
-        <div style={{
-            padding: '4px 10px', borderRadius: 8, fontSize: 11, fontFamily: 'monospace',
-            background: 'hsl(var(--app-surface-2))',
-            border: '1px solid hsl(var(--app-border))',
-            color: tone === 'cyan' ? '#22d3ee' : 'hsl(var(--app-text-muted))',
-        }}>
+        <div style={chip(tone === 'cyan' ? 'accent' : 'muted')}>
             {children}
         </div>
     )
@@ -123,15 +114,12 @@ export function VehiclePlateTrackingPanel() {
                         onClick={() => downloadSessionReport(
                             reportSession, 'plate-report', toFileStamp(reportStamp),
                         )}
+                        type="button"
                         title="Download photos + CSV for this session"
-                        style={{
-                            marginLeft: 'auto', display: 'flex', alignItems: 'center',
-                            gap: 5, padding: '4px 10px', borderRadius: 8, fontSize: 11,
-                            cursor: 'pointer', border: '1px solid #22d3ee55',
-                            background: 'rgba(34,211,238,0.12)', color: '#22d3ee',
-                        }}
+                        className={FOCUS}
+                        style={{ ...btn(), marginLeft: 'auto' }}
                     >
-                        <Download size={12} /> Report
+                        <Download size={14} aria-hidden /> Report
                     </button>
                 )}
             </div>
@@ -139,29 +127,28 @@ export function VehiclePlateTrackingPanel() {
             {/* ── Degraded-capability notices ─────────────────────────── */}
             {cvResults?.speed_note && (
                 <div style={{
-                    display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 11,
-                    lineHeight: 1.5, color: '#fbbf24',
+                    display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 13,
+                    lineHeight: '18px', fontWeight: 600, color: TONE.warn.fg,
                 }}>
-                    <AlertCircle size={12} style={{ marginTop: 1, flexShrink: 0 }} />
-                    <span>Speed unavailable - {cvResults.speed_note}.</span>
+                    <AlertCircle size={14} style={{ marginTop: 2, flexShrink: 0 }} aria-hidden />
+                    <span>No speed: {cvResults.speed_note}.</span>
                 </div>
             )}
             {!hasTelemetry && !cvResults?.speed_note && (
                 <div style={{
-                    display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 11,
-                    lineHeight: 1.5, color: '#fbbf24',
+                    display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 13,
+                    lineHeight: '18px', fontWeight: 600, color: TONE.warn.fg,
                 }}>
-                    <AlertCircle size={12} style={{ marginTop: 1, flexShrink: 0 }} />
-                    <span>
-                        No telemetry - speed needs altitude to convert pixels to
-                        metres, so it is omitted rather than guessed.
+                    <AlertCircle size={14} style={{ marginTop: 2, flexShrink: 0 }} aria-hidden />
+                    <span title="Speed needs the drone's altitude to turn pixels into metres, so it is left out rather than guessed.">
+                        No telemetry, so no speed.
                     </span>
                 </div>
             )}
             {!alprOk && (
-                <div style={{ display: 'flex', gap: 6, fontSize: 11, color: '#fbbf24' }}>
-                    <AlertCircle size={12} style={{ marginTop: 1, flexShrink: 0 }} />
-                    <span>Plate reader unavailable - identification and tracking still work.</span>
+                <div style={{ display: 'flex', gap: 6, fontSize: 13, lineHeight: '18px', fontWeight: 600, color: TONE.warn.fg }}>
+                    <AlertCircle size={14} style={{ marginTop: 2, flexShrink: 0 }} aria-hidden />
+                    <span>Plate reader off. Tracking still works.</span>
                 </div>
             )}
 
@@ -184,8 +171,8 @@ export function VehiclePlateTrackingPanel() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={LABEL}>Vehicles</span>
                     {vehicles.length > 0 && (
-                        <span style={{ fontSize: 9, color: 'hsl(var(--app-text-muted))' }}>
-                            click to lock - or click it on the video
+                        <span style={{ fontSize: 12, color: MUTED }}>
+                            Tap one to lock on
                         </span>
                     )}
                 </div>
@@ -193,10 +180,9 @@ export function VehiclePlateTrackingPanel() {
                     {vehicles.length === 0 ? (
                         <div style={{
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            height: 100, fontSize: 12, fontFamily: 'monospace',
-                            color: 'hsl(var(--app-text-muted))', textAlign: 'center',
+                            height: 100, ...SECONDARY, textAlign: 'center',
                         }}>
-                            {cvResults ? 'No vehicles in frame' : 'Start stream to track vehicles'}
+                            {cvResults ? 'No vehicles in frame' : 'Press Run to track vehicles'}
                         </div>
                     ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingRight: 4 }}>
@@ -213,35 +199,41 @@ export function VehiclePlateTrackingPanel() {
                                         key={v.vehicle_id ?? v.track_id ?? `idx-${i}`}
                                         onClick={() => v.track_id != null
                                             && lock(locked ? null : v.track_id)}
+                                        onKeyDown={e => {
+                                            if ((e.key === 'Enter' || e.key === ' ') && v.track_id != null) {
+                                                e.preventDefault(); lock(locked ? null : v.track_id)
+                                            }
+                                        }}
+                                        role="button"
+                                        tabIndex={0}
+                                        aria-pressed={locked}
+                                        className={FOCUS}
                                         title={locked ? 'Click to release' : 'Click to lock onto this vehicle'}
                                         style={{
                                             display: 'flex', alignItems: 'center', gap: 8,
-                                            padding: '6px 9px', borderRadius: 7, cursor: 'pointer',
-                                            background: locked ? 'rgba(34,211,238,0.12)' : 'hsl(var(--app-surface-2))',
-                                            border: `1px solid ${locked ? 'rgba(34,211,238,0.45)' : 'transparent'}`,
+                                            padding: '8px 10px', borderRadius: 10, cursor: 'pointer',
+                                            background: locked ? TONE.accent.bg : 'hsl(var(--app-surface-2))',
+                                            border: `1px solid ${locked ? TONE.accent.border : BORDER}`,
+                                            transition: 'background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out)',
                                         }}
                                     >
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
                                             <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
                                                 {v.vehicle_id && (
-                                                    <span style={{
-                                                        fontSize: 9.5, fontFamily: 'monospace',
-                                                        color: 'hsl(var(--app-text-muted))',
-                                                    }}>
+                                                    <span className="font-code" style={{ fontSize: 12, color: MUTED }}>
                                                         {v.vehicle_id}
                                                     </span>
                                                 )}
-                                                <span style={{
-                                                    fontSize: 12, fontWeight: 700,
-                                                    fontFamily: 'var(--font-geist-mono)',
+                                                <span className={v.plate ? 'font-code' : undefined} style={{
+                                                    fontSize: 14, fontWeight: 700,
                                                     letterSpacing: '0.04em',
                                                     // Green once independent frames agree, amber on
                                                     // a single-frame read. Both are shown and both
                                                     // are logged - suppressing the amber ones
                                                     // discarded nearly every real plate this rig
                                                     // captures.
-                                                    color: !v.plate ? 'hsl(var(--app-text-muted))'
-                                                        : v.plate_strong ? '#4ade80' : '#fbbf24',
+                                                    color: !v.plate ? MUTED
+                                                        : v.plate_strong ? TONE.ok.fg : TONE.warn.fg,
                                                 }}>
                                                     {v.plate
                                                         ? `${v.plate}${v.plate_strong ? '' : '?'}`
@@ -250,18 +242,16 @@ export function VehiclePlateTrackingPanel() {
                                                 {v.plate && (v.plate_px_w ?? 0) > 0 && (
                                                     // The honest quality number: a 40px read and a
                                                     // 300px read are not equally trustworthy.
-                                                    <span style={{
-                                                        fontSize: 9, fontFamily: 'monospace',
-                                                        color: 'hsl(var(--app-text-muted))',
-                                                    }}>
+                                                    <span style={{ ...NUM, fontSize: 12, color: MUTED }}
+                                                        title="Plate width in pixels, and how many frames agreed">
                                                         {v.plate_px_w}px
-                                                        {v.plate_votes ? ` ·${v.plate_votes}v` : ''}
+                                                        {v.plate_votes ? ` · ${v.plate_votes} votes` : ''}
                                                     </span>
                                                 )}
                                             </div>
                                             <span style={{
-                                                fontSize: 10, textTransform: 'capitalize',
-                                                color: 'hsl(var(--app-text-muted))',
+                                                fontSize: 13, textTransform: 'capitalize',
+                                                color: MUTED,
                                             }}>
                                                 {[showColour ? v.color : null,
                                                   v.type !== 'unknown' ? v.type : null]
@@ -270,8 +260,8 @@ export function VehiclePlateTrackingPanel() {
                                         </div>
                                         {v.speed_kmh != null && (
                                             <span style={{
-                                                marginLeft: 'auto', fontSize: 11, fontFamily: 'monospace',
-                                                color: v.speed_reliable ? '#4ade80' : '#fbbf24',
+                                                ...NUM, marginLeft: 'auto', fontSize: 14, fontWeight: 700, flexShrink: 0,
+                                                color: v.speed_reliable ? TEXT : TONE.warn.fg,
                                             }}>
                                                 ~{Math.round(v.speed_kmh)} km/h{v.speed_reliable ? '' : '?'}
                                             </span>
@@ -288,8 +278,7 @@ export function VehiclePlateTrackingPanel() {
             {(Object.keys(vehicleTypes).length > 0
               || Object.keys(vehicleColors).length > 0) && (
                 <div style={{
-                    fontSize: 10, fontFamily: 'monospace', lineHeight: 1.6,
-                    color: 'hsl(var(--app-text-muted))',
+                    ...SECONDARY, ...NUM, lineHeight: 1.6,
                 }}>
                     {Object.entries(vehicleTypes).map(([k, n]) => `${n} ${k}`).join(' · ')}
                     {Object.keys(vehicleColors).length > 0 && (
@@ -302,18 +291,19 @@ export function VehiclePlateTrackingPanel() {
             {/* ── Recent (bottom half) - always visible, no tab click ──── */}
             <div style={{
                 flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 6,
-                borderTop: '1px solid hsl(var(--app-border))', paddingTop: 8,
+                borderTop: `1px solid ${BORDER}`, paddingTop: 8,
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <p style={{ fontSize: 10, color: 'hsl(var(--app-text-muted))', fontFamily: 'monospace', margin: 0, letterSpacing: '0.06em' }}>
-                        RECENT VEHICLES
-                    </p>
+                    <p style={{ ...LABEL, margin: 0 }}>Recent vehicles</p>
                     {canClearHistory() && <button
                         onClick={() => clearHistory('plate-history').then(ok => { if (ok) loadHistory() })}
+                        type="button"
                         title="Clear all history"
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'hsl(var(--app-text-muted))', display: 'flex' }}
+                        aria-label="Clear all history"
+                        className={FOCUS}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: MUTED, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 6 }}
                     >
-                        <Trash2 size={12} />
+                        <Trash2 size={14} aria-hidden />
                     </button>}
                 </div>
                 <ScrollArea style={{ flex: 1 }}>
@@ -324,39 +314,37 @@ export function VehiclePlateTrackingPanel() {
                                 const isFirstOfSession = firstRowOfSession.has(ev.id)
                                 return (
                                     <div key={ev.id} style={{
-                                        display: 'flex', gap: 8, padding: 8, borderRadius: 8,
-                                        background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
+                                        ...TILE, display: 'flex', gap: 8, padding: 8,
                                     }}>
                                         <PlateThumb eventId={ev.image_path ? ev.id : null} alt={ev.plate_text || 'vehicle'} />
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, flex: 1 }}>
                                             <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
                                                 {ev.vehicle_id && (
-                                                    <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
+                                                    <span className="font-code" style={{ fontSize: 12, color: MUTED }}>
                                                         {ev.vehicle_id}
                                                     </span>
                                                 )}
                                                 {/* A row exists per VEHICLE now, so a blank plate is
                                                     a normal outcome - most vehicles never turn a
                                                     readable plate toward the camera. */}
-                                                <span style={{
-                                                    fontSize: 12.5, fontWeight: 700,
-                                                    fontFamily: 'var(--font-geist-mono)',
+                                                <span className={ev.plate_text ? 'font-code' : undefined} style={{
+                                                    fontSize: 14, fontWeight: 700,
                                                     letterSpacing: '0.04em',
-                                                    color: ev.plate_text ? undefined : 'hsl(var(--app-text-muted))',
+                                                    color: ev.plate_text ? TEXT : MUTED,
                                                 }}>
                                                     {ev.plate_text || 'no plate'}
                                                 </span>
                                                 {ev.plate_text && ev.plate_px_w > 0 && (
-                                                    <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
+                                                    <span style={{ ...NUM, fontSize: 12, color: MUTED }}>
                                                         {ev.plate_px_w}px
                                                     </span>
                                                 )}
                                             </div>
-                                            <span style={{ fontSize: 9.5, color: 'hsl(var(--app-text-muted))', textTransform: 'capitalize' }}>
+                                            <span style={{ ...NUM, fontSize: 13, color: MUTED, textTransform: 'capitalize' }}>
                                                 {[ev.vehicle_color, ev.vehicle_type].filter(Boolean).join(' ') || 'unknown'}
                                                 {ev.speed_est_kmh != null && ` · ~${Math.round(ev.speed_est_kmh)} km/h`}
                                             </span>
-                                            <span style={{ fontSize: 9, color: 'hsl(var(--app-text-muted))', fontFamily: 'monospace' }}>
+                                            <span style={{ ...NUM, fontSize: 12, color: MUTED }}>
                                                 {ev.first_seen ? new Date(ev.first_seen).toLocaleString() : ''}
                                                 {loc && ` · ${loc}`}
                                             </span>
@@ -364,10 +352,13 @@ export function VehiclePlateTrackingPanel() {
                                         {isFirstOfSession && (
                                             <button
                                                 onClick={() => downloadSessionReport(ev.session_id, 'plate-report', toFileStamp(ev.first_seen))}
+                                                type="button"
                                                 title="Download this session's report"
-                                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'hsl(var(--app-text-muted))', display: 'flex', alignSelf: 'flex-start' }}
+                                                aria-label="Download this session's report"
+                                                className={FOCUS}
+                                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: MUTED, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 6, flexShrink: 0, alignSelf: 'flex-start' }}
                                             >
-                                                <Download size={13} />
+                                                <Download size={14} aria-hidden />
                                             </button>
                                         )}
                                     </div>
@@ -377,7 +368,7 @@ export function VehiclePlateTrackingPanel() {
                     ) : (
                         <div style={{
                             display: 'flex', alignItems: 'center', justifyContent: 'center', height: 80,
-                            color: 'hsl(var(--app-text-muted))', fontSize: 11, fontFamily: 'monospace', textAlign: 'center',
+                            ...SECONDARY, textAlign: 'center',
                         }}>
                             No previous plates logged yet
                         </div>
@@ -392,8 +383,8 @@ export function VehiclePlateTrackingPanel() {
  *  send, so it is fetched into an object URL (revoked on unmount). */
 function PlateThumb({ eventId, alt }: { eventId: string | null; alt: string }) {
     const src = useApiObjectUrl(eventId ? plateImagePath(eventId) : null)
-    const box: React.CSSProperties = { width: 52, height: 40, borderRadius: 5, flexShrink: 0 }
-    if (!src) return <div style={{ ...box, background: 'hsl(var(--app-border))' }} />
+    const box: React.CSSProperties = { width: 52, height: 40, borderRadius: 6, flexShrink: 0 }
+    if (!src) return <div style={{ ...box, background: BORDER }} aria-hidden />
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={src} alt={alt} style={{ ...box, objectFit: 'cover' }} />
 }

@@ -21,8 +21,26 @@ import {
     type PathCheck, type Permit,
 } from '@/lib/planning'
 import type { UploadWp } from '@/lib/uploadPath'
+import { cn } from '@/lib/utils'
+import { BACKDROP, BTN, BTN_ACCENT, BTN_DANGER, BTN_PRIMARY, DIALOG, FOCUS, INPUT, LABEL, PANEL, POPOVER } from './ui'
 
-const CLASS_COLOR: Record<string, string> = { red: '#f87171', orange: '#fbbf24', green: '#4ade80' }
+type Tone = 'muted' | 'ok' | 'warn' | 'danger'
+const TONE_TEXT: Record<Tone, string> = {
+    muted: 'text-app-text-muted', ok: 'text-app-ok', warn: 'text-app-warn', danger: 'text-app-danger',
+}
+const TONE_BORDER: Record<Tone, string> = {
+    muted: 'border-app-border', ok: 'border-app-ok/50', warn: 'border-app-warn/50', danger: 'border-app-danger/50',
+}
+const CLASS_TONE: Record<string, Tone> = { red: 'danger', orange: 'warn', green: 'ok' }
+/** PERMIT_TONE carries dark-theme hex; map it to theme tones. */
+function permitTone(fg: string): Tone {
+    if (fg === '#4ade80') return 'ok'
+    if (fg === '#f87171') return 'danger'
+    if (fg === '#fbbf24' || fg === '#fb923c') return 'warn'
+    return 'muted'
+}
+const sentence = (s: string) => s.charAt(0) + s.slice(1).toLowerCase()
+const ICON_BTN = cn('w-8 h-8 rounded-[6px] flex items-center justify-center text-app-text-muted hover:text-app-text hover:bg-app-surface-2 transition-colors duration-[120ms]', FOCUS)
 
 function names(zs: { name: string }[]): string {
     return zs.map(z => z.name).join(', ')
@@ -65,57 +83,52 @@ export function AirspaceStrip({ workspaceId, droneId, path, canPlan, nonce, onRe
     const orange = restricted.filter(z => z.zone_class === 'orange')
     const prohibited = red.filter(z => z.permission_required === false)
 
-    let tone = '#9ca3af', icon = <Loader2 size={12} className="animate-spin" />, text = 'Checking airspace…', detail = ''
+    let tone: Tone = 'muted', icon = <Loader2 size={14} className="animate-spin" />, text = 'Checking airspace…', detail = ''
     if (fresh && result?.error) {
-        tone = '#fca5a5'; icon = <AlertTriangle size={12} />; text = 'Airspace check unavailable'
+        tone = 'danger'; icon = <AlertTriangle size={14} />; text = 'Airspace check unavailable'
         detail = `${result.error}. The server checks again at upload.`
     } else if (check) {
         if (check.needs === 'prohibited') {
-            tone = '#f87171'; icon = <Ban size={12} />
+            tone = 'danger'; icon = <Ban size={14} />
             text = `Prohibited: ${names(prohibited)}`
             detail = 'No permit can be issued for this zone. Re-route around it.'
         } else if (red.length && check.permit) {
-            tone = '#4ade80'; icon = <FileCheck size={12} />
+            tone = 'ok'; icon = <FileCheck size={14} />
             text = `Red zone under permit: ${names(red)}`
             detail = `Approved until ${fmtWhen(check.permit.valid_until)}. Upload this exact plan; any edit needs a new permit.`
         } else if (red.length) {
-            tone = '#f87171'; icon = <ShieldAlert size={12} />
+            tone = 'danger'; icon = <ShieldAlert size={14} />
             text = `No-fly (red): ${names(red)}${orange.length ? ` · orange: ${names(orange)}` : ''}`
             detail = 'Upload is refused unless an approved permit covers this plan for this drone.'
         } else if (orange.length && check.needs === 'none') {
-            tone = '#4ade80'; icon = <FileCheck size={12} />
+            tone = 'ok'; icon = <FileCheck size={14} />
             text = `Restricted (orange) under permit: ${names(orange)}`
             detail = `Approved until ${fmtWhen(check.permit?.valid_until ?? null)}.`
         } else if (orange.length) {
-            tone = '#fbbf24'; icon = <AlertTriangle size={12} />
+            tone = 'warn'; icon = <AlertTriangle size={14} />
             text = `Restricted (orange): ${names(orange)}`
             detail = 'You confirm the crossing at upload and get warnings inside it, or ask for a permit.'
         } else {
-            tone = '#4ade80'; icon = <Check size={12} />; text = 'Airspace clear'
+            tone = 'ok'; icon = <Check size={14} />; text = 'Airspace clear'
             detail = 'The plan crosses no restricted zone.'
         }
     }
     const canAsk = canPlan && check && check.needs !== 'prohibited' && check.needs !== 'none'
 
     return (
-        <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl border font-mono max-w-[640px]"
-            style={{ background: 'rgba(17,19,24,.94)', borderColor: `${tone}55` }}
-            title={detail}>
-            <span style={{ color: tone }} className="shrink-0">{icon}</span>
-            <div className="min-w-0">
-                <div className="text-[10px] font-bold truncate" style={{ color: tone }}>{text}</div>
-                {detail && <div className="text-[9px] text-gray-400 truncate">{detail}</div>}
+        <div className={cn(PANEL, TONE_BORDER[tone], 'flex items-center gap-3 px-3 py-2 max-w-[640px] w-full')}
+            title={detail} role="status">
+            <span className={cn('shrink-0', TONE_TEXT[tone])}>{icon}</span>
+            <div className="min-w-0 flex-1">
+                <div className={cn('text-[14px] font-bold truncate', TONE_TEXT[tone])}>{text}</div>
+                {detail && <div className="text-[13px] text-app-text-muted truncate">{detail}</div>}
             </div>
             {canAsk && (
-                <button onClick={onRequest}
-                    className="shrink-0 px-2 py-1 rounded-md text-[10px] font-bold"
-                    style={{ background: 'rgba(59,130,246,.2)', color: '#93c5fd', border: '1px solid rgba(59,130,246,.35)' }}>
+                <button onClick={onRequest} className={cn(BTN_ACCENT, 'shrink-0')}>
                     Request permit
                 </button>
             )}
-            <button onClick={onShowPermits} title="Permits for this workspace"
-                className="shrink-0 px-2 py-1 rounded-md text-[10px] text-gray-300"
-                style={{ background: 'rgba(255,255,255,.06)' }}>
+            <button onClick={onShowPermits} title="Permits for this workspace" className={cn(BTN, 'shrink-0')}>
                 Permits
             </button>
         </div>
@@ -166,69 +179,66 @@ export function PermitRequestDialog({ workspaceId, droneId, droneName, path, mis
         finally { setBusy(false) }
     }
 
-    const field = 'w-full text-[11px] rounded px-2 py-1.5 outline-none'
-    const fieldStyle = { background: 'rgba(255,255,255,.06)', color: '#fff', border: '1px solid rgba(255,255,255,.12)', colorScheme: 'dark' as const }
+    const field = cn(INPUT, 'w-full h-auto min-h-8 py-1.5')
 
     return (
-        <div className="absolute inset-0 z-[3500] flex items-center justify-center"
-            style={{ background: 'rgba(0,0,0,.6)' }} onMouseDown={onClose}>
+        <div className={cn('absolute inset-0 z-[3500] flex items-center justify-center', BACKDROP)}
+            onMouseDown={onClose}>
             <div role="dialog" aria-modal="true" aria-labelledby="permit-req-title"
-                className="w-[22rem] max-w-[calc(100%-32px)] rounded-2xl border shadow-2xl overflow-hidden font-mono"
-                style={{ background: 'rgba(17,19,24,.98)', borderColor: 'rgba(59,130,246,.35)' }}
+                className={cn(DIALOG, 'w-[24rem] max-w-[calc(100%-32px)] overflow-hidden')}
                 onMouseDown={e => e.stopPropagation()}
                 onKeyDown={e => { if (e.key === 'Escape') onClose() }}>
-                <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'rgba(59,130,246,.2)' }}>
-                    <span id="permit-req-title" className="text-[12px] font-bold text-blue-200">REQUEST A FLIGHT PERMIT</span>
-                    <button onClick={onClose} aria-label="Close" className="text-gray-500 hover:text-gray-200"><X size={14} /></button>
+                <div className="flex items-center justify-between pl-4 pr-2 py-2.5 border-b border-app-border">
+                    <span id="permit-req-title" className="text-[18px] font-bold text-app-text">Request a flight permit</span>
+                    <button onClick={onClose} aria-label="Close" title="Close" className={ICON_BTN}><X size={16} /></button>
                 </div>
                 <div className="px-4 py-3 space-y-3">
-                    {reason && <p className="text-[10px] text-red-200/90">{reason}</p>}
-                    <p className="text-[10px] text-gray-400">
-                        For this exact plan ({path.length} waypoints). The reviewer for this airspace decides;
-                        once approved, upload the same plan inside the window. Any edit needs a new permit.
+                    {reason && <p className="text-[13px] text-app-danger bg-app-danger-soft rounded-[6px] px-2.5 py-1.5" role="alert">{reason}</p>}
+                    <p className="text-[13px] text-app-text-muted">
+                        For this exact plan ({path.length} waypoints). Any edit needs a new permit.
                     </p>
                     <div>
-                        <label htmlFor="permit-desc" className="block text-[9px] tracking-wider text-gray-500 mb-1">PURPOSE OF THE FLIGHT</label>
+                        <label htmlFor="permit-desc" className={cn(LABEL, 'block mb-1')}>Purpose of the flight</label>
                         <textarea id="permit-desc" autoFocus rows={3} maxLength={500} value={description}
                             onChange={e => setDescription(e.target.value)} onBlur={() => setTouched(true)}
-                            className={field} style={fieldStyle} />
-                        {descError && <p className="text-[9px] text-red-300 mt-0.5">{descError}</p>}
+                            className={field} />
+                        {descError && <p className="text-[13px] text-app-danger mt-1">{descError}</p>}
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                         <div>
-                            <label htmlFor="permit-from" className="block text-[9px] tracking-wider text-gray-500 mb-1">FROM</label>
+                            <label htmlFor="permit-from" className={cn(LABEL, 'block mb-1')}>From</label>
                             <input id="permit-from" type="datetime-local" value={from} onChange={e => setFrom(e.target.value)}
-                                className={field} style={fieldStyle} />
+                                className={field} />
                         </div>
                         <div>
-                            <label htmlFor="permit-until" className="block text-[9px] tracking-wider text-gray-500 mb-1">UNTIL</label>
+                            <label htmlFor="permit-until" className={cn(LABEL, 'block mb-1')}>Until</label>
                             <input id="permit-until" type="datetime-local" value={until} onChange={e => setUntil(e.target.value)}
-                                className={field} style={fieldStyle} />
+                                className={field} />
                         </div>
                     </div>
-                    {windowError && <p className="text-[9px] text-red-300">{windowError}</p>}
-                    <fieldset>
-                        <legend className="text-[9px] tracking-wider text-gray-500 mb-1">DRONE</legend>
+                    {windowError && <p className="text-[13px] text-app-danger">{windowError}</p>}
+                    <fieldset className="space-y-1">
+                        <legend className={cn(LABEL, 'mb-1')}>Drone</legend>
                         {droneId && (
-                            <label className="flex items-center gap-2 text-[10px] text-gray-200">
-                                <input type="radio" checked={!anyDrone} onChange={() => setAnyDrone(false)} />
+                            <label className="flex items-center gap-2 min-h-8 text-[14px] text-app-text cursor-pointer">
+                                <input type="radio" checked={!anyDrone} onChange={() => setAnyDrone(false)}
+                                    className={cn('w-4 h-4 accent-[var(--app-accent)]', FOCUS)} />
                                 {droneName ?? 'The connected drone'}
                             </label>
                         )}
-                        <label className="flex items-center gap-2 text-[10px] text-gray-200">
-                            <input type="radio" checked={anyDrone} onChange={() => setAnyDrone(true)} />
+                        <label className="flex items-center gap-2 min-h-8 text-[14px] text-app-text cursor-pointer">
+                            <input type="radio" checked={anyDrone} onChange={() => setAnyDrone(true)}
+                                className={cn('w-4 h-4 accent-[var(--app-accent)]', FOCUS)} />
                             Any drone of this workspace
                         </label>
                     </fieldset>
-                    {error && <p className="text-[10px] text-red-300">{error}</p>}
+                    {error && <p className="text-[13px] text-app-danger" role="alert">{error}</p>}
                 </div>
                 <div className="flex gap-2 px-4 pb-4">
-                    <button onClick={onClose} className="flex-1 py-2 rounded-lg text-[11px] font-bold text-gray-400"
-                        style={{ background: 'rgba(255,255,255,.06)' }}>Cancel</button>
-                    <button onClick={() => void submit()} disabled={busy}
-                        className="flex-1 py-2 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
-                        style={{ background: 'rgba(59,130,246,.3)', color: '#bfdbfe', border: '1px solid rgba(59,130,246,.45)' }}>
-                        {busy && <Loader2 size={12} className="animate-spin" />} Send request
+                    <button onClick={onClose} className={cn(BTN, 'flex-1')}>Cancel</button>
+                    <button onClick={() => void submit()} disabled={busy} title={busy ? 'Sending' : undefined}
+                        className={cn(BTN_PRIMARY, 'flex-1')}>
+                        {busy && <Loader2 size={14} className="animate-spin" />} Send request
                     </button>
                 </div>
             </div>
@@ -267,54 +277,54 @@ export function PermitsPanel({ workspaceId, canPlan, nonce, onLoad, onChanged, o
     }
 
     return (
-        <div className="w-[22rem] max-w-[calc(100vw-32px)] rounded-xl border shadow-2xl overflow-hidden font-mono"
-            style={{ background: 'rgba(17,19,24,.97)', borderColor: 'rgba(255,255,255,.1)' }}
+        <div className={cn(POPOVER, 'w-[22rem] max-w-[calc(100vw-32px)] overflow-hidden')}
             onMouseDown={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-3 py-2 border-b" style={{ borderColor: 'rgba(255,255,255,.08)' }}>
-                <span className="text-[10px] tracking-widest font-bold text-gray-400">PERMITS</span>
+            <div className="flex items-center justify-between pl-4 pr-2 py-2 border-b border-app-border">
+                <span className="text-base font-bold text-app-text">Permits</span>
                 <span className="flex items-center gap-1">
-                    <button onClick={() => setTick(t => t + 1)} title="Refresh" aria-label="Refresh" className="p-1 text-gray-500 hover:text-gray-200"><RefreshCw size={11} /></button>
-                    <button onClick={onClose} title="Close" aria-label="Close" className="p-1 text-gray-500 hover:text-gray-200"><X size={12} /></button>
+                    <button onClick={() => setTick(t => t + 1)} title="Refresh" aria-label="Refresh" className={ICON_BTN}><RefreshCw size={14} /></button>
+                    <button onClick={onClose} title="Close" aria-label="Close" className={ICON_BTN}><X size={14} /></button>
                 </span>
             </div>
-            {error && <div className="px-3 py-1.5 text-[10px] text-red-300">{error}</div>}
+            {error && <div className="px-4 py-2 text-[13px] text-app-danger bg-app-danger-soft" role="alert">{error}</div>}
             <div className="max-h-80 overflow-y-auto">
                 {permits === null ? (
-                    <div className="px-3 py-3 text-[10px] text-gray-500 flex items-center gap-2"><Loader2 size={11} className="animate-spin" /> Loading</div>
+                    <div className="px-4 py-3 text-[13px] text-app-text-muted flex items-center gap-2" role="status"><Loader2 size={13} className="animate-spin" /> Loading</div>
                 ) : permits.length === 0 ? (
-                    <div className="px-3 py-4 text-[10px] text-gray-500">
-                        No permits yet. When a plan crosses an orange or red zone, use &ldquo;Request permit&rdquo; on the airspace bar.
+                    <div className="px-4 py-5 flex flex-col items-center gap-1.5 text-center">
+                        <FileCheck size={18} className="text-app-text-muted" />
+                        <p className="text-[13px] text-app-text-muted">No permits yet. Request one from the airspace bar.</p>
                     </div>
                 ) : permits.map(p => {
                     const st = PERMIT_TONE[p.status_effective] ?? PERMIT_TONE.pending
+                    const tone = permitTone(st.fg)
                     const usable = p.status_effective === 'approved' && p.in_window
                     return (
-                        <div key={p.id} className="px-3 py-2 border-b space-y-1" style={{ borderColor: 'rgba(255,255,255,.04)' }}>
+                        <div key={p.id} className="px-4 py-2.5 border-b border-app-border last:border-b-0 space-y-1">
                             <div className="flex items-center gap-2">
-                                <span className="text-[8px] font-bold px-1.5 py-0.5 rounded" style={{ color: st.fg, border: `1px solid ${st.fg}66` }}>{st.label}</span>
-                                <span className="text-[10px] text-gray-200 truncate flex-1">&ldquo;{p.description}&rdquo;</span>
+                                <span className={cn('shrink-0 text-xs font-bold px-2 h-6 inline-flex items-center rounded-full border', TONE_TEXT[tone], TONE_BORDER[tone])}>{sentence(st.label)}</span>
+                                <span className="text-[14px] font-semibold text-app-text truncate flex-1">&ldquo;{p.description}&rdquo;</span>
                             </div>
-                            <div className="text-[9px] text-gray-500">
+                            <div className="text-[13px] text-app-text-muted tabular-nums">
                                 {p.kind === 'area' ? 'Area' : `${p.waypoint_count} wp`} · {p.drone_name ?? 'any drone'} · {fmtWhen(p.valid_from)} to {fmtWhen(p.valid_until)}
                             </div>
-                            <div className="text-[9px] flex flex-wrap gap-x-2">
-                                {p.zones.map(z => <span key={z.id} style={{ color: CLASS_COLOR[z.zone_class] ?? '#9ca3af' }}>{z.name}</span>)}
-                            </div>
-                            {p.decision_note && <div className="text-[9px] text-gray-400 border-l-2 pl-1.5" style={{ borderColor: 'rgba(255,255,255,.12)' }}>
+                            {p.zones.length > 0 && <div className="text-[13px] font-semibold flex flex-wrap gap-x-2">
+                                {p.zones.map(z => <span key={z.id} className={TONE_TEXT[CLASS_TONE[z.zone_class] ?? 'muted']}>{z.name}</span>)}
+                            </div>}
+                            {p.decision_note && <div className="text-[13px] text-app-text-muted border-l-2 border-app-border pl-2">
                                 {p.decided_by_name ? `${p.decided_by_name}: ` : ''}{p.decision_note}</div>}
-                            <div className="flex gap-1.5 pt-0.5">
+                            <div className="flex gap-2 pt-1">
                                 {p.kind === 'mission' && (p.waypoints?.length ?? 0) > 0 && (
-                                    <button onClick={() => onLoad(p)} className="text-[9px] px-2 py-0.5 rounded"
-                                        style={{ background: usable ? 'rgba(34,197,94,.18)' : 'rgba(255,255,255,.06)', color: usable ? '#86efac' : '#d1d5db' }}
+                                    <button onClick={() => onLoad(p)} className={usable ? BTN_PRIMARY : BTN}
                                         title="Load the permitted plan into the planner (edits invalidate the permit)">
                                         Load plan
                                     </button>
                                 )}
                                 {canPlan && (p.status === 'pending' || p.status === 'approved') && p.status_effective !== 'expired' && (
                                     <button onClick={() => void withdraw(p)} disabled={busy === p.id}
-                                        className="text-[9px] px-2 py-0.5 rounded text-gray-300 disabled:opacity-40"
-                                        style={{ background: 'rgba(255,255,255,.06)' }}>
-                                        {busy === p.id ? 'Withdrawing…' : 'Withdraw request'}
+                                        title={busy === p.id ? 'Withdrawing now' : undefined}
+                                        className={BTN_DANGER}>
+                                        {busy === p.id ? 'Withdrawing…' : 'Withdraw'}
                                     </button>
                                 )}
                             </div>

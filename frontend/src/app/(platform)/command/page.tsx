@@ -55,10 +55,11 @@ import { useAiModule } from '@/components/command/useAiModule'
 import { useLibraryEntry } from '@/components/models/useModelLibrary'
 import { ViewOnlyFence } from '@/components/layout/ViewOnly'
 import { useLiveScope } from '@/hooks/useLiveScope'
+import { FOCUS, FOCUS_OVERLAY, OVERLAY_BTN } from '@/components/controls/flightStyles'
 
 const mapLoading = () => (
-    <div className="w-full h-full flex items-center justify-center bg-zinc-900">
-        <p className="text-xs font-mono text-zinc-400">Loading map…</p>
+    <div className="w-full h-full flex items-center justify-center bg-[#0b0e13]">
+        <p className="text-[13px] text-overlay-muted">Loading map…</p>
     </div>
 )
 const MissionMap = dynamic(() => import('@/components/mission/MissionMap'), { ssr: false, loading: mapLoading })
@@ -85,10 +86,11 @@ const PIP_DIMS: Record<PipSize, [number, number]> = { s: [240, 150], m: [336, 21
 const EDGE = 10             // PiP gap to the stage edge
 const DOCK_MIN = 280, DOCK_MAX = 600
 const TABS: { id: DockTab; label: string }[] = [
-    { id: 'avoid', label: 'AVOID' }, { id: 'ai', label: 'AI' }, { id: 'telemetry', label: 'TELEMETRY' },
-    { id: 'setup', label: 'SETUP' }, { id: 'log', label: 'LOG' },
+    { id: 'avoid', label: 'Avoid' }, { id: 'ai', label: 'AI' }, { id: 'telemetry', label: 'Telemetry' },
+    { id: 'setup', label: 'Setup' }, { id: 'log', label: 'Log' },
 ]
-const PANEL: React.CSSProperties = { background: '#0b0e13', borderColor: 'rgba(255,255,255,.08)' }
+// Top bar, action rail and mission bar follow the theme like the dock.
+const PANEL = "bg-app-surface border-app-border shadow-[var(--app-shadow)]"
 
 function loadLayout(): Layout {
     try {
@@ -146,13 +148,13 @@ function pipBox(corner: Corner, size: PipSize): React.CSSProperties {
 
 function MessageLog() {
     const msgs = useDroneStore(s => s.fcMessages)
-    if (!msgs.length) return <p className="text-xs font-mono text-zinc-500">No messages from the aircraft yet.</p>
+    if (!msgs.length) return <p className="text-[13px] text-app-text-muted">No messages from the aircraft yet.</p>
     return (
-        <div className="flex flex-col gap-1 font-mono text-[11px]">
+        <div className="flex flex-col gap-1.5 text-[13px]">
             {[...msgs].reverse().slice(0, 200).map(m => (
                 <div key={(m as { id?: number }).id ?? m.ts} className="flex gap-2">
-                    <span className="text-zinc-500 tabular-nums shrink-0">{new Date(m.ts * 1000).toLocaleTimeString()}</span>
-                    <span style={{ color: m.rank >= 5 ? '#f87171' : m.rank >= 4 ? '#fbbf24' : '#d4d4d8' }}>{m.text}</span>
+                    <span className="text-app-text-muted tabular-nums shrink-0">{new Date(m.ts * 1000).toLocaleTimeString()}</span>
+                    <span className={cn(m.rank >= 5 ? 'text-app-danger font-semibold' : m.rank >= 4 ? 'text-app-warn font-semibold' : 'text-app-text')}>{m.text}</span>
                 </div>
             ))}
         </div>
@@ -161,12 +163,11 @@ function MessageLog() {
 
 function Toggle({ on, label, hint, onClick }: { on: boolean; label: string; hint: string; onClick: () => void }) {
     return (
-        <button onClick={onClick} title={hint}
-            className="flex-1 h-8 rounded-md border text-[10px] font-mono tracking-widest transition-colors"
-            style={on
-                ? { background: 'rgba(34,211,238,.15)', borderColor: 'rgba(34,211,238,.6)', color: '#67e8f9' }
-                : { borderColor: 'hsl(var(--app-border))', color: 'hsl(var(--app-text-muted))' }}>
-            {label} {on ? 'ON' : 'OFF'}
+        <button onClick={onClick} title={hint} aria-pressed={on}
+            className={cn('flex-1 h-9 rounded-md border text-[13px] font-bold transition-colors duration-[var(--dur-fast)]', FOCUS,
+                on ? 'bg-app-accent-soft border-app-accent text-app-accent'
+                    : 'border-app-border-strong text-app-text-muted hover:text-app-text')}>
+            {label} {on ? 'on' : 'off'}
         </button>
     )
 }
@@ -333,11 +334,12 @@ function DevCommand() {
             <div onPointerDown={e => onPipDown(e, view)} role="button" aria-label={`Show ${label} full screen`}
                 className="absolute inset-0 z-[1500] cursor-pointer touch-none select-none" style={{ background: 'transparent' }} />
             <div className="absolute top-1.5 left-1.5 right-1.5 z-[1600] flex items-center justify-between pointer-events-none select-none">
-                <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold tracking-widest bg-black/65 text-zinc-100">
-                    {label} · click to enlarge · drag to move</span>
+                <span className="px-2 py-1 rounded-md text-[12px] font-bold bg-overlay-scrim text-overlay-text"
+                    title="Click to enlarge, drag to move">
+                    {label}</span>
                 <button onClick={() => update({ size: layout.size === 's' ? 'm' : layout.size === 'm' ? 'l' : 's' })}
-                    className="p-1.5 rounded bg-black/65 text-zinc-200 pointer-events-auto" title="Picture size">
-                    {layout.size === 'l' ? <Minimize2 size={12} /> : <Maximize2 size={12} />}</button>
+                    className={cn(OVERLAY_BTN, 'w-8 px-0 pointer-events-auto', FOCUS_OVERLAY)} title="Picture size" aria-label="Picture size">
+                    {layout.size === 'l' ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button>
             </div>
         </>
     )
@@ -357,20 +359,20 @@ function DevCommand() {
     }
 
     return (
-        <div className="flex flex-col h-full min-h-0 gap-2 text-zinc-100">
+        <div className="flex flex-col h-full min-h-0 gap-2 text-app-text">
             {/* ── Top bar ─────────────────────────────────────────────────── */}
-            <div className="h-12 shrink-0 flex items-center gap-2 px-2 rounded-xl border" style={PANEL}>
+            <div className={cn('h-12 shrink-0 flex items-center gap-2 px-2 rounded-[10px] border', PANEL)}>
                 <div className="flex-1 min-w-0"><StatusStrip avoid={avoid} /></div>
                 {mounted && runningMod && (
-                    <div className="h-9 flex items-center rounded-lg border overflow-hidden text-[11px] font-mono shrink-0"
+                    <div className="h-9 flex items-center rounded-lg border overflow-hidden text-[13px] shrink-0"
                         style={{ borderColor: `${runningMod.color}66`, background: `${runningMod.color}14` }}>
                         <button onClick={() => update({ tab: 'ai', dockHidden: false })} title="Show the module's panel"
-                            className="h-full pl-2.5 pr-2 flex items-center gap-1.5" style={{ color: runningMod.color }}>
+                            className={cn('h-full pl-2.5 pr-2 flex items-center gap-1.5', FOCUS)} style={{ color: runningMod.color }}>
                             <runningMod.icon size={14} />
-                            <span className="font-bold tracking-wider">AI {runningMod.name.toUpperCase()}</span>
+                            <span className="font-bold text-app-text">AI: {runningMod.name}</span>
                         </button>
                         <button onClick={ai.stop} aria-label={`Stop ${runningMod.name}`} title="Stop the module"
-                            className="h-full w-8 flex items-center justify-center border-l text-zinc-300 hover:text-white"
+                            className={cn('h-full w-8 flex items-center justify-center border-l text-app-text-muted hover:text-app-text', FOCUS)}
                             style={{ borderColor: `${runningMod.color}44` }}>
                             <X size={13} />
                         </button>
@@ -378,26 +380,27 @@ function DevCommand() {
                 )}
                 {mounted && !wallOn && getVideoSource() === 'air_unit_udp' && (
                     <button onClick={() => setWallOn(true)}
-                        className="h-9 px-2.5 rounded-lg border border-white/10 text-[10px] font-mono tracking-widest text-zinc-400"
+                        className={cn('h-9 px-2.5 rounded-md border border-app-border-strong text-[13px] font-bold text-app-text-muted hover:text-app-text', FOCUS)}
                         title="Show every mesh unit delivering video">WALL</button>
                 )}
                 {mounted && <LinkCluster avoid={avoid} />}
                 <button onClick={toggleDock} title={dockHidden ? 'Show panel (P)' : 'Hide panel (P)'}
-                    className="h-9 w-9 rounded-lg border border-white/10 text-zinc-300 flex items-center justify-center">
+                    aria-label={dockHidden ? 'Show panel' : 'Hide panel'}
+                    className={cn('h-9 w-9 rounded-md border border-app-border-strong text-app-text-muted hover:text-app-text flex items-center justify-center', FOCUS)}>
                     {dockHidden ? <PanelRightOpen size={15} /> : <PanelRightClose size={15} />}
                 </button>
             </div>
 
             <div className="flex flex-1 min-h-0 gap-2">
                 {/* ── Action rail ─────────────────────────────────────────── */}
-                <div className="shrink-0 rounded-xl border p-1.5 overflow-y-auto" style={PANEL}>
+                <div className={cn('shrink-0 rounded-[10px] border p-1.5 overflow-y-auto', PANEL)}>
                     <ViewOnlyFence compact>
                         <ActionRail avoid={avoid} />
                     </ViewOnlyFence>
                 </div>
 
                 {/* ── Stage ───────────────────────────────────────────────── */}
-                <div ref={stageRef} className="relative flex-1 min-w-0 rounded-xl border border-white/10 overflow-hidden bg-black">
+                <div ref={stageRef} className="relative flex-1 min-w-0 rounded-[10px] border border-app-border overflow-hidden bg-black">
                     <div style={boxFor('video')} className="flex">
                         <div className="absolute inset-0 flex">
                             {wallOn ? <CameraWall onClose={() => setWallOn(false)} /> : <VideoStream bare cleanFeed />}
@@ -410,12 +413,11 @@ function DevCommand() {
                             : <MissionMap readOnly follow compact={!mapBig} />)}
                         {!mapBig && pipChrome('map', layout.map3d ? 'MAP 3D' : 'MAP')}
                         {mapBig && (
-                            <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1600] flex rounded-lg border border-white/15 overflow-hidden text-[11px] font-mono"
-                                style={{ background: 'rgba(9,11,16,.85)' }}>
+                            <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1600] flex gap-0.5 p-0.5 rounded-md border border-overlay-border bg-overlay-scrim backdrop-blur-[6px] text-[13px] font-bold">
                                 {([false, true] as const).map(is3d => (
-                                    <button key={String(is3d)} onClick={() => update({ map3d: is3d })}
-                                        className="px-3 h-8 tracking-widest"
-                                        style={layout.map3d === is3d ? { background: 'rgba(34,211,238,.2)', color: '#67e8f9' } : { color: '#a1a1aa' }}>
+                                    <button key={String(is3d)} onClick={() => update({ map3d: is3d })} aria-pressed={layout.map3d === is3d}
+                                        className={cn('px-3 h-8 rounded', FOCUS_OVERLAY,
+                                            layout.map3d === is3d ? 'bg-[rgba(34,211,238,.22)] text-[var(--overlay-accent)]' : 'text-overlay-muted hover:text-overlay-text')}>
                                         {is3d ? '3D' : '2D'}</button>
                                 ))}
                             </div>
@@ -438,16 +440,18 @@ function DevCommand() {
                     <>
                         <div onMouseDown={onDockDrag} className="w-1.5 -mx-1 shrink-0 cursor-col-resize flex items-center justify-center group"
                             title="Drag to resize">
-                            <div className="w-0.5 h-10 rounded bg-zinc-500/40 group-hover:bg-cyan-400/80" />
+                            <div className="w-0.5 h-10 rounded bg-app-border-strong group-hover:bg-app-accent" />
                         </div>
-                        <aside className="shrink-0 flex flex-col min-h-0 rounded-xl border overflow-hidden"
-                            style={{ width: layout.dockW, background: 'hsl(var(--app-surface))', borderColor: 'hsl(var(--app-border))' }}>
-                            <div className="flex shrink-0 border-b" style={{ borderColor: 'hsl(var(--app-border))' }}>
+                        <aside className={cn('shrink-0 flex flex-col min-h-0 rounded-[10px] border overflow-hidden', PANEL)}
+                            style={{ width: layout.dockW }}>
+                            {/* Tabs: each a separate pill so neighbours never read as one word. */}
+                            <div role="tablist" aria-label="Panel" className="flex shrink-0 gap-1 p-1.5 border-b border-app-border bg-app-surface-2">
                                 {TABS.filter(tb => !(tb.id === 'avoid' && noAvoid)).map(tb => (
-                                    <button key={tb.id} onClick={() => update({ tab: tb.id })}
-                                        className={cn('flex-1 py-2.5 text-[10px] font-mono tracking-widest border-b-2 transition-colors',
-                                            activeTab === tb.id ? 'border-cyan-400 text-cyan-400' : 'border-transparent')}
-                                        style={activeTab === tb.id ? undefined : { color: 'hsl(var(--app-text-muted))' }}>
+                                    <button key={tb.id} role="tab" aria-selected={activeTab === tb.id} onClick={() => update({ tab: tb.id })}
+                                        className={cn('flex-1 min-w-0 h-8 px-1.5 rounded-md text-[13px] font-bold truncate transition-colors duration-[var(--dur-fast)]', FOCUS,
+                                            activeTab === tb.id
+                                                ? 'bg-app-surface text-app-accent shadow-[inset_0_-2px_0_var(--app-accent)] border border-app-border'
+                                                : 'text-app-text-muted hover:text-app-text hover:bg-app-surface border border-transparent')}>
                                         {tb.label}
                                     </button>
                                 ))}
@@ -472,10 +476,10 @@ function DevCommand() {
                                     <>
                                         {!noAvoid && <ViewOnlyFence note={false}><IndoorNavCard avoid={avoid} /></ViewOnlyFence>}
                                         {mounted && swarmEnabled
-                                            ? <p className="text-xs font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>
+                                            ? <p className="text-[13px] text-app-text-muted">
                                                 Swarm mode - manage the fleet on the Fly tab.</p>
                                             : <DeviceSelector />}
-                                        <div className="border-t pt-4 flex flex-col gap-2" style={{ borderColor: 'hsl(var(--app-border))' }}>
+                                        <div className="border-t border-app-border pt-4 flex flex-col gap-2">
                                             <ViewOnlyFence><DroneControls /></ViewOnlyFence>
                                         </div>
                                     </>
@@ -488,7 +492,7 @@ function DevCommand() {
             </div>
 
             {/* ── Mission bar ─────────────────────────────────────────────── */}
-            <div className="h-[68px] shrink-0 rounded-xl border" style={PANEL}>
+            <div className={cn('h-[68px] shrink-0 rounded-[10px] border', PANEL)}>
                 <MissionBar avoid={avoid} />
             </div>
         </div>

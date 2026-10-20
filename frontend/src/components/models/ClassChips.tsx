@@ -57,7 +57,7 @@ function ClassChip({ index, value, onSave }: { index: number; value: string; onS
             <button type="button" tabIndex={editing ? -1 : 0} aria-hidden={editing || undefined} onClick={() => { setDraft(value); setEditing(true) }}
                 aria-label={`Rename class ${index}: ${value}`}
                 style={{ visibility: editing ? 'hidden' : undefined }}>
-                <span className={s.idx}>{index}</span>{value}<Pencil size={10} aria-hidden style={{ opacity: 0.5 }} />
+                <span className={s.idx}>{index}</span>{value}<Pencil size={12} aria-hidden style={{ color: 'var(--cm-ink-2)' }} />
             </button>
             {editing && (
                 <input autoFocus size={1} value={draft} style={{ width: '100%', minWidth: 0 }} aria-label={`Class ${index} name`}

@@ -73,7 +73,7 @@ function Group({ att, why, rail, root }: {
                 {lastAct && (
                     <span className={a.last} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         <span className={a.dot} data-ok={last?.ok !== false} aria-hidden />
-                        {!rail && <span style={{ fontSize: 10 }}>{lastAct.label}</span>}
+                        {!rail && <span style={{ fontSize: 12 }}>{lastAct.label}</span>}
                         <span className="sr-only">{lastTip}</span>
                     </span>
                 )}

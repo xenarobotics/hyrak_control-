@@ -15,6 +15,10 @@ import { getServerUrl } from '@/lib/server-url'
 import { liveAuthHeaders } from '@/lib/auth'
 import { visibleInterval } from '@/lib/poll'
 import { Download, RefreshCw, Satellite, Sparkles, Loader } from 'lucide-react'
+import {
+    type Tone, TONE, LABEL, SECONDARY, NUM, TILE, TEXT, MUTED, BORDER, BORDER_STRONG, SURFACE_2,
+    chip, btn, DISABLED, FOCUS,
+} from './panelStyle'
 
 const AUTH = liveAuthHeaders({ 'Content-Type': 'application/json' })
 const api = (p: string) => `${getServerUrl()}/api/recon${p}`
@@ -29,19 +33,13 @@ type ResultT = {
     files: { name: string; size_mb: number; path: string }[]
 }
 
-const TRACK_COLORS: Record<string, string> = {
-    tracking: '#4ade80', degraded: '#fbbf24', lost: '#f87171',
-    initializing: '#60a5fa',
+const TRACK_TONES: Record<string, Tone> = {
+    tracking: 'ok', degraded: 'warn', lost: 'danger', initializing: 'accent',
 }
 
-const label: React.CSSProperties = {
-    fontSize: 10, fontFamily: 'monospace', letterSpacing: '0.06em',
-    color: 'hsl(var(--app-text-muted))', textTransform: 'uppercase',
-}
 const input: React.CSSProperties = {
-    width: '100%', padding: '5px 8px', borderRadius: 8, fontSize: 11,
-    fontFamily: 'monospace', background: 'hsl(var(--app-surface-2))',
-    border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))',
+    width: '100%', minHeight: 32, padding: '0 8px', borderRadius: 6, fontSize: 14,
+    background: SURFACE_2, border: `1px solid ${BORDER_STRONG}`, color: TEXT,
 }
 
 export function Reconstruction3DPanel() {
@@ -69,7 +67,7 @@ export function Reconstruction3DPanel() {
     // for only while the analysis runs (the feed exists only then).
     const depthStream = useTicketedStream(live ? '/api/recon/stream/depth' : null)
     const track = cvResults?.tracking_state ?? 'n/a'
-    const trackColor = TRACK_COLORS[track] ?? 'hsl(var(--app-text-muted))'
+    const trackTone: Tone = TRACK_TONES[track] ?? 'muted'
 
     const refreshEngine = useCallback(async () => {
         try { setEngine(await (await apiFetch(api('/engine'))).json()) }
@@ -154,42 +152,40 @@ export function Reconstruction3DPanel() {
 
     if (engine && !engine.installed) {
         return (
-            <p style={{ ...label, textTransform: 'none', lineHeight: 1.6 }}>
-                Reconstruction engine is not installed on the server. Run
-                <code> reconstruction/install.sh</code> there once, then this
-                mode comes alive.
+            <p style={SECONDARY}>
+                The 3D engine is not installed on the server. Run
+                <code className="font-code" style={{ fontSize: 12 }}> reconstruction/install.sh</code> there once.
             </p>
         )
     }
 
+    const fuse = !!engine?.options?.imu_fuse
+    const lowInput = (cvResults?.input_w ?? 0) < 1280
+
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {/* Live state - only meaningful while the analysis is running */}
             {live ? (
                 <>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        <span style={{
-                            padding: '3px 8px', borderRadius: 6, fontSize: 10,
-                            fontFamily: 'monospace', color: trackColor,
-                            border: `1px solid ${trackColor}55`,
-                            textTransform: 'uppercase',
-                        }}>{track}</span>
-                        <span style={{ ...label, alignSelf: 'center' }}>
-                            KF {cvResults?.keyframes ?? 0} · LM {cvResults?.landmarks ?? 0}
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <span style={{ ...chip(trackTone), textTransform: 'capitalize' }}>
+                            <span style={{ width: 6, height: 6, borderRadius: 999, background: 'currentColor' }} aria-hidden />
+                            {track}
+                        </span>
+                        <span style={{ ...SECONDARY, ...NUM }}
+                            title="Keyframes and landmarks in the map">
+                            {cvResults?.keyframes ?? 0} frames · {cvResults?.landmarks ?? 0} points
                         </span>
                         {(cvResults?.input_w ?? 0) > 0 && (
-                            <span style={{
-                                ...label, alignSelf: 'center',
-                                color: (cvResults?.input_w ?? 0) < 1280
-                                    ? '#fbbf24' : 'hsl(var(--app-text-muted))',
-                            }}>
-                                IN {cvResults?.input_w}x{cvResults?.input_h}
+                            <span style={{ ...SECONDARY, ...NUM, color: lowInput ? TONE.warn.fg : MUTED }}
+                                title="Resolution reaching the reconstruction">
+                                {cvResults?.input_w}x{cvResults?.input_h}
                             </span>
                         )}
                     </div>
                     <div style={{
-                        borderRadius: 8, overflow: 'hidden', background: '#000',
-                        border: '1px solid hsl(var(--app-border))', aspectRatio: '16/9',
+                        borderRadius: 10, overflow: 'hidden', background: '#000',
+                        border: `1px solid ${BORDER}`, aspectRatio: '16/9',
                     }}>
                         {/* Depth map - the network's per-frame view of the scene;
                             the full 3D map is the center pane. */}
@@ -200,59 +196,51 @@ export function Reconstruction3DPanel() {
                                 style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                         )}
                     </div>
-                    <button onClick={exportNow}
-                        style={{
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            gap: 6, padding: '6px 10px', borderRadius: 8, fontSize: 10,
-                            fontFamily: 'monospace', cursor: 'pointer',
-                            background: 'hsl(var(--app-surface-2))',
-                            border: '1px solid hsl(var(--app-border))',
-                            color: 'hsl(var(--app-text))',
-                        }}>
-                        EXPORT SNAPSHOT (keep scanning)
+                    <button onClick={exportNow} className={FOCUS} style={btn()}
+                        title="Save the map so far; scanning continues">
+                        <Download size={14} aria-hidden /> Save snapshot
                     </button>
-                    <p style={{ ...label, textTransform: 'none', lineHeight: 1.5 }}>
-                        Move at walking pace, translate rather than pan, keep the
-                        scene lit, finish where you started. Amber = pose degraded,
-                        red = lost: slow down. Stopping the analysis saves the map.
+                    <p style={SECONDARY}>
+                        Walk slowly, move sideways rather than turning, keep it lit, and
+                        end where you started. Amber or red status: slow down.
+                        Stopping saves the map.
                     </p>
                 </>
             ) : (
                 <>
-                    <p style={{ ...label, textTransform: 'none', lineHeight: 1.5 }}>
-                        Uses the session&apos;s video source like every other mode:
-                        press START ANALYSIS and move the camera through the space.
-                        Options below apply to the next scan.
+                    <p style={SECONDARY}>
+                        Press Run and move the camera through the space. These options
+                        apply to the next scan.
                     </p>
-                    <div>
-                        <p style={{ ...label, marginBottom: 4 }}>QUALITY PRESET</p>
-                        <select style={input} value={engine?.options?.preset ?? 'indoor'}
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <span style={LABEL}>Quality</span>
+                        <select className={FOCUS} style={input} value={engine?.options?.preset ?? 'indoor'}
                             onChange={e => void setOption({ preset: e.target.value })}>
                             {(engine?.presets ?? ['indoor']).map(p => (
                                 <option key={p} value={p}>{p.replace(/_/g, ' ')}</option>
                             ))}
                         </select>
-                    </div>
+                    </label>
                     <button
+                        className={FOCUS}
+                        aria-pressed={fuse}
                         onClick={() => void setOption({ imu_fuse: !engine?.options?.imu_fuse })}
-                        title="Fuse flight-controller telemetry (MAVLink) to anchor true metric scale - needs an FC on the video link (air unit on a drone), not a plain webcam"
+                        title="Use flight controller data (MAVLink) for true scale. Needs an FC on the video link, not a plain webcam."
                         style={{
-                            display: 'flex', alignItems: 'center', gap: 8,
-                            padding: '6px 10px', borderRadius: 8, fontSize: 10,
-                            fontFamily: 'monospace', cursor: 'pointer',
-                            background: engine?.options?.imu_fuse ? '#34d39918' : 'hsl(var(--app-surface-2))',
-                            border: `1px solid ${engine?.options?.imu_fuse ? '#34d39960' : 'hsl(var(--app-border))'}`,
-                            color: engine?.options?.imu_fuse ? '#34d399' : 'hsl(var(--app-text-muted))',
+                            ...btn(), justifyContent: 'flex-start', gap: 8,
+                            background: fuse ? TONE.ok.bg : SURFACE_2,
+                            border: `1px solid ${fuse ? TONE.ok.border : BORDER_STRONG}`,
+                            color: fuse ? TONE.ok.fg : TEXT,
                         }}>
-                        <Satellite size={12} />
-                        IMU / FC FUSE {engine?.options?.imu_fuse ? 'ON' : 'OFF'}
-                        <span style={{ marginLeft: 'auto', fontSize: 9 }}>MAVLink scale</span>
+                        <Satellite size={14} aria-hidden />
+                        Drone sensor scale
+                        <span style={{ marginLeft: 'auto', fontWeight: 700 }}>{fuse ? 'On' : 'Off'}</span>
                     </button>
                 </>
             )}
 
             {error && (
-                <p style={{ fontSize: 10, fontFamily: 'monospace', color: '#f87171' }}>
+                <p role="alert" style={{ fontSize: 13, fontWeight: 600, color: TONE.danger.fg }}>
                     {error}
                 </p>
             )}
@@ -260,50 +248,46 @@ export function Reconstruction3DPanel() {
             {/* Finished maps */}
             <div style={{ display: 'flex', alignItems: 'center',
                 justifyContent: 'space-between' }}>
-                <p style={label}>SCANS</p>
-                <button onClick={refreshResults} title="refresh"
-                    style={{ background: 'none', border: 'none', cursor: 'pointer',
-                        color: 'hsl(var(--app-text-muted))' }}>
-                    <RefreshCw size={11} />
+                <p style={LABEL}>Scans</p>
+                <button onClick={refreshResults} title="Refresh" aria-label="Refresh scans" className={FOCUS}
+                    style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: 'none', border: 'none', borderRadius: 6, cursor: 'pointer', color: MUTED }}>
+                    <RefreshCw size={14} aria-hidden />
                 </button>
             </div>
             {results.length === 0 && (
-                <p style={{ ...label, textTransform: 'none' }}>
+                <p style={SECONDARY}>
                     {engine?.running
-                        ? 'No scans yet - finished maps appear here.'
-                        : 'Engine idle - scans appear here after the first run.'}
+                        ? 'No scans yet. Finished maps appear here.'
+                        : 'Engine idle. Scans appear here after the first run.'}
                 </p>
             )}
             {results.map(r => (
-                <div key={`${r.kind}-${r.name}`} style={{
-                    border: '1px solid hsl(var(--app-border))',
-                    borderRadius: 8, padding: '7px 9px',
-                }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6,
-                        marginBottom: 4 }}>
-                        <span style={{
-                            fontSize: 9, fontFamily: 'monospace',
-                            color: r.kind === 'live' ? '#22d3ee' : '#c084fc',
-                        }}>{r.kind === 'live' ? 'LIVE' : 'OFFLINE'}</span>
-                        <span style={{ fontSize: 10, fontFamily: 'monospace',
+                <div key={`${r.kind}-${r.name}`} style={{ ...TILE, padding: '8px 10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8,
+                        marginBottom: 4, minWidth: 0 }}>
+                        <span style={chip(r.kind === 'live' ? 'accent' : 'ok')}>
+                            {r.kind === 'live' ? 'Live' : 'Refined'}
+                        </span>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: TEXT, minWidth: 0,
                             overflow: 'hidden', textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap' }}>{r.name}</span>
+                            whiteSpace: 'nowrap' }} title={r.name}>{r.name}</span>
                         {r.kind === 'live' && (
                             <button onClick={() => void reprocess(r.name)}
+                                className={FOCUS}
                                 disabled={!!scanBusy}
-                                title="Re-process this scan offline at maximum quality (COLMAP photogrammetry, 1-3 min)"
+                                title={scanBusy && scanBusy !== r.name
+                                    ? 'Another scan is being refined'
+                                    : 'Rebuild this scan at full quality (photogrammetry, 1-3 min)'}
                                 style={{
-                                    marginLeft: 'auto', display: 'flex', alignItems: 'center',
-                                    gap: 4, fontSize: 9, fontFamily: 'monospace',
-                                    background: 'none', border: '1px solid #c084fc55',
-                                    borderRadius: 6, padding: '2px 6px',
-                                    color: '#c084fc', cursor: 'pointer',
-                                    opacity: scanBusy ? 0.5 : 1,
+                                    ...btn(), marginLeft: 'auto', minHeight: 28, padding: '0 8px', fontSize: 12,
+                                    ...(scanBusy && scanBusy !== r.name ? DISABLED : {}),
+                                    ...(scanBusy === r.name ? { cursor: 'wait' } : {}),
                                 }}>
                                 {scanBusy === r.name
-                                    ? <Loader size={9} className="animate-spin" />
-                                    : <Sparkles size={9} />}
-                                {scanBusy === r.name ? (scanPhase || 'processing') : 'REFINE'}
+                                    ? <Loader size={12} className="animate-spin motion-reduce:animate-none" aria-hidden />
+                                    : <Sparkles size={12} aria-hidden />}
+                                {scanBusy === r.name ? (scanPhase || 'Refining') : 'Refine'}
                             </button>
                         )}
                     </div>
@@ -311,20 +295,21 @@ export function Reconstruction3DPanel() {
                         // A button, not <a href download>: the route needs the
                         // bearer, so the file is fetched into a blob first.
                         <button key={f.path} type="button"
+                            className={FOCUS}
                             onClick={() => { void downloadResult(f.path, f.name) }}
                             disabled={downloading === f.path}
                             style={{
                                 display: 'flex', alignItems: 'center', gap: 6, width: '100%',
-                                fontSize: 10, fontFamily: 'monospace', textAlign: 'left',
-                                color: 'hsl(var(--app-text-muted))', background: 'none',
+                                minHeight: 28, fontSize: 13, textAlign: 'left',
+                                color: MUTED, background: 'none', borderRadius: 6,
                                 border: 'none', cursor: downloading === f.path ? 'wait' : 'pointer',
                                 textDecoration: 'none', padding: '2px 0',
                             }}>
-                            <Download size={10} />
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap' }}>{f.name}</span>
-                            <span style={{ marginLeft: 'auto', flexShrink: 0 }}>
-                                {downloading === f.path ? 'downloading' : `${f.size_mb} MB`}
+                            <Download size={13} aria-hidden />
+                            <span className="font-code" style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap', color: TEXT }}>{f.name}</span>
+                            <span style={{ marginLeft: 'auto', flexShrink: 0, ...NUM }}>
+                                {downloading === f.path ? 'Downloading' : `${f.size_mb} MB`}
                             </span>
                         </button>
                     ))}

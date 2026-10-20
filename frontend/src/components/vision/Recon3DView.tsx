@@ -17,6 +17,7 @@ import { visibleInterval } from '@/lib/poll'
 import { useDroneStore } from '@/store/drone'
 import { useTicketedStream } from '@/hooks/useApiMedia'
 import { RotateCcw, Video } from 'lucide-react'
+import { OVERLAY, FOCUS_OVERLAY } from './panelStyle'
 
 const api = (p: string) => `${getServerUrl()}/api/recon${p}`
 
@@ -284,6 +285,22 @@ export function Recon3DView() {
         }
     }, [])
 
+    // Over the 3D map (always dark): fixed overlay tokens, both themes.
+    const pill: React.CSSProperties = {
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        minHeight: 26, padding: '2px 10px', borderRadius: 999,
+        background: OVERLAY.scrim, border: `1px solid ${OVERLAY.border}`,
+        color: OVERLAY.muted, backdropFilter: 'blur(6px)',
+    }
+    const ovBtn = (on: boolean): React.CSSProperties => ({
+        display: 'flex', alignItems: 'center', gap: 6, minHeight: 32, padding: '0 10px',
+        borderRadius: 6, fontSize: 13, fontWeight: 600,
+        background: OVERLAY.scrim, backdropFilter: 'blur(6px)',
+        border: `1px solid ${on ? OVERLAY.ok : OVERLAY.border}`,
+        color: on ? OVERLAY.ok : OVERLAY.text, cursor: 'pointer',
+        transition: 'color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out)',
+    })
+
     return (
         <div style={{ position: 'absolute', inset: 0, zIndex: 5 }}>
             <canvas ref={canvasRef}
@@ -291,99 +308,91 @@ export function Recon3DView() {
 
             {nPoints === 0 && (() => {
                 // Say exactly what is happening so it never reads as "broken".
-                let head = 'STARTING 3D ENGINE...', sub = 'one moment', color = 'rgba(255,255,255,0.55)'
+                let head = 'Starting the 3D engine', sub = 'One moment', color: string = OVERLAY.text
                 if (engineState === 'failed') {
-                    head = '3D ENGINE ERROR'
-                    sub = cv?.engine_error ?? 'see server log'
-                    color = '#f87171'
+                    head = '3D engine error'
+                    sub = cv?.engine_error ?? 'See the server log'
+                    color = OVERLAY.danger
                 } else if (engineState === 'running') {
                     if (trackState === 'initializing') {
                         // The engine holds here refusing to seed a map from a
                         // near-constant depth (a dark or textureless view -
                         // engine commit 026ed0e). Tell the user WHY, so a held
                         // init reads as an instruction, not a hang.
-                        head = 'POINT AT A LIT, TEXTURED AREA TO START'
-                        sub = 'aim at furniture, edges or a doorway, not a blank or dark wall'
-                        color = '#fbbf24'
+                        head = 'Point at a lit, textured area to start'
+                        sub = 'Furniture, edges or a doorway. Not a blank or dark wall.'
+                        color = OVERLAY.warn
                     } else if (trackState === 'lost' || trackState === 'n/a') {
-                        head = 'MOVE THE CAMERA SLOWLY TO BEGIN'
-                        sub = 'point at textured surfaces, keep it lit'
-                        color = '#fbbf24'
+                        head = 'Move the camera slowly to begin'
+                        sub = 'Point at textured surfaces and keep it lit'
+                        color = OVERLAY.warn
                     } else {
-                        head = 'BUILDING THE FIRST SURFACE...'
-                        sub = 'keep moving gently through the space'
-                        color = '#34d399'
+                        head = 'Building the first surface'
+                        sub = 'Keep moving gently through the space'
+                        color = OVERLAY.ok
                     }
                 }
                 return (
                     <div style={{
                         position: 'absolute', inset: 0, display: 'flex',
-                        flexDirection: 'column', alignItems: 'center',
-                        justifyContent: 'center', gap: 8, pointerEvents: 'none',
-                        color, fontFamily: 'monospace', textAlign: 'center', padding: 20,
+                        alignItems: 'center', justifyContent: 'center',
+                        pointerEvents: 'none', padding: 20,
                     }}>
-                        <p style={{ fontSize: 13, letterSpacing: 1 }}>{head}</p>
-                        <p style={{ fontSize: 11, opacity: 0.8, maxWidth: 340 }}>{sub}</p>
+                        <div style={{
+                            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                            padding: '12px 16px', borderRadius: 10, textAlign: 'center',
+                            background: OVERLAY.scrim, border: `1px solid ${OVERLAY.border}`,
+                            maxWidth: 360,
+                        }}>
+                            <p style={{ fontSize: 16, fontWeight: 700, color }}>{head}</p>
+                            <p style={{ fontSize: 13, color: OVERLAY.muted }}>{sub}</p>
+                        </div>
                     </div>
                 )
             })()}
 
             <div style={{
-                position: 'absolute', top: 8, left: 8, display: 'flex', gap: 6,
-                fontFamily: 'monospace', fontSize: 10,
+                position: 'absolute', top: 8, left: 8, right: 120, display: 'flex', flexWrap: 'wrap', gap: 6,
+                fontSize: 12, fontWeight: 600, fontVariantNumeric: 'tabular-nums',
             }}>
-                <span style={{
-                    padding: '3px 8px', borderRadius: 6, color: '#34d399',
-                    background: 'rgba(0,0,0,0.65)', border: '1px solid #34d39944',
-                }}>LIVE 3D MAP · {nPoints.toLocaleString()} pts</span>
-                <span style={{
-                    padding: '3px 8px', borderRadius: 6, color: '#a1a1aa',
-                    background: 'rgba(0,0,0,0.65)',
-                }}>drag orbit · wheel zoom · shift-drag pan</span>
+                <span style={{ ...pill, color: OVERLAY.text }}>
+                    <span style={{ width: 6, height: 6, borderRadius: 999, background: OVERLAY.ok }} aria-hidden />
+                    Live 3D map · {nPoints.toLocaleString()} pts
+                </span>
+                <span style={pill}>Drag to orbit · wheel to zoom · shift-drag to pan</span>
                 {inputW > 0 && (
                     <span title={inputDegraded
-                        ? 'The network is reducing your video in transit - detail below this cannot be reconstructed. Better connection = better scan.'
-                        : 'Resolution actually reaching the reconstruction'}
+                        ? 'The network is shrinking your video in transit. Detail below this cannot be rebuilt; a better connection gives a better scan.'
+                        : 'Resolution reaching the reconstruction'}
                         style={{
-                            padding: '3px 8px', borderRadius: 6,
-                            color: inputDegraded ? '#fbbf24' : '#a1a1aa',
-                            background: 'rgba(0,0,0,0.65)',
-                            border: inputDegraded ? '1px solid #fbbf2455' : 'none',
+                            ...pill,
+                            color: inputDegraded ? OVERLAY.warn : OVERLAY.muted,
+                            borderColor: inputDegraded ? OVERLAY.warn : OVERLAY.border,
                         }}>
-                        INPUT {inputW}x{inputH}{inputDegraded ? ' - LINK DEGRADED' : ''}
+                        Input {inputW}x{inputH}{inputDegraded ? ' · link degraded' : ''}
                     </span>
                 )}
             </div>
 
             <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 6 }}>
-                <button title="Re-frame the map"
+                <button title="Re-frame the map" className={FOCUS_OVERLAY}
                     onClick={() => { st.current.userMoved = false; st.current.dirty = true }}
-                    style={{
-                        display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px',
-                        borderRadius: 6, fontSize: 10, fontFamily: 'monospace',
-                        background: 'rgba(0,0,0,0.65)', border: '1px solid rgba(255,255,255,0.15)',
-                        color: '#e4e4e7', cursor: 'pointer',
-                    }}>
-                    <RotateCcw size={11} /> FIT
+                    style={ovBtn(false)}>
+                    <RotateCcw size={14} aria-hidden /> Fit
                 </button>
-                <button title="Toggle camera picture-in-picture"
+                <button title="Show or hide the camera picture" className={FOCUS_OVERLAY}
+                    aria-pressed={showPip}
                     onClick={() => setShowPip(v => !v)}
-                    style={{
-                        display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px',
-                        borderRadius: 6, fontSize: 10, fontFamily: 'monospace',
-                        background: showPip ? 'rgba(52,211,153,0.18)' : 'rgba(0,0,0,0.65)',
-                        border: '1px solid rgba(255,255,255,0.15)',
-                        color: showPip ? '#34d399' : '#e4e4e7', cursor: 'pointer',
-                    }}>
-                    <Video size={11} /> CAM
+                    style={ovBtn(showPip)}>
+                    <Video size={14} aria-hidden /> Camera
                 </button>
             </div>
 
             {showPip && (
                 <div style={{
                     position: 'absolute', bottom: 10, left: 10, width: 200,
-                    aspectRatio: '16/9', borderRadius: 8, overflow: 'hidden',
-                    border: '1px solid rgba(255,255,255,0.2)', background: '#000',
+                    aspectRatio: '16/9', borderRadius: 10, overflow: 'hidden',
+                    border: `1px solid ${OVERLAY.border}`, background: '#000',
                 }}>
                     {/* The engine's echo of what it receives - also live proof
                         that frames are reaching the reconstruction. */}

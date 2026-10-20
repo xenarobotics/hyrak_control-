@@ -8,6 +8,7 @@ import { useState } from 'react'
 import { PrefRow, S_INPUT, S_NOTE } from '@/components/settings/primitives'
 import { saveCameraPref, type CameraPref } from '@/lib/mapSightings'
 import { useCameraPref } from './useLiveSightings'
+import { FOCUS } from '@/components/mission/ui'
 
 type Direction = 'down' | 'forward'
 
@@ -21,11 +22,13 @@ function Seg({ value, onChange }: { value: Direction; onChange: (v: Direction) =
             {opts.map(o => (
                 <button key={o.v} type="button" role="radio" aria-checked={value === o.v}
                     onClick={() => onChange(o.v)}
+                    className={FOCUS}
                     style={{
-                        padding: '5px 10px', borderRadius: 6, fontSize: 12, fontFamily: 'monospace', cursor: 'pointer',
-                        border: `1px solid ${value === o.v ? 'rgba(34,211,238,0.55)' : 'hsl(var(--app-border))'}`,
-                        background: value === o.v ? 'rgba(34,211,238,0.10)' : 'transparent',
-                        color: value === o.v ? '#22d3ee' : 'hsl(var(--app-text))',
+                        minHeight: 32, padding: '0 12px', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                        border: `1px solid ${value === o.v ? 'color-mix(in srgb, var(--app-accent) 55%, transparent)' : 'hsl(var(--app-border))'}`,
+                        background: value === o.v ? 'var(--app-accent-soft)' : 'transparent',
+                        color: value === o.v ? 'var(--app-accent)' : 'hsl(var(--app-text))',
+                        transition: 'background-color 120ms, color 120ms',
                     }}>
                     {o.label}
                 </button>
@@ -54,10 +57,10 @@ function NumberField({ label, value, min, max, unit, onCommit }: {
                     value={draft ?? String(value)} aria-invalid={err}
                     onChange={e => { setDraft(e.target.value); setErr(false) }}
                     onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') commit() }}
-                    style={{ ...S_INPUT, width: 76, borderColor: err ? '#f87171' : undefined }} />
+                    style={{ ...S_INPUT, width: 76, borderColor: err ? 'var(--app-danger)' : undefined }} />
                 <span style={S_NOTE}>{unit}</span>
             </div>
-            {err && <span role="alert" style={{ ...S_NOTE, color: '#f87171' }}>Enter {min} to {max}</span>}
+            {err && <span role="alert" style={{ ...S_NOTE, color: 'var(--app-danger)' }}>Enter {min} to {max}</span>}
         </div>
     )
 }
@@ -72,9 +75,8 @@ export function MapCameraGroup() {
     return (
         <>
             {!pref.set && (
-                <p style={{ ...S_NOTE, color: '#d97706', padding: '8px 0 2px' }}>
-                    Not set yet: detections are placed as if the camera points straight down with
-                    an 80° lens. Set it once for this camera.
+                <p style={{ ...S_NOTE, color: 'var(--app-warn)', fontWeight: 600, padding: '8px 0 2px' }}>
+                    Not set yet: detections assume a straight-down camera with an 80° lens.
                 </p>
             )}
             <PrefRow label="Camera direction"
@@ -96,7 +98,7 @@ export function MapCameraGroup() {
                 sub="On a stabilising gimbal, so the drone tilting does not move it"
                 right={<input type="checkbox" aria-label="Camera stays level" checked={pref.stabilised}
                     onChange={e => save({ stabilised: e.target.checked })}
-                    style={{ accentColor: '#22d3ee', width: 16, height: 16 }} />} />
+                    className={FOCUS} style={{ accentColor: 'var(--app-accent)', width: 18, height: 18 }} />} />
         </>
     )
 }

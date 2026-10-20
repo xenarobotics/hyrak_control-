@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import { Settings2, X } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { FOCUS_OVERLAY, OVERLAY_BTN } from '@/components/controls/flightStyles'
 
 export interface OSDWidgetConfig {
     enabled: boolean
@@ -105,23 +107,15 @@ interface Props {
     onPreset: (p: 'minimal' | 'standard' | 'full') => void
 }
 
-function Toggle({ value, onChange }: { value: boolean; onChange: () => void }) {
+function Toggle({ value, onChange, label, disabled }: { value: boolean; onChange: () => void; label: string; disabled?: boolean }) {
     return (
-        <div
-            onClick={onChange}
-            style={{
-                width: 32, height: 16, borderRadius: 8, cursor: 'pointer',
-                background: value ? '#06b6d4' : 'rgba(255,255,255,0.2)',
-                position: 'relative', transition: 'background 0.2s', flexShrink: 0,
-            }}
+        <button type="button" role="switch" aria-checked={value} aria-label={label} onClick={onChange} disabled={disabled}
+            className={cn('relative w-9 h-5 rounded-full shrink-0 border after:absolute after:-inset-1.5 transition-colors duration-[var(--dur)] disabled:cursor-not-allowed', FOCUS_OVERLAY,
+                value ? 'bg-[var(--overlay-accent)] border-[var(--overlay-accent)]' : 'bg-white/15 border-overlay-border')}
         >
-            <div style={{
-                position: 'absolute', top: 2, width: 12, height: 12,
-                borderRadius: '50%', background: 'white',
-                left: value ? 18 : 2,
-                transition: 'left 0.2s',
-            }} />
-        </div>
+            <span className={cn('absolute top-1/2 -translate-y-1/2 left-0 w-3.5 h-3.5 rounded-full transition-transform duration-[var(--dur)]',
+                value ? 'translate-x-[17px] bg-[#04161b]' : 'translate-x-[2px] bg-overlay-text')} />
+        </button>
     )
 }
 
@@ -132,79 +126,48 @@ export function OSDConfigPanel({ config, onUpdate, onPreset }: Props) {
         .filter(k => k !== 'enabled')
 
     return (
-        <div style={{ position: 'relative' }}>
+        <div className="relative">
             {/* Toggle button */}
             <button
                 onClick={() => setOpen(o => !o)}
-                style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    padding: '6px 10px', borderRadius: 8,
-                    background: open ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.5)',
-                    backdropFilter: 'blur(8px)',
-                    border: `1px solid ${open ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.12)'}`,
-                    color: config.enabled ? 'white' : 'rgba(255,255,255,0.4)',
-                    fontFamily: 'monospace', fontSize: 11, cursor: 'pointer',
-                    transition: 'all 0.15s',
-                }}
+                aria-expanded={open}
+                title="Choose what the video overlay shows"
+                className={cn(OVERLAY_BTN, FOCUS_OVERLAY, open && 'bg-[rgba(8,12,18,0.92)] border-white/30',
+                    config.enabled ? 'text-overlay-text' : 'text-overlay-muted')}
             >
-                <Settings2 size={13} />
+                <Settings2 size={14} />
                 OSD
                 {/* Master enabled indicator */}
-                <div style={{
-                    width: 6, height: 6, borderRadius: '50%',
-                    background: config.enabled ? '#4ade80' : 'rgba(255,255,255,0.3)',
-                }} />
+                <span className={cn('w-2 h-2 rounded-full', config.enabled ? 'bg-[var(--overlay-ok)]' : 'bg-overlay-muted')} />
             </button>
 
             {open && (
-                <div style={{
-                    position: 'absolute', top: '100%', right: 0, marginTop: 4,
-                    width: 220, borderRadius: 12, overflow: 'hidden', zIndex: 100,
-                    background: 'rgba(0,0,0,0.82)',
-                    backdropFilter: 'blur(16px)',
-                    border: '1px solid rgba(255,255,255,0.15)',
-                }}>
+                <div className="absolute top-full right-0 mt-1 w-[232px] rounded-[10px] overflow-hidden z-[100] border border-overlay-border text-overlay-text"
+                    style={{ background: 'rgba(8,12,18,0.92)', backdropFilter: 'blur(6px)' }}>
                     {/* Header */}
-                    <div style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        padding: '8px 12px',
-                        borderBottom: '1px solid rgba(255,255,255,0.1)',
-                    }}>
-                        <span style={{ color: 'white', fontSize: 11, fontFamily: 'monospace', fontWeight: 600 }}>
-                            OSD WIDGETS
-                        </span>
-                        <button onClick={() => setOpen(false)}
-                            style={{ color: 'rgba(255,255,255,0.5)', background: 'none', border: 'none', cursor: 'pointer' }}>
-                            <X size={13} />
+                    <div className="flex items-center justify-between px-3 py-1.5 border-b border-overlay-border">
+                        <span className="text-[13px] font-bold">Overlay widgets</span>
+                        <button onClick={() => setOpen(false)} aria-label="Close" title="Close"
+                            className={cn('h-8 w-8 -mr-2 flex items-center justify-center rounded-md text-overlay-muted hover:text-overlay-text', FOCUS_OVERLAY)}>
+                            <X size={15} />
                         </button>
                     </div>
 
                     {/* Master toggle */}
-                    <div style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        padding: '10px 12px',
-                        borderBottom: '1px solid rgba(255,255,255,0.1)',
-                        background: config.enabled ? 'rgba(6,182,212,0.1)' : 'transparent',
-                    }}>
-                        <span style={{ color: config.enabled ? '#67e8f9' : 'rgba(255,255,255,0.5)', fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>
-                            {config.enabled ? 'OVERLAY ON' : 'OVERLAY OFF'}
+                    <div className={cn('flex items-center justify-between px-3 py-2.5 border-b border-overlay-border', config.enabled && 'bg-[rgba(34,211,238,0.10)]')}>
+                        <span className={cn('text-[13px] font-bold', config.enabled ? 'text-[var(--overlay-accent)]' : 'text-overlay-muted')}>
+                            {config.enabled ? 'Overlay on' : 'Overlay off'}
                         </span>
-                        <Toggle value={config.enabled} onChange={() => onUpdate('enabled', !config.enabled)} />
+                        <Toggle label="Video overlay" value={config.enabled} onChange={() => onUpdate('enabled', !config.enabled)} />
                     </div>
 
                     {/* Presets */}
-                    <div style={{ display: 'flex', gap: 6, padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                    <div className="flex gap-1.5 px-3 py-2 border-b border-overlay-border">
                         {(['minimal', 'standard', 'full'] as const).map(p => (
                             <button
                                 key={p}
                                 onClick={() => onPreset(p)}
-                                style={{
-                                    flex: 1, padding: '4px 0', borderRadius: 6, cursor: 'pointer',
-                                    background: 'rgba(255,255,255,0.07)',
-                                    border: '1px solid rgba(255,255,255,0.1)',
-                                    color: 'rgba(255,255,255,0.65)',
-                                    fontSize: 10, fontFamily: 'monospace', textTransform: 'capitalize',
-                                }}
+                                className={cn('flex-1 h-8 rounded-md border border-overlay-border bg-white/5 text-[12px] font-bold capitalize text-overlay-muted hover:text-overlay-text', FOCUS_OVERLAY)}
                             >
                                 {p}
                             </button>
@@ -212,20 +175,14 @@ export function OSDConfigPanel({ config, onUpdate, onPreset }: Props) {
                     </div>
 
                     {/* Individual toggles */}
-                    <div style={{ padding: '4px 0 8px', maxHeight: 240, overflowY: 'auto' }}>
+                    <div className="pt-1 pb-2 max-h-60 overflow-y-auto">
                         {widgetKeys.map(key => (
-                            <div
-                                key={key}
-                                style={{
-                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                    padding: '6px 12px',
-                                    opacity: config.enabled ? 1 : 0.4,
-                                }}
-                            >
-                                <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 11, fontFamily: 'monospace' }}>
+                            <div key={key} className="flex items-center justify-between px-3 py-1.5">
+                                <span className={cn('text-[13px]', config.enabled ? 'text-overlay-text' : 'text-overlay-muted')}>
                                     {WIDGET_LABELS[key]}
                                 </span>
                                 <Toggle
+                                    label={WIDGET_LABELS[key]}
                                     value={config[key] as boolean}
                                     onChange={() => onUpdate(key, !(config[key] as boolean))}
                                 />

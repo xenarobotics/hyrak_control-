@@ -47,23 +47,25 @@ function failure(r: ApiResult<unknown>, action: string): Failure | null {
 function FailureBox({ f, onClose }: { f: Failure | null; onClose?: () => void }) {
     if (!f) return null
     return (
-        <div role="alert" className="border border-red-800/70 bg-red-500/5 rounded p-2 space-y-1">
-            <div className="flex items-center gap-2 text-[9px] tracking-widest text-red-400">
+        <div role="alert" className="border border-app-danger/50 bg-app-danger-soft rounded-md p-2 space-y-1">
+            <div className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-[0.04em] text-app-danger">
                 {f.title}
                 {onClose && (
-                    <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-200" aria-label="Dismiss">x</button>
+                    <button onClick={onClose} className="ml-auto text-app-text-muted hover:text-app-text" aria-label="Dismiss">x</button>
                 )}
             </div>
-            <div className="text-[10px] text-red-200/90 leading-relaxed">{f.text}</div>
+            <div className="text-[12px] text-app-danger leading-relaxed">{f.text}</div>
         </div>
     )
 }
 
-const PANEL_STYLE: React.CSSProperties = {
-    background: 'rgba(17, 19, 24, .94)',
-    backdropFilter: 'blur(12px)',
-    WebkitBackdropFilter: 'blur(12px)',
-    borderColor: 'rgba(255, 255, 255, .08)',
+/** Zone class picker button: a colour swatch + the word, readable in both themes. */
+function classBtnStyle(c: ZoneClass, active: boolean): React.CSSProperties {
+    return {
+        borderColor: active ? ZONE_COLORS[c] : 'hsl(var(--app-border-strong))',
+        background: active ? `${ZONE_COLORS[c]}22` : 'transparent',
+        color: active ? 'hsl(var(--app-text))' : 'hsl(var(--app-text-muted))',
+    }
 }
 
 function ClickCapture({ onClick }: { onClick: (lat: number, lng: number) => void }) {
@@ -278,11 +280,10 @@ export default function ZoneEditor({
 
             {/* Control panel */}
             <div
-                className="absolute left-3 top-3 bottom-3 z-[1000] w-72 rounded-xl border flex flex-col overflow-hidden"
-                style={PANEL_STYLE}
+                className="absolute left-3 top-3 bottom-3 z-[1000] w-72 max-w-[calc(100%-24px)] rounded-[10px] border border-app-border bg-app-surface shadow-[var(--app-shadow)] flex flex-col overflow-hidden"
             >
-                <div className="px-3 py-2.5 text-[10px] tracking-widest text-zinc-500 border-b border-zinc-800/80">
-                    FLIGHT ZONES - {zones.length}
+                <div className="px-3 min-h-10 py-2 text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted border-b border-app-border flex items-center gap-2">
+                    Flight zones <span className="ml-auto tabular-nums">{zones.length}</span>
                 </div>
 
                 {!drawing ? (
@@ -291,12 +292,12 @@ export default function ZoneEditor({
                             {layerOptions.length > 0 ? (
                                 <button
                                     onClick={() => setDrawing(true)}
-                                    className="w-full py-2 rounded border border-cyan-700 text-xs text-cyan-400 hover:border-cyan-500"
+                                    className="w-full h-9 rounded-md bg-app-accent text-app-accent-ink text-[14px] font-bold transition-opacity duration-[120ms] hover:opacity-90"
                                 >
-                                    + DRAW NEW ZONE
+                                    + Draw new zone
                                 </button>
                             ) : (
-                                <div className="text-[10px] text-zinc-500">
+                                <div className="text-[12px] text-app-text-muted">
                                     You can see every zone, but none of your roles edits zones.
                                 </div>
                             )}
@@ -304,7 +305,7 @@ export default function ZoneEditor({
                         </div>
                         <div className="flex-1 overflow-y-auto p-2 pt-0 space-y-2">
                             {zones.length === 0 && (
-                                <div className="text-[10px] text-zinc-500 p-2">
+                                <div className="text-[12px] text-app-text-muted p-2">
                                     No zones yet. Draw your test field&apos;s green / orange / red
                                     areas - the backend enforces them on every connected drone.
                                 </div>
@@ -312,7 +313,7 @@ export default function ZoneEditor({
                             {zones.map(z => (
                                 <div
                                     key={z.properties.id}
-                                    className="border border-zinc-800 rounded p-2.5 text-xs cursor-pointer hover:border-zinc-600"
+                                    className="border border-app-border rounded-md bg-app-surface p-2.5 text-[13px] cursor-pointer transition-colors duration-[120ms] hover:border-app-text-subtle"
                                     onClick={() => setFocusZone(z)}
                                 >
                                     {editingId === z.properties.id ? (
@@ -320,20 +321,19 @@ export default function ZoneEditor({
                                             <input
                                                 value={editName}
                                                 onChange={e => setEditName(e.target.value)}
-                                                className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 outline-none"
+                                                className="w-full bg-app-surface-2 border border-app-border-strong rounded-md px-2 h-8 text-[13px] text-app-text outline-none"
                                             />
                                             <div className="flex gap-1.5">
                                                 {(['green', 'orange', 'red'] as ZoneClass[]).map(c => (
                                                     <button
                                                         key={c}
                                                         onClick={() => setEditClass(c)}
-                                                        className="flex-1 py-1 rounded border text-[9px] uppercase"
-                                                        style={{
-                                                            borderColor: editClass === c ? ZONE_COLORS[c] : 'rgba(255,255,255,.15)',
-                                                            color: editClass === c ? ZONE_COLORS[c] : '#71717a',
-                                                        }}
-                                                    >
-                                                        {c}
+                                                        className="flex-1 h-8 inline-flex items-center justify-center gap-1.5 rounded-md border text-[13px] font-semibold capitalize transition-colors duration-[120ms]"
+ style={classBtnStyle(c, editClass === c)}
+ aria-pressed={editClass === c}
+ >
+ <span className="size-2.5 rounded-full" style={{ background: ZONE_COLORS[c] }} aria-hidden />
+ {c}
                                                     </button>
                                                 ))}
                                             </div>
@@ -342,9 +342,9 @@ export default function ZoneEditor({
                                                     value={editCeiling}
                                                     onChange={e => setEditCeiling(e.target.value.replace(/[^0-9.]/g, ''))}
                                                     placeholder="ceiling m"
-                                                    className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-[10px] text-zinc-200 outline-none placeholder:text-zinc-600"
+                                                    className="flex-1 bg-app-surface-2 border border-app-border-strong rounded-md px-2 h-8 text-[13px] text-app-text outline-none placeholder:text-app-text-subtle"
                                                 />
-                                                <label className="flex items-center gap-1 text-[9px] text-zinc-400">
+                                                <label className="flex items-center gap-1 text-[12px] text-app-text-muted">
                                                     <input
                                                         type="checkbox"
                                                         checked={editActive}
@@ -354,7 +354,7 @@ export default function ZoneEditor({
                                                 </label>
                                             </div>
                                             {editClass === 'red' && (
-                                                <label className="flex items-center gap-1 text-[9px] text-zinc-400"
+                                                <label className="flex items-center gap-1 text-[12px] text-app-text-muted"
                                                     title="Changing this withdraws the permits approved for this zone">
                                                     <input type="checkbox" checked={editProhibited}
                                                         onChange={e => setEditProhibited(e.target.checked)} />
@@ -363,12 +363,12 @@ export default function ZoneEditor({
                                             )}
                                             <div className="flex gap-2">
                                                 <button onClick={() => void saveEdit()}
-                                                    className="flex-1 py-1 rounded border border-emerald-700 text-[10px] text-emerald-400 hover:border-emerald-500">
-                                                    SAVE
+                                                    className="flex-1 h-8 rounded-md border border-app-ok/50 text-[13px] font-semibold text-app-ok hover:bg-app-ok-soft transition-colors duration-[120ms]">
+                                                    Save
                                                 </button>
                                                 <button onClick={() => setEditingId(null)}
-                                                    className="px-3 py-1 rounded border border-zinc-700 text-[10px] text-zinc-400 hover:border-zinc-500">
-                                                    CANCEL
+                                                    className="h-8 px-3 rounded-md border border-app-border-strong text-[13px] font-semibold text-app-text hover:bg-app-surface-2 transition-colors duration-[120ms]">
+                                                    Cancel
                                                 </button>
                                             </div>
                                         </div>
@@ -381,7 +381,7 @@ export default function ZoneEditor({
                                                 />
                                                 <span className={
                                                     'font-semibold truncate ' +
-                                                    (z.properties.active ? 'text-zinc-100' : 'text-zinc-600 line-through')
+                                                    (z.properties.active ? 'text-app-text' : 'text-app-text-muted line-through')
                                                 }>
                                                     {z.properties.name}
                                                 </span>
@@ -389,29 +389,29 @@ export default function ZoneEditor({
                                                     <>
                                                         <button
                                                             onClick={e => { e.stopPropagation(); startEdit(z) }}
-                                                            className="ml-auto text-[10px] text-zinc-600 hover:text-cyan-400"
+                                                            className="ml-auto h-7 px-2 rounded-md text-[13px] font-semibold text-app-text-muted hover:text-app-accent hover:bg-app-surface-2"
                                                         >
-                                                            EDIT
+                                                            Edit
                                                         </button>
                                                         <button
                                                             onClick={e => { e.stopPropagation(); void remove(z) }}
-                                                            className="text-[10px] text-zinc-600 hover:text-red-400"
+                                                            className="h-7 px-2 rounded-md text-[13px] font-semibold text-app-text-muted hover:text-app-danger hover:bg-app-danger-soft"
                                                         >
-                                                            DELETE
+                                                            Delete
                                                         </button>
                                                     </>
                                                 )}
                                             </div>
-                                            <div className="mt-1 text-[9px] text-zinc-600">
-                                                {z.properties.zone_class.toUpperCase()}
-                                                {z.properties.layer && ` · ${LAYER_LABELS[z.properties.layer].toUpperCase()}`}
+                                            <div className="mt-1 text-[12px] text-app-text-muted">
+                                                <span className="capitalize">{z.properties.zone_class}</span>
+                                                {z.properties.layer && ` · ${LAYER_LABELS[z.properties.layer]}`}
                                                 {wsName(z.properties.workspace_id) && z.properties.layer !== 'regulatory' &&
                                                     ` · ${wsName(z.properties.workspace_id)}`}
                                                 {z.properties.ceiling_m != null &&
                                                     ` · up to ${z.properties.ceiling_m} m`}
                                                 {z.properties.zone_class === 'red' && z.properties.permission_required === false &&
-                                                    ' · NO PERMITS'}
-                                                {!z.properties.active && ' · INACTIVE'}
+                                                    ' · no permits'}
+                                                {!z.properties.active && ' · inactive'}
                                             </div>
                                         </>
                                     )}
@@ -420,19 +420,19 @@ export default function ZoneEditor({
                         </div>
                     </>
                 ) : (
-                    <div className="p-3 space-y-3 text-xs overflow-y-auto">
+                    <div className="p-3 space-y-3 text-[13px] overflow-y-auto">
                         <div className="space-y-1">
-                            <div className="text-[9px] tracking-widest text-zinc-500">LAYER</div>
+                            <div className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Layer</div>
                             <div className="flex gap-1.5">
                                 {layerOptions.map(l => (
                                     <button
                                         key={l}
                                         onClick={() => { setPickedLayer(l); setSaveFailure(null) }}
                                         aria-pressed={drawLayer === l}
-                                        className={'flex-1 py-1.5 rounded border text-[10px] uppercase transition-colors ' +
+                                        className={'flex-1 h-8 rounded-md border text-[13px] font-semibold capitalize transition-colors duration-[120ms] ' +
                                             (drawLayer === l
-                                                ? 'border-cyan-500 text-cyan-400 bg-cyan-500/10'
-                                                : 'border-zinc-700 text-zinc-500 hover:border-zinc-500')}
+                                                ? 'border-app-accent text-app-accent bg-app-accent-soft'
+                                                : 'border-app-border-strong text-app-text-muted hover:border-app-text-subtle')}
                                     >
                                         {LAYER_LABELS[l]}
                                     </button>
@@ -442,19 +442,19 @@ export default function ZoneEditor({
 
                         {drawLayer !== 'regulatory' && wsOptions.length > 0 && (
                             <div className="space-y-1">
-                                <label htmlFor="zone-ws" className="block text-[9px] tracking-widest text-zinc-500">WORKSPACE</label>
+                                <label htmlFor="zone-ws" className="block text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Workspace</label>
                                 <select
                                     id="zone-ws"
                                     value={drawWs?.id ?? ''}
                                     onChange={e => { setPickedWs(e.target.value); setSaveFailure(null) }}
-                                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200 outline-none"
+                                    className="w-full bg-app-surface-2 border border-app-border-strong rounded-md px-2 h-8 text-[13px] text-app-text outline-none"
                                 >
                                     {wsOptions.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                                 </select>
                             </div>
                         )}
 
-                        <div className="text-[10px] text-zinc-500 leading-relaxed">
+                        <div className="text-[12px] text-app-text-muted leading-relaxed">
                             {drawLayer === 'regulatory'
                                 ? 'Regulatory zones can go anywhere and apply to every drone.'
                                 : area
@@ -464,7 +464,7 @@ export default function ZoneEditor({
                                         : 'Pick a workspace.'}
                         </div>
 
-                        <div className="text-[10px] text-zinc-500">
+                        <div className="text-[12px] text-app-text-muted">
                             Click the map to add vertices ({points.length} placed
                             {points.length < 3 ? `, need ${3 - points.length} more` : ''})
                         </div>
@@ -474,14 +474,12 @@ export default function ZoneEditor({
                                 <button
                                     key={c}
                                     onClick={() => setZoneClass(c)}
-                                    className="flex-1 py-1.5 rounded border text-[10px] uppercase transition-colors"
-                                    style={{
-                                        borderColor: zoneClass === c ? ZONE_COLORS[c] : 'rgba(255,255,255,.15)',
-                                        color: zoneClass === c ? ZONE_COLORS[c] : '#71717a',
-                                        background: zoneClass === c ? `${ZONE_COLORS[c]}18` : 'transparent',
-                                    }}
-                                >
-                                    {c}
+                                    className="flex-1 h-8 inline-flex items-center justify-center gap-1.5 rounded-md border text-[13px] font-semibold capitalize transition-colors duration-[120ms]"
+ style={classBtnStyle(c, zoneClass === c)}
+ aria-pressed={zoneClass === c}
+ >
+ <span className="size-2.5 rounded-full" style={{ background: ZONE_COLORS[c] }} aria-hidden />
+ {c}
                                 </button>
                             ))}
                         </div>
@@ -490,45 +488,46 @@ export default function ZoneEditor({
                             value={name}
                             onChange={e => setName(e.target.value)}
                             placeholder="zone name (optional)"
-                            className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200 outline-none placeholder:text-zinc-600"
+                            className="w-full bg-app-surface-2 border border-app-border-strong rounded-md px-2 h-8 text-[13px] text-app-text outline-none placeholder:text-app-text-subtle"
                         />
                         <input
                             value={ceiling}
                             onChange={e => setCeiling(e.target.value.replace(/[^0-9.]/g, ''))}
                             placeholder="ceiling m AGL (optional - blank = all altitudes)"
-                            className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200 outline-none placeholder:text-zinc-600"
+                            className="w-full bg-app-surface-2 border border-app-border-strong rounded-md px-2 h-8 text-[13px] text-app-text outline-none placeholder:text-app-text-subtle"
                         />
                         {zoneClass === 'red' && (
-                            <label className="flex items-start gap-2 text-[10px] text-zinc-400">
+                            <label className="flex items-start gap-2 text-[13px] text-app-text-muted">
                                 <input type="checkbox" checked={prohibited} onChange={e => setProhibited(e.target.checked)} className="mt-0.5" />
                                 <span>Prohibited: no permit can be requested (otherwise pilots may ask
                                     to cross it, and reviewers for this area decide).</span>
                             </label>
                         )}
 
-                        {error && <div className="text-[10px] text-red-400">{error}</div>}
+                        {error && <div className="text-[12px] text-app-danger">{error}</div>}
                         <FailureBox f={saveFailure} />
 
                         <div className="flex gap-2">
                             <button
                                 onClick={() => void save()}
                                 disabled={points.length < 3 || saving}
-                                className="flex-1 py-2 rounded border border-emerald-700 text-emerald-400 disabled:border-zinc-800 disabled:text-zinc-600 hover:border-emerald-500"
+                                title={points.length < 3 ? 'Click the map to add at least 3 points' : undefined}
+                                className="flex-1 h-9 rounded-md border border-app-ok/50 bg-app-ok-soft text-[14px] font-bold text-app-ok disabled:cursor-not-allowed disabled:bg-transparent disabled:border-dashed disabled:border-app-border-strong disabled:text-app-text-muted hover:border-app-ok transition-colors duration-[120ms]"
                             >
-                                {saving ? 'SAVING…' : 'SAVE ZONE'}
+                                {saving ? 'Saving…' : 'Save zone'}
                             </button>
                             <button
                                 onClick={() => setPoints(p => p.slice(0, -1))}
                                 disabled={points.length === 0}
-                                className="px-3 py-2 rounded border border-zinc-700 text-zinc-400 disabled:text-zinc-700 hover:border-zinc-500"
+                                className="h-9 px-3 rounded-md border border-app-border-strong text-[13px] font-semibold text-app-text disabled:cursor-not-allowed disabled:border-dashed disabled:text-app-text-muted hover:bg-app-surface-2 transition-colors duration-[120ms]"
                             >
-                                UNDO
+                                Undo
                             </button>
                             <button
                                 onClick={reset}
-                                className="px-3 py-2 rounded border border-zinc-700 text-zinc-400 hover:border-zinc-500"
+                                className="h-9 px-3 rounded-md border border-app-border-strong text-[13px] font-semibold text-app-text hover:bg-app-surface-2 transition-colors duration-[120ms]"
                             >
-                                CANCEL
+                                Cancel
                             </button>
                         </div>
                     </div>

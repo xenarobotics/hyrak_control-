@@ -72,11 +72,10 @@ export function HeadingTape({ width = 300 }: Props) {
                                 {(isMed || isMajor) && (
                                     <text
                                         x={x} y={32}
-                                        fontSize={isMajor ? 11 : 9}
-                                        fill={isMajor ? (cardinalMap[deg] === 'N' ? '#f87171' : 'rgba(255,255,255,0.9)') : 'rgba(255,255,255,0.5)'}
+                                        fontSize={12}
+                                        fill={isMajor ? (cardinalMap[deg] === 'N' ? '#f87171' : '#F2F6FA') : '#C3CCD8'}
                                         textAnchor="middle"
-                                        fontFamily="monospace"
-                                        fontWeight={isMajor ? 'bold' : 'normal'}
+                                        fontWeight={isMajor ? 800 : 600}
                                         stroke="rgba(0,0,0,0.9)" strokeWidth={2.5}
                                         style={{ paintOrder: 'stroke fill' }}
                                     >
@@ -95,14 +94,14 @@ export function HeadingTape({ width = 300 }: Props) {
                 top: -20,
                 left: '50%',
                 transform: 'translateX(-50%)',
-                background: 'rgba(0,0,0,0.6)',
-                border: '1px solid rgba(255,255,255,0.2)',
+                background: 'var(--overlay-scrim)',
+                border: '1px solid var(--overlay-border)',
                 borderRadius: 4,
                 padding: '1px 8px',
-                fontFamily: 'monospace',
+                
                 fontSize: 12,
-                color: 'white',
-                fontWeight: 'bold',
+                color: 'var(--overlay-text)',
+                fontWeight: 800, fontVariantNumeric: 'tabular-nums',
                 whiteSpace: 'nowrap',
             }}>
                 {Math.round(heading).toString().padStart(3, '0')}° {headingToCardinal(heading)}

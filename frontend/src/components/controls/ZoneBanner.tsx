@@ -65,13 +65,14 @@ export function ZoneBanner() {
     return (
         <div
             className={
-                'fixed top-3 left-1/2 -translate-x-1/2 z-[3000] flex items-center gap-2.5 ' +
-                'px-4 py-2.5 rounded-xl font-mono text-[11px] font-bold shadow-2xl ' +
+                'fixed top-3 left-1/2 -translate-x-1/2 z-[3000] flex max-w-[calc(100vw-32px)] items-center gap-2.5 ' +
+                'px-4 py-2.5 rounded-[10px] text-[14px] font-bold shadow-2xl ' +
                 (status.zone_class === 'red' ? 'animate-pulse' : '')
             }
-            style={{ ...styles, backdropFilter: 'blur(8px)' }}
+            role={status.zone_class === 'green' ? 'status' : 'alert'}
+            style={styles}
         >
-            <Icon size={15} />
+            <Icon size={18} className="shrink-0" aria-hidden />
             {status.message}
         </div>
     )

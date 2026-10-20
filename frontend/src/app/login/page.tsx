@@ -2,10 +2,8 @@
 
 import { Suspense, useEffect, useState, type FormEvent } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import Image from 'next/image'
-import { Loader2 } from 'lucide-react'
 import { getToken, login } from '@/lib/auth'
-import { AUTH_INPUT as INPUT, AUTH_LABEL as LABEL } from '@/components/auth/AuthCard'
+import { AuthButton, AuthError, AuthField, AuthFrame, AUTH_NOTE } from '@/components/auth/AuthCard'
 
 const FALLBACK_NEXT = '/fly'
 
@@ -62,69 +60,23 @@ function LoginForm() {
     }
 
     return (
-        <div style={{
-            minHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: 16, background: 'hsl(var(--app-bg))', color: 'hsl(var(--app-text))',
-        }}>
-            <form onSubmit={onSubmit} noValidate style={{
-                width: '100%', maxWidth: 360, padding: '28px 28px 24px', borderRadius: 16,
-                background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))',
-                display: 'flex', flexDirection: 'column', gap: 16,
-            }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <Image src="/brand/icon-dark.png" alt="" width={28} height={28} className="dark:hidden" />
-                    <Image src="/brand/icon.png" alt="" width={28} height={28} className="hidden dark:block" />
-                    <div>
-                        <p style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>Sign in to HYRAK</p>
-                        <p style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>
-                            Sign in with your email or username
-                        </p>
-                    </div>
-                </div>
-
-                <div>
-                    <label htmlFor="login-username" style={LABEL}>EMAIL OR USERNAME</label>
-                    <input
-                        id="login-username" name="username" type="text" autoComplete="username"
-                        autoFocus autoCapitalize="none" spellCheck={false}
-                        value={loginName} onChange={e => setLoginName(e.target.value)}
-                        style={INPUT}
-                    />
-                </div>
-                <div>
-                    <label htmlFor="login-password" style={LABEL}>PASSWORD</label>
-                    <input
-                        id="login-password" name="password" type="password" autoComplete="current-password"
-                        value={password} onChange={e => setPassword(e.target.value)}
-                        style={INPUT}
-                    />
-                </div>
-
-                {error && (
-                    <p role="alert" style={{
-                        margin: 0, fontSize: 12, fontFamily: 'monospace', lineHeight: 1.5,
-                        color: '#f87171',
-                    }}>
-                        {error}
-                    </p>
-                )}
-
-                <button type="submit" disabled={busy} style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                    padding: '10px 14px', borderRadius: 8, border: 'none', cursor: busy ? 'default' : 'pointer',
-                    background: '#22d3ee', color: '#0b1016', fontSize: 13, fontFamily: 'monospace', fontWeight: 700,
-                    opacity: busy ? 0.7 : 1,
-                }}>
-                    {busy && <Loader2 size={14} className="animate-spin" />}
-                    {busy ? 'Signing in' : 'Sign in'}
-                </button>
-
-                <p style={{ margin: 0, fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', lineHeight: 1.5 }}>
-                    No account yet? Ask your workspace owner or HYRAK for an invite link.
-                    Forgot your password? HYRAK can issue a reset link.
-                </p>
-            </form>
-        </div>
+        <AuthFrame title="Sign in to HYRAK" sub="Use your email or username" onSubmit={e => void onSubmit(e)}>
+            <AuthField
+                id="login-username" name="username" label="Email or username" type="text" autoComplete="username"
+                autoFocus autoCapitalize="none" spellCheck={false}
+                value={loginName} onChange={e => setLoginName(e.target.value)}
+            />
+            <AuthField
+                id="login-password" name="password" label="Password" type="password" autoComplete="current-password"
+                value={password} onChange={e => setPassword(e.target.value)}
+            />
+            <AuthError text={error} />
+            <AuthButton busy={busy} busyText="Signing in">Sign in</AuthButton>
+            <p style={AUTH_NOTE}>
+                No account? Ask your workspace owner for an invite link.
+                Forgot your password? Ask HYRAK for a reset link.
+            </p>
+        </AuthFrame>
     )
 }
 

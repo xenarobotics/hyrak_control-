@@ -32,12 +32,16 @@ function ls<T>(key: string, fallback: T): T {
 function lsSet(key: string, val: unknown) {
     if (typeof window !== 'undefined') localStorage.setItem(key, JSON.stringify(val))
 }
+/** A colour (hex or var()) at an alpha, for tints of theme tokens. */
+function mix(c: string, pct: number) {
+    return `color-mix(in srgb, ${c} ${pct}%, transparent)`
+}
 function hColor(pct: number, locked = false) {
-    if (locked) return '#4b5563'
-    if (pct >= 100) return '#4ade80'
-    if (pct >= 65)  return '#22d3ee'
-    if (pct >= 35)  return '#fbbf24'
-    return '#f87171'
+    if (locked) return 'hsl(var(--app-text-muted))'
+    if (pct >= 100) return 'var(--app-ok)'
+    if (pct >= 65)  return 'var(--app-accent)'
+    if (pct >= 35)  return 'var(--app-warn)'
+    return 'var(--app-danger)'
 }
 
 type SectionId = 'connection' | 'vehicle' | 'sensors' | 'radio' | 'power' | 'safety' | 'flight' | 'parameters' | 'attachments'
@@ -89,14 +93,14 @@ const DOMAIN_META: { id: SectionId; label: string; icon: React.ElementType; desc
 ]
 
 const PARAM_CATS = [
-    { id: 'system',    label: 'System',           icon: Cpu,              color: '#22d3ee', desc: 'Core identity and MAVLink' },
-    { id: 'position',  label: 'Position',         icon: Move,             color: '#4ade80', desc: 'Speed and position limits' },
-    { id: 'attitude',  label: 'Attitude & PIDs',  icon: RotateCcw,        color: '#f97316', desc: 'Rate controllers and gains' },
-    { id: 'battery',   label: 'Battery',          icon: Battery,          color: '#fbbf24', desc: 'Cell count and thresholds' },
-    { id: 'safety',    label: 'Safety',           icon: Shield,           color: '#f87171', desc: 'Failsafes and geofence' },
-    { id: 'nav',       label: 'Navigation',       icon: Navigation,       color: '#c084fc', desc: 'Mission waypoints' },
-    { id: 'sensors',   label: 'Sensors & EKF',    icon: Gauge,            color: '#60a5fa', desc: 'Fusion weights and flags' },
-    { id: 'actuators', label: 'Actuators',        icon: SlidersHorizontal,color: '#fb923c', desc: 'Motors and PWM outputs' },
+    { id: 'system',    label: 'System',           icon: Cpu,              color: 'var(--app-accent)', desc: 'Core identity and MAVLink' },
+    { id: 'position',  label: 'Position',         icon: Move,             color: 'var(--app-ok)', desc: 'Speed and position limits' },
+    { id: 'attitude',  label: 'Attitude & PIDs',  icon: RotateCcw,        color: 'light-dark(#c2410c, #f97316)', desc: 'Rate controllers and gains' },
+    { id: 'battery',   label: 'Battery',          icon: Battery,          color: 'var(--app-warn)', desc: 'Cell count and thresholds' },
+    { id: 'safety',    label: 'Safety',           icon: Shield,           color: 'var(--app-danger)', desc: 'Failsafes and geofence' },
+    { id: 'nav',       label: 'Navigation',       icon: Navigation,       color: 'light-dark(#7e22ce, #c084fc)', desc: 'Mission waypoints' },
+    { id: 'sensors',   label: 'Sensors & EKF',    icon: Gauge,            color: 'light-dark(#1d4ed8, #60a5fa)', desc: 'Fusion weights and flags' },
+    { id: 'actuators', label: 'Actuators',        icon: SlidersHorizontal,color: 'light-dark(#c2410c, #fb923c)', desc: 'Motors and PWM outputs' },
 ]
 
 const PARAMS_DB: Param[] = [
@@ -181,11 +185,11 @@ function DroneSVG({ airframe, size = 56 }: { airframe: string; size?: number }) 
     const s = size, c = s / 2
     if (airframe === 'coaxial') return (
         <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`} fill="none">
-            <circle cx={c} cy={c} r={s*0.32} stroke="#22d3ee" strokeWidth={1.2} strokeDasharray="3 3" opacity={0.35} />
-            <circle cx={c} cy={c} r={s*0.16} fill="#22d3ee" opacity={0.15} stroke="#22d3ee" strokeWidth={1.5} />
-            <circle cx={c} cy={c} r={s*0.06} fill="#22d3ee" opacity={0.9} />
-            <line x1={c} y1={c} x2={c} y2={s*0.22} stroke="#22d3ee" strokeWidth={2} opacity={0.5} />
-            <polygon points={`${c},${s*0.14} ${c-s*0.055},${s*0.25} ${c+s*0.055},${s*0.25}`} fill="#22d3ee" opacity={0.8} />
+            <circle cx={c} cy={c} r={s*0.32} stroke="var(--app-accent)" strokeWidth={1.2} strokeDasharray="3 3" opacity={0.35} />
+            <circle cx={c} cy={c} r={s*0.16} fill="var(--app-accent)" opacity={0.15} stroke="var(--app-accent)" strokeWidth={1.5} />
+            <circle cx={c} cy={c} r={s*0.06} fill="var(--app-accent)" opacity={0.9} />
+            <line x1={c} y1={c} x2={c} y2={s*0.22} stroke="var(--app-accent)" strokeWidth={2} opacity={0.5} />
+            <polygon points={`${c},${s*0.14} ${c-s*0.055},${s*0.25} ${c+s*0.055},${s*0.25}`} fill="var(--app-accent)" opacity={0.8} />
         </svg>
     )
     if (airframe === 'hex') return (
@@ -193,41 +197,55 @@ function DroneSVG({ airframe, size = 56 }: { airframe: string; size?: number }) 
             {[0,60,120,180,240,300].map((deg, i) => {
                 const rad = (deg - 90) * Math.PI / 180, r = s * 0.34
                 const x = c + r * Math.cos(rad), y = c + r * Math.sin(rad)
-                return <g key={i}><line x1={c} y1={c} x2={x} y2={y} stroke="#22d3ee" strokeWidth={1.5} opacity={0.4} /><circle cx={x} cy={y} r={s*0.1} fill="#22d3ee" opacity={0.1} stroke="#22d3ee" strokeWidth={1.2} /></g>
+                return <g key={i}><line x1={c} y1={c} x2={x} y2={y} stroke="var(--app-accent)" strokeWidth={1.5} opacity={0.4} /><circle cx={x} cy={y} r={s*0.1} fill="var(--app-accent)" opacity={0.1} stroke="var(--app-accent)" strokeWidth={1.2} /></g>
             })}
-            <circle cx={c} cy={c} r={s*0.13} fill="#22d3ee" opacity={0.15} stroke="#22d3ee" strokeWidth={1.5} />
-            <circle cx={c} cy={c} r={s*0.055} fill="#22d3ee" opacity={0.9} />
-            <polygon points={`${c},${c-s*0.12} ${c-s*0.055},${c-s*0.02} ${c+s*0.055},${c-s*0.02}`} fill="#22d3ee" opacity={0.8} />
+            <circle cx={c} cy={c} r={s*0.13} fill="var(--app-accent)" opacity={0.15} stroke="var(--app-accent)" strokeWidth={1.5} />
+            <circle cx={c} cy={c} r={s*0.055} fill="var(--app-accent)" opacity={0.9} />
+            <polygon points={`${c},${c-s*0.12} ${c-s*0.055},${c-s*0.02} ${c+s*0.055},${c-s*0.02}`} fill="var(--app-accent)" opacity={0.8} />
         </svg>
     )
     if (airframe === 'vtol-tilt') return (
         <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`} fill="none">
-            <ellipse cx={c} cy={c} rx={s*0.07} ry={s*0.22} fill="#22d3ee" opacity={0.18} stroke="#22d3ee" strokeWidth={1.3} />
-            <ellipse cx={s*0.25} cy={c} rx={s*0.18} ry={s*0.055} fill="#22d3ee" opacity={0.1} stroke="#22d3ee" strokeWidth={1} />
-            <ellipse cx={s*0.75} cy={c} rx={s*0.18} ry={s*0.055} fill="#22d3ee" opacity={0.1} stroke="#22d3ee" strokeWidth={1} />
-            {[s*0.14, s*0.37, s*0.63, s*0.86].map((x, i) => <circle key={i} cx={x} cy={s*0.38} r={s*0.08} fill="#22d3ee" opacity={0.1} stroke="#22d3ee" strokeWidth={1} />)}
-            <polygon points={`${c},${s*0.28} ${c-s*0.055},${s*0.4} ${c+s*0.055},${s*0.4}`} fill="#22d3ee" opacity={0.8} />
+            <ellipse cx={c} cy={c} rx={s*0.07} ry={s*0.22} fill="var(--app-accent)" opacity={0.18} stroke="var(--app-accent)" strokeWidth={1.3} />
+            <ellipse cx={s*0.25} cy={c} rx={s*0.18} ry={s*0.055} fill="var(--app-accent)" opacity={0.1} stroke="var(--app-accent)" strokeWidth={1} />
+            <ellipse cx={s*0.75} cy={c} rx={s*0.18} ry={s*0.055} fill="var(--app-accent)" opacity={0.1} stroke="var(--app-accent)" strokeWidth={1} />
+            {[s*0.14, s*0.37, s*0.63, s*0.86].map((x, i) => <circle key={i} cx={x} cy={s*0.38} r={s*0.08} fill="var(--app-accent)" opacity={0.1} stroke="var(--app-accent)" strokeWidth={1} />)}
+            <polygon points={`${c},${s*0.28} ${c-s*0.055},${s*0.4} ${c+s*0.055},${s*0.4}`} fill="var(--app-accent)" opacity={0.8} />
         </svg>
     )
     return (
         <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`} fill="none">
             {[[s*0.21,s*0.21],[s*0.79,s*0.21],[s*0.21,s*0.79],[s*0.79,s*0.79]].map(([x,y],i) => (
-                <g key={i}><line x1={c} y1={c} x2={x} y2={y} stroke="#22d3ee" strokeWidth={1.8} opacity={0.4} /><circle cx={x} cy={y} r={s*0.14} fill="#22d3ee" opacity={0.1} stroke="#22d3ee" strokeWidth={1.5} /></g>
+                <g key={i}><line x1={c} y1={c} x2={x} y2={y} stroke="var(--app-accent)" strokeWidth={1.8} opacity={0.4} /><circle cx={x} cy={y} r={s*0.14} fill="var(--app-accent)" opacity={0.1} stroke="var(--app-accent)" strokeWidth={1.5} /></g>
             ))}
-            <circle cx={c} cy={c} r={s*0.14} fill="#22d3ee" opacity={0.18} stroke="#22d3ee" strokeWidth={1.5} />
-            <circle cx={c} cy={c} r={s*0.063} fill="#22d3ee" opacity={0.9} />
-            <polygon points={`${c},${c-s*0.15} ${c-s*0.055},${c-s*0.05} ${c+s*0.055},${c-s*0.05}`} fill="#22d3ee" opacity={0.8} />
+            <circle cx={c} cy={c} r={s*0.14} fill="var(--app-accent)" opacity={0.18} stroke="var(--app-accent)" strokeWidth={1.5} />
+            <circle cx={c} cy={c} r={s*0.063} fill="var(--app-accent)" opacity={0.9} />
+            <polygon points={`${c},${c-s*0.15} ${c-s*0.055},${c-s*0.05} ${c+s*0.055},${c-s*0.05}`} fill="var(--app-accent)" opacity={0.8} />
         </svg>
     )
 }
 
-function StatusRing({ pct, color, size = 44 }: { pct: number; color: string; size?: number }) {
-    const r = (size - 7) / 2, circ = 2 * Math.PI * r
+function StatusRing({ pct, color, size = 44, stroke = 3.5 }: { pct: number; color: string; size?: number; stroke?: number }) {
+    const r = (size - stroke * 2) / 2, circ = 2 * Math.PI * r
     return (
-        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform: 'rotate(-90deg)', flexShrink: 0 }}>
-            <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(128,128,128,0.15)" strokeWidth={3.5} />
-            <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={3.5} strokeDasharray={`${circ * pct / 100} ${circ}`} strokeLinecap="round" />
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform: 'rotate(-90deg)', flexShrink: 0 }} aria-hidden>
+            <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="hsl(var(--app-border))" strokeWidth={stroke} />
+            <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeDasharray={`${circ * pct / 100} ${circ}`} strokeLinecap="round" />
         </svg>
+    )
+}
+
+/** A readiness ring with its value inside; a check at 100 so 3 digits never
+ *  overflow the ring. Only rendered for values that are measured. */
+function ReadinessRing({ pct, color, size = 52 }: { pct: number; color: string; size?: number }) {
+    return (
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+            role="img" aria-label={`${pct.toFixed(0)}% ready`}>
+            <StatusRing pct={pct} color={color} size={size} stroke={4} />
+            <span style={{ position: 'absolute', fontSize: size >= 52 ? 14 : 12, fontWeight: 800, color, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
+                {pct >= 100 ? <Check size={size >= 52 ? 20 : 16} strokeWidth={3} /> : <>{pct.toFixed(0)}<span style={{ fontSize: 12, fontWeight: 700 }}>%</span></>}
+            </span>
+        </div>
     )
 }
 
@@ -236,31 +254,31 @@ function StatusRing({ pct, color, size = 44 }: { pct: number; color: string; siz
 function NetworkTopology({ connected, address }: { connected: boolean; address: string }) {
     const proto = address.split('://')[0]?.toUpperCase() ?? 'UDP'
     const host  = address.split('://')[1]?.split(':')[0] ?? '-'
-    const lc = connected ? '#22d3ee' : 'rgba(75,85,99,0.6)'
-    const lc2 = connected ? '#4ade80' : 'rgba(75,85,99,0.6)'
+    const lc = connected ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))'
+    const lc2 = connected ? 'var(--app-ok)' : 'hsl(var(--app-text-muted))'
     return (
         <svg viewBox="0 0 340 64" style={{ width: '100%', display: 'block', overflow: 'visible' }}>
             {/* GCS */}
-            <rect x={2} y={18} width={60} height={28} rx={6} fill="rgba(34,211,238,0.08)" stroke="#22d3ee" strokeWidth={1.5} />
-            <text x={32} y={30} textAnchor="middle" fontSize={9} fontFamily="monospace" fontWeight="700" fill="#22d3ee">GCS</text>
-            <text x={32} y={42} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="rgba(255,255,255,0.3)">hyrak</text>
+            <rect x={2} y={18} width={60} height={28} rx={6} fill="color-mix(in srgb, var(--app-accent) 8%, transparent)" stroke="var(--app-accent)" strokeWidth={1.5} />
+            <text x={32} y={30} textAnchor="middle" fontSize={11} fontFamily="inherit" fontWeight="700" fill="var(--app-accent)">GCS</text>
+            <text x={32} y={42} textAnchor="middle" fontSize={9} fontFamily="inherit" fill="hsl(var(--app-text-muted))">hyrak</text>
             {/* Line 1 */}
             <line x1={62} y1={32} x2={118} y2={32} stroke={lc} strokeWidth={1.5} strokeDasharray={connected ? undefined : '4 3'} />
-            {connected && <circle r={2.5} fill="#22d3ee"><animateMotion dur="1.4s" repeatCount="indefinite" path="M 62,32 L 118,32" /></circle>}
+            {connected && <circle r={2.5} fill="var(--app-accent)"><animateMotion dur="1.4s" repeatCount="indefinite" path="M 62,32 L 118,32" /></circle>}
             {/* Link node */}
-            <rect x={118} y={18} width={84} height={28} rx={6} fill={connected ? 'rgba(34,211,238,0.06)' : 'rgba(75,85,99,0.06)'} stroke={lc} strokeWidth={1.5} />
-            <text x={160} y={30} textAnchor="middle" fontSize={9} fontFamily="monospace" fontWeight="700" fill={lc}>{proto}</text>
-            <text x={160} y={42} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="rgba(255,255,255,0.25)">{host}</text>
+            <rect x={118} y={18} width={84} height={28} rx={6} fill={connected ? 'color-mix(in srgb, var(--app-accent) 6%, transparent)' : 'hsl(var(--app-text-subtle) / 0.06)'} stroke={lc} strokeWidth={1.5} />
+            <text x={160} y={30} textAnchor="middle" fontSize={11} fontFamily="inherit" fontWeight="700" fill={lc}>{proto}</text>
+            <text x={160} y={42} textAnchor="middle" fontSize={9} fontFamily="inherit" fill="hsl(var(--app-text-muted))">{host}</text>
             {/* Line 2 */}
             <line x1={202} y1={32} x2={258} y2={32} stroke={lc2} strokeWidth={1.5} strokeDasharray={connected ? undefined : '4 3'} />
-            {connected && <circle r={2.5} fill="#4ade80"><animateMotion dur="1.4s" repeatCount="indefinite" path="M 202,32 L 258,32" begin="0.7s" /></circle>}
+            {connected && <circle r={2.5} fill="var(--app-ok)"><animateMotion dur="1.4s" repeatCount="indefinite" path="M 202,32 L 258,32" begin="0.7s" /></circle>}
             {/* FC */}
-            <rect x={258} y={18} width={60} height={28} rx={6} fill={connected ? 'rgba(74,222,128,0.08)' : 'rgba(75,85,99,0.06)'} stroke={lc2} strokeWidth={1.5} />
-            <text x={288} y={30} textAnchor="middle" fontSize={9} fontFamily="monospace" fontWeight="700" fill={lc2}>FC</text>
-            <text x={288} y={42} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="rgba(255,255,255,0.25)">autopilot</text>
+            <rect x={258} y={18} width={60} height={28} rx={6} fill={connected ? 'color-mix(in srgb, var(--app-ok) 8%, transparent)' : 'hsl(var(--app-text-subtle) / 0.06)'} stroke={lc2} strokeWidth={1.5} />
+            <text x={288} y={30} textAnchor="middle" fontSize={11} fontFamily="inherit" fontWeight="700" fill={lc2}>FC</text>
+            <text x={288} y={42} textAnchor="middle" fontSize={9} fontFamily="inherit" fill="hsl(var(--app-text-muted))">autopilot</text>
             {/* Labels */}
-            <text x={90} y={14} textAnchor="middle" fontSize={7} fontFamily="monospace" fill={connected ? 'rgba(34,211,238,0.6)' : 'rgba(75,85,99,0.5)'}>MAVLink</text>
-            <text x={230} y={14} textAnchor="middle" fontSize={7} fontFamily="monospace" fill={connected ? 'rgba(74,222,128,0.6)' : 'rgba(75,85,99,0.5)'}>MAVSDK</text>
+            <text x={90} y={14} textAnchor="middle" fontSize={9} fontFamily="inherit" fill={connected ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))'}>MAVLink</text>
+            <text x={230} y={14} textAnchor="middle" fontSize={9} fontFamily="inherit" fill={connected ? 'var(--app-ok)' : 'hsl(var(--app-text-muted))'}>MAVSDK</text>
         </svg>
     )
 }
@@ -270,23 +288,23 @@ function BatteryCellsViz({ cells, totalV }: { cells: string; totalV?: number }) 
     const n = Math.min(parseInt(cells) || 4, 12)
     const estV = totalV ? totalV / n : 4.1
     const fillPct = Math.min(Math.max(((estV - 3.0) / (4.2 - 3.0)) * 100, 0), 100)
-    const cellColor = fillPct > 60 ? '#22d3ee' : fillPct > 30 ? '#fbbf24' : '#f87171'
+    const cellColor = fillPct > 60 ? 'var(--app-accent)' : fillPct > 30 ? 'var(--app-warn)' : 'var(--app-danger)'
     return (
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 5 }}>
-            <div style={{ width: 6, height: 22, background: 'rgba(255,255,255,0.12)', borderRadius: 2, alignSelf: 'center' }} />
+            <div style={{ width: 6, height: 22, background: 'hsl(var(--app-text) / 0.12)', borderRadius: 2, alignSelf: 'center' }} />
             {Array.from({ length: n }, (_, i) => (
                 <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                    <div style={{ width: 8, height: 5, background: `${cellColor}60`, borderRadius: '2px 2px 0 0' }} />
-                    <div style={{ width: 20, height: 52, borderRadius: 3, background: 'rgba(0,0,0,0.4)', border: `1.5px solid ${cellColor}40`, position: 'relative', overflow: 'hidden' }}>
-                        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${fillPct}%`, background: `linear-gradient(to top, ${cellColor}, ${cellColor}40)` }} />
-                        <span style={{ position: 'absolute', bottom: 2, left: 0, right: 0, textAlign: 'center', fontSize: 6, fontFamily: 'monospace', color: 'rgba(255,255,255,0.5)', lineHeight: 1 }}>{estV.toFixed(1)}</span>
+                    <div style={{ width: 8, height: 5, background: `${mix(cellColor, 38)}`, borderRadius: '2px 2px 0 0' }} />
+                    <div style={{ width: 20, height: 52, borderRadius: 3, background: 'hsl(var(--app-surface-2))', border: `1.5px solid ${mix(cellColor, 25)}`, position: 'relative', overflow: 'hidden' }}>
+                        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${fillPct}%`, background: `linear-gradient(to top, ${cellColor}, ${mix(cellColor, 25)})` }} />
+                        <span style={{ position: 'absolute', bottom: 2, left: 0, right: 0, textAlign: 'center', fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', lineHeight: 1 }}>{estV.toFixed(1)}</span>
                     </div>
-                    <span style={{ fontSize: 7, fontFamily: 'monospace', color: 'rgba(255,255,255,0.25)' }}>S{i+1}</span>
+                    <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>S{i+1}</span>
                 </div>
             ))}
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-                <div style={{ width: 8, height: 8, background: '#4ade80', borderRadius: 1, opacity: 0.7 }} />
-                <div style={{ width: 6, height: 18, background: 'rgba(255,255,255,0.12)', borderRadius: 2 }} />
+                <div style={{ width: 8, height: 8, background: 'var(--app-ok)', borderRadius: 1, opacity: 0.7 }} />
+                <div style={{ width: 6, height: 18, background: 'hsl(var(--app-text) / 0.12)', borderRadius: 2 }} />
             </div>
         </div>
     )
@@ -300,66 +318,66 @@ function DischargeCurve({ warnPct, critPct }: { warnPct: number; critPct: number
     return (
         <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block' }}>
             <defs><clipPath id="dcc"><rect x={0} y={0} width={W} height={H} /></clipPath></defs>
-            <rect x={0} y={0} width={critX} height={H} fill="rgba(248,113,113,0.07)" clipPath="url(#dcc)" />
-            <rect x={critX} y={0} width={warnX-critX} height={H} fill="rgba(251,191,36,0.06)" clipPath="url(#dcc)" />
-            <rect x={warnX} y={0} width={W-warnX} height={H} fill="rgba(74,222,128,0.04)" clipPath="url(#dcc)" />
-            <path d={`${curve} L ${W},${H} L 0,${H} Z`} fill="rgba(34,211,238,0.05)" />
-            <path d={curve} fill="none" stroke="#22d3ee" strokeWidth={1.8} opacity={0.7} />
-            <line x1={warnX} y1={0} x2={warnX} y2={H} stroke="#fbbf24" strokeWidth={1.5} strokeDasharray="4 3" />
-            <text x={warnX-3} y={10} textAnchor="end" fontSize={7} fontFamily="monospace" fill="#fbbf24">{warnPct}%</text>
-            <line x1={critX} y1={0} x2={critX} y2={H} stroke="#f87171" strokeWidth={1.5} strokeDasharray="4 3" />
-            <text x={critX-3} y={10} textAnchor="end" fontSize={7} fontFamily="monospace" fill="#f87171">{critPct}%</text>
-            <text x={1} y={H-2} fontSize={6} fontFamily="monospace" fill="rgba(255,255,255,0.18)">100% · 4.2V</text>
-            <text x={W-1} y={H-2} textAnchor="end" fontSize={6} fontFamily="monospace" fill="rgba(255,255,255,0.18)">0% · 3.0V</text>
+            <rect x={0} y={0} width={critX} height={H} fill="color-mix(in srgb, var(--app-danger) 7%, transparent)" clipPath="url(#dcc)" />
+            <rect x={critX} y={0} width={warnX-critX} height={H} fill="color-mix(in srgb, var(--app-warn) 6%, transparent)" clipPath="url(#dcc)" />
+            <rect x={warnX} y={0} width={W-warnX} height={H} fill="color-mix(in srgb, var(--app-ok) 4%, transparent)" clipPath="url(#dcc)" />
+            <path d={`${curve} L ${W},${H} L 0,${H} Z`} fill="color-mix(in srgb, var(--app-accent) 5%, transparent)" />
+            <path d={curve} fill="none" stroke="var(--app-accent)" strokeWidth={1.8} opacity={0.7} />
+            <line x1={warnX} y1={0} x2={warnX} y2={H} stroke="var(--app-warn)" strokeWidth={1.5} strokeDasharray="4 3" />
+            <text x={warnX-3} y={10} textAnchor="end" fontSize={9} fontFamily="inherit" fill="var(--app-warn)">{warnPct}%</text>
+            <line x1={critX} y1={0} x2={critX} y2={H} stroke="var(--app-danger)" strokeWidth={1.5} strokeDasharray="4 3" />
+            <text x={critX-3} y={10} textAnchor="end" fontSize={9} fontFamily="inherit" fill="var(--app-danger)">{critPct}%</text>
+            <text x={1} y={H-2} fontSize={8} fontFamily="inherit" fill="hsl(var(--app-text-muted))">100% · 4.2V</text>
+            <text x={W-1} y={H-2} textAnchor="end" fontSize={8} fontFamily="inherit" fill="hsl(var(--app-text-muted))">0% · 3.0V</text>
         </svg>
     )
 }
 
 function GeofenceMap({ maxDist, maxDistEnabled, rthAlt }: { maxDist: number; maxDistEnabled: boolean; rthAlt: number }) {
-    const labels: [string, number, string][] = [['N',0,'#f87171'],['E',90,'rgba(255,255,255,0.3)'],['S',180,'rgba(255,255,255,0.3)'],['W',270,'rgba(255,255,255,0.3)']]
+    const labels: [string, number, string][] = [['N',0,'var(--app-danger)'],['E',90,'hsl(var(--app-text-muted))'],['S',180,'hsl(var(--app-text-muted))'],['W',270,'hsl(var(--app-text-muted))']]
     return (
-        <svg viewBox="-112 -112 224 224" style={{ width: '100%', display: 'block' }}>
+        <svg viewBox="-112 -112 224 224" style={{ width: '100%', display: 'block' }} role="img" aria-label="Top-down view of the distance fence and return altitude">
             <defs>
                 <radialGradient id="gfbg" cx="50%" cy="50%" r="50%">
-                    <stop offset="0%" stopColor="rgba(34,211,238,0.04)" />
+                    <stop offset="0%" stopColor="color-mix(in srgb, var(--app-accent) 4%, transparent)" />
                     <stop offset="100%" stopColor="rgba(0,0,0,0)" />
                 </radialGradient>
             </defs>
-            <circle r={106} fill="#090e14" />
+            <circle r={106} fill="hsl(var(--app-surface-2))" />
             <circle r={106} fill="url(#gfbg)" />
             {[-80,-60,-40,-20,0,20,40,60,80].map(v => (
                 <g key={v}>
-                    <line x1={v} y1={-100} x2={v} y2={100} stroke="rgba(255,255,255,0.025)" strokeWidth={0.5} />
-                    <line x1={-100} y1={v} x2={100} y2={v} stroke="rgba(255,255,255,0.025)" strokeWidth={0.5} />
+                    <line x1={v} y1={-100} x2={v} y2={100} stroke="hsl(var(--app-text) / 0.025)" strokeWidth={0.5} />
+                    <line x1={-100} y1={v} x2={100} y2={v} stroke="hsl(var(--app-text) / 0.025)" strokeWidth={0.5} />
                 </g>
             ))}
-            <circle r={100} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={0.8} />
+            <circle r={100} fill="none" stroke="hsl(var(--app-text) / 0.06)" strokeWidth={0.8} />
             {[30,60,90,120,150,180,210,240,270,300,330,0].map(d => {
                 const rad=(d-90)*Math.PI/180
-                return <line key={d} x1={96*Math.cos(rad)} y1={96*Math.sin(rad)} x2={100*Math.cos(rad)} y2={100*Math.sin(rad)} stroke="rgba(255,255,255,0.12)" strokeWidth={d%90===0?1.5:0.5} />
+                return <line key={d} x1={96*Math.cos(rad)} y1={96*Math.sin(rad)} x2={100*Math.cos(rad)} y2={100*Math.sin(rad)} stroke="hsl(var(--app-text) / 0.12)" strokeWidth={d%90===0?1.5:0.5} />
             })}
             {labels.map(([l,d,col]) => {
                 const rad=(d-90)*Math.PI/180
-                return <text key={l} x={82*Math.cos(rad)} y={82*Math.sin(rad)+3} textAnchor="middle" fontSize={8} fontFamily="monospace" fontWeight="700" fill={col}>{l}</text>
+                return <text key={l} x={82*Math.cos(rad)} y={82*Math.sin(rad)+3} textAnchor="middle" fontSize={11} fontFamily="inherit" fontWeight="700" fill={col}>{l}</text>
             })}
             {/* Safe zone */}
-            <circle r={48} fill="rgba(74,222,128,0.03)" stroke="rgba(74,222,128,0.15)" strokeWidth={1} strokeDasharray="2 5" />
+            <circle r={48} fill="color-mix(in srgb, var(--app-ok) 3%, transparent)" stroke="color-mix(in srgb, var(--app-ok) 45%, transparent)" strokeWidth={1} strokeDasharray="2 5" />
             {/* Max distance fence */}
             {maxDistEnabled ? (
                 <>
-                    <circle r={78} fill="rgba(248,113,113,0.04)" stroke="#f87171" strokeWidth={1.5} strokeDasharray="5 3" opacity={0.7} />
-                    <text x={80} y={-3} fontSize={7} fontFamily="monospace" fill="#f87171">{maxDist}m</text>
+                    <circle r={78} fill="color-mix(in srgb, var(--app-danger) 4%, transparent)" stroke="var(--app-danger)" strokeWidth={1.5} strokeDasharray="5 3" opacity={0.7} />
+                    <text x={80} y={-3} fontSize={9.5} fontFamily="inherit" fill="var(--app-danger)">{maxDist}m</text>
                 </>
             ) : (
-                <circle r={78} fill="none" stroke="rgba(75,85,99,0.2)" strokeWidth={1} strokeDasharray="4 4" />
+                <circle r={78} fill="none" stroke="hsl(var(--app-text-subtle) / 0.2)" strokeWidth={1} strokeDasharray="4 4" />
             )}
             {/* RTH circle (indicates RTH altitude conceptually) */}
-            <circle r={28} fill="none" stroke="rgba(34,211,238,0.12)" strokeWidth={0.8} strokeDasharray="2 5" />
+            <circle r={28} fill="none" stroke="color-mix(in srgb, var(--app-accent) 45%, transparent)" strokeWidth={0.8} strokeDasharray="2 5" />
             {/* Home */}
-            <circle r={5} fill="#22d3ee" opacity={0.9} />
-            <line x1={0} y1={0} x2={0} y2={-10} stroke="#22d3ee" strokeWidth={1.5} opacity={0.7} />
-            <text x={7} y={-8} fontSize={7} fontFamily="monospace" fill="#22d3ee">H</text>
-            <text x={0} y={-31} textAnchor="middle" fontSize={6} fontFamily="monospace" fill="rgba(34,211,238,0.45)">RTH {rthAlt}m</text>
+            <circle r={5} fill="var(--app-accent)" opacity={0.9} />
+            <line x1={0} y1={0} x2={0} y2={-10} stroke="var(--app-accent)" strokeWidth={1.5} opacity={0.7} />
+            <text x={7} y={-8} fontSize={9.5} fontFamily="inherit" fill="var(--app-accent)">H</text>
+            <text x={0} y={-31} textAnchor="middle" fontSize={9} fontFamily="inherit" fill="var(--app-accent)">RTH {rthAlt}m</text>
         </svg>
     )
 }
@@ -374,51 +392,53 @@ function AltitudeProfile({ takeoffAlt, rthAlt, maxAlt, maxAltEnabled }: { takeof
             {/* Sky gradient */}
             <defs>
                 <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="rgba(34,211,238,0.06)" />
-                    <stop offset="100%" stopColor="rgba(34,211,238,0)" />
+                    <stop offset="0%" stopColor="color-mix(in srgb, var(--app-accent) 6%, transparent)" />
+                    <stop offset="100%" stopColor="color-mix(in srgb, var(--app-accent) 0%, transparent)" />
                 </linearGradient>
             </defs>
             <rect x={0} y={0} width={W} height={H} fill="url(#sky)" />
             {/* Ceiling */}
             {maxAltEnabled && <>
-                <rect x={0} y={0} width={W} height={my} fill="rgba(248,113,113,0.04)" />
-                <line x1={0} y1={my} x2={W} y2={my} stroke="#f87171" strokeWidth={1.5} strokeDasharray="6 3" />
-                <text x={W-4} y={my-4} textAnchor="end" fontSize={7} fontFamily="monospace" fill="#f87171">{maxAlt}m ceiling</text>
+                <rect x={0} y={0} width={W} height={my} fill="color-mix(in srgb, var(--app-danger) 4%, transparent)" />
+                <line x1={0} y1={my} x2={W} y2={my} stroke="var(--app-danger)" strokeWidth={1.5} strokeDasharray="6 3" />
+                <text x={W-4} y={my-4} textAnchor="end" fontSize={7} fontFamily="inherit" fill="var(--app-danger)">{maxAlt}m ceiling</text>
             </>}
             {/* RTH altitude */}
-            <line x1={0} y1={ry} x2={W} y2={ry} stroke="#22d3ee" strokeWidth={1} strokeDasharray="6 4" opacity={0.45} />
-            <text x={W-4} y={ry-4} textAnchor="end" fontSize={7} fontFamily="monospace" fill="rgba(34,211,238,0.6)">RTH {rthAlt}m</text>
+            <line x1={0} y1={ry} x2={W} y2={ry} stroke="var(--app-accent)" strokeWidth={1} strokeDasharray="6 4" opacity={0.45} />
+            <text x={W-4} y={ry-4} textAnchor="end" fontSize={7} fontFamily="inherit" fill="var(--app-accent)">RTH {rthAlt}m</text>
             {/* Takeoff */}
-            <line x1={44} y1={H} x2={44} y2={ty} stroke="#4ade80" strokeWidth={2.5} opacity={0.7} />
-            <polygon points={`${44},${ty-9} ${40},${ty} ${48},${ty}`} fill="#4ade80" opacity={0.8} />
-            <circle cx={44} cy={ty} r={3.5} fill="#4ade80" />
-            <text x={50} y={ty+4} fontSize={7} fontFamily="monospace" fill="#4ade80">{takeoffAlt}m</text>
+            <line x1={44} y1={H} x2={44} y2={ty} stroke="var(--app-ok)" strokeWidth={2.5} opacity={0.7} />
+            <polygon points={`${44},${ty-9} ${40},${ty} ${48},${ty}`} fill="var(--app-ok)" opacity={0.8} />
+            <circle cx={44} cy={ty} r={3.5} fill="var(--app-ok)" />
+            <text x={50} y={ty+4} fontSize={7} fontFamily="inherit" fill="var(--app-ok)">{takeoffAlt}m</text>
             {/* RTH flight path */}
-            <path d={`M 110,${ty} L 110,${ry} L 200,${ry}`} fill="none" stroke="#22d3ee" strokeWidth={1.5} strokeDasharray="5 3" opacity={0.35} />
-            <text x={204} y={ry+4} fontSize={7} fontFamily="monospace" fill="rgba(34,211,238,0.45)">→ H</text>
+            <path d={`M 110,${ty} L 110,${ry} L 200,${ry}`} fill="none" stroke="var(--app-accent)" strokeWidth={1.5} strokeDasharray="5 3" opacity={0.35} />
+            <text x={204} y={ry+4} fontSize={7} fontFamily="inherit" fill="var(--app-accent)">→ H</text>
             {/* Ground */}
-            <rect x={0} y={H} width={W} height={22} fill="rgba(74,222,128,0.06)" />
-            <line x1={0} y1={H} x2={W} y2={H} stroke="rgba(74,222,128,0.4)" strokeWidth={1.5} />
-            <text x={44} y={H+15} textAnchor="middle" fontSize={8} fontFamily="monospace" fill="rgba(255,255,255,0.25)">H</text>
-            <text x={W-4} y={H+15} textAnchor="end" fontSize={7} fontFamily="monospace" fill="rgba(255,255,255,0.15)">0m AGL</text>
+            <rect x={0} y={H} width={W} height={22} fill="color-mix(in srgb, var(--app-ok) 6%, transparent)" />
+            <line x1={0} y1={H} x2={W} y2={H} stroke="color-mix(in srgb, var(--app-ok) 40%, transparent)" strokeWidth={1.5} />
+            <text x={44} y={H+15} textAnchor="middle" fontSize={8} fontFamily="inherit" fill="hsl(var(--app-text-muted))">H</text>
+            <text x={W-4} y={H+15} textAnchor="end" fontSize={7} fontFamily="inherit" fill="hsl(var(--app-text-muted))">0m AGL</text>
         </svg>
     )
 }
 
 // ── Primitives ────────────────────────────────────────────────────────────────
 
+const FOCUS_RING = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--app-accent)]'
+
 function Tip({ text }: { text: string }) {
     return (
         <Tooltip>
-            <TooltipTrigger style={{ background: 'none', border: 'none', padding: 0, cursor: 'help', display: 'flex' }}><Info size={11} style={{ color: 'hsl(var(--app-text-muted))' }} /></TooltipTrigger>
-            <TooltipContent style={{ maxWidth: 220, fontSize: 11, lineHeight: 1.5 }}>{text}</TooltipContent>
+            <TooltipTrigger aria-label="More info" className={'rounded-full ' + FOCUS_RING} style={{ background: 'none', border: 'none', padding: 2, cursor: 'help', display: 'flex' }}><Info size={14} style={{ color: 'hsl(var(--app-text-muted))' }} /></TooltipTrigger>
+            <TooltipContent style={{ maxWidth: 240, fontSize: 13, lineHeight: 1.45 }}>{text}</TooltipContent>
         </Tooltip>
     )
 }
 function Label({ text, tip }: { text: string; tip?: string }) {
     return (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6 }}>
-            <span style={{ fontSize: 10, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.08em', color: 'hsl(var(--app-text-muted))' }}>{text}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'hsl(var(--app-text-muted))' }}>{text}</span>
             {tip && <Tip text={tip} />}
         </div>
     )
@@ -426,100 +446,127 @@ function Label({ text, tip }: { text: string; tip?: string }) {
 function Field({ label, tip, children, span2 }: { label: string; tip?: string; children: React.ReactNode; span2?: boolean }) {
     return <div style={span2 ? { gridColumn: 'span 2' } : {}}><Label text={label} tip={tip} />{children}</div>
 }
+const INPUT_STYLE = (disabled?: boolean): React.CSSProperties => ({
+    width: '100%', height: 36, padding: '0 11px', borderRadius: 6, boxSizing: 'border-box', outline: 'none',
+    background: disabled ? 'hsl(var(--app-surface-2))' : 'hsl(var(--app-surface))',
+    border: `1px ${disabled ? 'dashed' : 'solid'} hsl(var(--app-border-strong))`,
+    color: disabled ? 'hsl(var(--app-text-muted))' : 'hsl(var(--app-text))',
+    fontSize: 14, fontVariantNumeric: 'tabular-nums', cursor: disabled ? 'not-allowed' : undefined,
+})
 function AppInput({ value, onChange, placeholder, disabled }: { value: string; onChange?: (v: string) => void; placeholder?: string; disabled?: boolean }) {
-    return <input value={value} onChange={e => onChange?.(e.target.value)} placeholder={placeholder} disabled={disabled} style={{ width: '100%', padding: '9px 11px', borderRadius: 8, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: disabled ? 'hsl(var(--app-text-muted))' : 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none', opacity: disabled ? 0.6 : 1, boxSizing: 'border-box' }} />
+    return <input value={value} onChange={e => onChange?.(e.target.value)} placeholder={placeholder} disabled={disabled} className={FOCUS_RING} style={INPUT_STYLE(disabled)} />
 }
 function AppSelect<T extends string>({ value, options, onChange, disabled }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; disabled?: boolean }) {
-    return <select value={value} onChange={e => onChange(e.target.value as T)} disabled={disabled} style={{ width: '100%', padding: '9px 11px', borderRadius: 8, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.6 : 1, outline: 'none' }}>{options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
+    return <select value={value} onChange={e => onChange(e.target.value as T)} disabled={disabled} className={FOCUS_RING} style={{ ...INPUT_STYLE(disabled), cursor: disabled ? 'not-allowed' : 'pointer' }}>{options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
 }
 function Toggle({ value, onChange, disabled }: { value: boolean; onChange: () => void; disabled?: boolean }) {
-    return <div onClick={disabled ? undefined : onChange} style={{ width: 40, height: 22, borderRadius: 11, cursor: disabled ? 'not-allowed' : 'pointer', flexShrink: 0, background: value ? '#22d3ee' : 'hsl(var(--app-border))', position: 'relative', transition: 'background 0.18s', opacity: disabled ? 0.5 : 1 }}><div style={{ position: 'absolute', top: 4, width: 14, height: 14, borderRadius: '50%', background: 'white', left: value ? 22 : 4, transition: 'left 0.18s' }} /></div>
+    return (
+        <button type="button" role="switch" aria-checked={value} disabled={disabled} onClick={disabled ? undefined : onChange}
+            className={FOCUS_RING}
+            style={{ width: 40, height: 24, borderRadius: 999, cursor: disabled ? 'not-allowed' : 'pointer', flexShrink: 0, padding: 0,
+                background: value ? 'var(--app-accent)' : 'hsl(var(--app-border-strong))', border: disabled ? '1px dashed hsl(var(--app-border-strong))' : 'none',
+                position: 'relative', transition: 'background-color var(--dur) var(--ease-out)' }}>
+            <span style={{ position: 'absolute', top: 4, left: 4, width: 16, height: 16, borderRadius: '50%', background: '#fff',
+                transform: `translateX(${value ? 16 : 0}px)`, transition: 'transform var(--dur) var(--ease-out)' }} />
+        </button>
+    )
 }
 function LockedNote({ text }: { text: string }) {
-    return <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '9px 12px', borderRadius: 8, background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.18)' }}><Lock size={11} style={{ color: '#fbbf24', flexShrink: 0, marginTop: 1 }} /><span style={{ fontSize: 11, fontFamily: 'monospace', color: '#fbbf24', lineHeight: 1.5 }}>{text}</span></div>
+    return <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px 12px', borderRadius: 6, background: 'var(--app-warn-soft)', border: '1px solid color-mix(in srgb, var(--app-warn) 30%, transparent)' }}><Lock size={14} style={{ color: 'var(--app-warn)', flexShrink: 0, marginTop: 2 }} /><span style={{ fontSize: 13, color: 'hsl(var(--app-text))', lineHeight: 1.45 }}>{text}</span></div>
 }
 
 // ── Layout shells ─────────────────────────────────────────────────────────────
 
-// A dark instrument panel block (no card border - feels embedded rather than floating)
+const PANEL_TITLE: React.CSSProperties = { padding: '10px 16px', fontSize: 12, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', borderBottom: '1px solid hsl(var(--app-border))' }
+
+// An instrument panel block
 function Panel({ title, children, accent }: { title?: string; children: React.ReactNode; accent?: string }) {
     return (
-        <div style={{ borderRadius: 10, background: 'hsl(var(--app-surface))', border: `1px solid ${accent ? `${accent}22` : 'hsl(var(--app-border))'}`, overflow: 'hidden' }}>
-            {title && <div style={{ padding: '7px 14px', fontSize: 9, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.12em', color: accent ?? 'rgba(255,255,255,0.25)', borderBottom: `1px solid ${accent ? `${accent}18` : 'hsl(var(--app-border))'}` }}>{title}</div>}
-            <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>{children}</div>
+        <div style={{ borderRadius: 10, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', boxShadow: 'var(--app-shadow)', overflow: 'hidden' }}>
+            {title && <div style={{ ...PANEL_TITLE, color: 'hsl(var(--app-text-muted))', display: 'flex', alignItems: 'center', gap: 8 }}>{accent && <span aria-hidden style={{ width: 8, height: 8, borderRadius: 2, background: accent }} />}{title}</div>}
+            <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>{children}</div>
         </div>
     )
 }
-// Light surface card for settings/form content
+// Surface card for settings/form content
 function Card({ title, children }: { title?: string; children: React.ReactNode }) {
     return (
-        <div style={{ borderRadius: 10, border: '1px solid hsl(var(--app-border))', background: 'hsl(var(--app-surface-2))', overflow: 'hidden' }}>
-            {title && <div style={{ padding: '8px 14px', fontSize: 10, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.1em', color: 'hsl(var(--app-text-muted))', borderBottom: '1px solid hsl(var(--app-border))' }}>{title}</div>}
-            <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>{children}</div>
+        <div style={{ borderRadius: 10, border: '1px solid hsl(var(--app-border))', background: 'hsl(var(--app-surface))', boxShadow: 'var(--app-shadow)', overflow: 'hidden' }}>
+            {title && <div style={{ ...PANEL_TITLE, color: 'hsl(var(--app-text-muted))' }}>{title}</div>}
+            <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>{children}</div>
         </div>
     )
 }
-function G2({ children, gap = 14 }: { children: React.ReactNode; gap?: number }) {
-    return <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap, alignItems: 'start' }}>{children}</div>
+function G2({ children, gap = 16 }: { children: React.ReactNode; gap?: number }) {
+    return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap, alignItems: 'start' }}>{children}</div>
 }
 
 // ── Domain Card ───────────────────────────────────────────────────────────────
 
-function DomainCard({ id, label, icon: Icon, pct, color, metrics, locked, onClick }: {
+/** Overview card for one setup section. `pct` is null when nothing is
+ *  measured for it (no drone, or a local setting): no ring then, never a
+ *  made-up percentage. */
+function DomainCard({ label, icon: Icon, pct, color, metrics, onClick }: {
     id: SectionId; label: string; icon: React.ElementType
-    pct: number; color: string; metrics: { k: string; v: string }[]
-    locked?: boolean; onClick: () => void
+    pct: number | null; color: string; metrics: { k: string; v: string }[]
+    onClick: () => void
 }) {
     return (
-        <button onClick={onClick} style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '14px 16px', borderRadius: 12, textAlign: 'left', cursor: 'pointer', width: '100%', border: '1.5px solid hsl(var(--app-border))', background: 'hsl(var(--app-surface-2))', transition: 'all 0.15s', opacity: locked ? 0.5 : 1 }}
-            onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = `${color}80`; el.style.background = 'hsl(var(--app-surface))' }}
-            onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = 'hsl(var(--app-border))'; el.style.background = 'hsl(var(--app-surface-2))' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                    <Icon size={13} style={{ color }} />
-                    <span style={{ fontSize: 10, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.1em', color: 'hsl(var(--app-text-muted))' }}>{label}</span>
+        <button onClick={onClick}
+            className={'border border-app-border bg-app-surface hover:border-app-border-strong hover:bg-app-surface-2 transition-colors duration-[120ms] ' + FOCUS_RING}
+            style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 16, borderRadius: 10, textAlign: 'left', cursor: 'pointer', width: '100%', minWidth: 0, boxShadow: 'var(--app-shadow)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%' }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--app-accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Icon size={18} style={{ color: 'var(--app-accent)' }} />
                 </div>
-                <StatusRing pct={pct} color={color} size={36} />
+                <span style={{ flex: 1, minWidth: 0, fontSize: 16, fontWeight: 700, color: 'hsl(var(--app-text))' }}>{label}</span>
+                {pct != null && <ReadinessRing pct={pct} color={color} size={40} />}
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <dl style={{ display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', columnGap: 12, rowGap: 4, margin: 0, width: '100%' }}>
                 {metrics.map((m, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 5 }}>
-                        <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', flexShrink: 0 }}>{m.k}</span>
-                        <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text))', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.v}</span>
-                    </div>
+                    <React.Fragment key={i}>
+                        <dt style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))' }}>{m.k}</dt>
+                        <dd style={{ margin: 0, fontSize: 13, color: 'hsl(var(--app-text))', fontWeight: 600, fontVariantNumeric: 'tabular-nums', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.v}</dd>
+                    </React.Fragment>
                 ))}
-            </div>
+            </dl>
         </button>
     )
 }
 
 // ── Vehicle Banner ────────────────────────────────────────────────────────────
 
-function VehicleBanner({ vehicle, readiness, telStatus, address }: { vehicle: VehicleProfile; readiness: number; telStatus: string; address: string }) {
-    const connected = telStatus === 'connected', rc = hColor(readiness)
+function VehicleBanner({ vehicle, readiness, telStatus, address }: { vehicle: VehicleProfile; readiness: number | null; telStatus: string; address: string }) {
+    const connected = telStatus === 'connected'
+    const chip: React.CSSProperties = { fontSize: 12, fontWeight: 700, padding: '2px 8px', borderRadius: 999, border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text-muted))', background: 'hsl(var(--app-surface-2))' }
     return (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '10px 20px', borderBottom: '1px solid hsl(var(--app-border))', background: 'hsl(var(--app-surface-2))', flexShrink: 0 }}>
-            <DroneSVG airframe={vehicle.airframe} size={50} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '12px 20px', borderBottom: '1px solid hsl(var(--app-border))', background: 'hsl(var(--app-surface))', flexShrink: 0, flexWrap: 'wrap' }}>
+            <DroneSVG airframe={vehicle.airframe} size={48} />
             <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: 'hsl(var(--app-text))' }}>{vehicle.name}</span>
-                    <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>{AIRFRAME_LABELS[vehicle.airframe] ?? vehicle.airframe}</span>
-                    {vehicle.frameId && <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#22d3ee', background: 'rgba(6,182,212,0.12)', padding: '1px 7px', borderRadius: 5, border: '1px solid rgba(6,182,212,0.25)' }}>#{vehicle.frameId}</span>}
-                    <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', background: 'hsl(var(--app-surface))', padding: '1px 7px', borderRadius: 5, border: '1px solid hsl(var(--app-border))' }}>{vehicle.firmware.toUpperCase()}</span>
+                    <h1 style={{ fontSize: 20, fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>{vehicle.name}</h1>
+                    <span style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))' }}>{AIRFRAME_LABELS[vehicle.airframe] ?? vehicle.airframe}</span>
+                    {vehicle.frameId && <span style={{ ...chip, color: 'var(--app-accent)', background: 'var(--app-accent-soft)', borderColor: 'color-mix(in srgb, var(--app-accent) 35%, transparent)' }}>#{vehicle.frameId}</span>}
+                    <span style={chip}>{vehicle.firmware.toUpperCase()}</span>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
-                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: connected ? '#4ade80' : '#6b7280' }} />
-                    <span style={{ fontSize: 11, fontFamily: 'monospace', color: connected ? '#4ade80' : 'hsl(var(--app-text-muted))' }}>{connected ? 'Connected' : 'Disconnected'}</span>
-                    {connected && <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', opacity: 0.5 }}>· {address}</span>}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, minWidth: 0 }}>
+                    {connected ? <Wifi size={14} style={{ color: 'var(--app-ok)', flexShrink: 0 }} /> : <WifiOff size={14} style={{ color: 'hsl(var(--app-text-muted))', flexShrink: 0 }} />}
+                    <span style={{ fontSize: 13, fontWeight: 600, color: connected ? 'var(--app-ok)' : 'hsl(var(--app-text-muted))' }}>{connected ? 'Connected' : 'Not connected'}</span>
+                    {connected && <span className="font-code" style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>· {address}</span>}
                 </div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <StatusRing pct={readiness} color={rc} size={48} />
-                    <span style={{ position: 'absolute', fontSize: 11, fontFamily: 'monospace', fontWeight: 700, color: rc }}>{readiness.toFixed(0)}%</span>
+            {readiness != null ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}
+                    title="Sensor health measured on the connected drone (GPS, gyro and accel, compass, baro)">
+                    <ReadinessRing pct={readiness} color={hColor(readiness)} size={52} />
+                    <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'hsl(var(--app-text-muted))' }}>Ready</span>
                 </div>
-                <span style={{ fontSize: 8, fontFamily: 'monospace', letterSpacing: '0.12em', color: 'hsl(var(--app-text-muted))' }}>READY</span>
-            </div>
+            ) : (
+                <span style={{ ...chip, fontSize: 13, padding: '4px 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                    title="Readiness is measured from a connected drone">
+                    <WifiOff size={14} /> Connect a drone to check readiness
+                </span>
+            )}
         </div>
     )
 }
@@ -528,23 +575,22 @@ function VehicleBanner({ vehicle, readiness, telStatus, address }: { vehicle: Ve
 
 function SectionTabBar({ current, onSelect, onBack, tabs }: {
     current: SectionId; onSelect: (id: SectionId) => void; onBack: () => void
-    tabs: { id: SectionId; label: string; icon: React.ElementType; color: string }[]
+    tabs: { id: SectionId; label: string; icon: React.ElementType }[]
 }) {
     return (
-        <div style={{ display: 'flex', alignItems: 'center', borderTop: '1px solid hsl(var(--app-border))', background: 'hsl(var(--app-surface-2))', flexShrink: 0, overflowX: 'auto' }}>
-            <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '10px 14px', background: 'none', border: 'none', borderRight: '1px solid hsl(var(--app-border))', cursor: 'pointer', color: 'hsl(var(--app-text-muted))', fontSize: 11, fontFamily: 'monospace', whiteSpace: 'nowrap', flexShrink: 0 }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'hsl(var(--app-text))' }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'hsl(var(--app-text-muted))' }}>
-                <ChevronLeft size={13} /> Overview
+        <div role="tablist" aria-label="Setup sections" style={{ display: 'flex', alignItems: 'stretch', gap: 4, padding: '0 12px', borderBottom: '1px solid hsl(var(--app-border))', background: 'hsl(var(--app-surface))', flexShrink: 0, overflowX: 'auto' }}>
+            <button onClick={onBack}
+                className={'text-app-text-muted hover:text-app-text transition-colors duration-[120ms] ' + FOCUS_RING}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 12px 0 4px', minHeight: 44, background: 'none', border: 'none', borderRight: '1px solid hsl(var(--app-border))', cursor: 'pointer', fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                <ChevronLeft size={16} /> Overview
             </button>
             {tabs.map(t => {
                 const active = t.id === current, Icon = t.icon
                 return (
-                    <button key={t.id} onClick={() => onSelect(t.id)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '10px 12px', background: active ? `${t.color}12` : 'none', border: 'none', borderBottom: active ? `2px solid ${t.color}` : '2px solid transparent', cursor: 'pointer', color: active ? t.color : 'hsl(var(--app-text-muted))', fontSize: 11, fontFamily: 'monospace', whiteSpace: 'nowrap', transition: 'all 0.12s' }}
-                        onMouseEnter={e => { if (!active) (e.currentTarget as HTMLElement).style.color = 'hsl(var(--app-text))' }}
-                        onMouseLeave={e => { if (!active) (e.currentTarget as HTMLElement).style.color = 'hsl(var(--app-text-muted))' }}>
-                        <div style={{ width: 6, height: 6, borderRadius: '50%', background: t.color, flexShrink: 0 }} />
-                        <Icon size={12} />{t.label}
+                    <button key={t.id} role="tab" aria-selected={active} onClick={() => onSelect(t.id)}
+                        className={(active ? 'text-app-accent' : 'text-app-text-muted hover:text-app-text') + ' transition-colors duration-[120ms] ' + FOCUS_RING}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 12px', minHeight: 44, background: 'none', border: 'none', borderBottom: `2px solid ${active ? 'var(--app-accent)' : 'transparent'}`, marginBottom: -1, cursor: 'pointer', fontSize: 14, fontWeight: active ? 700 : 600, whiteSpace: 'nowrap' }}>
+                        <Icon size={16} />{t.label}
                     </button>
                 )
             })}
@@ -554,21 +600,17 @@ function SectionTabBar({ current, onSelect, onBack, tabs }: {
 
 // ── Section header ────────────────────────────────────────────────────────────
 
-function SectionHead({ meta, pct }: { meta: typeof DOMAIN_META[0]; pct: number }) {
-    const color = hColor(pct, meta.id === 'parameters')
+function SectionHead({ meta, pct }: { meta: typeof DOMAIN_META[0]; pct: number | null }) {
     return (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 22, paddingBottom: 18, borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-            <div style={{ width: 42, height: 42, borderRadius: 11, background: `${color}14`, border: `1.5px solid ${color}35`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <meta.icon size={19} style={{ color }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24, paddingBottom: 16, borderBottom: '1px solid hsl(var(--app-border))' }}>
+            <div style={{ width: 44, height: 44, borderRadius: 10, background: 'var(--app-accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <meta.icon size={22} style={{ color: 'var(--app-accent)' }} />
             </div>
-            <div style={{ flex: 1 }}>
-                <h2 style={{ fontSize: 16, fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>{meta.label}</h2>
-                <p style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>{meta.desc}</p>
+            <div style={{ flex: 1, minWidth: 0 }}>
+                <h2 style={{ fontSize: 22, fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>{meta.label}</h2>
+                <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>{meta.desc}</p>
             </div>
-            <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <StatusRing pct={pct} color={color} size={44} />
-                <span style={{ position: 'absolute', fontSize: 10, fontFamily: 'monospace', fontWeight: 700, color }}>{pct.toFixed(0)}%</span>
-            </div>
+            {pct != null && <ReadinessRing pct={pct} color={hColor(pct)} size={52} />}
         </div>
     )
 }
@@ -588,11 +630,11 @@ function SectionHead({ meta, pct }: { meta: typeof DOMAIN_META[0]; pct: number }
 // that is the ceiling. This panel is that experiment.
 
 function rateTone(measured: number, asked: number): string {
-    if (!asked) return '#9ca3af'
+    if (!asked) return 'hsl(var(--app-text-muted))'
     const ratio = measured / asked
-    if (ratio >= 0.85) return '#4ade80'      // the link is keeping up
-    if (ratio >= 0.55) return '#fbbf24'      // partially - near the ceiling
-    return '#f87171'                          // asking for far more than arrives
+    if (ratio >= 0.85) return 'var(--app-ok)'      // the link is keeping up
+    if (ratio >= 0.55) return 'var(--app-warn)'      // partially - near the ceiling
+    return 'var(--app-danger)'                          // asking for far more than arrives
 }
 
 function LinkThroughput() {
@@ -605,20 +647,20 @@ function LinkThroughput() {
     const asked: Record<string, number> = { position: 8, attitude: 10 }
 
     return (
-        <Panel title="LINK THROUGHPUT" accent="#a78bfa">
+        <Panel title="Link throughput" accent="light-dark(#6d28d9, #a78bfa)">
             {Object.entries(measured).map(([k, v]) => {
                 const want = asked[k] ?? 0
                 return (
                     <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                        <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase' }}>{k}</span>
-                        <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 600, color: rateTone(v as number, want) }}>
+                        <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', textTransform: 'uppercase' }}>{k}</span>
+                        <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: rateTone(v as number, want) }}>
                             {(v as number).toFixed(1)} Hz
-                            {want > 0 && <span style={{ opacity: 0.45 }}> / {want} asked</span>}
+                            {want > 0 && <span style={{ color: 'hsl(var(--app-text-muted))' }}> / {want} asked</span>}
                         </span>
                     </div>
                 )
             })}
-            <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)', lineHeight: 1.6, margin: '4px 0 0' }}>
+            <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', lineHeight: 1.6, margin: '4px 0 0' }}>
                 Green means the link is delivering what was asked. If it stays
                 amber or red, the radio is at its ceiling - raise AIR_SPEED or
                 turn ECC off on the radio, not here.
@@ -660,21 +702,21 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {/* Topology diagram */}
-            <Panel title="NETWORK TOPOLOGY" accent="#22d3ee">
+            <Panel title="Network topology" accent="var(--app-accent)">
                 <NetworkTopology connected={connected} address={address} />
             </Panel>
 
             <G2>
                 {/* Left: link setup */}
-                <Card title="LINK SETUP">
+                <Card title="Link setup">
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 20, fontSize: 11, fontFamily: 'monospace', fontWeight: 700, background: connected ? 'rgba(74,222,128,0.1)' : 'rgba(107,114,128,0.08)', border: `1px solid ${connected ? 'rgba(74,222,128,0.3)' : 'rgba(107,114,128,0.2)'}`, color: connected ? '#4ade80' : '#9ca3af' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 999, fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 700, background: connected ? 'color-mix(in srgb, var(--app-ok) 10%, transparent)' : 'hsl(var(--app-text-subtle) / 0.08)', border: `1px solid ${connected ? 'color-mix(in srgb, var(--app-ok) 30%, transparent)' : 'hsl(var(--app-text-subtle) / 0.2)'}`, color: connected ? 'var(--app-ok)' : 'hsl(var(--app-text-muted))' }}>
                             {connected ? <Check size={11} /> : <WifiOff size={11} />}
                             {connected ? 'Connected' : 'No link'}
                         </div>
                     </div>
                     {customer && !connected && (
-                        <p style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', lineHeight: 1.6, margin: 0 }}>
+                        <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', lineHeight: 1.6, margin: 0 }}>
                             Connect your drone from the Fly tab: a radio plugged into this device, or SITL
                             through the HYRAK desktop app.
                         </p>
@@ -684,16 +726,16 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                                 <div style={{ display: 'flex', gap: 6 }}>
                                     <AppInput value={address} onChange={setAddress} placeholder="udpin://0.0.0.0:14540" />
-                                    <button onClick={() => setShowPresets(s => !s)} style={{ padding: '9px 10px', borderRadius: 8, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text-muted))', fontSize: 11, fontFamily: 'monospace', cursor: 'pointer', whiteSpace: 'nowrap' }}>Presets</button>
+                                    <button onClick={() => setShowPresets(s => !s)} style={{ padding: '9px 10px', borderRadius: 6, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text-muted))', fontSize: 13, fontVariantNumeric: 'tabular-nums', cursor: 'pointer', whiteSpace: 'nowrap' }}>Presets</button>
                                 </div>
                                 {showPresets && (
-                                    <div style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid hsl(var(--app-border))' }}>
+                                    <div style={{ borderRadius: 6, overflow: 'hidden', border: '1px solid hsl(var(--app-border))' }}>
                                         {MAV_PRESETS.map(p => (
                                             <button key={p.addr} onClick={() => { setAddress(p.addr); setShowPresets(false) }} style={{ width: '100%', display: 'flex', flexDirection: 'column', padding: '9px 12px', background: 'hsl(var(--app-surface))', border: 'none', borderBottom: '1px solid hsl(var(--app-border))', cursor: 'pointer', textAlign: 'left' }}
                                                 onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'hsl(var(--app-surface-2))' }}
                                                 onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'hsl(var(--app-surface))' }}>
-                                                <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'hsl(var(--app-text))' }}>{p.label}</span>
-                                                <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', marginTop: 2 }}>{p.addr}</span>
+                                                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text))' }}>{p.label}</span>
+                                                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', marginTop: 2 }}>{p.addr}</span>
                                             </button>
                                         ))}
                                     </div>
@@ -710,23 +752,23 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                         <Field label="RF BRIDGE PORTS" tip="UDP ports the ground station's wfb_rx/wfb_tx use - see communication/start-gs.sh. The uplink HOST matters once the decoder is not on this machine: downlink arrives from anywhere (we bind 0.0.0.0), but the uplink is sent to a fixed listener, so leaving it on 127.0.0.1 with an off-box decoder gives perfect telemetry and no commands.">
                             <div style={{ display: 'flex', gap: 6 }}>
                                 <div style={{ flex: 1 }}>
-                                    <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>Downlink (video/mavlink dn)</span>
+                                    <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>Downlink (video/mavlink dn)</span>
                                     <input
                                         type="number" min={1} max={65535}
                                         value={downlinkPort}
                                         disabled={connected}
                                         onChange={e => { const v = Number(e.target.value); setDownlinkPort(v); if (v > 0 && v < 65536) setRfDownlinkPort(v) }}
-                                        style={{ width: '100%', padding: '8px 10px', borderRadius: 8, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none', boxSizing: 'border-box', marginTop: 3 }}
+                                        style={{ width: '100%', padding: '8px 10px', borderRadius: 6, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 12, fontVariantNumeric: 'tabular-nums', outline: 'none', boxSizing: 'border-box', marginTop: 3 }}
                                     />
                                 </div>
                                 <div style={{ flex: 1 }}>
-                                    <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>Uplink (mavlink up)</span>
+                                    <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>Uplink (mavlink up)</span>
                                     <input
                                         type="number" min={1} max={65535}
                                         value={uplinkPort}
                                         disabled={connected}
                                         onChange={e => { const v = Number(e.target.value); setUplinkPort(v); if (v > 0 && v < 65536) setRfUplinkPort(v) }}
-                                        style={{ width: '100%', padding: '8px 10px', borderRadius: 8, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none', boxSizing: 'border-box', marginTop: 3 }}
+                                        style={{ width: '100%', padding: '8px 10px', borderRadius: 6, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 12, fontVariantNumeric: 'tabular-nums', outline: 'none', boxSizing: 'border-box', marginTop: 3 }}
                                     />
                                 </div>
                             </div>
@@ -737,7 +779,7 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                                 is sent to a specific listener. Loopback is only
                                 right while the decoder runs on this machine. */}
                             <div style={{ marginTop: 6 }}>
-                                <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
+                                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>
                                     Uplink host (where wfb_tx / the decoder runs)
                                 </span>
                                 <input
@@ -746,9 +788,9 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                                     placeholder="127.0.0.1"
                                     disabled={connected}
                                     onChange={e => { const v = e.target.value; setUplinkHost(v); setRfUplinkHost(v) }}
-                                    style={{ width: '100%', padding: '8px 10px', borderRadius: 8, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none', boxSizing: 'border-box', marginTop: 3 }}
+                                    style={{ width: '100%', padding: '8px 10px', borderRadius: 6, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 12, fontVariantNumeric: 'tabular-nums', outline: 'none', boxSizing: 'border-box', marginTop: 3 }}
                                 />
-                                <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', display: 'block', marginTop: 4, lineHeight: 1.5 }}>
+                                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', display: 'block', marginTop: 4, lineHeight: 1.5 }}>
                                     Commands go to <b>{uplinkHost}:{uplinkPort}</b>.
                                     Use 127.0.0.1 only if the RF decoder runs on
                                     this machine - with the decoder on its own
@@ -760,22 +802,22 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                     )}
                     {/* Customers only release a link here; it is made on the Fly tab. */}
                     {customer ? (connected && (
-                        <button onClick={() => { void disconnectTelemetryLink() }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 0', borderRadius: 8, cursor: 'pointer', fontFamily: 'monospace', fontSize: 12, fontWeight: 700, border: '1px solid', background: 'rgba(248,113,113,.08)', borderColor: 'rgba(248,113,113,.35)', color: '#fca5a5' }}>
+                        <button onClick={() => { void disconnectTelemetryLink() }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 0', borderRadius: 6, cursor: 'pointer', fontVariantNumeric: 'tabular-nums', fontSize: 13, fontWeight: 700, border: '1px solid', background: 'color-mix(in srgb, var(--app-danger) 8%, transparent)', borderColor: 'color-mix(in srgb, var(--app-danger) 35%, transparent)', color: 'var(--app-danger)' }}>
                             <WifiOff size={14} /> Disconnect
                         </button>
                     )) : <div style={{ display: 'flex', gap: 8 }}>
-                        <button onClick={connected ? disconnect : connect} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 0', borderRadius: 8, cursor: 'pointer', fontFamily: 'monospace', fontSize: 12, fontWeight: 700, border: '1px solid', ...(connected ? { background: 'rgba(248,113,113,.08)', borderColor: 'rgba(248,113,113,.35)', color: '#fca5a5' } : { background: 'rgba(74,222,128,.08)', borderColor: 'rgba(74,222,128,.35)', color: '#4ade80' }) }}>
+                        <button onClick={connected ? disconnect : connect} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 0', borderRadius: 6, cursor: 'pointer', fontVariantNumeric: 'tabular-nums', fontSize: 13, fontWeight: 700, border: '1px solid', ...(connected ? { background: 'color-mix(in srgb, var(--app-danger) 8%, transparent)', borderColor: 'color-mix(in srgb, var(--app-danger) 35%, transparent)', color: 'var(--app-danger)' } : { background: 'color-mix(in srgb, var(--app-ok) 8%, transparent)', borderColor: 'color-mix(in srgb, var(--app-ok) 35%, transparent)', color: 'var(--app-ok)' }) }}>
                             {connected ? <WifiOff size={14} /> : <Wifi size={14} />}
                             {connected ? 'Disconnect' : 'Connect'}
                         </button>
-                        {connected && <button onClick={() => { disconnect(); setTimeout(connect, 600) }} style={{ padding: '10px 12px', borderRadius: 8, cursor: 'pointer', background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text-muted))' }}><RotateCcw size={14} /></button>}
+                        {connected && <button onClick={() => { disconnect(); setTimeout(connect, 600) }} style={{ padding: '10px 12px', borderRadius: 6, cursor: 'pointer', background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text-muted))' }}><RotateCcw size={14} /></button>}
                     </div>}
                 </Card>
 
                 {/* Right: live telemetry or MAVLink stream */}
                 {connected ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        <Panel title="LIVE TELEMETRY" accent="#4ade80">
+                        <Panel title="Live telemetry" accent="var(--app-ok)">
                             {[
                                 { k: 'Flight Mode', v: fm?.mode ?? '-', hi: !!fm?.is_armed },
                                 { k: 'Armed',       v: fm?.is_armed ? 'YES' : 'no' },
@@ -786,34 +828,34 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                                 { k: 'Heading',     v: telemetry?.heading_deg != null ? `${telemetry.heading_deg.toFixed(1)}°` : '-' },
                             ].map(r => (
                                 <div key={r.k} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                                    <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)' }}>{r.k}</span>
-                                    <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 600, color: r.hi ? '#f87171' : 'hsl(var(--app-text))' }}>{r.v}</span>
+                                    <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>{r.k}</span>
+                                    <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: r.hi ? 'var(--app-danger)' : 'hsl(var(--app-text))' }}>{r.v}</span>
                                 </div>
                             ))}
                         </Panel>
-                        <Panel title="MAVLINK STREAM" accent="#22d3ee">
+                        <Panel title="MAVLink stream" accent="var(--app-accent)">
                             {mavMsgs.map(m => (
                                 <div key={m} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#22d3ee', flexShrink: 0 }}>
+                                    <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--app-accent)', flexShrink: 0 }}>
                                         <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}`}</style>
-                                        <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: '#22d3ee', animation: 'pulse 2s infinite' }} />
+                                        <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: 'var(--app-accent)', animation: 'pulse 2s infinite' }} />
                                     </div>
-                                    <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#4ade80' }}>{m}</span>
+                                    <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--app-ok)' }}>{m}</span>
                                 </div>
                             ))}
                         </Panel>
                         <LinkThroughput />
                     </div>
                 ) : (
-                    <Panel title="PROTOCOL REFERENCE">
+                    <Panel title="Protocol reference">
                         {[
-                            { badge: 'PX4', color: '#60a5fa', text: 'MAVSDK over UDP. Default SITL port: 14540. Physical radio: serial:///dev/ttyUSB0:57600' },
-                            { badge: 'ArduPilot', color: '#4ade80', text: 'Compatible via MAVLink dialect. Default SITL port: 14550. Set TERRAIN_ENABLE=1 for terrain follow.' },
-                            { badge: 'TCP', color: '#c084fc', text: 'For companion computer bridge: tcp://192.168.x.x:5760. Set GCS_TCP_PORT on the flight controller.' },
+                            { badge: 'PX4', color: 'light-dark(#1d4ed8, #60a5fa)', text: 'MAVSDK over UDP. Default SITL port: 14540. Physical radio: serial:///dev/ttyUSB0:57600' },
+                            { badge: 'ArduPilot', color: 'var(--app-ok)', text: 'Compatible via MAVLink dialect. Default SITL port: 14550. Set TERRAIN_ENABLE=1 for terrain follow.' },
+                            { badge: 'TCP', color: 'light-dark(#7e22ce, #c084fc)', text: 'For companion computer bridge: tcp://192.168.x.x:5760. Set GCS_TCP_PORT on the flight controller.' },
                         ].map(p => (
                             <div key={p.badge} style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
-                                <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 9, fontFamily: 'monospace', fontWeight: 700, background: `${p.color}18`, color: p.color, flexShrink: 0, marginTop: 1 }}>{p.badge}</span>
-                                <p style={{ fontSize: 11, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)', lineHeight: 1.6, margin: 0 }}>{p.text}</p>
+                                <span style={{ padding: '2px 6px', borderRadius: 6, fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 700, background: `${mix(p.color, 9)}`, color: p.color, flexShrink: 0, marginTop: 1 }}>{p.badge}</span>
+                                <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', lineHeight: 1.6, margin: 0 }}>{p.text}</p>
                             </div>
                         ))}
                     </Panel>
@@ -829,17 +871,17 @@ function VehicleWorkspace({ v, onUpdate }: { v: VehicleProfile; onUpdate: (p: Pa
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {/* Identity hero */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: '20px 24px', borderRadius: 14, background: '#090e14', border: '1px solid rgba(34,211,238,0.12)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: '20px 24px', borderRadius: 10, background: 'hsl(var(--app-surface-2))', border: '1px solid color-mix(in srgb, var(--app-accent) 12%, transparent)' }}>
                 <DroneSVG airframe={v.airframe} size={96} />
                 <div>
                     <h2 style={{ fontSize: 24, fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>{v.name}</h2>
-                    <p style={{ fontSize: 12, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)', margin: '4px 0 0' }}>
+                    <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', margin: '4px 0 0' }}>
                         {AIRFRAME_LABELS[v.airframe] ?? v.airframe} · {v.firmware.toUpperCase()}{v.frameId ? ` · Frame #${v.frameId}` : ''}
                     </p>
                 </div>
             </div>
             <G2>
-                <Card title="IDENTITY">
+                <Card title="Identity">
                     <Field label="VEHICLE NAME">
                         <AppInput value={v.name} onChange={name => onUpdate({ name })} placeholder="My Drone" />
                     </Field>
@@ -847,7 +889,7 @@ function VehicleWorkspace({ v, onUpdate }: { v: VehicleProfile; onUpdate: (p: Pa
                         <AppInput value={v.frameId} onChange={frameId => onUpdate({ frameId })} placeholder="e.g. 4302" />
                     </Field>
                 </Card>
-                <Card title="HARDWARE">
+                <Card title="Hardware">
                     <Field label="AIRFRAME TYPE">
                         <AppSelect value={v.airframe} onChange={airframe => onUpdate({ airframe })} options={Object.entries(AIRFRAME_LABELS).map(([k, l]) => ({ value: k, label: l }))} />
                     </Field>
@@ -891,7 +933,7 @@ function VehicleWorkspace({ v, onUpdate }: { v: VehicleProfile; onUpdate: (p: Pa
 
 type SensorStatus = 'ok' | 'warn' | 'off'
 const STATUS_COLOUR: Record<SensorStatus, string> = {
-    ok: '#4ade80', warn: '#fbbf24', off: '#4b5563',
+    ok: 'var(--app-ok)', warn: 'var(--app-warn)', off: 'hsl(var(--app-text-muted))',
 }
 
 const GPS_FIX_LABEL: Record<number, string> = {
@@ -904,11 +946,11 @@ function SectionHeader({ title, hint, right }: {
 }) {
     return (
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '2px 2px 0' }}>
-            <span style={{ fontSize: 10, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.14em', color: 'hsl(var(--app-text))' }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>
                 {title}
-            </span>
+            </h3>
             {hint && (
-                <span style={{ fontSize: 10, color: 'hsl(var(--app-text-muted))' }}>{hint}</span>
+                <span style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))' }}>{hint}</span>
             )}
             {right && <span style={{ marginLeft: 'auto' }}>{right}</span>}
         </div>
@@ -920,12 +962,12 @@ function StatusChip({ status, text }: { status: SensorStatus; text: string }) {
     return (
         <span style={{
             display: 'inline-flex', alignItems: 'center', gap: 5,
-            padding: '2px 8px', borderRadius: 20, flexShrink: 0,
-            background: `${c}14`, border: `1px solid ${c}3a`,
-            fontSize: 9, fontFamily: 'monospace', fontWeight: 700, color: c,
-            letterSpacing: '0.06em', whiteSpace: 'nowrap',
+            padding: '2px 8px', borderRadius: 999, flexShrink: 0,
+            background: `${mix(c, 8)}`, border: `1px solid ${mix(c, 23)}`,
+            fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: c,
+            whiteSpace: 'nowrap',
         }}>
-            <span style={{ width: 5, height: 5, borderRadius: '50%', background: c }} />
+            {status === 'ok' ? <Check size={12} strokeWidth={3} aria-hidden /> : status === 'warn' ? <AlertTriangle size={12} aria-hidden /> : <span style={{ width: 6, height: 6, borderRadius: '50%', background: c }} />}
             {text}
         </span>
     )
@@ -944,28 +986,28 @@ function SensorCard({ icon, title, status, statusText, value, sub }: {
             display: 'flex', flexDirection: 'column', gap: 8,
             padding: '11px 12px', borderRadius: 10,
             background: 'hsl(var(--app-surface-2))',
-            border: `1px solid ${status === 'off' ? 'hsl(var(--app-border))' : `${c}42`}`,
-            boxShadow: status === 'warn' ? `inset 3px 0 0 ${c}` : status === 'ok' ? `inset 3px 0 0 ${c}55` : undefined,
+            border: `1px solid ${status === 'off' ? 'hsl(var(--app-border))' : `${mix(c, 26)}`}`,
+            boxShadow: status === 'warn' ? `inset 3px 0 0 ${c}` : status === 'ok' ? `inset 3px 0 0 ${mix(c, 33)}` : undefined,
         }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{
-                    width: 26, height: 26, borderRadius: 7, flexShrink: 0,
+                    width: 26, height: 26, borderRadius: 6, flexShrink: 0,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    background: `${c}14`, color: c,
+                    background: `${mix(c, 8)}`, color: c,
                 }}>
                     {icon}
                 </span>
-                <span style={{ fontSize: 11.5, fontWeight: 600, color: 'hsl(var(--app-text))', flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: 'hsl(var(--app-text))', flex: 1, minWidth: 0 }}>
                     {title}
                 </span>
                 <StatusChip status={status} text={statusText} />
             </div>
             <div>
-                <p style={{ fontSize: 13, fontFamily: 'monospace', fontWeight: 600, color: status === 'off' ? 'hsl(var(--app-text-muted))' : 'hsl(var(--app-text))', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: status === 'off' ? 'hsl(var(--app-text-muted))' : 'hsl(var(--app-text))', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {value}
                 </p>
                 {sub && (
-                    <p style={{ fontSize: 9.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '2px 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', margin: '2px 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {sub}
                     </p>
                 )}
@@ -1004,9 +1046,9 @@ function CalCard({ sensor, verdict, connected, busy, isActive, phase, progress, 
 }) {
     const Icon = CAL_ICON[sensor.key] ?? Gauge
     const running = isActive && (phase === 'running' || phase === 'starting')
-    const border = running ? '#fbbf24'
-        : verdict === false ? '#fbbf24'
-        : verdict === true ? '#4ade80'
+    const border = running ? 'var(--app-warn)'
+        : verdict === false ? 'var(--app-warn)'
+        : verdict === true ? 'var(--app-ok)'
         : null
     const chip = running ? <StatusChip status="warn" text={`RUNNING · ${progress}%`} />
         : verdict === false ? <StatusChip status="warn" text="NEEDS CAL" />
@@ -1017,24 +1059,24 @@ function CalCard({ sensor, verdict, connected, busy, isActive, phase, progress, 
         <div style={{
             display: 'flex', alignItems: 'center', gap: 10,
             padding: '9px 12px', borderRadius: 10,
-            background: running ? 'rgba(251,191,36,0.05)' : 'hsl(var(--app-surface-2))',
-            border: `1px solid ${border ? `${border}4a` : 'hsl(var(--app-border))'}`,
+            background: running ? 'color-mix(in srgb, var(--app-warn) 5%, transparent)' : 'hsl(var(--app-surface-2))',
+            border: `1px solid ${border ? `${mix(border, 29)}` : 'hsl(var(--app-border))'}`,
             boxShadow: border ? `inset 3px 0 0 ${border}${verdict === true && !running ? '55' : ''}` : undefined,
-            transition: 'border-color 250ms, background 250ms',
+            transition: 'border-color var(--dur-slow) var(--ease-out), background-color var(--dur-slow) var(--ease-out)',
         }}>
             <span style={{
-                width: 28, height: 28, borderRadius: 8, flexShrink: 0,
+                width: 28, height: 28, borderRadius: 6, flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: border ? `${border}14` : 'hsl(var(--app-surface))',
+                background: border ? `${mix(border, 8)}` : 'hsl(var(--app-surface))',
                 color: border ?? 'hsl(var(--app-text-muted))',
             }}>
                 {running ? <Loader size={14} className="animate-spin" /> : <Icon size={14} />}
             </span>
             <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'hsl(var(--app-text))' }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: 'hsl(var(--app-text))' }}>
                     {sensor.label}
                 </span>
-                <span style={{ fontSize: 9.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
+                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>
                     {sensor.mins}
                 </span>
                 <Tip text={sensor.blurb} />
@@ -1045,13 +1087,13 @@ function CalCard({ sensor, verdict, connected, busy, isActive, phase, progress, 
                 disabled={!clickable}
                 title={connected ? `Start ${sensor.label} calibration` : 'Connect to the drone first'}
                 style={{
-                    padding: '5px 13px', borderRadius: 7, flexShrink: 0,
+                    padding: '5px 13px', borderRadius: 6, flexShrink: 0,
                     background: 'transparent',
-                    border: `1px solid ${clickable ? 'rgba(34,211,238,0.45)' : 'hsl(var(--app-border))'}`,
-                    color: clickable ? '#22d3ee' : 'hsl(var(--app-text-muted))',
-                    fontSize: 11, fontFamily: 'monospace', fontWeight: 600,
+                    border: `1px ${clickable || running ? 'solid' : 'dashed'} ${clickable ? 'color-mix(in srgb, var(--app-accent) 45%, transparent)' : 'hsl(var(--app-border-strong))'}`,
+                    color: clickable ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))',
+                    fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 600,
                     cursor: clickable ? 'pointer' : 'not-allowed',
-                    opacity: clickable || running ? 1 : 0.45,
+                    minHeight: 32,
                 }}
             >
                 {running ? 'Running'
@@ -1186,16 +1228,16 @@ function MountOrientation({ connected }: { connected: boolean }) {
 
     const axisSelect = (key: string, shown: Rpy, axis: 'r' | 'p' | 'y', label: string, opts: number[], enabled: boolean) => (
         <label style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1, minWidth: 76 }}>
-            <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', letterSpacing: '0.08em' }}>{label}</span>
+            <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', letterSpacing: '0.04em' }}>{label}</span>
             <select
                 value={shown[axis]}
                 disabled={!enabled}
                 onChange={e => pick(key, shown, axis, Number(e.target.value))}
                 style={{
-                    padding: '5px 8px', borderRadius: 7, fontSize: 11.5, fontFamily: 'monospace',
-                    background: 'hsl(var(--app-surface))', color: 'hsl(var(--app-text))',
-                    border: '1px solid hsl(var(--app-border))',
-                    cursor: enabled ? 'pointer' : 'not-allowed', opacity: enabled ? 1 : 0.5,
+                    padding: '5px 8px', borderRadius: 6, fontSize: 12, fontVariantNumeric: 'tabular-nums',
+                    background: enabled ? 'hsl(var(--app-surface))' : 'hsl(var(--app-surface-2))', color: enabled ? 'hsl(var(--app-text))' : 'hsl(var(--app-text-muted))',
+                    border: `1px ${enabled ? 'solid' : 'dashed'} hsl(var(--app-border-strong))`,
+                    cursor: enabled ? 'pointer' : 'not-allowed',
                 }}
             >
                 {opts.map(d => <option key={d} value={d}>{d}°</option>)}
@@ -1208,10 +1250,10 @@ function MountOrientation({ connected }: { connected: boolean }) {
             display: 'flex', flexDirection: 'column', gap: 10,
             padding: '11px 12px', borderRadius: 10,
             background: 'hsl(var(--app-surface-2))',
-            border: `1px solid ${rebootNeeded ? 'rgba(251,191,36,0.4)' : 'hsl(var(--app-border))'}`,
+            border: `1px solid ${rebootNeeded ? 'color-mix(in srgb, var(--app-warn) 40%, transparent)' : 'hsl(var(--app-border))'}`,
         }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 11.5, fontWeight: 600, color: 'hsl(var(--app-text))' }}>Mount orientation</span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: 'hsl(var(--app-text))' }}>Mount orientation</span>
                 <Tip text="Set these BEFORE calibrating: offsets computed with a wrong mount rotation pass the calibration and then fly wrong. Applied at boot - changing either needs a reboot." />
             </div>
             {MOUNT_PARAMS.map(pm => {
@@ -1224,9 +1266,9 @@ function MountOrientation({ connected }: { connected: boolean }) {
                 const shown: Rpy = drafts[pm.key] ?? (known && !isAuto ? rpyOf(v) : null) ?? { r: 0, p: 0, y: 0 }
                 return (
                     <div key={pm.key} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 9.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', letterSpacing: '0.06em' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', letterSpacing: '0.06em' }}>
                             {pm.label.toUpperCase()} <Tip text={pm.tip} />
-                            <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, color: known ? '#22d3ee' : 'hsl(var(--app-text-muted))' }}>
+                            <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: known ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))' }}>
                                 {connected ? (known ? rotationLabel(v) : 'reading…') : '-'}
                             </span>
                         </span>
@@ -1242,11 +1284,11 @@ function MountOrientation({ connected }: { connected: boolean }) {
                                     disabled={!enabled}
                                     title="Let PX4 detect the compass rotation during calibration"
                                     style={{
-                                        padding: '6px 10px', borderRadius: 7, marginBottom: 0,
-                                        background: isAuto ? 'rgba(34,211,238,0.14)' : 'transparent',
-                                        border: `1px solid ${isAuto ? 'rgba(34,211,238,0.6)' : 'hsl(var(--app-border))'}`,
-                                        color: isAuto ? '#22d3ee' : 'hsl(var(--app-text-muted))',
-                                        fontSize: 10, fontFamily: 'monospace', fontWeight: 700,
+                                        padding: '6px 10px', borderRadius: 6, marginBottom: 0,
+                                        background: isAuto ? 'color-mix(in srgb, var(--app-accent) 14%, transparent)' : 'transparent',
+                                        border: `1px solid ${isAuto ? 'color-mix(in srgb, var(--app-accent) 60%, transparent)' : 'hsl(var(--app-border))'}`,
+                                        color: isAuto ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))',
+                                        fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 700,
                                         cursor: enabled ? 'pointer' : 'not-allowed',
                                     }}
                                 >
@@ -1261,19 +1303,19 @@ function MountOrientation({ connected }: { connected: boolean }) {
                 )
             })}
             {error && (
-                <p style={{ fontSize: 10, fontFamily: 'monospace', color: '#f87171', margin: 0, lineHeight: 1.5 }}>{error}</p>
+                <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'var(--app-danger)', margin: 0, lineHeight: 1.5 }}>{error}</p>
             )}
             {rebootNeeded && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <p style={{ fontSize: 10, fontFamily: 'monospace', color: '#fbbf24', margin: 0, flex: 1, lineHeight: 1.5 }}>
+                    <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'var(--app-warn)', margin: 0, flex: 1, lineHeight: 1.5 }}>
                         Saved - applied at boot. Reboot the FC, then recalibrate.
                     </p>
                     <button
                         onClick={() => { getSocket().emit('drone_action', { action: 'reboot' }); setRebootNeeded(false) }}
                         style={{
-                            padding: '4px 12px', borderRadius: 7, background: 'transparent',
-                            border: '1px solid rgba(251,191,36,0.5)', color: '#fbbf24',
-                            fontSize: 10.5, fontFamily: 'monospace', fontWeight: 700, cursor: 'pointer',
+                            padding: '4px 12px', borderRadius: 6, background: 'transparent',
+                            border: '1px solid color-mix(in srgb, var(--app-warn) 50%, transparent)', color: 'var(--app-warn)',
+                            fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 700, cursor: 'pointer',
                         }}
                         title="Restarts the flight controller. Only works while disarmed - the link will drop and reconnect."
                     >
@@ -1337,13 +1379,13 @@ function SensorsWorkspace() {
     const healthyCount = statuses.filter(v => v === 'ok').length
 
     return (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(360px, 1fr) minmax(540px, 1.45fr)', gap: 14, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: 16, alignItems: 'start' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <SectionHeader
-                    title="SENSOR STATUS"
+                    title="Sensor status"
                     hint="live from the autopilot"
                     right={
-                        <span style={{ fontSize: 10, fontFamily: 'monospace', fontWeight: 700, color: connected ? (healthyCount === 4 ? '#4ade80' : '#fbbf24') : '#6b7280' }}>
+                        <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: connected ? (healthyCount === 4 ? 'var(--app-ok)' : 'var(--app-warn)') : 'hsl(var(--app-text-muted))' }}>
                             {connected ? `${healthyCount}/4 healthy` : 'not connected'}
                         </span>
                     }
@@ -1388,7 +1430,7 @@ function SensorsWorkspace() {
                 </div>
 
                 <SectionHeader
-                    title="CALIBRATION"
+                    title="Calibration"
                     hint={connected ? 'watch the model on the right' : 'connect to enable'}
                     right={<Tip text="No barometer or GPS calibration exists in PX4: the barometer is zeroed at every boot and the GNSS receiver calibrates itself - the live readout above IS the check. Airspeed applies to fixed-wing only." />}
                 />
@@ -1414,7 +1456,7 @@ function SensorsWorkspace() {
                     autopilot answers "no, the vehicle is armed" in a sentence,
                     and dropping it would leave a button that looks broken. */}
                 {refusal && (
-                    <p style={{ fontSize: 11, fontFamily: 'monospace', color: '#f87171', margin: 0, lineHeight: 1.6 }}>
+                    <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'var(--app-danger)', margin: 0, lineHeight: 1.6 }}>
                         {refusal}
                     </p>
                 )}
@@ -1656,11 +1698,11 @@ function RadioWorkspace() {
     const reach = SWITCH_REACH[switchType] ?? SWITCH_REACH['3']
 
     return (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 1fr) minmax(500px, 1.35fr)', gap: 14, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: 16, alignItems: 'start' }}>
             {/* LEFT - what the transmitter is WIRED to do */}
             <div className="rc-rise" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <SectionHeader
-                    title="RC LINK"
+                    title="RC link"
                     hint="as the autopilot sees it"
                     right={<StatusChip
                         status={!connected ? 'off' : rc?.available ? 'ok' : 'warn'}
@@ -1669,7 +1711,7 @@ function RadioWorkspace() {
                 />
                 {/* The honest line about live channels. */}
                 <div style={{
-                    padding: '9px 12px', borderRadius: 10, fontSize: 10, fontFamily: 'monospace',
+                    padding: '9px 12px', borderRadius: 10, fontSize: 12, fontVariantNumeric: 'tabular-nums',
                     lineHeight: 1.6, color: 'hsl(var(--app-text-muted))',
                     background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
                 }}>
@@ -1681,7 +1723,7 @@ function RadioWorkspace() {
                 </div>
 
                 <SectionHeader
-                    title="FLIGHT MODES"
+                    title="Flight modes"
                     hint="written to the aircraft, not stored in the app"
                 />
                 <div style={{
@@ -1690,7 +1732,7 @@ function RadioWorkspace() {
                     background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
                 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 11, fontWeight: 600, color: 'hsl(var(--app-text))', flex: 1 }}>Mode switch channel</span>
+                        <span style={{ fontSize: 14, fontWeight: 700, color: 'hsl(var(--app-text))', flex: 1 }}>Mode switch channel</span>
                         <Tip text="The transmitter channel your mode switch sends on (RC_MAP_FLTMODE)." />
                         <select
                             value={modeChannel ?? ''}
@@ -1710,15 +1752,15 @@ function RadioWorkspace() {
                         unreachable slots dim; with live data the slot your
                         switch is on RIGHT NOW is ringed. */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ fontSize: 9.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', flex: 1, letterSpacing: '0.06em' }}>SWITCH TYPE</span>
+                        <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', flex: 1, letterSpacing: '0.06em' }}>SWITCH TYPE</span>
                         {['2', '3', '6'].map(t => (
                             <button key={t} onClick={() => { setSwitchType(t); lsSet('hyrak-rc-switch-type', t) }} style={{
                                 padding: '3px 9px', borderRadius: 6,
-                                background: switchType === t ? 'rgba(34,211,238,0.14)' : 'transparent',
-                                border: `1px solid ${switchType === t ? 'rgba(34,211,238,0.6)' : 'hsl(var(--app-border))'}`,
-                                color: switchType === t ? '#22d3ee' : 'hsl(var(--app-text-muted))',
-                                fontSize: 9.5, fontFamily: 'monospace', fontWeight: 700, cursor: 'pointer',
-                                transition: 'border-color 150ms, background 150ms, color 150ms',
+                                background: switchType === t ? 'color-mix(in srgb, var(--app-accent) 14%, transparent)' : 'transparent',
+                                border: `1px solid ${switchType === t ? 'color-mix(in srgb, var(--app-accent) 60%, transparent)' : 'hsl(var(--app-border))'}`,
+                                color: switchType === t ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))',
+                                fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 700, cursor: 'pointer',
+                                transition: 'border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out)',
                             }}>{t}-POS</button>
                         ))}
                     </div>
@@ -1732,20 +1774,20 @@ function RadioWorkspace() {
                         return (
                             <div key={key} style={{
                                 display: 'flex', alignItems: 'center', gap: 10,
-                                opacity: reachable ? 1 : 0.38,
-                                transition: 'opacity 250ms',
+                                opacity: reachable ? 1 : 0.6,
+                                transition: 'opacity var(--dur) var(--ease-out)',
                             }}>
                                 <span style={{
-                                    width: 24, height: 24, borderRadius: 7, flexShrink: 0,
+                                    width: 24, height: 24, borderRadius: 6, flexShrink: 0,
                                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    fontSize: 10, fontFamily: 'monospace', fontWeight: 700,
-                                    background: isActive ? 'rgba(74,222,128,0.16)' : 'rgba(34,211,238,0.1)',
-                                    color: isActive ? '#4ade80' : '#22d3ee',
-                                    border: `1px solid ${isActive ? '#4ade80' : 'rgba(34,211,238,0.3)'}`,
-                                    boxShadow: isActive ? '0 0 0 3px rgba(74,222,128,0.15)' : 'none',
-                                    transition: 'all 200ms',
+                                    fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 700,
+                                    background: isActive ? 'color-mix(in srgb, var(--app-ok) 16%, transparent)' : 'color-mix(in srgb, var(--app-accent) 10%, transparent)',
+                                    color: isActive ? 'var(--app-ok)' : 'var(--app-accent)',
+                                    border: `1px solid ${isActive ? 'var(--app-ok)' : 'color-mix(in srgb, var(--app-accent) 30%, transparent)'}`,
+                                    boxShadow: isActive ? '0 0 0 3px color-mix(in srgb, var(--app-ok) 15%, transparent)' : 'none',
+                                    transition: 'background-color var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out), color var(--dur) var(--ease-out)',
                                 }}>{i + 1}</span>
-                                <span style={{ width: 42, fontSize: 8.5, fontFamily: 'monospace', color: isActive ? '#4ade80' : 'hsl(var(--app-text-muted))', letterSpacing: '0.04em', transition: 'color 200ms' }}>
+                                <span style={{ width: 42, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: isActive ? 'var(--app-ok)' : 'hsl(var(--app-text-muted))', letterSpacing: '0.04em', transition: 'color var(--dur) var(--ease-out)' }}>
                                     {reachable ? posLabel : ''}
                                 </span>
                                 <select
@@ -1762,13 +1804,13 @@ function RadioWorkspace() {
                         )
                     })}
                     {(modeChannel ?? 0) === 0 && modeChannel !== null && (
-                        <p style={{ fontSize: 9.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: 0 }}>
+                        <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', margin: 0 }}>
                             Slots stay disabled until a mode switch channel is assigned.
                         </p>
                     )}
                 </div>
 
-                <SectionHeader title="SWITCHES" hint="one channel each, 0 = unassigned" />
+                <SectionHeader title="Switches" hint="one channel each, 0 = unassigned" />
                 <div style={{
                     display: 'flex', flexDirection: 'column', gap: 7,
                     padding: '11px 12px', borderRadius: 10,
@@ -1779,7 +1821,7 @@ function RadioWorkspace() {
                         const enabled = connected && v !== null && v !== undefined
                         return (
                             <div key={sw.key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <span style={{ fontSize: 11, color: 'hsl(var(--app-text))', flex: 1 }}>{sw.label}</span>
+                                <span style={{ fontSize: 12, color: 'hsl(var(--app-text))', flex: 1 }}>{sw.label}</span>
                                 <Tip text={sw.tip} />
                                 <select
                                     value={v ?? ''}
@@ -1796,28 +1838,28 @@ function RadioWorkspace() {
                     })}
                 </div>
                 {paramErr && (
-                    <p style={{ fontSize: 10, fontFamily: 'monospace', color: '#f87171', margin: 0, lineHeight: 1.5 }}>{paramErr}</p>
+                    <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'var(--app-danger)', margin: 0, lineHeight: 1.5 }}>{paramErr}</p>
                 )}
             </div>
 
             {/* RIGHT - the transmitter, drawn */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div className="rc-rise" style={{
-                    padding: 14, borderRadius: 12, animationDelay: '60ms',
+                    padding: 14, borderRadius: 10, animationDelay: '60ms',
                     background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
                 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                        <span style={{ fontSize: 11.5, fontWeight: 600, color: 'hsl(var(--app-text))', flex: 1 }}>
-                            Transmitter {live && <span className="rc-pulse" style={{ fontSize: 9, fontFamily: 'monospace', color: '#4ade80', marginLeft: 6 }}>● LIVE</span>}
+                        <span style={{ fontSize: 14, fontWeight: 700, color: 'hsl(var(--app-text))', flex: 1 }}>
+                            Transmitter {live && <span className="rc-pulse" style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--app-ok)', marginLeft: 6 }}>● LIVE</span>}
                         </span>
-                        <span style={{ fontSize: 9.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>stick layout</span>
+                        <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>stick layout</span>
                         {['1', '2', '3', '4'].map(m => (
                             <button key={m} onClick={() => { setVisualMode(m); lsSet('hyrak-rc-visual-mode', m) }} style={{
                                 width: 24, height: 24, borderRadius: 6, padding: 0,
-                                background: visualMode === m ? 'rgba(34,211,238,0.14)' : 'transparent',
-                                border: `1px solid ${visualMode === m ? 'rgba(34,211,238,0.6)' : 'hsl(var(--app-border))'}`,
-                                color: visualMode === m ? '#22d3ee' : 'hsl(var(--app-text-muted))',
-                                fontSize: 10.5, fontFamily: 'monospace', fontWeight: 700, cursor: 'pointer',
+                                background: visualMode === m ? 'color-mix(in srgb, var(--app-accent) 14%, transparent)' : 'transparent',
+                                border: `1px solid ${visualMode === m ? 'color-mix(in srgb, var(--app-accent) 60%, transparent)' : 'hsl(var(--app-border))'}`,
+                                color: visualMode === m ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))',
+                                fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 700, cursor: 'pointer',
                             }}>{m}</button>
                         ))}
                     </div>
@@ -1838,9 +1880,9 @@ function RadioWorkspace() {
                                 return (
                                     <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                                         <div style={{ height: 5, borderRadius: 3, background: 'hsl(var(--app-surface))', overflow: 'hidden' }}>
-                                            <div style={{ height: '100%', width: `${pct}%`, background: '#22d3ee', transition: 'width 80ms linear' }} />
+                                            <div style={{ height: '100%', width: `${pct}%`, background: 'var(--app-accent)', transition: 'width 80ms linear' }} />
                                         </div>
-                                        <span style={{ fontSize: 8.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
+                                        <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>
                                             {i + 1} · {v > 0 ? v : '-'}
                                         </span>
                                     </div>
@@ -1853,59 +1895,59 @@ function RadioWorkspace() {
                 {/* Stick calibration */}
                 <div className="rc-rise" style={{
                     display: 'flex', flexDirection: 'column', gap: 8,
-                    padding: '12px 14px', borderRadius: 12, animationDelay: '120ms',
-                    background: wiz === 'capturing' ? 'rgba(251,191,36,0.05)' : 'hsl(var(--app-surface-2))',
-                    border: `1px solid ${wiz === 'capturing' ? 'rgba(251,191,36,0.45)' : 'rgba(34,211,238,0.35)'}`,
-                    boxShadow: wiz === 'capturing' ? 'none' : 'inset 3px 0 0 rgba(34,211,238,0.45)',
-                    transition: 'border-color 250ms',
+                    padding: '12px 14px', borderRadius: 10, animationDelay: '120ms',
+                    background: wiz === 'capturing' ? 'color-mix(in srgb, var(--app-warn) 5%, transparent)' : 'hsl(var(--app-surface-2))',
+                    border: `1px solid ${wiz === 'capturing' ? 'color-mix(in srgb, var(--app-warn) 45%, transparent)' : 'color-mix(in srgb, var(--app-accent) 35%, transparent)'}`,
+                    boxShadow: wiz === 'capturing' ? 'none' : 'inset 3px 0 0 color-mix(in srgb, var(--app-accent) 45%, transparent)',
+                    transition: 'border-color var(--dur-slow) var(--ease-out)',
                 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{
-                            width: 26, height: 26, borderRadius: 7,
+                            width: 26, height: 26, borderRadius: 6,
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            background: 'rgba(34,211,238,0.12)', color: '#22d3ee',
+                            background: 'color-mix(in srgb, var(--app-accent) 12%, transparent)', color: 'var(--app-accent)',
                         }}>
                             <SlidersHorizontal size={14} />
                         </span>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: 'hsl(var(--app-text))', flex: 1 }}>Stick calibration</span>
+                        <span style={{ fontSize: 14, fontWeight: 700, color: 'hsl(var(--app-text))', flex: 1 }}>Stick calibration</span>
                         <Tip text="Teaches PX4 each channel's real endpoints and centre (RCn_MIN / TRIM / MAX). Channels that move less than 300µs during capture are left untouched, so an idle knob cannot be miscalibrated by accident." />
                     </div>
                     {wiz === 'idle' && (
                         <>
-                            <p style={{ fontSize: 10.5, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: 0, lineHeight: 1.6 }}>
+                            <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', margin: 0, lineHeight: 1.6 }}>
                                 {!live ? 'Needs live channel data - see the RC LINK note on the left.'
                                     : armed ? 'Refused while armed.'
                                     : 'Records your sticks\' real endpoints while you move them, then writes the result to the aircraft.'}
                             </p>
-                            <button onClick={startCapture} disabled={!live || armed} style={wizBtn(live && !armed, '#22d3ee')}>
+                            <button onClick={startCapture} disabled={!live || armed} style={wizBtn(live && !armed, 'var(--app-accent)')}>
                                 START CAPTURE
                             </button>
                         </>
                     )}
                     {wiz === 'capturing' && (
                         <>
-                            <p style={{ fontSize: 11, color: 'hsl(var(--app-text))', margin: 0, lineHeight: 1.6, fontWeight: 600 }}>
+                            <p style={{ fontSize: 13, color: 'hsl(var(--app-text))', margin: 0, lineHeight: 1.6, fontWeight: 600 }}>
                                 Move BOTH sticks through their full range - corners included - and flip every switch both ways.
                             </p>
-                            <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: 0, lineHeight: 1.6 }}>
+                            <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', margin: 0, lineHeight: 1.6 }}>
                                 Finish with everything centred and the throttle all the way DOWN - that final position becomes the trim - then press done.
                             </p>
                             <div style={{ display: 'flex', gap: 8 }}>
-                                <button onClick={finishCapture} style={wizBtn(true, '#4ade80')}>DONE - REVIEW</button>
-                                <button onClick={() => setWiz('idle')} style={wizBtn(true, '#f87171')}>CANCEL</button>
+                                <button onClick={finishCapture} style={wizBtn(true, 'var(--app-ok)')}>DONE - REVIEW</button>
+                                <button onClick={() => setWiz('idle')} style={wizBtn(true, 'var(--app-danger)')}>CANCEL</button>
                             </div>
                         </>
                     )}
                     {(wiz === 'review' || wiz === 'writing' || wiz === 'done') && (
                         <>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr', gap: '3px 12px', fontSize: 10, fontFamily: 'monospace' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr', gap: '3px 12px', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
                                 <span style={{ color: 'hsl(var(--app-text-muted))' }}>CH</span>
                                 <span style={{ color: 'hsl(var(--app-text-muted))' }}>MIN</span>
                                 <span style={{ color: 'hsl(var(--app-text-muted))' }}>TRIM</span>
                                 <span style={{ color: 'hsl(var(--app-text-muted))' }}>MAX</span>
                                 {calRows().map(r => (
                                     <React.Fragment key={r.ch}>
-                                        <span style={{ color: '#22d3ee', fontWeight: 700 }}>{r.ch}</span>
+                                        <span style={{ color: 'var(--app-accent)', fontWeight: 700 }}>{r.ch}</span>
                                         <span style={{ color: 'hsl(var(--app-text))' }}>{r.min}</span>
                                         <span style={{ color: 'hsl(var(--app-text))' }}>{r.trim}</span>
                                         <span style={{ color: 'hsl(var(--app-text))' }}>{r.max}</span>
@@ -1913,36 +1955,36 @@ function RadioWorkspace() {
                                 ))}
                             </div>
                             {calRows().length === 0 && (
-                                <p style={{ fontSize: 10, fontFamily: 'monospace', color: '#fbbf24', margin: 0 }}>
+                                <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'var(--app-warn)', margin: 0 }}>
                                     Nothing moved more than 300µs - there is nothing to write.
                                 </p>
                             )}
                             {wiz === 'review' && (
                                 <div style={{ display: 'flex', gap: 8 }}>
                                     <button onClick={writeCalibration} disabled={calRows().length === 0 || armed}
-                                        style={wizBtn(calRows().length > 0 && !armed, '#4ade80')}>
+                                        style={wizBtn(calRows().length > 0 && !armed, 'var(--app-ok)')}>
                                         WRITE TO AIRCRAFT
                                     </button>
-                                    <button onClick={startCapture} style={wizBtn(true, '#fbbf24')}>RECAPTURE</button>
-                                    <button onClick={() => setWiz('idle')} style={wizBtn(true, '#f87171')}>DISCARD</button>
+                                    <button onClick={startCapture} style={wizBtn(true, 'var(--app-warn)')}>RECAPTURE</button>
+                                    <button onClick={() => setWiz('idle')} style={wizBtn(true, 'var(--app-danger)')}>DISCARD</button>
                                 </div>
                             )}
                             {wiz === 'writing' && (
-                                <p style={{ fontSize: 10.5, fontFamily: 'monospace', color: '#fbbf24', margin: 0 }}>
+                                <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'var(--app-warn)', margin: 0 }}>
                                     Writing {writeProgress}
                                 </p>
                             )}
                             {wiz === 'done' && (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                    <p style={{ fontSize: 10.5, fontFamily: 'monospace', color: '#4ade80', margin: 0, flex: 1 }}>
+                                    <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'var(--app-ok)', margin: 0, flex: 1 }}>
                                         Written. Verify on the bars above: full stick = full bar, centred = middle.
                                     </p>
-                                    <button onClick={() => setWiz('idle')} style={wizBtn(true, '#22d3ee')}>DONE</button>
+                                    <button onClick={() => setWiz('idle')} style={wizBtn(true, 'var(--app-accent)')}>DONE</button>
                                 </div>
                             )}
                         </>
                     )}
-                    {wizErr && <p style={{ fontSize: 10, fontFamily: 'monospace', color: '#f87171', margin: 0 }}>{wizErr}</p>}
+                    {wizErr && <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'var(--app-danger)', margin: 0 }}>{wizErr}</p>}
                 </div>
             </div>
         </div>
@@ -1951,20 +1993,20 @@ function RadioWorkspace() {
 
 function selStyle(enabled: boolean): React.CSSProperties {
     return {
-        padding: '5px 8px', borderRadius: 7, fontSize: 11, fontFamily: 'monospace',
-        background: 'hsl(var(--app-surface))', color: 'hsl(var(--app-text))',
-        border: '1px solid hsl(var(--app-border))', minWidth: 92,
-        cursor: enabled ? 'pointer' : 'not-allowed', opacity: enabled ? 1 : 0.5,
+        padding: '5px 8px', borderRadius: 6, fontSize: 12, fontVariantNumeric: 'tabular-nums',
+        background: enabled ? 'hsl(var(--app-surface))' : 'hsl(var(--app-surface-2))', color: enabled ? 'hsl(var(--app-text))' : 'hsl(var(--app-text-muted))',
+        border: `1px ${enabled ? 'solid' : 'dashed'} hsl(var(--app-border-strong))`, minWidth: 92, minHeight: 32,
+        cursor: enabled ? 'pointer' : 'not-allowed',
     }
 }
 
 function wizBtn(enabled: boolean, colour: string): React.CSSProperties {
     return {
-        padding: '6px 14px', borderRadius: 7, background: 'transparent',
-        border: `1px solid ${enabled ? `${colour}77` : 'hsl(var(--app-border))'}`,
-        color: enabled ? colour : 'hsl(var(--app-text-muted))',
-        fontSize: 10.5, fontFamily: 'monospace', fontWeight: 700,
-        cursor: enabled ? 'pointer' : 'not-allowed', opacity: enabled ? 1 : 0.5,
+        padding: '6px 14px', borderRadius: 6, background: 'transparent',
+        border: `1px ${enabled ? 'solid' : 'dashed'} ${enabled ? mix(colour, 47) : 'hsl(var(--app-border-strong))'}`,
+        color: enabled ? colour : 'hsl(var(--app-text-muted))', minHeight: 32,
+        fontSize: 13, fontWeight: 700,
+        cursor: enabled ? 'pointer' : 'not-allowed',
     }
 }
 
@@ -1992,7 +2034,7 @@ function TransmitterSvg({ layout, axisValue, live, modeChannel, modeValue, switc
     })
     const L = stickOffset(layout.left)
     const Rk = stickOffset(layout.right)
-    const stickCol = live ? '#22d3ee' : 'hsl(var(--app-text-muted))'
+    const stickCol = live ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))'
     // The mode switch, drawn as what it is: a lever with 2/3/6 detents.
     const positions = Number(switchType) === 2 ? 2 : Number(switchType) === 6 ? 6 : 3
     const slot = slotForValue(modeValue)
@@ -2032,13 +2074,13 @@ function TransmitterSvg({ layout, axisValue, live, modeChannel, modeValue, switc
                 (CSS transition), so flipping the real switch visibly clicks
                 through LOW / MID / HIGH on screen. */}
             <g>
-                <text x={318} y={20} textAnchor="middle" fontSize={8} fontFamily="monospace"
-                    fill={modeChannel > 0 ? '#22d3ee' : 'hsl(var(--app-text-muted))'}>
+                <text x={318} y={20} textAnchor="middle" fontSize={9} fontFamily="inherit"
+                    fill={modeChannel > 0 ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))'}>
                     MODE{modeChannel > 0 ? ` CH${modeChannel}` : ' (unassigned)'}
                 </text>
                 <rect x={288} y={26} width={60} height={16} rx={6}
-                    fill={modeChannel > 0 ? 'rgba(34,211,238,0.1)' : 'hsl(var(--app-surface))'}
-                    stroke={modeChannel > 0 ? 'rgba(34,211,238,0.55)' : 'hsl(var(--app-border))'} strokeWidth={1.2} />
+                    fill={modeChannel > 0 ? 'color-mix(in srgb, var(--app-accent) 10%, transparent)' : 'hsl(var(--app-surface))'}
+                    stroke={modeChannel > 0 ? 'color-mix(in srgb, var(--app-accent) 55%, transparent)' : 'hsl(var(--app-border))'} strokeWidth={1.2} />
                 {Array.from({ length: positions }, (_, i) => (
                     <circle key={i} cx={296 + (i / (positions - 1)) * 44} cy={34} r={1.6}
                         fill="hsl(var(--app-text-muted))" opacity={0.6} />
@@ -2047,7 +2089,7 @@ function TransmitterSvg({ layout, axisValue, live, modeChannel, modeValue, switc
                     transform: `translate(${296 + (detent / Math.max(positions - 1, 1)) * 44}px, 34px)`,
                     transition: 'transform 160ms ease-out',
                 }}>
-                    <circle r={5.5} fill={live && modeChannel > 0 ? '#22d3ee' : 'hsl(var(--app-text-muted))'} />
+                    <circle r={5.5} fill={live && modeChannel > 0 ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))'} />
                     <circle r={2.2} fill="hsl(var(--app-surface))" />
                 </g>
             </g>
@@ -2063,9 +2105,9 @@ function TransmitterSvg({ layout, axisValue, live, modeChannel, modeValue, switc
                         <line x1={-off.dx} y1={-off.dy} x2={0} y2={0} stroke={stickCol} strokeWidth={4.5} strokeLinecap="round" opacity={0.75} />
                         <circle r={12.5} fill={stickCol} />
                         <circle r={6} fill="hsl(var(--app-surface))" />
-                        <circle cx={-3} cy={-3.5} r={2.2} fill="rgba(255,255,255,0.5)" />
+                        <circle cx={-3} cy={-3.5} r={2.2} fill="hsl(var(--app-text-muted))" />
                     </g>
-                    <text x={cx} y={190} textAnchor="middle" fontSize={9} fontFamily="monospace" fill="hsl(var(--app-text-muted))">
+                    <text x={cx} y={190} textAnchor="middle" fontSize={9} fontFamily="inherit" fill="hsl(var(--app-text-muted))">
                         {AXIS_SHORT[ax.y]} ↑↓ · {AXIS_SHORT[ax.x]} ←→
                     </text>
                 </g>
@@ -2073,12 +2115,12 @@ function TransmitterSvg({ layout, axisValue, live, modeChannel, modeValue, switc
             {/* screen: the mode the AIRCRAFT reports, which is the whole
                 point of a mode switch */}
             <rect x={178} y={96} width={64} height={34} rx={6} fill="hsl(var(--app-bg))" stroke="hsl(var(--app-border))" strokeWidth={1.2} />
-            <text x={210} y={110} textAnchor="middle" fontSize={7.5} fontFamily="monospace"
-                fill={live ? '#4ade80' : 'hsl(var(--app-text-muted))'}>
+            <text x={210} y={110} textAnchor="middle" fontSize={9} fontFamily="inherit"
+                fill={live ? 'var(--app-ok)' : 'hsl(var(--app-text-muted))'}>
                 {live ? 'RC LIVE' : 'NO RX'}
             </text>
-            <text x={210} y={123} textAnchor="middle" fontSize={8.5} fontFamily="monospace" fontWeight="700"
-                fill={flightMode !== 'NO LINK' ? '#22d3ee' : 'hsl(var(--app-text-muted))'}>
+            <text x={210} y={123} textAnchor="middle" fontSize={10} fontFamily="inherit" fontWeight="700"
+                fill={flightMode !== 'NO LINK' ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))'}>
                 {flightMode.slice(0, 9)}
             </text>
         </svg>
@@ -2096,13 +2138,13 @@ function PowerWorkspace({ p, onUpdate }: { p: PowerProfile; onUpdate: (patch: Pa
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {/* Battery hero panel */}
-            <Panel title="BATTERY PACK" accent="#22d3ee">
+            <Panel title="Battery pack" accent="var(--app-accent)">
                 <div style={{ display: 'flex', alignItems: 'flex-end', gap: 24 }}>
                     <BatteryCellsViz cells={p.cells} totalV={totalV} />
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         <div>
-                            <span style={{ fontSize: 28, fontFamily: 'monospace', fontWeight: 700, color: '#22d3ee', lineHeight: 1 }}>{p.cells}S</span>
-                            <span style={{ fontSize: 13, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)', marginLeft: 8 }}>{p.capacity} mAh</span>
+                            <span style={{ fontSize: 28, fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--app-accent)', lineHeight: 1 }}>{p.cells}S</span>
+                            <span style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', marginLeft: 8 }}>{p.capacity} mAh</span>
                         </div>
                         {[
                             { label: 'Full charge', val: `${fullV} V` },
@@ -2111,8 +2153,8 @@ function PowerWorkspace({ p, onUpdate }: { p: PowerProfile; onUpdate: (patch: Pa
                             ...(totalV ? [{ label: 'Live voltage', val: `${totalV.toFixed(2)} V` }] : []),
                         ].map(r => (
                             <div key={r.label} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                                <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.25)', width: 80 }}>{r.label}</span>
-                                <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, color: r.label === 'Live voltage' ? '#4ade80' : 'hsl(var(--app-text))' }}>{r.val}</span>
+                                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', width: 80 }}>{r.label}</span>
+                                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: r.label === 'Live voltage' ? 'var(--app-ok)' : 'hsl(var(--app-text))' }}>{r.val}</span>
                             </div>
                         ))}
                     </div>
@@ -2120,7 +2162,7 @@ function PowerWorkspace({ p, onUpdate }: { p: PowerProfile; onUpdate: (patch: Pa
             </Panel>
 
             <G2>
-                <Card title="PACK CONFIG">
+                <Card title="Pack config">
                     <Field label="CELL COUNT (S)">
                         <AppSelect value={p.cells} onChange={cells => onUpdate({ cells })} options={['2','3','4','5','6','8','10','12'].map(v => ({ value: v, label: `${v}S  ·  ${(+v*4.2).toFixed(1)}V full` }))} />
                     </Field>
@@ -2137,24 +2179,24 @@ function PowerWorkspace({ p, onUpdate }: { p: PowerProfile; onUpdate: (patch: Pa
                     </Field>
                 </Card>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                    <Panel title="DISCHARGE CURVE" accent="#fbbf24">
+                    <Panel title="Discharge curve" accent="var(--app-warn)">
                         <DischargeCurve warnPct={p.warnPct} critPct={p.critPct} />
-                        <p style={{ fontSize: 9, fontFamily: 'monospace', color: 'rgba(255,255,255,0.2)', margin: 0 }}>Typical LiPo curve - flat to ~20%, then rapid voltage drop</p>
+                        <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', margin: 0 }}>Typical LiPo curve - flat to ~20%, then rapid voltage drop</p>
                     </Panel>
-                    <Card title="THRESHOLDS">
+                    <Card title="Thresholds">
                         <div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
                                 <Label text={`WARNING - ${p.warnPct}%`} tip="Triggers a warning alert. Fly home well before this." />
-                                <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#fbbf24' }}>{p.warnPct}%</span>
+                                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--app-warn)' }}>{p.warnPct}%</span>
                             </div>
-                            <input type="range" min={10} max={40} step={5} value={p.warnPct} onChange={e => onUpdate({ warnPct: +e.target.value })} style={{ width: '100%', accentColor: '#fbbf24' }} />
+                            <input type="range" min={10} max={40} step={5} value={p.warnPct} onChange={e => onUpdate({ warnPct: +e.target.value })} style={{ width: '100%', accentColor: 'var(--app-warn)' }} />
                         </div>
                         <div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
                                 <Label text={`CRITICAL - ${p.critPct}%`} tip="Triggers the action below." />
-                                <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#f87171' }}>{p.critPct}%</span>
+                                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--app-danger)' }}>{p.critPct}%</span>
                             </div>
-                            <input type="range" min={5} max={20} step={1} value={p.critPct} onChange={e => onUpdate({ critPct: +e.target.value })} style={{ width: '100%', accentColor: '#f87171' }} />
+                            <input type="range" min={5} max={20} step={1} value={p.critPct} onChange={e => onUpdate({ critPct: +e.target.value })} style={{ width: '100%', accentColor: 'var(--app-danger)' }} />
                         </div>
                     </Card>
                 </div>
@@ -2165,6 +2207,22 @@ function PowerWorkspace({ p, onUpdate }: { p: PowerProfile; onUpdate: (patch: Pa
 
 // ── SAFETY ────────────────────────────────────────────────────────────────────
 
+/** A limit: label left, the value large in tabular numerals right, an optional switch. */
+function LimitRow({ label, tip, value, unit, toggle }: { label: string; tip?: string; value: string; unit?: string; toggle?: React.ReactNode }) {
+    return (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'hsl(var(--app-text-muted))' }}>{label}</span>
+                {tip && <Tip text={tip} />}
+            </div>
+            <span style={{ fontSize: 16, fontWeight: 700, color: 'hsl(var(--app-text))', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                {value}{unit && <span style={{ fontSize: 13, fontWeight: 600, color: 'hsl(var(--app-text-muted))', marginLeft: 3 }}>{unit}</span>}
+            </span>
+            {toggle}
+        </div>
+    )
+}
+
 function SafetyWorkspace({ s, onUpdate }: { s: SafetyProfile; onUpdate: (p: Partial<SafetyProfile>) => void }) {
     const terrainFollow    = useMissionStore(st => st.terrainFollow)
     const setTerrainFollow = useMissionStore(st => st.setTerrainFollow)
@@ -2173,17 +2231,19 @@ function SafetyWorkspace({ s, onUpdate }: { s: SafetyProfile; onUpdate: (p: Part
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <G2>
                 {/* Left: geofence map */}
-                <Panel title="AIRSPACE - TOP DOWN VIEW" accent="#22d3ee">
-                    <GeofenceMap maxDist={s.maxDist} maxDistEnabled={s.maxDistEnabled} rthAlt={s.rthAlt} />
+                <Panel title="Airspace, top-down">
+                    <div style={{ width: '100%', maxWidth: 340, margin: '0 auto' }}>
+                        <GeofenceMap maxDist={s.maxDist} maxDistEnabled={s.maxDistEnabled} rthAlt={s.rthAlt} />
+                    </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         {[
-                            { color: '#f87171', label: `Max distance fence - ${s.maxDistEnabled ? s.maxDist + 'm' : 'disabled'}` },
-                            { color: '#4ade80', label: 'Safe operating zone (estimated)' },
-                            { color: '#22d3ee', label: `RTH altitude - ${s.rthAlt}m` },
+                            { color: 'var(--app-danger)', label: `Distance fence: ${s.maxDistEnabled ? s.maxDist + ' m' : 'off'}` },
+                            { color: 'var(--app-ok)', label: 'Safe zone (estimate)' },
+                            { color: 'var(--app-accent)', label: `Return altitude: ${s.rthAlt} m` },
                         ].map(l => (
                             <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                                <div style={{ width: 20, height: 1.5, background: l.color, flexShrink: 0 }} />
-                                <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)' }}>{l.label}</span>
+                                <div style={{ width: 20, height: 3, borderRadius: 2, background: l.color, flexShrink: 0 }} />
+                                <span style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text))' }}>{l.label}</span>
                             </div>
                         ))}
                     </div>
@@ -2192,17 +2252,18 @@ function SafetyWorkspace({ s, onUpdate }: { s: SafetyProfile; onUpdate: (p: Part
                 {/* Right: controls */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                     {/* Terrain follow - functional, prominent */}
-                    <div style={{ padding: '14px 16px', borderRadius: 10, background: terrainFollow ? 'rgba(34,211,238,0.07)' : '#090e14', border: `1.5px solid ${terrainFollow ? 'rgba(34,211,238,0.3)' : 'hsl(var(--app-border))'}`, transition: 'all 0.2s' }}>
+                    <div style={{ padding: '14px 16px', borderRadius: 10, background: terrainFollow ? 'color-mix(in srgb, var(--app-accent) 7%, transparent)' : 'hsl(var(--app-surface-2))', border: `1px solid ${terrainFollow ? 'color-mix(in srgb, var(--app-accent) 40%, transparent)' : 'hsl(var(--app-border))'}`, transition: 'background-color var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out)' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                            <span style={{ fontSize: 13, fontWeight: 600, color: terrainFollow ? '#22d3ee' : 'hsl(var(--app-text))' }}>Terrain Following</span>
+                            <span style={{ fontSize: 16, fontWeight: 700, color: 'hsl(var(--app-text))' }}>Terrain following</span>
                             <Toggle value={terrainFollow} onChange={() => setTerrainFollow(!terrainFollow)} />
                         </div>
-                        <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)', margin: 0, lineHeight: 1.6 }}>
-                            {terrainFollow ? 'Active - missions export with TERRAIN_ALT frame. Drone holds constant AGL over hills.' : 'Off - mission altitudes are relative to home point.'}
+                        <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: 0, lineHeight: 1.45 }}
+                            title={terrainFollow ? 'Missions export with the TERRAIN_ALT frame.' : undefined}>
+                            {terrainFollow ? 'On: holds the same height above the ground over hills.' : 'Off: mission heights are measured from the home point.'}
                         </p>
                     </div>
-                    <Card title="FAILSAFE ACTIONS">
-                        <Field label="SIGNAL LOSS ACTION" tip="What the autopilot does if RC or telemetry link drops.">
+                    <Card title="Failsafe">
+                        <Field label="If the link is lost" tip="What the autopilot does if the RC or telemetry link drops.">
                             <AppSelect value={s.signalLoss} onChange={signalLoss => onUpdate({ signalLoss })} options={[
                                 { value: 'rtl',      label: 'Return to Launch (RTL)' },
                                 { value: 'land',     label: 'Land immediately' },
@@ -2211,29 +2272,23 @@ function SafetyWorkspace({ s, onUpdate }: { s: SafetyProfile; onUpdate: (p: Part
                             ]} />
                         </Field>
                     </Card>
-                    <Card title="LIMITS">
+                    <Card title="Limits">
                         <div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                                <Label text={`RTH ALT - ${s.rthAlt}m`} tip="Drone climbs to this before flying home." />
-                            </div>
-                            <input type="range" min={10} max={150} step={5} value={s.rthAlt} onChange={e => onUpdate({ rthAlt: +e.target.value })} style={{ width: '100%', accentColor: '#22d3ee' }} />
+                            <LimitRow label="Return altitude" tip="The drone climbs to this before flying home." value={`${s.rthAlt}`} unit="m" />
+                            <input type="range" min={10} max={150} step={5} value={s.rthAlt} onChange={e => onUpdate({ rthAlt: +e.target.value })} style={{ width: '100%', accentColor: 'var(--app-accent)' }} />
                         </div>
                         <div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                                <Label text={`MAX ALT - ${s.maxAltEnabled ? s.maxAlt + 'm' : 'unlimited'}`} />
-                                <Toggle value={s.maxAltEnabled} onChange={() => onUpdate({ maxAltEnabled: !s.maxAltEnabled })} />
-                            </div>
-                            {s.maxAltEnabled && <input type="range" min={20} max={500} step={10} value={s.maxAlt} onChange={e => onUpdate({ maxAlt: +e.target.value })} style={{ width: '100%', accentColor: '#f87171' }} />}
+                            <LimitRow label="Max altitude" value={s.maxAltEnabled ? `${s.maxAlt}` : 'No limit'} unit={s.maxAltEnabled ? 'm' : undefined}
+                                toggle={<Toggle value={s.maxAltEnabled} onChange={() => onUpdate({ maxAltEnabled: !s.maxAltEnabled })} />} />
+                            {s.maxAltEnabled && <input type="range" min={20} max={500} step={10} value={s.maxAlt} onChange={e => onUpdate({ maxAlt: +e.target.value })} style={{ width: '100%', accentColor: 'var(--app-danger)' }} />}
                         </div>
                         <div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                                <Label text={`MAX DIST - ${s.maxDistEnabled ? s.maxDist + 'm' : 'unlimited'}`} />
-                                <Toggle value={s.maxDistEnabled} onChange={() => onUpdate({ maxDistEnabled: !s.maxDistEnabled })} />
-                            </div>
-                            {s.maxDistEnabled && <input type="range" min={50} max={5000} step={50} value={s.maxDist} onChange={e => onUpdate({ maxDist: +e.target.value })} style={{ width: '100%', accentColor: '#f87171' }} />}
+                            <LimitRow label="Max distance" value={s.maxDistEnabled ? `${s.maxDist}` : 'No limit'} unit={s.maxDistEnabled ? 'm' : undefined}
+                                toggle={<Toggle value={s.maxDistEnabled} onChange={() => onUpdate({ maxDistEnabled: !s.maxDistEnabled })} />} />
+                            {s.maxDistEnabled && <input type="range" min={50} max={5000} step={50} value={s.maxDist} onChange={e => onUpdate({ maxDist: +e.target.value })} style={{ width: '100%', accentColor: 'var(--app-danger)' }} />}
                         </div>
                     </Card>
-                    <LockedNote text="Limit parameters saved locally - autopilot upload requires parameter write access" />
+                    <LockedNote text="Saved on this device only. Sending limits to the autopilot needs parameter write access." />
                 </div>
             </G2>
         </div>
@@ -2245,39 +2300,39 @@ function SafetyWorkspace({ s, onUpdate }: { s: SafetyProfile; onUpdate: (p: Part
 function FlightWorkspace({ f, onUpdate, rthAlt, maxAlt, maxAltEnabled }: { f: FlightProfile; onUpdate: (p: Partial<FlightProfile>) => void; rthAlt: number; maxAlt: number; maxAltEnabled: boolean }) {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <Panel title="ALTITUDE PROFILE - SIDE VIEW" accent="#4ade80">
+            <Panel title="Altitude profile, side view" accent="var(--app-ok)">
                 <AltitudeProfile takeoffAlt={f.takeoffAlt} rthAlt={rthAlt} maxAlt={maxAlt} maxAltEnabled={maxAltEnabled} />
                 <div style={{ display: 'flex', gap: 16 }}>
                     {[
-                        { color: '#4ade80', label: `Takeoff - ${f.takeoffAlt}m` },
-                        { color: '#22d3ee', label: `RTH altitude - ${rthAlt}m` },
-                        ...(maxAltEnabled ? [{ color: '#f87171', label: `Max altitude - ${maxAlt}m` }] : []),
+                        { color: 'var(--app-ok)', label: `Takeoff - ${f.takeoffAlt}m` },
+                        { color: 'var(--app-accent)', label: `RTH altitude - ${rthAlt}m` },
+                        ...(maxAltEnabled ? [{ color: 'var(--app-danger)', label: `Max altitude - ${maxAlt}m` }] : []),
                     ].map(l => (
                         <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                             <div style={{ width: 16, height: 2, background: l.color }} />
-                            <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)' }}>{l.label}</span>
+                            <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>{l.label}</span>
                         </div>
                     ))}
                 </div>
             </Panel>
             <G2>
-                <Card title="ALTITUDE DEFAULTS">
+                <Card title="Altitude defaults">
                     <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
                             <Label text="DEFAULT TAKEOFF" tip="Height for automated takeoff commands." />
-                            <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#4ade80' }}>{f.takeoffAlt} m</span>
+                            <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--app-ok)' }}>{f.takeoffAlt} m</span>
                         </div>
-                        <input type="range" min={2} max={50} step={1} value={f.takeoffAlt} onChange={e => onUpdate({ takeoffAlt: +e.target.value })} style={{ width: '100%', accentColor: '#4ade80' }} />
+                        <input type="range" min={2} max={50} step={1} value={f.takeoffAlt} onChange={e => onUpdate({ takeoffAlt: +e.target.value })} style={{ width: '100%', accentColor: 'var(--app-ok)' }} />
                     </div>
                     <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
                             <Label text="LOITER RADIUS" tip="Circle radius in loiter/hold. Mostly for fixed-wing." />
-                            <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#22d3ee' }}>{f.loiterRadius} m</span>
+                            <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--app-accent)' }}>{f.loiterRadius} m</span>
                         </div>
-                        <input type="range" min={10} max={200} step={10} value={f.loiterRadius} onChange={e => onUpdate({ loiterRadius: +e.target.value })} style={{ width: '100%', accentColor: '#22d3ee' }} />
+                        <input type="range" min={10} max={200} step={10} value={f.loiterRadius} onChange={e => onUpdate({ loiterRadius: +e.target.value })} style={{ width: '100%', accentColor: 'var(--app-accent)' }} />
                     </div>
                 </Card>
-                <Card title="RETURN TO HOME">
+                <Card title="Return to home">
                     <Field label="RTH MODE" tip="What the drone does when RTL triggers.">
                         <AppSelect value={f.rthMode} onChange={rthMode => onUpdate({ rthMode })} options={[
                             { value: 'ascend',  label: 'Climb to RTH alt → fly home → land' },
@@ -2309,29 +2364,29 @@ interface DisplayParam {
 
 // Group colour / icon map
 const GROUP_STYLE: Record<PX4Group, { color: string; icon: React.ElementType }> = {
-    'Commander':         { color: '#f87171', icon: Shield },
-    'EKF2':              { color: '#60a5fa', icon: Gauge },
-    'Multicopter Rate':  { color: '#f97316', icon: RotateCcw },
-    'Position Control':  { color: '#4ade80', icon: Move },
-    'Navigation':        { color: '#c084fc', icon: Navigation },
-    'Return to Launch':  { color: '#22d3ee', icon: ChevronLeft },
-    'Battery':           { color: '#fbbf24', icon: Battery },
-    'Geofence':          { color: '#f87171', icon: Shield },
-    'Mission':           { color: '#a78bfa', icon: Navigation },
-    'System':            { color: '#22d3ee', icon: Cpu },
-    'MAVLink':           { color: '#22d3ee', icon: Radio },
-    'PWM / ESC':         { color: '#fb923c', icon: Zap },
-    'Motors':            { color: '#fb923c', icon: SlidersHorizontal },
+    'Commander':         { color: 'var(--app-danger)', icon: Shield },
+    'EKF2':              { color: 'light-dark(#1d4ed8, #60a5fa)', icon: Gauge },
+    'Multicopter Rate':  { color: 'light-dark(#c2410c, #f97316)', icon: RotateCcw },
+    'Position Control':  { color: 'var(--app-ok)', icon: Move },
+    'Navigation':        { color: 'light-dark(#7e22ce, #c084fc)', icon: Navigation },
+    'Return to Launch':  { color: 'var(--app-accent)', icon: ChevronLeft },
+    'Battery':           { color: 'var(--app-warn)', icon: Battery },
+    'Geofence':          { color: 'var(--app-danger)', icon: Shield },
+    'Mission':           { color: 'light-dark(#6d28d9, #a78bfa)', icon: Navigation },
+    'System':            { color: 'var(--app-accent)', icon: Cpu },
+    'MAVLink':           { color: 'var(--app-accent)', icon: Radio },
+    'PWM / ESC':         { color: 'light-dark(#c2410c, #fb923c)', icon: Zap },
+    'Motors':            { color: 'light-dark(#c2410c, #fb923c)', icon: SlidersHorizontal },
     'Control Allocator': { color: 'hsl(var(--app-text-muted))', icon: SlidersHorizontal },
     'Logging':           { color: 'hsl(var(--app-text-muted))', icon: Terminal },
-    'Circuit Breakers':  { color: '#f87171', icon: AlertTriangle },
-    'Sensors':           { color: '#60a5fa', icon: Gauge },
-    'RC Channels':       { color: '#a78bfa', icon: Radio },
-    'Land Detector':     { color: '#4ade80', icon: Plane },
-    'VTOL':              { color: '#e879f9', icon: Plane },
-    'Failure Detector':  { color: '#f87171', icon: AlertTriangle },
-    'Attitude Estimator':{ color: '#818cf8', icon: Gauge },
-    'Other':             { color: '#6b7280', icon: Terminal },
+    'Circuit Breakers':  { color: 'var(--app-danger)', icon: AlertTriangle },
+    'Sensors':           { color: 'light-dark(#1d4ed8, #60a5fa)', icon: Gauge },
+    'RC Channels':       { color: 'light-dark(#6d28d9, #a78bfa)', icon: Radio },
+    'Land Detector':     { color: 'var(--app-ok)', icon: Plane },
+    'VTOL':              { color: 'light-dark(#a21caf, #e879f9)', icon: Plane },
+    'Failure Detector':  { color: 'var(--app-danger)', icon: AlertTriangle },
+    'Attitude Estimator':{ color: 'light-dark(#4338ca, #818cf8)', icon: Gauge },
+    'Other':             { color: 'hsl(var(--app-text-muted))', icon: Terminal },
 }
 
 // ── Demo mode ParamCard (uses hardcoded PARAMS_DB) ─────────────────────────
@@ -2352,8 +2407,8 @@ function ParamCard({ p, currentVal, catColor, isSearching, onSet, onRevert }: {
         ? (p.opts?.find(o => o.v === p.def)?.l ?? String(p.def))
         : `${p.def}${p.unit ? ` ${p.unit}` : ''}`
 
-    const borderAccent = p.danger ? 'rgba(248,113,113,0.22)' : modified ? 'rgba(251,191,36,0.28)' : `${catColor}1a`
-    const leftBorder   = p.danger ? '#f87171' : modified ? '#fbbf24' : catColor
+    const borderAccent = p.danger ? 'color-mix(in srgb, var(--app-danger) 22%, transparent)' : modified ? 'color-mix(in srgb, var(--app-warn) 28%, transparent)' : `${mix(catColor, 10)}`
+    const leftBorder   = p.danger ? 'var(--app-danger)' : modified ? 'var(--app-warn)' : catColor
 
     return (
         <div style={{ borderRadius: 10, background: 'hsl(var(--app-surface))', border: `1px solid ${borderAccent}`, borderLeft: `3px solid ${leftBorder}`, display: 'flex', flexDirection: 'column' }}>
@@ -2362,57 +2417,57 @@ function ParamCard({ p, currentVal, catColor, isSearching, onSet, onRevert }: {
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                            <span style={{ fontSize: 12, fontWeight: 700, color: 'hsl(var(--app-text))', lineHeight: 1.3 }}>{p.name}</span>
-                            {p.danger   && <AlertTriangle size={9} style={{ color: '#f87171', flexShrink: 0 }} />}
-                            {modified   && <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#fbbf24', flexShrink: 0 }} />}
+                            <span style={{ fontSize: 14, fontWeight: 700, color: 'hsl(var(--app-text))', lineHeight: 1.3 }}>{p.name}</span>
+                            {p.danger   && <AlertTriangle size={9} style={{ color: 'var(--app-danger)', flexShrink: 0 }} />}
+                            {modified   && <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--app-warn)', flexShrink: 0 }} />}
                         </div>
-                        <span style={{ fontSize: 9, fontFamily: 'monospace', color: catColor, opacity: 0.65 }}>{p.key}</span>
+                        <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }} className="font-code">{p.key}</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
                         {isSearching && (
-                            <span style={{ fontSize: 8, fontFamily: 'monospace', padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.22)' }}>
+                            <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', padding: '1px 5px', borderRadius: 6, background: 'hsl(var(--app-text) / 0.04)', color: 'hsl(var(--app-text-muted))' }}>
                                 {PARAM_CATS.find(c => c.id === p.cat)?.label}
                             </span>
                         )}
-                        <span style={{ fontSize: 8, fontFamily: 'monospace', padding: '1px 5px', borderRadius: 4, background: `${catColor}14`, color: catColor, opacity: 0.75 }}>
+                        <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', padding: '1px 5px', borderRadius: 6, background: `${mix(catColor, 8)}`, color: catColor }}>
                             {p.type.toUpperCase()}
                         </span>
                     </div>
                 </div>
-                <p style={{ fontSize: 11, color: 'hsl(var(--app-text-muted))', margin: '5px 0 0', lineHeight: 1.5 }}>{p.desc}</p>
+                <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: '5px 0 0', lineHeight: 1.5 }}>{p.desc}</p>
             </div>
 
             {/* Control */}
             <div style={{ padding: '10px 13px 12px', flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {p.type === 'bool' && (
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span style={{ fontSize: 14, fontFamily: 'monospace', fontWeight: 700, color: currentVal ? '#4ade80' : '#6b7280' }}>{valLabel}</span>
+                        <span style={{ fontSize: 14, fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: currentVal ? 'var(--app-ok)' : 'hsl(var(--app-text-muted))' }}>{valLabel}</span>
                         <Toggle value={!!currentVal} onChange={() => onSet(p.key, currentVal ? 0 : 1)} />
                     </div>
                 )}
                 {p.type === 'enum' && p.opts && (
-                    <select value={currentVal} onChange={e => onSet(p.key, +e.target.value)} style={{ width: '100%', padding: '8px 10px', borderRadius: 7, background: 'rgba(0,0,0,0.35)', border: `1px solid ${catColor}28`, color: 'hsl(var(--app-text))', fontSize: 11, fontFamily: 'monospace', cursor: 'pointer', outline: 'none' }}>
+                    <select value={currentVal} onChange={e => onSet(p.key, +e.target.value)} style={{ width: '100%', padding: '8px 10px', borderRadius: 6, background: 'hsl(var(--app-surface-2))', border: `1px solid ${mix(catColor, 16)}`, color: 'hsl(var(--app-text))', fontSize: 13, fontVariantNumeric: 'tabular-nums', cursor: 'pointer', outline: 'none' }}>
                         {p.opts.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
                     </select>
                 )}
                 {(p.type === 'float' || p.type === 'int') && p.min !== undefined && p.max !== undefined && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                            <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.18)' }}>{p.min}{p.unit ? ` ${p.unit}` : ''}</span>
-                            <span style={{ fontSize: 15, fontFamily: 'monospace', fontWeight: 700, color: p.danger ? '#f87171' : catColor }}>{currentVal}{p.unit ? ` ${p.unit}` : ''}</span>
-                            <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'rgba(255,255,255,0.18)' }}>{p.max}{p.unit ? ` ${p.unit}` : ''}</span>
+                            <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>{p.min}{p.unit ? ` ${p.unit}` : ''}</span>
+                            <span style={{ fontSize: 15, fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: p.danger ? 'var(--app-danger)' : catColor }}>{currentVal}{p.unit ? ` ${p.unit}` : ''}</span>
+                            <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>{p.max}{p.unit ? ` ${p.unit}` : ''}</span>
                         </div>
                         <input type="range" min={p.min} max={p.max} step={p.step ?? (p.type === 'int' ? 1 : 0.01)} value={currentVal}
                             onChange={e => onSet(p.key, +e.target.value)}
-                            style={{ width: '100%', accentColor: p.danger ? '#f87171' : catColor }} />
+                            style={{ width: '100%', accentColor: p.danger ? 'var(--app-danger)' : catColor }} />
                     </div>
                 )}
 
                 {/* Footer: default + revert */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 }}>
-                    <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'rgba(255,255,255,0.16)' }}>default: {defLabel}</span>
+                    <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>default: {defLabel}</span>
                     {modified && (
-                        <button onClick={() => onRevert(p.key)} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 5, background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.28)', color: '#fbbf24', fontSize: 9, fontFamily: 'monospace', cursor: 'pointer' }}>
+                        <button onClick={() => onRevert(p.key)} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 6, background: 'color-mix(in srgb, var(--app-warn) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--app-warn) 28%, transparent)', color: 'var(--app-warn)', fontSize: 13, fontVariantNumeric: 'tabular-nums', cursor: 'pointer' }}>
                             <RotateCcw size={8} /> revert
                         </button>
                     )}
@@ -2429,10 +2484,10 @@ function ParamSidebarItem({ label, count, color, Icon, active, onClick }: {
 }) {
     return (
         <button onClick={onClick}
-            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px 8px 10px', borderRadius: 7, border: 'none', borderLeft: `3px solid ${active ? color : 'transparent'}`, background: active ? `${color}12` : 'transparent', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
-            <Icon size={13} style={{ color: active ? color : '#64748b', flexShrink: 0 }} />
-            <span style={{ flex: 1, fontSize: 12, color: active ? '#f1f5f9' : 'hsl(var(--app-text-muted))', fontWeight: active ? 600 : 400, lineHeight: 1.2 }}>{label}</span>
-            <span style={{ fontSize: 10, fontFamily: 'monospace', color: active ? color : '#475569', minWidth: 18, textAlign: 'right' }}>{count}</span>
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px 8px 10px', borderRadius: 6, border: 'none', borderLeft: `3px solid ${active ? color : 'transparent'}`, background: active ? `${mix(color, 7)}` : 'transparent', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
+            <Icon size={13} style={{ color: active ? color : 'hsl(var(--app-text-muted))', flexShrink: 0 }} />
+            <span style={{ flex: 1, fontSize: 12, color: active ? 'hsl(var(--app-text))' : 'hsl(var(--app-text-muted))', fontWeight: active ? 600 : 400, lineHeight: 1.2 }}>{label}</span>
+            <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: active ? color : 'hsl(var(--app-text-muted))', minWidth: 18, textAlign: 'right' }}>{count}</span>
         </button>
     )
 }
@@ -2447,7 +2502,7 @@ function LiveParamCard({ dp, localVal, pending, lastOk, expert, originalVal, onS
 }) {
     const val      = localVal ?? dp.liveValue
     const meta     = dp.meta
-    const color    = GROUP_STYLE[dp.group]?.color ?? '#22d3ee'
+    const color    = GROUP_STYLE[dp.group]?.color ?? 'var(--app-accent)'
     // modified = param has drifted from the value we loaded from drone (original snapshot)
     const modified = originalVal !== undefined && dp.liveValue !== originalVal
     const isDanger = meta?.danger ?? false
@@ -2455,8 +2510,8 @@ function LiveParamCard({ dp, localVal, pending, lastOk, expert, originalVal, onS
 
     if (isExpert && !expert) return null
 
-    const accentColor = isDanger ? '#f87171' : color
-    const borderL     = isDanger ? '#f87171' : modified ? '#fbbf24' : `${color}55`
+    const accentColor = isDanger ? 'var(--app-danger)' : color
+    const borderL     = isDanger ? 'var(--app-danger)' : modified ? 'var(--app-warn)' : `${mix(color, 33)}`
 
     const hasRange  = meta?.min !== undefined && meta?.max !== undefined
     const hasOpts   = !!(meta?.opts && Object.keys(meta.opts).length > 0)
@@ -2471,29 +2526,29 @@ function LiveParamCard({ dp, localVal, pending, lastOk, expert, originalVal, onS
         : `${isIntType ? Math.round(val) : Number(val.toFixed(4))}${meta?.unit ? ` ${meta.unit}` : ''}`
 
     return (
-        <div style={{ borderRadius: 10, background: '#0d1520', border: '1px solid #1e293b', borderLeft: `3px solid ${borderL}`, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ borderRadius: 10, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', borderLeft: `3px solid ${borderL}`, display: 'flex', flexDirection: 'column' }}>
             {/* Header */}
             <div style={{ padding: '11px 13px 8px' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                            <span style={{ fontSize: 13, fontWeight: 600, color: '#f1f5f9', lineHeight: 1.3 }}>
+                            <span style={{ fontSize: 13, fontWeight: 600, color: 'hsl(var(--app-text))', lineHeight: 1.3 }}>
                                 {meta?.name ?? humanizeParamKey(dp.key)}
                             </span>
-                            {isDanger && <AlertTriangle size={10} style={{ color: '#f87171', flexShrink: 0 }} />}
-                            {modified  && <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#fbbf24', flexShrink: 0 }} />}
-                            {pending   && <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#60a5fa', flexShrink: 0 }} />}
+                            {isDanger && <AlertTriangle size={10} style={{ color: 'var(--app-danger)', flexShrink: 0 }} />}
+                            {modified  && <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--app-warn)', flexShrink: 0 }} />}
+                            {pending   && <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'light-dark(#1d4ed8, #60a5fa)', flexShrink: 0 }} />}
                         </div>
-                        <span style={{ fontSize: 10, fontFamily: 'monospace', color: accentColor, letterSpacing: '0.02em' }}>{dp.key}</span>
+                        <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: accentColor, letterSpacing: '0.02em' }}>{dp.key}</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, marginTop: 1 }}>
-                        {lastOk === true  && !pending && <span style={{ fontSize: 11, color: '#4ade80' }}>✓</span>}
-                        {lastOk === false && !pending && <AlertTriangle size={10} style={{ color: '#f87171' }} />}
-                        {isExpert && <span style={{ fontSize: 9, fontFamily: 'monospace', padding: '1px 5px', borderRadius: 3, background: 'rgba(251,191,36,0.1)', color: '#fbbf24', letterSpacing: '0.04em' }}>EXPERT</span>}
+                        {lastOk === true  && !pending && <span style={{ fontSize: 12, color: 'var(--app-ok)' }}>✓</span>}
+                        {lastOk === false && !pending && <AlertTriangle size={10} style={{ color: 'var(--app-danger)' }} />}
+                        {isExpert && <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', padding: '1px 5px', borderRadius: 6, background: 'color-mix(in srgb, var(--app-warn) 10%, transparent)', color: 'var(--app-warn)', letterSpacing: '0.04em' }}>EXPERT</span>}
                     </div>
                 </div>
                 {meta?.desc && (
-                    <p style={{ fontSize: 11, color: 'hsl(var(--app-text-muted))', margin: 0, lineHeight: 1.5 }}>{meta.desc}</p>
+                    <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: 0, lineHeight: 1.5 }}>{meta.desc}</p>
                 )}
             </div>
 
@@ -2501,7 +2556,7 @@ function LiveParamCard({ dp, localVal, pending, lastOk, expert, originalVal, onS
             <div style={{ padding: '0 13px 12px', flex: 1, display: 'flex', flexDirection: 'column', gap: 7 }}>
                 {isBool && (
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 2 }}>
-                        <span style={{ fontSize: 13, fontFamily: 'monospace', fontWeight: 700, color: val ? '#4ade80' : '#475569' }}>{val ? 'Enabled' : 'Disabled'}</span>
+                        <span style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: val ? 'var(--app-ok)' : 'hsl(var(--app-text-muted))' }}>{val ? 'Enabled' : 'Disabled'}</span>
                         <Toggle value={!!val} onChange={() => onSet(dp.key, val ? 0 : 1, dp.paramType)} />
                     </div>
                 )}
@@ -2513,7 +2568,7 @@ function LiveParamCard({ dp, localVal, pending, lastOk, expert, originalVal, onS
                             const isActive = Math.round(val) === kNum
                             return (
                                 <button key={k} onClick={() => onSet(dp.key, kNum, dp.paramType)}
-                                    style={{ flex: 1, padding: '6px 8px', borderRadius: 6, border: `1px solid ${isActive ? accentColor : '#1e293b'}`, background: isActive ? `${accentColor}22` : '#060d18', color: isActive ? '#f1f5f9' : '#64748b', fontSize: 11, cursor: 'pointer', fontWeight: isActive ? 600 : 400, transition: 'all 0.12s' }}>
+                                    style={{ flex: 1, padding: '6px 8px', borderRadius: 6, border: `1px solid ${isActive ? accentColor : 'hsl(var(--app-border))'}`, background: isActive ? `${mix(accentColor, 13)}` : 'hsl(var(--app-surface-2))', color: isActive ? 'hsl(var(--app-text))' : 'hsl(var(--app-text-muted))', fontSize: 12, cursor: 'pointer', fontWeight: isActive ? 600 : 400, transition: 'background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out)' }}>
                                     {l as string}
                                 </button>
                             )
@@ -2523,16 +2578,16 @@ function LiveParamCard({ dp, localVal, pending, lastOk, expert, originalVal, onS
                 {/* 3+ option enum → dropdown */}
                 {hasOpts && !isTwoOpt && (
                     <select value={val} onChange={e => onSet(dp.key, +e.target.value, dp.paramType)}
-                        style={{ width: '100%', padding: '7px 10px', borderRadius: 7, background: '#060d18', border: `1px solid ${accentColor}30`, color: '#f1f5f9', fontSize: 11, cursor: 'pointer', outline: 'none' }}>
+                        style={{ width: '100%', padding: '7px 10px', borderRadius: 6, background: 'hsl(var(--app-surface-2))', border: `1px solid ${mix(accentColor, 19)}`, color: 'hsl(var(--app-text))', fontSize: 12, cursor: 'pointer', outline: 'none' }}>
                         {optEntries.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                     </select>
                 )}
                 {hasRange && !hasOpts && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                            <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#475569' }}>{meta!.min}{meta?.unit ? ` ${meta.unit}` : ''}</span>
-                            <span style={{ fontSize: 16, fontFamily: 'monospace', fontWeight: 700, color: accentColor }}>{displayVal}</span>
-                            <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#475569' }}>{meta!.max}{meta?.unit ? ` ${meta.unit}` : ''}</span>
+                            <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>{meta!.min}{meta?.unit ? ` ${meta.unit}` : ''}</span>
+                            <span style={{ fontSize: 16, fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: accentColor }}>{displayVal}</span>
+                            <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>{meta!.max}{meta?.unit ? ` ${meta.unit}` : ''}</span>
                         </div>
                         <input type="range" min={meta!.min} max={meta!.max} step={meta?.step ?? (isIntType ? 1 : 0.01)} value={val}
                             onChange={e => onSet(dp.key, +e.target.value, dp.paramType)}
@@ -2543,23 +2598,23 @@ function LiveParamCard({ dp, localVal, pending, lastOk, expert, originalVal, onS
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <input type="number" value={localVal ?? dp.liveValue} step={isIntType ? 1 : 'any'}
                             onChange={e => { const n = +e.target.value; if (!isNaN(n)) onSet(dp.key, n, dp.paramType) }}
-                            style={{ flex: 1, padding: '7px 10px', borderRadius: 7, background: '#060d18', border: `1px solid ${accentColor}30`, color: '#f1f5f9', fontSize: 12, fontFamily: 'monospace', outline: 'none' }} />
-                        {meta?.unit && <span style={{ fontSize: 11, color: '#64748b' }}>{meta.unit}</span>}
+                            style={{ flex: 1, padding: '7px 10px', borderRadius: 6, background: 'hsl(var(--app-surface-2))', border: `1px solid ${mix(accentColor, 19)}`, color: 'hsl(var(--app-text))', fontSize: 12, fontVariantNumeric: 'tabular-nums', outline: 'none' }} />
+                        {meta?.unit && <span style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))' }}>{meta.unit}</span>}
                     </div>
                 )}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#334155' }}>
+                    <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>
                         drone: {dp.liveValue}{meta?.unit ? ` ${meta.unit}` : ''}
                         {originalVal !== undefined && originalVal !== dp.liveValue
                             ? ` · was: ${isIntType ? Math.round(originalVal) : Number(originalVal.toFixed(4))}${meta?.unit ? ` ${meta.unit}` : ''}`
                             : ''}
                     </span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        {pending   && <span style={{ fontSize: 10, color: '#60a5fa' }}>saving…</span>}
-                        {!pending && lastOk === true  && <span style={{ fontSize: 10, color: '#4ade80' }}>saved</span>}
-                        {!pending && lastOk === false && <span style={{ fontSize: 10, color: '#f87171' }}>failed</span>}
+                        {pending   && <span style={{ fontSize: 12, color: 'light-dark(#1d4ed8, #60a5fa)' }}>saving…</span>}
+                        {!pending && lastOk === true  && <span style={{ fontSize: 12, color: 'var(--app-ok)' }}>saved</span>}
+                        {!pending && lastOk === false && <span style={{ fontSize: 12, color: 'var(--app-danger)' }}>failed</span>}
                         {modified && !pending && (
-                            <button onClick={() => onRevert(dp.key)} style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '2px 7px', borderRadius: 4, background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.25)', color: '#fbbf24', fontSize: 9, fontFamily: 'monospace', cursor: 'pointer' }}>
+                            <button onClick={() => onRevert(dp.key)} style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '2px 7px', borderRadius: 6, background: 'color-mix(in srgb, var(--app-warn) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--app-warn) 25%, transparent)', color: 'var(--app-warn)', fontSize: 13, fontVariantNumeric: 'tabular-nums', cursor: 'pointer' }}>
                                 <RotateCcw size={8} /> revert
                             </button>
                         )}
@@ -2816,40 +2871,40 @@ function ParametersWorkspace() {
             {/* ── Toolbar ── */}
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <div style={{ flex: 1, position: 'relative' }}>
-                    <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#475569', pointerEvents: 'none' }} />
+                    <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'hsl(var(--app-text-muted))', pointerEvents: 'none' }} />
                     {liveParams
                         ? <input value={query} onChange={e => setQuery(e.target.value)} placeholder={`Search all ${displayParams.length} parameters…`}
-                            style={{ width: '100%', padding: '10px 12px 10px 36px', borderRadius: 9, background: '#0d1520', border: '1.5px solid #1e293b', color: '#f1f5f9', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
-                            onFocus={e => { (e.target as HTMLInputElement).style.borderColor = '#334155' }}
-                            onBlur={e =>  { (e.target as HTMLInputElement).style.borderColor = '#1e293b' }} />
+                            style={{ width: '100%', padding: '10px 12px 10px 36px', borderRadius: 6, background: 'hsl(var(--app-surface))', border: '1.5px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
+                            onFocus={e => { (e.target as HTMLInputElement).style.borderColor = 'hsl(var(--app-border-strong))' }}
+                            onBlur={e =>  { (e.target as HTMLInputElement).style.borderColor = 'hsl(var(--app-border))' }} />
                         : <input value={demoQuery} onChange={e => setDemoQuery(e.target.value)} placeholder="Search demo parameters - connect drone to see live values…"
-                            style={{ width: '100%', padding: '10px 12px 10px 36px', borderRadius: 9, background: '#0d1520', border: '1.5px solid #1e293b', color: '#f1f5f9', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
-                            onFocus={e => { (e.target as HTMLInputElement).style.borderColor = '#334155' }}
-                            onBlur={e =>  { (e.target as HTMLInputElement).style.borderColor = '#1e293b' }} />
+                            style={{ width: '100%', padding: '10px 12px 10px 36px', borderRadius: 6, background: 'hsl(var(--app-surface))', border: '1.5px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
+                            onFocus={e => { (e.target as HTMLInputElement).style.borderColor = 'hsl(var(--app-border-strong))' }}
+                            onBlur={e =>  { (e.target as HTMLInputElement).style.borderColor = 'hsl(var(--app-border))' }} />
                     }
                 </div>
                 <button onClick={() => liveParams ? setExpert(e => !e) : setDemoExpert(e => !e)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 13px', borderRadius: 8, border: `1.5px solid ${isExpertOn ? '#ca8a04' : '#1e293b'}`, background: isExpertOn ? 'rgba(202,138,4,0.1)' : '#0d1520', color: isExpertOn ? '#fbbf24' : '#64748b', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', fontWeight: isExpertOn ? 600 : 400 }}>
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 13px', borderRadius: 6, border: `1.5px solid ${isExpertOn ? 'var(--app-warn)' : 'hsl(var(--app-border))'}`, background: isExpertOn ? 'color-mix(in srgb, var(--app-warn) 10%, transparent)' : 'hsl(var(--app-surface))', color: isExpertOn ? 'var(--app-warn)' : 'hsl(var(--app-text-muted))', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', fontWeight: isExpertOn ? 600 : 400 }}>
                     <Zap size={12} />{isExpertOn ? 'Expert on' : 'Beginner'}
                 </button>
                 {(originalModCount > 0 || modifiedCount > 0) && liveParams && (
                     <>
-                        <button onClick={() => setModifiedOnly(m => !m)} style={{ padding: '7px 11px', borderRadius: 7, background: modifiedOnly ? 'rgba(251,191,36,0.15)' : 'rgba(251,191,36,0.08)', border: `1px solid ${modifiedOnly ? 'rgba(251,191,36,0.5)' : 'rgba(251,191,36,0.25)'}`, fontSize: 12, fontWeight: 600, color: '#fbbf24', whiteSpace: 'nowrap', cursor: 'pointer' }}>
+                        <button onClick={() => setModifiedOnly(m => !m)} style={{ padding: '7px 11px', borderRadius: 6, background: modifiedOnly ? 'color-mix(in srgb, var(--app-warn) 15%, transparent)' : 'color-mix(in srgb, var(--app-warn) 8%, transparent)', border: `1px solid ${modifiedOnly ? 'color-mix(in srgb, var(--app-warn) 50%, transparent)' : 'color-mix(in srgb, var(--app-warn) 25%, transparent)'}`, fontSize: 13, fontWeight: 600, color: 'var(--app-warn)', whiteSpace: 'nowrap', cursor: 'pointer' }}>
                             {originalModCount > 0 ? originalModCount : modifiedCount} modified{modifiedOnly ? ' ✕' : ' →'}
                         </button>
                         {originalModCount > 0 && (
-                            <button onClick={revertAll} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 11px', borderRadius: 7, background: 'rgba(251,191,36,0.05)', border: '1px solid rgba(251,191,36,0.2)', fontSize: 12, color: '#92400e', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                            <button onClick={revertAll} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 11px', borderRadius: 6, background: 'color-mix(in srgb, var(--app-warn) 5%, transparent)', border: '1px solid color-mix(in srgb, var(--app-warn) 20%, transparent)', fontSize: 13, color: 'var(--app-warn)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                                 <RotateCcw size={11} /> Revert all
                             </button>
                         )}
                     </>
                 )}
                 {liveParams
-                    ? <button onClick={fetchParams} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 13px', borderRadius: 8, border: '1px solid #1e293b', background: '#0d1520', color: '#64748b', fontSize: 12, cursor: 'pointer' }}>
+                    ? <button onClick={fetchParams} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 13px', borderRadius: 6, border: '1px solid hsl(var(--app-border))', background: 'hsl(var(--app-surface))', color: 'hsl(var(--app-text-muted))', fontSize: 13, cursor: 'pointer' }}>
                         <RotateCcw size={12} /> Refresh
                       </button>
                     : connected && !loading
-                    ? <button onClick={fetchParams} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 15px', borderRadius: 8, border: '1.5px solid rgba(74,222,128,0.35)', background: 'rgba(74,222,128,0.08)', color: '#4ade80', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
+                    ? <button onClick={fetchParams} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 15px', borderRadius: 6, border: '1.5px solid color-mix(in srgb, var(--app-ok) 35%, transparent)', background: 'color-mix(in srgb, var(--app-ok) 8%, transparent)', color: 'var(--app-ok)', fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>
                         <Wifi size={12} /> Load from Drone
                       </button>
                     : null
@@ -2858,10 +2913,10 @@ function ParametersWorkspace() {
 
             {/* ── Expert warning ── */}
             {isExpertOn && (
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px', borderRadius: 8, background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.18)' }}>
-                    <AlertTriangle size={13} style={{ color: '#f87171', flexShrink: 0, marginTop: 1 }} />
-                    <p style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))', margin: 0, lineHeight: 1.55 }}>
-                        <span style={{ color: '#f87171', fontWeight: 600 }}>Expert mode - </span>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px', borderRadius: 6, background: 'color-mix(in srgb, var(--app-danger) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--app-danger) 18%, transparent)' }}>
+                    <AlertTriangle size={13} style={{ color: 'var(--app-danger)', flexShrink: 0, marginTop: 1 }} />
+                    <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: 0, lineHeight: 1.55 }}>
+                        <span style={{ color: 'var(--app-danger)', fontWeight: 600 }}>Expert mode - </span>
                         parameters marked ⚠ can destabilise the drone. Change PIDs in steps of 0.01 max. Always hover-test after any change.
                     </p>
                 </div>
@@ -2870,33 +2925,33 @@ function ParametersWorkspace() {
             {/* ── Loading ── */}
             {loading && (
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '64px 0' }}>
-                    <div style={{ width: 44, height: 44, borderRadius: '50%', border: '3px solid #1e293b', borderTop: '3px solid #22d3ee', animation: 'spin 0.8s linear infinite' }} />
+                    <div style={{ width: 44, height: 44, borderRadius: '50%', border: '3px solid hsl(var(--app-border))', borderTop: '3px solid var(--app-accent)', animation: 'spin 0.8s linear infinite' }} />
                     <div style={{ textAlign: 'center' }}>
                         <p style={{ fontSize: 14, color: 'hsl(var(--app-text-muted))', margin: 0 }}>Downloading parameters from drone…</p>
-                        <p style={{ fontSize: 12, color: '#475569', margin: '5px 0 0' }}>This takes 5-30 s on a fresh MAVLink connection</p>
+                        <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: '5px 0 0' }}>This takes 5-30 s on a fresh MAVLink connection</p>
                     </div>
                 </div>
             )}
 
             {/* ── Error ── */}
             {fetchError && !loading && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 8, background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)' }}>
-                    <AlertTriangle size={14} style={{ color: '#f87171', flexShrink: 0 }} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 6, background: 'color-mix(in srgb, var(--app-danger) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--app-danger) 20%, transparent)' }}>
+                    <AlertTriangle size={14} style={{ color: 'var(--app-danger)', flexShrink: 0 }} />
                     <div style={{ flex: 1 }}>
-                        <p style={{ fontSize: 13, color: '#f87171', margin: 0, fontWeight: 600 }}>Download failed</p>
-                        <p style={{ fontSize: 11, color: '#64748b', margin: '2px 0 0' }}>{fetchError}</p>
+                        <p style={{ fontSize: 13, color: 'var(--app-danger)', margin: 0, fontWeight: 600 }}>Download failed</p>
+                        <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>{fetchError}</p>
                     </div>
-                    <button onClick={fetchParams} style={{ padding: '6px 14px', borderRadius: 7, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', color: '#f87171', fontSize: 12, cursor: 'pointer' }}>Retry</button>
+                    <button onClick={fetchParams} style={{ padding: '6px 14px', borderRadius: 6, background: 'color-mix(in srgb, var(--app-danger) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--app-danger) 25%, transparent)', color: 'var(--app-danger)', fontSize: 13, cursor: 'pointer' }}>Retry</button>
                 </div>
             )}
 
             {/* ── Demo banner ── */}
             {!liveParams && !loading && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 8, background: 'rgba(34,211,238,0.05)', border: '1px solid rgba(34,211,238,0.15)' }}>
-                    <Info size={13} style={{ color: '#22d3ee', flexShrink: 0 }} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 6, background: 'color-mix(in srgb, var(--app-accent) 5%, transparent)', border: '1px solid color-mix(in srgb, var(--app-accent) 15%, transparent)' }}>
+                    <Info size={13} style={{ color: 'var(--app-accent)', flexShrink: 0 }} />
                     <div>
-                        <p style={{ fontSize: 12, color: '#22d3ee', margin: 0, fontWeight: 600 }}>Demo mode - example parameters only</p>
-                        <p style={{ fontSize: 11, color: '#64748b', margin: '2px 0 0' }}>
+                        <p style={{ fontSize: 13, color: 'var(--app-accent)', margin: 0, fontWeight: 600 }}>Demo mode - example parameters only</p>
+                        <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>
                             {connected ? 'Drone is connected - click "Load from Drone" to read real values' : 'Connect your drone, then click "Load from Drone" to browse and edit live parameters'}
                         </p>
                     </div>
@@ -2905,10 +2960,10 @@ function ParametersWorkspace() {
 
             {/* ── Live status bar ── */}
             {liveParams && !loading && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 8, background: 'rgba(74,222,128,0.05)', border: '1px solid rgba(74,222,128,0.15)' }}>
-                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ade80', flexShrink: 0 }} />
-                    <span style={{ fontSize: 12, color: '#4ade80', fontWeight: 600 }}>{displayParams.length} parameters from drone</span>
-                    <span style={{ fontSize: 11, color: '#475569' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 6, background: 'color-mix(in srgb, var(--app-ok) 5%, transparent)', border: '1px solid color-mix(in srgb, var(--app-ok) 15%, transparent)' }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--app-ok)', flexShrink: 0 }} />
+                    <span style={{ fontSize: 12, color: 'var(--app-ok)', fontWeight: 600 }}>{displayParams.length} parameters from drone</span>
+                    <span style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))' }}>
                         · {Object.keys(PX4_META).filter(k => liveParams[k]).length} with descriptions
                         · {displayParams.filter(d => !d.meta).length} raw (no metadata)
                     </span>
@@ -2917,12 +2972,12 @@ function ParametersWorkspace() {
 
             {/* ── Main two-pane layout: sidebar + content ── */}
             {!loading && (
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0, flexWrap: 'wrap' }}>
 
                     {/* ── Left sidebar nav (hidden while searching or in modified-only view) ── */}
                     {!isSearching_combined && !modifiedOnly && (
                         <>
-                            <nav style={{ width: 196, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <nav style={{ flex: '0 1 196px', minWidth: 160, display: 'flex', flexDirection: 'column', gap: 2 }}>
                                 {liveParams
                                     ? availableGroups.map(grp => {
                                         const s = GROUP_STYLE[grp] ?? GROUP_STYLE['Other']
@@ -2942,17 +2997,17 @@ function ParametersWorkspace() {
                                     })
                                 }
                             </nav>
-                            <div style={{ width: 1, alignSelf: 'stretch', background: '#1e293b', margin: '0 14px', flexShrink: 0 }} />
+                            <div style={{ width: 1, alignSelf: 'stretch', background: 'hsl(var(--app-border))', margin: '0 14px', flexShrink: 0 }} />
                         </>
                     )}
 
                     {/* ── Right content area ── */}
-                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ flex: '1 1 300px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
 
                         {/* Content header */}
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 22 }}>
                             {modifiedOnly && liveParams ? (
-                                <span style={{ fontSize: 12, color: '#fbbf24' }}>
+                                <span style={{ fontSize: 12, color: 'var(--app-warn)' }}>
                                     {filteredLive.length} modified parameter{filteredLive.length !== 1 ? 's' : ''} across all groups
                                 </span>
                             ) : isSearching_combined ? (
@@ -2965,13 +3020,13 @@ function ParametersWorkspace() {
                             ) : liveParams ? (
                                 <>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                                        <div style={{ width: 7, height: 7, borderRadius: '50%', background: GROUP_STYLE[activeGroup]?.color ?? '#22d3ee', flexShrink: 0 }} />
+                                        <div style={{ width: 7, height: 7, borderRadius: '50%', background: GROUP_STYLE[activeGroup]?.color ?? 'var(--app-accent)', flexShrink: 0 }} />
                                         <span style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))' }}>
                                             {activeGroup} - {groupCounts[activeGroup] ?? 0} parameter{(groupCounts[activeGroup] ?? 0) !== 1 ? 's' : ''}
                                         </span>
                                     </div>
                                     {!expert && displayParams.filter(d => d.group === activeGroup && d.meta?.expert).length > 0 && (
-                                        <button onClick={() => setExpert(true)} style={{ fontSize: 11, color: '#ca8a04', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                                        <button onClick={() => setExpert(true)} style={{ fontSize: 13, color: 'var(--app-warn)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
                                             +{displayParams.filter(d => d.group === activeGroup && d.meta?.expert).length} expert params →
                                         </button>
                                     )}
@@ -2981,7 +3036,7 @@ function ParametersWorkspace() {
                                     <span style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))' }}>
                                         {PARAM_CATS.find(c => c.id === demoActiveCat)?.label} - {demoFiltered.length} example parameters
                                     </span>
-                                    {demoModCount > 0 && <span style={{ fontSize: 11, color: '#fbbf24', fontWeight: 600 }}>{demoModCount} modified</span>}
+                                    {demoModCount > 0 && <span style={{ fontSize: 12, color: 'var(--app-warn)', fontWeight: 600 }}>{demoModCount} modified</span>}
                                 </div>
                             )}
                         </div>
@@ -2989,7 +3044,7 @@ function ParametersWorkspace() {
                         {/* ── Param grid ── */}
                         {liveParams ? (
                             filteredLive.length > 0 ? (
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 260px), 1fr))', gap: 10 }}>
                                     {filteredLive.map(dp => (
                                         <LiveParamCard key={dp.key} dp={dp}
                                             localVal={localEdits[dp.key]} pending={!!pending[dp.key]}
@@ -2999,21 +3054,21 @@ function ParametersWorkspace() {
                                     ))}
                                 </div>
                             ) : (
-                                <div style={{ textAlign: 'center', padding: '56px 0', color: '#475569', fontSize: 13 }}>
+                                <div style={{ textAlign: 'center', padding: '56px 0', color: 'hsl(var(--app-text-muted))', fontSize: 13 }}>
                                     {isSearching ? `No parameters match "${query}"` : 'No parameters in this group'}
                                 </div>
                             )
                         ) : (
                             demoFiltered.length > 0 ? (
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 260px), 1fr))', gap: 10 }}>
                                     {demoFiltered.map(p => (
                                         <ParamCard key={p.key} p={p} currentVal={getDemoVal(p.key)}
-                                            catColor={PARAM_CATS.find(c => c.id === p.cat)?.color ?? '#22d3ee'}
+                                            catColor={PARAM_CATS.find(c => c.id === p.cat)?.color ?? 'var(--app-accent)'}
                                             isSearching={isDemoSearching} onSet={setDemoVal} onRevert={revertDemo} />
                                     ))}
                                 </div>
                             ) : (
-                                <div style={{ textAlign: 'center', padding: '56px 0', color: '#475569', fontSize: 13 }}>
+                                <div style={{ textAlign: 'center', padding: '56px 0', color: 'hsl(var(--app-text-muted))', fontSize: 13 }}>
                                     No parameters match your search
                                 </div>
                             )
@@ -3025,32 +3080,32 @@ function ParametersWorkspace() {
             {/* ── Footer action bar ── */}
             <input ref={importFileRef} type="file" accept=".params,.txt" style={{ display: 'none' }}
                 onChange={e => { const f = e.target.files?.[0]; if (f) { importParams(f); e.target.value = '' } }} />
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8, paddingTop: 4, borderTop: '1px solid #1e293b' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8, paddingTop: 4, borderTop: '1px solid hsl(var(--app-border))' }}>
                 {/* Export */}
-                <button onClick={downloadParams} disabled={!liveParams}
-                    style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: 9, background: '#0d1520', border: '1px solid #1e293b', cursor: liveParams ? 'pointer' : 'default', opacity: liveParams ? 1 : 0.35, textAlign: 'left', width: '100%' }}>
-                    <Download size={14} style={{ color: '#60a5fa', flexShrink: 0 }} />
+                <button onClick={downloadParams} disabled={!liveParams} title={liveParams ? undefined : 'Load the parameters first'}
+                    style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: 6, background: 'hsl(var(--app-surface))', border: `1px ${liveParams ? 'solid' : 'dashed'} hsl(var(--app-border-strong))`, cursor: liveParams ? 'pointer' : 'not-allowed', textAlign: 'left', width: '100%' }}>
+                    <Download size={14} style={{ color: 'light-dark(#1d4ed8, #60a5fa)', flexShrink: 0 }} />
                     <div>
-                        <p style={{ fontSize: 12, fontWeight: 600, color: '#f1f5f9', margin: 0 }}>Export .params</p>
-                        <p style={{ fontSize: 10, color: '#475569', margin: 0 }}>Download backup file</p>
+                        <p style={{ fontSize: 13, fontWeight: 600, color: 'hsl(var(--app-text))', margin: 0 }}>Export .params</p>
+                        <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: 0 }}>Download backup file</p>
                     </div>
                 </button>
                 {/* Import */}
-                <button onClick={() => liveParams && importFileRef.current?.click()} disabled={!liveParams}
-                    style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: 9, background: '#0d1520', border: '1px solid #1e293b', cursor: liveParams ? 'pointer' : 'default', opacity: liveParams ? 1 : 0.35, textAlign: 'left', width: '100%' }}>
-                    <Upload size={14} style={{ color: '#c084fc', flexShrink: 0 }} />
+                <button onClick={() => liveParams && importFileRef.current?.click()} disabled={!liveParams} title={liveParams ? undefined : 'Load the parameters first'}
+                    style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: 6, background: 'hsl(var(--app-surface))', border: `1px ${liveParams ? 'solid' : 'dashed'} hsl(var(--app-border-strong))`, cursor: liveParams ? 'pointer' : 'not-allowed', textAlign: 'left', width: '100%' }}>
+                    <Upload size={14} style={{ color: 'light-dark(#7e22ce, #c084fc)', flexShrink: 0 }} />
                     <div>
-                        <p style={{ fontSize: 12, fontWeight: 600, color: '#f1f5f9', margin: 0 }}>Import .params</p>
-                        <p style={{ fontSize: 10, color: '#475569', margin: 0 }}>Apply from backup file</p>
+                        <p style={{ fontSize: 13, fontWeight: 600, color: 'hsl(var(--app-text))', margin: 0 }}>Import .params</p>
+                        <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: 0 }}>Apply from backup file</p>
                     </div>
                 </button>
                 {/* Reboot FC */}
-                <button onClick={connected ? rebootFC : undefined} disabled={!connected}
-                    style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: 9, background: '#0d1520', border: `1px solid ${connected ? 'rgba(248,113,113,0.2)' : '#1e293b'}`, cursor: connected ? 'pointer' : 'default', opacity: connected ? 1 : 0.35, textAlign: 'left', width: '100%' }}>
-                    <Power size={14} style={{ color: '#f87171', flexShrink: 0 }} />
+                <button onClick={connected ? rebootFC : undefined} disabled={!connected} title={connected ? undefined : 'Connect a drone first'}
+                    style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: 6, background: 'hsl(var(--app-surface))', border: `1px ${connected ? 'solid' : 'dashed'} ${connected ? 'color-mix(in srgb, var(--app-danger) 35%, transparent)' : 'hsl(var(--app-border-strong))'}`, cursor: connected ? 'pointer' : 'not-allowed', textAlign: 'left', width: '100%' }}>
+                    <Power size={14} style={{ color: 'var(--app-danger)', flexShrink: 0 }} />
                     <div>
-                        <p style={{ fontSize: 12, fontWeight: 600, color: '#f1f5f9', margin: 0 }}>Reboot FC</p>
-                        <p style={{ fontSize: 10, color: '#475569', margin: 0 }}>Restart flight controller</p>
+                        <p style={{ fontSize: 13, fontWeight: 600, color: 'hsl(var(--app-text))', margin: 0 }}>Reboot FC</p>
+                        <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: 0 }}>Restart flight controller</p>
                     </div>
                 </button>
             </div>
@@ -3094,19 +3149,22 @@ export default function ConfigPage() {
         connected,  // baro: PX4 keeps no verdict - reporting is the claim
     ].filter(Boolean).length
 
-    const domainPcts: Record<SectionId, number> = {
-        connection:  connected ? 100 : 30,
-        vehicle:     [vehicle.name !== 'My Drone', !!vehicle.airframe, !!vehicle.firmware].filter(Boolean).length * 33.3,
-        sensors:     connected ? (sensorOK / 4) * 100 : 0,
-        radio:       75,
-        power:       power.capacity ? 100 : 50,
-        safety:      100,
-        flight:      100,
-        parameters:  80,
-        attachments: 100,
+    // Readiness only where something is measured from the drone. Sections
+    // that hold local settings (radio, power, safety, flight, parameters,
+    // attachments) have no ring: a percentage there would be invented.
+    const domainPcts: Record<SectionId, number | null> = {
+        connection:  null,
+        vehicle:     null,
+        sensors:     connected ? (sensorOK / 4) * 100 : null,
+        radio:       null,
+        power:       null,
+        safety:      null,
+        flight:      null,
+        parameters:  null,
+        attachments: null,
     }
-    const readiness = Math.round(DOMAIN_META.slice(0, 7).reduce((s, d) => s + domainPcts[d.id], 0) / 7)
-    const tabs = DOMAIN_META.map(d => ({ ...d, color: hColor(domainPcts[d.id], d.id === 'parameters'), pct: domainPcts[d.id] }))
+    const readiness = connected ? Math.round((sensorOK / 4) * 100) : null
+    const tabs = DOMAIN_META
 
     // ── Two-finger swipe back interception ────────────────────────────────────
     const viewRef        = useRef(view)
@@ -3144,21 +3202,21 @@ export default function ConfigPage() {
 
             <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
                 {/* ── Grid overview ──────────────────────────────────────── */}
-                <div style={{ position: 'absolute', inset: 0, overflowY: 'auto', padding: '16px 20px', opacity: inGrid ? 1 : 0, transform: inGrid ? 'scale(1)' : 'scale(0.97)', transition: 'opacity 0.2s ease, transform 0.2s ease', pointerEvents: inGrid ? 'auto' : 'none' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
+                <div style={{ position: 'absolute', inset: 0, overflowY: 'auto', padding: '16px clamp(12px, 3vw, 20px)', opacity: inGrid ? 1 : 0, transform: inGrid ? 'scale(1)' : 'scale(0.97)', transition: 'opacity var(--dur-slow) var(--ease-out), transform var(--dur-slow) var(--ease-out)', pointerEvents: inGrid ? 'auto' : 'none' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 240px), 1fr))', gap: 12 }}>
                         {DOMAIN_META.map(d => (
                             <DomainCard key={d.id} id={d.id} label={d.label} icon={d.icon}
-                                pct={domainPcts[d.id]} color={hColor(domainPcts[d.id], d.id === 'parameters')}
+                                pct={domainPcts[d.id]} color={hColor(domainPcts[d.id] ?? 0)}
                                 metrics={
-                                    d.id === 'connection'  ? [{ k: 'status', v: connected ? 'Connected' : 'Disconnected' }, { k: 'link', v: address.split('//')[1]?.split(':')[0] ?? '-' }]
-                                  : d.id === 'vehicle'     ? [{ k: 'name', v: vehicle.name }, { k: 'frame', v: AIRFRAME_LABELS[vehicle.airframe] ?? vehicle.airframe }]
-                                  : d.id === 'sensors'     ? [{ k: 'health', v: connected ? `${sensorOK}/4 OK` : 'No data' }]
-                                  : d.id === 'radio'       ? [{ k: 'mode', v: `Mode ${radio.rcMode}` }, { k: 'slots', v: `${radio.modes.length} configured` }]
-                                  : d.id === 'power'       ? [{ k: 'pack', v: `${power.cells}S · ${power.capacity}mAh` }, { k: 'critical', v: `${power.critAction.toUpperCase()} @ ${power.critPct}%` }]
-                                  : d.id === 'safety'      ? [{ k: 'terrain', v: terrainFollow ? 'Follow ON' : 'Follow OFF' }, { k: 'loss', v: `${safety.signalLoss.toUpperCase()} on loss` }]
-                                  : d.id === 'flight'      ? [{ k: 'takeoff', v: `${flight.takeoffAlt}m` }, { k: 'RTH', v: `${safety.rthAlt}m` }]
-                                  : d.id === 'attachments' ? [{ k: 'fitted', v: !fitted.droneId ? 'No drone' : fitted.attachments.length ? fitted.attachments.map(x => x.name).join(', ') : 'None' }]
-                                  : [{ k: 'params', v: `${PARAMS_DB.length} available` }, { k: 'subsystems', v: `${PARAM_CATS.length} sections` }]
+                                    d.id === 'connection'  ? [{ k: 'Status', v: connected ? 'Connected' : 'Not connected' }, { k: 'Link', v: address.split('//')[1]?.split(':')[0] ?? '-' }]
+                                  : d.id === 'vehicle'     ? [{ k: 'Name', v: vehicle.name }, { k: 'Frame', v: AIRFRAME_LABELS[vehicle.airframe] ?? vehicle.airframe }]
+                                  : d.id === 'sensors'     ? [{ k: 'Health', v: connected ? `${sensorOK}/4 OK` : 'Connect a drone' }]
+                                  : d.id === 'radio'       ? [{ k: 'Sticks', v: `Mode ${radio.rcMode}` }, { k: 'Modes', v: `${radio.modes.length} set` }]
+                                  : d.id === 'power'       ? [{ k: 'Pack', v: `${power.cells}S · ${power.capacity} mAh` }, { k: 'Critical', v: `${power.critAction.toUpperCase()} @ ${power.critPct}%` }]
+                                  : d.id === 'safety'      ? [{ k: 'Terrain', v: terrainFollow ? 'Follow on' : 'Follow off' }, { k: 'Link loss', v: safety.signalLoss.toUpperCase() }]
+                                  : d.id === 'flight'      ? [{ k: 'Takeoff', v: `${flight.takeoffAlt} m` }, { k: 'Return', v: `${safety.rthAlt} m` }]
+                                  : d.id === 'attachments' ? [{ k: 'Fitted', v: !fitted.droneId ? 'Connect a drone' : fitted.attachments.length ? fitted.attachments.map(x => x.name).join(', ') : 'None' }]
+                                  : [{ k: 'Params', v: `${PARAMS_DB.length} available` }, { k: 'Groups', v: `${PARAM_CATS.length}` }]
                                 }
                                 onClick={() => openSection(d.id)} />
                         ))}
@@ -3166,8 +3224,9 @@ export default function ConfigPage() {
                 </div>
 
                 {/* ── Workspace ──────────────────────────────────────────── */}
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', opacity: !inGrid ? 1 : 0, transform: !inGrid ? 'scale(1)' : 'scale(1.015)', transition: 'opacity 0.2s ease, transform 0.2s ease', pointerEvents: !inGrid ? 'auto' : 'none' }}>
-                    <div style={{ flex: 1, overflowY: 'auto', padding: '24px 24px 16px' }}>
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', opacity: !inGrid ? 1 : 0, transform: !inGrid ? 'scale(1)' : 'scale(1.015)', transition: 'opacity var(--dur-slow) var(--ease-out), transform var(--dur-slow) var(--ease-out)', pointerEvents: !inGrid ? 'auto' : 'none' }}>
+                    <SectionTabBar current={section} onSelect={setSection} onBack={goToGrid} tabs={tabs} />
+                    <div role="tabpanel" style={{ flex: 1, overflowY: 'auto', padding: '24px clamp(12px, 3vw, 24px) 24px' }}>
                         <SectionHead meta={meta} pct={domainPcts[section]} />
                         {/* Parameter writes, calibration and reboots are
                             commands: a workspace viewer reads this page only. */}
@@ -3184,7 +3243,6 @@ export default function ConfigPage() {
                         {/* Reads for everyone; owners and admins edit (the server says who). */}
                         {section === 'attachments' && <AttachmentsSection />}
                     </div>
-                    <SectionTabBar current={section} onSelect={setSection} onBack={goToGrid} tabs={tabs} />
                 </div>
             </div>
         </div>

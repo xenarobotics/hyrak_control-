@@ -18,6 +18,7 @@ import {
     ShieldAlert, Brain, ScanFace, Sparkles,
     UsersRound, ScanLine, TrafficCone, Box,
 } from 'lucide-react'
+import { TEXT, MUTED, SUBTLE, SURFACE_2, BORDER, BORDER_STRONG, TONE, FOCUS } from './panelStyle'
 
 // Exported: the Command window's AI drawer offers exactly this catalogue.
 export const MODES = [
@@ -141,36 +142,37 @@ export function ModeSelector() {
                 return (
                     <button
                         key={m.value}
+                        type="button"
                         onClick={() => available && !isStreaming && setMode(m.value)}
                         disabled={!available || isStreaming}
                         aria-pressed={active}
                         aria-label={`${m.label} - ${available ? m.desc : 'coming soon'}`}
+                        title={!available ? 'Coming soon' : isStreaming ? 'Stop the video to switch mode' : undefined}
+                        className={FOCUS}
                         style={{
-                            display: 'flex', alignItems: 'center', gap: 8,
-                            padding: '8px 10px', borderRadius: 10, cursor: available ? 'pointer' : 'not-allowed',
-                            background: active ? `${m.color}18` : 'hsl(var(--app-surface-2))',
-                            border: `1px solid ${active ? m.color + '60' : 'hsl(var(--app-border))'}`,
-                            opacity: !available ? 0.4 : 1,
-                            transition: 'all 0.15s',
+                            display: 'flex', alignItems: 'center', gap: 8, minHeight: 44,
+                            padding: '8px 12px', borderRadius: 10, cursor: available && !isStreaming ? 'pointer' : 'not-allowed',
+                            background: active ? TONE.accent.bg : SURFACE_2,
+                            border: `1px ${available ? 'solid' : 'dashed'} ${active ? 'var(--app-accent)' : available ? BORDER : BORDER_STRONG}`,
+                            transition: 'background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out)',
                         }}
                     >
-                        <Icon size={16} style={{ color: active ? m.color : 'hsl(var(--app-text-muted))', flexShrink: 0 }} />
+                        <Icon size={16} aria-hidden style={{ color: !available ? SUBTLE : m.color, flexShrink: 0 }} />
                         <div style={{ textAlign: 'left', minWidth: 0 }}>
                             <div style={{
-                                fontSize: 12, fontWeight: 500,
-                                color: active ? m.color : 'hsl(var(--app-text))',
-                                fontFamily: 'var(--font-geist-mono)',
+                                fontSize: 14, fontWeight: active ? 700 : 600,
+                                color: available ? TEXT : SUBTLE,
                             }}>
                                 {m.label}
                             </div>
-                            <div style={{ fontSize: 10, color: 'hsl(var(--app-text-muted))', marginTop: 1 }}>
-                                {available ? m.desc : 'coming soon'}
+                            <div style={{ fontSize: 12, color: available ? MUTED : SUBTLE, marginTop: 1 }}>
+                                {available ? m.desc : 'Coming soon'}
                             </div>
                         </div>
                         {active && (
-                            <div style={{
-                                marginLeft: 'auto', width: 6, height: 6,
-                                borderRadius: '50%', background: m.color,
+                            <div aria-hidden style={{
+                                marginLeft: 'auto', width: 8, height: 8,
+                                borderRadius: '50%', background: 'var(--app-accent)',
                                 flexShrink: 0,
                             }} />
                         )}

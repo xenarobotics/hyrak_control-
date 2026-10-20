@@ -189,10 +189,10 @@ function CountsTable({ now, run, waiting }: {
                     </thead>
                     <tbody>
                         {rows.map(r => (
-                            <tr key={r.name} style={{ opacity: r.now === 0 || r.stale ? 0.6 : 1 }}>
+                            <tr key={r.name} style={r.now === 0 || r.stale ? { color: 'var(--cm-ink-2)' } : undefined}>
                                 <th scope="row" style={{ textTransform: 'capitalize' }}>{r.name}</th>
                                 <td className={s.resCount}>{r.now}</td>
-                                <td className={s.mono}>{r.peak}</td>
+                                <td style={{ fontVariantNumeric: 'tabular-nums' }}>{r.peak}</td>
                             </tr>
                         ))}
                     </tbody>

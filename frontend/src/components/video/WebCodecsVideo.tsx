@@ -255,8 +255,7 @@ export function WebCodecsVideo({ src, codec: wireCodec = 'h264', className, styl
         <>
             <canvas ref={canvasRef} className={className} style={style} />
             {error && (
-                <p className="absolute bottom-14 left-3 text-xs font-mono"
-                    style={{ color: '#f87171' }}>{error}</p>
+                <p role="alert" className="absolute bottom-14 left-3 right-3 px-2 py-1 rounded-md text-[13px] font-semibold bg-overlay-scrim text-[var(--overlay-danger)]">{error}</p>
             )}
         </>
     )

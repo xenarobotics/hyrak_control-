@@ -2,22 +2,30 @@
 
 // The frame shared by the public sign-in pages (/login, /invite/<token>,
 // /reset/<token>): a centred card on the app background with the HYRAK mark,
-// mono field labels and the cyan primary button.
+// sentence-case field labels and the accent primary button.
 
 import Image from 'next/image'
 import { Loader2 } from 'lucide-react'
 
 export const AUTH_LABEL: React.CSSProperties = {
-    display: 'block', fontSize: 10, fontFamily: 'monospace', fontWeight: 700,
-    letterSpacing: '0.12em', color: 'hsl(var(--app-text-muted))', marginBottom: 6,
+    display: 'block', fontSize: 13, fontWeight: 600,
+    color: 'hsl(var(--app-text))', marginBottom: 6,
 }
 export const AUTH_INPUT: React.CSSProperties = {
-    width: '100%', padding: '9px 11px', borderRadius: 8, fontSize: 14,
-    background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
-    color: 'hsl(var(--app-text))', outline: 'none',
+    width: '100%', minHeight: 40, padding: '9px 12px', borderRadius: 6, fontSize: 14,
+    background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border-strong))',
+    color: 'hsl(var(--app-text))',
 }
 export const AUTH_NOTE: React.CSSProperties = {
-    margin: 0, fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', lineHeight: 1.5,
+    margin: 0, fontSize: 13, color: 'hsl(var(--app-text-muted))', lineHeight: 1.5,
+}
+/** The filled accent action, for a link styled as the primary button. */
+export const AUTH_PRIMARY: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+    minHeight: 40, padding: '10px 16px', borderRadius: 6, border: 'none',
+    background: 'var(--app-accent)', color: 'var(--app-accent-ink)',
+    fontSize: 14, fontWeight: 700,
+    transition: 'opacity var(--dur-fast) var(--ease-out)',
 }
 
 export function AuthFrame({ title, sub, children, onSubmit }: {
@@ -29,12 +37,12 @@ export function AuthFrame({ title, sub, children, onSubmit }: {
     const body = (
         <>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <Image src="/brand/icon-dark.png" alt="" width={28} height={28} className="dark:hidden" />
-                <Image src="/brand/icon.png" alt="" width={28} height={28} className="hidden dark:block" />
+                <Image src="/brand/icon-dark.png" alt="" width={32} height={32} className="dark:hidden" />
+                <Image src="/brand/icon.png" alt="" width={32} height={32} className="hidden dark:block" />
                 <div style={{ minWidth: 0 }}>
-                    <p style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>{title}</p>
+                    <h1 style={{ fontSize: 'var(--fs-xl)', lineHeight: '28px', fontWeight: 700, margin: 0 }}>{title}</h1>
                     {sub && (
-                        <p style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>
+                        <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>
                             {sub}
                         </p>
                     )}
@@ -44,8 +52,9 @@ export function AuthFrame({ title, sub, children, onSubmit }: {
         </>
     )
     const card: React.CSSProperties = {
-        width: '100%', maxWidth: 380, padding: '28px 28px 24px', borderRadius: 16,
+        width: '100%', maxWidth: 400, padding: 24, borderRadius: 14,
         background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))',
+        boxShadow: 'var(--app-shadow)',
         display: 'flex', flexDirection: 'column', gap: 16,
     }
     return (
@@ -73,10 +82,10 @@ export function AuthField({ id, label, error, hint, ...input }: {
                 id={id} aria-invalid={error ? true : undefined}
                 aria-describedby={error || hint ? `${id}-note` : undefined}
                 {...input}
-                style={{ ...AUTH_INPUT, ...(error ? { borderColor: '#f87171' } : null), ...input.style }}
+                style={{ ...AUTH_INPUT, ...(error ? { borderColor: 'var(--app-danger)' } : null), ...input.style }}
             />
             {(error || hint) && (
-                <p id={`${id}-note`} style={{ ...AUTH_NOTE, marginTop: 5, color: error ? '#f87171' : AUTH_NOTE.color }}>
+                <p id={`${id}-note`} style={{ ...AUTH_NOTE, marginTop: 5, color: error ? 'var(--app-danger)' : AUTH_NOTE.color }}>
                     {error || hint}
                 </p>
             )}
@@ -87,7 +96,7 @@ export function AuthField({ id, label, error, hint, ...input }: {
 export function AuthError({ text }: { text: string }) {
     if (!text) return null
     return (
-        <p role="alert" style={{ margin: 0, fontSize: 12, fontFamily: 'monospace', lineHeight: 1.5, color: '#f87171' }}>
+        <p role="alert" style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: 'var(--app-danger)' }}>
             {text}
         </p>
     )
@@ -103,13 +112,11 @@ export function AuthButton({ busy, children, busyText, onClick, type = 'submit',
 }) {
     return (
         <button type={type} disabled={busy} onClick={onClick} style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            padding: '10px 14px', borderRadius: 8, cursor: busy ? 'default' : 'pointer',
-            border: subtle ? '1px solid hsl(var(--app-border))' : 'none',
-            background: subtle ? 'transparent' : '#22d3ee',
-            color: subtle ? 'hsl(var(--app-text))' : '#0b1016',
-            fontSize: 13, fontFamily: 'monospace', fontWeight: 700,
-            opacity: busy ? 0.7 : 1,
+            ...AUTH_PRIMARY,
+            cursor: busy ? 'progress' : 'pointer',
+            border: subtle ? '1px solid hsl(var(--app-border-strong))' : 'none',
+            background: subtle ? 'transparent' : 'var(--app-accent)',
+            color: subtle ? 'hsl(var(--app-text))' : 'var(--app-accent-ink)',
         }}>
             {busy && <Loader2 size={14} className="animate-spin" />}
             {busy && busyText ? busyText : children}

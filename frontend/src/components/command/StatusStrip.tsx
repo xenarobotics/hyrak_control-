@@ -9,20 +9,25 @@ import { useDroneStore } from '@/store/drone'
 import { useFlightTimer } from '@/hooks/useFlightTimer'
 import type { AvoidanceStatus } from '@/lib/avoidance'
 
-const AVOID_COLOR: Record<string, string> = {
-    nominal: '#4ade80', avoiding: '#22d3ee', holding: '#fbbf24', returning: '#f87171',
-    rerouted: '#22d3ee', climbing: '#a78bfa', disabled: '#71717a',
-    guarding: '#22d3ee', follow: '#4ade80',
+type Tone = 'ok' | 'warn' | 'danger' | 'accent' | 'muted' | 'text'
+const TONE: Record<Tone, string> = {
+    ok: 'text-app-ok', warn: 'text-app-warn', danger: 'text-app-danger',
+    accent: 'text-app-accent', muted: 'text-app-text-muted', text: 'text-app-text',
+}
+const AVOID_TONE: Record<string, Tone> = {
+    nominal: 'ok', avoiding: 'accent', holding: 'warn', returning: 'danger',
+    rerouted: 'accent', climbing: 'accent', disabled: 'muted',
+    guarding: 'accent', follow: 'ok',
 }
 
-function Cell({ icon, label, value, color, title }: {
-    icon?: React.ReactNode; label?: string; value: React.ReactNode; color?: string; title?: string
+function Cell({ icon, label, value, tone = 'text', title }: {
+    icon?: React.ReactNode; label?: string; value: React.ReactNode; tone?: Tone; title?: string
 }) {
     return (
-        <div className="flex items-center gap-1.5 px-2.5 h-full border-r border-white/10 whitespace-nowrap" title={title}>
-            {icon && <span className="opacity-70">{icon}</span>}
-            {label && <span className="text-[9px] tracking-widest text-zinc-400">{label}</span>}
-            <span className="text-[12px] font-semibold tabular-nums" style={{ color: color ?? '#e5e7eb' }}>{value}</span>
+        <div className="flex items-center gap-1.5 px-2.5 h-full border-r border-app-border whitespace-nowrap" title={title}>
+            {icon && <span className={TONE[tone]}>{icon}</span>}
+            {label && <span className="text-[12px] font-bold text-app-text-muted">{label}</span>}
+            <span className={`text-[13px] font-bold tabular-nums ${TONE[tone]}`}>{value}</span>
         </div>
     )
 }
@@ -36,7 +41,7 @@ export function StatusStrip({ avoid }: { avoid: AvoidanceStatus | null }) {
     const cloudOk = connectionStatus === 'connected'
     const droneOk = telemetryStatus === 'connected' && t?.link_ok !== false
     const bat = t?.battery.remaining_percent
-    const batColor = bat == null ? undefined : bat < 20 ? '#f87171' : bat < 35 ? '#fbbf24' : '#4ade80'
+    const batTone: Tone = bat == null ? 'text' : bat < 20 ? 'danger' : bat < 35 ? 'warn' : 'ok'
     const armed = t?.flight_mode.is_armed ?? false
     const rangeLost = !!avoid && avoid.enabled && (avoid.params?.use_range_sensor ?? 1) !== 0
         && avoid.sensor_mode !== 'range' && (t?.flight_mode.is_in_air ?? false) && !avoid.stale
@@ -48,45 +53,45 @@ export function StatusStrip({ avoid }: { avoid: AvoidanceStatus | null }) {
     const mm = String(Math.floor(elapsed / 60)).padStart(2, '0'), ss = String(elapsed % 60).padStart(2, '0')
 
     return (
-        <div className="flex items-stretch h-9 font-mono overflow-x-auto [scrollbar-width:none]">
+        <div className="flex items-stretch h-9 overflow-x-auto [scrollbar-width:none]">
             <Cell icon={<Cloud size={13} />} value={cloudOk ? 'CLOUD' : connectionStatus.toUpperCase()}
-                color={cloudOk ? '#4ade80' : connectionStatus === 'reconnecting' ? '#fbbf24' : '#f87171'}
+                tone={cloudOk ? 'ok' : connectionStatus === 'reconnecting' ? 'warn' : 'danger'}
                 title="Browser to cloud (socket)" />
             {streamStatus !== 'idle' && (
                 <Cell icon={<Video size={13} />}
                     value={streamStatus === 'connected' ? 'VIDEO' : streamStatus.toUpperCase()}
-                    color={streamStatus === 'connected' ? '#4ade80' : streamStatus === 'connecting' ? '#fbbf24' : '#f87171'}
+                    tone={streamStatus === 'connected' ? 'ok' : streamStatus === 'connecting' ? 'warn' : 'danger'}
                     title="Video stream (WebRTC)" />
             )}
             <Cell icon={<Radio size={13} />}
                 value={droneOk ? 'LINK' : t?.link_ok === false ? `LOST ${Math.round(t.link_lost_s ?? 0)}s` : 'NO LINK'}
-                color={droneOk ? '#4ade80' : '#f87171'} title="Cloud to aircraft (MAVLink)" />
-            <Cell value={t?.flight_mode.mode ?? '-'} color="#22d3ee" title="Flight mode" />
-            <Cell value={armed ? 'ARMED' : 'DISARMED'} color={armed ? '#f87171' : '#a1a1aa'} />
-            <Cell icon={<Battery size={13} />} value={bat != null ? `${Math.round(bat)}%` : '-'} color={batColor}
+                tone={droneOk ? 'ok' : 'danger'} title="Cloud to aircraft (MAVLink)" />
+            <Cell value={t?.flight_mode.mode ?? '-'} tone="accent" title="Flight mode" />
+            <Cell value={armed ? 'ARMED' : 'DISARMED'} tone={armed ? 'danger' : 'muted'} />
+            <Cell icon={<Battery size={13} />} value={bat != null ? `${Math.round(bat)}%` : '-'} tone={batTone}
                 title={t ? `${t.battery.voltage_v.toFixed(1)} V` : undefined} />
             <Cell icon={<Satellite size={13} />} value={t ? `${t.gps.satellites_visible}` : '-'}
-                color={t && t.gps.fix_type >= 3 ? '#e5e7eb' : '#fbbf24'} title="GPS satellites" />
+                tone={t && t.gps.fix_type >= 3 ? 'text' : 'warn'} title="GPS satellites" />
             <Cell icon={<Navigation size={13} />} label="HOME" value={t ? `${Math.round(t.home_distance_m)} m` : '-'} />
             <Cell icon={<Timer size={13} />} value={`${mm}:${ss}`} title="Flight time" />
             <Cell icon={<ShieldCheck size={13} />} label="AVOID"
                 value={aState === 'stale' ? `STALE ${avoid?.stale_s ?? 0}s` : String(aState).toUpperCase()}
-                color={aState === 'stale' || aState === 'off' ? '#f87171' : aState === 'watching' ? '#fbbf24' : AVOID_COLOR[aState] ?? '#e5e7eb'}
+                tone={aState === 'stale' || aState === 'off' ? 'danger' : aState === 'watching' ? 'warn' : AVOID_TONE[aState] ?? 'text'}
                 title={aState === 'stale' ? 'No answer from avoidance - what you see is old' : avoid?.reason || (aState === 'off' ? 'Avoidance is off' : aState === 'watching' ? 'Detecting only - Steer is off' : '')} />
             {rangeLost && (
-                <Cell label="SENSOR" value="RANGE LOST" color="#f87171"
+                <Cell label="SENSOR" value="RANGE LOST" tone="danger"
                     title="The range sensor stopped streaming: avoidance is on the camera (or blind) and its acting floor moved up" />
             )}
             {avoid?.sensor_stale && !avoid.stale && (
-                <Cell value="BLIND" color="#f87171" title="No scan has reached the map for 2 s" />
+                <Cell value="BLIND" tone="danger" title="No scan has reached the map for 2 s" />
             )}
             {avoid?.env === 'indoor' && (
-                <Cell label="NAV" value="INDOOR" color="#fcd34d"
+                <Cell label="NAV" value="INDOOR" tone="warn"
                     title={`${avoid.env_reason ?? ''} - position from ${avoid.pose_source === 'local' ? 'PX4 local' : 'GPS'}`} />
             )}
             {avoid?.sensor_mode && (
                 <Cell label="SENSOR" value={avoid.sensor_mode === 'range' ? 'DEPTH' : avoid.sensor_mode === 'mono' ? 'CAMERA' : 'NONE'}
-                    color={avoid.sensor_mode === 'none' ? '#f87171' : '#e5e7eb'} />
+                    tone={avoid.sensor_mode === 'none' ? 'danger' : 'text'} />
             )}
         </div>
     )

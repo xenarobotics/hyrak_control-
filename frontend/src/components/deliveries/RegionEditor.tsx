@@ -17,6 +17,8 @@ import 'leaflet/dist/leaflet.css'
 import { MAP_LAYERS } from '@/types/mission'
 import { getServerUrl } from '@/lib/server-url'
 import { liveAuthHeaders } from '@/lib/auth'
+import { Plus, Undo2 } from 'lucide-react'
+import { BTN, BTN_ACCENT, BTN_PRIMARY, FOCUS, INPUT, LABEL, PANEL } from '@/components/mission/ui'
 
 
 export const CATEGORY_COLORS: Record<string, string> = {
@@ -56,17 +58,8 @@ function FlyTo({ feature }: { feature: FeatureGJ | null }) {
     return null
 }
 
-const panelStyle: React.CSSProperties = {
-    background: 'hsl(var(--app-surface))',
-    borderColor: 'hsl(var(--app-border))',
-}
-const inputCls = 'w-full rounded-md border px-2 py-1.5 text-xs bg-transparent ' +
-    'focus:outline-none focus:ring-1 focus:ring-cyan-500'
-const inputStyle = {
-    borderColor: 'hsl(var(--app-border))',
-    color: 'hsl(var(--app-text))',
-    background: 'hsl(var(--app-bg))',
-}
+const inputCls = `${INPUT} w-full`
+const smallBtn = 'inline-flex items-center h-8 px-2 rounded-[6px] text-xs font-bold transition-colors duration-[120ms] ' + FOCUS
 
 export default function RegionEditor() {
     const layer = MAP_LAYERS.find(l => l.key === 'nav') ?? MAP_LAYERS[0]
@@ -187,91 +180,98 @@ export default function RegionEditor() {
                 ))}
             </MapContainer>
 
-            <div className="absolute left-3 top-3 bottom-3 z-[1000] w-72 rounded-xl border flex flex-col overflow-hidden"
-                style={panelStyle}>
-                <div className="px-3 py-2.5 text-[10px] font-mono tracking-widest border-b"
-                    style={{ color: 'hsl(var(--app-text-muted))', borderColor: 'hsl(var(--app-border))' }}>
-                    LAND-USE REGIONS - {features.length}
+            <div className={`${PANEL} absolute left-3 top-3 bottom-3 z-[1000] w-72 max-w-[calc(100%-24px)] flex flex-col overflow-hidden`}>
+                <div className="flex items-center gap-2 px-4 pt-4 pb-3 border-b border-app-border">
+                    <h3 className="text-[18px] leading-6 font-bold">Land-use regions</h3>
+                    <span className="ml-auto inline-flex items-center h-6 px-2 rounded-full text-xs font-bold tabular-nums bg-app-surface-2 border border-app-border">
+                        {features.length}
+                    </span>
                 </div>
 
                 {!drawing ? (
                     <>
-                        <div className="p-2 space-y-2">
+                        <div className="p-3 space-y-2">
                             <button onClick={() => setDrawing(true)}
-                                className="w-full py-2 rounded-md border text-xs font-mono text-cyan-500 hover:bg-cyan-500/10"
-                                style={{ borderColor: '#06b6d455' }}>
-                                + DRAW NEW REGION
+                                className={`${BTN_ACCENT} w-full`}>
+                                <Plus size={14} aria-hidden /> Draw new region
                             </button>
-                            <input className={inputCls} style={inputStyle}
-                                placeholder="filter (hostel, road...)"
+                            <input className={inputCls}
+                                placeholder="Filter (hostel, road...)"
+                                aria-label="Filter regions"
                                 value={filter} onChange={e => setFilter(e.target.value)} />
                         </div>
-                        <div className="flex-1 overflow-y-auto p-2 pt-0 space-y-1.5">
+                        <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-1.5">
                             {visible.map(f => (
                                 <div key={f.properties.id}
-                                    className="border rounded-md p-2 text-xs cursor-pointer hover:border-zinc-500"
-                                    style={{ borderColor: 'hsl(var(--app-border))' }}
-                                    onClick={() => setFocus(f)}>
+                                    role="button" tabIndex={0}
+                                    className={`border border-app-border rounded-[10px] px-3 py-2 cursor-pointer hover:border-app-border-strong hover:bg-app-surface-2 transition-colors duration-[120ms] ${FOCUS}`}
+                                    onClick={() => setFocus(f)}
+                                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFocus(f) } }}>
                                     <div className="flex items-center gap-2">
-                                        <span className="w-2.5 h-2.5 rounded-sm shrink-0"
+                                        <span className="w-2.5 h-2.5 rounded-sm shrink-0" aria-hidden
                                             style={{ background: CATEGORY_COLORS[f.properties.category] ?? '#a1a1aa' }} />
-                                        <span className={'truncate font-mono text-[11px] ' +
-                                            (f.properties.active ? '' : 'line-through opacity-50')}>
+                                        <span className={'truncate text-sm font-semibold ' +
+                                            (f.properties.active ? 'text-app-text' : 'line-through text-app-text-subtle')}>
                                             {f.properties.name}
                                         </span>
-                                        <button className="ml-auto text-[9px] font-mono opacity-60 hover:opacity-100"
+                                        <button className={`${smallBtn} ml-auto text-app-text-muted hover:text-app-text hover:bg-app-raised`}
+                                            title={f.properties.active ? 'Turn this region off' : 'Turn this region on'}
                                             onClick={e => { e.stopPropagation(); void toggle(f) }}>
-                                            {f.properties.active ? 'OFF' : 'ON'}
+                                            {f.properties.active ? 'Off' : 'On'}
                                         </button>
-                                        <button className="text-[9px] font-mono text-red-400 opacity-60 hover:opacity-100"
+                                        <button className={`${smallBtn} text-app-danger hover:bg-app-danger-soft`}
+                                            title="Delete this region"
                                             onClick={e => { e.stopPropagation(); void remove(f) }}>
-                                            DEL
+                                            Delete
                                         </button>
                                     </div>
-                                    <p className="mt-0.5 text-[9px] font-mono"
-                                        style={{ color: 'hsl(var(--app-text-muted))' }}>
-                                        {f.properties.category}
+                                    <p className="text-[13px] text-app-text-muted capitalize">
+                                        {f.properties.category.replace(/_/g, ' ')}
                                     </p>
                                 </div>
                             ))}
                         </div>
-                        <p className="p-2 text-[9px] font-mono border-t"
-                            style={{ color: 'hsl(var(--app-text-muted))', borderColor: 'hsl(var(--app-border))' }}>
-                            Regions shape route PREFERENCE. Flight-law ZONES are
-                            managed on /admin. Bulk import: scripts/import_osm_features.py
+                        <p className="px-4 py-3 text-[13px] text-app-text-muted border-t border-app-border"
+                            title="Bulk import: scripts/import_osm_features.py">
+                            Regions shape route preference. Flight-law zones live in Admin.
                         </p>
                     </>
                 ) : (
-                    <div className="p-3 space-y-3 text-xs">
-                        <p className="text-[10px] font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>
-                            Click the map to add vertices ({points.length} placed
+                    <div className="p-4 space-y-3 text-sm">
+                        <p className="text-[13px] text-app-text-muted">
+                            Click the map to add corners ({points.length} placed
                             {points.length < 3 ? `, need ${3 - points.length} more` : ''})
                         </p>
-                        <select className={inputCls} style={inputStyle} value={category}
+                        <label className="block space-y-1">
+                            <span className={LABEL}>Category</span>
+                        <select className={inputCls} value={category}
                             onChange={e => setCategory(e.target.value)}>
                             {categories.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
-                        <input className={inputCls} style={inputStyle}
-                            placeholder="region name (e.g. Hostel Block K)"
+                        </label>
+                        <label className="block space-y-1">
+                            <span className={LABEL}>Name</span>
+                        <input className={inputCls}
+                            placeholder="e.g. Hostel Block K"
                             value={name} onChange={e => setName(e.target.value)} />
-                        {error && <p className="text-[10px] text-red-400">{error}</p>}
+                        </label>
+                        {error && <p className="text-[13px] text-app-danger" role="alert">{error}</p>}
                         <div className="flex gap-2">
                             <button onClick={() => void save()}
                                 disabled={points.length < 3 || saving}
-                                className="flex-1 py-2 rounded-md border font-mono text-emerald-500 disabled:opacity-40 hover:bg-emerald-500/10"
-                                style={{ borderColor: '#10b98155' }}>
-                                {saving ? 'SAVING...' : 'SAVE REGION'}
+                                title={points.length < 3 ? 'Place at least 3 corners first' : undefined}
+                                className={`${BTN_PRIMARY} flex-1`}>
+                                {saving ? 'Saving...' : 'Save region'}
                             </button>
                             <button onClick={() => setPoints(p => p.slice(0, -1))}
                                 disabled={points.length === 0}
-                                className="px-3 py-2 rounded-md border font-mono disabled:opacity-40"
-                                style={{ borderColor: 'hsl(var(--app-border))' }}>
-                                UNDO
+                                title={points.length === 0 ? 'No corners to undo' : 'Remove the last corner'}
+                                aria-label="Undo last corner"
+                                className={BTN}>
+                                <Undo2 size={14} aria-hidden />
                             </button>
-                            <button onClick={reset}
-                                className="px-3 py-2 rounded-md border font-mono"
-                                style={{ borderColor: 'hsl(var(--app-border))' }}>
-                                CANCEL
+                            <button onClick={reset} className={BTN}>
+                                Cancel
                             </button>
                         </div>
                     </div>

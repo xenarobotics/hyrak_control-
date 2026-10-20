@@ -57,9 +57,8 @@ export function AltitudeTape({ height = 200 }: Props) {
                                 {(isMajor || isMed) && (
                                     <text
                                         x={isMajor ? 6 : 8} y={y - 2}
-                                        fontSize={isMajor ? 9 : 8}
-                                        fill={`rgba(255,255,255,${isMajor ? 0.7 : 0.4})`}
-                                        fontFamily="monospace"
+                                        fontSize={12}
+                                        fill={isMajor ? '#F2F6FA' : '#C3CCD8'} fontWeight={isMajor ? 700 : 600}
                                         stroke="rgba(0,0,0,0.9)" strokeWidth={2.5}
                                         style={{ paintOrder: 'stroke fill' }}
                                     >
@@ -81,7 +80,7 @@ export function AltitudeTape({ height = 200 }: Props) {
                 />
                 <text
                     x={w / 2 + 4} y={cy + 4}
-                    fontSize={11} fill="white" fontFamily="monospace"
+                    fontSize={12} fill="white"
                     textAnchor="middle" fontWeight="bold"
                     stroke="rgba(0,0,0,0.9)" strokeWidth={2.5}
                     style={{ paintOrder: 'stroke fill' }}
@@ -94,8 +93,8 @@ export function AltitudeTape({ height = 200 }: Props) {
             <div style={{
                 position: 'absolute', bottom: -20, left: '50%',
                 transform: 'translateX(-50%)',
-                fontSize: 9, fontFamily: 'monospace',
-                color: climbRateColor(climb),
+                fontSize: 12, 
+                color: ({ '#4ade80': 'var(--overlay-ok)', '#f87171': 'var(--overlay-danger)' } as Record<string, string>)[climbRateColor(climb)] ?? 'var(--overlay-text)', fontWeight: 700,
                 whiteSpace: 'nowrap',
             }}>
                 {climb >= 0 ? '▲' : '▼'} {Math.abs(climb).toFixed(1)}m/s

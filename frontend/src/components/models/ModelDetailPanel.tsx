@@ -104,17 +104,19 @@ export function ModelDetailPanel({ modelId, open, onOpenChange, editable, canPub
         <>
             {editable && (
                 <button type="button" className={s.btn} onClick={() => setConfirmDelete(true)}
-                    aria-expanded={confirmDelete} style={{ color: 'var(--cm-bad)' }}>
+                    aria-expanded={confirmDelete}
+                    style={{ color: 'var(--cm-bad)', borderColor: 'color-mix(in srgb, var(--cm-bad) 45%, transparent)' }}>
                     <Trash2 size={13} aria-hidden /> Delete
                 </button>
             )}
+            {/* Delete stays on the far left, away from the everyday actions. */}
+            <span className={s.spacer} />
             {editable && (
                 <button type="button" className={s.btn} aria-busy={busy === 'retest' || undefined}
                     onClick={() => run('retest', () => retestModel(m.id), 'Testing again. This takes about a minute.')}>
                     {busy === 'retest' ? <Loader size={13} className="animate-spin motion-reduce:animate-none" aria-hidden /> : <RefreshCw size={13} aria-hidden />} Re-test
                 </button>
             )}
-            <span className={s.spacer} />
             {canRun && ready && !running && (
                 <button type="button" className={cn(s.btn, s.primary)} onClick={() => onRun(m)}>
                     <Play size={13} aria-hidden /> Run
@@ -263,7 +265,7 @@ function RenameInline({ value, onSave }: { value: string; onSave: (v: string) =>
                 <button type="button" className={s.renameShow} onClick={() => { setDraft(value); setEditing(true) }}
                     style={{ visibility: editing ? 'hidden' : undefined }} tabIndex={editing ? -1 : 0}
                     aria-label={`Rename ${value}`} title="Rename">
-                    <span>{value}</span><Pencil size={13} aria-hidden style={{ opacity: 0.55, flexShrink: 0 }} />
+                    <span>{value}</span><Pencil size={13} aria-hidden style={{ color: 'var(--cm-ink-2)', flexShrink: 0 }} />
                 </button>
                 {editing && (
                     <input autoFocus size={1} className={s.renameInput} value={draft} aria-label="Model name"

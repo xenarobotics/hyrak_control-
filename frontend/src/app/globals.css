@@ -27,8 +27,12 @@
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
-  --font-sans: var(--font-geist-sans), sans-serif;
-  --font-mono: var(--font-geist-mono), monospace;
+  /* Nunito everywhere (docs/DESIGN_SYSTEM.md). `font-mono` keeps working
+     as "numbers that line up": same face, tabular digits. Real code uses
+     `font-code`. */
+  --font-sans: var(--font-nunito), system-ui, sans-serif;
+  --font-mono: var(--font-nunito), system-ui, sans-serif;
+  --font-code: var(--font-geist-mono), ui-monospace, monospace;
 
   /* App surface palette - lets components use bg-app-surface, text-app-text,
      border-app-border, etc. instead of inline style={{ ... hsl(var(--app-*)) }} */
@@ -39,6 +43,22 @@
   --color-app-text: hsl(var(--app-text));
   --color-app-text-muted: hsl(var(--app-text-muted));
   --color-app-sidebar: hsl(var(--app-sidebar));
+  --color-app-raised: hsl(var(--app-raised));
+  --color-app-border-strong: hsl(var(--app-border-strong));
+  --color-app-text-subtle: hsl(var(--app-text-subtle));
+  --color-app-accent: var(--app-accent);
+  --color-app-accent-ink: var(--app-accent-ink);
+  --color-app-accent-soft: var(--app-accent-soft);
+  --color-app-ok: var(--app-ok);
+  --color-app-ok-soft: var(--app-ok-soft);
+  --color-app-warn: var(--app-warn);
+  --color-app-warn-soft: var(--app-warn-soft);
+  --color-app-danger: var(--app-danger);
+  --color-app-danger-soft: var(--app-danger-soft);
+  --color-overlay-scrim: var(--overlay-scrim);
+  --color-overlay-text: var(--overlay-text);
+  --color-overlay-muted: var(--overlay-muted);
+  --color-overlay-border: var(--overlay-border);
 }
 
 :root {
@@ -53,23 +73,53 @@
   --secondary: 240 4.8% 95.9%;
   --secondary-foreground: 240 5.9% 10%;
   --muted: 240 4.8% 95.9%;
-  --muted-foreground: 240 3.8% 46.1%;
+  --muted-foreground: 217 20% 32%;
   --accent: 240 4.8% 95.9%;
   --accent-foreground: 240 5.9% 10%;
-  --destructive: 0 84.2% 60.2%;
+  --destructive: 0 72% 42%;
   --destructive-foreground: 0 0% 98%;
   --border: 240 5.9% 90%;
-  --input: 240 5.9% 90%;
+  --input: 215 16% 52%;
   --ring: 240 5.9% 10%;
   --radius: 0.5rem;
 
-  --app-bg: 240 5% 96%;
+  --app-bg: 216 33% 96%;
   --app-surface: 0 0% 100%;
-  --app-surface-2: 240 5% 94%;
-  --app-border: 240 6% 88%;
-  --app-text: 240 10% 10%;
-  --app-text-muted: 240 4% 46%;
-  --app-sidebar: 0 0% 99%;
+  --app-surface-2: 215 28% 95%;
+  --app-raised: 0 0% 100%;
+  --app-border: 215 20% 80%;
+  --app-border-strong: 215 16% 52%;
+  --app-text: 220 40% 11%;
+  --app-text-muted: 217 20% 32%;
+  --app-text-subtle: 216 12% 42%;
+  --app-sidebar: 0 0% 100%;
+  --app-accent: #0e7490;
+  --app-accent-ink: #ffffff;
+  --app-accent-soft: rgba(14, 116, 144, 0.10);
+  --app-ok: #166534;
+  --app-ok-soft: rgba(22, 101, 52, 0.10);
+  --app-warn: #a15c07;
+  --app-warn-soft: rgba(202, 138, 4, 0.14);
+  --app-danger: #b91c1c;
+  --app-danger-soft: rgba(185, 28, 28, 0.10);
+  --app-shadow: 0 1px 2px rgb(15 23 42 / 0.06), 0 4px 12px rgb(15 23 42 / 0.05);
+
+  /* Type scale (docs/DESIGN_SYSTEM.md section 2). */
+  --fs-2xs: 12px; --fs-xs: 12px; --fs-sm: 13px; --fs-base: 14px;
+  --fs-md: 16px; --fs-lg: 18px; --fs-xl: 22px; --fs-2xl: 28px;
+  --ease-out: cubic-bezier(.2, .8, .2, 1);
+  --ease-in: cubic-bezier(.4, 0, 1, 1);
+  --dur-fast: 120ms; --dur: 180ms; --dur-slow: 240ms;
+
+  /* Over video and map tiles: one fixed set in both themes (design system 9). */
+  --overlay-scrim: rgba(8, 12, 18, 0.72);
+  --overlay-text: #F2F6FA;
+  --overlay-muted: #C3CCD8;
+  --overlay-border: rgba(255, 255, 255, 0.18);
+  --overlay-accent: #22d3ee;
+  --overlay-ok: #4ade80;
+  --overlay-warn: #fbbf24;
+  --overlay-danger: #f87171;
 }
 
 .dark {
@@ -84,22 +134,35 @@
   --secondary: 240 3.7% 15.9%;
   --secondary-foreground: 0 0% 98%;
   --muted: 240 3.7% 15.9%;
-  --muted-foreground: 240 5% 64.9%;
+  --muted-foreground: 215 16% 74%;
   --accent: 240 3.7% 15.9%;
   --accent-foreground: 0 0% 98%;
-  --destructive: 0 62.8% 30.6%;
+  --destructive: 0 91% 71%;
   --destructive-foreground: 0 0% 98%;
   --border: 240 3.7% 15.9%;
   --input: 240 3.7% 15.9%;
   --ring: 240 4.9% 83.9%;
 
-  --app-bg: 240 10% 5%;
-  --app-surface: 240 8% 8%;
-  --app-surface-2: 240 7% 11%;
-  --app-border: 240 6% 16%;
-  --app-text: 0 0% 96%;
-  --app-text-muted: 240 5% 55%;
-  --app-sidebar: 240 8% 7%;
+  --app-bg: 220 22% 8%;
+  --app-surface: 220 20% 11%;
+  --app-surface-2: 219 18% 14%;
+  --app-raised: 219 17% 17%;
+  --app-border: 218 15% 24%;
+  --app-border-strong: 217 14% 44%;
+  --app-text: 214 30% 96%;
+  --app-text-muted: 215 16% 74%;
+  --app-text-subtle: 216 12% 60%;
+  --app-sidebar: 220 21% 10%;
+  --app-accent: #22d3ee;
+  --app-accent-ink: #04161b;
+  --app-accent-soft: rgba(34, 211, 238, 0.12);
+  --app-ok: #4ade80;
+  --app-ok-soft: rgba(74, 222, 128, 0.12);
+  --app-warn: #fbbf24;
+  --app-warn-soft: rgba(251, 191, 36, 0.12);
+  --app-danger: #f87171;
+  --app-danger-soft: rgba(248, 113, 113, 0.12);
+  --app-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.25);
 }
 
 /* Midnight: the reworked dark. Stacked ON TOP of .dark (the theme toggle
@@ -112,13 +175,26 @@
    - a slate-blue cast instead of neutral gray: separates surfaces without
      making them lighter. */
 .midnight {
-  --app-bg: 219 25% 9%;
-  --app-surface: 219 22% 12%;
-  --app-surface-2: 218 20% 15%;
-  --app-border: 217 18% 24%;
+  --app-bg: 220 22% 8%;
+  --app-surface: 220 20% 11%;
+  --app-surface-2: 219 18% 14%;
+  --app-raised: 219 17% 17%;
+  --app-border: 218 15% 24%;
+  --app-border-strong: 217 14% 44%;
   --app-text: 214 30% 96%;
-  --app-text-muted: 216 14% 68%;
-  --app-sidebar: 219 24% 11%;
+  --app-text-muted: 215 16% 74%;
+  --app-text-subtle: 216 12% 60%;
+  --app-sidebar: 220 21% 10%;
+  --app-accent: #22d3ee;
+  --app-accent-ink: #04161b;
+  --app-accent-soft: rgba(34, 211, 238, 0.12);
+  --app-ok: #4ade80;
+  --app-ok-soft: rgba(74, 222, 128, 0.12);
+  --app-warn: #fbbf24;
+  --app-warn-soft: rgba(251, 191, 36, 0.12);
+  --app-danger: #f87171;
+  --app-danger-soft: rgba(248, 113, 113, 0.12);
+  --app-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.25);
 }
 
 /* Percentage height chain for the app shell. The shell used h-screen
@@ -135,8 +211,22 @@ html, body {
 body {
   background: hsl(var(--app-bg));
   color: hsl(var(--app-text));
-  font-family: var(--font-geist-sans, ui-sans-serif), sans-serif;
+  font-family: var(--font-nunito, Nunito), system-ui, sans-serif;
+  font-size: var(--fs-base);
+  line-height: 1.45;
 }
+
+/* Nunito by default, monospace-styled text included: most of this interface
+   sets fontFamily 'monospace' inline (see the font preference block below
+   for why only [style*] reaches it). Digits stay aligned with tabular
+   numbers instead of a mono face. A chosen font (data-font) still wins. */
+html:not([data-font]) [style*='monospace'], html:not([data-font]) .font-mono,
+html:not([data-font]) [style*='geist-mono'] {
+  font-family: var(--font-nunito, Nunito), system-ui, sans-serif !important;
+}
+.font-mono, [style*='monospace'], [style*='geist-mono'] { font-variant-numeric: tabular-nums; }
+/* Real code and raw values someone may copy keep a monospace face. */
+.font-code { font-family: var(--font-geist-mono), ui-monospace, monospace !important; }
 
 /* Font preference (Settings → General). Monospace runs - telemetry values,
    coordinates, parameter names - keep their mono face on purpose: they are
@@ -147,6 +237,7 @@ body {
    custom property declared on <html> that references them is invalid THERE
    and silently computes to nothing - which is exactly how the first version
    of this feature managed to change no font at all. */
+html[data-font='geist']  body { font-family: var(--font-geist-sans, Geist), system-ui, sans-serif; }
 html[data-font='system'] body { font-family: system-ui, 'Segoe UI', Roboto, sans-serif; }
 html[data-font='ubuntu'] body { font-family: var(--font-ubuntu, Ubuntu), system-ui, sans-serif; }
 html[data-font='inter']  body { font-family: var(--font-inter, Inter), system-ui, sans-serif; }
@@ -159,6 +250,7 @@ html[data-font='nunito'] body { font-family: var(--font-nunito, Nunito), system-
    half-working. The [style*] attribute match with !important is blunt, but
    it is the only handle inline styles offer. True tabular data pays a
    price (digits stop aligning); that is the trade the preference states. */
+html[data-font='geist']  [style*='monospace'], html[data-font='geist'] .font-mono, html[data-font='geist'] [style*='geist-mono'] { font-family: var(--font-geist-sans, Geist), system-ui, sans-serif !important; }
 html[data-font='system'] [style*='monospace'], html[data-font='system'] .font-mono { font-family: system-ui, 'Segoe UI', Roboto, sans-serif !important; }
 html[data-font='ubuntu'] [style*='monospace'], html[data-font='ubuntu'] .font-mono { font-family: var(--font-ubuntu, Ubuntu), system-ui, sans-serif !important; }
 html[data-font='inter']  [style*='monospace'], html[data-font='inter'] .font-mono { font-family: var(--font-inter, Inter), system-ui, sans-serif !important; }
@@ -169,6 +261,17 @@ html[data-font='system'] [style*='geist-mono'] { font-family: system-ui, 'Segoe 
 html[data-font='ubuntu'] [style*='geist-mono'] { font-family: var(--font-ubuntu, Ubuntu), system-ui, sans-serif !important; }
 html[data-font='inter']  [style*='geist-mono'] { font-family: var(--font-inter, Inter), system-ui, sans-serif !important; }
 html[data-font='nunito'] [style*='geist-mono'] { font-family: var(--font-nunito, Nunito), system-ui, sans-serif !important; }
+
+/* Focus (design system 8): a 2px accent ring with a 2px gap on every
+   interactive element. In the base layer, so a component utility that draws
+   its own ring (shadcn's focus-visible:ring + outline-none) still wins; an inline outline: none
+   hides it, so components keep that only where a ring replaces it. */
+@layer base {
+  :where(a, button, input, select, textarea, summary, [role='button'], [role='tab'], [role='switch'], [tabindex]:not([tabindex='-1'])):focus-visible {
+    outline: 2px solid var(--app-accent);
+    outline-offset: 2px;
+  }
+}
 
 /* ── Bright theme accent remap ─────────────────────────────────────────────
    The accent palette (#4ade80 green, #22d3ee cyan, #fbbf24 amber, #f87171
@@ -260,16 +363,16 @@ html[data-fontsize='xlarge'] [style*="font-size: 22px"] { font-size: 28.5px !imp
 html[data-fontsize='xlarge'] [style*="font-size: 24px"] { font-size: 31px !important; }
 html[data-fontsize='xlarge'] [style*="font-size: 28px"] { font-size: 36.5px !important; }
 
-/* The same scaling for Tailwind-classed text (text-xs, text-[10px], ...) -
+/* The same scaling for Tailwind-classed text (text-xs, text-[12px], ...) -
    the Fly sidebar and controls are classed, not inline-styled, and a text
    size that grew one page and not the next reads as broken. */
 html[data-fontsize='large'] .text-xs { font-size: 14px !important; }
 html[data-fontsize='large'] .text-sm { font-size: 16px !important; }
 html[data-fontsize='large'] .text-base { font-size: 18.5px !important; }
 html[data-fontsize='large'] .text-lg { font-size: 20.5px !important; }
-html[data-fontsize='large'] .text-\[8px\] { font-size: 9px !important; }
-html[data-fontsize='large'] .text-\[9px\] { font-size: 10.5px !important; }
-html[data-fontsize='large'] .text-\[10px\] { font-size: 11.5px !important; }
+html[data-fontsize='large'] .text-\[8px\] { font-size: 12px !important; }
+html[data-fontsize='large'] .text-\[9px\] { font-size: 12px !important; }
+html[data-fontsize='large'] .text-\[10px\] { font-size: 12px !important; }
 html[data-fontsize='large'] .text-\[11px\] { font-size: 12.5px !important; }
 html[data-fontsize='large'] .text-\[11\.5px\] { font-size: 13px !important; }
 html[data-fontsize='large'] .text-\[12px\] { font-size: 14px !important; }
@@ -280,8 +383,8 @@ html[data-fontsize='xlarge'] .text-xs { font-size: 15.5px !important; }
 html[data-fontsize='xlarge'] .text-sm { font-size: 18px !important; }
 html[data-fontsize='xlarge'] .text-base { font-size: 21px !important; }
 html[data-fontsize='xlarge'] .text-lg { font-size: 23.5px !important; }
-html[data-fontsize='xlarge'] .text-\[8px\] { font-size: 10.5px !important; }
-html[data-fontsize='xlarge'] .text-\[9px\] { font-size: 11.5px !important; }
+html[data-fontsize='xlarge'] .text-\[8px\] { font-size: 12px !important; }
+html[data-fontsize='xlarge'] .text-\[9px\] { font-size: 12px !important; }
 html[data-fontsize='xlarge'] .text-\[10px\] { font-size: 13px !important; }
 html[data-fontsize='xlarge'] .text-\[11px\] { font-size: 14.5px !important; }
 html[data-fontsize='xlarge'] .text-\[11\.5px\] { font-size: 15px !important; }
@@ -358,4 +461,15 @@ html[data-fontsize='xlarge'] .text-\[13px\] { font-size: 17px !important; }
 }
 @media (prefers-reduced-motion: reduce) {
   .hy-simple *, .hy-simple *::before, .hy-simple *::after { transition: none !important; animation: none !important; }
+}
+
+/* Reduced motion, everywhere (design system 5): no movement, no smooth
+   scrolling; opacity changes stay but are near instant. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
 }

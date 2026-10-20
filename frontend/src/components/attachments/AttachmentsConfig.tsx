@@ -101,7 +101,7 @@ export function AttachmentsSection() {
             <div className={a.head}>
                 <span className={s.label}>Fitted to</span>
                 <span className={a.headDrone}>{droneName ?? droneId}</span>
-                {attachments.length > 0 && <span className={s.mono} style={{ fontSize: 10, color: 'var(--cm-ink-2)' }}>{attachments.length}/{MAX_ATTACHMENTS}</span>}
+                {attachments.length > 0 && <span className={s.mono} style={{ fontSize: 12, color: 'var(--cm-ink-2)' }}>{attachments.length}/{MAX_ATTACHMENTS}</span>}
                 {loading && <Loader size={12} className="animate-spin motion-reduce:animate-none" aria-label="Loading" />}
                 {!canManage && loaded && !error && <span className={cn(s.chip, s.chipMute)} title="Only a workspace owner or admin can change attachments.">View only</span>}
                 {canManage && attachments.length > 0 && (

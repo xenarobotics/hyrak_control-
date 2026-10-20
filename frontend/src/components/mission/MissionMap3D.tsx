@@ -8,6 +8,7 @@ import { WP_META, HYBRID_LABEL_TILES } from '@/types/mission'
 import type { Waypoint } from '@/types/mission'
 import type * as CesiumNS from 'cesium'
 import { Map3DNavControls } from '@/components/mission/Map3DNavControls'
+import { bodyFont } from '@/components/mission/ui'
 
 // ── Bezier smooth-path ──────────────────────────────────────────────────────
 
@@ -142,7 +143,7 @@ function makeWaypointCanvas(num: number, colorHex: string, size: number): HTMLCa
 
   // Waypoint number centred inside circle
   ctx.fillStyle = '#fff'
-  ctx.font = `bold ${size <= 28 ? 10 : 12}px sans-serif`
+  ctx.font = `800 ${size <= 28 ? 12 : 14}px ${bodyFont()}`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.fillText(String(num), r, r + 0.5)
@@ -425,6 +426,12 @@ export default function MissionMap3D({ readOnly = false, showNav = true, navStyl
       viewer.scene.globe.showGroundAtmosphere = true
       if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = true
       viewer.scene.backgroundColor = Cesium.Color.BLACK
+
+      // Opening view: IITH from 3 km up instead of the whole globe, when
+      // there is no plan to fly to yet (the plan / drone fly-to still runs).
+      if (useMissionStore.getState().waypoints.length === 0) {
+        viewer.camera.setView({ destination: Cesium.Cartesian3.fromDegrees(78.12, 17.59, 3000) })
+      }
 
       // Remove the ugly Cesium ion credit bar
       const creditContainer = viewer.cesiumWidget.creditContainer as HTMLElement
@@ -981,7 +988,7 @@ export default function MissionMap3D({ readOnly = false, showNav = true, navStyl
           },
           label: {
             text: 'RTL',
-            font: 'bold 11px monospace',
+            font: `bold 13px ${bodyFont()}`,
             fillColor: Cesium.Color.WHITE,
             style: Cesium.LabelStyle.FILL_AND_OUTLINE,
             outlineColor: Cesium.Color.BLACK,
@@ -1157,7 +1164,7 @@ export default function MissionMap3D({ readOnly = false, showNav = true, navStyl
         },
         label: {
           text: String(i + 1),
-          font: '10px monospace',
+          font: `bold 12px ${bodyFont()}`,
           fillColor: Cesium.Color.WHITE,
           pixelOffset: new Cesium.Cartesian2(0, -16),
           heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
@@ -1213,7 +1220,7 @@ export default function MissionMap3D({ readOnly = false, showNav = true, navStyl
         },
         label: {
           text: `${relAlt.toFixed(1)} m`,
-          font: 'bold 11px monospace',
+          font: `bold 13px ${bodyFont()}`,
           fillColor: Cesium.Color.WHITE,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
           outlineColor: Cesium.Color.BLACK,
@@ -1294,7 +1301,7 @@ export default function MissionMap3D({ readOnly = false, showNav = true, navStyl
           },
           label: {
             text: `${drone.name}\n${altText}`,
-            font: 'bold 10px monospace',
+            font: `bold 12px ${bodyFont()}`,
             fillColor: Cesium.Color.WHITE,
             style: Cesium.LabelStyle.FILL_AND_OUTLINE,
             outlineColor: Cesium.Color.BLACK,

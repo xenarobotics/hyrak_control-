@@ -32,11 +32,11 @@ import { Camera, Satellite, Plug, PlugZap, Loader, RefreshCw, Plus } from 'lucid
 import { useClientValue } from '@/hooks/useClientValue'
 
 const selectStyle: React.CSSProperties = {
-    height: 26, maxWidth: 150, padding: '0 6px', borderRadius: 7,
+    flexShrink: 0, height: 32, maxWidth: 150, padding: '0 6px', borderRadius: 6,
     background: 'hsl(var(--app-surface-2))',
-    border: '1px solid hsl(var(--app-border))',
+    border: '1px solid hsl(var(--app-border-strong))',
     color: 'hsl(var(--app-text))',
-    fontSize: 11, fontFamily: 'monospace', cursor: 'pointer',
+    fontSize: 13, cursor: 'pointer',
     textOverflow: 'ellipsis',
 }
 
@@ -44,8 +44,8 @@ function Label({ icon, text }: { icon: React.ReactNode; text: string }) {
     return (
         <span style={{
             display: 'flex', alignItems: 'center', gap: 4,
-            fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))',
-            whiteSpace: 'nowrap',
+            fontSize: 12, fontWeight: 700, color: 'hsl(var(--app-text-muted))',
+            whiteSpace: 'nowrap', flexShrink: 0,
         }}>
             {icon}{text}
         </span>
@@ -57,10 +57,13 @@ function IconButton({ onClick, title, children }: {
 }) {
     return (
         <button
+            type="button"
             onClick={onClick}
             title={title}
+            aria-label={title}
             style={{
-                display: 'flex', alignItems: 'center', padding: 3, borderRadius: 5,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                width: 32, height: 32, borderRadius: 6,
                 background: 'transparent', border: 'none',
                 color: 'hsl(var(--app-text-muted))', cursor: 'pointer',
             }}
@@ -141,7 +144,7 @@ export function StatusBarLinks() {
 
     return (
         <>
-            <Label icon={<Camera size={11} />} text="VIDEO" />
+            <Label icon={<Camera size={14} />} text="VIDEO" />
             <select
                 value={videoSource}
                 onChange={e => changeVideoSource(e.target.value as VideoSource)}
@@ -183,17 +186,17 @@ export function StatusBarLinks() {
                         ))}
                     </select>
                     <IconButton onClick={scanCameras} title="Re-scan cameras on this device">
-                        <RefreshCw size={11} />
+                        <RefreshCw size={14} />
                     </IconButton>
                 </>
             )}
 
-            <Label icon={<Satellite size={11} />} text="LINK" />
+            <Label icon={<Satellite size={14} />} text="LINK" />
             <select
                 value={source}
                 onChange={e => setSource(e.target.value)}
                 disabled={isConnected}
-                style={{ ...selectStyle, opacity: isConnected ? 0.5 : 1 }}
+                style={{ ...selectStyle, ...(isConnected ? { borderStyle: 'dashed', color: 'hsl(var(--app-text-muted))', cursor: 'not-allowed' } : null) }}
                 title={isConnected
                     ? 'Disconnect before changing the telemetry link'
                     : 'Which radio or bridge carries telemetry'}
@@ -208,16 +211,16 @@ export function StatusBarLinks() {
                 grant through Chrome's picker. */}
             {desktop ? (
                 <IconButton onClick={() => { void refreshNativeRadios() }} title="Re-scan serial ports">
-                    <RefreshCw size={11} />
+                    <RefreshCw size={14} />
                 </IconButton>
             ) : browserSerialSupported && (
                 <IconButton onClick={() => { void addRadio() }} title="Add a USB radio plugged into this device">
-                    <Plus size={12} />
+                    <Plus size={16} />
                 </IconButton>
             )}
             {!desktop && !browserSerialSupported && (
                 <IconButton onClick={() => { void refreshRadios() }} title="Re-scan radios">
-                    <RefreshCw size={11} />
+                    <RefreshCw size={14} />
                 </IconButton>
             )}
 
@@ -229,21 +232,21 @@ export function StatusBarLinks() {
                     ? 'SITL needs the desktop app - a browser tab cannot reach udp:14540'
                     : isConnected ? 'Disconnect telemetry' : 'Connect telemetry'}
                 style={{
-                    display: 'flex', alignItems: 'center', gap: 5,
-                    padding: '5px 10px', borderRadius: 7,
-                    fontSize: 11, fontFamily: 'monospace', fontWeight: 600,
-                    background: 'transparent',
-                    border: `1px solid ${isConnected ? '#f8717160' : '#4ade8060'}`,
-                    color: isConnected ? '#f87171' : '#4ade80',
-                    cursor: 'pointer', whiteSpace: 'nowrap',
-                    opacity: (isConnecting || disconnecting || linkBlocked) ? 0.4 : 1,
+                    display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
+                    height: 32, padding: '0 10px', borderRadius: 6,
+                    fontSize: 13, fontWeight: 700,
+                    background: linkBlocked ? 'hsl(var(--app-surface-2))' : 'transparent',
+                    border: linkBlocked ? '1px dashed hsl(var(--app-border-strong))'
+                        : `1px solid ${isConnected ? 'var(--app-danger)' : 'var(--app-ok)'}`,
+                    color: linkBlocked ? 'hsl(var(--app-text-muted))' : isConnected ? 'var(--app-danger)' : 'var(--app-ok)',
+                    cursor: linkBlocked ? 'not-allowed' : (isConnecting || disconnecting) ? 'progress' : 'pointer', whiteSpace: 'nowrap',
                 }}
             >
                 {isConnecting || disconnecting
-                    ? <><Loader size={12} className="animate-spin" />{isConnecting ? 'LINKING' : 'CLOSING'}</>
+                    ? <><Loader size={14} className="animate-spin" />{isConnecting ? 'LINKING' : 'CLOSING'}</>
                     : isConnected
-                        ? <><PlugZap size={12} /> DROP</>
-                        : <><Plug size={12} /> LINK</>}
+                        ? <><PlugZap size={14} /> DROP</>
+                        : <><Plug size={14} /> LINK</>}
             </button>
         </>
     )

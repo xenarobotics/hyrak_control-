@@ -16,10 +16,10 @@ import { css as s, StatusChip, Callout } from './ui'
 
 export type LibraryFilter = 'all' | 'hyrak' | 'ours'
 
-const FILTERS: { value: LibraryFilter; label: string }[] = [
-    { value: 'all', label: 'All' },
-    { value: 'hyrak', label: 'HYRAK models' },
-    { value: 'ours', label: 'Our models' },
+const FILTERS: { value: LibraryFilter; label: string; short: string }[] = [
+    { value: 'all', label: 'All', short: 'All' },
+    { value: 'hyrak', label: 'HYRAK models', short: 'HYRAK' },
+    { value: 'ours', label: 'Our models', short: 'Ours' },
 ]
 
 export interface LibraryProps {
@@ -100,7 +100,7 @@ export function ModelLibrary(p: LibraryProps) {
                 <div className={s.libTitleRow}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                         <h2 id="cm-lib-title" className={s.title}>Models</h2>
-                        <p className={s.muted}>Pick a model and press Run. It watches the live video and marks what it finds.</p>
+                        <p className={s.muted}>Press Run to watch the live video and mark what the model finds.</p>
                     </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -125,8 +125,11 @@ export function ModelLibrary(p: LibraryProps) {
                     <div className={s.segment} role="group" aria-label="Show">
                         {FILTERS.map(f => (
                             <button key={f.value} type="button" aria-pressed={filter === f.value}
+                                aria-label={`${f.label}, ${counts[f.value]}`}
                                 onClick={() => setFilter(f.value)}>
-                                {f.label}<span className={s.count}>{counts[f.value]}</span>
+                                <span className={s.segLong}>{f.label}</span>
+                                <span className={s.segShort} aria-hidden>{f.short}</span>
+                                <span className={s.count} aria-hidden>{counts[f.value]}</span>
                             </button>
                         ))}
                     </div>
@@ -200,7 +203,9 @@ function ModelCard({ entry: e, running, starting, canRun, canManage, onRun, onSt
                 <button type="button" className={s.cardOpen} onClick={onOpen}
                     aria-label={`${e.name}: open details`}>{text}</button>
             ) : (
-                <div className={s.cardMain}>{text}</div>
+                // Built-in: no detail view, so the card is plain text (no
+                // hover, no chevron) and its full description shows on hover.
+                <div className={s.cardMain} title={e.blurb}>{text}</div>
             )}
             <div className={s.cardActions}>
                 {canRun && e.status === 'ready' && (running ? (

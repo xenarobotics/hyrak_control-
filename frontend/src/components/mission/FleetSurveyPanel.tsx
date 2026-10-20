@@ -7,6 +7,8 @@ import { getSocket } from '@/lib/socket'
 import { generateSurveyLines, partitionSurveyLines, serpentine, pathLengthM } from '@/lib/survey'
 import type { Waypoint, WaypointType } from '@/types/mission'
 import { Users, Upload, PlayCircle, Loader2, Check, AlertTriangle, Eye } from 'lucide-react'
+import { BTN_ACCENT, BTN_WARN, FOCUS, INPUT } from './ui'
+import { cn } from '@/lib/utils'
 
 let _fsCounter = 0
 const fsUid = () => `fswp_${Date.now()}_${++_fsCounter}`
@@ -156,25 +158,20 @@ export default function FleetSurveyPanel() {
   const anyUploading = Object.values(uploadStates).some(s => s === 'uploading')
 
   return (
-    <div
-      className="flex flex-col gap-2.5 rounded-lg p-3 mt-1"
-      style={{
-        background: 'rgba(6, 182, 212, .07)',
-        border: '1px solid rgba(6, 182, 212, .25)',
-      }}
-    >
+    <div className="flex flex-col gap-2.5 rounded-[10px] p-3 mt-1 border border-app-border bg-app-surface-2">
       <div className="flex items-center gap-2">
-        <Users size={13} color="#22d3ee" />
-        <span className="text-[11px] font-mono font-bold" style={{ color: '#a5f3fc' }}>
-          Fleet Survey - {connected.length} drones
+        <span className="w-7 h-7 rounded-[6px] bg-app-accent-soft text-app-accent flex items-center justify-center">
+          <Users size={14} />
+        </span>
+        <span className="text-[14px] font-bold text-app-text">Fleet survey</span>
+        <span className="ml-auto inline-flex items-center h-6 px-2 rounded-full text-xs font-bold tabular-nums bg-app-surface text-app-text border border-app-border">
+          {connected.length} drones
         </span>
       </div>
 
       {/* Altitude stagger */}
-      <div className="flex items-center justify-between">
-        <span className="text-[9px] font-mono font-semibold" style={{ color: '#67e8f9' }}>
-          Alt stagger / drone
-        </span>
+      <label className="flex items-center justify-between gap-2" title="Each drone flies this much higher than the one before">
+        <span className="text-[13px] font-semibold text-app-text">Height step per drone</span>
         <div className="flex items-center gap-1">
           <input
             type="number"
@@ -186,39 +183,22 @@ export default function FleetSurveyPanel() {
               const v = Number(e.target.value)
               if (!isNaN(v)) setAltStagger(Math.min(10, Math.max(0, v)))
             }}
-            className="w-12 text-[10px] font-mono font-bold text-right tabular-nums rounded-md px-1.5 py-0.5 outline-none"
-            style={{
-              background: 'rgba(255,255,255,.08)',
-              border: '1px solid rgba(255,255,255,.15)',
-              color: '#fff',
-            }}
+            className={cn(INPUT, 'w-14 text-right font-bold')}
           />
-          <span className="text-[8px] font-mono font-semibold" style={{ color: '#9ca3af' }}>m</span>
+          <span className="text-xs text-app-text-muted">m</span>
         </div>
-      </div>
+      </label>
 
       {/* Split button */}
       <button
         onClick={handleSplit}
         disabled={!canSplit}
-        className="flex items-center justify-center gap-1.5 rounded-lg py-2 transition-colors disabled:opacity-30 disabled:pointer-events-none"
-        style={{
-          background: 'rgba(6, 182, 212, .2)',
-          border: '1.5px solid rgba(6, 182, 212, .45)',
-          color: '#67e8f9',
-          fontSize: 10,
-          fontWeight: 700,
-          fontFamily: 'var(--font-geist-mono)',
-        }}
+        title={canSplit ? 'Give each drone its own strip of the area' : 'Draw an area first (3+ points)'}
+        className={BTN_ACCENT}
       >
-        <Users size={11} />
+        <Users size={13} />
         {assignments.length > 0 ? 'Re-split area' : `Split across ${connected.length} drones`}
       </button>
-      {!canSplit && (
-        <span className="text-[9px] font-mono" style={{ color: '#4b5563' }}>
-          Draw an area polygon first (3+ points)
-        </span>
-      )}
 
       {/* Assignment list */}
       {assignments.length > 0 && (
@@ -230,24 +210,25 @@ export default function FleetSurveyPanel() {
               <button
                 key={a.droneId}
                 onClick={() => setActiveDrone(a.droneId)}
-                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-all"
-                style={{
-                  background: isActive ? a.color + '18' : 'rgba(255,255,255,.03)',
-                  border: `1px solid ${isActive ? a.color + '55' : 'rgba(255,255,255,.08)'}`,
-                }}
+                aria-pressed={isActive}
+                className={cn(
+                  'flex items-center gap-2 rounded-[6px] px-2 min-h-8 text-left border transition-colors duration-[120ms]',
+                  isActive ? 'bg-app-accent-soft border-app-accent/50' : 'bg-app-surface border-app-border hover:border-app-border-strong',
+                  FOCUS,
+                )}
                 title="Preview this drone's strip on the map"
               >
-                <div className="w-2 h-2 rounded-full shrink-0" style={{ background: a.color }} />
-                <span className="flex-1 text-[10px] font-mono font-bold truncate" style={{ color: a.color }}>
+                <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: a.color }} />
+                <span className="flex-1 text-[13px] font-bold truncate text-app-text">
                   {a.name}
                 </span>
-                <span className="text-[9px] font-mono tabular-nums" style={{ color: '#9ca3af' }}>
+                <span className="text-xs tabular-nums text-app-text-muted">
                   {a.waypointCount} wp · {(a.distanceM / 1000).toFixed(2)} km
                 </span>
-                {st === 'uploading' && <Loader2 size={10} className="animate-spin" color="#facc15" />}
-                {st === 'ok' && <Check size={10} color="#4ade80" />}
-                {st === 'fail' && <AlertTriangle size={10} color="#f87171" />}
-                {isActive && st === 'idle' && <Eye size={10} color={a.color} />}
+                {st === 'uploading' && <Loader2 size={13} className="animate-spin text-app-warn" aria-label="Uploading" />}
+                {st === 'ok' && <Check size={13} className="text-app-ok" aria-label="Uploaded" />}
+                {st === 'fail' && <AlertTriangle size={13} className="text-app-danger" aria-label="Upload failed" />}
+                {isActive && st === 'idle' && <Eye size={13} className="text-app-accent" aria-label="Previewing" />}
               </button>
             )
           })}
@@ -260,40 +241,26 @@ export default function FleetSurveyPanel() {
           <button
             onClick={handleUploadAll}
             disabled={anyUploading}
-            className="flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 transition-colors disabled:opacity-40"
-            style={{
-              background: 'rgba(59, 130, 246, .2)',
-              border: '1.5px solid rgba(59, 130, 246, .45)',
-              color: '#93c5fd',
-              fontSize: 10,
-              fontWeight: 700,
-              fontFamily: 'var(--font-geist-mono)',
-            }}
+            title={anyUploading ? 'Uploading now' : 'Send each drone its strip'}
+            className={cn(BTN_ACCENT, 'flex-1')}
           >
-            {anyUploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+            {anyUploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
             Upload all
           </button>
           <button
             onClick={handleStartAll}
             disabled={!allUploaded}
-            className="flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 transition-colors disabled:opacity-30 disabled:pointer-events-none"
-            style={{
-              background: 'rgba(34, 197, 94, .2)',
-              border: '1.5px solid rgba(34, 197, 94, .5)',
-              color: '#86efac',
-              fontSize: 10,
-              fontWeight: 700,
-              fontFamily: 'var(--font-geist-mono)',
-            }}
+            title={allUploaded ? 'Arm and start every drone' : 'Upload to every drone first'}
+            className={cn(BTN_WARN, 'flex-1')}
           >
-            <PlayCircle size={11} />
-            Start fleet mission
+            <PlayCircle size={13} />
+            Start all
           </button>
         </div>
       )}
 
       {startResult && (
-        <span className="text-[9px] font-mono font-semibold" style={{ color: '#86efac' }}>
+        <span className="text-[13px] font-semibold text-app-ok" role="status">
           {startResult}
         </span>
       )}

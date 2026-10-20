@@ -51,9 +51,9 @@ function droneIcon(d: MapDrone): L.DivIcon {
     const border = d.approx ? `2px dashed ${color}` : `2px solid ${color}`
     const label = d.approx ? `~ ${d.name}` : d.name
     const sub = d.approx && d.approx_label
-        ? `<div style="color:#a1a1aa;font-size:9px;">${d.approx_label}</div>`
+        ? `<div style="color:#C3CCD8;font-size:12px;font-weight:600;">${d.approx_label}</div>`
         : d.sim
-            ? `<div style="color:#a78bfa;font-size:8px;letter-spacing:1px;">SIM</div>`
+            ? `<div style="color:#c4b5fd;font-size:12px;font-weight:700;letter-spacing:.04em;">SIM</div>`
             : ''
     return L.divIcon({
         className: '',
@@ -65,9 +65,9 @@ function droneIcon(d: MapDrone): L.DivIcon {
             <div style="transform:rotate(${d.heading}deg);color:${color};
                 font-size:${sz - 16}px;line-height:1;">${d.approx ? '●' : '▲'}</div>
         </div>
-        <div style="text-align:center;margin-top:2px;color:#e4e4e7;
-            font-family:monospace;font-size:10px;white-space:nowrap;
-            text-shadow:0 1px 3px #000;">${label}${sub}</div>`,
+        <div style="position:absolute;left:50%;top:${sz + 3}px;transform:translateX(-50%);
+            padding:1px 6px;border-radius:6px;background:rgba(8,12,18,.72);color:#F2F6FA;
+            font-size:12px;font-weight:700;line-height:16px;white-space:nowrap;text-align:center;">${label}${sub}</div>`,
         iconSize: [sz, sz],
         iconAnchor: [sz / 2, sz / 2],
     })
@@ -159,12 +159,12 @@ export default function AdminMap({
             </MapContainer>
             <button
                 onClick={() => setFitKey(k => k + 1)}
-                className="absolute bottom-3 right-3 z-[1000] px-3 py-1.5 rounded border border-zinc-700 bg-zinc-950/80 text-[10px] font-mono text-zinc-300 hover:border-zinc-500"
+                className="absolute bottom-3 right-3 z-[1000] h-8 px-3 rounded-md border border-overlay-border bg-overlay-scrim text-[13px] font-semibold text-overlay-text backdrop-blur-sm transition-colors duration-[120ms] hover:border-[var(--overlay-accent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--overlay-accent)]"
             >
-                RECENTER
+                Recenter
             </button>
             {drones.length === 0 && (
-                <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] px-3 py-1.5 rounded border border-zinc-800 bg-zinc-950/80 text-[10px] font-mono text-zinc-500">
+                <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] px-3 py-1.5 rounded-full border border-overlay-border bg-overlay-scrim text-[13px] text-overlay-muted backdrop-blur-sm">
                     No locatable clients
                 </div>
             )}

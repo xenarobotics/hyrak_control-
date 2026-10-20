@@ -25,12 +25,13 @@ import { getSocket } from '@/lib/socket'
 import { claimSocket, releaseSocket, socketOwner } from '@/lib/socketClaim'
 import { useDroneStore } from '@/store/drone'
 import type { MapDroneLive, MapRoute, MapSelection } from '@/components/deliveries/DeliveryMap'
+import { BTN, BTN_ACCENT, BTN_DANGER, BTN_PRIMARY, BTN_WARN, FOCUS, INPUT, LABEL } from '@/components/mission/ui'
 
 const RegionEditor = dynamic(() => import('@/components/deliveries/RegionEditor'), {
     ssr: false,
     loading: () => (
         <div className="h-64 flex items-center justify-center">
-            <p className="text-xs font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>
+            <p className="text-[13px] text-app-text-muted">
                 Loading editor...
             </p>
         </div>
@@ -41,9 +42,8 @@ const RegionEditor = dynamic(() => import('@/components/deliveries/RegionEditor'
 const DeliveryMap = dynamic(() => import('@/components/deliveries/DeliveryMap'), {
     ssr: false,
     loading: () => (
-        <div className="h-full w-full rounded-lg border flex items-center justify-center"
-            style={{ borderColor: 'hsl(var(--app-border))' }}>
-            <p className="text-xs font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>
+        <div className="h-full w-full rounded-[10px] border border-app-border bg-app-surface-2 flex items-center justify-center">
+            <p className="text-[13px] text-app-text-muted">
                 Loading map...
             </p>
         </div>
@@ -69,17 +69,24 @@ const STATUS_ORDER = [
     'delivered', 'returned', 'failed', 'cancelled',
 ]
 
-const STATUS_STYLE: Record<string, { fg: string; bg: string; label: string }> = {
-    received:   { fg: '#a1a1aa', bg: '#a1a1aa22', label: 'RECEIVED' },
-    planned:    { fg: '#38bdf8', bg: '#38bdf822', label: 'PLANNED' },
-    assigned:   { fg: '#a78bfa', bg: '#a78bfa22', label: 'ASSIGNED' },
-    to_pickup:  { fg: '#fbbf24', bg: '#fbbf2422', label: 'TO PICKUP' },
-    loading:    { fg: '#fb923c', bg: '#fb923c22', label: 'LOADING' },
-    to_dropoff: { fg: '#22d3ee', bg: '#22d3ee22', label: 'TO DROPOFF' },
-    delivered:  { fg: '#4ade80', bg: '#4ade8022', label: 'DELIVERED' },
-    returned:   { fg: '#facc15', bg: '#facc1522', label: 'RETURNED' },
-    failed:     { fg: '#f87171', bg: '#f8717122', label: 'FAILED' },
-    cancelled:  { fg: '#71717a', bg: '#71717a22', label: 'CANCELLED' },
+// Theme tokens (CSS variables), so each status reads in dark AND light.
+// Amber = the drone is moving or about to; colour always comes with a word.
+const tone = (fg: string, label: string) => ({
+    fg, bg: `color-mix(in srgb, ${fg} 13%, transparent)`,
+    line: `color-mix(in srgb, ${fg} 45%, transparent)`, label,
+})
+const T_MUTED = 'hsl(var(--app-text-muted))'
+const STATUS_STYLE: Record<string, { fg: string; bg: string; line: string; label: string }> = {
+    received:   tone(T_MUTED, 'Received'),
+    planned:    tone('var(--app-accent)', 'Planned'),
+    assigned:   tone('var(--app-accent)', 'Assigned'),
+    to_pickup:  tone('var(--app-warn)', 'To pickup'),
+    loading:    tone('var(--app-warn)', 'Loading'),
+    to_dropoff: tone('var(--app-warn)', 'To dropoff'),
+    delivered:  tone('var(--app-ok)', 'Delivered'),
+    returned:   tone('var(--app-warn)', 'Returned'),
+    failed:     tone('var(--app-danger)', 'Failed'),
+    cancelled:  tone('hsl(var(--app-text-subtle))', 'Cancelled'),
 }
 
 type PadT = {
@@ -156,8 +163,8 @@ function StatusChip({ status }: { status: string }) {
     const s = STATUS_STYLE[status] ?? STATUS_STYLE.received
     return (
         <span
-            className="font-mono text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap"
-            style={{ color: s.fg, background: s.bg, border: `1px solid ${s.fg}55` }}
+            className="inline-flex items-center h-6 px-2 rounded-full text-xs font-bold whitespace-nowrap"
+            style={{ color: s.fg, background: s.bg, border: `1px solid ${s.line}` }}
         >
             {s.label}
         </span>
@@ -166,56 +173,44 @@ function StatusChip({ status }: { status: string }) {
 
 function SectionCard({ children }: { children: React.ReactNode }) {
     return (
-        <div
-            className="rounded-xl border p-4"
-            style={{
-                background: 'hsl(var(--app-surface))',
-                borderColor: 'hsl(var(--app-border))',
-            }}
-        >
+        <div className="rounded-[10px] border border-app-border bg-app-surface p-4 shadow-[var(--app-shadow)]">
             {children}
         </div>
     )
 }
 
-const inputCls = 'w-full rounded-md border px-2.5 py-1.5 text-sm bg-transparent ' +
-    'focus:outline-none focus:ring-1 focus:ring-cyan-500'
-const inputStyle = {
-    borderColor: 'hsl(var(--app-border))',
-    color: 'hsl(var(--app-text))',
-    background: 'hsl(var(--app-bg))',
-}
-const btnPrimary = 'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs ' +
-    'font-mono bg-cyan-600 hover:bg-cyan-500 text-white transition-colors ' +
-    'disabled:opacity-40 disabled:cursor-not-allowed'
-const btnGhost = 'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs ' +
-    'font-mono border transition-colors hover:bg-zinc-500/10'
+const inputCls = `${INPUT} w-full font-normal normal-case tracking-normal`
+const btnPrimary = BTN_PRIMARY
+const btnGhost = BTN
 
 export default function DeliveriesPage() {
     const [tab, setTab] = useState<'orders' | 'regions' | 'profiles' | 'pads' | 'keys'>('orders')
 
     return (
         <div className="h-full flex flex-col gap-3 overflow-hidden">
-            <div className="flex items-center gap-2 shrink-0">
-                <Package size={18} className="text-cyan-500" />
-                <h1 className="text-base font-semibold tracking-wide">Deliveries</h1>
-                <div className="ml-4 flex gap-1">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 shrink-0">
+                <div className="flex items-center gap-2">
+                    <Package size={20} className="text-app-accent" aria-hidden />
+                    <h1 className="text-[22px] leading-7 font-bold">Deliveries</h1>
+                </div>
+                <div className="flex gap-1 overflow-x-auto max-w-full" role="tablist">
                     {([
-                        ['orders', 'ORDERS', Package],
-                        ['regions', 'REGIONS', MapIcon],
-                        ['profiles', 'PROFILES', SlidersHorizontal],
-                        ['pads', 'PADS', MapPin],
-                        ['keys', 'CLIENT KEYS', KeyRound],
+                        ['orders', 'Orders', Package],
+                        ['regions', 'Regions', MapIcon],
+                        ['profiles', 'Profiles', SlidersHorizontal],
+                        ['pads', 'Pads', MapPin],
+                        ['keys', 'Client keys', KeyRound],
                     ] as const).map(([id, label, Icon]) => (
                         <button
                             key={id}
                             onClick={() => setTab(id)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-mono transition-colors"
-                            style={tab === id
-                                ? { background: '#06b6d418', color: '#06b6d4', border: '1px solid #06b6d455' }
-                                : { color: 'hsl(var(--app-text-muted))', border: '1px solid transparent' }}
+                            role="tab" aria-selected={tab === id}
+                            className={'flex items-center gap-1.5 h-8 px-3 rounded-[6px] text-sm font-semibold whitespace-nowrap border transition-colors duration-[120ms] ' + FOCUS + ' ' +
+                                (tab === id
+                                    ? 'bg-app-accent-soft text-app-accent border-app-accent/40'
+                                    : 'text-app-text-muted border-transparent hover:text-app-text hover:bg-app-surface-2')}
                         >
-                            <Icon size={13} />{label}
+                            <Icon size={14} aria-hidden />{label}
                         </button>
                     ))}
                 </div>
@@ -627,21 +622,22 @@ function OrdersTab() {
     return (
         <div className="flex flex-col xl:flex-row gap-3 xl:h-full">
             <div className="xl:flex-1 min-w-0 flex flex-col gap-3 xl:overflow-y-auto xl:pr-1">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
                 <button className={btnPrimary} onClick={() => setShowNew(v => !v)}>
-                    <Plus size={13} /> NEW ORDER
+                    <Plus size={14} aria-hidden /> New order
                 </button>
-                <button className={btnGhost} style={{ borderColor: 'hsl(var(--app-border))' }}
+                <button className={btnGhost}
                     onClick={refresh}>
-                    <RefreshCw size={13} /> REFRESH
+                    <RefreshCw size={14} aria-hidden /> Refresh
                 </button>
                 <button className={btnGhost}
                     style={showArchived
-                        ? { borderColor: '#06b6d455', color: '#06b6d4' }
-                        : { borderColor: 'hsl(var(--app-border))' }}
+                        ? { borderColor: 'color-mix(in srgb, var(--app-accent) 45%, transparent)', color: 'var(--app-accent)' }
+                        : undefined}
+                    aria-pressed={showArchived}
                     title="Include shelved orders in the list"
                     onClick={() => setShowArchived(v => !v)}>
-                    ARCHIVED
+                    Archived
                 </button>
                 <span className="ml-auto flex items-center gap-1.5 flex-wrap">
                     {Object.entries(
@@ -650,23 +646,23 @@ function OrdersTab() {
                         }, {})
                     ).sort((a, b) => STATUS_ORDER.indexOf(a[0]) - STATUS_ORDER.indexOf(b[0]))
                         .map(([s, n]) => (
-                            <span key={s} className="px-1.5 py-0.5 rounded text-[10px] font-mono"
+                            <span key={s} className="inline-flex items-center h-6 px-2 rounded-full text-xs font-bold tabular-nums"
                                 style={{ color: STATUS_STYLE[s]?.fg, background: STATUS_STYLE[s]?.bg }}>
                                 {n} {STATUS_STYLE[s]?.label ?? s}
                             </span>
                         ))}
-                    <span className="text-[11px] font-mono"
-                        style={{ color: 'hsl(var(--app-text-muted))' }}>
+                    <span className="text-[13px] text-app-text-muted tabular-nums">
                         {onlineIds.size} drone{onlineIds.size === 1 ? '' : 's'} online
                     </span>
                 </span>
             </div>
 
             {error && (
-                <div className="flex items-center gap-2 text-xs rounded-md px-3 py-2"
-                    style={{ color: '#f87171', background: '#f8717115', border: '1px solid #f8717155' }}>
+                <div role="alert" className="flex items-center gap-2 text-[13px] rounded-[10px] px-3 py-1"
+                    style={{ color: 'var(--app-danger)', background: 'color-mix(in srgb, var(--app-danger) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--app-danger) 33%, transparent)' }}>
                     <AlertTriangle size={14} /> {error}
-                    <button className="ml-auto" onClick={() => setError('')}><X size={13} /></button>
+                    <button className={'ml-auto w-8 h-8 inline-flex items-center justify-center rounded-[6px] hover:bg-app-danger-soft ' + FOCUS}
+                        aria-label="Dismiss error" title="Dismiss" onClick={() => setError('')}><X size={14} /></button>
                 </div>
             )}
 
@@ -678,8 +674,7 @@ function OrdersTab() {
 
             <SectionCard>
                 {tasks.length === 0 ? (
-                    <p className="text-sm py-6 text-center"
-                        style={{ color: 'hsl(var(--app-text-muted))' }}>
+                    <p className="text-sm py-6 text-center text-app-text-muted">
                         {loaded
                             ? 'No orders yet. Create one here, or through the client API (POST /v1/tasks).'
                             : 'Loading orders...'}
@@ -688,13 +683,12 @@ function OrdersTab() {
                     <div className="overflow-x-auto">
                         <table className="w-full text-sm">
                             <thead>
-                                <tr className="text-left text-[10px] font-mono"
-                                    style={{ color: 'hsl(var(--app-text-muted))' }}>
+                                <tr className={'text-left ' + LABEL}>
                                     <th className="pb-2 pr-2 w-6"></th>
-                                    <th className="pb-2 pr-3">ORDER</th>
-                                    <th className="pb-2 pr-3">ROUTE</th>
-                                    <th className="pb-2 pr-3">STATUS</th>
-                                    <th className="pb-2">DRONE</th>
+                                    <th className="pb-2 pr-3">Order</th>
+                                    <th className="pb-2 pr-3">Route</th>
+                                    <th className="pb-2 pr-3">Status</th>
+                                    <th className="pb-2">Drone</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -739,15 +733,14 @@ function OrdersTab() {
                             return (
                                 <button key={t.id}
                                     onClick={() => setOpenId(openId === t.id ? null : t.id)}
-                                    className="shrink-0 flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors hover:bg-zinc-500/5"
+                                    className={'shrink-0 flex items-center gap-2 rounded-[10px] border px-3 py-2 text-left transition-colors duration-[120ms] hover:bg-app-surface-2 ' + FOCUS}
                                     style={{
                                         background: 'hsl(var(--app-surface))',
-                                        borderColor: openId === t.id ? '#06b6d4' : 'hsl(var(--app-border))',
+                                        borderColor: openId === t.id ? 'var(--app-accent)' : 'hsl(var(--app-border))',
                                     }}>
-                                    <span className="font-mono text-xs text-cyan-500">{t.order_no}</span>
+                                    <span className="text-sm font-bold text-app-accent tabular-nums">{t.order_no}</span>
                                     <StatusChip status={t.status} />
-                                    <span className="font-mono text-[10px]"
-                                        style={{ color: 'hsl(var(--app-text-muted))' }}>
+                                    <span className="text-[13px] text-app-text-muted tabular-nums">
                                         {d ? `${d.name} ${Math.round(d.battery)}%${d.in_air ? ' ✈' : ''}`
                                             : 'drone offline'}
                                     </span>
@@ -762,23 +755,22 @@ function OrdersTab() {
             {panelOpen ? (
                 <div className="xl:w-[250px] shrink-0 flex flex-col gap-2 xl:overflow-y-auto">
                     <div className="flex items-center gap-2">
-                        <Plane size={13} className="text-cyan-500" />
-                        <span className="text-[11px] font-mono">DRONES</span>
-                        <button className="ml-auto opacity-60 hover:opacity-100"
-                            title="Hide the drones panel"
+                        <Plane size={16} className="text-app-accent" aria-hidden />
+                        <h2 className="text-[18px] leading-6 font-bold">Drones</h2>
+                        <button className={'ml-auto w-8 h-8 inline-flex items-center justify-center rounded-[6px] text-app-text-muted hover:text-app-text hover:bg-app-surface-2 ' + FOCUS}
+                            title="Hide the drones panel" aria-label="Hide the drones panel"
                             onClick={() => setPanelOpen(false)}>
-                            <ChevronsRight size={14} />
+                            <ChevronsRight size={16} />
                         </button>
                     </div>
                     <DronesPanel />
                 </div>
             ) : (
                 <button
-                    className="shrink-0 self-start rounded-md border p-1.5"
-                    title="Show the drones panel"
-                    style={{ borderColor: 'hsl(var(--app-border))', color: 'hsl(var(--app-text-muted))' }}
+                    className={'shrink-0 self-start w-8 h-8 inline-flex items-center justify-center rounded-[6px] border border-app-border text-app-text-muted hover:text-app-text hover:bg-app-surface-2 ' + FOCUS}
+                    title="Show the drones panel" aria-label="Show the drones panel"
                     onClick={() => setPanelOpen(true)}>
-                    <ChevronsLeft size={14} />
+                    <ChevronsLeft size={16} />
                 </button>
             )}
         </div>
@@ -826,61 +818,59 @@ function OrderRow({
     return (
         <>
             <tr
-                className="cursor-pointer border-t transition-colors hover:bg-zinc-500/5"
-                style={{ borderColor: 'hsl(var(--app-border))' }}
+                className={'cursor-pointer border-t border-app-border transition-colors duration-[120ms] hover:bg-app-surface-2 ' + FOCUS}
+                tabIndex={0} aria-expanded={open}
                 onClick={onToggle}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle() } }}
             >
-                <td className="py-2 pr-2" style={{ color: 'hsl(var(--app-text-muted))' }}>
-                    {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                <td className="py-2.5 pr-2 text-app-text-muted">
+                    {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                 </td>
-                <td className="py-2 pr-3 font-mono text-cyan-500 whitespace-nowrap">{task.order_no}</td>
-                <td className="py-2 pr-3 text-xs">
+                <td className="py-2.5 pr-3 font-bold text-app-accent tabular-nums whitespace-nowrap">{task.order_no}</td>
+                <td className="py-2.5 pr-3 text-sm">
                     {task.pickup.name}
-                    <span style={{ color: 'hsl(var(--app-text-muted))' }}> to </span>
+                    <span className="text-app-text-muted"> to </span>
                     {task.dropoff.name}
                 </td>
-                <td className="py-2 pr-3"><StatusChip status={task.status} /></td>
-                <td className="py-2 text-xs font-mono whitespace-nowrap">{droneName(task.drone_id) ?? '--'}</td>
+                <td className="py-2.5 pr-3"><StatusChip status={task.status} /></td>
+                <td className="py-2.5 text-[13px] whitespace-nowrap">{droneName(task.drone_id) ?? '--'}</td>
             </tr>
             {open && (
-                <tr style={{ borderColor: 'hsl(var(--app-border))' }}>
+                <tr>
                     <td colSpan={5} className="pb-4">
-                        <div className="mx-2 mt-1 rounded-lg border p-4 grid gap-4 md:grid-cols-[1fr_1fr]"
-                            style={{ borderColor: 'hsl(var(--app-border))', background: 'hsl(var(--app-bg))' }}>
-                            <p className="text-xs md:col-span-2" style={{ color: 'hsl(var(--app-text-muted))' }}>
+                        <div className="mx-2 mt-1 rounded-[10px] border border-app-border bg-app-surface-2 p-4 grid gap-4 md:grid-cols-[1fr_1fr]">
+                            <p className="text-[13px] md:col-span-2 text-app-text-muted">
                                 {task.client_name}
-                                {task.payload.description && <> - {task.payload.description}</>}
-                                {task.payload.kg > 0 && <span className="font-mono"> {task.payload.kg} kg</span>}
-                                <span className="font-mono"> - {fmtTime(task.created_at)}</span>
+                                {task.payload.description && <> · {task.payload.description}</>}
+                                {task.payload.kg > 0 && <span className="tabular-nums"> · {task.payload.kg} kg</span>}
+                                <span className="tabular-nums"> · {fmtTime(task.created_at)}</span>
                             </p>
                             {/* Timeline */}
                             <div>
-                                <p className="text-[10px] font-mono mb-2"
-                                    style={{ color: 'hsl(var(--app-text-muted))' }}>TIMELINE</p>
+                                <p className={LABEL + ' mb-2'}>Timeline</p>
                                 {(detail?.events ?? []).length === 0 ? (
-                                    <p className="text-xs" style={{ color: 'hsl(var(--app-text-muted))' }}>loading...</p>
+                                    <p className="text-[13px] text-app-text-muted">Loading...</p>
                                 ) : (
                                     <ol className="space-y-1.5">
                                         {(detail?.events ?? []).map((e, i) => (
-                                            <li key={i} className="flex items-start gap-2 text-xs">
+                                            <li key={i} className="flex items-start gap-2 text-[13px]">
                                                 <span className="mt-1 w-1.5 h-1.5 rounded-full shrink-0"
-                                                    style={{ background: STATUS_STYLE[e.status]?.fg ?? '#a1a1aa' }} />
-                                                <span className="font-mono whitespace-nowrap"
-                                                    style={{ color: 'hsl(var(--app-text-muted))' }}>
+                                                    style={{ background: STATUS_STYLE[e.status]?.fg ?? 'hsl(var(--app-text-muted))' }} />
+                                                <span className="tabular-nums whitespace-nowrap text-app-text-muted">
                                                     {fmtTime(e.t)}
                                                 </span>
-                                                <span className="font-mono"
+                                                <span className="font-bold whitespace-nowrap"
                                                     style={{ color: STATUS_STYLE[e.status]?.fg }}>
                                                     {STATUS_STYLE[e.status]?.label ?? e.status}
                                                 </span>
-                                                {e.note && <span style={{ color: 'hsl(var(--app-text-muted))' }}>{e.note}</span>}
+                                                {e.note && <span className="text-app-text-muted">{e.note}</span>}
                                             </li>
                                         ))}
                                     </ol>
                                 )}
                                 {task.fail_reason && (
-                                    <p className="mt-2 text-xs flex items-center gap-1.5" style={{ color: '#f87171' }}>
-                                        <AlertTriangle size={12} /> {task.fail_reason}
+                                    <p className="mt-2 text-[13px] flex items-center gap-1.5 text-app-danger" role="alert">
+                                        <AlertTriangle size={14} aria-hidden /> {task.fail_reason}
                                     </p>
                                 )}
                             </div>
@@ -888,20 +878,19 @@ function OrderRow({
                             {/* Route + actions */}
                             <div className="flex flex-col gap-3">
                                 <div>
-                                    <p className="text-[10px] font-mono mb-2"
-                                        style={{ color: 'hsl(var(--app-text-muted))' }}>ROUTE</p>
+                                    <p className={LABEL + ' mb-2'}>Route</p>
                                     {detail?.mission ? (
-                                        <div className="text-xs space-y-1">
-                                            <p><span className="font-mono">{detail.mission.distance_m.toFixed(0)} m</span>
-                                                <span style={{ color: 'hsl(var(--app-text-muted))' }}> over </span>
-                                                <span className="font-mono">{detail.mission.waypoint_count} waypoints</span>
-                                                <span style={{ color: 'hsl(var(--app-text-muted))' }}>, about </span>
-                                                <span className="font-mono">{fmtDur(detail.mission.est_duration_s)}</span>
-                                                <span style={{ color: 'hsl(var(--app-text-muted))' }}> with profile </span>
+                                        <div className="text-[13px] space-y-1">
+                                            <p><span className="font-bold tabular-nums">{detail.mission.distance_m.toFixed(0)} m</span>
+                                                <span className="text-app-text-muted"> over </span>
+                                                <span className="font-bold tabular-nums">{detail.mission.waypoint_count} waypoints</span>
+                                                <span className="text-app-text-muted">, about </span>
+                                                <span className="font-bold tabular-nums">{fmtDur(detail.mission.est_duration_s)}</span>
+                                                <span className="text-app-text-muted"> with profile </span>
                                                 {task.profile_name || 'Direct'}</p>
                                             {detail.mission.coverage?.categories_m &&
                                                 Object.keys(detail.mission.coverage.categories_m).length > 0 && (
-                                                <p style={{ color: 'hsl(var(--app-text-muted))' }}>
+                                                <p className="text-app-text-muted">
                                                     Ground cover: {Object.entries(detail.mission.coverage.categories_m)
                                                         .sort((a, b) => b[1] - a[1]).slice(0, 3)
                                                         .map(([c, m]) => `${c} ${(100 * m / (detail.mission!.coverage.total_m || 1)).toFixed(0)}%`)
@@ -910,30 +899,29 @@ function OrderRow({
                                             )}
                                         </div>
                                     ) : (
-                                        <p className="text-xs" style={{ color: 'hsl(var(--app-text-muted))' }}>
+                                        <p className="text-[13px] text-app-text-muted">
                                             No route planned yet.
                                         </p>
                                     )}
                                 </div>
 
                                 <div>
-                                    <p className="text-[10px] font-mono mb-2"
-                                        style={{ color: 'hsl(var(--app-text-muted))' }}>ACTIONS</p>
+                                    <p className={LABEL + ' mb-2'}>Actions</p>
                                     <div className="flex flex-wrap items-center gap-2">
                                         {task.status === 'planned' && (
                                             onlineDrones.length === 0 ? (
-                                                <span className="text-xs" style={{ color: 'hsl(var(--app-text-muted))' }}>
-                                                    No drones online - connect one on the Fly tab to assign.
+                                                <span className="text-[13px] text-app-text-muted">
+                                                    No drones online. Connect one on the Fly tab to assign.
                                                 </span>
                                             ) : (
-                                                <span className="flex items-center gap-1.5">
+                                                <span className="flex flex-wrap items-center gap-1.5">
                                                     <select
-                                                        className="rounded-md border px-2 py-1 text-xs bg-transparent"
-                                                        style={inputStyle}
+                                                        className={INPUT}
+                                                        aria-label="Drone to assign"
                                                         value={assignTo}
                                                         onChange={e => setAssignTo(e.target.value)}
                                                     >
-                                                        <option value="">assign online drone...</option>
+                                                        <option value="">Assign an online drone...</option>
                                                         {onlineDrones
                                                             .filter(d => !busyInfo.has(d.id))
                                                             .map(d => (
@@ -953,41 +941,40 @@ function OrderRow({
                                                             })}
                                                     </select>
                                                     <button className={btnPrimary} disabled={busy || !assignTo}
+                                                        title={!assignTo ? 'Pick a drone first' : undefined}
                                                         onClick={() => onAct(task.id, { status: 'assigned', drone_id: assignTo })}>
-                                                        ASSIGN
+                                                        Assign
                                                     </button>
                                                 </span>
                                             )
                                         )}
                                         {startLeg && (
                                             thisStarting?.phase === 'need_ack' ? (
-                                                <button className={btnPrimary} disabled={busy}
-                                                    style={{ background: '#f59e0b', borderColor: '#f59e0b' }}
+                                                <button className={BTN_WARN} disabled={busy}
                                                     title={thisStarting.msg}
                                                     onClick={() => onStart(task, startLeg, true)}>
-                                                    <AlertTriangle size={12} /> CONFIRM ORANGE &amp; START
+                                                    <AlertTriangle size={14} aria-hidden /> Confirm orange zone and start
                                                 </button>
                                             ) : thisStarting ? (
-                                                <span className="flex items-center gap-1.5 text-xs font-mono"
-                                                    style={{ color: '#22d3ee' }}>
-                                                    <Loader size={12} className="animate-spin" />
-                                                    {thisStarting.phase === 'uploading' ? 'UPLOADING MISSION' : 'ARMING + STARTING'}
+                                                <span className="flex items-center gap-1.5 text-[13px] font-semibold text-app-accent" role="status">
+                                                    <Loader size={14} className="animate-spin motion-reduce:animate-none" aria-hidden />
+                                                    {thisStarting.phase === 'uploading' ? 'Uploading mission...' : 'Arming and starting...'}
                                                 </span>
                                             ) : (
-                                                <button className={btnPrimary}
+                                                <button className={BTN_WARN}
                                                     disabled={busy || (!isFleet && !telemetryConnected)}
                                                     title={isFleet || telemetryConnected
                                                         ? 'Upload this leg, arm, and start the flight'
                                                         : 'Connect the drone on the Fly tab first'}
                                                     onClick={() => onStart(task, startLeg, false)}>
-                                                    <Play size={12} />
-                                                    {startLeg === 'pickup' ? 'START PICKUP FLIGHT' : 'START DELIVERY FLIGHT'}
+                                                    <Play size={14} aria-hidden />
+                                                    {startLeg === 'pickup' ? 'Start pickup flight' : 'Start delivery flight'}
                                                 </button>
                                             )
                                         )}
                                         {(task.status === 'assigned' || task.status === 'loading')
                                             && !isFleet && !telemetryConnected && !thisStarting && (
-                                            <span className="text-xs" style={{ color: 'hsl(var(--app-text-muted))' }}>
+                                            <span className="text-[13px] text-app-text-muted">
                                                 Telemetry not connected in this session.
                                             </span>
                                         )}
@@ -1000,37 +987,34 @@ function OrderRow({
                                             .filter(s => !(startLeg === 'delivery' && s === 'to_dropoff'))
                                             .map(s => (
                                             <button key={s} className={btnGhost} disabled={busy}
-                                                title="Manually mark the order - does NOT fly anything"
+                                                title="Manually mark the order. This does not fly anything."
                                                 style={{
-                                                    borderColor: `${STATUS_STYLE[s].fg}66`,
+                                                    borderColor: STATUS_STYLE[s].line,
                                                     color: STATUS_STYLE[s].fg,
                                                 }}
                                                 onClick={() => onAct(task.id, { status: s })}>
-                                                MARK {STATUS_STYLE[s].label}
+                                                Mark {STATUS_STYLE[s].label.toLowerCase()}
                                             </button>
                                         ))}
                                         {canReplan && (
                                             <button className={btnGhost} disabled={busy}
-                                                style={{ borderColor: 'hsl(var(--app-border))' }}
                                                 onClick={() => onReplan(task.id)}>
-                                                <RotateCw size={12} /> REPLAN
+                                                <RotateCw size={14} aria-hidden /> Replan
                                             </button>
                                         )}
                                         {nexts.length === 0 && (
                                             <>
                                                 <button className={btnGhost} disabled={busy}
-                                                    style={{ borderColor: 'hsl(var(--app-border))' }}
                                                     title={task.archived
                                                         ? 'Bring the order back onto the board'
                                                         : 'Shelve the order - it leaves the board but stays in the database'}
                                                     onClick={() => onArchive(task.id, !task.archived)}>
-                                                    {task.archived ? 'UNARCHIVE' : 'ARCHIVE'}
+                                                    {task.archived ? 'Unarchive' : 'Archive'}
                                                 </button>
-                                                <button className={btnGhost} disabled={busy}
-                                                    style={{ borderColor: '#f8717166', color: '#f87171' }}
+                                                <button className={BTN_DANGER} disabled={busy}
                                                     title="Permanently delete the order and its timeline (flight history stays)"
                                                     onClick={() => onDelete(task.id)}>
-                                                    <X size={12} /> DELETE
+                                                    <X size={14} aria-hidden /> Delete
                                                 </button>
                                             </>
                                         )}
@@ -1077,35 +1061,37 @@ function NewOrderForm({ pads, profiles, onDone, onError }: {
 
     return (
         <SectionCard>
-            <p className="text-[10px] font-mono mb-3" style={{ color: 'hsl(var(--app-text-muted))' }}>
-                NEW ORDER (operator-created; client apps use POST /v1/tasks)
+            <h2 className="text-[18px] leading-6 font-bold mb-1">New order</h2>
+            <p className="text-[13px] text-app-text-muted mb-3">
+                Client apps create orders with <code className="font-code">POST /v1/tasks</code>.
             </p>
             <div className="grid gap-2 md:grid-cols-5">
-                <select className={inputCls} style={inputStyle} value={pickup}
+                <select className={inputCls} value={pickup} aria-label="Pickup pad"
                     onChange={e => setPickup(e.target.value)}>
-                    <option value="">pickup pad...</option>
+                    <option value="">Pickup pad...</option>
                     {pads.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
-                <select className={inputCls} style={inputStyle} value={dropoff}
+                <select className={inputCls} value={dropoff} aria-label="Dropoff pad"
                     onChange={e => setDropoff(e.target.value)}>
-                    <option value="">dropoff pad...</option>
+                    <option value="">Dropoff pad...</option>
                     {pads.filter(p => p.id !== pickup).map(p =>
                         <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
-                <input className={inputCls} style={inputStyle} placeholder="payload description"
+                <input className={inputCls} placeholder="Payload description" aria-label="Payload description"
                     value={desc} onChange={e => setDesc(e.target.value)} />
-                <input className={inputCls} style={inputStyle} placeholder="kg" type="number"
+                <input className={inputCls} placeholder="kg" aria-label="Payload weight in kg" type="number"
                     min="0" step="0.1" value={kg} onChange={e => setKg(e.target.value)} />
-                <select className={inputCls} style={inputStyle} value={profile}
+                <select className={inputCls} value={profile} aria-label="Route profile"
                     onChange={e => setProfile(e.target.value)}>
-                    <option value="">route profile: auto</option>
+                    <option value="">Route profile: auto</option>
                     {profiles.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
                 </select>
             </div>
             <div className="mt-3">
                 <button className={btnPrimary} disabled={busy || !pickup || !dropoff}
+                    title={!pickup || !dropoff ? 'Pick both pads first' : undefined}
                     onClick={submit}>
-                    <Plus size={13} /> CREATE ORDER
+                    <Plus size={14} aria-hidden /> Create order
                 </button>
             </div>
         </SectionCard>
@@ -1281,10 +1267,11 @@ function DronesPanel() {
     return (
         <div className="flex flex-col gap-3">
             {error && (
-                <div className="flex items-center gap-2 text-xs rounded-md px-3 py-2"
-                    style={{ color: '#f87171', background: '#f8717115', border: '1px solid #f8717155' }}>
+                <div role="alert" className="flex items-center gap-2 text-[13px] rounded-[10px] px-3 py-1"
+                    style={{ color: 'var(--app-danger)', background: 'color-mix(in srgb, var(--app-danger) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--app-danger) 33%, transparent)' }}>
                     <AlertTriangle size={14} /> {error}
-                    <button className="ml-auto" onClick={() => setError('')}><X size={13} /></button>
+                    <button className={'ml-auto w-8 h-8 inline-flex items-center justify-center rounded-[6px] hover:bg-app-danger-soft ' + FOCUS}
+                        aria-label="Dismiss error" title="Dismiss" onClick={() => setError('')}><X size={14} /></button>
                 </div>
             )}
 
@@ -1296,65 +1283,60 @@ function DronesPanel() {
                     return (
                         <SectionCard key={d.id}>
                             <div className="flex items-center gap-2">
-                                <span className="w-2 h-2 rounded-full"
-                                    style={{ background: lv.in_air ? '#fbbf24' : '#4ade80' }} />
-                                <span className="font-mono text-sm">{d.name || lv.name}</span>
+                                <span className={'w-2 h-2 rounded-full shrink-0 ' + (lv.in_air ? 'bg-app-warn' : 'bg-app-ok')} aria-hidden />
+                                <span className="text-base font-bold truncate">{d.name || lv.name}</span>
                                 {d.is_simulated && (
-                                    <span className="font-mono text-[9px] px-1.5 rounded"
-                                        style={{ color: '#a78bfa', background: '#a78bfa22' }}>SIM</span>
+                                    <span className="inline-flex items-center h-5 px-1.5 rounded-full text-xs font-bold text-app-accent bg-app-accent-soft"
+                                        title="Simulated drone">Sim</span>
                                 )}
-                                <span className="ml-auto font-mono text-[10px]"
-                                    style={{ color: lv.in_air ? '#fbbf24' : '#4ade80' }}>
-                                    {lv.in_air ? 'IN AIR' : 'ON GROUND'}
+                                <span className={'ml-auto text-xs font-bold whitespace-nowrap ' + (lv.in_air ? 'text-app-warn' : 'text-app-ok')}>
+                                    {lv.in_air ? 'In air' : 'On ground'}
                                 </span>
                             </div>
-                            <div className="mt-2 grid grid-cols-3 gap-2 text-[11px] font-mono">
+                            <dl className="mt-3 grid grid-cols-3 gap-2">
                                 <div>
-                                    <p style={{ color: 'hsl(var(--app-text-muted))' }}>BATTERY</p>
-                                    <p style={{ color: lv.battery < 25 ? '#f87171' : 'hsl(var(--app-text))' }}>
-                                        {Math.round(lv.battery)}%
-                                    </p>
+                                    <dt className={LABEL}>Battery</dt>
+                                    <dd className={'text-base font-bold tabular-nums ' + (lv.battery < 25 ? 'text-app-danger' : 'text-app-text')}>
+                                        {Math.round(lv.battery)}<span className="text-xs font-semibold text-app-text-muted">%</span>
+                                    </dd>
+                                </div>
+                                <div className="min-w-0">
+                                    <dt className={LABEL}>Mode</dt>
+                                    <dd className="text-sm font-semibold truncate" title={lv.mode}>{lv.mode}</dd>
                                 </div>
                                 <div>
-                                    <p style={{ color: 'hsl(var(--app-text-muted))' }}>MODE</p>
-                                    <p>{lv.mode}</p>
+                                    <dt className={LABEL}>Delivered</dt>
+                                    <dd className="text-base font-bold tabular-nums">{doneCount(d.id)}</dd>
                                 </div>
-                                <div>
-                                    <p style={{ color: 'hsl(var(--app-text-muted))' }}>DELIVERED</p>
-                                    <p>{doneCount(d.id)}</p>
-                                </div>
-                            </div>
-                            <div className="mt-2 text-xs">
+                            </dl>
+                            <div className="mt-2 text-[13px]">
                                 {task ? (
-                                    <p>
-                                        <span className="font-mono text-cyan-500">{task.order_no}</span>
-                                        <span style={{ color: 'hsl(var(--app-text-muted))' }}> - </span>
+                                    <p className="flex flex-wrap items-center gap-2">
+                                        <span className="font-bold text-app-accent tabular-nums">{task.order_no}</span>
                                         <StatusChip status={task.status} />
                                     </p>
                                 ) : (
-                                    <p style={{ color: 'hsl(var(--app-text-muted))' }}>
-                                        Idle - next in line for dispatch.
+                                    <p className="text-app-text-muted">
+                                        Idle, next in line for dispatch.
                                     </p>
                                 )}
                             </div>
                             {!task && (
                                 <div className="mt-3">
                                     {returning ? (
-                                        <span className="flex items-center gap-1.5 text-xs font-mono"
-                                            style={{ color: '#22d3ee' }}>
-                                            <Loader size={12} className="animate-spin" />
-                                            {returning.phase === 'planning' ? 'PLANNING RETURN'
-                                                : returning.phase === 'uploading' ? 'UPLOADING' : 'STARTING'}
+                                        <span className="flex items-center gap-1.5 text-[13px] font-semibold text-app-accent" role="status">
+                                            <Loader size={14} className="animate-spin motion-reduce:animate-none" aria-hidden />
+                                            {returning.phase === 'planning' ? 'Planning return...'
+                                                : returning.phase === 'uploading' ? 'Uploading...' : 'Starting...'}
                                         </span>
                                     ) : (
-                                        <button className={btnGhost}
-                                            style={{ borderColor: '#fbbf2466', color: '#fbbf24' }}
+                                        <button className={BTN_WARN + ' w-full'}
                                             disabled={!fleetIds.has(d.id) && telemetryStatus !== 'connected'}
                                             title={fleetIds.has(d.id) || telemetryStatus === 'connected'
                                                 ? 'Plan and fly this drone home to the nearest station'
                                                 : 'Connect the drone on the Fly tab first'}
                                             onClick={() => returnToStation(d.id)}>
-                                            <Home size={12} /> RETURN TO STATION
+                                            <Home size={14} aria-hidden /> Return to station
                                         </button>
                                     )}
                                 </div>
@@ -1366,7 +1348,7 @@ function DronesPanel() {
 
             {online.length === 0 && (
                 <SectionCard>
-                    <p className="text-xs py-2 text-center" style={{ color: 'hsl(var(--app-text-muted))' }}>
+                    <p className="text-[13px] py-2 text-center text-app-text-muted">
                         No drones online.
                     </p>
                 </SectionCard>
@@ -1374,26 +1356,25 @@ function DronesPanel() {
 
             <div className="flex items-center gap-1.5">
                 <button className={`${btnGhost} flex-1`}
-                    style={{ borderColor: 'hsl(var(--app-border))' }}
                     disabled={connectingFleet}
-                    title="Connect station drones to the SERVER. The watchdog also re-adopts them automatically every 25 s - this button just does it now."
+                    title="Connect station drones to the server. The watchdog also re-adopts them every 25 s; this does it now."
                     onClick={connectFleet}>
                     {connectingFleet
-                        ? <><Loader size={12} className="animate-spin" /> CONNECTING</>
-                        : <><Plane size={12} /> CONNECT FLEET</>}
+                        ? <><Loader size={14} className="animate-spin motion-reduce:animate-none" aria-hidden /> Connecting...</>
+                        : <><Plane size={14} aria-hidden /> Connect fleet</>}
                 </button>
-                <select className="rounded-md border px-1.5 py-1.5 text-xs bg-transparent font-mono"
-                    style={inputStyle} value={fleetCount}
+                <select className={INPUT} aria-label="How many fleet drones to connect"
+                    value={fleetCount}
                     onChange={e => setFleetCount(parseInt(e.target.value))}>
                     {[1, 2, 3, 4, 5, 6, 7, 8].map(n => <option key={n} value={n}>{n}</option>)}
                 </select>
             </div>
             <div className="flex items-center gap-1.5">
-                <input className="flex-1 rounded-md border px-2 py-1.5 text-xs bg-transparent font-mono"
-                    style={inputStyle} placeholder="udp port (e.g. 14546)"
+                <input className={INPUT + ' flex-1 min-w-0'}
+                    aria-label="MAVLink UDP port to adopt"
+                    placeholder="UDP port, e.g. 14546"
                     value={adoptPort} onChange={e => setAdoptPort(e.target.value)} />
                 <button className={btnGhost}
-                    style={{ borderColor: 'hsl(var(--app-border))' }}
                     disabled={!adoptPort || connectingFleet}
                     title="Manually adopt one drone by its MAVLink UDP port - new SITL instance or a real air unit's telemetry ingress"
                     onClick={async () => {
@@ -1407,27 +1388,22 @@ function DronesPanel() {
                             else { setAdoptPort(''); await refresh() }
                         } catch { setError('Backend unreachable') }
                     }}>
-                    ADD
+                    Add
                 </button>
             </div>
-            <p className="text-[9px] font-mono -mt-1" style={{ color: 'hsl(var(--app-text-muted))' }}>
-                Links auto-heal: a restarted drone or server reconnects itself.
-                New drones on ports 14541-14548 are adopted automatically;
-                other ports via ADD. Video attaches with the air-unit ingress
-                (not applicable to SITL).
+            <p className="text-[13px] -mt-1 text-app-text-muted"
+                title="A restarted drone or server reconnects itself. Video attaches with the air-unit ingress (not for SITL).">
+                Links heal themselves. Ports 14541-14548 join automatically; others via Add.
             </p>
 
             {offline.length > 0 && (
                 <SectionCard>
-                    <p className="text-[10px] font-mono mb-2"
-                        style={{ color: 'hsl(var(--app-text-muted))' }}>
-                        OFFLINE ({offline.length})
+                    <p className={LABEL + ' mb-2'}>
+                        Offline ({offline.length})
                     </p>
                     <div className="flex flex-wrap gap-2">
                         {offline.map(d => (
-                            <span key={d.id} className="px-2 py-1 rounded-md border text-xs font-mono"
-                                style={{ borderColor: 'hsl(var(--app-border))',
-                                         color: 'hsl(var(--app-text-muted))' }}>
+                            <span key={d.id} className="px-2 py-1 rounded-[6px] border border-app-border text-[13px] text-app-text-muted">
                                 {d.name}{d.is_simulated ? ' (sim)' : ''}
                                 {doneCount(d.id) > 0 && ` - ${doneCount(d.id)} delivered`}
                             </span>
@@ -1501,71 +1477,65 @@ function ProfilesTab() {
     return (
         <div className="flex flex-col gap-3 max-w-3xl">
             {error && (
-                <div className="flex items-center gap-2 text-xs rounded-md px-3 py-2"
-                    style={{ color: '#f87171', background: '#f8717115', border: '1px solid #f8717155' }}>
+                <div role="alert" className="flex items-center gap-2 text-[13px] rounded-[10px] px-3 py-1"
+                    style={{ color: 'var(--app-danger)', background: 'color-mix(in srgb, var(--app-danger) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--app-danger) 33%, transparent)' }}>
                     <AlertTriangle size={14} /> {error}
-                    <button className="ml-auto" onClick={() => setError('')}><X size={13} /></button>
+                    <button className={'ml-auto w-8 h-8 inline-flex items-center justify-center rounded-[6px] hover:bg-app-danger-soft ' + FOCUS}
+                        aria-label="Dismiss error" title="Dismiss" onClick={() => setError('')}><X size={14} /></button>
                 </div>
             )}
-            <p className="text-xs" style={{ color: 'hsl(var(--app-text-muted))' }}>
-                Every route planned with a profile flies at its cruise altitude
-                and speed. Changes apply to NEW plans (replan an order to pick
-                them up). Zones (flight law) are managed on /admin - regions
-                (preference) on the REGIONS tab.
+            <p className="text-[13px] text-app-text-muted"
+                title="Zones (flight law) are managed in Admin; regions (preference) on the Regions tab.">
+                Routes fly at their profile&apos;s altitude and speed. Changes apply to new plans; replan an order to pick them up.
             </p>
             {profiles.map(p => {
                 const e = editFor(p)
                 return (
                     <SectionCard key={p.id}>
                         <div className="flex items-center gap-2">
-                            <span className="font-mono text-sm">{p.name}</span>
+                            <h3 className="text-base font-bold">{p.name}</h3>
                             {p.builtin && (
-                                <span className="font-mono text-[9px] px-1.5 rounded"
-                                    style={{ color: '#a78bfa', background: '#a78bfa22' }}>BUILTIN</span>
+                                <span className="inline-flex items-center h-5 px-1.5 rounded-full text-xs font-bold text-app-accent bg-app-accent-soft">Built-in</span>
                             )}
                             {saved === p.id && (
-                                <span className="text-[10px] font-mono text-emerald-500">saved</span>
+                                <span className="inline-flex items-center gap-1 text-xs font-bold text-app-ok" role="status"><Check size={14} aria-hidden /> Saved</span>
                             )}
                         </div>
                         {p.description && (
-                            <p className="mt-1 text-xs" style={{ color: 'hsl(var(--app-text-muted))' }}>
+                            <p className="mt-1 text-[13px] text-app-text-muted">
                                 {p.description}
                             </p>
                         )}
                         <div className="mt-3 grid gap-2 sm:grid-cols-4 items-end">
-                            <label className="text-[10px] font-mono"
-                                style={{ color: 'hsl(var(--app-text-muted))' }}>
-                                CRUISE ALT (m AGL)
-                                <input className={inputCls + ' mt-1'} style={inputStyle}
+                            <label className={LABEL + ' normal-case'}>
+                                Cruise alt (m AGL)
+                                <input className={inputCls + ' mt-1'}
                                     type="number" min={5} max={120} step={1} value={e.alt}
                                     onChange={ev => setEdits(prev => ({ ...prev, [p.id]: { ...e, alt: ev.target.value } }))} />
                             </label>
-                            <label className="text-[10px] font-mono"
-                                style={{ color: 'hsl(var(--app-text-muted))' }}>
-                                SPEED (m/s)
-                                <input className={inputCls + ' mt-1'} style={inputStyle}
+                            <label className={LABEL + ' normal-case'}>
+                                Speed (m/s)
+                                <input className={inputCls + ' mt-1'}
                                     type="number" min={2} max={20} step={0.5} value={e.speed}
                                     onChange={ev => setEdits(prev => ({ ...prev, [p.id]: { ...e, speed: ev.target.value } }))} />
                             </label>
-                            <label className="text-[10px] font-mono"
-                                style={{ color: 'hsl(var(--app-text-muted))' }}>
-                                ORANGE ZONES
-                                <select className={inputCls + ' mt-1'} style={inputStyle} value={e.orange}
+                            <label className={LABEL + ' normal-case'}>
+                                Orange zones
+                                <select className={inputCls + ' mt-1'} value={e.orange}
                                     onChange={ev => setEdits(prev => ({ ...prev, [p.id]: { ...e, orange: ev.target.value } }))}>
-                                    <option value="allow">allow</option>
-                                    <option value="penalize">penalize (detour if cheap)</option>
-                                    <option value="block">block (never enter)</option>
+                                    <option value="allow">Allow</option>
+                                    <option value="penalize">Penalize (detour if cheap)</option>
+                                    <option value="block">Block (never enter)</option>
                                 </select>
                             </label>
                             <button className={btnPrimary} disabled={busy === p.id}
                                 onClick={() => save(p)}>
-                                {busy === p.id ? 'SAVING...' : 'SAVE'}
+                                {busy === p.id ? 'Saving...' : 'Save'}
                             </button>
                         </div>
                         {p.rules?.categories && Object.keys(p.rules.categories).length > 0 && (
-                            <p className="mt-2 text-[10px] font-mono"
-                                style={{ color: 'hsl(var(--app-text-muted))' }}>
-                                ground rules: {Object.entries(p.rules.categories)
+                            <p className="mt-2 text-[13px] text-app-text-muted">
+                                Ground rules: {Object.entries(p.rules.categories)
                                     .map(([c, r]) => `${c}:${r.mode}`).join('  ')}
                             </p>
                         )}
@@ -1629,91 +1599,84 @@ function PadsTab() {
     return (
         <div className="flex flex-col gap-3">
             <SectionCard>
-                <p className="text-[10px] font-mono mb-3" style={{ color: 'hsl(var(--app-text-muted))' }}>
-                    NEW LOCATION - a PAD is a client-facing pickup/drop point;
-                    a STATION is a drone home base (clients never see it)
+                <h2 className="text-[18px] leading-6 font-bold mb-1">New location</h2>
+                <p className="text-[13px] text-app-text-muted mb-3">
+                    A pad is a pickup or drop point clients see. A station is a drone home base.
                 </p>
-                {error && <p className="text-xs mb-2" style={{ color: '#f87171' }}>{error}</p>}
+                {error && <p className="text-[13px] mb-2 text-app-danger" role="alert">{error}</p>}
                 <div className="grid gap-2 md:grid-cols-5">
-                    <select className={inputCls} style={inputStyle} value={kind}
+                    <select className={inputCls} value={kind} aria-label="Kind"
                         onChange={e => setKind(e.target.value as 'pad' | 'station')}>
-                        <option value="pad">pad</option>
-                        <option value="station">station</option>
+                        <option value="pad">Pad</option>
+                        <option value="station">Station</option>
                     </select>
-                    <input className={inputCls} style={inputStyle} placeholder="name (Mess-A)"
+                    <input className={inputCls} placeholder="Name, e.g. Mess-A" aria-label="Name"
                         value={name} onChange={e => setName(e.target.value)} />
-                    <input className={inputCls} style={inputStyle} placeholder="latitude" type="number"
+                    <input className={inputCls} placeholder="Latitude" aria-label="Latitude" type="number"
                         step="0.000001" value={lat} onChange={e => setLat(e.target.value)} />
-                    <input className={inputCls} style={inputStyle} placeholder="longitude" type="number"
+                    <input className={inputCls} placeholder="Longitude" aria-label="Longitude" type="number"
                         step="0.000001" value={lng} onChange={e => setLng(e.target.value)} />
-                    <input className={inputCls} style={inputStyle} placeholder="notes"
+                    <input className={inputCls} placeholder="Notes" aria-label="Notes"
                         value={notes} onChange={e => setNotes(e.target.value)} />
                 </div>
                 <div className="mt-3">
                     <button className={btnPrimary}
                         disabled={busy || !name || lat === '' || lng === ''}
+                        title={!name || lat === '' || lng === '' ? 'Enter a name, latitude and longitude first' : undefined}
                         onClick={create}>
-                        <Plus size={13} /> ADD PAD
+                        <Plus size={14} aria-hidden /> Add {kind === 'station' ? 'station' : 'pad'}
                     </button>
                 </div>
             </SectionCard>
 
             <SectionCard>
                 {pads.length === 0 ? (
-                    <p className="text-sm py-4 text-center" style={{ color: 'hsl(var(--app-text-muted))' }}>
+                    <p className="text-sm py-4 text-center text-app-text-muted">
                         No pads yet. Orders need at least two.
                     </p>
                 ) : (
                     <div className="overflow-x-auto">
                         <table className="w-full text-sm">
                             <thead>
-                                <tr className="text-left text-[10px] font-mono"
-                                    style={{ color: 'hsl(var(--app-text-muted))' }}>
-                                    <th className="pb-2 pr-4">NAME</th>
-                                    <th className="pb-2 pr-4">POSITION</th>
-                                    <th className="pb-2 pr-4">NOTES</th>
-                                    <th className="pb-2 pr-4">STATE</th>
+                                <tr className={'text-left ' + LABEL}>
+                                    <th className="pb-2 pr-4">Name</th>
+                                    <th className="pb-2 pr-4">Position</th>
+                                    <th className="pb-2 pr-4">Notes</th>
+                                    <th className="pb-2 pr-4">State</th>
                                     <th className="pb-2"></th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {pads.map(p => (
-                                    <tr key={p.id} className="border-t"
-                                        style={{ borderColor: 'hsl(var(--app-border))' }}>
+                                    <tr key={p.id} className="border-t border-app-border">
                                         <td className="py-2 pr-4">
                                             {p.name}
                                             {p.kind === 'station' && (
-                                                <span className="ml-2 font-mono text-[9px] px-1.5 py-0.5 rounded"
-                                                    style={{ color: '#fbbf24', background: '#fbbf2422' }}>
-                                                    STATION
+                                                <span className="ml-2 inline-flex items-center h-5 px-1.5 rounded-full text-xs font-bold text-app-warn bg-app-warn-soft">
+                                                    Station
                                                 </span>
                                             )}
                                         </td>
-                                        <td className="py-2 pr-4 font-mono text-xs">
+                                        <td className="py-2 pr-4 text-[13px] tabular-nums whitespace-nowrap">
                                             {p.lat.toFixed(6)}, {p.lng.toFixed(6)}
                                         </td>
-                                        <td className="py-2 pr-4 text-xs"
-                                            style={{ color: 'hsl(var(--app-text-muted))' }}>
+                                        <td className="py-2 pr-4 text-[13px] text-app-text-muted">
                                             {p.notes || '--'}
                                         </td>
                                         <td className="py-2 pr-4">
-                                            <span className="font-mono text-[10px] px-2 py-0.5 rounded-full"
-                                                style={p.active
-                                                    ? { color: '#4ade80', background: '#4ade8022' }
-                                                    : { color: '#71717a', background: '#71717a22' }}>
-                                                {p.active ? 'ACTIVE' : 'RETIRED'}
+                                            <span className={'inline-flex items-center h-6 px-2 rounded-full text-xs font-bold ' +
+                                                (p.active ? 'text-app-ok bg-app-ok-soft' : 'text-app-text-muted bg-app-surface-2')}>
+                                                {p.active ? 'Active' : 'Retired'}
                                             </span>
                                         </td>
                                         <td className="py-2 text-right whitespace-nowrap">
                                             <button className={btnGhost}
-                                                style={{ borderColor: 'hsl(var(--app-border))' }}
                                                 onClick={() => toggle(p)}>
-                                                {p.active ? 'RETIRE' : 'RESTORE'}
+                                                {p.active ? 'Retire' : 'Restore'}
                                             </button>
-                                            <button className={`${btnGhost} ml-2`}
-                                                style={{ borderColor: '#f8717166', color: '#f87171' }}
+                                            <button className={`${BTN_DANGER} ml-2`}
                                                 onClick={() => remove(p)}>
-                                                <X size={12} /> DELETE
+                                                <X size={14} aria-hidden /> Delete
                                             </button>
                                         </td>
                                     </tr>
@@ -1772,33 +1735,33 @@ function KeysTab() {
     return (
         <div className="flex flex-col gap-3">
             <SectionCard>
-                <p className="text-[10px] font-mono mb-3" style={{ color: 'hsl(var(--app-text-muted))' }}>
-                    MINT KEY - one per client application. The key appears once; only
-                    its hash is stored.
+                <h2 className="text-[18px] leading-6 font-bold mb-1">New client key</h2>
+                <p className="text-[13px] text-app-text-muted mb-3">
+                    One per client app. The key shows once; only its hash is stored.
                 </p>
-                {error && <p className="text-xs mb-2" style={{ color: '#f87171' }}>{error}</p>}
-                <div className="flex gap-2">
-                    <input className={`${inputCls} max-w-xs`} style={inputStyle}
-                        placeholder="client name (demo storefront)"
+                {error && <p className="text-[13px] mb-2 text-app-danger" role="alert">{error}</p>}
+                <div className="flex flex-wrap gap-2">
+                    <input className={`${inputCls} max-w-xs`}
+                        aria-label="Client name"
+                        placeholder="Client name, e.g. demo storefront"
                         value={name} onChange={e => setName(e.target.value)} />
-                    <button className={btnPrimary} disabled={busy || !name.trim()} onClick={mint}>
-                        <KeyRound size={13} /> MINT
+                    <button className={btnPrimary} disabled={busy || !name.trim()} onClick={mint}
+                        title={!name.trim() ? 'Enter a client name first' : undefined}>
+                        <KeyRound size={14} aria-hidden /> Create key
                     </button>
                 </div>
             </SectionCard>
 
             {minted && (
-                <div className="rounded-xl border p-4"
-                    style={{ background: '#06b6d410', borderColor: '#06b6d455' }}>
-                    <p className="text-xs mb-2" style={{ color: '#06b6d4' }}>
+                <div className="rounded-[10px] border border-app-accent/40 bg-app-accent-soft p-4">
+                    <p className="text-sm font-bold mb-2 text-app-accent">
                         Copy this key now. It will not be shown again.
                     </p>
-                    <div className="flex items-center gap-2">
-                        <code className="font-mono text-sm px-3 py-1.5 rounded-md border select-all"
-                            style={{ borderColor: '#06b6d455', color: 'hsl(var(--app-text))' }}>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <code className="font-code text-sm px-3 py-1.5 rounded-[6px] border border-app-accent/40 bg-app-surface text-app-text select-all break-all">
                             {minted}
                         </code>
-                        <button className={btnGhost} style={{ borderColor: '#06b6d455', color: '#06b6d4' }}
+                        <button className={BTN_ACCENT}
                             onClick={async () => {
                                 try {
                                     await navigator.clipboard.writeText(minted)
@@ -1806,13 +1769,12 @@ function KeysTab() {
                                     setTimeout(() => setCopied(false), 1500)
                                 } catch { /* clipboard unavailable */ }
                             }}>
-                            {copied ? <Check size={13} /> : <Copy size={13} />}
-                            {copied ? 'COPIED' : 'COPY'}
+                            {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
+                            {copied ? 'Copied' : 'Copy'}
                         </button>
                         <button className={btnGhost}
-                            style={{ borderColor: 'hsl(var(--app-border))' }}
                             onClick={() => setMinted(null)}>
-                            <X size={13} /> DISMISS
+                            <X size={14} aria-hidden /> Dismiss
                         </button>
                     </div>
                 </div>
@@ -1820,55 +1782,48 @@ function KeysTab() {
 
             <SectionCard>
                 {keys.length === 0 ? (
-                    <p className="text-sm py-4 text-center" style={{ color: 'hsl(var(--app-text-muted))' }}>
+                    <p className="text-sm py-4 text-center text-app-text-muted">
                         No client keys yet.
                     </p>
                 ) : (
+                    <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                         <thead>
-                            <tr className="text-left text-[10px] font-mono"
-                                style={{ color: 'hsl(var(--app-text-muted))' }}>
-                                <th className="pb-2 pr-4">CLIENT</th>
-                                <th className="pb-2 pr-4">KEY</th>
-                                <th className="pb-2 pr-4">LAST USED</th>
-                                <th className="pb-2 pr-4">STATE</th>
+                            <tr className={'text-left ' + LABEL}>
+                                <th className="pb-2 pr-4">Client</th>
+                                <th className="pb-2 pr-4">Key</th>
+                                <th className="pb-2 pr-4">Last used</th>
+                                <th className="pb-2 pr-4">State</th>
                                 <th className="pb-2"></th>
                             </tr>
                         </thead>
                         <tbody>
                             {keys.map(k => (
-                                <tr key={k.id} className="border-t"
-                                    style={{ borderColor: 'hsl(var(--app-border))' }}>
+                                <tr key={k.id} className="border-t border-app-border">
                                     <td className="py-2 pr-4">{k.name}</td>
-                                    <td className="py-2 pr-4 font-mono text-xs"
-                                        style={{ color: 'hsl(var(--app-text-muted))' }}>
+                                    <td className="py-2 pr-4 font-code text-[13px] text-app-text-muted">
                                         {k.prefix}...
                                     </td>
-                                    <td className="py-2 pr-4 font-mono text-xs"
-                                        style={{ color: 'hsl(var(--app-text-muted))' }}>
+                                    <td className="py-2 pr-4 text-[13px] tabular-nums text-app-text-muted whitespace-nowrap">
                                         {fmtTime(k.last_used_at)}
                                     </td>
                                     <td className="py-2 pr-4">
-                                        <span className="font-mono text-[10px] px-2 py-0.5 rounded-full"
-                                            style={k.active
-                                                ? { color: '#4ade80', background: '#4ade8022' }
-                                                : { color: '#f87171', background: '#f8717122' }}>
-                                            {k.active ? 'ACTIVE' : 'REVOKED'}
+                                        <span className={'inline-flex items-center h-6 px-2 rounded-full text-xs font-bold ' +
+                                            (k.active ? 'text-app-ok bg-app-ok-soft' : 'text-app-danger bg-app-danger-soft')}>
+                                            {k.active ? 'Active' : 'Revoked'}
                                         </span>
                                     </td>
                                     <td className="py-2 text-right">
-                                        <button className={btnGhost}
-                                            style={k.active
-                                                ? { borderColor: '#f8717166', color: '#f87171' }
-                                                : { borderColor: 'hsl(var(--app-border))' }}
+                                        <button className={k.active ? BTN_DANGER : btnGhost}
                                             onClick={() => setActive(k, !k.active)}>
-                                            {k.active ? 'REVOKE' : 'RESTORE'}
+                                            {k.active ? 'Revoke' : 'Restore'}
                                         </button>
                                     </td>
                                 </tr>
                             ))}
                         </tbody>
                     </table>
+                    </div>
                 )}
             </SectionCard>
         </div>

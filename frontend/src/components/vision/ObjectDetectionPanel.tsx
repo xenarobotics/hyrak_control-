@@ -6,6 +6,7 @@ import { useStableCounts, useEasedNumber } from '@/lib/panelSmoothing'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import { Search } from 'lucide-react'
+import { TILE, READOUT, SECONDARY, MUTED, chip, FOCUS, NUM } from './panelStyle'
 
 // Icon mapping for common COCO classes
 const CLASS_EMOJI: Record<string, string> = {
@@ -27,29 +28,18 @@ function ObjectCard(
     const emoji = CLASS_EMOJI[name] ?? '📦'
     return (
         <div style={{
+            ...TILE,
             display: 'flex', flexDirection: 'column', alignItems: 'center',
             justifyContent: 'center', gap: 4,
-            padding: '12px 8px',
-            background: 'hsl(var(--app-surface-2))',
-            border: '1px solid hsl(var(--app-border))',
-            borderRadius: 10, textAlign: 'center',
+            padding: '12px 8px', textAlign: 'center',
             // Held past its last sighting: dimmed rather than removed, so the
             // grid keeps its shape while a detection flickers.
-            opacity: stale ? 0.45 : 1,
-            transition: 'opacity 180ms ease-out',
+            opacity: stale ? 0.6 : 1,
+            transition: 'opacity var(--dur) var(--ease-out)',
         }}>
-            <span style={{ fontSize: 22 }}>{emoji}</span>
-            <span style={{
-                fontSize: 20, fontWeight: 700,
-                fontFamily: 'var(--font-geist-mono)',
-                color: 'hsl(var(--app-text))',
-            }}>
-                {count}
-            </span>
-            <span style={{
-                fontSize: 10, color: 'hsl(var(--app-text-muted))',
-                textTransform: 'capitalize',
-            }}>
+            <span style={{ fontSize: 20, lineHeight: 1 }} aria-hidden>{emoji}</span>
+            <span style={READOUT}>{count}</span>
+            <span style={{ ...SECONDARY, textTransform: 'capitalize', overflowWrap: 'anywhere' }}>
                 {name}
             </span>
         </div>
@@ -79,41 +69,28 @@ export function ObjectDetectionPanel() {
 
             {/* Stats row */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{
-                    padding: '4px 10px',
-                    background: 'hsl(var(--app-surface-2))',
-                    border: '1px solid hsl(var(--app-border))',
-                    borderRadius: 8, fontSize: 11, fontFamily: 'monospace',
-                    color: 'hsl(var(--app-text-muted))',
-                }}>
-                    {totalCount} detected
-                </div>
+                <span style={chip('muted')}>{totalCount} found</span>
                 {personCount > 0 && (
-                    <div style={{
-                        padding: '4px 10px',
-                        background: '#E6F1FB',
-                        border: '1px solid #85B7EB',
-                        borderRadius: 8, fontSize: 11, fontFamily: 'monospace',
-                        color: '#185FA5',
-                    }}>
-                        🧍 {personCount} person
-                    </div>
+                    <span style={chip('accent')}>
+                        {personCount} {personCount === 1 ? 'person' : 'people'}
+                    </span>
                 )}
             </div>
 
             {/* Search */}
             <div style={{ position: 'relative' }}>
-                <Search size={12} style={{
+                <Search size={14} aria-hidden style={{
                     position: 'absolute', left: 10, top: '50%',
                     transform: 'translateY(-50%)',
-                    color: 'hsl(var(--app-text-muted))',
+                    color: MUTED,
                 }} />
                 <Input
                     value={search}
                     onChange={e => setSearch(e.target.value)}
-                    placeholder="Filter objects..."
-                    className="h-8 text-xs font-mono"
-                    style={{ paddingLeft: 28 }}
+                    placeholder="Filter"
+                    aria-label="Filter objects"
+                    className={`h-8 text-[13px] ${FOCUS}`}
+                    style={{ paddingLeft: 30 }}
                 />
             </div>
 
@@ -122,7 +99,7 @@ export function ObjectDetectionPanel() {
                 {objects.length > 0 ? (
                     <div style={{
                         display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))',
+                        gridTemplateColumns: 'repeat(auto-fill, minmax(84px, 1fr))',
                         gap: 8, paddingRight: 4,
                     }}>
                         {objects.map(o => (
@@ -132,10 +109,9 @@ export function ObjectDetectionPanel() {
                 ) : (
                     <div style={{
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        height: 120, color: 'hsl(var(--app-text-muted))',
-                        fontSize: 12, fontFamily: 'monospace',
+                        height: 120, ...SECONDARY, ...NUM,
                     }}>
-                        {cvResults ? 'No objects detected' : 'Start stream to detect objects'}
+                        {cvResults ? 'Nothing found yet' : 'Waiting for video'}
                     </div>
                 )}
             </ScrollArea>

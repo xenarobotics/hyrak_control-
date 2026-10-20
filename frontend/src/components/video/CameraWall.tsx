@@ -12,6 +12,8 @@ import { getSocket } from '@/lib/socket'
 import { getServerUrl } from '@/lib/server-url'
 import { setAirUnitVideoPort } from '@/lib/videoSource'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
+import { cn } from '@/lib/utils'
+import { FOCUS_OVERLAY, OVERLAY_BTN } from '@/components/controls/flightStyles'
 
 type MeshUnit = { id: number; port: number; live: boolean; in_use: boolean; kbps: number | null; source: string | null }
 
@@ -126,18 +128,20 @@ export function CameraWall({ onClose }: { onClose: () => void }) {
 
     const cols = units.length <= 1 ? 1 : units.length <= 4 ? 2 : 3
     return (
-        <div className="relative flex-1 min-w-0 flex flex-col rounded-xl overflow-hidden" style={{ background: '#000' }}>
-            <div className="flex items-center justify-between px-3 py-1.5 text-[10px] font-mono" style={{ color: '#a1a1aa', background: 'rgba(17,19,24,.9)' }}>
-                <span>CAMERA WALL - {status}</span>
-                <button onClick={onClose} className="px-2 py-0.5 rounded border" style={{ borderColor: '#22d3ee55', color: '#22d3ee' }}>SINGLE VIEW</button>
+        <div className="relative flex-1 min-w-0 flex flex-col rounded-[10px] overflow-hidden bg-black">
+            <div className="flex items-center justify-between gap-2 px-3 py-1.5 text-[13px] bg-[#0b0e13] text-overlay-muted">
+                <span><span className="font-bold text-overlay-text">Camera wall</span> - {status}</span>
+                <button onClick={onClose}
+                    className={cn(OVERLAY_BTN, FOCUS_OVERLAY, 'text-[var(--overlay-accent)] border-[var(--overlay-accent)]')}>Single view</button>
             </div>
             <div className="flex-1 grid gap-1 p-1" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
                 {units.map(u => (
                     <button key={u.port} onClick={() => pick(u)} title={`Unit ${u.id} - udp ${u.port} - tap for single view`}
-                        className="relative rounded overflow-hidden" style={{ background: '#0a0a0a', minHeight: 120 }}>
+                        className={cn('relative rounded-md overflow-hidden bg-[#0a0a0a]', FOCUS_OVERLAY)} style={{ minHeight: 120 }}>
                         <video ref={el => { videoRefs.current[u.port] = el }} autoPlay muted playsInline className="w-full h-full object-contain" />
-                        <span className="absolute left-2 top-1.5 text-[10px] font-mono px-1.5 py-0.5 rounded" style={{ background: 'rgba(0,0,0,.6)', color: streams[u.port] ? '#4ade80' : '#fbbf24' }}>
-                            UNIT {u.id}{u.kbps ? ` - ${u.kbps} k` : ''}{streams[u.port] ? '' : ' - waiting'}
+                        <span className={cn('absolute left-2 top-1.5 text-[12px] font-bold px-1.5 py-0.5 rounded bg-overlay-scrim',
+                            streams[u.port] ? 'text-[var(--overlay-ok)]' : 'text-[var(--overlay-warn)]')}>
+                            Unit {u.id}{u.kbps ? ` - ${u.kbps} k` : ''}{streams[u.port] ? '' : ' - waiting'}
                         </span>
                     </button>
                 ))}

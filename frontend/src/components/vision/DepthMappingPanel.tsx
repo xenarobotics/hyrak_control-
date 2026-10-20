@@ -1,6 +1,7 @@
 'use client'
 
 import { useDroneStore } from '@/store/drone'
+import { LABEL, READOUT, UNIT, SECONDARY, TILE, NUM, BORDER, chip } from './panelStyle'
 
 export function DepthMappingPanel() {
     const cvResults = useDroneStore(s => s.cvResults)
@@ -13,73 +14,47 @@ export function DepthMappingPanel() {
 
             {cvResults ? (
                 <>
-                    {/* Color scale */}
-                    <div>
-                        <div style={{
-                            fontSize: 10, color: 'hsl(var(--app-text-muted))',
-                            fontFamily: 'monospace', marginBottom: 6,
-                        }}>
-                            DEPTH SCALE - 0.3m to 5m
-                        </div>
-                        <div style={{
-                            height: 18, borderRadius: 6,
-                            background: 'linear-gradient(to right, #00007f, #0000ff, #007fff, #00ffff, #7fff7f, #ffff00, #ff7f00, #ff0000)',
-                            border: '1px solid hsl(var(--app-border))',
-                        }} />
-                        <div style={{
-                            display: 'flex', justifyContent: 'space-between',
-                            marginTop: 4, fontSize: 10,
-                            color: 'hsl(var(--app-text-muted))', fontFamily: 'monospace',
-                        }}>
-                            <span>0.3m (near)</span>
-                            <span>5m+ (far)</span>
-                        </div>
-                    </div>
-
-                    {/* Metric depth stats */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                    {/* Metric depth stats: nearest first, it is the one that matters */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
                         {[
-                            { label: 'Min', value: minD, color: '#60a5fa' },
-                            { label: 'Mean', value: meanD, color: '#4ade80' },
-                            { label: 'Max', value: maxD, color: '#f87171' },
+                            { label: 'Nearest', value: minD },
+                            { label: 'Average', value: meanD },
+                            { label: 'Farthest', value: maxD },
                         ].map(stat => (
-                            <div key={stat.label} style={{
-                                padding: '10px 8px', borderRadius: 8, textAlign: 'center',
-                                background: 'hsl(var(--app-surface-2))',
-                                border: '1px solid hsl(var(--app-border))',
-                            }}>
-                                <div style={{
-                                    fontSize: 18, fontWeight: 700,
-                                    fontFamily: 'monospace', color: stat.color,
-                                }}>
-                                    {stat.value.toFixed(2)}
+                            <div key={stat.label} style={{ ...TILE, padding: '10px 8px', textAlign: 'center' }}>
+                                <div style={{ ...READOUT, fontSize: 22 }}>
+                                    {stat.value.toFixed(1)}<span style={UNIT}>m</span>
                                 </div>
-                                <div style={{
-                                    fontSize: 9, color: 'hsl(var(--app-text-muted))', marginTop: 2,
-                                }}>
-                                    {stat.label} (metres)
-                                </div>
+                                <div style={{ ...SECONDARY, marginTop: 2 }}>{stat.label}</div>
                             </div>
                         ))}
                     </div>
 
-                    <div style={{
-                        padding: '8px 12px', borderRadius: 8,
-                        background: '#E1F5EE18',
-                        border: '1px solid rgba(93,202,165,0.3)',
-                        fontSize: 11, color: 'rgba(93,202,165,0.9)',
-                        fontFamily: 'monospace',
-                    }}>
-                        ✓ Depth Anything 3 metric depth · Blue = near · Red = far
+                    {/* Colour scale (the depth image's own colormap, not theme colours) */}
+                    <div>
+                        <div style={{ ...LABEL, marginBottom: 6 }}>Colour scale</div>
+                        <div style={{
+                            height: 16, borderRadius: 6,
+                            background: 'linear-gradient(to right, #00007f, #0000ff, #007fff, #00ffff, #7fff7f, #ffff00, #ff7f00, #ff0000)',
+                            border: `1px solid ${BORDER}`,
+                        }} />
+                        <div style={{
+                            ...SECONDARY, ...NUM,
+                            display: 'flex', justifyContent: 'space-between', marginTop: 4,
+                        }}>
+                            <span>Blue: near (0.3 m)</span>
+                            <span>Red: far (5 m+)</span>
+                        </div>
                     </div>
+
+                    <span style={chip('ok')} title="Depth Anything 3, metric depth">Measured in metres</span>
                 </>
             ) : (
                 <div style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    height: 100, color: 'hsl(var(--app-text-muted))',
-                    fontSize: 12, fontFamily: 'monospace',
+                    height: 100, ...SECONDARY,
                 }}>
-                    Start stream in Depth mode
+                    Waiting for video
                 </div>
             )}
         </div>

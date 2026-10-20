@@ -12,7 +12,7 @@ import {
     changePassword, fmtWhen, listSessions, revokeOtherSessions, revokeSession, updateMe, type SessionRow,
 } from '@/lib/workspaces'
 import { passwordProblem } from '@/components/auth/AuthCard'
-import { Pill, PrefRow, S_INPUT, S_LABEL, S_NOTE, SButton, Status } from '@/components/settings/primitives'
+import { Pill, PrefRow, S_FIELD_LABEL, S_INPUT, S_NOTE, SButton, Status } from '@/components/settings/primitives'
 
 export function ProfileGroup() {
     const { user } = useAccess()
@@ -46,7 +46,7 @@ export function ProfileGroup() {
     return (
         <form onSubmit={e => void save(e)} noValidate>
             <PrefRow label="Username" sub="Sign in with this or your email"
-                right={<span style={{ fontSize: 12, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>{user.username}</span>} />
+                right={<span style={{ fontSize: 14, color: 'hsl(var(--app-text))' }}>{user.username}</span>} />
             <PrefRow label={<label htmlFor="acct-name">Display name</label>} sub="Shown to the people in your workspaces"
                 right={<input id="acct-name" value={curName} autoComplete="name"
                     onChange={e => { setName(e.target.value); setOk('') }} style={{ ...S_INPUT, width: 220 }} />} />
@@ -57,11 +57,11 @@ export function ProfileGroup() {
                 sub={user.email_verified ? 'Verified - sign in with this or your username'
                     : user.email ? 'Not verified - sign in with your username' : 'Ask HYRAK to add one'}
                 right={<span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>{user.email || '-'}</span>
-                    {user.email && <Pill tone={user.email_verified ? 'cyan' : 'amber'}>{user.email_verified ? 'VERIFIED' : 'UNVERIFIED'}</Pill>}
+                    <span style={{ fontSize: 14, color: 'hsl(var(--app-text))', overflowWrap: 'anywhere' }}>{user.email || '-'}</span>
+                    {user.email && <Pill tone={user.email_verified ? 'cyan' : 'amber'}>{user.email_verified ? 'Verified' : 'Not verified'}</Pill>}
                 </span>} />
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0' }}>
-                <SButton type="submit" tone="primary" disabled={!dirty || busy}>{busy ? 'Saving' : 'Save profile'}</SButton>
+                <SButton type="submit" tone="primary" disabled={!dirty || busy} title={!dirty && !busy ? 'Change your display name first' : undefined}>{busy ? 'Saving' : 'Save profile'}</SButton>
                 <Status error={error} ok={ok} />
             </div>
         </form>
@@ -101,26 +101,26 @@ export function PasswordGroup() {
 
     const field = (id: string, label: string, value: string, set: (v: string) => void, k: keyof typeof problems, auto: string) => (
         <div style={{ flex: '1 1 180px', minWidth: 0 }}>
-            <label htmlFor={id} style={S_LABEL}>{label}</label>
+            <label htmlFor={id} style={S_FIELD_LABEL}>{label}</label>
             <input id={id} type="password" autoComplete={auto} value={value}
                 onChange={e => { set(e.target.value); setOk('') }} onBlur={() => touch(k)}
                 aria-invalid={show(k) ? true : undefined}
-                style={{ ...S_INPUT, width: '100%', ...(show(k) ? { borderColor: '#f87171' } : null) }} />
-            {show(k) && <p style={{ ...S_NOTE, color: '#f87171', marginTop: 4 }}>{show(k)}</p>}
+                style={{ ...S_INPUT, width: '100%', ...(show(k) ? { borderColor: 'var(--app-danger)' } : null) }} />
+            {show(k) && <p style={{ ...S_NOTE, color: 'var(--app-danger)', marginTop: 4 }}>{show(k)}</p>}
         </div>
     )
 
     return (
         <form onSubmit={e => void submit(e)} noValidate style={{ padding: '10px 0', borderBottom: '1px solid hsl(var(--app-border))' }}>
             <p style={{ ...S_NOTE, marginBottom: 10 }}>
-                At least 10 characters, no other rules. Changing it signs out every other device.
+                At least 10 characters. Changing it signs out your other devices.
             </p>
             {/* Hidden username so password managers file the new password under the right account. */}
             <input type="text" autoComplete="username" hidden readOnly value={user?.username ?? ''} />
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-                {field('pw-current', 'CURRENT PASSWORD', current, setCurrent, 'current', 'current-password')}
-                {field('pw-new', 'NEW PASSWORD', next, setNext, 'next', 'new-password')}
-                {field('pw-confirm', 'CONFIRM NEW PASSWORD', confirm, setConfirm, 'confirm', 'new-password')}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                {field('pw-current', 'Current password', current, setCurrent, 'current', 'current-password')}
+                {field('pw-new', 'New password', next, setNext, 'next', 'new-password')}
+                {field('pw-confirm', 'Confirm new password', confirm, setConfirm, 'confirm', 'new-password')}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
                 <SButton type="submit" tone="primary" disabled={busy}>{busy ? 'Changing' : 'Change password'}</SButton>
@@ -175,12 +175,15 @@ export function DevicesGroup() {
                 <PrefRow key={r.id}
                     label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                         {r.label || 'Unnamed device'}
-                        {r.current && <Pill tone="cyan">THIS DEVICE</Pill>}
+                        {r.current && <Pill tone="cyan">This device</Pill>}
                     </span>}
                     sub={`Signed in ${fmtWhen(r.created_at)} - last active ${fmtWhen(r.last_seen_at)}`}
                     right={r.current ? null : (
-                        <SButton tone="danger" disabled={busyId === r.id} onClick={() => void signOut(r)}>
-                            {busyId === r.id ? 'Signing out' : 'Sign out'}
+                        // Neutral on purpose: one red button per row read as a
+                        // column of alarms. Red is kept for "sign out all".
+                        <SButton disabled={busyId === r.id} onClick={() => void signOut(r)}
+                            title={`Sign out ${r.label || 'this device'}`}>
+                            {busyId === r.id ? 'Signing out' : 'Sign out device'}
                         </SButton>
                     )} />
             ))}

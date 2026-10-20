@@ -11,10 +11,13 @@ import {
     Upload, CheckCircle, AlertCircle, Loader2, UserX, ScanFace,
     Mountain, MoveVertical, UserPlus,
 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { FaceGalleryPanel } from './FaceGalleryPanel'
 import { fetchFollowTuning } from '@/lib/calibration'
+import {
+    TONE, LABEL, SECONDARY, NUM, TILE, TEXT, MUTED, SUBTLE, SURFACE_2, BORDER, BORDER_STRONG,
+    chip, btn, DISABLED, FOCUS,
+} from './panelStyle'
 
 // Kept in sync with backend defaults (person_tracker.py _make_state: yaw_pd
 // kp=30/kd=4/max_output=55) - yaw-axis units (deg/s output). A prior 0-2
@@ -25,7 +28,7 @@ const PD_DEFAULTS = { kp: 30.0, kd: 4.0, max_output: 55, deadband: 0.05 }
 const PD_PARAMS = [
     {
         key: 'max_output' as const,
-        label: 'Max Speed', min: 15, max: 55, step: 1, unit: '',
+        label: 'Max turn speed', min: 15, max: 55, step: 1, unit: '',
         format: (v: number) => v.toFixed(0),
         tooltip: 'Maximum yaw rate (deg/s) while tracking. Backend hard-caps this at 55 to stay under the flight controller\'s auto-yaw rate limit.',
     },
@@ -43,7 +46,7 @@ const PD_PARAMS = [
     },
     {
         key: 'deadband' as const,
-        label: 'Dead Zone', min: 0.01, max: 0.15, step: 0.01, unit: '',
+        label: 'Dead zone', min: 0.01, max: 0.15, step: 0.01, unit: '',
         format: (v: number) => v.toFixed(2),
         tooltip: 'Minimum error before a correction is sent. Increase if the drone never fully settles.',
     },
@@ -64,14 +67,17 @@ function PillToggle({ active, onClick, children }: {
 }) {
     return (
         <button
+            type="button"
             onClick={onClick}
+            aria-pressed={active}
+            className={FOCUS}
             style={{
-                padding: '3px 10px', borderRadius: 20, fontSize: 10,
-                fontFamily: 'monospace', fontWeight: 600, cursor: 'pointer',
-                border: active ? '1px solid #22d3ee' : '1px solid hsl(var(--app-border))',
-                background: active ? '#22d3ee18' : 'hsl(var(--app-surface-2))',
-                color: active ? '#22d3ee' : 'hsl(var(--app-text-muted))',
-                transition: 'all 0.15s',
+                minHeight: 28, padding: '0 12px', borderRadius: 999, fontSize: 12,
+                fontWeight: 700, cursor: 'pointer',
+                border: `1px solid ${active ? TONE.accent.fg : BORDER_STRONG}`,
+                background: active ? TONE.accent.bg : SURFACE_2,
+                color: active ? TONE.accent.fg : MUTED,
+                transition: 'color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out)',
             }}
         >
             {children}
@@ -83,6 +89,20 @@ const DISTANCE_STEP = 0.06
 const DISTANCE_MIN  = 0.10
 const DISTANCE_MAX  = 0.60
 
+/** Small round "i" that opens a tooltip. */
+function InfoTip({ children, width = 220 }: { children: React.ReactNode; width?: number }) {
+    return (
+        <Tooltip>
+            <TooltipTrigger className={FOCUS} aria-label="More info" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', padding: 2, borderRadius: 999, cursor: 'help' }}>
+                <Info size={13} style={{ color: MUTED }} />
+            </TooltipTrigger>
+            <TooltipContent style={{ maxWidth: width, fontSize: 13, lineHeight: 1.5 }}>
+                {children}
+            </TooltipContent>
+        </Tooltip>
+    )
+}
+
 function ParamSlider({
     label, value, min, max, step, unit, format, tooltip, onChange, disabled,
 }: {
@@ -93,30 +113,23 @@ function ParamSlider({
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
-                        {label}
-                    </span>
-                    <Tooltip>
-                        <TooltipTrigger style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'help' }}>
-                            <Info size={11} style={{ color: 'hsl(var(--app-text-muted))' }} />
-                        </TooltipTrigger>
-                        <TooltipContent style={{ maxWidth: 220, fontSize: 11, lineHeight: 1.5 }}>
-                            {tooltip}
-                        </TooltipContent>
-                    </Tooltip>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={SECONDARY}>{label}</span>
+                    <InfoTip>{tooltip}</InfoTip>
                 </div>
-                <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text))' }}>
+                <span style={{ ...NUM, fontSize: 13, fontWeight: 700, color: disabled ? SUBTLE : TEXT }}>
                     {format(value)}{unit}
                 </span>
             </div>
             <input
                 type="range" min={min} max={max} step={step} value={value}
                 disabled={disabled}
+                title={disabled ? 'Stop tracking to change this' : undefined}
+                className={FOCUS}
                 onChange={e => onChange(parseFloat(e.target.value))}
                 style={{
-                    width: '100%', accentColor: '#22d3ee',
-                    opacity: disabled ? 0.4 : 1, cursor: disabled ? 'not-allowed' : 'pointer',
+                    width: '100%', minHeight: 24, accentColor: disabled ? 'hsl(var(--app-text-subtle))' : 'var(--app-accent)',
+                    cursor: disabled ? 'not-allowed' : 'pointer',
                 }}
             />
         </div>
@@ -315,19 +328,17 @@ export function PersonTrackerPanel() {
     }
 
     // ── Upload section ──────────────────────────────────────────────────────
+    const lockedOut = isTracking ? 'Stop tracking first' : undefined
     const uploadSection = () => {
         if (uploadState === 'uploading') {
             return (
-                <div style={{
+                <div role="status" style={{
+                    ...TILE, ...SECONDARY,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    gap: 8, padding: '14px 12px', borderRadius: 10,
-                    background: 'hsl(var(--app-surface-2))',
-                    border: '1px solid hsl(var(--app-border))',
-                    fontSize: 12, fontFamily: 'monospace',
-                    color: 'hsl(var(--app-text-muted))',
+                    gap: 8, padding: '14px 12px',
                 }}>
-                    <Loader2 size={14} className="animate-spin" />
-                    Detecting face…
+                    <Loader2 size={14} className="animate-spin motion-reduce:animate-none" aria-hidden />
+                    Looking for a face…
                 </div>
             )
         }
@@ -336,60 +347,66 @@ export function PersonTrackerPanel() {
             return (
                 <div style={{
                     borderRadius: 10, overflow: 'hidden',
-                    border: '1px solid #22d3ee60',
-                    background: '#22d3ee08',
+                    border: `1px solid ${TONE.accent.border}`,
+                    background: TONE.accent.bg,
                 }}>
                     {/* Thumbnail + info row */}
-                    <div style={{ display: 'flex', gap: 10, padding: '10px 12px', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: 12, padding: '12px', alignItems: 'center' }}>
                         <div style={{
-                            width: 52, height: 52, borderRadius: 8, overflow: 'hidden',
-                            border: '2px solid #22d3ee', flexShrink: 0,
+                            width: 52, height: 52, borderRadius: 6, overflow: 'hidden',
+                            border: `2px solid ${TONE.accent.fg}`, flexShrink: 0,
                         }}>
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={faceThumbnail} alt="Reference face" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                         </div>
-                        <div style={{ flex: 1 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 3 }}>
-                                <CheckCircle size={12} style={{ color: '#22d3ee' }} />
-                                <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#22d3ee' }}>
-                                    Face registered
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                                <CheckCircle size={14} style={{ color: TONE.accent.fg }} aria-hidden />
+                                <span style={{ fontSize: 14, fontWeight: 700, color: TEXT }}>
+                                    Face saved
                                 </span>
                             </div>
-                            <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
+                            <div style={{ ...SECONDARY, ...NUM }}>
                                 {isTracking
                                     ? faceConfirmed
-                                        ? `Match confirmed - ${(similarity * 100).toFixed(0)}% similarity`
-                                        : searching ? 'Searching for target…' : 'Waiting for face lock…'
+                                        ? `Matched, ${(similarity * 100).toFixed(0)}% alike`
+                                        : searching ? 'Searching…' : 'Waiting for a face…'
                                     : 'Ready to track'}
                             </div>
                         </div>
                     </div>
                     {/* Re-upload link */}
                     <div style={{
-                        borderTop: '1px solid hsl(var(--app-border))',
-                        padding: '6px 12px', display: 'flex', justifyContent: 'space-between',
+                        borderTop: `1px solid ${TONE.accent.border}`,
+                        padding: '4px 8px', display: 'flex', justifyContent: 'space-between',
                         alignItems: 'center',
                     }}>
                         <button
+                            type="button"
                             onClick={() => fileInputRef.current?.click()}
                             disabled={isTracking}
+                            title={lockedOut}
+                            className={FOCUS}
                             style={{
-                                fontSize: 10, fontFamily: 'monospace', background: 'none',
+                                fontSize: 13, fontWeight: 600, background: 'none', minHeight: 32,
                                 border: 'none', cursor: isTracking ? 'not-allowed' : 'pointer',
-                                color: 'hsl(var(--app-text-muted))', opacity: isTracking ? 0.4 : 1,
-                                padding: 0, display: 'flex', alignItems: 'center', gap: 4,
+                                color: isTracking ? SUBTLE : MUTED, borderRadius: 6,
+                                padding: '0 4px', display: 'flex', alignItems: 'center', gap: 6,
                             }}
                         >
-                            <Upload size={10} /> Upload different photo
+                            <Upload size={13} aria-hidden /> Another photo
                         </button>
                         <button
+                            type="button"
                             onClick={handleReset}
                             disabled={isTracking}
+                            title={lockedOut}
+                            className={FOCUS}
                             style={{
-                                fontSize: 10, fontFamily: 'monospace', background: 'none',
+                                fontSize: 13, fontWeight: 600, background: 'none', minHeight: 32,
                                 border: 'none', cursor: isTracking ? 'not-allowed' : 'pointer',
-                                color: '#f87171', opacity: isTracking ? 0.4 : 1,
-                                padding: 0,
+                                color: isTracking ? SUBTLE : TONE.danger.fg, borderRadius: 6,
+                                padding: '0 4px',
                             }}
                         >
                             Clear
@@ -402,35 +419,30 @@ export function PersonTrackerPanel() {
         if (uploadState === 'no_face' || uploadState === 'error') {
             return (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <div style={{
+                    <div role="alert" style={{
                         display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px 12px',
-                        borderRadius: 10, background: '#f8717118',
-                        border: '1px solid #f8717160',
+                        borderRadius: 10, background: TONE.danger.bg,
+                        border: `1px solid ${TONE.danger.border}`,
                     }}>
                         {uploadState === 'no_face'
-                            ? <UserX size={14} style={{ color: '#f87171', flexShrink: 0, marginTop: 1 }} />
-                            : <AlertCircle size={14} style={{ color: '#f87171', flexShrink: 0, marginTop: 1 }} />}
-                        <div>
-                            <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#f87171', marginBottom: 2 }}>
-                                {uploadState === 'no_face' ? 'No face detected' : 'Upload failed'}
+                            ? <UserX size={15} style={{ color: TONE.danger.fg, flexShrink: 0, marginTop: 1 }} aria-hidden />
+                            : <AlertCircle size={15} style={{ color: TONE.danger.fg, flexShrink: 0, marginTop: 1 }} aria-hidden />}
+                        <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: TONE.danger.fg, marginBottom: 2 }}>
+                                {uploadState === 'no_face' ? 'No face found' : 'Upload failed'}
                             </div>
-                            <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
-                                {uploadError || 'Use a clear front-facing photo'}
+                            <div style={{ ...SECONDARY, overflowWrap: 'anywhere' }}>
+                                {uploadError || 'Use a clear photo of the face, looking at the camera'}
                             </div>
                         </div>
                     </div>
                     <button
+                        type="button"
                         onClick={() => fileInputRef.current?.click()}
-                        style={{
-                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                            padding: '8px 12px', borderRadius: 8,
-                            background: 'hsl(var(--app-surface-2))',
-                            border: '1px dashed hsl(var(--app-border))',
-                            cursor: 'pointer', fontSize: 11, fontFamily: 'monospace',
-                            color: 'hsl(var(--app-text-muted))',
-                        }}
+                        className={FOCUS}
+                        style={{ ...btn(), borderStyle: 'dashed' }}
                     >
-                        <Upload size={12} /> Try again
+                        <Upload size={13} aria-hidden /> Try another photo
                     </button>
                 </div>
             )
@@ -439,28 +451,33 @@ export function PersonTrackerPanel() {
         // idle
         return (
             <button
+                type="button"
                 onClick={() => fileInputRef.current?.click()}
+                className={FOCUS}
                 style={{
                     display: 'flex', flexDirection: 'column', alignItems: 'center',
-                    justifyContent: 'center', gap: 6, padding: '16px 12px',
+                    justifyContent: 'center', gap: 4, padding: '16px 12px',
                     borderRadius: 10, width: '100%',
-                    background: 'hsl(var(--app-surface-2))',
-                    border: '2px dashed hsl(var(--app-border))',
-                    cursor: 'pointer', transition: 'border-color 0.15s',
+                    background: SURFACE_2,
+                    border: `2px dashed ${BORDER_STRONG}`,
+                    cursor: 'pointer', transition: 'border-color var(--dur-fast) var(--ease-out)',
                 }}
-                onMouseEnter={e => (e.currentTarget.style.borderColor = '#22d3ee60')}
-                onMouseLeave={e => (e.currentTarget.style.borderColor = 'hsl(var(--app-border))')}
+                onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--app-accent)')}
+                onMouseLeave={e => (e.currentTarget.style.borderColor = BORDER_STRONG)}
             >
-                <ScanFace size={24} style={{ color: '#22d3ee', opacity: 0.7 }} />
-                <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text))' }}>
-                    Upload reference photo
+                <ScanFace size={24} style={{ color: TONE.accent.fg }} aria-hidden />
+                <span style={{ fontSize: 14, fontWeight: 600, color: TEXT }}>
+                    Upload a face photo
                 </span>
-                <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
-                    JPEG or PNG - clear front-facing face
+                <span style={SECONDARY}>
+                    JPEG or PNG, face to camera
                 </span>
             </button>
         )
     }
+
+    const lockTone = lockState === 'lost' ? 'danger' : 'warn'
+    const canCapture = !!enrolName.trim() && enrolTarget != null
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -481,19 +498,17 @@ export function PersonTrackerPanel() {
                 hides that, and an operator who cannot tell them apart cannot
                 judge whether to take over. */}
             {lockState !== 'idle' && lockState !== 'locked' && (
-                <div style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '6px 10px', borderRadius: 8, fontSize: 11,
-                    background: lockState === 'lost' ? 'rgba(248,113,113,0.12)'
-                              : lockState === 'coasting' ? 'rgba(251,191,36,0.10)'
-                              : 'rgba(251,191,36,0.16)',
-                    border: `1px solid ${lockState === 'lost' ? 'rgba(248,113,113,0.4)' : 'rgba(251,191,36,0.4)'}`,
-                    color: lockState === 'lost' ? '#f87171' : '#fbbf24',
+                <div role="status" style={{
+                    display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                    padding: '8px 12px', borderRadius: 10, fontSize: 13,
+                    background: TONE[lockTone].bg,
+                    border: `1px solid ${TONE[lockTone].border}`,
+                    color: TONE[lockTone].fg,
                 }}>
-                    <span style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                         {lockState}
                     </span>
-                    <span style={{ fontFamily: 'monospace', opacity: 0.85 }}>{lockMessage}</span>
+                    <span style={{ color: TEXT, minWidth: 0 }}>{lockMessage}</span>
                 </div>
             )}
 
@@ -501,49 +516,39 @@ export function PersonTrackerPanel() {
                 Shown whenever it fires OR is blocked. A climb the pilot
                 cannot explain is a climb they will fight, and being blocked by
                 the legal ceiling is different from being blocked because the
-                view has become too steep to recognise anything. */}
+                view has become too steep to recognise anything. Amber: it
+                moves the drone. */}
             {elevate && (elevate.elevating || elevate.blocked_by) && (
-                <div style={{
+                <div role="status" style={{
                     display: 'flex', alignItems: 'flex-start', gap: 8,
-                    padding: '6px 10px', borderRadius: 8, fontSize: 11, lineHeight: 1.5,
-                    background: elevate.elevating ? 'rgba(34,211,238,0.12)' : 'rgba(248,113,113,0.10)',
-                    border: `1px solid ${elevate.elevating ? 'rgba(34,211,238,0.4)' : 'rgba(248,113,113,0.35)'}`,
-                    color: elevate.elevating ? '#22d3ee' : '#f87171',
+                    padding: '8px 12px', borderRadius: 10, fontSize: 13, lineHeight: '18px',
+                    background: elevate.elevating ? TONE.warn.bg : TONE.danger.bg,
+                    border: `1px solid ${elevate.elevating ? TONE.warn.border : TONE.danger.border}`,
+                    color: TEXT,
                 }}>
-                    <MoveVertical size={13} style={{ marginTop: 1, flexShrink: 0 }} />
+                    <MoveVertical size={14} aria-hidden style={{ marginTop: 2, flexShrink: 0, color: elevate.elevating ? TONE.warn.fg : TONE.danger.fg }} />
                     <span>
-                        <b>{elevate.elevating ? 'Auto-elevating' : 'Cannot climb'}</b>
-                        {' - '}{elevate.reason}
+                        <b style={{ fontWeight: 700, color: elevate.elevating ? TONE.warn.fg : TONE.danger.fg }}>
+                            {elevate.elevating ? 'Climbing' : 'Cannot climb'}
+                        </b>
+                        {': '}{elevate.reason}
                     </span>
                 </div>
             )}
 
             {/* Stats bar */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <div style={{
-                    display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px',
-                    background: 'hsl(var(--app-surface-2))',
-                    border: '1px solid hsl(var(--app-border))',
-                    borderRadius: 8, fontSize: 11, fontFamily: 'monospace',
-                    color: 'hsl(var(--app-text-muted))',
-                }}>
-                    <Users size={12} /> {personCount} in frame
-                </div>
+                <span style={chip('muted')}>
+                    <Users size={13} aria-hidden /> {personCount} in view
+                </span>
                 {isTracking && (
-                    <div style={{
-                        display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px',
-                        background: faceConfirmed ? '#22d3ee18' : '#E6F1FB18',
-                        border: `1px solid ${faceConfirmed ? '#22d3ee' : '#85B7EB'}`,
-                        borderRadius: 8, fontSize: 11, fontFamily: 'monospace',
-                        color: faceConfirmed ? '#22d3ee' : '#60a5fa',
-                    }}>
-                        <Crosshair size={12} />
-                        {faceConfirmed ? `LOCKED #${targetId}` : 'SCANNING'}
-                    </div>
+                    <span style={chip(faceConfirmed ? 'ok' : 'accent')}>
+                        <Crosshair size={13} aria-hidden />
+                        {faceConfirmed ? `Locked #${targetId}` : 'Scanning'}
+                    </span>
                 )}
             </div>
 
-            {/* Photo upload section */}
             {/* ── Enrol from the live feed ────────────────────────────
                 Faster and more accurate than uploading a photo: the gallery
                 ends up holding this camera, lens, angle and lighting, which
@@ -552,87 +557,78 @@ export function PersonTrackerPanel() {
                 little else, and pose variation is the main way recognition
                 fails at drone standoff. */}
             {capture ? (
-                <div style={{
-                    display: 'flex', flexDirection: 'column', gap: 5,
-                    padding: '9px 10px', borderRadius: 10,
-                    background: 'rgba(56,160,255,0.10)',
-                    border: '1px solid rgba(56,160,255,0.35)',
+                <div role="status" style={{
+                    display: 'flex', flexDirection: 'column', gap: 8,
+                    padding: '10px 12px', borderRadius: 10,
+                    background: TONE.accent.bg,
+                    border: `1px solid ${TONE.accent.border}`,
                 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12 }}>
-                        <UserPlus size={13} style={{ color: '#38a0ff' }} />
-                        <span style={{ fontWeight: 700, color: '#38a0ff' }}>
-                            Enrolling {capture.name}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+                        <UserPlus size={14} style={{ color: TONE.accent.fg }} aria-hidden />
+                        <span style={{ fontWeight: 700, color: TEXT, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            Saving {capture.name}
                         </span>
-                        <span style={{ marginLeft: 'auto', fontSize: 11, fontFamily: 'monospace', color: '#38a0ff' }}>
+                        <span style={{ ...NUM, marginLeft: 'auto', fontSize: 13, fontWeight: 700, color: TONE.accent.fg }}>
                             {capture.shots}/{capture.needed}
                         </span>
                     </div>
-                    <div style={{ height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.10)' }}>
+                    <div style={{ height: 4, borderRadius: 999, background: BORDER, overflow: 'hidden' }}>
                         <div style={{
-                            width: `${(capture.shots / capture.needed) * 100}%`, height: '100%',
-                            borderRadius: 2, background: '#38a0ff', transition: 'width .2s',
+                            width: '100%', height: '100%', borderRadius: 999, background: TONE.accent.fg,
+                            transformOrigin: 'left', transform: `scaleX(${capture.shots / capture.needed})`,
+                            transition: 'transform var(--dur) var(--ease-out)',
                         }} />
                     </div>
-                    <div style={{ fontSize: 9.5, color: 'hsl(var(--app-text-muted))', lineHeight: 1.4 }}>
-                        Keep them in frame. Shots are spread over a couple of seconds so
-                        the gallery gets more than one pose.
+                    <div style={SECONDARY}>
+                        Keep them in view for a couple of seconds.
                     </div>
                     <button
+                        type="button"
                         onClick={() => getSocket().emit('enrol_person_live', { cancel: true })}
-                        style={{
-                            padding: '4px 0', borderRadius: 6, fontSize: 10, cursor: 'pointer',
-                            border: '1px solid hsl(var(--app-border))', background: 'transparent',
-                            color: 'hsl(var(--app-text-muted))',
-                        }}
+                        className={FOCUS}
+                        style={btn()}
                     >Cancel</button>
                 </div>
             ) : personCount > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                    <div style={{
-                        display: 'flex', alignItems: 'center', gap: 6, fontSize: 10,
-                        textTransform: 'uppercase', letterSpacing: 0.6,
-                        color: 'hsl(var(--app-text-muted))',
-                    }}>
-                        <UserPlus size={11} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ ...LABEL, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <UserPlus size={13} aria-hidden />
                         Add to database
                         {enrolTarget != null && (
-                            <span style={{ marginLeft: 'auto', textTransform: 'none', fontFamily: 'monospace' }}>
+                            <span style={{ ...NUM, marginLeft: 'auto', textTransform: 'none', letterSpacing: 0, fontWeight: 600 }}>
                                 #{enrolTarget}{targetId === enrolTarget ? ' (followed)' : ''}
                             </span>
                         )}
                     </div>
-                    <div style={{ display: 'flex', gap: 6 }}>
+                    <div style={{ display: 'flex', gap: 8 }}>
                         <input
                             value={enrolName}
                             onChange={e => setEnrolName(e.target.value)}
                             onKeyDown={e => { if (e.key === 'Enter') startEnrol() }}
-                            placeholder={enrolTarget != null ? `Name for #${enrolTarget}` : 'No one in frame'}
+                            placeholder={enrolTarget != null ? `Name for #${enrolTarget}` : 'No one in view'}
                             disabled={enrolTarget == null}
+                            aria-label="Name"
+                            className={FOCUS}
                             style={{
-                                flex: 1, minWidth: 0, padding: '6px 8px', borderRadius: 7,
-                                fontSize: 12, border: '1px solid hsl(var(--app-border))',
-                                background: 'hsl(var(--app-surface-2))', color: 'hsl(var(--app-text))',
+                                flex: 1, minWidth: 0, minHeight: 32, padding: '0 10px', borderRadius: 6,
+                                fontSize: 14, border: `1px solid ${BORDER_STRONG}`,
+                                background: SURFACE_2, color: TEXT,
                             }}
                         />
                         <button
+                            type="button"
                             onClick={startEnrol}
-                            disabled={!enrolName.trim() || enrolTarget == null}
-                            style={{
-                                padding: '6px 12px', borderRadius: 7, fontSize: 11, fontWeight: 600,
-                                cursor: enrolName.trim() && enrolTarget != null ? 'pointer' : 'not-allowed',
-                                border: '1px solid #38a0ff',
-                                background: enrolName.trim() && enrolTarget != null
-                                    ? 'rgba(56,160,255,0.15)' : 'transparent',
-                                color: enrolName.trim() && enrolTarget != null
-                                    ? '#38a0ff' : 'hsl(var(--app-text-muted))',
-                            }}
+                            disabled={!canCapture}
+                            title={canCapture ? undefined : enrolTarget == null ? 'No one in view' : 'Type a name first'}
+                            className={FOCUS}
+                            style={canCapture ? btn('primary') : { ...btn(), ...DISABLED }}
                         >Capture</button>
                     </div>
-                    <div style={{ fontSize: 9.5, color: 'hsl(var(--app-text-muted))' }}>
-                        Tap someone on the video to pick who, then name them here.
+                    <div style={SECONDARY}>
+                        Tap someone on the video, then name them.
                     </div>
                     {enrolMsg && (
-                        <div style={{ fontSize: 10, color: '#38a0ff' }}>{enrolMsg}</div>
+                        <div role="status" style={{ fontSize: 13, color: TONE.accent.fg }}>{enrolMsg}</div>
                     )}
                 </div>
             )}
@@ -648,165 +644,134 @@ export function PersonTrackerPanel() {
                 margin={galleryMargin}
             />
 
-            {/* Track / Stop */}
+            {/* Track / Stop. Amber: starting moves the drone. */}
             <div style={{ display: 'flex', gap: 8 }}>
                 {!isTracking ? (
-                    <Button
-                        size="sm"
-                        className="flex-1 gap-2 font-mono text-xs"
+                    <button
+                        type="button"
                         disabled={!canTrack}
                         onClick={handleStartTracking}
+                        title={canTrack ? 'The drone turns and moves to follow' : 'Tap someone on the video or upload a photo first'}
+                        className={FOCUS}
                         style={{
-                            background: canTrack ? '#0e6b6b' : undefined,
-                            opacity: canTrack ? 1 : 0.5,
+                            ...(canTrack ? btn('warn') : { ...btn(), ...DISABLED }),
+                            flex: 1, minHeight: 36, fontSize: 14, fontWeight: 700,
                         }}
                     >
-                        <Crosshair size={13} />
-                        {canTrack ? 'Start Tracking' : 'Select someone or upload a photo'}
-                    </Button>
+                        <Crosshair size={14} aria-hidden />
+                        {canTrack ? 'Start tracking' : 'Pick someone first'}
+                    </button>
                 ) : (
-                    <Button
-                        size="sm"
-                        variant="destructive"
-                        className="flex-1 gap-2 font-mono text-xs"
+                    <button
+                        type="button"
                         onClick={handleStopTracking}
+                        className={FOCUS}
+                        style={{ ...btn('danger'), flex: 1, minHeight: 36, fontSize: 14, fontWeight: 700 }}
                     >
-                        <Square size={13} />
-                        Stop Tracking
-                    </Button>
+                        <Square size={14} aria-hidden />
+                        Stop tracking
+                    </button>
                 )}
             </div>
 
             {/* ── Flight Controls ─────────────────────────────────────────── */}
-            <div style={{ borderRadius: 8, border: '1px solid hsl(var(--app-border))' }}>
+            <div style={{ borderRadius: 10, border: `1px solid ${BORDER}`, overflow: 'hidden' }}>
                 <div style={{
-                    padding: '7px 12px', background: 'hsl(var(--app-surface-2))',
-                    borderBottom: '1px solid hsl(var(--app-border))',
-                    fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))',
+                    ...LABEL,
+                    padding: '8px 12px', background: SURFACE_2,
+                    borderBottom: `1px solid ${BORDER}`,
                 }}>
-                    FLIGHT CONTROLS
+                    Flight controls
                 </div>
-                <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: 12 }}>
 
                     {/* ── Distance ── */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <MoveVertical size={12} style={{ color: 'hsl(var(--app-text-muted))', transform: 'rotate(90deg)' }} />
-                            <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>Distance</span>
-                            <Tooltip>
-                                <TooltipTrigger style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'help' }}>
-                                    <Info size={10} style={{ color: 'hsl(var(--app-text-muted))' }} />
-                                </TooltipTrigger>
-                                <TooltipContent style={{ maxWidth: 240, fontSize: 11, lineHeight: 1.5 }}>
-                                    Frame height = 100%. The drone moves forward or backward to keep the target filling {Math.round(distanceRatio * 100)}% of the frame.
-                                    Drag the slider or press − / + to step. Each + press moves 6% closer.
-                                </TooltipContent>
-                            </Tooltip>
-                            <span style={{ marginLeft: 'auto', fontSize: 10, fontFamily: 'monospace', color: '#22d3ee' }}>
+                            <MoveVertical size={13} style={{ color: MUTED, transform: 'rotate(90deg)' }} aria-hidden />
+                            <span style={{ fontSize: 13, fontWeight: 600, color: TEXT }}>Distance</span>
+                            <InfoTip width={240}>
+                                The drone moves in or out to keep the person {Math.round(distanceRatio * 100)}% of the frame height. Each + is 6% closer.
+                            </InfoTip>
+                            <span style={{ ...NUM, marginLeft: 'auto', fontSize: 13, fontWeight: 700, color: TONE.accent.fg }}>
                                 {distanceLabel(distanceRatio)} · {Math.round(distanceRatio * 100)}%
                             </span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <button
+                                type="button"
                                 onClick={handleFurther}
                                 title="Step further"
-                                style={{
-                                    width: 28, height: 28, borderRadius: 6, flexShrink: 0,
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    border: '1px solid hsl(var(--app-border))',
-                                    background: 'hsl(var(--app-surface-2))',
-                                    cursor: 'pointer', fontSize: 18, lineHeight: 1,
-                                    color: 'hsl(var(--app-text))',
-                                }}
+                                aria-label="Step further"
+                                className={FOCUS}
+                                style={{ ...btn(), width: 32, padding: 0, fontSize: 18, flexShrink: 0 }}
                             >−</button>
                             <input
                                 type="range"
                                 min={DISTANCE_MIN * 100} max={DISTANCE_MAX * 100} step={1}
                                 value={Math.round(distanceRatio * 100)}
                                 onChange={e => handleDistanceChange(parseFloat(e.target.value) / 100)}
-                                style={{ flex: 1, accentColor: '#22d3ee', cursor: 'pointer' }}
+                                aria-label="Distance"
+                                className={FOCUS}
+                                style={{ flex: 1, minWidth: 0, minHeight: 24, accentColor: 'var(--app-accent)', cursor: 'pointer' }}
                             />
                             <button
+                                type="button"
                                 onClick={handleCloser}
                                 title="Step closer"
-                                style={{
-                                    width: 28, height: 28, borderRadius: 6, flexShrink: 0,
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    border: '1px solid hsl(var(--app-border))',
-                                    background: 'hsl(var(--app-surface-2))',
-                                    cursor: 'pointer', fontSize: 18, lineHeight: 1,
-                                    color: 'hsl(var(--app-text))',
-                                }}
+                                aria-label="Step closer"
+                                className={FOCUS}
+                                style={{ ...btn(), width: 32, padding: 0, fontSize: 18, flexShrink: 0 }}
                             >+</button>
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0 36px' }}>
-                            <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>Far</span>
-                            <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>Close</span>
+                        <div style={{ ...SECONDARY, fontSize: 12, display: 'flex', justifyContent: 'space-between', padding: '0 40px' }}>
+                            <span>Far</span>
+                            <span>Close</span>
                         </div>
                     </div>
 
-                    <div style={{ height: 1, background: 'hsl(var(--app-border))', margin: '0 -12px' }} />
+                    <div style={{ height: 1, background: BORDER, margin: '0 -12px' }} />
 
                     {/* ── Altitude ── */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <Mountain size={12} style={{ color: 'hsl(var(--app-text-muted))' }} />
-                                <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>Altitude</span>
-                                <Tooltip>
-                                    <TooltipTrigger style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'help' }}>
-                                        <Info size={10} style={{ color: 'hsl(var(--app-text-muted))' }} />
-                                    </TooltipTrigger>
-                                    <TooltipContent style={{ maxWidth: 220, fontSize: 11, lineHeight: 1.5 }}>
-                                        Fixed: drone holds current altitude. Hold ▲/▼ to nudge up or down while tracking.
-                                        Auto: altitude PD follows the target vertically (experimental).
-                                    </TooltipContent>
-                                </Tooltip>
+                                <Mountain size={13} style={{ color: MUTED }} aria-hidden />
+                                <span style={{ fontSize: 13, fontWeight: 600, color: TEXT }}>Height</span>
+                                <InfoTip>
+                                    Fixed: holds the current height; hold Up or Down to nudge while tracking.
+                                    Auto: follows the person up and down (experimental).
+                                </InfoTip>
                             </div>
-                            <div style={{ display: 'flex', gap: 4 }}>
-                                <PillToggle active={altitudeMode === 'fixed'} onClick={() => handleAltitudeMode('fixed')}>FIXED</PillToggle>
-                                <PillToggle active={altitudeMode === 'auto'} onClick={() => handleAltitudeMode('auto')}>AUTO</PillToggle>
+                            <div style={{ display: 'flex', gap: 4 }} role="group" aria-label="Altitude mode">
+                                <PillToggle active={altitudeMode === 'fixed'} onClick={() => handleAltitudeMode('fixed')}>Fixed</PillToggle>
+                                <PillToggle active={altitudeMode === 'auto'} onClick={() => handleAltitudeMode('auto')}>Auto</PillToggle>
                             </div>
                         </div>
                         {altitudeMode === 'fixed' && (
-                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                                 <button
+                                    type="button"
                                     onPointerDown={() => { if (isTracking) getSocket().emit('set_altitude_nudge', { velocity: -0.4 }) }}
                                     onPointerUp={() => getSocket().emit('set_altitude_nudge', { velocity: 0 })}
                                     onPointerLeave={() => getSocket().emit('set_altitude_nudge', { velocity: 0 })}
                                     disabled={!isTracking}
-                                    style={{
-                                        flex: 1, padding: '5px 0', borderRadius: 6, fontSize: 10,
-                                        fontFamily: 'monospace', fontWeight: 600,
-                                        cursor: isTracking ? 'pointer' : 'not-allowed',
-                                        border: '1px solid hsl(var(--app-border))',
-                                        background: 'hsl(var(--app-surface-2))',
-                                        color: 'hsl(var(--app-text))',
-                                        opacity: isTracking ? 1 : 0.4,
-                                        userSelect: 'none',
-                                    }}
+                                    title={isTracking ? 'Hold to climb' : 'Start tracking first'}
+                                    className={FOCUS}
+                                    style={{ ...(isTracking ? btn() : { ...btn(), ...DISABLED }), flex: 1, userSelect: 'none' }}
                                 >▲ Up</button>
-                                <span style={{
-                                    flex: '1 1 0', fontSize: 9, fontFamily: 'monospace',
-                                    color: 'hsl(var(--app-text-muted))', textAlign: 'center',
-                                }}>
-                                    {isTracking ? 'Hold to move' : 'Start tracking first'}
+                                <span style={{ ...SECONDARY, flex: '1 1 0', fontSize: 12, textAlign: 'center' }}>
+                                    {isTracking ? 'Hold to move' : 'Track first'}
                                 </span>
                                 <button
+                                    type="button"
                                     onPointerDown={() => { if (isTracking) getSocket().emit('set_altitude_nudge', { velocity: 0.4 }) }}
                                     onPointerUp={() => getSocket().emit('set_altitude_nudge', { velocity: 0 })}
                                     onPointerLeave={() => getSocket().emit('set_altitude_nudge', { velocity: 0 })}
                                     disabled={!isTracking}
-                                    style={{
-                                        flex: 1, padding: '5px 0', borderRadius: 6, fontSize: 10,
-                                        fontFamily: 'monospace', fontWeight: 600,
-                                        cursor: isTracking ? 'pointer' : 'not-allowed',
-                                        border: '1px solid hsl(var(--app-border))',
-                                        background: 'hsl(var(--app-surface-2))',
-                                        color: 'hsl(var(--app-text))',
-                                        opacity: isTracking ? 1 : 0.4,
-                                        userSelect: 'none',
-                                    }}
+                                    title={isTracking ? 'Hold to descend' : 'Start tracking first'}
+                                    className={FOCUS}
+                                    style={{ ...(isTracking ? btn() : { ...btn(), ...DISABLED }), flex: 1, userSelect: 'none' }}
                                 >▼ Down</button>
                             </div>
                         )}
@@ -818,28 +783,29 @@ export function PersonTrackerPanel() {
             {/* Live similarity badge */}
             {isTracking && faceConfirmed && similarity > 0 && (
                 <div style={{
-                    padding: '8px 12px', borderRadius: 8,
-                    background: '#22d3ee10', border: '1px solid #22d3ee40',
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '8px 12px', borderRadius: 10,
+                    background: TONE.accent.bg, border: `1px solid ${TONE.accent.border}`,
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
                 }}>
-                    <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
-                        Face similarity
+                    <span style={{ fontSize: 13, color: TEXT }}>
+                        Face match
                     </span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         {/* Mini bar */}
                         <div style={{
-                            width: 60, height: 4, borderRadius: 2,
-                            background: 'hsl(var(--app-border))', overflow: 'hidden',
+                            width: 60, height: 4, borderRadius: 999,
+                            background: BORDER, overflow: 'hidden',
                         }}>
                             <div style={{
-                                height: '100%', borderRadius: 2,
-                                width: `${Math.min(100, similarity * 100 / 0.7)}%`,
-                                background: similarity >= 0.55 ? '#22d3ee' : '#f59e0b',
-                                transition: 'width 0.3s',
+                                height: '100%', width: '100%', borderRadius: 999,
+                                transformOrigin: 'left',
+                                transform: `scaleX(${Math.min(1, similarity / 0.7)})`,
+                                background: similarity >= 0.55 ? TONE.ok.fg : TONE.warn.fg,
+                                transition: 'transform var(--dur-slow) var(--ease-out)',
                             }} />
                         </div>
-                        <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#22d3ee', fontWeight: 500 }}>
-                            {(similarity * 100).toFixed(0)}%
+                        <span style={{ ...NUM, fontSize: 16, fontWeight: 700, color: TEXT }}>
+                            {(similarity * 100).toFixed(0)}<span style={{ fontSize: 12, color: MUTED, marginLeft: 1 }}>%</span>
                         </span>
                     </div>
                 </div>
@@ -847,19 +813,15 @@ export function PersonTrackerPanel() {
 
             {/* Live PD command */}
             {isTracking && cmd && (
-                <div style={{
-                    padding: '10px 12px', borderRadius: 8,
-                    background: 'hsl(var(--app-surface-2))',
-                    border: '1px solid hsl(var(--app-border))',
-                }}>
-                    <div style={{ fontSize: 10, color: 'hsl(var(--app-text-muted))', fontFamily: 'monospace', marginBottom: 6 }}>
-                        PD COMMAND OUTPUT
+                <div style={{ ...TILE, padding: '10px 12px' }}>
+                    <div style={{ ...LABEL, marginBottom: 6 }}>
+                        Steering output
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, fontFamily: 'monospace', fontSize: 11 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', fontSize: 13 }}>
                         {Object.entries(cmd).filter(([k]) => k !== 'type').map(([k, v]) => (
-                            <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                                <span style={{ color: 'hsl(var(--app-text-muted))' }}>{k}</span>
-                                <span style={{ color: (v as number) !== 0 ? '#22d3ee' : 'hsl(var(--app-text-muted))', fontWeight: 500 }}>
+                            <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, minWidth: 0 }}>
+                                <span className="font-code" style={{ color: MUTED, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis' }}>{k}</span>
+                                <span style={{ ...NUM, color: (v as number) !== 0 ? TONE.accent.fg : MUTED, fontWeight: 700 }}>
                                     {v as number}
                                 </span>
                             </div>
@@ -869,22 +831,25 @@ export function PersonTrackerPanel() {
             )}
 
             {/* PD tuning - collapsible */}
-            <div style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid hsl(var(--app-border))' }}>
+            <div style={{ borderRadius: 10, overflow: 'hidden', border: `1px solid ${BORDER}` }}>
                 <button
+                    type="button"
                     onClick={() => setPdOpen(o => !o)}
+                    aria-expanded={pdOpen}
+                    className={FOCUS}
                     style={{
+                        ...LABEL,
                         width: '100%', display: 'flex', alignItems: 'center',
-                        justifyContent: 'space-between', padding: '8px 12px',
-                        background: 'hsl(var(--app-surface-2))', border: 'none', cursor: 'pointer',
-                        color: 'hsl(var(--app-text-muted))', fontSize: 10, fontFamily: 'monospace',
-                        borderBottom: pdOpen ? '1px solid hsl(var(--app-border))' : 'none',
+                        justifyContent: 'space-between', minHeight: 36, padding: '0 12px',
+                        background: SURFACE_2, border: 'none', cursor: 'pointer',
+                        borderBottom: pdOpen ? `1px solid ${BORDER}` : 'none',
                     }}
                 >
-                    <span>PD CONTROLLER TUNING</span>
-                    {pdOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                    <span>Follow tuning</span>
+                    {pdOpen ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
                 </button>
                 {pdOpen && (
-                    <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: 12 }}>
                         {PD_PARAMS.map(p => (
                             <ParamSlider
                                 key={p.key}
@@ -896,20 +861,17 @@ export function PersonTrackerPanel() {
                             />
                         ))}
                         {isTracking && (
-                            <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: 0 }}>
-                                Stop tracking to adjust parameters
+                            <p style={{ ...SECONDARY, margin: 0 }}>
+                                Stop tracking to change these.
                             </p>
                         )}
                         <button
+                            type="button"
                             onClick={() => { setPd(savedPd); emitPdParams(savedPd) }}
                             disabled={isTracking}
-                            style={{
-                                fontSize: 10, fontFamily: 'monospace', padding: '4px 8px',
-                                borderRadius: 6, border: '1px solid hsl(var(--app-border))',
-                                background: 'none', cursor: isTracking ? 'not-allowed' : 'pointer',
-                                color: 'hsl(var(--app-text-muted))', opacity: isTracking ? 0.4 : 1,
-                                alignSelf: 'flex-end',
-                            }}
+                            title={lockedOut}
+                            className={FOCUS}
+                            style={{ ...(isTracking ? { ...btn(), ...DISABLED } : btn()), alignSelf: 'flex-end' }}
                         >
                             Reset to saved
                         </button>

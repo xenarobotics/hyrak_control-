@@ -25,9 +25,8 @@ export function ViewOnlyNote({ tone = 'dark', compact }: { tone?: 'dark' | 'simp
     }
     return (
         <p role="note" title={VIEW_ONLY_TEXT}
-            className="flex items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[10px] leading-snug"
-            style={{ borderColor: 'rgba(34,211,238,.35)', background: 'rgba(34,211,238,.08)', color: '#a5f3fc' }}>
-            <Eye size={11} className="shrink-0" />
+            className="flex items-center gap-1.5 rounded-md border border-app-border bg-app-accent-soft px-2 py-1 text-[12px] font-semibold leading-snug text-app-accent">
+            <Eye size={14} className="shrink-0" />
             {compact ? 'VIEW ONLY' : VIEW_ONLY_TEXT}
         </p>
     )

@@ -167,7 +167,7 @@ export function FleetAside() {
                 style={{ borderColor: 'hsl(var(--app-border))' }}
             >
                 <span
-                    className="text-[10px] font-mono tracking-widest"
+                    className="text-[12px] font-bold uppercase tracking-[0.04em]"
                     style={{ color: 'hsl(var(--app-text-muted))' }}
                 >
                     FLEET
@@ -176,13 +176,13 @@ export function FleetAside() {
                     <button
                         onClick={() => setShowRelay(v => !v)}
                         title="Connect a client's own remote SITL swarm (sitl_relay/swarm_relay.py)"
-                        className="rounded p-0.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors relative"
+                        className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-app-surface-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg relative"
                     >
-                        <Cable size={12} style={{ color: relayConnected ? '#10b981' : 'hsl(var(--app-text-muted))' }} />
+                        <Cable size={15} style={{ color: relayConnected ? 'var(--app-ok)' : 'hsl(var(--app-text-muted))' }} />
                         {relayConnected && (
                             <span
                                 className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full"
-                                style={{ background: '#10b981' }}
+                                style={{ background: 'var(--app-ok)' }}
                             />
                         )}
                     </button>
@@ -190,10 +190,10 @@ export function FleetAside() {
                         onClick={triggerScan}
                         disabled={scanStatus === 'scanning'}
                         title="Re-scan for drones"
-                        className="rounded p-0.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-40"
+                        className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-app-surface-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg disabled:opacity-40"
                     >
                         <RefreshCw
-                            size={12}
+                            size={15}
                             className={scanStatus === 'scanning' ? 'animate-spin' : ''}
                             style={{ color: 'hsl(var(--app-text-muted))' }}
                         />
@@ -201,17 +201,17 @@ export function FleetAside() {
                     <button
                         onClick={() => setShowAdd(v => !v)}
                         title="Add drone manually"
-                        className="rounded p-0.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                        className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-app-surface-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg"
                     >
-                        <Plus size={12} style={{ color: 'hsl(var(--app-text-muted))' }} />
+                        <Plus size={15} style={{ color: 'hsl(var(--app-text-muted))' }} />
                     </button>
                     {droneList.length > 0 && (
                         <button
                             onClick={handleDisconnectAll}
                             title="Disconnect all drones"
-                            className="rounded p-0.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                            className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-app-surface-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg"
                         >
-                            <Unplug size={12} style={{ color: '#f87171' }} />
+                            <Unplug size={15} style={{ color: 'var(--app-danger)' }} />
                         </button>
                     )}
                 </div>
@@ -226,14 +226,14 @@ export function FleetAside() {
                     style={{ borderColor: 'hsl(var(--app-border))' }}
                 >
                     <div className="flex items-center justify-between mb-0.5">
-                        <span className="text-[9px] font-mono tracking-wider" style={{ color: 'hsl(var(--app-text-muted))' }}>
+                        <span className="text-[12px] font-bold uppercase tracking-[0.04em]" style={{ color: 'hsl(var(--app-text-muted))' }}>
                             REMOTE SWARM RELAY
                         </span>
-                        <button onClick={() => setShowRelay(false)}>
-                            <X size={10} style={{ color: 'hsl(var(--app-text-muted))' }} />
+                        <button onClick={() => setShowRelay(false)} aria-label="Close" title="Close" className="h-8 w-8 -mr-2 flex items-center justify-center rounded-md hover:bg-app-surface-2 outline-none focus-visible:ring-2 focus-visible:ring-app-accent">
+                            <X size={14} style={{ color: 'hsl(var(--app-text-muted))' }} />
                         </button>
                     </div>
-                    <p className="text-[9px] font-mono leading-relaxed" style={{ color: 'hsl(var(--app-text-muted))' }}>
+                    <p className="text-[12px] leading-relaxed" style={{ color: 'hsl(var(--app-text-muted))' }}>
                         {isDesktopApp()
                             ? 'For a swarm running on your own machine. The desktop app bridges it directly - nothing else to run.'
                             : <>For a swarm running on your own machine, not this one. Run{' '}
@@ -245,21 +245,21 @@ export function FleetAside() {
                             onChange={e => { setRelayUrl(e.target.value); setSwarmRelayUrl(e.target.value) }}
                             disabled={relayConnected}
                             placeholder={DEFAULT_SWARM_RELAY_URL}
-                            className="w-full text-xs px-2 py-1.5 rounded border bg-transparent outline-none focus:border-cyan-500 transition-colors disabled:opacity-60"
+                            className="w-full text-[13px] px-2 py-1.5 rounded border bg-transparent outline-none focus-visible:border-app-accent focus-visible:ring-2 focus-visible:ring-app-accent transition-colors disabled:opacity-60"
                             style={{ borderColor: 'hsl(var(--app-border))', color: 'hsl(var(--app-text))' }}
                         />
                     )}
                     {relayError && (
-                        <p className="text-[9px] font-mono" style={{ color: '#ef4444' }}>{relayError}</p>
+                        <p className="text-[12px]" style={{ color: 'var(--app-danger)' }}>{relayError}</p>
                     )}
                     <button
                         onClick={relayConnected ? handleRelayDisconnect : handleRelayConnect}
                         disabled={relayBusy}
-                        className="w-full text-xs py-1.5 rounded font-mono transition-colors disabled:opacity-50"
+                        className="w-full text-[13px] py-1.5 rounded transition-colors disabled:opacity-50"
                         style={{
-                            background: relayConnected ? 'transparent' : '#22d3ee',
-                            border: relayConnected ? '1px solid #ef4444' : 'none',
-                            color: relayConnected ? '#ef4444' : 'black',
+                            background: relayConnected ? 'transparent' : 'var(--app-accent)',
+                            border: relayConnected ? '1px solid var(--app-danger)' : 'none',
+                            color: relayConnected ? 'var(--app-danger)' : 'var(--app-accent-ink)',
                         }}
                     >
                         {relayBusy ? 'Connecting…' : relayConnected ? 'Disconnect relay' : 'Connect relay'}
@@ -270,22 +270,22 @@ export function FleetAside() {
             {/* Fleet summary strip */}
             {droneList.length > 0 && (
                 <div
-                    className="flex items-center gap-2 px-3 py-1.5 text-[9px] font-mono border-b shrink-0"
+                    className="flex items-center gap-2 px-3 py-1.5 text-[12px] border-b shrink-0"
                     style={{ borderColor: 'hsl(var(--app-border))', color: 'hsl(var(--app-text-muted))' }}
                 >
-                    <span style={{ color: connected.length ? '#10b981' : undefined }}>
+                    <span style={{ color: connected.length ? 'var(--app-ok)' : undefined }}>
                         {connected.length}/{droneList.length} ONLINE
                     </span>
-                    <span style={{ color: armed.length ? '#f59e0b' : undefined }}>
+                    <span style={{ color: armed.length ? 'var(--app-warn)' : undefined }}>
                         {armed.length} ARMED
                     </span>
-                    <span style={{ color: flying.length ? '#22d3ee' : undefined }}>
+                    <span style={{ color: flying.length ? 'var(--app-accent)' : undefined }}>
                         {flying.length} AIR
                     </span>
                     {minBatt != null && (
                         <span
                             className="ml-auto"
-                            style={{ color: minBatt < 25 ? '#ef4444' : undefined }}
+                            style={{ color: minBatt < 25 ? 'var(--app-danger)' : undefined }}
                             title="Lowest battery in fleet"
                         >
                             ▼{minBatt.toFixed(0)}%
@@ -297,8 +297,8 @@ export function FleetAside() {
             {/* Scan status banner */}
             {scanStatus === 'scanning' && (
                 <div
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-[9px] font-mono border-b shrink-0"
-                    style={{ borderColor: 'hsl(var(--app-border))', color: '#22d3ee' }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] border-b shrink-0"
+                    style={{ borderColor: 'hsl(var(--app-border))', color: 'var(--app-accent)' }}
                 >
                     <ScanLine size={10} className="animate-pulse" />
                     Scanning for drones…
@@ -306,7 +306,7 @@ export function FleetAside() {
             )}
             {scanStatus === 'done' && droneList.length === 0 && (
                 <div
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-[9px] font-mono border-b shrink-0"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] border-b shrink-0"
                     style={{ borderColor: 'hsl(var(--app-border))', color: 'hsl(var(--app-text-muted))' }}
                 >
                     No SITL drones found
@@ -322,21 +322,21 @@ export function FleetAside() {
                     <div className="flex items-center justify-between px-1">
                         <button
                             onClick={() => setSelected(allSelected ? [] : connected.map(d => d.id))}
-                            className="flex items-center gap-1 text-[9px] font-mono hover:opacity-80 transition-opacity"
+                            className="flex items-center gap-1 text-[12px] hover:opacity-80 transition-opacity"
                             style={{ color: 'hsl(var(--app-text-muted))' }}
                         >
                             <span
                                 className="w-3 h-3 rounded-sm border flex items-center justify-center"
                                 style={{
                                     borderColor: 'hsl(var(--app-border))',
-                                    background: allSelected ? '#22d3ee' : 'transparent',
+                                    background: allSelected ? 'var(--app-accent)' : 'transparent',
                                 }}
                             >
                                 {allSelected && <Check size={9} className="text-black" />}
                             </span>
                             {targetIds.length ? `${targetIds.length} SELECTED` : 'SELECT ALL'}
                         </button>
-                        <span className="text-[9px] font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>
+                        <span className="text-[12px]" style={{ color: 'hsl(var(--app-text-muted))' }}>
                             FLEET CMD
                         </span>
                     </div>
@@ -351,15 +351,15 @@ export function FleetAside() {
                             max={120}
                             value={groupAlt}
                             onChange={e => setGroupAlt(Math.max(1, Number(e.target.value) || 1))}
-                            className="w-14 text-[10px] font-mono px-1.5 py-1 rounded border bg-transparent outline-none focus:border-cyan-500 transition-colors"
+                            className="w-14 text-[12px] px-1.5 py-1 rounded border bg-transparent outline-none focus-visible:border-app-accent focus-visible:ring-2 focus-visible:ring-app-accent transition-colors"
                             style={{ borderColor: 'hsl(var(--app-border))', color: 'hsl(var(--app-text))' }}
                             title="Fleet altitude target (m)"
                         />
-                        <span className="text-[9px] font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>m</span>
+                        <span className="text-[12px]" style={{ color: 'hsl(var(--app-text-muted))' }}>m</span>
                         <button
                             onClick={() => sendGroup('set_altitude', { altitude: groupAlt })}
                             disabled={targetIds.length === 0}
-                            className="flex-1 flex items-center justify-center gap-1 text-[9px] font-mono py-1.5 rounded border transition-colors hover:border-cyan-500 hover:text-cyan-400 disabled:opacity-40"
+                            className="flex-1 flex items-center justify-center gap-1 text-[12px] py-1.5 rounded border transition-colors hover:border-cyan-500 hover:text-cyan-400 disabled:opacity-40"
                             style={{ borderColor: 'hsl(var(--app-border))', color: 'hsl(var(--app-text-muted))' }}
                             title={`All targeted drones fly to ${groupAlt} m (grounded ones take off to it)`}
                         >
@@ -373,8 +373,8 @@ export function FleetAside() {
                     <button
                         onClick={() => sendGroup('arm_and_start_mission')}
                         disabled={targetIds.length === 0}
-                        className="flex items-center justify-center gap-1 text-[9px] font-mono py-1.5 rounded border transition-colors hover:border-green-500 hover:text-green-400 disabled:opacity-40"
-                        style={{ borderColor: 'hsl(var(--app-border))', color: '#4ade80' }}
+                        className="flex items-center justify-center gap-1 text-[12px] py-1.5 rounded border transition-colors hover:border-green-500 hover:text-green-400 disabled:opacity-40"
+                        style={{ borderColor: 'hsl(var(--app-border))', color: 'var(--app-ok)' }}
                         title="Arm + start the uploaded mission on every ticked drone"
                     >
                         <PlayCircle size={10} />
@@ -384,11 +384,11 @@ export function FleetAside() {
                     <button
                         onClick={handleKill}
                         disabled={targetIds.length === 0}
-                        className="flex items-center justify-center gap-1 text-[9px] font-mono py-1.5 rounded border transition-colors disabled:opacity-40"
+                        className="flex items-center justify-center gap-1 text-[12px] py-1.5 rounded border transition-colors disabled:opacity-40"
                         style={{
-                            borderColor: killConfirm ? '#ef4444' : 'hsl(var(--app-border))',
-                            color: '#ef4444',
-                            background: killConfirm ? '#ef444422' : 'transparent',
+                            borderColor: killConfirm ? 'var(--app-danger)' : 'hsl(var(--app-border))',
+                            color: 'var(--app-danger)',
+                            background: killConfirm ? 'var(--app-danger-soft)' : 'transparent',
                         }}
                     >
                         <Zap size={10} />
@@ -397,10 +397,10 @@ export function FleetAside() {
 
                     {lastGroupResult && (
                         <div
-                            className="text-[9px] font-mono text-center py-0.5 rounded"
+                            className="text-[12px] text-center py-0.5 rounded"
                             style={{
-                                color: lastGroupResult.okCount === lastGroupResult.total ? '#10b981' : '#f59e0b',
-                                background: (lastGroupResult.okCount === lastGroupResult.total ? '#10b981' : '#f59e0b') + '15',
+                                color: lastGroupResult.okCount === lastGroupResult.total ? 'var(--app-ok)' : 'var(--app-warn)',
+                                background: lastGroupResult.okCount === lastGroupResult.total ? 'var(--app-ok-soft)' : 'var(--app-warn-soft)',
                             }}
                         >
                             {lastGroupResult.action.toUpperCase()}: {lastGroupResult.okCount}/{lastGroupResult.total} OK
@@ -410,13 +410,13 @@ export function FleetAside() {
                     {/* Latest supervisor alert (full feed on the mission page) */}
                     {latestAlert && (
                         <div
-                            className="flex items-center gap-1.5 text-[9px] font-mono px-1.5 py-1 rounded truncate"
+                            className="flex items-center gap-1.5 text-[12px] px-1.5 py-1 rounded truncate"
                             title={latestAlert.msg}
                             style={{
-                                color: latestAlert.severity === 'critical' ? '#f87171'
-                                    : latestAlert.severity === 'warn' ? '#fbbf24' : '#22d3ee',
-                                background: (latestAlert.severity === 'critical' ? '#f87171'
-                                    : latestAlert.severity === 'warn' ? '#fbbf24' : '#22d3ee') + '12',
+                                color: latestAlert.severity === 'critical' ? 'var(--app-danger)'
+                                    : latestAlert.severity === 'warn' ? 'var(--app-warn)' : 'var(--app-accent)',
+                                background: latestAlert.severity === 'critical' ? 'var(--app-danger-soft)'
+                                    : latestAlert.severity === 'warn' ? 'var(--app-warn-soft)' : 'var(--app-accent-soft)',
                             }}
                         >
                             <span
@@ -436,29 +436,29 @@ export function FleetAside() {
                     style={{ borderColor: 'hsl(var(--app-border))' }}
                 >
                     <div className="flex items-center justify-between mb-0.5">
-                        <span className="text-[9px] font-mono tracking-wider" style={{ color: 'hsl(var(--app-text-muted))' }}>
+                        <span className="text-[12px] font-bold uppercase tracking-[0.04em]" style={{ color: 'hsl(var(--app-text-muted))' }}>
                             MANUAL CONNECT
                         </span>
                         <button onClick={() => setShowAdd(false)}>
-                            <X size={10} style={{ color: 'hsl(var(--app-text-muted))' }} />
+                            <X size={14} style={{ color: 'hsl(var(--app-text-muted))' }} />
                         </button>
                     </div>
                     <input
                         value={form.name}
                         onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                         placeholder="Name (e.g. Drone 2)"
-                        className="w-full text-xs px-2 py-1.5 rounded border bg-transparent outline-none focus:border-cyan-500 transition-colors"
+                        className="w-full text-[13px] px-2 py-1.5 rounded border bg-transparent outline-none focus-visible:border-app-accent focus-visible:ring-2 focus-visible:ring-app-accent transition-colors"
                         style={{ borderColor: 'hsl(var(--app-border))', color: 'hsl(var(--app-text))' }}
                     />
                     <input
                         value={form.port}
                         onChange={e => setForm(f => ({ ...f, port: e.target.value }))}
                         placeholder="UDP port (e.g. 14541)"
-                        className="w-full text-xs px-2 py-1.5 rounded border bg-transparent outline-none focus:border-cyan-500 transition-colors"
+                        className="w-full text-[13px] px-2 py-1.5 rounded border bg-transparent outline-none focus-visible:border-app-accent focus-visible:ring-2 focus-visible:ring-app-accent transition-colors"
                         style={{ borderColor: 'hsl(var(--app-border))', color: 'hsl(var(--app-text))' }}
                     />
                     <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>Color</span>
+                        <span className="text-[12px]" style={{ color: 'hsl(var(--app-text-muted))' }}>Color</span>
                         <div className="flex gap-1.5 flex-wrap">
                             {FLEET_COLORS.slice(0, 10).map(c => (
                                 <button
@@ -476,7 +476,7 @@ export function FleetAside() {
                     </div>
                     <button
                         onClick={handleConnect}
-                        className="w-full text-xs py-1.5 rounded bg-cyan-500 hover:bg-cyan-600 text-white font-mono transition-colors"
+                        className="w-full text-[13px] py-1.5 rounded bg-app-accent text-[var(--app-accent-ink)] hover:brightness-110 font-bold transition-colors"
                     >
                         Connect
                     </button>
@@ -486,7 +486,7 @@ export function FleetAside() {
             {/* Active drone label */}
             {activeDroneId !== null && drones[activeDroneId] && (
                 <div
-                    className="flex items-center justify-between px-3 py-1.5 text-[9px] font-mono shrink-0 border-b"
+                    className="flex items-center justify-between px-3 py-1.5 text-[12px] shrink-0 border-b"
                     style={{ borderColor: 'hsl(var(--app-border))' }}
                 >
                     <span style={{ color: 'hsl(var(--app-text-muted))' }}>Controlling</span>
@@ -506,7 +506,7 @@ export function FleetAside() {
             <div className="flex-1 overflow-y-auto py-2 min-h-0">
                 {droneList.length === 0 && scanStatus === 'idle' && (
                     <p
-                        className="text-center text-[10px] font-mono mt-8 px-4 leading-relaxed"
+                        className="text-center text-[12px] mt-8 px-4 leading-relaxed"
                         style={{ color: 'hsl(var(--app-text-muted))' }}
                     >
                         Scanning for drones…
@@ -546,30 +546,30 @@ export function FleetAside() {
                                 </button>
                                 <div
                                     className="w-2 h-2 rounded-full shrink-0 transition-colors"
-                                    style={{ background: drone.connected ? drone.color : '#71717a' }}
+                                    style={{ background: drone.connected ? drone.color : 'hsl(var(--app-text-subtle))' }}
                                 />
                                 <span
-                                    className="text-xs font-mono font-medium flex-1 truncate"
+                                    className="text-[13px] font-medium flex-1 truncate"
                                     style={{ color: 'hsl(var(--app-text))' }}
                                 >
                                     {drone.name}
                                 </span>
                                 {warning && (
                                     <span className="shrink-0" title={warning}>
-                                        <AlertTriangle size={10} color="#ef4444" />
+                                        <AlertTriangle size={13} className="text-app-danger" />
                                     </span>
                                 )}
                                 {droneArmed && (
                                     <span
-                                        className="text-[8px] font-mono font-bold px-1 rounded shrink-0"
-                                        style={{ background: '#f59e0b25', color: '#f59e0b' }}
+                                        className="text-[12px] font-bold px-1 rounded shrink-0"
+                                        style={{ background: 'var(--app-warn-soft)', color: 'var(--app-warn)' }}
                                     >
                                         ARM
                                     </span>
                                 )}
                                 {isActive && (
                                     <span
-                                        className="text-[8px] font-mono font-bold px-1 rounded shrink-0"
+                                        className="text-[12px] font-bold px-1 rounded shrink-0"
                                         style={{ background: drone.color + '30', color: drone.color }}
                                     >
                                         CTRL
@@ -593,7 +593,7 @@ export function FleetAside() {
                             {/* Quick-status line */}
                             {tel && (
                                 <div
-                                    className="flex gap-2 px-2 pb-1.5 text-[9px] font-mono"
+                                    className="flex gap-2 px-2 pb-1.5 text-[12px]"
                                     style={{ color: 'hsl(var(--app-text-muted))' }}
                                 >
                                     <span>{tel.flight_mode?.mode ?? '-'}</span>
@@ -612,7 +612,7 @@ export function FleetAside() {
 
                             {!tel && !drone.connected && (
                                 <div
-                                    className="flex items-center gap-1.5 px-2 pb-1.5 text-[9px] font-mono"
+                                    className="flex items-center gap-1.5 px-2 pb-1.5 text-[12px]"
                                     style={{ color: 'hsl(var(--app-text-muted))' }}
                                 >
                                     <Wifi size={9} />
@@ -642,7 +642,7 @@ export function FleetAside() {
                                             : '-'],
                                         ['Port',    `UDP ${portForDrone(drone.id)}`],
                                     ] as [string, string][]).map(([label, value]) => (
-                                        <div key={label} className="flex justify-between text-[9px] font-mono">
+                                        <div key={label} className="flex justify-between text-[12px]">
                                             <span style={{ color: 'hsl(var(--app-text-muted))' }}>{label}</span>
                                             <span style={{ color: 'hsl(var(--app-text))' }}>{value}</span>
                                         </div>
@@ -650,7 +650,7 @@ export function FleetAside() {
                                     <div className="flex gap-1 mt-1">
                                         <button
                                             onClick={e => { e.stopPropagation(); handleSelectDrone(drone.id) }}
-                                            className="flex-1 text-[9px] font-mono py-0.5 rounded transition-colors"
+                                            className="flex-1 text-[12px] py-0.5 rounded transition-colors"
                                             style={{
                                                 background: isActive ? drone.color + '22' : 'transparent',
                                                 color: isActive ? drone.color : 'hsl(var(--app-text-muted))',
@@ -661,7 +661,7 @@ export function FleetAside() {
                                         </button>
                                         <button
                                             onClick={e => handleRemove(drone.id, e)}
-                                            className="text-[9px] font-mono text-red-400 hover:text-red-300 px-2 py-0.5 rounded transition-colors"
+                                            className="text-[12px] text-app-danger hover:bg-app-danger-soft font-bold px-2 py-0.5 rounded transition-colors"
                                             style={{ border: '1px solid hsl(var(--app-border))' }}
                                         >
                                             Remove
@@ -676,7 +676,7 @@ export function FleetAside() {
 
             {/* Footer hint */}
             <div
-                className="px-3 py-2 shrink-0 border-t text-[9px] font-mono text-center"
+                className="px-3 py-2 shrink-0 border-t text-[12px] text-center"
                 style={{ borderColor: 'hsl(var(--app-border))', color: 'hsl(var(--app-text-muted))' }}
             >
                 Click a drone to control · ☐ for group cmds

@@ -4,8 +4,10 @@ import { useMemo } from 'react'
 import { useMissionStore, RTL_SENTINEL_ID } from '@/store/mission'
 import { WP_META } from '@/types/mission'
 import type { WaypointType } from '@/types/mission'
-import { Trash2, X, Home, RotateCcw, Compass } from 'lucide-react'
+import { Trash2, X, Home, RotateCcw, Compass, MousePointerClick } from 'lucide-react'
 import { WaypointActions } from '@/components/attachments/WaypointActions'
+import { cn } from '@/lib/utils'
+import { FOCUS, LABEL, INPUT, BTN, BTN_DANGER } from '@/components/mission/ui'
 
 function computeBearing(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const φ1 = (lat1 * Math.PI) / 180
@@ -36,31 +38,23 @@ function Field({
   onChange: (v: number) => void
 }) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] font-mono font-bold" style={{ color: '#e5e7eb' }}>
-          {label}
-        </span>
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[13px] font-semibold text-app-text">{label}</span>
         <div className="flex items-center gap-1">
           <input
             type="number"
             min={min}
             step={step}
             value={value}
+            aria-label={`${label} (${unit})`}
             onChange={e => {
               const v = Number(e.target.value)
               if (!isNaN(v)) onChange(Math.max(min, v))
             }}
-            className="w-14 text-[11px] font-mono font-bold text-right tabular-nums rounded-md px-1.5 py-1 outline-none"
-            style={{
-              background: 'rgba(255,255,255,.08)',
-              border: '1px solid rgba(255,255,255,.15)',
-              color: '#fff',
-            }}
+            className={cn(INPUT, 'w-16 text-right font-bold')}
           />
-          <span className="text-[9px] font-mono font-semibold w-7" style={{ color: '#9ca3af' }}>
-            {unit}
-          </span>
+          <span className="text-xs font-semibold w-7 text-app-text-muted">{unit}</span>
         </div>
       </div>
       <input
@@ -69,10 +63,54 @@ function Field({
         max={Math.max(max, value)}
         step={step}
         value={value}
+        aria-label={label}
         onChange={e => onChange(Number(e.target.value))}
-        className="w-full h-1.5 rounded-full cursor-pointer"
-        style={{ accentColor: '#3b82f6' }}
+        className={cn('w-full h-5 cursor-pointer rounded-full', FOCUS)}
+        style={{ accentColor: 'var(--app-accent)' }}
       />
+    </div>
+  )
+}
+
+/** Lat / lng pair. */
+function Coord({ label, value, step, onChange }: {
+  label: string; value: number; step: number; onChange: (v: number) => void
+}) {
+  return (
+    <label className="flex-1 min-w-0 flex flex-col gap-1">
+      <span className="text-xs font-semibold text-app-text-muted">{label}</span>
+      <input
+        type="number"
+        step={step}
+        value={value}
+        onChange={e => onChange(Number(e.target.value))}
+        className={cn(INPUT, 'w-full font-semibold')}
+      />
+    </label>
+  )
+}
+
+/** Panel header: icon tile, title, close. */
+function Header({ badge, title, sub, onClose }: {
+  badge: React.ReactNode; title: string; sub?: string; onClose: () => void
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center gap-2.5 min-w-0">
+        {badge}
+        <div className="min-w-0 leading-tight">
+          <p className="text-[16px] font-bold text-app-text truncate">{title}</p>
+          {sub && <p className="text-xs text-app-text-muted truncate">{sub}</p>}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onClose}
+        className={cn('w-8 h-8 shrink-0 flex items-center justify-center rounded-[6px] text-app-text-muted hover:text-app-text hover:bg-app-surface-2 transition-colors duration-[120ms]', FOCUS)}
+        title="Close" aria-label="Close"
+      >
+        <X size={16} aria-hidden />
+      </button>
     </div>
   )
 }
@@ -116,67 +154,25 @@ export default function WaypointEditor() {
     const rtl = getRtlWaypoint()
     return (
       <div className="flex flex-col gap-4 px-1">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div
-              className="w-6 h-6 rounded-full flex items-center justify-center"
-              style={{ background: '#a855f7', color: '#fff' }}
-            >
-              <Home size={12} />
-            </div>
-            <span className="text-[13px] font-mono font-bold" style={{ color: '#fff' }}>RTL</span>
-          </div>
-          <button
-            onClick={() => selectWaypoint(null)}
-            className="p-1.5 rounded-md transition-colors"
-            title="Deselect"
-            style={{ background: 'rgba(255,255,255,.08)', color: '#9ca3af' }}
-          >
-            <X size={13} />
-          </button>
-        </div>
+        <Header
+          badge={<span className="w-8 h-8 rounded-[10px] flex items-center justify-center text-white shrink-0" style={{ background: '#a855f7' }} aria-hidden><Home size={16} /></span>}
+          title="Return home"
+          sub={rtlPosition ? 'Custom RTL point' : 'Takeoff point'}
+          onClose={() => selectWaypoint(null)}
+        />
 
-        <p className="text-[10px] font-mono leading-relaxed" style={{ color: '#9ca3af' }}>
-          Where the drone flies when RTL is triggered - aborts the current mission immediately
-          and goes here. Defaults to the takeoff point until you set a custom position.
+        <p className="text-[13px] text-app-text-muted">
+          RTL stops the mission and flies here.
         </p>
 
         {/* Coordinates (editable) */}
-        <div>
-          <span className="text-[9px] font-mono tracking-wider font-bold mb-1.5 block"
-            style={{ color: '#9ca3af' }}>
-            POSITION
-          </span>
+        <div className="flex flex-col gap-1.5">
+          <span className={LABEL}>Position</span>
           <div className="flex gap-2">
-            <div className="flex-1 flex flex-col gap-0.5">
-              <span className="text-[8px] font-mono font-semibold" style={{ color: '#6b7280' }}>LAT</span>
-              <input
-                type="number"
-                step={0.000001}
-                value={rtl.lat}
-                onChange={e => {
-                  const v = Number(e.target.value)
-                  if (!isNaN(v) && v >= -90 && v <= 90) setRtlPosition(v, rtl.lng)
-                }}
-                className="w-full rounded-md px-2 py-1.5 text-[10px] font-mono font-semibold tabular-nums outline-none"
-                style={{ background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.15)', color: '#fff' }}
-              />
-            </div>
-            <div className="flex-1 flex flex-col gap-0.5">
-              <span className="text-[8px] font-mono font-semibold" style={{ color: '#6b7280' }}>LNG</span>
-              <input
-                type="number"
-                step={0.000001}
-                value={rtl.lng}
-                onChange={e => {
-                  const v = Number(e.target.value)
-                  if (!isNaN(v) && v >= -180 && v <= 180) setRtlPosition(rtl.lat, v)
-                }}
-                className="w-full rounded-md px-2 py-1.5 text-[10px] font-mono font-semibold tabular-nums outline-none"
-                style={{ background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.15)', color: '#fff' }}
-              />
-            </div>
+            <Coord label="Lat" step={0.000001} value={rtl.lat}
+              onChange={v => { if (!isNaN(v) && v >= -90 && v <= 90) setRtlPosition(v, rtl.lng) }} />
+            <Coord label="Lng" step={0.000001} value={rtl.lng}
+              onChange={v => { if (!isNaN(v) && v >= -180 && v <= 180) setRtlPosition(rtl.lat, v) }} />
           </div>
         </div>
 
@@ -190,22 +186,16 @@ export default function WaypointEditor() {
           onChange={setRtlAltitude}
         />
 
-        <button
-          onClick={resetRtlToTakeoff}
-          disabled={!rtlPosition}
-          className="flex items-center justify-center gap-1.5 rounded-lg py-2 mt-1 transition-colors disabled:opacity-30 disabled:pointer-events-none"
-          style={{
-            background: 'rgba(255,255,255,.06)',
-            border: '1.5px solid rgba(255,255,255,.12)',
-            color: '#9ca3af',
-            fontSize: 11,
-            fontWeight: 700,
-            fontFamily: 'var(--font-geist-mono)',
-          }}
-        >
-          <RotateCcw size={13} />
-          Reset to takeoff position
-        </button>
+        <span title={rtlPosition ? 'Use the takeoff point again' : 'Already at the takeoff point'} className="flex">
+          <button
+            onClick={resetRtlToTakeoff}
+            disabled={!rtlPosition}
+            className={cn(BTN, 'w-full')}
+          >
+            <RotateCcw size={14} aria-hidden />
+            Reset to takeoff
+          </button>
+        </span>
       </div>
     )
   }
@@ -213,9 +203,12 @@ export default function WaypointEditor() {
 
   if (!wp) {
     return (
-      <div className="flex items-center justify-center h-full px-4">
-        <p className="text-[11px] font-mono text-center leading-relaxed font-semibold" style={{ color: '#6b7280' }}>
-          Select a waypoint<br />to edit properties
+      <div className="flex flex-col items-center justify-center gap-2 py-6 px-3 text-center">
+        <span className="w-10 h-10 rounded-[10px] flex items-center justify-center bg-app-surface-2 text-app-text-muted">
+          <MousePointerClick size={20} aria-hidden />
+        </span>
+        <p className="text-[13px] font-semibold text-app-text-muted">
+          Select a waypoint to edit it
         </p>
       </div>
     )
@@ -227,36 +220,22 @@ export default function WaypointEditor() {
 
   return (
     <div className="flex flex-col gap-4 px-1">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div
-            className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold"
-            style={{ background: meta.color, color: '#fff' }}
-          >
+      <Header
+        badge={
+          <span className="w-8 h-8 rounded-full flex items-center justify-center text-[13px] font-extrabold tabular-nums text-white shrink-0"
+            style={{ background: meta.color }} aria-hidden>
             {index + 1}
-          </div>
-          <span className="text-[13px] font-mono font-bold" style={{ color: '#fff' }}>
-            {meta.label}
           </span>
-        </div>
-        <button
-          onClick={() => selectWaypoint(null)}
-          className="p-1.5 rounded-md transition-colors"
-          title="Deselect"
-          style={{ background: 'rgba(255,255,255,.08)', color: '#9ca3af' }}
-        >
-          <X size={13} />
-        </button>
-      </div>
+        }
+        title={meta.label}
+        sub={`Waypoint ${index + 1} of ${waypoints.length}`}
+        onClose={() => selectWaypoint(null)}
+      />
 
       {/* Type selector */}
-      <div>
-        <span className="text-[9px] font-mono tracking-wider font-bold mb-2 block"
-          style={{ color: '#9ca3af' }}>
-          TYPE
-        </span>
-        <div className="grid grid-cols-3 gap-1">
+      <div className="flex flex-col gap-1.5">
+        <span className={LABEL}>Type</span>
+        <div className="grid grid-cols-2 gap-1" role="group" aria-label="Waypoint type">
           {typeOptions.map(t => {
             const m = WP_META[t]
             const active = wp.type === t
@@ -264,13 +243,11 @@ export default function WaypointEditor() {
               <button
                 key={t}
                 onClick={() => updateWaypoint(wp.id, { type: t })}
-                className="rounded-md py-1.5 text-[9px] font-mono font-bold transition-colors"
-                style={{
-                  background: active ? `${m.color}30` : 'rgba(255,255,255,.05)',
-                  border: `1.5px solid ${active ? m.color : 'rgba(255,255,255,.1)'}`,
-                  color: active ? m.color : '#9ca3af',
-                }}
+                aria-pressed={active}
+                className={cn('h-8 flex items-center justify-center gap-1.5 rounded-[6px] border text-[13px] font-semibold transition-colors duration-[120ms]', FOCUS,
+                  active ? 'bg-app-accent-soft border-app-accent/60 text-app-text' : 'bg-app-surface-2 border-app-border text-app-text-muted hover:text-app-text')}
               >
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: m.color }} aria-hidden />
                 {m.label}
               </button>
             )
@@ -279,57 +256,19 @@ export default function WaypointEditor() {
       </div>
 
       {/* Coordinates (editable) */}
-      <div>
-        <span className="text-[9px] font-mono tracking-wider font-bold mb-1.5 block"
-          style={{ color: '#9ca3af' }}>
-          POSITION
-        </span>
+      <div className="flex flex-col gap-1.5">
+        <span className={LABEL}>Position</span>
         <div className="flex gap-2">
-          <div className="flex-1 flex flex-col gap-0.5">
-            <span className="text-[8px] font-mono font-semibold" style={{ color: '#6b7280' }}>LAT</span>
-            <input
-              type="number"
-              step={0.000001}
-              value={wp.lat}
-              onChange={e => {
-                const v = Number(e.target.value)
-                if (!isNaN(v) && v >= -90 && v <= 90) updateWaypoint(wp.id, { lat: Math.round(v * 1e7) / 1e7 })
-              }}
-              className="w-full rounded-md px-2 py-1.5 text-[10px] font-mono font-semibold tabular-nums outline-none"
-              style={{
-                background: 'rgba(255,255,255,.08)',
-                border: '1px solid rgba(255,255,255,.15)',
-                color: '#fff',
-              }}
-            />
-          </div>
-          <div className="flex-1 flex flex-col gap-0.5">
-            <span className="text-[8px] font-mono font-semibold" style={{ color: '#6b7280' }}>LNG</span>
-            <input
-              type="number"
-              step={0.000001}
-              value={wp.lng}
-              onChange={e => {
-                const v = Number(e.target.value)
-                if (!isNaN(v) && v >= -180 && v <= 180) updateWaypoint(wp.id, { lng: Math.round(v * 1e7) / 1e7 })
-              }}
-              className="w-full rounded-md px-2 py-1.5 text-[10px] font-mono font-semibold tabular-nums outline-none"
-              style={{
-                background: 'rgba(255,255,255,.08)',
-                border: '1px solid rgba(255,255,255,.15)',
-                color: '#fff',
-              }}
-            />
-          </div>
+          <Coord label="Lat" step={0.000001} value={wp.lat}
+            onChange={v => { if (!isNaN(v) && v >= -90 && v <= 90) updateWaypoint(wp.id, { lat: Math.round(v * 1e7) / 1e7 }) }} />
+          <Coord label="Lng" step={0.000001} value={wp.lng}
+            onChange={v => { if (!isNaN(v) && v >= -180 && v <= 180) updateWaypoint(wp.id, { lng: Math.round(v * 1e7) / 1e7 }) }} />
         </div>
       </div>
 
       {/* Parameter sliders + input boxes */}
       <div className="flex flex-col gap-3">
-        <span className="text-[9px] font-mono tracking-wider font-bold"
-          style={{ color: '#9ca3af' }}>
-          PARAMETERS
-        </span>
+        <span className={LABEL}>Flight</span>
         <Field
           label="Altitude"
           value={wp.altitude}
@@ -359,32 +298,23 @@ export default function WaypointEditor() {
         />
         {autoHeading ? (
           // Auto-heading is ON - show the computed bearing, disable manual editing
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-mono font-bold" style={{ color: '#e5e7eb' }}>Yaw</span>
+          <div className="flex flex-col gap-1" title="Auto heading is on: the yaw is set when the plan is uploaded">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[13px] font-semibold text-app-text">Yaw</span>
               <div className="flex items-center gap-1.5">
-                <Compass size={11} color="#fbbf24" />
-                <span className="text-[10px] font-mono font-semibold tabular-nums" style={{ color: '#fbbf24' }}>
+                <Compass size={14} className="text-app-accent" aria-hidden />
+                <span className="text-[14px] font-bold tabular-nums text-app-text">
                   {autoYaw !== null ? `${autoYaw.toFixed(0)}°` : '-'}
                 </span>
-                <span className="text-[9px] font-mono w-7" style={{ color: '#6b7280' }}>auto</span>
+                <span className="text-xs font-semibold w-7 text-app-text-muted">auto</span>
               </div>
             </div>
-            <div
-              className="w-full h-1.5 rounded-full"
-              style={{ background: 'rgba(251,191,36,.15)', border: '1px solid rgba(251,191,36,.2)' }}
-            >
+            <div className="w-full h-1.5 rounded-full bg-app-surface-2 border border-app-border overflow-hidden">
               <div
-                className="h-1.5 rounded-full"
-                style={{
-                  width: `${autoYaw !== null ? (autoYaw / 360) * 100 : 0}%`,
-                  background: 'rgba(251,191,36,.5)',
-                }}
+                className="h-full rounded-full bg-app-accent"
+                style={{ width: `${autoYaw !== null ? (autoYaw / 360) * 100 : 0}%` }}
               />
             </div>
-            <p className="text-[9px] font-mono" style={{ color: '#6b7280' }}>
-              Auto Heading ON - yaw set at upload
-            </p>
           </div>
         ) : (
           <Field
@@ -417,17 +347,9 @@ export default function WaypointEditor() {
       {/* Delete */}
       <button
         onClick={() => { removeWaypoint(wp.id); selectWaypoint(null) }}
-        className="flex items-center justify-center gap-1.5 rounded-lg py-2 mt-1 transition-colors"
-        style={{
-          background: 'rgba(248, 113, 113, .15)',
-          border: '1.5px solid rgba(248, 113, 113, .35)',
-          color: '#fca5a5',
-          fontSize: 11,
-          fontWeight: 700,
-          fontFamily: 'var(--font-geist-mono)',
-        }}
+        className={cn(BTN_DANGER, 'w-full')}
       >
-        <Trash2 size={13} />
+        <Trash2 size={14} aria-hidden />
         Delete waypoint
       </button>
     </div>

@@ -15,7 +15,7 @@ import {
     absoluteUrl, addMember, copyText, createInvite, fmtWhen, isPendingInvite, listInvites, listMembers,
     personName, removeMember, revokeInvite, updateMember, type Invite, type Member,
 } from '@/lib/workspaces'
-import { Pill, PrefRow, S_INPUT, S_LABEL, S_NOTE, SButton, Status } from '@/components/settings/primitives'
+import { Pill, PrefRow, S_FIELD_LABEL, S_INPUT, S_NOTE, SButton, Status } from '@/components/settings/primitives'
 
 function NoWorkspace() {
     return <p style={{ ...S_NOTE, padding: '10px 0' }}>You are not in a workspace yet. Ask for an invite link.</p>
@@ -47,11 +47,11 @@ export function WorkspaceGroup() {
                         {workspaces.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                     </select>
                 ) : <span style={{ fontSize: 13, color: 'hsl(var(--app-text))' }}>{workspace.name}</span>} />
-            <PrefRow label="Type" right={<span style={{ fontSize: 12, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
+            <PrefRow label="Type" right={<span style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))' }}>
                 {KIND_LABELS[workspace.kind] ?? workspace.kind}</span>} />
             <PrefRow label="Your role"
                 sub={workspace.inherited ? 'Held on a workspace above this one and applies here too' : undefined}
-                right={<span style={{ fontSize: 12, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
+                right={<span style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))' }}>
                     {roleLabel(workspace.my_role, workspace.kind)}</span>} />
         </>
     )
@@ -151,7 +151,7 @@ export function MembersGroup() {
                                 <SButton tone="danger" disabled={busy === m.id} onClick={() => remove(m)}>Remove</SButton>
                             </span>
                         ) : (
-                            <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
+                            <span style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))' }}>
                                 {roleLabel(m.role, ws.kind)}
                             </span>
                         )} />
@@ -165,16 +165,16 @@ export function MembersGroup() {
                     </p>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
                         <div style={{ flex: '2 1 180px', minWidth: 0 }}>
-                            <label htmlFor="mem-login" style={S_LABEL}>EMAIL OR USERNAME</label>
+                            <label htmlFor="mem-login" style={S_FIELD_LABEL}>Email or username</label>
                             <input id="mem-login" value={login} autoCapitalize="none" spellCheck={false}
                                 onChange={e => { setLogin(e.target.value); setError('') }} style={{ ...S_INPUT, width: '100%' }} />
                         </div>
                         <div>
-                            <label htmlFor="mem-role" style={S_LABEL}>ROLE</label>
+                            <label htmlFor="mem-role" style={S_FIELD_LABEL}>Role</label>
                             <RoleSelect id="mem-role" value={addRole} roles={grantable} kind={ws.kind} onChange={setRole} />
                         </div>
                         <div style={{ flex: '1 1 140px', minWidth: 0 }}>
-                            <label htmlFor="mem-title" style={S_LABEL}>TITLE (OPTIONAL)</label>
+                            <label htmlFor="mem-title" style={S_FIELD_LABEL}>Title (optional)</label>
                             <input id="mem-title" value={title} placeholder="e.g. Site lead"
                                 onChange={e => setTitle(e.target.value)} style={{ ...S_INPUT, width: '100%' }} />
                         </div>
@@ -256,21 +256,21 @@ export function InvitesGroup() {
                 <form onSubmit={e => void create(e)} noValidate style={{ padding: '10px 0', borderBottom: '1px solid hsl(var(--app-border))' }}>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
                         <div>
-                            <label htmlFor="inv-role" style={S_LABEL}>ROLE</label>
+                            <label htmlFor="inv-role" style={S_FIELD_LABEL}>Role</label>
                             <RoleSelect id="inv-role" value={inviteRole} roles={roles} kind={ws.kind} onChange={setRole} />
                         </div>
                         <div style={{ flex: '2 1 180px', minWidth: 0 }}>
-                            <label htmlFor="inv-email" style={S_LABEL}>EMAIL (OPTIONAL)</label>
+                            <label htmlFor="inv-email" style={S_FIELD_LABEL}>Email (optional)</label>
                             <input id="inv-email" type="email" value={email} spellCheck={false} placeholder="Anyone with the link"
                                 onChange={e => { setEmail(e.target.value); setError('') }} style={{ ...S_INPUT, width: '100%' }} />
                         </div>
                         <div style={{ flex: '1 1 120px', minWidth: 0 }}>
-                            <label htmlFor="inv-title" style={S_LABEL}>TITLE (OPTIONAL)</label>
+                            <label htmlFor="inv-title" style={S_FIELD_LABEL}>Title (optional)</label>
                             <input id="inv-title" value={title} onChange={e => setTitle(e.target.value)}
                                 style={{ ...S_INPUT, width: '100%' }} />
                         </div>
                         <div>
-                            <label htmlFor="inv-days" style={S_LABEL}>EXPIRES</label>
+                            <label htmlFor="inv-days" style={S_FIELD_LABEL}>Expires</label>
                             <select id="inv-days" value={days} onChange={e => setDays(Number(e.target.value))} style={S_INPUT}>
                                 {EXPIRY_DAYS.map(d => <option key={d} value={d}>{d} day{d > 1 ? 's' : ''}</option>)}
                             </select>
@@ -281,7 +281,7 @@ export function InvitesGroup() {
                     </div>
                     {link && (
                         <div style={{ marginTop: 12 }}>
-                            <label htmlFor="inv-link" style={S_LABEL}>INVITE LINK</label>
+                            <label htmlFor="inv-link" style={S_FIELD_LABEL}>Invite link</label>
                             <div style={{ display: 'flex', gap: 8 }}>
                                 <input id="inv-link" ref={linkRef} readOnly value={link.url} onFocus={e => e.currentTarget.select()}
                                     style={{ ...S_INPUT, flex: 1 }} />

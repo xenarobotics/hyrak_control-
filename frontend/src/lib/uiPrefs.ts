@@ -4,14 +4,18 @@
 // and both are re-applied before first paint by the inline script in
 // app/layout.tsx, so a reload doesn't flash the defaults.
 
-export type UiFont = 'default' | 'system' | 'ubuntu' | 'inter' | 'nunito'
+// The default face is Nunito (docs/DESIGN_SYSTEM.md). 'nunito' stays in the
+// type so a preference saved before Nunito became the default still reads,
+// but it is the default now, so it is offered once, as "Nunito (default)".
+export type UiFont = 'default' | 'geist' | 'system' | 'ubuntu' | 'inter' | 'nunito'
 export const UI_FONTS: { value: UiFont; label: string }[] = [
-    { value: 'default', label: 'Geist (default)' },
-    { value: 'system', label: 'System sans' },
-    { value: 'ubuntu', label: 'Ubuntu' },
+    { value: 'default', label: 'Nunito (default)' },
+    { value: 'geist', label: 'Geist' },
     { value: 'inter', label: 'Inter' },
-    { value: 'nunito', label: 'Nunito' },
+    { value: 'ubuntu', label: 'Ubuntu' },
+    { value: 'system', label: 'System' },
 ]
+const LEGACY_FONTS: UiFont[] = ['nunito']
 
 /** Percent. 100 = as designed. The whole interface scales - the request
  *  behind this was "the text is too small", and scaling only the text
@@ -21,8 +25,8 @@ export const UI_ZOOMS = [90, 100, 110, 120, 135] as const
 export type UiTextSize = 'default' | 'large' | 'xlarge'
 export const UI_TEXT_SIZES: { value: UiTextSize; label: string }[] = [
     { value: 'default', label: 'Default' },
-    { value: 'large', label: 'Large (+15%)' },
-    { value: 'xlarge', label: 'Extra large (+30%)' },
+    { value: 'large', label: 'Large' },
+    { value: 'xlarge', label: 'Extra large' },
 ]
 
 const FONT_KEY = 'hyrak-ui-font'
@@ -42,6 +46,7 @@ function writeKey(key: string, value: string) {
 export function getUiFont(): UiFont {
     if (typeof window === 'undefined') return 'default'
     const v = readKey(FONT_KEY)
+    if (LEGACY_FONTS.includes(v as UiFont)) return 'default'
     return (UI_FONTS.some(f => f.value === v) ? v : 'default') as UiFont
 }
 

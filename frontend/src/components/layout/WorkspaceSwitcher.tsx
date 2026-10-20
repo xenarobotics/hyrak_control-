@@ -37,32 +37,30 @@ export function WorkspaceSwitcher({ normal }: { normal: boolean }) {
                 title={`Workspace: ${workspace.name}`}
                 aria-label={`Workspace: ${workspace.name}. Switch workspace`}
                 className={cn(
-                    'mb-3 flex flex-col items-center rounded-lg border transition-colors',
-                    normal ? 'w-20 gap-1 py-2' : 'w-12 gap-0.5 py-1.5',
-                    normal ? '' : 'border-[hsl(var(--app-border))] text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800',
+                    'flex flex-col items-center rounded-[10px] border transition-colors duration-[120ms]',
+                    normal ? 'mb-3 w-20 gap-1 py-2' : 'w-12 gap-1 py-1.5 md:mb-3',
+                    normal ? '' : 'border-app-border text-app-text-muted hover:text-app-text hover:bg-app-surface-2',
                 )}
                 style={normal ? { borderColor: 'var(--s-line)', color: 'var(--s-ink)' } : undefined}
             >
                 <span className={cn(
                     'flex items-center justify-center rounded-md font-bold',
-                    normal ? 'h-8 w-8 text-[14px]' : 'h-6 w-6 font-mono text-[10px]',
+                    normal ? 'h-8 w-8 text-[14px]' : 'h-7 w-7 text-[12px] bg-app-accent-soft text-app-accent',
                 )}
-                    style={normal
-                        ? { background: 'var(--s-blue-soft)', color: 'var(--s-blue)' }
-                        : { background: 'rgba(34,211,238,0.1)', color: '#22d3ee' }}>
+                    style={normal ? { background: 'var(--s-blue-soft)', color: 'var(--s-blue)' } : undefined}>
                     {initials(workspace.name)}
                 </span>
-                <span className={cn('max-w-full truncate px-1', normal ? 'text-[12px] font-bold' : 'font-mono text-[9px]')}>
+                <span className={cn('max-w-full truncate px-1 text-[12px]', normal ? 'font-bold' : 'font-semibold')}>
                     {workspace.name}
                 </span>
             </DropdownMenuTrigger>
             <DropdownMenuContent side="right" align="start" sideOffset={8} className="w-64">
                 <DropdownMenuGroup>
-                    <DropdownMenuLabel className="flex items-center gap-1.5 font-mono text-[10px] tracking-widest">
-                        <Building2 size={11} /> WORKSPACE
+                    <DropdownMenuLabel className="flex items-center gap-1.5 text-[12px] font-bold tracking-[0.06em]">
+                        <Building2 size={14} /> WORKSPACE
                     </DropdownMenuLabel>
                     {isCustomer && workspaces.length > 1 && (
-                        <p className="px-2 pb-1.5 text-[10px] leading-snug text-muted-foreground">
+                        <p className="px-2 pb-1.5 text-[12px] leading-snug text-muted-foreground">
                             Switching ends the live session: video stops and the drone link is released.
                         </p>
                     )}
@@ -71,7 +69,7 @@ export function WorkspaceSwitcher({ normal }: { normal: boolean }) {
                             <DropdownMenuRadioItem key={w.id} value={w.id} className="items-start">
                                 <span className="flex min-w-0 flex-col">
                                     <span className="truncate">{w.name}</span>
-                                    <span className="truncate font-mono text-[10px] text-muted-foreground">
+                                    <span className="truncate text-[12px] text-muted-foreground">
                                         {KIND_LABELS[w.kind] ?? w.kind}
                                         {w.my_role ? ` - ${roleLabel(w.my_role, w.kind)}` : ''}
                                         {w.inherited ? ' (inherited)' : ''}

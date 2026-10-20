@@ -39,7 +39,9 @@ import { apiDownload, apiFetch } from '@/lib/api'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
 import dynamic from 'next/dynamic'
-import { Map as MapIcon, Plane, Shield, FileCheck, X, Search, Building2, Users, ScrollText, ArrowLeft } from 'lucide-react'
+import { Map as MapIcon, Plane, Shield, FileCheck, X, Search, Building2, Users, ScrollText, ArrowLeft, Activity, Sun, Moon, AlertTriangle, CheckCircle2, Circle } from 'lucide-react'
+import { useTheme } from '@/lib/theme'
+import { useHydrated } from '@/hooks/useClientValue'
 import { connectSocket, getSocket } from '@/lib/socket'
 import { liveAuthHeaders } from '@/lib/auth'
 import { useAuthGate } from '@/hooks/useAuthGate'
@@ -157,13 +159,13 @@ type Tab = 'overview' | 'drones' | 'zones' | 'permits' | 'workspaces' | 'staff' 
 
 // Rail labels fit a 48px button at 9px mono; `full` is the tooltip.
 const TABS: { key: Tab; label: string; full?: string; icon: typeof MapIcon }[] = [
-    { key: 'overview',   label: 'MAP',     icon: MapIcon },
-    { key: 'drones',     label: 'DRONES',  icon: Plane },
-    { key: 'zones',      label: 'ZONES',   icon: Shield },
-    { key: 'permits',    label: 'PERMITS', icon: FileCheck },
-    { key: 'workspaces', label: 'SPACES',  full: 'WORKSPACES', icon: Building2 },
-    { key: 'staff',      label: 'STAFF',   icon: Users },
-    { key: 'audit',      label: 'AUDIT',   icon: ScrollText },
+    { key: 'overview',   label: 'Map',     icon: MapIcon },
+    { key: 'drones',     label: 'Drones',  icon: Plane },
+    { key: 'zones',      label: 'Zones',   icon: Shield },
+    { key: 'permits',    label: 'Permits', icon: FileCheck },
+    { key: 'workspaces', label: 'Spaces',  full: 'Workspaces', icon: Building2 },
+    { key: 'staff',      label: 'Staff',   icon: Users },
+    { key: 'audit',      label: 'Audit',   icon: ScrollText },
 ]
 
 // Deterministic ~±30m offset so several clients geolocated to the same city
@@ -565,18 +567,21 @@ export default function AdminPage() {
 
     if (gate !== 'ok') {
         return (
-            <div className="h-screen flex items-center justify-center bg-zinc-950 text-zinc-500 font-mono">
-                <span className="text-[11px] tracking-[0.12em]">CHECKING SIGN-IN</span>
+            <div className="h-screen flex items-center justify-center bg-app-bg text-app-text-muted">
+                <span className="text-[14px]">Checking sign-in…</span>
             </div>
         )
     }
 
+    const liveCount = telemSessions.length + fleetDrones.length
+
     return (
-        <div className="h-screen flex bg-zinc-950 text-zinc-200 font-mono overflow-hidden">
-            {/* ── Left rail ────────────────────────────────────────────── */}
-            <aside className="w-16 shrink-0 flex flex-col items-center py-4 gap-1 border-r border-zinc-800 bg-zinc-950 z-10">
-                <div className="mb-5" title={org ? 'Organization console' : 'HYRAK OPS'}>
-                    <Image src="/brand/icon.png" alt="HYRAK" width={26} height={26} />
+        <div className={'h-screen flex bg-app-bg text-app-text overflow-hidden ' + FOCUS_SCOPE}>
+            {/* ── Left rail: same look as the app's rail (layout.tsx) ───── */}
+            <aside className="w-16 shrink-0 flex flex-col items-center py-4 gap-1 border-r border-app-border bg-app-sidebar z-10">
+                <div className="mb-5 p-2" title={org ? 'Organization console' : 'HYRAK console'}>
+                    <Image src="/brand/icon-dark.png" alt="HYRAK" width={26} height={26} className="dark:hidden" />
+                    <Image src="/brand/icon.png" alt="HYRAK" width={26} height={26} className="hidden dark:block" />
                 </div>
                 {visibleTabs.map(({ key, label, full, icon: Icon }) => {
                     const pending = key === 'permits'
@@ -584,74 +589,78 @@ export default function AdminPage() {
                     return (
                         <button
                             key={key}
-                            title={full ?? label}
+                            title={pending > 0 ? `${full ?? label}: ${pending} waiting` : (full ?? label)}
                             aria-current={tab === key ? 'page' : undefined}
                             onClick={() => setTab(key)}
                             className={
-                                'relative flex flex-col items-center gap-1 w-12 py-2 rounded text-[9px] transition-colors ' +
+                                'relative flex flex-col items-center gap-1 w-12 py-2 rounded-md text-[12px] font-semibold transition-colors duration-[120ms] ' +
                                 (tab === key
-                                    ? 'bg-cyan-500/10 text-cyan-400'
-                                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900')
+                                    ? 'bg-app-accent-soft text-app-accent'
+                                    : 'text-app-text-muted hover:text-app-text hover:bg-app-surface-2')
                             }
                         >
-                            <Icon size={17} />
+                            <Icon size={18} aria-hidden />
                             {label}
                             {pending > 0 && (
-                                <span className="absolute top-1 right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-amber-500 text-black text-[9px] font-bold flex items-center justify-center">
+                                <span className="absolute top-0.5 right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-app-warn text-app-accent-ink text-[12px] font-bold tabular-nums flex items-center justify-center">
                                     {pending}
                                 </span>
                             )}
                         </button>
                     )
                 })}
-                {/* The live count is founder data; the organization console
-                    has its way back to the app in its header instead. */}
-                {!org && (
-                    <div className="mt-auto text-center text-[9px] text-zinc-600">
-                        <div className={(telemSessions.length + fleetDrones.length) > 0 ? 'text-emerald-400' : ''}>
-                            ● {telemSessions.length + fleetDrones.length}
+                <div className="mt-auto flex flex-col items-center gap-1">
+                    {/* The live count is founder data; the organization console
+                        has its way back to the app in its header instead. */}
+                    {!org && (
+                        <div className={'flex flex-col items-center gap-0.5 py-2 text-[12px] font-semibold ' + (liveCount > 0 ? 'text-app-ok' : 'text-app-text-muted')}
+                            title={`${liveCount} drone${liveCount === 1 ? '' : 's'} connected`}>
+                            <span className="flex items-center gap-1 tabular-nums text-[14px] font-bold">
+                                <Activity size={14} aria-hidden /> {liveCount}
+                            </span>
+                            Live
                         </div>
-                        LIVE
-                    </div>
-                )}
+                    )}
+                    {!org && (
+                        <a href="/command" title="Back to the app"
+                            className="flex flex-col items-center gap-1 w-12 py-2 rounded-md text-[12px] font-semibold text-app-text-muted hover:text-app-text hover:bg-app-surface-2 transition-colors duration-[120ms]">
+                            <ArrowLeft size={18} aria-hidden />
+                            App
+                        </a>
+                    )}
+                    <ConsoleThemeToggle />
+                </div>
             </aside>
 
             {/* ── Main area ────────────────────────────────────────────── */}
-            <main className={'flex-1 relative flex min-w-0' + (org ? ' pt-10' : '')}>
+            <main className={'flex-1 relative flex flex-col md:flex-row min-w-0 overflow-y-auto md:overflow-hidden' + (org ? ' pt-12' : '')}>
                 {org && (
-                    <header className="absolute top-0 inset-x-0 h-10 flex items-center gap-3 px-4 border-b border-zinc-800">
-                        <h1 className="text-[11px] tracking-[0.2em] text-zinc-300">ORGANIZATION CONSOLE</h1>
-                        <span className="text-[10px] text-zinc-600 truncate">
+                    <header className="absolute top-0 inset-x-0 h-12 flex items-center gap-3 px-4 border-b border-app-border bg-app-surface">
+                        <h1 className="text-[18px] font-bold text-app-text whitespace-nowrap">Organization console</h1>
+                        <span className="text-[13px] text-app-text-muted truncate">
                             {user?.display_name || user?.username}
                         </span>
-                        <a href="/command" className="ml-auto flex items-center gap-1.5 text-[10px] tracking-widest text-cyan-400 hover:text-cyan-300">
-                            <ArrowLeft size={12} /> BACK TO THE APP
+                        <a href="/command" className="ml-auto flex items-center gap-1.5 h-8 px-3 rounded-md border border-app-border-strong text-[13px] font-semibold text-app-text hover:bg-app-surface-2 transition-colors duration-[120ms] whitespace-nowrap">
+                            <ArrowLeft size={14} aria-hidden /> Back to the app
                         </a>
                     </header>
                 )}
                 {tab === 'overview' && (
                     <>
-                        <div className="flex-1 relative min-w-0">
+                        <div className="flex-1 relative min-w-0 min-h-[360px]">
                             <AdminMap drones={mapDrones} zones={zones} onSelect={toggleSelect} />
 
                             {/* Active drones column - mission-page panel style */}
-                            <div
-                                className="absolute left-3 top-3 bottom-3 z-[1000] w-72 rounded-xl border flex flex-col overflow-hidden"
-                                style={{
-                                    background: 'rgba(17, 19, 24, .94)',
-                                    backdropFilter: 'blur(12px)',
-                                    WebkitBackdropFilter: 'blur(12px)',
-                                    borderColor: 'rgba(255, 255, 255, .08)',
-                                }}
-                            >
-                                <div className="px-3 py-2.5 text-[10px] tracking-widest text-zinc-500 border-b border-zinc-800/80">
-                                    ACTIVE DRONES - {telemSessions.length + fleetDrones.length}
+                            <div className="absolute left-3 top-3 z-[1000] w-72 max-w-[calc(100%-24px)] max-h-[calc(100%-24px)] rounded-[10px] border border-app-border bg-app-surface shadow-[var(--app-shadow)] flex flex-col overflow-hidden">
+                                <div className="px-3 h-11 flex items-center gap-2 border-b border-app-border">
+                                    <h2 className="text-[16px] font-bold text-app-text">Active drones</h2>
+                                    <span className="ml-auto text-[13px] font-bold tabular-nums text-app-text-muted">{liveCount}</span>
                                 </div>
                                 <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                                    {telemSessions.length + fleetDrones.length === 0 && (
-                                        <div className="text-[10px] text-zinc-500 p-2">
-                                            No drones connected. Clients without a telemetry link
-                                            don&apos;t appear here.
+                                    {liveCount === 0 && (
+                                        <div className="flex items-center gap-2 text-[13px] text-app-text-muted p-2"
+                                            title="Clients without a telemetry link don't appear here.">
+                                            <Plane size={16} aria-hidden /> No drones connected
                                         </div>
                                     )}
                                     {telemSessions.map(s => (
@@ -659,14 +668,14 @@ export default function AdminPage() {
                                             key={s.session_id}
                                             onClick={() => toggleSelect(s.session_id)}
                                             className={
-                                                'w-full text-left border rounded p-2.5 transition-colors ' +
+                                                'w-full text-left border rounded-md p-2.5 transition-colors duration-[120ms] ' +
                                                 (selected === s.session_id
-                                                    ? 'border-cyan-500 bg-cyan-500/5'
-                                                    : 'border-zinc-800 hover:border-zinc-600')
+                                                    ? 'border-app-accent bg-app-accent-soft'
+                                                    : 'border-app-border hover:border-app-text-subtle')
                                             }
                                         >
-                                            <div className="flex items-center gap-2 text-xs">
-                                                <span className="font-semibold text-zinc-100 truncate">
+                                            <div className="flex flex-wrap items-center gap-1.5 text-[14px]">
+                                                <span className="font-semibold text-app-text truncate">
                                                     {s.drone?.name ?? 'IDENTIFYING…'}
                                                 </span>
                                                 {s.drone?.is_simulated && <Tag label="SIM" tone="amber" />}
@@ -674,27 +683,27 @@ export default function AdminPage() {
                                                 {s.in_air && <Tag label="IN AIR" tone="amber" />}
                                             </div>
                                             {s.live?.zone_class === 'orange' && (
-                                                <div className="mt-0.5 text-[9px] text-amber-400 animate-pulse">
-                                                    ● IN ORANGE ZONE
-                                                </div>
+                                                <div className="mt-1 flex items-center gap-1 text-[12px] font-bold text-app-warn">
+<AlertTriangle size={12} aria-hidden /> In orange zone
+</div>
                                             )}
                                             {s.live?.zone_class === 'red' && (
-                                                <div className="mt-0.5 text-[9px] text-red-400 animate-pulse">
-                                                    ● IN RED ZONE - ENFORCING
-                                                </div>
+                                                <div className="mt-1 flex items-center gap-1 text-[12px] font-bold text-app-danger">
+<AlertTriangle size={12} aria-hidden /> In red zone, enforcing
+</div>
                                             )}
-                                            <div className="mt-0.5 text-[9px] text-zinc-500 truncate">
+                                            <div className="mt-0.5 text-[12px] text-app-text-muted truncate">
                                                 {s.workspace_name || 'workspace ?'} · {s.username ?? '?'}{s.role ? ` (${s.role})` : ''}
                                             </div>
-                                            <div className="mt-1 flex items-center gap-3 text-[10px] text-zinc-500">
+                                            <div className="mt-1 flex items-center gap-3 text-[12px] text-app-text-muted">
                                                 <Badge on={s.is_streaming} label="VIDEO" />
                                                 <Badge on={s.telemetry_connected} label="TELEM" />
                                                 {s.ai_mode && s.ai_mode !== 'manual-control' && (
-                                                    <span className="text-violet-400 truncate">{s.ai_mode}</span>
+                                                    <span className="text-violet-700 dark:text-violet-400 truncate">{s.ai_mode}</span>
                                                 )}
                                                 {s.takeover && <Tag label="HYRAK CONTROL" tone="red" />}
                                             </div>
-                                            <div className="mt-0.5 text-[9px] text-zinc-600">
+                                            <div className="mt-0.5 text-[12px] text-app-text-muted">
                                                 {s.live
                                                     ? `${s.live.mode} · ${s.live.alt.toFixed(0)}m · ${s.live.battery.toFixed(0)}%`
                                                     : s.approx_location
@@ -711,30 +720,30 @@ export default function AdminPage() {
                                                 key={fid}
                                                 onClick={() => toggleSelect(fid)}
                                                 className={
-                                                    'w-full text-left border rounded p-2.5 transition-colors ' +
+                                                    'w-full text-left border rounded-md p-2.5 transition-colors duration-[120ms] ' +
                                                     (selected === fid
                                                         ? 'border-violet-500 bg-violet-500/5'
-                                                        : 'border-zinc-800 hover:border-zinc-600')
+                                                        : 'border-app-border hover:border-app-text-subtle')
                                                 }
                                             >
-                                                <div className="flex items-center gap-2 text-xs">
-                                                    <span className="font-semibold text-zinc-100 truncate">
+                                                <div className="flex flex-wrap items-center gap-1.5 text-[14px]">
+                                                    <span className="font-semibold text-app-text truncate">
                                                         {fleetName(f)}
                                                     </span>
                                                     <Tag label="SIM" tone="violet" />
                                                     {f.live?.armed && <Tag label="ARMED" tone="red" />}
                                                 </div>
                                                 {f.live?.zone_class === 'orange' && (
-                                                    <div className="mt-0.5 text-[9px] text-amber-400 animate-pulse">
-                                                        ● IN ORANGE ZONE
-                                                    </div>
+                                                    <div className="mt-1 flex items-center gap-1 text-[12px] font-bold text-app-warn">
+<AlertTriangle size={12} aria-hidden /> In orange zone
+</div>
                                                 )}
                                                 {f.live?.zone_class === 'red' && (
-                                                    <div className="mt-0.5 text-[9px] text-red-400 animate-pulse">
-                                                        ● IN RED ZONE
-                                                    </div>
+                                                    <div className="mt-1 flex items-center gap-1 text-[12px] font-bold text-app-danger">
+<AlertTriangle size={12} aria-hidden /> In red zone
+</div>
                                                 )}
-                                                <div className="mt-0.5 text-[9px] text-zinc-600">
+                                                <div className="mt-0.5 text-[12px] text-app-text-muted">
                                                     {f.live
                                                         ? `${f.live.mode} · ${f.live.alt.toFixed(0)}m · ${f.live.battery.toFixed(0)}%`
                                                         : 'connecting…'}
@@ -781,37 +790,37 @@ export default function AdminPage() {
                 )}
 
                 {tab === 'drones' && (
-                    <div className="flex-1 flex min-w-0">
+                    <div className="flex-1 flex flex-col md:flex-row min-w-0">
                         {/* Selector column */}
-                        <div className="w-80 shrink-0 border-r border-zinc-800 flex flex-col">
-                            <div className="p-3 space-y-2 border-b border-zinc-800">
+                        <div className="w-full md:w-80 shrink-0 border-b md:border-b-0 md:border-r border-app-border bg-app-surface flex flex-col max-h-[45vh] md:max-h-none">
+                            <div className="p-3 space-y-2 border-b border-app-border">
                                 <select
                                     value={selectedDroneId ?? ''}
                                     onChange={e => selectDrone(e.target.value || null)}
-                                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200"
+                                    className="w-full bg-app-surface-2 border border-app-border-strong rounded-md px-2 h-8 text-[13px] text-app-text"
                                 >
-                                    <option value="">- select drone -</option>
+                                    <option value="">Select a drone</option>
                                     {drones.map(d => (
                                         <option key={d.id} value={d.id}>
                                             {d.name} {onlineUids.has(d.hardware_uid) ? '● online' : ''}
                                         </option>
                                     ))}
                                 </select>
-                                <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-700 rounded px-2">
-                                    <Search size={12} className="text-zinc-500" />
+                                <div className="flex items-center gap-2 bg-app-surface-2 border border-app-border-strong rounded-md px-2">
+                                    <Search size={12} className="text-app-text-muted" />
                                     <input
                                         value={search}
                                         onChange={e => setSearch(e.target.value)}
                                         placeholder="search name / uid…"
-                                        className="flex-1 bg-transparent py-1.5 text-xs text-zinc-200 outline-none placeholder:text-zinc-600"
+                                        className="flex-1 bg-transparent h-8 text-[13px] text-app-text outline-none placeholder:text-app-text-subtle"
                                     />
                                 </div>
                             </div>
                             <div className="flex-1 overflow-y-auto p-2 space-y-2">
                                 {filteredDrones.length === 0 && (
-                                    <div className="text-[10px] text-zinc-600 p-2">
+                                    <div className="text-[12px] text-app-text-muted p-2">
                                         {drones.length === 0
-                                            ? 'No drones registered yet - connect telemetry once and the FC’s hardware UID gets stored here permanently.'
+                                            ? 'No drones yet. A drone is added the first time it connects.'
                                             : 'No match.'}
                                     </div>
                                 )}
@@ -822,18 +831,18 @@ export default function AdminPage() {
                                             key={d.id}
                                             onClick={() => selectDrone(d.id === selectedDroneId ? null : d.id)}
                                             className={
-                                                'w-full text-left border rounded p-2.5 transition-colors ' +
+                                                'w-full text-left border rounded-md p-2.5 transition-colors duration-[120ms] ' +
                                                 (selectedDroneId === d.id
-                                                    ? 'border-cyan-500 bg-cyan-500/5'
-                                                    : 'border-zinc-800 hover:border-zinc-600')
+                                                    ? 'border-app-accent bg-app-accent-soft'
+                                                    : 'border-app-border hover:border-app-text-subtle')
                                             }
                                         >
-                                            <div className="flex items-center gap-2 text-xs">
-                                                <span className={online ? 'text-emerald-400' : 'text-zinc-700'}>●</span>
-                                                <span className="font-semibold text-zinc-100 truncate">{d.name}</span>
+                                            <div className="flex flex-wrap items-center gap-1.5 text-[14px]">
+                                                <span className={online ? 'text-app-ok' : 'text-app-text-muted'}>●</span>
+                                                <span className="font-semibold text-app-text truncate">{d.name}</span>
                                                 {d.is_simulated && <Tag label="SIM" tone="amber" />}
                                             </div>
-                                            <div className="mt-1 text-[9px] text-zinc-600">
+                                            <div className="mt-1 text-[12px] text-app-text-muted">
                                                 last seen {fmtDate(d.last_seen)}
                                             </div>
                                         </button>
@@ -845,45 +854,46 @@ export default function AdminPage() {
                         {/* Drone detail */}
                         <div className="flex-1 overflow-y-auto">
                             {!selectedDrone ? (
-                                <div className="h-full flex items-center justify-center text-xs text-zinc-600">
+                                <div className="h-full flex flex-col items-center justify-center gap-2 text-[14px] text-app-text-muted">
+                                    <Plane size={22} aria-hidden />
                                     Select a drone to inspect it
                                 </div>
                             ) : (
                                 <div className="max-w-2xl mx-auto p-5 space-y-4">
                                     <div className="flex items-center gap-3">
-                                        <span className="text-lg font-semibold text-zinc-100">
+                                        <span className="text-[22px] font-bold text-app-text">
                                             {selectedDrone.name}
                                         </span>
                                         {selectedDrone.is_simulated && <Tag label="SIM" tone="amber" />}
                                         {selectedDroneSession
-                                            ? <Tag label="ONLINE" tone="emerald" />
-                                            : <Tag label="OFFLINE" tone="zinc" />}
+                                            ? <Tag label="Online" tone="emerald" />
+                                            : <Tag label="Offline" tone="zinc" />}
                                         {selectedDroneSession?.live?.armed && <Tag label="ARMED" tone="red" />}
                                         <button
                                             onClick={() => renameDrone(selectedDrone)}
-                                            className="ml-auto px-2 py-1 rounded border border-zinc-700 text-[10px] text-zinc-400 hover:border-zinc-500"
+                                            className="ml-auto h-8 px-3 rounded-md border border-app-border-strong text-[13px] font-semibold transition-colors duration-[120ms] text-app-text-muted hover:border-app-text-subtle"
                                         >
-                                            RENAME
+                                            Rename
                                         </button>
                                         {selectedDroneSession && (
                                             <button
                                                 onClick={() => { setTab('overview'); watch(selectedDroneSession.session_id) }}
-                                                className="px-2 py-1 rounded border border-cyan-700 text-[10px] text-cyan-400 hover:border-cyan-500"
+                                                className="h-8 px-3 rounded-md border border-app-accent/60 text-[13px] font-semibold transition-colors duration-[120ms] text-app-accent hover:border-app-accent"
                                             >
-                                                SHOW ON MAP
+                                                Show on map
                                             </button>
                                         )}
                                     </div>
 
-                                    <div className="border border-zinc-800 rounded p-3 space-y-1.5 text-[10px] text-zinc-500">
-                                        <div className="tracking-widest">IDENTITY</div>
+                                    <div className="border border-app-border rounded-[10px] bg-app-surface p-3 space-y-1.5 text-[12px] text-app-text-muted">
+                                        <div className="text-[12px] font-bold uppercase tracking-[0.04em]">IDENTITY</div>
                                         <Uid uid={selectedDrone.hardware_uid}
                                             copied={copiedUid === selectedDrone.hardware_uid} onCopy={copyUid} />
-                                        <div className="text-zinc-600">
+                                        <div className="text-app-text-muted">
                                             first seen {fmtDate(selectedDrone.first_seen)} · last seen {fmtDate(selectedDrone.last_seen)}
                                         </div>
                                         {selectedDroneSession?.approx_location && (
-                                            <div className="text-zinc-600">
+                                            <div className="text-app-text-muted">
                                                 client near {[selectedDroneSession.approx_location.city,
                                                     selectedDroneSession.approx_location.country].filter(Boolean).join(', ')}
                                             </div>
@@ -892,13 +902,13 @@ export default function AdminPage() {
 
                                     {/* Live video + flight data when online */}
                                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                                        <div className="border border-zinc-800 rounded overflow-hidden">
-                                            <div className="px-3 py-1.5 text-[10px] text-zinc-500 border-b border-zinc-800">VIDEO</div>
+                                        <div className="border border-app-border rounded-[10px] bg-app-surface overflow-hidden">
+                                            <div className="px-3 min-h-10 py-2 text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted border-b border-app-border flex items-center gap-2">VIDEO</div>
                                             {selectedDroneSession && frameUrl ? (
                                                 // eslint-disable-next-line @next/next/no-img-element
                                                 <img src={frameUrl} alt="drone video" className="w-full" />
                                             ) : (
-                                                <div className="aspect-video flex items-center justify-center text-[10px] text-zinc-600">
+                                                <div className="aspect-video flex items-center justify-center text-[12px] text-app-text-muted">
                                                     {!selectedDroneSession
                                                         ? 'Drone is offline'
                                                         : selectedDroneSession.is_streaming
@@ -907,12 +917,12 @@ export default function AdminPage() {
                                                 </div>
                                             )}
                                         </div>
-                                        <div className="border border-zinc-800 rounded">
-                                            <div className="px-3 py-1.5 text-[10px] text-zinc-500 border-b border-zinc-800">FLIGHT DATA</div>
+                                        <div className="border border-app-border rounded-[10px] bg-app-surface">
+                                            <div className="px-3 min-h-10 py-2 text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted border-b border-app-border flex items-center gap-2">FLIGHT DATA</div>
                                             {selectedDroneSession && telem ? (
                                                 <TelemGrid telem={telem} />
                                             ) : (
-                                                <div className="p-3 text-[10px] text-zinc-600">
+                                                <div className="p-3 text-[12px] text-app-text-muted">
                                                     {!selectedDroneSession
                                                         ? 'Drone is offline'
                                                         : 'Waiting for telemetry…'}
@@ -922,73 +932,72 @@ export default function AdminPage() {
                                     </div>
 
                                     {/* Flight history */}
-                                    <div className="border border-zinc-800 rounded">
-                                        <div className="px-3 py-2 text-[10px] tracking-widest text-zinc-500 border-b border-zinc-800">
+                                    <div className="border border-app-border rounded-[10px] bg-app-surface">
+                                        <div className="px-3 min-h-10 py-2 text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted border-b border-app-border flex items-center gap-2">
                                             RECENT FLIGHTS - {flights.length}
                                         </div>
                                         {flights.length === 0 ? (
-                                            <div className="p-3 text-[10px] text-zinc-600">
-                                                No recorded flights yet. Every armed→disarmed cycle is
-                                                stored automatically with its full 1 Hz track.
+                                            <div className="p-3 text-[12px] text-app-text-muted">
+                                                No flights yet. Each arm-to-disarm is saved with its track.
                                             </div>
                                         ) : (
-                                            <div className="divide-y divide-zinc-900">
+                                            <div className="divide-y divide-app-border">
                                                 {flights.map(f => (
                                                     <div key={f.id}>
                                                         <button
                                                             onClick={() => void openFlight(f.id)}
                                                             className={
-                                                                'w-full text-left px-3 py-2 text-[10px] flex items-center gap-3 hover:bg-zinc-900/50 ' +
-                                                                (flightDetail?.flight.id === f.id ? 'bg-zinc-900/60' : '')
+                                                                'w-full text-left px-3 min-h-10 py-2 text-[13px] flex items-center gap-3 tabular-nums transition-colors duration-[120ms] hover:bg-app-surface-2 ' +
+                                                                (flightDetail?.flight.id === f.id ? 'bg-app-surface-2' : '')
                                                             }
                                                         >
-                                                            <span className="text-zinc-300">{fmtDate(f.started_at)}</span>
+                                                            <span className="text-app-text tabular-nums">{fmtDate(f.started_at)}</span>
                                                             {f.in_progress ? (
                                                                 <Tag label="IN FLIGHT" tone="emerald" />
                                                             ) : (
-                                                                <span className="text-zinc-500">{fmtDur(f.duration_s)}</span>
+                                                                <span className="text-app-text-muted">{fmtDur(f.duration_s)}</span>
                                                             )}
-                                                            <span className="text-zinc-600">
+                                                            <span className="text-app-text-muted">
                                                                 {f.max_alt_m.toFixed(0)}m max · {(f.distance_m / 1000).toFixed(2)}km
                                                             </span>
                                                             {f.crossed_orange && (
-                                                                <span className="text-amber-500" title="Passed through orange zone">●</span>
+                                                                <AlertTriangle size={14} className="text-app-warn" aria-label="Passed through orange zone" />
                                                             )}
                                                             {f.crossed_red && (
-                                                                <span className="text-red-500" title="Entered red zone">●</span>
+                                                                <AlertTriangle size={14} className="text-app-danger" aria-label="Entered red zone" />
                                                             )}
-                                                            <span className="ml-auto text-zinc-700">
+                                                            <span className="ml-auto text-app-text-muted">
                                                                 {flightDetail?.flight.id === f.id ? '▾' : '▸'}
                                                             </span>
                                                         </button>
                                                         {flightDetail?.flight.id === f.id && (
                                                             <div className="px-3 pb-3 space-y-2">
-                                                                <div className="h-56 rounded overflow-hidden border border-zinc-800">
+                                                                <div className="h-56 rounded-md overflow-hidden border border-app-border">
                                                                     <FlightTrackMap track={flightDetail.track} />
                                                                 </div>
-                                                                <div className="flex items-center gap-3 text-[9px]">
+                                                                <div className="flex items-center gap-3 text-[12px]">
                                                                     {/* A button, not <a href>: the route needs the bearer. */}
                                                                     <button
                                                                         type="button"
                                                                         onClick={() => { void apiDownload(`/api/flights/${f.id}/download`, `flight_${f.id}.csv`) }}
-                                                                        className="px-2 py-1 rounded border border-zinc-700 text-zinc-300 hover:border-cyan-600 hover:text-cyan-400"
+                                                                        className="px-2 py-1 rounded-md border border-app-border-strong text-app-text hover:border-app-accent hover:text-app-accent"
                                                                     >
-                                                                        ⬇ DOWNLOAD CSV
+                                                                        Download CSV
                                                                     </button>
                                                                     {f.crossed_orange && (
-                                                                        <span className="text-amber-500">● crossed orange zone</span>
+                                                                        <span className="flex items-center gap-1 text-app-warn"><AlertTriangle size={12} aria-hidden /> Crossed orange zone</span>
                                                                     )}
                                                                     {f.crossed_red && (
-                                                                        <span className="text-red-500">● entered red zone</span>
+                                                                        <span className="flex items-center gap-1 text-app-danger"><AlertTriangle size={12} aria-hidden /> Entered red zone</span>
                                                                     )}
                                                                 </div>
-                                                                <div className="grid grid-cols-4 gap-2 text-[9px] text-zinc-500">
-                                                                    <div>SAMPLES <span className="text-zinc-300">{flightDetail.flight.samples_count}</span></div>
-                                                                    <div>MAX ALT <span className="text-zinc-300">{flightDetail.flight.max_alt_m.toFixed(1)}m</span></div>
-                                                                    <div>DIST <span className="text-zinc-300">{(flightDetail.flight.distance_m / 1000).toFixed(2)}km</span></div>
+                                                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[12px] text-app-text-muted tabular-nums">
+                                                                    <div>SAMPLES <span className="text-app-text">{flightDetail.flight.samples_count}</span></div>
+                                                                    <div>MAX ALT <span className="text-app-text">{flightDetail.flight.max_alt_m.toFixed(1)}m</span></div>
+                                                                    <div>DIST <span className="text-app-text">{(flightDetail.flight.distance_m / 1000).toFixed(2)}km</span></div>
                                                                     <div>
                                                                         MIN BATT{' '}
-                                                                        <span className="text-zinc-300">
+                                                                        <span className="text-app-text">
                                                                             {flightDetail.track.length > 0
                                                                                 ? Math.min(...flightDetail.track.map(s => s.battery)).toFixed(0)
                                                                                 : '-'}%
@@ -1024,35 +1033,35 @@ export default function AdminPage() {
                     <div className="flex-1 overflow-y-auto p-5">
                         <div className="max-w-3xl mx-auto space-y-6">
                             {permitError && (
-                                <div className="text-xs text-red-300 border border-red-900/60 rounded p-2">{permitError}</div>
+                                <div role="alert" className="text-[13px] text-app-danger bg-app-danger-soft border border-app-danger/50 rounded-[10px] p-3">{permitError}</div>
                             )}
                             <section className="space-y-2">
-                                <h2 className="text-xs tracking-widest text-zinc-500">
-                                    PENDING REQUESTS - {permits.filter(p => p.status === 'pending').length}
+                                <h2 className="text-[18px] font-bold text-app-text">
+                                    Waiting for a decision <span className="tabular-nums text-app-text-muted">{permits.filter(p => p.status === 'pending').length}</span>
                                 </h2>
                                 {permits.filter(p => p.status === 'pending').length === 0 && (
-                                    <div className="text-xs text-zinc-600 border border-zinc-800 rounded p-4">
-                                        No pending requests you can decide. A pilot whose plan crosses an orange
-                                        or red zone in your area asks from the Mission tab; the request appears here.
+                                    <div className="flex items-center gap-2 text-[14px] text-app-text-muted border border-app-border rounded-[10px] bg-app-surface p-4"
+                                        title="A pilot whose plan crosses an orange or red zone in your area asks from the Mission tab; the request appears here.">
+                                        <FileCheck size={16} aria-hidden /> Nothing to decide right now
                                     </div>
                                 )}
                                 {permits.filter(p => p.status === 'pending').map(p => (
-                                    <div key={p.id} className="border border-amber-700/40 rounded p-3 space-y-2 text-xs">
+                                    <div key={p.id} className="border border-app-warn/50 rounded-[10px] bg-app-surface p-4 space-y-2 text-[13px]">
                                         <div className="flex items-center gap-3 flex-wrap">
-                                            <span className="font-semibold text-zinc-100">{p.workspace_name || p.workspace_id.slice(0, 8)}</span>
-                                            <span className="text-zinc-400">{p.drone_name ?? (p.drone_id ? p.drone_id.slice(0, 8) : 'any drone')}</span>
-                                            <span className="text-zinc-600">{p.kind === 'area' ? 'area' : `${p.waypoint_count} waypoints`}</span>
-                                            <span className="text-zinc-600">by {p.requested_by_name || '-'} {fmtDate(p.requested_at)}</span>
+                                            <span className="font-semibold text-app-text">{p.workspace_name || p.workspace_id.slice(0, 8)}</span>
+                                            <span className="text-app-text-muted">{p.drone_name ?? (p.drone_id ? p.drone_id.slice(0, 8) : 'any drone')}</span>
+                                            <span className="text-app-text-muted">{p.kind === 'area' ? 'area' : `${p.waypoint_count} waypoints`}</span>
+                                            <span className="text-app-text-muted">by {p.requested_by_name || '-'} {fmtDate(p.requested_at)}</span>
                                         </div>
-                                        <div className="text-zinc-300 border-l-2 border-zinc-700 pl-2">
+                                        <div className="text-app-text border-l-2 border-app-border-strong pl-2">
                                             &ldquo;{p.description}&rdquo;
                                         </div>
-                                        <div className="text-[10px] text-zinc-400">
+                                        <div className="text-[12px] text-app-text-muted">
                                             window {fmtDate(p.valid_from)} to {fmtDate(p.valid_until)}
                                         </div>
-                                        <div className="text-[10px] flex flex-wrap gap-x-3">
+                                        <div className="text-[12px] flex flex-wrap gap-x-3">
                                             {p.zones.map(z => (
-                                                <span key={z.id} className={z.zone_class === 'red' ? 'text-red-400/90' : 'text-amber-400/90'}>
+                                                <span key={z.id} className={z.zone_class === 'red' ? 'text-app-danger' : 'text-app-warn'}>
                                                     {z.zone_class} zone: {z.name}
                                                 </span>
                                             ))}
@@ -1063,48 +1072,48 @@ export default function AdminPage() {
                                                 <input id={`note-${p.id}`} value={permitNotes[p.id] ?? ''} maxLength={500}
                                                     onChange={e => setPermitNotes(n => ({ ...n, [p.id]: e.target.value }))}
                                                     placeholder="Note to the pilot (optional)"
-                                                    className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-[11px] text-zinc-200 outline-none focus:border-zinc-600" />
+                                                    className="flex-1 min-w-0 bg-app-surface-2 border border-app-border rounded-md px-2 h-8 text-[13px] text-app-text outline-none focus:border-app-accent" />
                                                 <button
                                                     onClick={() => void decidePermit(p.id, true)}
-                                                    className="px-3 py-1 rounded border border-emerald-700 text-emerald-400 hover:border-emerald-500"
+                                                    className="h-8 px-3 rounded-md border border-app-ok/50 bg-app-ok-soft text-[13px] font-semibold text-app-ok hover:border-app-ok transition-colors duration-[120ms]"
                                                 >
-                                                    APPROVE
+                                                    Approve
                                                 </button>
                                                 <button
                                                     onClick={() => void decidePermit(p.id, false)}
-                                                    className="px-3 py-1 rounded border border-red-800 text-red-400 hover:border-red-600"
+                                                    className="h-8 px-3 rounded-md border border-app-danger/50 text-[13px] font-semibold text-app-danger hover:bg-app-danger-soft transition-colors duration-[120ms]"
                                                 >
-                                                    DENY
+                                                    Deny
                                                 </button>
                                             </div>
                                         ) : (
-                                            <div className="text-[10px] text-zinc-600">You requested this one; another reviewer decides it.</div>
+                                            <div className="text-[12px] text-app-text-muted">You requested this one; another reviewer decides it.</div>
                                         )}
                                     </div>
                                 ))}
                             </section>
 
                             <section className="space-y-2">
-                                <h2 className="text-xs tracking-widest text-zinc-500">HISTORY</h2>
+                                <h2 className="text-[18px] font-bold text-app-text">History</h2>
                                 {permits.filter(p => p.status !== 'pending').length === 0 && (
-                                    <div className="text-[10px] text-zinc-600 p-2">No decided permits yet.</div>
+                                    <div className="text-[13px] text-app-text-muted p-2">No decided permits yet.</div>
                                 )}
                                 {permits.filter(p => p.status !== 'pending').map(p => {
                                     const tone = PERMIT_TONE[p.status_effective] ?? PERMIT_TONE.pending
                                     return (
-                                        <div key={p.id} className="border border-zinc-800 rounded p-2.5 flex items-center gap-3 text-[10px]">
-                                            <span className="px-1.5 py-0.5 rounded border font-bold shrink-0" style={{ color: tone.fg, borderColor: `${tone.fg}66` }}>
+                                        <div key={p.id} className="border border-app-border rounded-[10px] bg-app-surface min-h-11 px-3 py-2 flex items-center gap-3 text-[13px]">
+                                            <span className="inline-flex items-center h-6 px-2 rounded-full border text-[12px] font-bold shrink-0" style={{ color: tone.fg, borderColor: `${tone.fg}66` }}>
                                                 {tone.label}
                                             </span>
-                                            <span className="text-zinc-200 shrink-0">{p.workspace_name || p.workspace_id.slice(0, 8)}</span>
-                                            <span className="text-zinc-500 truncate min-w-0" title={p.decision_note || p.description}>
+                                            <span className="text-app-text shrink-0">{p.workspace_name || p.workspace_id.slice(0, 8)}</span>
+                                            <span className="text-app-text-muted truncate min-w-0" title={p.decision_note || p.description}>
                                                 {p.description}{p.decision_note ? ` - ${p.decided_by_name ? `${p.decided_by_name}: ` : ''}${p.decision_note}` : ''}
                                             </span>
-                                            <span className="ml-auto text-zinc-600 shrink-0">until {fmtDate(p.valid_until)}</span>
+                                            <span className="ml-auto text-app-text-muted shrink-0">until {fmtDate(p.valid_until)}</span>
                                             {p.status === 'approved' && p.can_decide && p.status_effective !== 'expired' && (
                                                 <button onClick={() => void decidePermit(p.id, false)}
-                                                    className="px-2 py-0.5 rounded border border-red-800 text-red-400 hover:border-red-600 shrink-0">
-                                                    REVOKE
+                                                    className="h-8 px-3 rounded-md border border-app-danger/50 text-[13px] font-semibold text-app-danger hover:bg-app-danger-soft transition-colors duration-[120ms] shrink-0">
+                                                    Revoke
                                                 </button>
                                             )}
                                         </div>
@@ -1148,82 +1157,82 @@ function DetailPanel({
     control: ControlProps
 }) {
     return (
-        <section className="w-96 shrink-0 border-l border-zinc-800 bg-zinc-950 overflow-y-auto">
-            <div className="flex items-center gap-2 px-3 py-2.5 border-b border-zinc-800 sticky top-0 bg-zinc-950 z-10">
-                <span className="text-sm font-semibold text-zinc-100 truncate">
+        <section className="w-full md:w-96 shrink-0 border-t md:border-t-0 md:border-l border-app-border bg-app-surface overflow-y-auto max-h-[60vh] md:max-h-none">
+            <div className="flex items-center gap-2 px-3 py-2.5 border-b border-app-border sticky top-0 bg-app-surface z-10 flex-wrap">
+                <span className="text-[18px] font-bold text-app-text truncate">
                     {session.drone?.name ?? session.session_id.slice(0, 8)}
                 </span>
                 {session.drone?.is_simulated && <Tag label="SIM" tone="amber" />}
                 {session.live?.armed && <Tag label="ARMED" tone="red" />}
                 {session.live?.zone_class === 'orange' && <Tag label="ORANGE ZONE" tone="amber" />}
                 {session.live?.zone_class === 'red' && <Tag label="RED ZONE" tone="red" />}
-                <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-200" title="Close">
-                    <X size={16} />
+                <button onClick={onClose} className="ml-auto grid place-items-center size-8 rounded-md text-app-text-muted hover:text-app-text hover:bg-app-surface-2" title="Close" aria-label="Close">
+                    <X size={18} />
                 </button>
             </div>
 
-            <div className="border-b border-zinc-800 px-3 py-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
-                <span className="text-zinc-500">WORKSPACE</span><span className="text-zinc-200 truncate">{session.workspace_name || '-'}</span>
-                <span className="text-zinc-500">USER</span>
-                <span className="text-zinc-200 truncate">{session.username ?? '-'}{session.role ? ` (${session.role})` : ''}{session.staff ? ' · staff' : ''}</span>
-                <span className="text-zinc-500">LINK</span><span className="text-zinc-200">{session.link_kind ? (LINK_LABELS[session.link_kind] ?? session.link_kind) : 'none'}</span>
-                <span className="text-zinc-500">AI MODE</span><span className="text-zinc-200">{session.ai_mode}</span>
-                <span className="text-zinc-500">STATE</span>
-                <span className="text-zinc-200">{session.in_air ? 'IN AIR' : session.armed ? 'ARMED' : 'ON GROUND'}{session.detached ? ' · client away' : ''}</span>
-            </div>
+            <dl className="border-b border-app-border px-3 py-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[13px]">
+                <dt className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted self-center">WORKSPACE</dt><dd className="text-app-text min-w-0 truncate">{session.workspace_name || '-'}</dd>
+                <dt className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted self-center">USER</dt>
+                <dd className="text-app-text min-w-0 truncate">{session.username ?? '-'}{session.role ? ` (${session.role})` : ''}{session.staff ? ' · staff' : ''}</dd>
+                <dt className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted self-center">LINK</dt><dd className="text-app-text min-w-0">{session.link_kind ? (LINK_LABELS[session.link_kind] ?? session.link_kind) : 'none'}</dd>
+                <dt className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted self-center">AI MODE</dt><dd className="text-app-text min-w-0">{session.ai_mode}</dd>
+                <dt className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted self-center">STATE</dt>
+                <dd className="text-app-text min-w-0">{session.in_air ? 'In air' : session.armed ? 'Armed' : 'On ground'}{session.detached ? ' · client away' : ''}</dd>
+            </dl>
 
             {control && session.telemetry_connected && <ControlBlock session={session} telem={telem} control={control} />}
             {!control && session.takeover && (
-                <div className="border-b border-zinc-800 px-3 py-2 text-[10px] text-red-400">
+                <div className="border-b border-app-border px-3 py-2 text-[12px] text-app-danger">
                     HYRAK operations ({session.takeover.by}) hold this drone.
                 </div>
             )}
 
-            <div className="border-b border-zinc-800">
-                <div className="px-3 py-1.5 text-[10px] text-zinc-500">VIDEO</div>
+            <div className="border-b border-app-border">
+                <div className="px-3 pt-3 pb-1.5 text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Video</div>
                 {frameUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={frameUrl} alt="session video" className="w-full" />
                 ) : (
-                    <div className="aspect-video flex items-center justify-center text-[10px] text-zinc-600">
+                    <div className="aspect-video flex items-center justify-center text-[12px] text-app-text-muted">
                         {session.is_streaming ? 'Waiting for frames…' : 'Client is not streaming video'}
                     </div>
                 )}
             </div>
 
-            <div className="border-b border-zinc-800 pb-2">
-                <div className="px-3 py-1.5 text-[10px] text-zinc-500">FLIGHT DATA</div>
+            <div className="border-b border-app-border pb-2">
+                <div className="px-3 pt-3 pb-1.5 text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Flight data</div>
                 {telem ? (
                     <TelemGrid telem={telem} />
                 ) : (
-                    <div className="px-3 text-[10px] text-zinc-600">
+                    <div className="px-3 text-[12px] text-app-text-muted">
                         {session.telemetry_connected ? 'Waiting for telemetry…' : 'No telemetry connected'}
                     </div>
                 )}
             </div>
 
-            <div className="border-b border-zinc-800 px-3 py-2 space-y-1.5 text-[10px]">
-                <div className="text-zinc-500 tracking-widest">IDENTITY</div>
+            <div className="border-b border-app-border px-3 py-2 space-y-1.5 text-[12px]">
+                <div className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">IDENTITY</div>
                 {session.hardware_uid ? (
                     <Uid uid={session.hardware_uid}
                         copied={copiedUid === session.hardware_uid} onCopy={onCopyUid} />
                 ) : (
-                    <div className="text-zinc-600">UID not resolved</div>
+                    <div className="text-app-text-muted">UID not resolved</div>
                 )}
-                <div className="text-zinc-600">session {session.session_id}</div>
+                <div className="text-app-text-muted">session {session.session_id}</div>
                 {session.approx_location && (
-                    <div className="text-zinc-600">
+                    <div className="text-app-text-muted">
                         client near {[session.approx_location.city, session.approx_location.country]
                             .filter(Boolean).join(', ')}
                     </div>
                 )}
                 {session.drone_address && (
-                    <div className="text-zinc-700 break-all">{session.drone_address}</div>
+                    <div className="text-app-text-muted break-all">{session.drone_address}</div>
                 )}
                 {session.drone && onRename && (
                     <button
                         onClick={() => onRename(session.drone!)}
-                        className="mt-1 px-2 py-1 rounded border border-zinc-700 text-[10px] text-zinc-400 hover:border-zinc-500"
+                        className="mt-1 h-8 px-3 rounded-md border border-app-border-strong text-[13px] font-semibold transition-colors duration-[120ms] text-app-text-muted hover:border-app-text-subtle"
                     >
                         RENAME
                     </button>
@@ -1246,70 +1255,70 @@ function ControlBlock({ session, telem, control }: { session: SessionInfo; telem
     const [alt, setAlt] = useState(5)
     const [confirming, setConfirming] = useState(false)
     const heldByOther = !!session.takeover && !control.mine
-    const btn = 'px-2 py-1.5 rounded border text-[10px] tracking-widest disabled:opacity-40'
+    const btn = 'min-h-8 px-2 py-1 rounded-md border text-[13px] font-bold transition-colors duration-[120ms] disabled:cursor-not-allowed disabled:border-dashed disabled:border-app-border-strong disabled:text-app-text-muted'
     return (
-        <div className="border-b border-zinc-800 px-3 py-2 space-y-2">
-            <div className="flex items-center gap-2 text-[10px] tracking-widest text-zinc-500">
+        <div className="border-b border-app-border px-3 py-2 space-y-2">
+            <div className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">
                 CONTROL
                 {control.mine && <Tag label="YOU HAVE CONTROL" tone="red" />}
                 {heldByOther && <Tag label={`HELD BY ${session.takeover!.by.toUpperCase()}`} tone="amber" />}
             </div>
             <div className="grid grid-cols-3 gap-1.5">
-                <button className={btn + ' border-amber-700 text-amber-300 hover:border-amber-500'}
+                <button className={btn + ' border-app-warn/50 text-app-warn hover:border-app-warn'}
                     disabled={heldByOther} onClick={() => control.send('hold')}>HOLD</button>
-                <button className={btn + ' border-cyan-700 text-cyan-300 hover:border-cyan-500'}
+                <button className={btn + ' border-app-accent/60 text-app-accent hover:border-app-accent'}
                     disabled={heldByOther} onClick={() => control.send('return')}>RTL</button>
-                <button className={btn + ' border-red-800 text-red-300 hover:border-red-600'}
+                <button className={btn + ' border-app-danger/50 text-app-danger hover:border-app-danger'}
                     disabled={heldByOther} onClick={() => control.send('land')}>LAND</button>
             </div>
             {!session.takeover && (confirming ? (
                 <div className="flex gap-1.5">
-                    <button className={btn + ' flex-1 border-red-700 bg-red-500/10 text-red-300'}
+                    <button className={btn + ' flex-1 border-app-danger/50 bg-app-danger-soft text-app-danger'}
                         onClick={() => { setConfirming(false); control.takeOver() }}>
-                        CONFIRM: TAKE CONTROL FROM {(session.username ?? 'THE PILOT').toUpperCase()}
+                        Confirm: take control from {session.username ?? 'the pilot'}
                     </button>
-                    <button className={btn + ' border-zinc-700 text-zinc-400'} onClick={() => setConfirming(false)}>Cancel</button>
+                    <button className={btn + ' border-app-border-strong text-app-text-muted'} onClick={() => setConfirming(false)}>Cancel</button>
                 </div>
             ) : (
-                <button className={btn + ' w-full border-red-800 text-red-300 hover:border-red-600'}
+                <button className={btn + ' w-full border-app-danger/50 text-app-danger hover:border-app-danger'}
                     onClick={() => setConfirming(true)}>Take control</button>
             ))}
             {control.mine && (
                 <>
                     <div className="grid grid-cols-2 gap-1.5">
-                        <button className={btn + ' border-zinc-700 text-zinc-200'} onClick={() => control.send('arm')}>ARM</button>
-                        <button className={btn + ' border-zinc-700 text-zinc-200'} onClick={() => control.send('disarm')}>DISARM</button>
-                        <button className={btn + ' border-zinc-700 text-zinc-200'} onClick={() => control.send('start_mission')}>START MISSION</button>
-                        <button className={btn + ' border-zinc-700 text-zinc-200'} onClick={() => control.send('pause_mission')}>PAUSE MISSION</button>
+                        <button className={btn + ' border-app-border-strong text-app-text'} onClick={() => control.send('arm')}>ARM</button>
+                        <button className={btn + ' border-app-border-strong text-app-text'} onClick={() => control.send('disarm')}>DISARM</button>
+                        <button className={btn + ' border-app-border-strong text-app-text'} onClick={() => control.send('start_mission')}>Start mission</button>
+                        <button className={btn + ' border-app-border-strong text-app-text'} onClick={() => control.send('pause_mission')}>Pause mission</button>
                     </div>
                     <div className="flex items-center gap-1.5">
-                        <label htmlFor="takeover-alt" className="text-[10px] text-zinc-500">TAKEOFF ALT</label>
+                        <label htmlFor="takeover-alt" className="text-[12px] font-bold text-app-text-muted">Takeoff alt</label>
                         <input id="takeover-alt" type="number" min={1} max={120} value={alt}
                             onChange={e => setAlt(Math.max(1, Math.min(120, Number(e.target.value) || 1)))}
-                            className="w-14 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-[11px] text-zinc-200" />
-                        <span className="text-[10px] text-zinc-600">m</span>
-                        <button className={btn + ' ml-auto border-zinc-700 text-zinc-200'}
+                            className="w-16 h-8 bg-app-surface-2 border border-app-border-strong rounded-md px-1.5 text-[13px] tabular-nums text-app-text" />
+                        <span className="text-[12px] text-app-text-muted">m</span>
+                        <button className={btn + ' ml-auto border-app-border-strong text-app-text'}
                             onClick={() => control.send('takeoff', { altitude: alt })}>TAKEOFF</button>
                     </div>
                     <div className="flex items-center gap-1.5">
-                        <label htmlFor="takeover-mode" className="text-[10px] text-zinc-500">MODE</label>
+                        <label htmlFor="takeover-mode" className="text-[12px] font-bold text-app-text-muted">Mode</label>
                         <select id="takeover-mode" value="" aria-label="Set flight mode"
                             onChange={e => { if (e.target.value) control.send('set_mode', { mode: e.target.value }) }}
-                            className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-1 text-[11px] text-zinc-200">
+                            className="flex-1 h-8 bg-app-surface-2 border border-app-border-strong rounded-md px-1.5 text-[13px] text-app-text">
                             <option value="">{telem?.flight_mode.mode ?? 'set mode'}</option>
                             {FLIGHT_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                         </select>
                     </div>
-                    <button className={btn + ' w-full border-emerald-700 text-emerald-300 hover:border-emerald-500'}
+                    <button className={btn + ' w-full border-app-ok/50 text-app-ok hover:border-app-ok'}
                         onClick={control.release}>Release control</button>
                 </>
             )}
             {control.lastResult && (
-                <div className={'text-[10px] ' + (control.lastResult.ok ? 'text-emerald-400' : 'text-red-400')}>
+                <div className={'text-[12px] ' + (control.lastResult.ok ? 'text-app-ok' : 'text-app-danger')}>
                     {control.lastResult.action}: {control.lastResult.ok ? 'done' : (control.lastResult.error ?? 'refused')}
                 </div>
             )}
-            {control.note && <div className="text-[10px] text-amber-400">{control.note}</div>}
+            {control.note && <div className="text-[12px] text-app-warn">{control.note}</div>}
         </div>
     )
 }
@@ -1327,46 +1336,46 @@ function FleetDetailPanel({
 }) {
     const l = drone.live
     return (
-        <section className="w-96 shrink-0 border-l border-zinc-800 bg-zinc-950 overflow-y-auto">
-            <div className="flex items-center gap-2 px-3 py-2.5 border-b border-zinc-800 sticky top-0 bg-zinc-950 z-10">
-                <span className="text-sm font-semibold text-zinc-100 truncate">{name}</span>
+        <section className="w-full md:w-96 shrink-0 border-t md:border-t-0 md:border-l border-app-border bg-app-surface overflow-y-auto max-h-[60vh] md:max-h-none">
+            <div className="flex items-center gap-2 px-3 py-2.5 border-b border-app-border sticky top-0 bg-app-surface z-10 flex-wrap">
+                <span className="text-[18px] font-bold text-app-text truncate">{name}</span>
                 <Tag label="SIM" tone="violet" />
                 {l?.armed && <Tag label="ARMED" tone="red" />}
                 {l?.zone_class === 'orange' && <Tag label="ORANGE ZONE" tone="amber" />}
                 {l?.zone_class === 'red' && <Tag label="RED ZONE" tone="red" />}
-                <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-200" title="Close">
-                    <X size={16} />
+                <button onClick={onClose} className="ml-auto grid place-items-center size-8 rounded-md text-app-text-muted hover:text-app-text hover:bg-app-surface-2" title="Close" aria-label="Close">
+                    <X size={18} />
                 </button>
             </div>
 
-            <div className="border-b border-zinc-800 pb-2">
-                <div className="px-3 py-1.5 text-[10px] text-zinc-500">FLIGHT DATA</div>
+            <div className="border-b border-app-border pb-2">
+                <div className="px-3 pt-3 pb-1.5 text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Flight data</div>
                 {l ? (
-                    <div className="px-3 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] font-mono">
-                        <span className="text-zinc-500">MODE</span><span className="text-zinc-200">{l.mode}</span>
-                        <span className="text-zinc-500">ALT</span><span className="text-zinc-200">{l.alt.toFixed(1)} m</span>
-                        <span className="text-zinc-500">HDG</span><span className="text-zinc-200">{l.heading.toFixed(0)}°</span>
-                        <span className="text-zinc-500">BATT</span><span className="text-zinc-200">{l.battery.toFixed(0)}%</span>
-                        <span className="text-zinc-500">LAT</span><span className="text-zinc-200">{l.lat.toFixed(6)}</span>
-                        <span className="text-zinc-500">LNG</span><span className="text-zinc-200">{l.lng.toFixed(6)}</span>
-                        <span className="text-zinc-500">STATE</span>
-                        <span className="text-zinc-200">
-                            {l.in_air ? 'IN AIR' : l.armed ? 'ARMED' : 'ON GROUND'}
+                    <div className="px-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-[13px] tabular-nums">
+                        <span className="text-app-text-muted">MODE</span><span className="text-app-text">{l.mode}</span>
+                        <span className="text-app-text-muted">ALT</span><span className="text-app-text">{l.alt.toFixed(1)} m</span>
+                        <span className="text-app-text-muted">HDG</span><span className="text-app-text">{l.heading.toFixed(0)}°</span>
+                        <span className="text-app-text-muted">BATT</span><span className="text-app-text">{l.battery.toFixed(0)}%</span>
+                        <span className="text-app-text-muted">LAT</span><span className="text-app-text">{l.lat.toFixed(6)}</span>
+                        <span className="text-app-text-muted">LNG</span><span className="text-app-text">{l.lng.toFixed(6)}</span>
+                        <span className="text-app-text-muted">STATE</span>
+                        <span className="text-app-text">
+                            {l.in_air ? 'In air' : l.armed ? 'Armed' : 'On ground'}
                         </span>
                     </div>
                 ) : (
-                    <div className="px-3 text-[10px] text-zinc-600">Waiting for telemetry…</div>
+                    <div className="px-3 text-[12px] text-app-text-muted">Waiting for telemetry…</div>
                 )}
             </div>
 
-            <div className="border-b border-zinc-800 px-3 py-2 space-y-1.5 text-[10px]">
-                <div className="text-zinc-500 tracking-widest">IDENTITY</div>
+            <div className="border-b border-app-border px-3 py-2 space-y-1.5 text-[12px]">
+                <div className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">IDENTITY</div>
                 <Uid uid={drone.hardware_uid}
                     copied={copiedUid === drone.hardware_uid} onCopy={onCopyUid} />
-                <div className="text-zinc-600">
+                <div className="text-app-text-muted">
                     Simulated fleet drone · PX4 SITL instance {drone.drone_id}
                 </div>
-                <div className="text-zinc-600">
+                <div className="text-app-text-muted">
                     Connected server-side (UDP) - no client session, no video feed.
                 </div>
             </div>
@@ -1377,16 +1386,10 @@ function FleetDetailPanel({
 // Permissions structure - populated once the geofencing phase lands.
 function PermitsBlock() {
     return (
-        <div className="border border-zinc-800 rounded p-3 space-y-2 text-[10px]">
-            <div className="text-zinc-500 tracking-widest">PERMISSIONS</div>
-            <div className="flex justify-between text-zinc-600">
-                <span>PENDING</span><span>0</span>
-            </div>
-            <div className="flex justify-between text-zinc-600">
-                <span>GRANTED</span><span>0</span>
-            </div>
-            <div className="text-zinc-700">
-                Zone permit requests appear here once the geofencing phase lands.
+        <div className="border border-app-border rounded-[10px] bg-app-surface p-3 space-y-2 text-[12px]">
+            <div className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Permissions</div>
+            <div className="text-[13px] text-app-text-muted">
+                Per-drone permits are not tracked yet. Zone permit requests are in the Permits tab.
             </div>
         </div>
     )
@@ -1394,7 +1397,7 @@ function PermitsBlock() {
 
 function TelemGrid({ telem }: { telem: Telem }) {
     return (
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 px-3 py-2 text-xs">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 px-3 py-2">
             <Stat k="MODE" v={telem.flight_mode.mode} />
             <Stat k="ARMED" v={telem.flight_mode.is_armed ? 'YES' : 'NO'}
                 accent={telem.flight_mode.is_armed} />
@@ -1429,26 +1432,46 @@ function Uid({ uid, copied, onCopy }: { uid: string; copied: boolean; onCopy: (u
         <button
             onClick={() => onCopy(uid)}
             title="Click to copy full UID"
-            className="text-[10px] tracking-wide text-cyan-600/80 hover:text-cyan-400 transition-colors break-all text-left"
+            className="font-code text-[12px] text-app-accent hover:underline break-all text-left rounded-sm"
         >
-            {copied ? 'COPIED ✓' : `UID ${uid}`}
+            {copied ? 'Copied' : `UID ${uid}`}
         </button>
     )
 }
 
 function Badge({ on, label }: { on: boolean; label: string }) {
     return (
-        <span className={on ? 'text-emerald-400' : 'text-zinc-700'}>
-            ● {label}
+        <span className={'inline-flex items-center gap-1 font-semibold ' + (on ? 'text-app-ok' : 'text-app-text-muted')}
+            title={`${label}: ${on ? 'on' : 'off'}`}>
+            {on ? <CheckCircle2 size={12} aria-hidden /> : <Circle size={12} aria-hidden />} {label}
         </span>
     )
 }
 
 function Stat({ k, v, accent }: { k: string; v: string; accent?: boolean }) {
     return (
-        <div className="flex justify-between gap-2 border-b border-zinc-900 pb-1">
-            <span className="text-zinc-600">{k}</span>
-            <span className={accent ? 'text-emerald-400' : 'text-zinc-200'}>{v}</span>
+        <div className="flex justify-between gap-2 border-b border-app-border pb-1">
+            <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">{k}</span>
+            <span className={'text-[13px] font-semibold tabular-nums ' + (accent ? 'text-app-ok' : 'text-app-text')}>{v}</span>
         </div>
+    )
+}
+
+/** Every focusable control in the console gets the app's 2px accent ring. */
+const FOCUS_SCOPE = '[&_:focus-visible]:outline-2 [&_:focus-visible]:outline-offset-2 [&_:focus-visible]:outline-[var(--app-accent)]'
+
+/** Light / dark switch for the console rail, same choice as the app's rail. */
+function ConsoleThemeToggle() {
+    const { theme, setTheme } = useTheme()
+    const mounted = useHydrated()
+    if (!mounted) return <div className="w-12 h-12" />
+    const isDark = theme !== 'light'
+    return (
+        <button onClick={() => setTheme(isDark ? 'light' : 'dark')}
+            title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+            className="flex flex-col items-center gap-1 w-12 py-2 rounded-md text-[12px] font-semibold text-app-text-muted hover:text-app-text hover:bg-app-surface-2 transition-colors duration-[120ms]">
+            {isDark ? <Sun size={18} aria-hidden /> : <Moon size={18} aria-hidden />}
+            {isDark ? 'Light' : 'Dark'}
+        </button>
     )
 }

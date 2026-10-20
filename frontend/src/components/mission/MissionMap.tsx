@@ -2,6 +2,7 @@
 
 import { apiFetch } from '@/lib/api'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   MapContainer,
   TileLayer,
@@ -29,6 +30,14 @@ import { visibleInterval } from '@/lib/poll'
 import { getHazards, getObstaclesAndPath, addHazard, type KnownHazard, type LiveObstacle, type LatLng } from '@/lib/avoidance'
 import { ZONE_COLORS, zoneRings, type ZoneFeature } from '@/components/admin/zones'
 import { LiveSightingsLayer, SightingsLegend } from '@/components/mapdetect/MapDetectionsUi'
+import { useActiveWorkspace } from '@/hooks/useAccess'
+import { FOCUS_OVERLAY, OVERLAY } from '@/components/mission/ui'
+
+// Marker text: the app's body face, never below 12px.
+const MARKER_FONT = 'var(--font-nunito),Nunito,system-ui,sans-serif'
+// Where the map opens when there is no plan, no drone and no workspace
+// area yet: IIT Hyderabad, never (0, 0) or the whole world.
+const FALLBACK_CENTER: [number, number] = [17.59, 78.12]
 
 // ── Flight zones (green/orange/red) - pilots plan around these ─────────────
 
@@ -161,9 +170,9 @@ function wpIcon(index: number, type: string, selected: boolean): L.DivIcon {
       width:${sz}px;height:${sz}px;border-radius:50%;
       background:${selected ? color : '#0f172a'};
       border:2.5px solid ${color};
-      color:#fff;font-size:11px;font-weight:700;
+      color:#fff;font-size:12px;font-weight:800;
       display:flex;align-items:center;justify-content:center;
-      font-family:var(--font-geist-mono,monospace);
+      font-family:${MARKER_FONT};font-variant-numeric:tabular-nums;
       box-shadow:0 2px 10px rgba(0,0,0,.5),0 0 0 3px ${color}30;
       transition:all .15s;cursor:pointer;
     ">${index + 1}</div>`,
@@ -190,7 +199,7 @@ const startIcon = L.divIcon({
   html: `<div style="width:26px;height:26px;border-radius:50%;background:#22c55e;
     border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.5);display:flex;
     align-items:center;justify-content:center;color:#fff;font-weight:800;
-    font-size:12px;font-family:monospace;">A</div>`,
+    font-size:12px;font-family:${MARKER_FONT};">A</div>`,
   iconSize: [26, 26], iconAnchor: [13, 13],
 })
 const destIcon = L.divIcon({
@@ -199,21 +208,21 @@ const destIcon = L.divIcon({
     transform:rotate(45deg);background:#ef4444;border:3px solid #fff;
     box-shadow:0 2px 8px rgba(0,0,0,.5);display:flex;align-items:center;
     justify-content:center;"><span style="transform:rotate(-45deg);color:#fff;
-    font-weight:800;font-size:12px;font-family:monospace;">B</span></div>`,
+    font-weight:800;font-size:12px;font-family:${MARKER_FONT};">B</span></div>`,
   iconSize: [26, 26], iconAnchor: [13, 24],
 })
 
 const rtlIcon = L.divIcon({
   className: '',
   html: `<div style="
-    width:22px;height:22px;border-radius:6px;
+    width:34px;height:22px;border-radius:6px;
     background:#a855f7;border:2px solid #fff;
     display:flex;align-items:center;justify-content:center;
     box-shadow:0 2px 6px rgba(0,0,0,.3);
-    font-size:8px;font-weight:800;color:#fff;font-family:monospace;
+    font-size:12px;font-weight:800;color:#fff;font-family:${MARKER_FONT};
   ">RTL</div>`,
-  iconSize: [22, 22],
-  iconAnchor: [11, 11],
+  iconSize: [34, 22],
+  iconAnchor: [17, 11],
 })
 
 // Red, matching the 3D view's drone billboard exactly - drone position should
@@ -264,9 +273,9 @@ function makeFleetDroneIcon(name: string, color: string, isActive: boolean): L.D
       width:${sz}px;height:${sz}px;border-radius:50%;
       background:${color};
       border:${isActive ? 3 : 2}px solid #fff;
-      color:#fff;font-size:${isActive ? 10 : 9}px;font-weight:800;
+      color:#fff;font-size:${isActive ? 13 : 12}px;font-weight:800;
       display:flex;align-items:center;justify-content:center;
-      font-family:monospace;
+      font-family:${MARKER_FONT};
       box-shadow:0 2px 10px rgba(0,0,0,.5),0 0 0 ${isActive ? 3 : 2}px ${color}60;
       cursor:default;
     ">${label}</div>`,
@@ -535,11 +544,15 @@ function WaypointMarker({ wp, index, readOnly = false }: { wp: Waypoint; index: 
  */
 // `layer`: force a base layer for this instance (Normal mode uses the plain
 // street map) without touching the operator's saved choice.
-export default function MissionMap({ readOnly = false, follow = false, compact = false, layer, detectionsLegendStyle }: {
+export default function MissionMap({ readOnly = false, follow = false, compact = false, layer, detectionsLegendStyle, avoidanceLegendHost }: {
   readOnly?: boolean; follow?: boolean; compact?: boolean; layer?: MapLayer
   /** Where the detections legend sits (default: top right, clear of the
    *  Command window's corner pictures). */
   detectionsLegendStyle?: React.CSSProperties
+  /** Render the avoidance legend into this element instead of the map's
+   *  bottom-left corner (the Mission page stacks it in its left column).
+   *  Passing null renders nothing until the element exists. */
+  avoidanceLegendHost?: HTMLElement | null
 } = {}) {
   const rawWaypoints       = useMissionStore(s => s.waypoints)
   const homePosition       = useMissionStore(s => s.homePosition)
@@ -557,6 +570,7 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
   const fleetPlans         = useMissionStore(s => s.plans)
   const activePlanKey      = useMissionStore(s => s.activePlanKey)
   const { isCustomer }     = useAccess()
+  const { workspace }      = useActiveWorkspace()
 
   // RTL is a separate, non-mission control (see rtlPosition in the mission
   // store) - never part of the orderable/flown path. Defensive filter in case
@@ -619,11 +633,61 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
     }
   }
 
+  // Opening view only (MapContainer reads it once): the plan, else the
+  // workspace's area, else IITH. The drone fly-to and plan fit still take
+  // over as before.
+  const [initialView] = useState<{ center: [number, number]; zoom: number }>(() => {
+    if (waypoints.length > 0) return { center: [waypoints[0].lat, waypoints[0].lng], zoom: 16 }
+    const ring = workspace?.operating_area?.coordinates?.[0]
+    if (Array.isArray(ring) && ring.length > 0) {
+      const pts = ring.filter((p): p is number[] => Array.isArray(p) && p.length >= 2)
+      if (pts.length > 0) {
+        const lng = pts.reduce((a, p) => a + p[0], 0) / pts.length
+        const lat = pts.reduce((a, p) => a + p[1], 0) / pts.length
+        if (Number.isFinite(lat) && Number.isFinite(lng)) return { center: [lat, lng], zoom: 15 }
+      }
+    }
+    return { center: FALLBACK_CENTER, zoom: 15 }
+  })
+
+  const avoidanceLegend = !compact && !isCustomer ? (
+    <div className={`${OVERLAY} rounded-[10px] px-3 py-2.5 text-[13px] min-w-[160px] shadow-lg`}
+      style={avoidanceLegendHost === undefined ? { position: 'absolute', bottom: 12, left: 12, zIndex: 1000 } : undefined}>
+      <label className="flex items-center gap-2 cursor-pointer font-bold min-h-6">
+        <input type="checkbox" checked={showAvoid}
+          onChange={e => setShowAvoid(e.target.checked)}
+          className={`h-4 w-4 cursor-pointer ${FOCUS_OVERLAY}`}
+          style={{ accentColor: 'var(--overlay-accent)' }} />
+        Avoidance
+      </label>
+      {showAvoid && (
+        <div className="mt-2 flex flex-col gap-1.5">
+          <LegendRow color="#38bdf8" label="Known hazard" />
+          <LegendRow color="#9aa3b5" label="Static obstacle" />
+          <LegendRow color="#fbbf24" label="Moving obstacle" />
+          {/* The shared hazard map is staff-write (docs/ACCESS_MODEL.md 8b). */}
+          {!readOnly && !hazardReadOnly && <button
+            onClick={() => setPinMode(p => !p)}
+            aria-pressed={pinMode}
+            className={`mt-1 w-full h-8 rounded-[6px] border text-[13px] font-bold transition-colors duration-[120ms] ${FOCUS_OVERLAY}`}
+            style={{
+              borderColor: pinMode ? 'var(--overlay-accent)' : 'var(--overlay-border)',
+              background: pinMode ? 'rgba(34, 211, 238, 0.18)' : 'rgba(255, 255, 255, 0.06)',
+              color: 'var(--overlay-text)',
+            }}
+            title="Pin a known hazard: click here, then click the map">
+            {pinMode ? 'Click the map to pin…' : '+ Pin hazard'}
+          </button>}
+        </div>
+      )}
+    </div>
+  ) : null
+
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
     <MapContainer
-      center={[20, 0]}
-      zoom={3}
+      center={initialView.center}
+      zoom={initialView.zoom}
       className="w-full h-full"
       style={{ background: '#0a0a0a' }}
       zoomControl={false}
@@ -733,15 +797,15 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
           icon={L.divIcon({
             className: '',
             html: `<div style="
-              width:18px;height:18px;border-radius:50%;
+              width:22px;height:22px;border-radius:50%;
               background:#a855f7;border:2.5px solid #fff;
               box-shadow:0 1px 5px rgba(0,0,0,.45);
               display:flex;align-items:center;justify-content:center;
-              font-size:8px;font-weight:700;color:#fff;font-family:monospace;
+              font-size:12px;font-weight:800;color:#fff;font-family:${MARKER_FONT};
               cursor:grab;
             ">${i + 1}</div>`,
-            iconSize: [18, 18],
-            iconAnchor: [9, 9],
+            iconSize: [22, 22],
+            iconAnchor: [11, 11],
           })}
           eventHandlers={{
             dragend: (e) => {
@@ -804,52 +868,21 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
 
       {/* Avoidance overlay control - toggle visibility, legend, click-to-pin.
           Avoidance is staff-only (docs/ACCESS_MODEL.md 8a). */}
-      {!compact && !isCustomer && <div style={{
-        position: 'absolute', bottom: 12, left: 12, zIndex: 1000,
-        background: 'rgba(10,12,18,0.82)', backdropFilter: 'blur(6px)',
-        border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8,
-        padding: '8px 10px', fontSize: 11, color: '#e5e7eb',
-        fontFamily: 'var(--font-geist-mono,monospace)', minWidth: 148,
-        boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
-      }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontWeight: 700 }}>
-          <input type="checkbox" checked={showAvoid}
-            onChange={e => setShowAvoid(e.target.checked)}
-            style={{ accentColor: '#38bdf8', cursor: 'pointer' }} />
-          Avoidance
-        </label>
-        {showAvoid && (
-          <div style={{ marginTop: 7, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <LegendRow color="#38bdf8" label="Known hazard" />
-            <LegendRow color="#9aa3b5" label="Static obstacle" />
-            <LegendRow color="#fbbf24" label="Moving obstacle" />
-            {/* The shared hazard map is staff-write (docs/ACCESS_MODEL.md 8b). */}
-            {!readOnly && !hazardReadOnly && <button
-              onClick={() => setPinMode(p => !p)}
-              style={{
-                marginTop: 4, width: '100%', padding: '4px 6px', borderRadius: 5,
-                border: `1px solid ${pinMode ? '#38bdf8' : 'rgba(255,255,255,0.12)'}`,
-                background: pinMode ? 'rgba(56,189,248,0.18)' : 'rgba(255,255,255,0.04)',
-                color: pinMode ? '#7dd3fc' : '#cbd5e1', cursor: 'pointer',
-                fontFamily: 'inherit', fontSize: 10.5, fontWeight: 600,
-              }}>
-              {pinMode ? 'Click map to pin...' : '+ Pin hazard'}
-            </button>}
-          </div>
-        )}
-      </div>}
+      {avoidanceLegend && (avoidanceLegendHost === undefined
+        ? avoidanceLegend
+        : avoidanceLegendHost ? createPortal(avoidanceLegend, avoidanceLegendHost) : null)}
     </div>
   )
 }
 
 function LegendRow({ color, label }: { color: string; label: string }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <span style={{
-        width: 11, height: 11, borderRadius: '50%', flexShrink: 0,
-        background: `${color}44`, border: `1.5px solid ${color}`,
+    <div className="flex items-center gap-2">
+      <span aria-hidden style={{
+        width: 12, height: 12, borderRadius: '50%', flexShrink: 0,
+        background: `${color}55`, border: `2px solid ${color}`,
       }} />
-      <span style={{ color: '#cbd5e1' }}>{label}</span>
+      <span style={{ color: 'var(--overlay-muted)' }}>{label}</span>
     </div>
   )
 }

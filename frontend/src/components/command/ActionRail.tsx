@@ -18,41 +18,50 @@ import { useDroneStore, type ActionResult } from '@/store/drone'
 import type { AvoidanceStatus } from '@/lib/avoidance'
 import { actingFloorM } from './avoidFloor'
 import { AttachmentStrip } from '@/components/attachments/AttachmentStrip'
+import { FOCUS, DISABLED } from '@/components/controls/flightStyles'
+import { WhyDisabled } from '@/components/controls/WhyDisabled'
+import { cn } from '@/lib/utils'
 
 type Tone = 'default' | 'go' | 'warn' | 'danger' | 'fire'
-const TONES: Record<Tone, { fg: string; bg: string; bd: string }> = {
-    default: { fg: '#e5e7eb', bg: 'rgba(255,255,255,.04)', bd: 'rgba(255,255,255,.10)' },
-    go:      { fg: '#86efac', bg: 'rgba(74,222,128,.08)', bd: 'rgba(74,222,128,.35)' },
-    warn:    { fg: '#fcd34d', bg: 'rgba(251,191,36,.07)', bd: 'rgba(251,191,36,.32)' },
-    danger:  { fg: '#fca5a5', bg: 'rgba(248,113,113,.08)', bd: 'rgba(248,113,113,.45)' },
-    fire:    { fg: '#ffffff', bg: '#b91c1c', bd: '#ef4444' },
+// Theme tokens, so the rail follows light and dark like the rest of the page.
+const TONES: Record<Tone, string> = {
+    default: 'border-app-border-strong bg-app-surface-2 text-app-text',
+    go:      'border-app-ok bg-app-ok-soft text-app-ok',
+    warn:    'border-app-warn bg-app-warn-soft text-app-warn',
+    danger:  'border-app-danger bg-app-danger-soft text-app-danger',
+    fire:    'border-[#ef4444] bg-[#b91c1c] text-white',
 }
 
-function RailButton({ icon, label, sub, onClick, tone = 'default', active, pending, disabled, title, tall }: {
+function RailButton({ icon, label, sub, onClick, tone = 'default', active, pending, disabled, title, why, tall }: {
     icon: React.ReactNode; label: string; sub?: string; onClick: () => void
-    tone?: Tone; active?: boolean; pending?: boolean; disabled?: boolean; title?: string; tall?: boolean
+    tone?: Tone; active?: boolean; pending?: boolean; disabled?: boolean; title?: string
+    /** Plain-words reason shown as a tooltip while disabled. */
+    why?: string | null; tall?: boolean
 }) {
-    const c = TONES[tone]
     return (
-        <button onClick={onClick} disabled={disabled} title={title ?? label}
-            className="w-full rounded-lg border flex flex-col items-center justify-center gap-0.5 transition-colors disabled:opacity-30 hover:brightness-125"
-            style={{
-                height: tall ? 64 : 50,
-                background: active ? 'rgba(34,211,238,.18)' : c.bg,
-                borderColor: active ? 'rgba(34,211,238,.7)' : c.bd,
-                color: active ? '#a5f3fc' : c.fg,
-            }}>
-            {pending ? <Loader2 size={17} className="animate-spin" /> : icon}
-            <span className="text-[9.5px] font-mono font-bold tracking-wider leading-none">{label}</span>
-            {sub && <span className="text-[9px] font-mono opacity-60 leading-none">{sub}</span>}
-        </button>
+        <WhyDisabled reason={disabled ? (why ?? 'Not available right now') : null}>
+            <button onClick={onClick} disabled={disabled} title={disabled ? undefined : (title ?? label)}
+                aria-label={sub ? `${label}, ${sub}` : label}
+                className={cn(
+                    'w-full rounded-md border flex flex-col items-center justify-center gap-1',
+                    'transition-colors duration-[var(--dur-fast)] hover:brightness-110',
+                    active ? 'border-app-accent bg-app-accent-soft text-app-accent' : TONES[tone],
+                    tall ? 'h-16' : 'h-[52px]',
+                    FOCUS, DISABLED,
+                )}>
+                {pending ? <Loader2 size={18} className="animate-spin" /> : icon}
+                <span className="text-[12px] font-extrabold tracking-[0.04em] leading-none">{label}</span>
+                {sub && <span className="text-[12px] font-semibold leading-none">{sub}</span>}
+            </button>
+        </WhyDisabled>
     )
 }
 
 const Group = ({ label }: { label: string }) => (
-    <span className="text-[8.5px] font-mono tracking-[0.2em] text-zinc-500 pt-1.5 pl-0.5">{label}</span>
+    <span className="text-[12px] font-bold uppercase tracking-[0.06em] text-app-text-muted pt-2 pl-0.5">{label}</span>
 )
 
+const NO_LINK = 'Connect a drone first'
 const INDOOR_TAKEOFF_M = 1.5, INDOOR_TAKEOFF_MAX_M = 2      // backend caps at 2 m too
 
 export function ActionRail({ avoid }: { avoid?: AvoidanceStatus | null }) {
@@ -119,22 +128,26 @@ export function ActionRail({ avoid }: { avoid?: AvoidanceStatus | null }) {
             <RailButton icon={<Power size={17} />} label={armed ? 'DISARM' : 'ARM'} disabled={!linked || (armed && inAir)}
                 tone={armed ? 'danger' : 'go'} pending={pend('arm', 'disarm')}
                 onClick={() => (armed ? disarm() : arm())}
-                title={armed && inAir ? 'Cannot disarm in the air' : undefined} />
-            <div className="rounded-lg border flex flex-col overflow-hidden"
-                style={{ borderColor: TONES.go.bd, background: TONES.go.bg }}>
-                <button onClick={() => sendAction('takeoff', { altitude: Math.min(alt, altMax) })} disabled={!linked || inAir}
-                    title={`Take off to ${Math.min(alt, altMax)} m` + (indoor ? ' (indoor: capped at 2 m)' : '')
-                        + (belowFloor ? ` - below the avoidance floor (${floor} m): avoidance cannot steer there` : '')}
-                    className="h-[44px] flex flex-col items-center justify-center gap-0.5 disabled:opacity-30 hover:brightness-125"
-                    style={{ color: TONES.go.fg }}>
-                    {pend('takeoff') ? <Loader2 size={17} className="animate-spin" /> : <Rocket size={17} />}
-                    <span className="text-[9.5px] font-mono font-bold tracking-wider leading-none">TAKEOFF</span>
-                </button>
-                <div className="flex items-center justify-between border-t px-0.5" style={{ borderColor: TONES.go.bd }}>
-                    <button onClick={() => setAlt(a => Math.max(indoor ? 1 : 2, a - (indoor ? 0.5 : 1)))} className="p-1.5 text-zinc-300" aria-label="Lower takeoff altitude"><Minus size={11} /></button>
-                    <span className="text-[10px] font-mono font-bold tabular-nums" style={{ color: belowFloor ? '#fcd34d' : '#f4f4f5' }}
-                        title={belowFloor ? `below the avoidance floor (${floor} m)` : undefined}>{Math.min(alt, altMax)}m</span>
-                    <button onClick={() => setAlt(a => Math.min(altMax, a + (indoor ? 0.5 : 1)))} className="p-1.5 text-zinc-300" aria-label="Raise takeoff altitude"><Plus size={11} /></button>
+                why={!linked ? NO_LINK : 'Land before disarming'} />
+            <div className="rounded-md border border-app-ok bg-app-ok-soft flex flex-col overflow-hidden">
+                <WhyDisabled reason={!linked ? NO_LINK : inAir ? 'Already flying' : null}>
+                    <button onClick={() => sendAction('takeoff', { altitude: Math.min(alt, altMax) })} disabled={!linked || inAir}
+                        title={!linked || inAir ? undefined : `Take off to ${Math.min(alt, altMax)} m` + (indoor ? ' (indoor: capped at 2 m)' : '')
+                            + (belowFloor ? ` - below the avoidance floor (${floor} m): avoidance cannot steer there` : '')}
+                        className={cn('w-full h-[46px] flex flex-col items-center justify-center gap-1 text-app-ok hover:brightness-110', FOCUS, DISABLED)}>
+                        {pend('takeoff') ? <Loader2 size={18} className="animate-spin" /> : <Rocket size={18} />}
+                        <span className="text-[12px] font-extrabold tracking-[0.04em] leading-none">TAKEOFF</span>
+                    </button>
+                </WhyDisabled>
+                <div className="flex items-center justify-between border-t border-app-ok bg-app-surface">
+                    <button onClick={() => setAlt(a => Math.max(indoor ? 1 : 2, a - (indoor ? 0.5 : 1)))}
+                        className={cn('h-8 w-6 flex items-center justify-center text-app-text hover:text-app-accent', FOCUS)}
+                        aria-label="Lower takeoff altitude" title="Lower takeoff altitude"><Minus size={14} /></button>
+                    <span className={cn('text-[13px] font-extrabold tabular-nums', belowFloor ? 'text-app-warn' : 'text-app-text')}
+                        title={belowFloor ? `below the avoidance floor (${floor} m)` : 'Takeoff altitude'}>{Math.min(alt, altMax)}m</span>
+                    <button onClick={() => setAlt(a => Math.min(altMax, a + (indoor ? 0.5 : 1)))}
+                        className={cn('h-8 w-6 flex items-center justify-center text-app-text hover:text-app-accent', FOCUS)}
+                        aria-label="Raise takeoff altitude" title="Raise takeoff altitude"><Plus size={14} /></button>
                 </div>
             </div>
 
@@ -143,30 +156,31 @@ export function ActionRail({ avoid }: { avoid?: AvoidanceStatus | null }) {
                 disabled={!linked || (inMission && !finished)} active={inMission && !finished}
                 sub={inMission && !finished ? 'flying' : undefined}
                 pending={pend('start_mission', 'arm_and_start_mission', 'restart_mission', 'arm_and_restart_mission')}
-                onClick={() => sendAction(start.action)} title={inMission ? 'Mission is flying - HOLD pauses it' : start.title} />
+                onClick={() => sendAction(start.action)} title={inMission ? 'Mission is flying - HOLD pauses it' : start.title}
+                why={!linked ? NO_LINK : 'Mission is flying - HOLD pauses it'} />
             <RailButton icon={<CirclePause size={17} />} label="HOLD" disabled={!linked || !inAir}
                 active={mode === 'HOLD'} pending={pend('hold', 'pause_mission')}
                 onClick={() => sendAction(inMission ? 'pause_mission' : 'hold')}
-                title={inMission ? 'Pause the mission and hover' : 'Hover in place'} />
+                title={inMission ? 'Pause the mission and hover' : 'Hover in place'}
+                why={!linked ? NO_LINK : 'Only while flying'} />
 
             <Group label="RECOVER" />
             <RailButton icon={<Home size={17} />} label="RTL" tone="warn" disabled={!linked || !inAir}
                 active={mode.includes('RETURN') || mode === 'RTL'} pending={pend('return')} onClick={() => sendAction('return')}
-                title="Return to launch" />
+                title="Return to launch" why={!linked ? NO_LINK : 'Only while flying'} />
             <RailButton icon={<ArrowDownToLine size={17} />} label="LAND" tone="warn" disabled={!linked || !inAir}
-                active={mode === 'LAND'} pending={pend('land')} onClick={() => sendAction('land')} title="Land here" />
+                active={mode === 'LAND'} pending={pend('land')} onClick={() => sendAction('land')} title="Land here" why={!linked ? NO_LINK : 'Only while flying'} />
 
             <AttachmentStrip variant="rail" frame={strip => <><Group label="PAYLOAD" />{strip}</>} />
 
             <div className="flex-1 min-h-2" />
             {flash && (
-                <div className="text-[9.5px] font-mono rounded border border-red-400/40 px-1.5 py-1 text-red-200 break-words"
-                    style={{ background: 'rgba(69,10,10,.85)' }}>{flash}</div>
+                <div role="alert" className="text-[12px] font-semibold rounded-md border border-app-danger bg-app-danger-soft px-1.5 py-1 text-app-danger break-words">{flash}</div>
             )}
             <RailButton icon={<OctagonX size={18} />} label={killArmed ? 'CONFIRM' : 'KILL'} tone={killArmed ? 'fire' : 'danger'} tall
                 sub={killArmed ? 'tap again' : 'tap twice'} disabled={!linked}
                 onClick={() => { if (killArmed) { emergencyStop(); setKillArmed(false) } else setKillArmed(true) }}
-                title="Emergency motor stop - tap twice" />
+                title="Emergency motor stop - tap twice" why={NO_LINK} />
         </div>
     )
 }

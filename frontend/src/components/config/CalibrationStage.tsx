@@ -19,11 +19,24 @@ import { useDroneStore } from '@/store/drone'
 import type { CalibrationState, CalSide } from '@/types/calibration'
 import { Check, X, Loader, CircleAlert, RotateCw, Gauge } from 'lucide-react'
 import * as THREE from 'three'
+import { FOCUS } from '@/components/vision/panelStyle'
 
+// The 3D scene needs literal colours (three.js cannot read CSS variables);
+// the scene is drawn on its own dark-lit stage, so these stay fixed.
 const ACTIVE_C = '#fbbf24'
 const DONE_C = '#4ade80'
 const FAIL_C = '#f87171'
 const IDLE_C = '#22d3ee'
+
+// Text and borders use the theme tokens, which pass contrast in both themes.
+const T_ACTIVE = 'var(--app-warn)'
+const T_DONE = 'var(--app-ok)'
+const T_FAIL = 'var(--app-danger)'
+const T_IDLE = 'var(--app-accent)'
+const T_MUTED = 'hsl(var(--app-text-muted))'
+const T_SUBTLE = 'hsl(var(--app-text-subtle))'
+const textFor = (c: string) => c === ACTIVE_C ? T_ACTIVE : c === DONE_C ? T_DONE : c === FAIL_C ? T_FAIL : T_IDLE
+const NUM: React.CSSProperties = { fontVariantNumeric: 'tabular-nums' }
 
 /** Plain-language name for the position being asked for. "back" and "front"
  *  name which face points DOWN and read backwards to most people the first
@@ -127,8 +140,8 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
         : done ? 'Calibration complete'
         : failed ? 'Calibration failed'
         : cancelled ? 'Calibration cancelled'
-        : mode === 'rotate' ? 'Now ROTATE it - keep turning'
-        : mode === 'hold' ? 'HOLD IT STILL'
+        : mode === 'rotate' ? 'Rotate it and keep turning'
+        : mode === 'hold' ? 'Hold it still'
         : target ? `Turn it: ${SIDE_WORDS[target]}`
         : state.instruction || 'Waiting for the autopilot…'
 
@@ -137,31 +150,32 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
     // the screen says calibrated.
     const wantsReboot = done && state.sensor === 'mag'
 
-    const subline = idle ? 'The aircraft above follows your live attitude - turn the real one and it turns with it'
-        : wantsReboot ? 'Saved - PX4 applies a compass calibration at boot, so reboot before flying'
+    const tone = textFor(accent)
+    const subline = idle ? 'This model follows the real aircraft. Turn it and watch.'
+        : wantsReboot ? 'Saved. Reboot before flying: PX4 loads compass changes at startup.'
         : done ? 'The new offsets are saved on the aircraft'
         : failed ? (state.error || 'The autopilot did not accept the calibration')
         : cancelled ? 'Nothing was written to the aircraft'
-        : mode === 'rotate' ? 'Turn it steadily about the axis the arrow circles, at about the speed shown'
-        : mode === 'hold' ? 'Do not move it until this position is ticked off'
-        : mode === 'reorient' ? 'Match the position shown - the arrow is the way round'
+        : mode === 'rotate' ? 'Turn it steadily around the axis the arrow circles'
+        : mode === 'hold' ? 'Keep it still until this position is ticked off'
+        : mode === 'reorient' ? 'Match the position shown. The arrow shows which way.'
         : ''
 
     return (
         <div style={{
             display: 'flex', flexDirection: 'column', gap: 12,
-            padding: 16, borderRadius: 12,
+            padding: 16, borderRadius: 10,
             background: 'hsl(var(--app-surface-2))',
-            border: `1px solid ${accent}44`,
+            border: `1px solid color-mix(in srgb, ${tone} 40%, transparent)`,
         }}>
             {/* Header */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                {running ? <Loader size={14} className="animate-spin" color={accent} />
-                    : done ? <Check size={15} color={DONE_C} />
-                    : failed ? <CircleAlert size={15} color={FAIL_C} />
-                    : idle ? <Gauge size={14} color={accent} />
-                    : <X size={15} color="#6b7280" />}
-                <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: accent, letterSpacing: 0.4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                {running ? <Loader size={16} className="animate-spin motion-reduce:animate-none" color={tone} aria-hidden />
+                    : done ? <Check size={16} color={T_DONE} aria-hidden />
+                    : failed ? <CircleAlert size={16} color={T_FAIL} aria-hidden />
+                    : idle ? <Gauge size={16} color={tone} aria-hidden />
+                    : <X size={16} color={T_MUTED} aria-hidden />}
+                <span style={{ fontSize: 12, fontWeight: 700, color: tone, letterSpacing: '0.05em' }}>
                     {(state.label || state.sensor || 'CALIBRATION').toUpperCase()}
                 </span>
                 {oriented && (
@@ -175,7 +189,7 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
                         <span style={{ display: 'flex', gap: 7 }}>
                             {order.map(side => {
                                 const st = state.sides?.[side]
-                                const c = st === 'done' ? DONE_C : st === 'active' ? ACTIVE_C : '#4b5563'
+                                const c = st === 'done' ? T_DONE : st === 'active' ? T_ACTIVE : T_SUBTLE
                                 return (
                                     <span key={side} title={SIDE_WORDS[side]} style={{
                                         display: 'flex', flexDirection: 'column',
@@ -183,13 +197,13 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
                                     }}>
                                         <span style={{
                                             width: 9, height: 9, borderRadius: '50%',
-                                            background: st === 'done' ? DONE_C : st === 'active' ? ACTIVE_C : 'transparent',
+                                            background: st === 'done' || st === 'active' ? c : 'transparent',
                                             border: `1.5px solid ${c}`,
-                                            transition: 'background 250ms, border-color 250ms',
+                                            transition: 'background-color var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out)',
                                         }} />
                                         <span style={{
-                                            fontSize: 8.5, fontFamily: 'monospace', color: c,
-                                            fontWeight: st === 'active' ? 700 : 400, letterSpacing: 0.3,
+                                            fontSize: 12, color: st ? c : T_MUTED,
+                                            fontWeight: st === 'active' ? 700 : 600,
                                         }}>
                                             {SIDE_ABBR[side]}
                                         </span>
@@ -197,7 +211,7 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
                                 )
                             })}
                         </span>
-                        <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, ...NUM, color: T_MUTED }}>
                             {doneCount}/{order.length}
                         </span>
                     </span>
@@ -205,7 +219,7 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
                 {/* No number while nothing is running - an idle "0%" reads
                     as a stalled calibration. */}
                 {!oriented && !idle && (
-                    <span style={{ marginLeft: 'auto', fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
+                    <span style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 700, ...NUM, color: T_MUTED }}>
                         {state.progress ?? 0}%
                     </span>
                 )}
@@ -215,8 +229,9 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
                 moves on its own is a bar that lies about a stalled run. */}
             <div style={{ height: 4, borderRadius: 2, background: 'hsl(var(--app-surface))', overflow: 'hidden', opacity: idle ? 0 : 1 }}>
                 <div style={{
-                    height: '100%', width: `${Math.max(0, Math.min(100, state.progress ?? 0))}%`,
-                    background: accent, transition: 'width 400ms ease-out',
+                    height: '100%', width: '100%', transformOrigin: 'left',
+                    transform: `scaleX(${Math.max(0, Math.min(100, state.progress ?? 0)) / 100})`,
+                    background: tone, transition: 'transform var(--dur-slow) var(--ease-out)',
                 }} />
             </div>
 
@@ -232,30 +247,30 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
                 />
                 {!live && running && (
                     <span style={{
-                        position: 'absolute', left: 12, bottom: 10,
-                        fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))',
+                        position: 'absolute', left: 12, bottom: 10, maxWidth: '60%',
+                        fontSize: 13, color: T_MUTED,
                     }}>
-                        No attitude telemetry - showing the requested position instead of the live one
+                        No attitude data: showing the position to match
                     </span>
                 )}
                 <span style={{
                     position: 'absolute', right: 12, bottom: 10,
-                    fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))',
+                    fontSize: 12, color: T_MUTED,
                 }}>
-                    drag to orbit
+                    Drag to orbit
                 </span>
             </div>
 
             {/* One instruction */}
             <div>
                 <p style={{
-                    fontSize: 17, fontWeight: 600, margin: 0, lineHeight: 1.35,
-                    color: failed ? FAIL_C : matched ? DONE_C : 'hsl(var(--app-text))',
+                    fontSize: 18, fontWeight: 700, margin: 0, lineHeight: 1.35,
+                    color: failed ? T_FAIL : matched ? T_DONE : 'hsl(var(--app-text))',
                 }}>
                     {headline}
                 </p>
                 {subline && (
-                    <p style={{ fontSize: 12, margin: '4px 0 0', color: 'hsl(var(--app-text-muted))', lineHeight: 1.5 }}>
+                    <p style={{ fontSize: 13, margin: '4px 0 0', color: T_MUTED, lineHeight: 1.5 }}>
                         {subline}
                     </p>
                 )}
@@ -266,24 +281,22 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
                     colour; this carries it as words, which is what someone
                     reads when they are trying to plan the next move. */}
                 {running && oriented && (
-                    <p style={{ fontSize: 11, margin: '7px 0 0', lineHeight: 1.6, fontFamily: 'monospace' }}>
+                    <p style={{ fontSize: 13, margin: '8px 0 0', lineHeight: 1.6, color: T_MUTED }}>
                         {doneList.length > 0 && (
                             <>
-                                <span style={{ color: DONE_C }}>Done</span>
-                                <span style={{ color: 'hsl(var(--app-text-muted))' }}> {doneList.join(' · ')}</span>
+                                <span style={{ color: T_DONE, fontWeight: 700 }}>Done:</span>
+                                <span> {doneList.join(' · ')}</span>
                             </>
                         )}
-                        {doneList.length > 0 && pendingList.length > 0 && (
-                            <span style={{ color: 'hsl(var(--app-text-muted))' }}>{'   '}</span>
-                        )}
+                        {doneList.length > 0 && pendingList.length > 0 && <br />}
                         {pendingList.length > 0 && (
                             <>
-                                <span style={{ color: 'hsl(var(--app-text-muted))' }}>Still to do</span>
-                                <span style={{ color: 'hsl(var(--app-text-muted))' }}> {pendingList.join(' · ')}</span>
+                                <span style={{ fontWeight: 700 }}>Still to do:</span>
+                                <span> {pendingList.join(' · ')}</span>
                             </>
                         )}
                         {pendingList.length === 0 && doneList.length > 0 && (
-                            <span style={{ color: DONE_C }}>   - that was the last one</span>
+                            <span style={{ color: T_DONE }}>. That was the last one.</span>
                         )}
                     </p>
                 )}
@@ -292,32 +305,32 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
                     is the difference between a panel one release behind and a
                     panel that is lying. */}
                 {state.detail && (
-                    <p style={{ fontSize: 10, fontFamily: 'monospace', margin: '6px 0 0', color: 'hsl(var(--app-text-muted))', opacity: 0.75, wordBreak: 'break-word' }}>
-                        FC: {state.detail}
+                    <p style={{ fontSize: 12, margin: '6px 0 0', color: T_MUTED, wordBreak: 'break-word' }}>
+                        Flight controller: <span className="font-code">{state.detail}</span>
                     </p>
                 )}
             </div>
 
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {idle ? null : running ? (
-                    <button onClick={onCancel} style={btn(FAIL_C)}
+                    <button type="button" onClick={onCancel} style={btn(T_FAIL)} className={FOCUS}
                         title="Stops the routine on the aircraft as well as here">
-                        <X size={12} /> CANCEL
+                        <X size={14} aria-hidden /> Cancel
                     </button>
                 ) : (
                     <>
                         {wantsReboot && onReboot && (
-                            <button onClick={() => { onReboot(); onDismiss() }} style={btn(ACTIVE_C)}
-                                title="Restarts the flight controller. Only works while disarmed - the link will drop and reconnect.">
-                                <RotateCw size={12} /> REBOOT FC
+                            <button type="button" onClick={() => { onReboot(); onDismiss() }} style={btn(T_ACTIVE)} className={FOCUS}
+                                title="Restarts the flight controller. Only works while disarmed; the link drops and reconnects.">
+                                <RotateCw size={14} aria-hidden /> Reboot flight controller
                             </button>
                         )}
-                        <button onClick={onDismiss} style={btn(IDLE_C)}>
-                            <Check size={12} /> {wantsReboot ? 'LATER' : 'DONE'}
+                        <button type="button" onClick={onDismiss} style={btn(T_IDLE)} className={FOCUS}>
+                            <Check size={14} aria-hidden /> {wantsReboot ? 'Later' : 'Done'}
                         </button>
                         {(failed || cancelled) && (
-                            <button onClick={onRetry} style={btn(ACTIVE_C)}>
-                                <RotateCw size={12} /> TRY AGAIN
+                            <button type="button" onClick={onRetry} style={btn(T_ACTIVE)} className={FOCUS}>
+                                <RotateCw size={14} aria-hidden /> Try again
                             </button>
                         )}
                     </>
@@ -331,9 +344,9 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
 function btn(colour: string): React.CSSProperties {
     return {
         display: 'flex', alignItems: 'center', gap: 6,
-        padding: '7px 15px', borderRadius: 8,
-        background: 'transparent', border: `1px solid ${colour}66`,
-        color: colour, fontSize: 11, fontFamily: 'monospace', fontWeight: 600,
+        minHeight: 32, padding: '0 14px', borderRadius: 6,
+        background: 'transparent', border: `1px solid color-mix(in srgb, ${colour} 55%, transparent)`,
+        color: colour, fontSize: 14, fontWeight: 600,
         cursor: 'pointer',
     }
 }

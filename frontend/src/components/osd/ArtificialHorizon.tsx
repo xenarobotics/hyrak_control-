@@ -57,8 +57,7 @@ export function ArtificialHorizon({ width = 400, height = 300 }: Props) {
                             {isLarge && (
                                 <text
                                     x={cx + lineW / 2 + 6} y={y + 3.5}
-                                    fontSize={10} fill="white" opacity={0.6}
-                                    fontFamily="monospace"
+                                    fontSize={12} fill="#C3CCD8" fontWeight={600}
                                     stroke="rgba(0,0,0,0.9)" strokeWidth={2.5}
                                     style={{ paintOrder: 'stroke fill' }}
                                 >
@@ -103,8 +102,7 @@ export function ArtificialHorizon({ width = 400, height = 300 }: Props) {
             {/* Pitch angle readout - subtle, bottom of element */}
             <text
                 x={cx + width * 0.38} y={cy + 4}
-                fontSize={9} fill="rgba(255,255,255,0.45)"
-                fontFamily="monospace" textAnchor="start"
+                fontSize={12} fill="#C3CCD8" textAnchor="start"
                 stroke="rgba(0,0,0,0.8)" strokeWidth={2}
                 style={{ paintOrder: 'stroke fill' }}
             >

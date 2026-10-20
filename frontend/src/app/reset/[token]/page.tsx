@@ -9,7 +9,7 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { resetPassword } from '@/lib/workspaces'
 import {
-    AuthButton, AuthError, AuthField, AuthFrame, AUTH_NOTE, passwordProblem,
+    AuthButton, AuthError, AuthField, AuthFrame, AUTH_NOTE, AUTH_PRIMARY, passwordProblem,
 } from '@/components/auth/AuthCard'
 
 export default function ResetPage() {
@@ -46,10 +46,7 @@ export default function ResetPage() {
         return (
             <AuthFrame title="Password changed" sub="HYRAK">
                 <p style={AUTH_NOTE}>Sign in with your new password.</p>
-                <Link href="/login" style={{
-                    display: 'flex', justifyContent: 'center', padding: '10px 14px', borderRadius: 8,
-                    background: '#22d3ee', color: '#0b1016', fontSize: 13, fontFamily: 'monospace', fontWeight: 700,
-                }}>
+                <Link href="/login" style={AUTH_PRIMARY}>
                     Go to sign in
                 </Link>
             </AuthFrame>
@@ -58,11 +55,11 @@ export default function ResetPage() {
 
     return (
         <AuthFrame title="Set a new password" sub="Reset links work once, for one hour" onSubmit={e => void onSubmit(e)}>
-            <AuthField id="reset-password" label="NEW PASSWORD" type="password" autoComplete="new-password" autoFocus
+            <AuthField id="reset-password" label="New password" type="password" autoComplete="new-password" autoFocus
                 value={password} onChange={e => setPassword(e.target.value)}
                 onBlur={() => setTouched(t => ({ ...t, password: true }))}
                 error={show('password')} hint="At least 10 characters. A short sentence works well." />
-            <AuthField id="reset-confirm" label="CONFIRM PASSWORD" type="password" autoComplete="new-password"
+            <AuthField id="reset-confirm" label="Confirm password" type="password" autoComplete="new-password"
                 value={confirm} onChange={e => setConfirm(e.target.value)}
                 onBlur={() => setTouched(t => ({ ...t, confirm: true }))}
                 error={show('confirm')} />

@@ -64,10 +64,10 @@ function Detections({ flight, data, onReload }: {
     const [confirming, setConfirming] = useState(false)
     const [busy, setBusy] = useState(false)
     const [failed, setFailed] = useState<string | null>(null)
-    const btn = 'flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-mono'
+    const btn = 'flex min-h-8 items-center gap-1.5 px-3 py-1 rounded-md border text-[13px] font-semibold'
     if (data === null) {
         return (
-            <div className="flex items-center gap-2 text-[11px] font-mono" style={muted}>
+            <div className="flex items-center gap-2 text-[13px] font-mono" style={muted}>
                 <span role="alert">Detections for this flight could not be loaded.</span>
                 <button type="button" onClick={onReload} className={btn} style={border}>Try again</button>
             </div>
@@ -76,7 +76,7 @@ function Detections({ flight, data, onReload }: {
     const list = data.sightings
     if (list.length === 0) {
         return (
-            <div className="text-[11px] font-mono leading-relaxed" style={muted}>
+            <div className="text-[13px] font-mono leading-relaxed" style={muted}>
                 <p className="font-semibold" style={{ color: 'hsl(var(--app-text))' }}>No detections recorded on this flight</p>
                 <p>Turn on Record to map in the AI panel while a model runs, and every detection is
                     kept here with its position.</p>
@@ -98,7 +98,7 @@ function Detections({ flight, data, onReload }: {
         else setFailed('The detections were not deleted. Try again.')
     }
     return (
-        <div className="flex flex-col gap-2 text-[11px] font-mono">
+        <div className="flex flex-col gap-2 text-[13px] font-mono">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="font-semibold" style={{ color: 'hsl(var(--app-text))' }}>{list.length} detections</span>
                 {countsByLabel(list).map(([label, n]) => (
@@ -108,19 +108,19 @@ function Detections({ flight, data, onReload }: {
                     </span>
                 ))}
             </div>
-            <p className="text-[10px]" style={muted}>
+            <p className="text-[12px]" style={muted}>
                 Positions are estimates from GPS, height and camera angle; click a dot for its accuracy.
             </p>
             <div className="flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => void save('geojson')} className={btn} style={border}>
-                    <Download size={11} /> Download GeoJSON
+                    <Download size={14} /> Download GeoJSON
                 </button>
                 <button type="button" onClick={() => void save('csv')} className={btn} style={border}>
-                    <Download size={11} /> Download detections CSV
+                    <Download size={14} /> Download detections CSV
                 </button>
                 {data.canClear && !confirming && (
                     <button type="button" onClick={() => setConfirming(true)} className={btn}
-                        style={{ borderColor: 'rgba(248,113,113,0.5)', color: '#f87171' }}>
+                        style={{ borderColor: 'var(--app-danger)', color: 'var(--app-danger)' }}>
                         Delete detections
                     </button>
                 )}
@@ -129,13 +129,13 @@ function Detections({ flight, data, onReload }: {
                 <div role="group" aria-label="Confirm deleting detections" className="flex flex-wrap items-center gap-2">
                     <span>Delete all {list.length} detections of this flight? The track stays.</span>
                     <button type="button" onClick={() => void remove()} disabled={busy} aria-busy={busy}
-                        className={btn} style={{ borderColor: 'rgba(248,113,113,0.5)', color: '#f87171' }}>
+                        className={btn} style={{ borderColor: 'var(--app-danger)', color: 'var(--app-danger)' }}>
                         {busy ? 'Deleting...' : `Delete ${list.length} detections`}
                     </button>
                     <button type="button" onClick={() => setConfirming(false)} className={btn} style={border}>Cancel</button>
                 </div>
             )}
-            {failed && <p role="alert" className="text-[11px]" style={{ color: '#f87171' }}>{failed}</p>}
+            {failed && <p role="alert" className="text-[12px]" style={{ color: 'var(--app-danger)' }}>{failed}</p>}
         </div>
     )
 }
@@ -158,7 +158,7 @@ function Replay({ flight, track, sightings, onReloadSightings }: {
     const p = track[i]
     return (
         <div className="flex flex-col gap-2 pb-3">
-            <div className="h-56 rounded overflow-hidden border" style={border}>
+            <div className="h-56 rounded-[10px] overflow-hidden border" style={border}>
                 <FlightTrackMap track={track} cursor={track.length ? i : null}
                     sightings={sightings?.sightings} />
             </div>
@@ -166,8 +166,8 @@ function Replay({ flight, track, sightings, onReloadSightings }: {
                 <div className="flex items-center gap-2">
                     <button type="button" onClick={() => setPlaying(v => !v)}
                         aria-label={playing ? 'Pause replay' : 'Play replay'}
-                        className="p-1.5 rounded border" style={border}>
-                        {playing ? <Pause size={12} /> : <Play size={12} />}
+                        className="flex size-8 items-center justify-center rounded-md border" style={border}>
+                        {playing ? <Pause size={14} /> : <Play size={14} />}
                     </button>
                     <input type="range" min={0} max={track.length - 1} value={i}
                         aria-label="Replay position"
@@ -176,7 +176,7 @@ function Replay({ flight, track, sightings, onReloadSightings }: {
                 </div>
             )}
             {p && (
-                <div className="grid grid-cols-4 gap-2 text-[10px] font-mono" style={muted}>
+                <div className="grid grid-cols-4 gap-2 text-[13px] font-mono" style={muted}>
                     <span>T+{i}s</span>
                     <span>{p.alt.toFixed(1)} m</span>
                     <span>{p.speed.toFixed(1)} m/s</span>
@@ -185,8 +185,8 @@ function Replay({ flight, track, sightings, onReloadSightings }: {
             )}
             <button type="button"
                 onClick={() => { void apiDownload(`/api/flights/${flight.id}/download`, `flight_${flight.id}.csv`) }}
-                className="self-start flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-mono" style={border}>
-                <Download size={11} /> Download track CSV
+                className="self-start flex min-h-8 items-center gap-1.5 px-3 py-1 rounded-md border text-[13px] font-semibold" style={border}>
+                <Download size={14} /> Download track CSV
             </button>
             <Detections flight={flight} data={sightings} onReload={onReloadSightings} />
         </div>
@@ -224,10 +224,10 @@ export function FlightHistory() {
         setFlights(fs => fs && fs.map(f => f.id === id ? { ...f, sightings: sightings?.sightings.length ?? f.sightings } : f))
     }
 
-    if (flights === null) return <p className="text-[11px] font-mono" style={muted}>Loading flights</p>
+    if (flights === null) return <p className="text-[13px] font-mono" style={muted}>Loading flights</p>
     if (flights.length === 0) {
         return (
-            <p className="text-[11px] font-mono leading-relaxed" style={muted}>
+            <p className="text-[13px] font-mono leading-relaxed" style={muted}>
                 No flights recorded yet. Every arm-to-disarm is stored with its full track as
                 soon as the drone is identified.
             </p>
@@ -239,13 +239,13 @@ export function FlightHistory() {
                 <div key={f.id} style={border}>
                     <button type="button" onClick={() => void toggle(f.id)}
                         aria-expanded={open?.id === f.id}
-                        className="w-full flex items-center gap-3 py-2 text-left text-[11px] font-mono">
+                        className="w-full min-h-10 flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-left text-[13px] font-mono">
                         <span>{fmtWhen(f.started_at)}</span>
                         <span style={muted}>{f.drone_name ?? f.drone_id.slice(0, 8)}</span>
                         <span style={muted}>{f.in_progress ? 'in flight' : fmtDur(f.duration_s)}</span>
                         <span style={muted}>{f.max_alt_m.toFixed(0)} m · {(f.distance_m / 1000).toFixed(2)} km</span>
-                        {f.crossed_orange && <span className="text-amber-500" title="Passed through an orange zone">●</span>}
-                        {f.crossed_red && <span className="text-red-500" title="Entered a red zone">●</span>}
+                        {f.crossed_orange && <span className="text-app-warn" title="Passed through an orange zone" aria-label="Passed through an orange zone">●</span>}
+                        {f.crossed_red && <span className="text-app-danger" title="Entered a red zone" aria-label="Entered a red zone">●</span>}
                         {!!f.sightings && <span style={muted}>{f.sightings} detections</span>}
                         <span className="ml-auto" style={muted}>{open?.id === f.id ? '▾' : '▸'}</span>
                     </button>

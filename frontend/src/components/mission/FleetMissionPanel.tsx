@@ -18,13 +18,18 @@ import {
     Users, Upload, PlayCircle, Loader2, Check, AlertTriangle,
     ChevronDown, ChevronUp, CornerUpRight, Layers,
 } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { BTN, BTN_ACCENT, BTN_WARN, FOCUS, INPUT, PANEL } from './ui'
 
 let _rsCounter = 0
 const rsUid = () => `rs_${Date.now()}_${++_rsCounter}`
 
-const ALERT_COLORS: Record<string, string> = {
-    info: '#22d3ee', warn: '#fbbf24', critical: '#f87171',
+const ALERT_CLASS: Record<string, string> = {
+    info: 'bg-app-accent-soft border-app-accent/40 text-app-accent',
+    warn: 'bg-app-warn-soft border-app-warn/40 text-app-warn',
+    critical: 'bg-app-danger-soft border-app-danger/40 text-app-danger',
 }
+const ALERT_DOT: Record<string, string> = { info: 'bg-app-accent', warn: 'bg-app-warn', critical: 'bg-app-danger' }
 
 type UploadState = 'idle' | 'uploading' | 'ok' | 'fail'
 
@@ -286,33 +291,30 @@ export default function FleetMissionPanel({ leftOffset }: { leftOffset: string }
 
     return (
         <div
-            className="absolute bottom-3 z-[1500] w-[300px] font-mono transition-all duration-200"
+            className="absolute bottom-3 z-[1500] w-[300px] max-w-[calc(100%-24px)] transition-[left] duration-200"
             style={{ left: leftOffset }}
         >
-            <div
-                className="rounded-xl border overflow-hidden"
-                style={{
-                    background: 'rgba(17, 19, 24, .94)',
-                    backdropFilter: 'blur(12px)',
-                    borderColor: 'rgba(255, 255, 255, .08)',
-                }}
-            >
+            <div className={cn(PANEL, 'overflow-hidden')}>
                 {/* Header */}
                 <button
                     onClick={() => setOpen(v => !v)}
-                    className="w-full flex items-center gap-2 px-3 py-2"
+                    aria-expanded={open}
+                    className={cn('w-full flex items-center gap-2 px-3 min-h-10 rounded-[10px]', FOCUS)}
                 >
-                    <Users size={13} color="#22d3ee" />
-                    <span className="text-[10px] font-bold tracking-widest" style={{ color: '#a5f3fc' }}>
-                        FLEET MISSION - {connected.length} DRONES
+                    <span className="w-7 h-7 rounded-[6px] bg-app-accent-soft text-app-accent flex items-center justify-center shrink-0">
+                        <Users size={14} />
                     </span>
-                    <span className="ml-auto" style={{ color: '#6b7280' }}>
-                        {open ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
+                    <span className="text-[14px] font-bold text-app-text">Fleet mission</span>
+                    <span className="inline-flex items-center h-6 px-2 rounded-full text-xs font-bold tabular-nums bg-app-surface-2 text-app-text border border-app-border">
+                        {connected.length} drones
+                    </span>
+                    <span className="ml-auto text-app-text-muted">
+                        {open ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
                     </span>
                 </button>
 
                 {open && (
-                    <div className="px-2.5 pb-2.5 flex flex-col gap-1.5">
+                    <div className="px-3 pb-3 flex flex-col gap-2">
                         {/* Per-drone rows */}
                         <div className="flex flex-col gap-1 max-h-44 overflow-y-auto">
                             {connected.map(d => {
@@ -327,33 +329,33 @@ export default function FleetMissionPanel({ leftOffset }: { leftOffset: string }
                                     <button
                                         key={d.id}
                                         onClick={() => setActiveDrone(d.id)}
-                                        className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left"
-                                        style={{
-                                            background: isActive ? d.color + '18' : 'rgba(255,255,255,.03)',
-                                            border: `1px solid ${isActive ? d.color + '55' : 'rgba(255,255,255,.08)'}`,
-                                        }}
+                                        aria-pressed={isActive}
+                                        className={cn(
+                                            'flex items-center gap-2 rounded-[6px] px-2 min-h-8 text-left border transition-colors duration-[120ms]',
+                                            isActive ? 'bg-app-accent-soft border-app-accent/50' : 'bg-app-surface-2 border-app-border hover:border-app-border-strong',
+                                            FOCUS,
+                                        )}
                                         title="Select to edit this drone's plan"
                                     >
-                                        <div className="w-2 h-2 rounded-full shrink-0" style={{ background: d.color }} />
-                                        <span className="flex-1 text-[10px] font-bold truncate" style={{ color: d.color }}>
+                                        <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: d.color }} />
+                                        <span className="flex-1 text-[13px] font-bold truncate text-app-text">
                                             {d.name}
                                         </span>
-                                        <span className="text-[9px] tabular-nums" style={{ color: wpCount ? '#d1d5db' : '#4b5563' }}>
-                                            {wpCount ? `${wpCount} wp` : 'no plan'}
+                                        <span className={cn('text-xs tabular-nums', wpCount ? 'text-app-text' : 'text-app-text-muted')}>
+                                            {wpCount ? `${wpCount} wp` : 'No plan'}
                                         </span>
                                         {tel?.flight_mode?.is_armed && (
-                                            <span className="text-[8px] font-bold px-1 rounded"
-                                                style={{ background: 'rgba(245,158,11,.15)', color: '#fbbf24' }}>
-                                                {tel.flight_mode.is_in_air ? 'AIR' : 'ARM'}
+                                            <span className="text-xs font-bold px-1.5 rounded-full bg-app-warn-soft text-app-warn">
+                                                {tel.flight_mode.is_in_air ? 'Air' : 'Armed'}
                                             </span>
                                         )}
                                         {st === 'uploading'
-                                            ? <Loader2 size={10} className="animate-spin" color="#facc15" />
+                                            ? <Loader2 size={13} className="animate-spin text-app-warn" aria-label="Uploading" />
                                             : uploaded
-                                                ? <Check size={10} color="#4ade80" />
+                                                ? <Check size={13} className="text-app-ok" aria-label="Uploaded" />
                                                 : st === 'fail'
-                                                    ? <AlertTriangle size={10} color="#f87171" />
-                                                    : <span className="w-2.5 h-2.5 rounded-full border" style={{ borderColor: '#3f3f46' }} />}
+                                                    ? <AlertTriangle size={13} className="text-app-danger" aria-label="Upload failed" />
+                                                    : <span className="w-3 h-3 rounded-full border border-app-border-strong" title="Not uploaded" />}
                                         {reassignEligible(d.id) && (
                                             <span
                                                 onClick={e => {
@@ -361,13 +363,12 @@ export default function FleetMissionPanel({ leftOffset }: { leftOffset: string }
                                                     setReassignFrom(v => v === d.id ? null : d.id)
                                                 }}
                                                 title="Mission incomplete - hand the remaining waypoints to another drone"
-                                                className="px-1 rounded"
-                                                style={{
-                                                    background: reassignFrom === d.id ? 'rgba(245,158,11,.25)' : 'rgba(255,255,255,.06)',
-                                                    color: '#fbbf24',
-                                                }}
+                                                className={cn(
+                                                    'w-6 h-6 rounded-[6px] inline-flex items-center justify-center text-app-warn border border-app-warn/40',
+                                                    reassignFrom === d.id ? 'bg-app-warn/25' : 'bg-app-warn-soft',
+                                                )}
                                             >
-                                                <CornerUpRight size={10} className="inline" />
+                                                <CornerUpRight size={13} />
                                             </span>
                                         )}
                                     </button>
@@ -377,11 +378,8 @@ export default function FleetMissionPanel({ leftOffset }: { leftOffset: string }
 
                         {/* Reassignment target picker */}
                         {reassignFrom !== null && (
-                            <div
-                                className="flex items-center gap-1.5 flex-wrap rounded-md px-2 py-1.5 text-[9px]"
-                                style={{ background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.25)' }}
-                            >
-                                <span style={{ color: '#fcd34d' }}>
+                            <div className="flex items-center gap-1.5 flex-wrap rounded-[6px] px-2 py-1.5 text-[13px] bg-app-warn-soft border border-app-warn/40">
+                                <span className="text-app-text font-semibold">
                                     Send {remainderOf(reassignFrom).length} remaining wp of{' '}
                                     {drones[reassignFrom]?.name} to:
                                 </span>
@@ -389,16 +387,17 @@ export default function FleetMissionPanel({ leftOffset }: { leftOffset: string }
                                     <button
                                         key={d.id}
                                         onClick={() => doReassign(reassignFrom, d.id)}
-                                        className="px-1.5 py-0.5 rounded font-bold"
-                                        style={{ background: d.color + '22', color: d.color, border: `1px solid ${d.color}55` }}
+                                        className={cn(BTN, 'h-7 px-2')}
                                     >
+                                        <span className="w-2 h-2 rounded-full" style={{ background: d.color }} />
                                         {d.name}
                                     </button>
                                 ))}
                                 <button
                                     onClick={() => setReassignFrom(null)}
-                                    className="ml-auto px-1.5 py-0.5 rounded"
-                                    style={{ color: '#9ca3af', background: 'rgba(255,255,255,.06)' }}
+                                    aria-label="Cancel hand-over"
+                                    title="Cancel"
+                                    className={cn(BTN, 'ml-auto h-7 w-7 px-0')}
                                 >
                                     ✕
                                 </button>
@@ -407,24 +406,20 @@ export default function FleetMissionPanel({ leftOffset }: { leftOffset: string }
 
                         {/* Lane conflict advisory + one-click vertical layering */}
                         {conflicts.length > 0 && (
-                            <div
-                                className="flex flex-col gap-1.5 rounded-md px-2 py-1.5 text-[9px]"
-                                style={{ background: 'rgba(245,158,11,.1)', border: '1px solid rgba(245,158,11,.3)', color: '#fcd34d' }}
-                            >
-                                <div className="flex items-start gap-1.5">
-                                    <AlertTriangle size={11} className="shrink-0 mt-px" />
+                            <div className="flex flex-col gap-1.5 rounded-[6px] px-2 py-1.5 text-[13px] bg-app-warn-soft border border-app-warn/40" role="status">
+                                <div className="flex items-start gap-1.5 text-app-text">
+                                    <AlertTriangle size={14} className="shrink-0 mt-0.5 text-app-warn" />
                                     <span>
-                                        {conflicts.map(c => `${c.a} × ${c.b} come within ${c.distanceM} m at overlapping altitude`).join('; ')}
-                                        {' '}- separate the lanes or their altitudes.
+                                        {conflicts.map(c => `${c.a} × ${c.b} within ${c.distanceM} m`).join('; ')}
+                                        {' '}at the same height.
                                     </span>
                                 </div>
                                 <button
                                     onClick={autoStaggerAlt}
-                                    className="flex items-center justify-center gap-1 rounded py-1 font-bold"
-                                    style={{ background: 'rgba(245,158,11,.2)', border: '1px solid rgba(245,158,11,.4)', color: '#fde68a' }}
+                                    className={BTN_WARN}
                                     title="Offset every drone's lane by +2 m per drone (vertical layering)"
                                 >
-                                    <Layers size={10} /> AUTO-LAYER ALTITUDES (+2 m / drone)
+                                    <Layers size={13} /> Layer heights (+2 m each)
                                 </button>
                             </div>
                         )}
@@ -435,16 +430,10 @@ export default function FleetMissionPanel({ leftOffset }: { leftOffset: string }
                                 {alerts.slice(0, 3).map((a, i) => (
                                     <div
                                         key={`${a.at}-${i}`}
-                                        className="flex items-center gap-1.5 rounded px-2 py-1 text-[9px]"
-                                        style={{
-                                            background: ALERT_COLORS[a.severity] + '12',
-                                            border: `1px solid ${ALERT_COLORS[a.severity]}33`,
-                                            color: ALERT_COLORS[a.severity],
-                                        }}
+                                        className={cn('flex items-center gap-1.5 rounded-[6px] px-2 py-1 text-[13px] font-semibold border', ALERT_CLASS[a.severity] ?? ALERT_CLASS.info)}
                                     >
                                         <span
-                                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${a.severity === 'critical' ? 'animate-pulse' : ''}`}
-                                            style={{ background: ALERT_COLORS[a.severity] }}
+                                            className={cn('w-2 h-2 rounded-full shrink-0', ALERT_DOT[a.severity] ?? ALERT_DOT.info, a.severity === 'critical' && 'animate-pulse motion-reduce:animate-none')}
                                         />
                                         <span className="truncate" title={a.msg}>{a.msg}</span>
                                     </div>
@@ -453,8 +442,8 @@ export default function FleetMissionPanel({ leftOffset }: { leftOffset: string }
                         )}
 
                         {/* Liftoff stagger */}
-                        <div className="flex items-center justify-between px-0.5">
-                            <span className="text-[9px]" style={{ color: '#9ca3af' }}>Liftoff stagger</span>
+                        <label className="flex items-center justify-between gap-2" title="Seconds between each drone's takeoff">
+                            <span className="text-[13px] font-semibold text-app-text">Liftoff gap</span>
                             <div className="flex items-center gap-1">
                                 <input
                                     type="number" min={0} max={15} step={1}
@@ -463,50 +452,36 @@ export default function FleetMissionPanel({ leftOffset }: { leftOffset: string }
                                         const v = Number(e.target.value)
                                         if (!isNaN(v)) setStaggerS(Math.min(15, Math.max(0, v)))
                                     }}
-                                    className="w-11 text-[10px] font-bold text-right tabular-nums rounded-md px-1.5 py-0.5 outline-none"
-                                    style={{
-                                        background: 'rgba(255,255,255,.08)',
-                                        border: '1px solid rgba(255,255,255,.15)',
-                                        color: '#fff',
-                                    }}
+                                    className={cn(INPUT, 'w-14 text-right font-bold')}
                                 />
-                                <span className="text-[8px]" style={{ color: '#9ca3af' }}>s</span>
+                                <span className="text-xs text-app-text-muted">s</span>
                             </div>
-                        </div>
+                        </label>
 
                         {/* Bulk actions */}
-                        <div className="flex gap-1.5">
+                        <div className="flex gap-2">
                             <button
                                 onClick={handleUploadAll}
                                 disabled={planned.length === 0 || anyUploading}
-                                className="flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-[10px] font-bold disabled:opacity-30"
-                                style={{
-                                    background: 'rgba(59,130,246,.2)',
-                                    border: '1.5px solid rgba(59,130,246,.45)',
-                                    color: '#93c5fd',
-                                }}
+                                title={planned.length === 0 ? 'No drone has a plan yet' : anyUploading ? 'Uploading now' : 'Upload every plan'}
+                                className={cn(BTN_ACCENT, 'flex-1')}
                             >
-                                {anyUploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
-                                UPLOAD ALL ({planned.length})
+                                {anyUploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                                Upload all ({planned.length})
                             </button>
                             <button
                                 onClick={handleStartAll}
                                 disabled={uploadedIds.length === 0 || anyUploading}
-                                className="flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-[10px] font-bold disabled:opacity-30"
-                                style={{
-                                    background: 'rgba(34,197,94,.2)',
-                                    border: '1.5px solid rgba(34,197,94,.45)',
-                                    color: '#4ade80',
-                                }}
+                                title={uploadedIds.length === 0 ? 'Upload plans first' : anyUploading ? 'Wait for uploads to finish' : 'Arm and start every uploaded drone'}
+                                className={cn(BTN_WARN, 'flex-1')}
                             >
-                                <PlayCircle size={11} />
-                                START ALL ({uploadedIds.length})
+                                <PlayCircle size={13} />
+                                Start all ({uploadedIds.length})
                             </button>
                         </div>
 
                         {feedback && (
-                            <div className="text-[9px] text-center py-0.5 rounded"
-                                style={{ color: '#fcd34d', background: 'rgba(245,158,11,.08)' }}>
+                            <div className="text-[13px] font-semibold text-center py-1 rounded-[6px] text-app-warn bg-app-warn-soft" role="status">
                                 {feedback}
                             </div>
                         )}

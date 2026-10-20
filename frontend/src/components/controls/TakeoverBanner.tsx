@@ -34,17 +34,16 @@ export function TakeoverBanner() {
     if (takeover) {
         return (
             <div role="alert" aria-live="assertive"
-                className="fixed top-3 left-1/2 -translate-x-1/2 z-[3100] flex max-w-[min(640px,calc(100vw-32px))] items-start gap-3 px-4 py-3 rounded-xl font-mono shadow-2xl"
+                className="fixed top-3 left-1/2 -translate-x-1/2 z-[3100] flex max-w-[min(640px,calc(100vw-32px))] items-start gap-3 px-4 py-3 rounded-[10px] shadow-2xl"
                 style={{ background: 'rgba(127, 29, 29, .97)', border: '1px solid rgba(248, 113, 113, .7)', color: '#fee2e2' }}>
-                <ShieldAlert size={18} className="shrink-0 mt-0.5" />
+                <ShieldAlert size={20} className="shrink-0 mt-0.5" aria-hidden />
                 <span className="flex flex-col gap-1 min-w-0">
-                    <span className="text-[12px] font-bold tracking-wider">
-                        HYRAK operations has taken control ({takeover.by})
+                    <span className="text-[14px] font-bold">
+                        HYRAK operations has control ({takeover.by})
                     </span>
-                    <span className="text-[11px] leading-relaxed" style={{ color: '#fecaca' }}>
-                        Your drone is being flown by HYRAK operations. Commands from this session,
-                        hold, return and land included, are held back until they hand control back.
-                        Video and telemetry keep running here.
+                    <span className="text-[13px] leading-relaxed" style={{ color: '#fecaca' }}>
+                        Your commands, including hold, return and land, are held until they hand
+                        control back. Video and telemetry keep running.
                     </span>
                 </span>
             </div>
@@ -53,9 +52,9 @@ export function TakeoverBanner() {
     if (!intervention) return null
     return (
         <div role="status"
-            className="fixed top-3 left-1/2 -translate-x-1/2 z-[3100] flex max-w-[min(560px,calc(100vw-32px))] items-center gap-2.5 px-4 py-2.5 rounded-xl font-mono text-[11px] shadow-2xl"
-            style={{ background: 'rgba(30, 41, 59, .96)', border: '1px solid rgba(148, 163, 184, .5)', color: '#e2e8f0' }}>
-            <Info size={15} className="shrink-0" />
+            className="fixed top-3 left-1/2 -translate-x-1/2 z-[3100] flex max-w-[min(560px,calc(100vw-32px))] items-center gap-2.5 px-4 py-2.5 rounded-[10px] text-[13px] shadow-2xl"
+            style={{ background: 'rgba(30, 41, 59, .97)', border: '1px solid rgba(148, 163, 184, .5)', color: '#e2e8f0' }}>
+            <Info size={18} className="shrink-0" aria-hidden />
             <span>
                 HYRAK operations ({intervention.by}) sent {ACTION_LABELS[intervention.action] ?? intervention.action} to your drone.
             </span>

@@ -2,7 +2,9 @@
 
 import { useMissionStore } from '@/store/mission'
 import FleetSurveyPanel from './FleetSurveyPanel'
-import { Grid3X3, Eraser, Play, RefreshCw, X, MapPin, AlertTriangle, CornerDownRight, Undo2 } from 'lucide-react'
+import { BTN, BTN_ACCENT, BTN_PRIMARY, BTN_WARN, FOCUS, INPUT, LABEL } from './ui'
+import { cn } from '@/lib/utils'
+import { Grid3X3, Eraser, Play, RefreshCw, X, MapPin, AlertTriangle, Undo2 } from 'lucide-react'
 
 // ── Slider field ───────────────────────────────────────────────────────────
 
@@ -25,30 +27,22 @@ function SurveyField({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] font-mono font-bold" style={{ color: '#e5e7eb' }}>
-          {label}
-        </span>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[13px] font-semibold text-app-text">{label}</span>
         <div className="flex items-center gap-1">
           <input
             type="number"
             min={min}
             step={step}
             value={value}
+            aria-label={`${label} (${unit})`}
             onChange={e => {
               const v = Number(e.target.value)
               if (!isNaN(v)) onChange(Math.max(min, v))
             }}
-            className="w-14 text-[10px] font-mono font-bold text-right tabular-nums rounded-md px-1.5 py-0.5 outline-none"
-            style={{
-              background: 'rgba(255,255,255,.08)',
-              border: '1px solid rgba(255,255,255,.15)',
-              color: '#fff',
-            }}
+            className={cn(INPUT, 'w-16 text-right font-bold')}
           />
-          <span className="text-[8px] font-mono font-semibold w-6" style={{ color: '#9ca3af' }}>
-            {unit}
-          </span>
+          <span className="text-xs text-app-text-muted w-7">{unit}</span>
         </div>
       </div>
       <input
@@ -57,9 +51,9 @@ function SurveyField({
         max={Math.max(max, value)}
         step={step}
         value={value}
+        aria-label={label}
         onChange={e => onChange(Number(e.target.value))}
-        className="w-full h-1 rounded-full cursor-pointer"
-        style={{ accentColor: '#a855f7' }}
+        className={cn('w-full h-1 rounded-full cursor-pointer accent-[var(--app-accent)]', FOCUS)}
       />
     </div>
   )
@@ -83,20 +77,17 @@ export default function SurveyPlanner() {
   const showReplaceWarning = !surveyGenerated && waypoints.length > 0 && surveyPolygon.length >= 3
   // Show "Update" when a previous generation exists
   const isUpdate = surveyGenerated && surveyPolygon.length >= 3
+  const areaReady = surveyPolygon.length >= 3
 
   if (!surveyMode) {
     return (
       <button
         onClick={() => setSurveyMode(true)}
-        className="flex items-center gap-2 w-full rounded-lg px-3 py-2.5 transition-colors"
-        style={{
-          background: 'rgba(168, 85, 247, .12)',
-          border: '1.5px solid rgba(168, 85, 247, .3)',
-          color: '#c084fc',
-        }}
+        className={cn(BTN_ACCENT, 'w-full justify-start')}
+        title="Draw an area on the map and generate a lawnmower pattern over it"
       >
         <Grid3X3 size={14} />
-        <span className="text-[11px] font-mono font-bold">Area Survey</span>
+        Area survey
       </button>
     )
   }
@@ -106,78 +97,62 @@ export default function SurveyPlanner() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Grid3X3 size={14} color="#c084fc" />
-          <span className="text-[12px] font-mono font-bold" style={{ color: '#fff' }}>
-            Area Survey
+          <span className="w-7 h-7 rounded-[6px] bg-app-accent-soft text-app-accent flex items-center justify-center">
+            <Grid3X3 size={14} />
           </span>
+          <span className="text-base font-bold text-app-text">Area survey</span>
         </div>
         <button
           onClick={() => setSurveyMode(false)}
-          className="p-1 rounded-md transition-colors"
-          style={{ background: 'rgba(255,255,255,.08)', color: '#9ca3af' }}
+          className={cn('w-8 h-8 rounded-[6px] flex items-center justify-center text-app-text-muted hover:text-app-text hover:bg-app-surface-2 transition-colors duration-[120ms]', FOCUS)}
           title="Close survey planner"
+          aria-label="Close survey planner"
         >
-          <X size={12} />
+          <X size={14} />
         </button>
       </div>
 
       {/* Polygon status + undo last point */}
       <div className="flex items-center gap-2">
         <div
-          className="flex-1 rounded-lg px-3 py-2 flex items-center gap-2"
-          style={{
-            background: surveyPolygon.length >= 3
-              ? 'rgba(34, 197, 94, .08)'
-              : 'rgba(168, 85, 247, .08)',
-            border: `1px solid ${surveyPolygon.length >= 3
-              ? 'rgba(34, 197, 94, .25)'
-              : 'rgba(168, 85, 247, .2)'}`,
-          }}
+          className={cn(
+            'flex-1 min-w-0 rounded-[6px] px-2.5 py-1.5 flex items-center gap-2 border text-[13px] font-semibold',
+            areaReady ? 'bg-app-ok-soft border-app-ok/40 text-app-ok' : 'bg-app-surface-2 border-app-border text-app-text-muted',
+          )}
+          role="status"
         >
-          <MapPin size={12} color={surveyPolygon.length >= 3 ? '#4ade80' : '#c084fc'} />
-          <span className="text-[10px] font-mono font-semibold" style={{ color: surveyPolygon.length >= 3 ? '#86efac' : '#d8b4fe' }}>
-            {surveyPolygon.length < 3
-              ? `Click map to draw area (${surveyPolygon.length}/3+ pts)`
-              : `${surveyPolygon.length} points · drag to edit`}
+          <MapPin size={13} className="shrink-0" />
+          <span className="truncate">
+            {areaReady
+              ? `${surveyPolygon.length} points, drag to edit`
+              : `Click the map: ${surveyPolygon.length} of 3+ points`}
           </span>
         </div>
         {surveyPolygon.length > 0 && (
           <button
             onClick={() => removeSurveyPoint(surveyPolygon.length - 1)}
             title="Remove last point"
-            className="p-2 rounded-lg flex-shrink-0 transition-colors"
-            style={{
-              background: 'rgba(255,255,255,.06)',
-              border: '1px solid rgba(255,255,255,.1)',
-              color: '#9ca3af',
-            }}
+            aria-label="Remove last point"
+            className={cn(BTN, 'w-8 px-0 shrink-0')}
           >
-            <Undo2 size={12} />
+            <Undo2 size={14} />
           </button>
         )}
       </div>
 
       {/* Replace warning - only shown on first generate when manual wps exist */}
       {showReplaceWarning && (
-        <div
-          className="rounded-lg px-3 py-2 flex items-start gap-2"
-          style={{
-            background: 'rgba(245, 158, 11, .08)',
-            border: '1px solid rgba(245, 158, 11, .3)',
-          }}
-        >
-          <AlertTriangle size={12} color="#fbbf24" className="shrink-0 mt-0.5" />
-          <span className="text-[10px] font-mono font-semibold leading-relaxed" style={{ color: '#fde68a' }}>
-            Generate will replace your current {waypoints.length}-waypoint mission plan.
+        <div className="rounded-[6px] px-2.5 py-2 flex items-start gap-2 bg-app-warn-soft border border-app-warn/40 text-app-warn" role="status">
+          <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+          <span className="text-[13px] font-semibold">
+            Replaces your {waypoints.length} current waypoints.
           </span>
         </div>
       )}
 
       {/* Config */}
       <div className="flex flex-col gap-2.5">
-        <span className="text-[9px] font-mono tracking-wider font-bold" style={{ color: '#9ca3af' }}>
-          PARAMETERS
-        </span>
+        <span className={LABEL}>Pattern</span>
 
         <SurveyField label="Altitude"     value={surveyConfig.altitude}   unit="m"   min={5}   max={120} step={1}   onChange={v => setSurveyConfig({ altitude: v })} />
         <SurveyField label="Speed"        value={surveyConfig.speed}      unit="m/s" min={0.5} max={15}  step={0.5} onChange={v => setSurveyConfig({ speed: v })} />
@@ -193,58 +168,29 @@ export default function SurveyPlanner() {
         <button
           onClick={clearSurveyPolygon}
           disabled={surveyPolygon.length === 0}
-          title="Clears the drawn area polygon so you can redraw. Mission waypoints are not affected until you Generate."
-          className="flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 transition-colors disabled:opacity-30 disabled:pointer-events-none"
-          style={{
-            background: 'rgba(255,255,255,.06)',
-            border: '1.5px solid rgba(255,255,255,.12)',
-            color: '#d1d5db',
-            fontSize: 10,
-            fontWeight: 700,
-            fontFamily: 'var(--font-geist-mono)',
-          }}
+          title={surveyPolygon.length === 0
+            ? 'Nothing drawn yet'
+            : 'Clear the drawn area to redraw it. Waypoints stay until you generate.'}
+          className={cn(BTN, 'flex-1')}
         >
-          <Eraser size={11} />
-          Clear Area
+          <Eraser size={13} />
+          Clear area
         </button>
 
         {/* Generate / Update */}
         <button
           onClick={generateSurveyWaypoints}
-          disabled={surveyPolygon.length < 3}
-          className="flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 transition-colors disabled:opacity-30 disabled:pointer-events-none"
-          style={{
-            background: isUpdate
-              ? 'rgba(59, 130, 246, .2)'
-              : showReplaceWarning
-              ? 'rgba(245, 158, 11, .18)'
-              : 'rgba(168, 85, 247, .2)',
-            border: `1.5px solid ${isUpdate
-              ? 'rgba(59, 130, 246, .45)'
-              : showReplaceWarning
-              ? 'rgba(245, 158, 11, .45)'
-              : 'rgba(168, 85, 247, .45)'}`,
-            color: isUpdate ? '#93c5fd' : showReplaceWarning ? '#fde68a' : '#d8b4fe',
-            fontSize: 10,
-            fontWeight: 700,
-            fontFamily: 'var(--font-geist-mono)',
-          }}
+          disabled={!areaReady}
+          title={!areaReady ? 'Draw at least 3 points first' : isUpdate ? 'Regenerate the waypoints for this area' : 'Generate waypoints for this area'}
+          className={cn(showReplaceWarning ? BTN_WARN : BTN_PRIMARY, 'flex-1')}
         >
-          {isUpdate ? <RefreshCw size={11} /> : <Play size={11} />}
+          {isUpdate ? <RefreshCw size={13} /> : <Play size={13} />}
           {isUpdate ? 'Update' : 'Generate'}
         </button>
       </div>
 
       {/* Multi-drone survey - visible in swarm mode with 2+ connected drones */}
       <FleetSurveyPanel />
-
-      {/* Hint */}
-      <div className="flex items-start gap-1.5">
-        <CornerDownRight size={10} color="#374151" className="shrink-0 mt-0.5" />
-        <span className="text-[9px] font-mono" style={{ color: '#374151' }}>
-          Clear Area redraws the polygon. Waypoints stay until you Generate/Update.
-        </span>
-      </div>
     </div>
   )
 }

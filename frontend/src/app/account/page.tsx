@@ -35,7 +35,7 @@ export default function AccountPage() {
         return (
             <div className="flex h-full items-center justify-center"
                 style={{ background: 'hsl(var(--app-bg))', color: 'hsl(var(--app-text-muted))' }}>
-                <span style={{ fontSize: 11, fontFamily: 'monospace', letterSpacing: '0.12em' }}>CHECKING SIGN-IN</span>
+                <span role="status" style={{ fontSize: 13 }}>Checking sign-in</span>
             </div>
         )
     }
@@ -47,38 +47,40 @@ export default function AccountPage() {
     return (
         <div style={{ height: '100%', overflowY: 'auto', background: 'hsl(var(--app-bg))', color: 'hsl(var(--app-text))' }}>
             <div style={{ maxWidth: 760, margin: '0 auto', padding: '24px 16px 48px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <header style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <Image src="/brand/icon-dark.png" alt="" width={28} height={28} className="dark:hidden" />
-                    <Image src="/brand/icon.png" alt="" width={28} height={28} className="hidden dark:block" />
+                <header style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
+                    <Image src="/brand/icon-dark.png" alt="" width={32} height={32} className="dark:hidden" />
+                    <Image src="/brand/icon.png" alt="" width={32} height={32} className="hidden dark:block" />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>Your account</p>
-                        <p style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>
+                        <h1 style={{ fontSize: 'var(--fs-xl)', lineHeight: '28px', fontWeight: 700, margin: 0 }}>Your account</h1>
+                        <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>
                             {user?.display_name || user?.username}
                         </p>
                     </div>
                     {live && (
-                        <Link href={appHref} style={{ fontSize: 12, fontFamily: 'monospace', color: '#22d3ee' }}>Back to the app</Link>
+                        <Link href={appHref} style={{
+                            display: 'inline-flex', alignItems: 'center', minHeight: 32, padding: '0 4px',
+                            fontSize: 14, fontWeight: 600, color: 'var(--app-accent)',
+                        }}>Back to the app</Link>
                     )}
                     <SButton onClick={() => { void logout().then(() => window.location.assign('/login')) }}>Sign out</SButton>
                 </header>
 
                 {user && !live && (
                     <p style={{
-                        margin: 0, padding: '10px 14px', borderRadius: 10, fontSize: 12, lineHeight: 1.5,
-                        border: '1px solid #f59e0b60', background: '#f59e0b14',
+                        margin: 0, padding: '12px 16px', borderRadius: 10, fontSize: 14, lineHeight: 1.5,
+                        border: '1px solid hsl(var(--app-border))', background: 'var(--app-warn-soft)',
                     }}>
-                        Your workspace is set up. Live video, telemetry and flying for customer
-                        workspaces are switched on in the next release; until then you can manage
-                        your profile and invite your team here.
+                        Your workspace is ready. Live flying arrives in the next release; for now,
+                        manage your profile and invite your team here.
                     </p>
                 )}
 
                 {SECTIONS.map(({ label, Body }) => (
                     <section key={label} style={{
-                        padding: '14px 18px', borderRadius: 14,
+                        padding: 16, borderRadius: 10, boxShadow: 'var(--app-shadow)',
                         background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))',
                     }}>
-                        <p style={{ ...S_LABEL, margin: '0 0 6px' }}>{label}</p>
+                        <h2 style={{ ...S_LABEL, margin: '0 0 4px' }}>{label}</h2>
                         <Body />
                     </section>
                 ))}

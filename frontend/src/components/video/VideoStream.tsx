@@ -17,6 +17,8 @@ import { useReceiver, fallbackFromHevc } from '@/lib/hyrakReceiver'
 import { clampToLiveEdge } from '@/lib/liveEdge'
 import { WebCodecsVideo } from './WebCodecsVideo'
 import { useClientValue } from '@/hooks/useClientValue'
+import { FOCUS_OVERLAY, OVERLAY_BTN } from '@/components/controls/flightStyles'
+import { WhyDisabled } from '@/components/controls/WhyDisabled'
 
 // 'fit' shows the WHOLE frame at the source's own aspect, letterboxed -
 // distinct from the fixed presets, which force an aspect the camera may not
@@ -148,14 +150,15 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
         : aspectRatio === 'fit' ? { maxHeight: '100%', maxWidth: '100%' }
         : { aspectRatio: aspectRatio.replace(':', '/'), maxHeight: '100%', maxWidth: '100%' }
 
+    const startBlocked = needsCamera && camerasScanned && !selectedCameraId && !isStreaming
+
     return (
         <div
             ref={containerRef}
             className={cn(
-                'relative flex flex-col rounded-xl border overflow-hidden transition-all',
+                'relative flex flex-col rounded-[10px] border border-app-border overflow-hidden bg-black',
                 maximized && !isFullscreen ? 'fixed inset-4 z-50' : 'flex-1'
             )}
-            style={{ background: '#000', borderColor: 'hsl(var(--app-border))' }}
         >
             {/* Main video - raw local feed when no AI mode is active, processed remote feed otherwise */}
             {wcUrl ? (
@@ -184,16 +187,16 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
                 stream negotiates, so "VIDEO OFFLINE" over a working picture
                 would be wrong. */}
             {!isStreaming && !localPreviewUrl && !noOsd && (
-                <div className="flex-1 flex flex-col items-center justify-center gap-3"
-                    style={{ color: 'rgba(255,255,255,0.3)' }}
-                >
-                    <VideoOff size={40} strokeWidth={1.5} />
-                    <p className="font-mono text-sm tracking-wider">VIDEO OFFLINE</p>
-                    {needsCamera && camerasScanned && !selectedCameraId && (
-                        <p className="text-xs opacity-50">Select a camera in Devices panel</p>
+                <div className="flex-1 flex flex-col items-center justify-center gap-2 px-4 text-center">
+                    <VideoOff size={36} strokeWidth={1.75} className="text-overlay-muted" />
+                    <p className="text-[16px] font-bold text-overlay-text">Video offline</p>
+                    {needsCamera && camerasScanned && !selectedCameraId ? (
+                        <p className="text-[13px] text-overlay-muted">Pick a camera in Devices</p>
+                    ) : !bare && (
+                        <p className="text-[13px] text-overlay-muted">Press Start below to bring it up</p>
                     )}
                     {lastError && (
-                        <p className="text-xs text-center max-w-xs px-4" style={{ color: '#f87171' }}>{lastError}</p>
+                        <p role="alert" className="text-[13px] font-semibold max-w-xs text-[var(--overlay-danger)]">{lastError}</p>
                     )}
                 </div>
             )}
@@ -203,24 +206,23 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
 
             {/* PiP local feed - only useful as a comparison while viewing the AI-processed remote feed */}
             {isStreaming && localStream && !isRaw && (
-                <div className="absolute bottom-12 left-3 w-28 rounded-lg overflow-hidden border"
-                    style={{ borderColor: 'rgba(255,255,255,0.15)', aspectRatio: '16/9' }}
+                <div className="absolute bottom-14 left-3 w-28 rounded-md overflow-hidden border border-overlay-border"
+                    style={{ aspectRatio: '16/9' }}
                 >
                     <video
                         ref={localVideoRef}
                         autoPlay playsInline muted
                         className="w-full h-full object-cover"
                     />
-                    <div className="absolute bottom-1 left-1 text-[9px] font-mono px-1 rounded"
-                        style={{ background: 'rgba(0,0,0,0.6)', color: '#fff' }}>
-                        LOCAL
+                    <div className="absolute bottom-1 left-1 text-[12px] font-bold px-1.5 rounded bg-overlay-scrim text-overlay-text">
+                        Local
                     </div>
                 </div>
             )}
 
             {/* Controls */}
             {!bare && <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-2"
-                style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.7), transparent)' }}
+                style={{ background: 'linear-gradient(to top, rgba(8,12,18,0.75), transparent)' }}
             >
                 {/* The recorder captures the <video>'s MediaStream. A WebCodecs
                     canvas has no <video>, and a local preview URL plays via
@@ -230,24 +232,23 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
                     : <span />}
                 <div className="flex items-center gap-1.5">
                     {isStreaming && (
-                        <div className="flex gap-1">
+                        <div className="hidden sm:flex gap-0.5 p-0.5 rounded-md border border-overlay-border bg-overlay-scrim backdrop-blur-[6px]" role="group" aria-label="Picture fit">
                             {(['fill', 'fit', '16:9', '4:3', '1:1'] as const).map(r => (
-                                <button key={r} onClick={() => setAspectRatio(r)}
-                                    className="px-2 py-1 rounded text-[10px] font-mono"
-                                    style={{
-                                        background: aspectRatio === r ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.5)',
-                                        border: `1px solid ${aspectRatio === r ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.1)'}`,
-                                        color: aspectRatio === r ? 'white' : 'rgba(255,255,255,0.5)',
-                                    }}
+                                <button key={r} onClick={() => setAspectRatio(r)} aria-pressed={aspectRatio === r}
+                                    className={cn('h-8 min-w-8 px-2 rounded text-[12px] font-bold capitalize transition-colors duration-[var(--dur-fast)]', FOCUS_OVERLAY,
+                                        aspectRatio === r ? 'bg-[rgba(34,211,238,.22)] text-[var(--overlay-accent)]' : 'text-overlay-muted hover:text-overlay-text')}
                                 >
                                     {r}
                                 </button>
                             ))}
                         </div>
                     )}
+                    <WhyDisabled reason={isLoading ? 'Starting the video' : startBlocked ? 'Pick a camera in Devices first' : null} className="inline-block">
                     <Button size="sm"
-                        variant={isStreaming ? 'destructive' : 'default'}
-                        className="font-mono text-xs gap-1.5 shadow-lg"
+                        variant={isStreaming ? 'ghost' : 'default'}
+                        className={cn(OVERLAY_BTN, FOCUS_OVERLAY, 'h-8 text-[13px] shadow-none disabled:opacity-100 disabled:border-dashed disabled:text-overlay-muted',
+                            isStreaming ? 'border-[var(--overlay-danger)] text-[var(--overlay-danger)] hover:text-[var(--overlay-danger)]'
+                                : 'bg-[var(--overlay-accent)] border-[var(--overlay-accent)] text-[#04161b] hover:bg-[#67e8f9] disabled:bg-overlay-scrim')}
                         onClick={isStreaming ? stopStream : startStream}
                         // `needsCamera`, NOT `!serverSourced`. Only a real webcam
                         // requires the operator to pick a device. 'rtsp_camera'
@@ -258,21 +259,22 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
                         // PC. needsCameraSelection() exists for this and was
                         // already used correctly for the hint above; this call
                         // site was missed.
-                        disabled={isLoading || (needsCamera && camerasScanned && !selectedCameraId && !isStreaming)}
+                        disabled={isLoading || startBlocked}
                     >
                         {isLoading
-                            ? <><Loader size={12} className="animate-spin" /> Starting...</>
+                            ? <><Loader size={14} className="animate-spin" /> Starting...</>
                             : isStreaming
-                                ? <><VideoOff size={12} /> Stop</>
-                                : <><Video size={12} /> Start</>
+                                ? <><VideoOff size={14} /> Stop</>
+                                : <><Video size={14} /> Start</>
                         }
                     </Button>
-                    <Button size="sm" variant="outline" className="shadow-lg" onClick={() => setMaximized(m => !m)}
+                    </WhyDisabled>
+                    <Button size="sm" variant="ghost" className={cn(OVERLAY_BTN, FOCUS_OVERLAY, 'h-8 w-8 px-0 hover:text-overlay-text')} onClick={() => setMaximized(m => !m)}
                         aria-label={maximized ? 'Restore video size' : 'Maximize video'}
                         title={maximized ? 'Restore video size' : 'Maximize video'}>
                         {maximized ? <Minimize size={14} /> : <Maximize size={14} />}
                     </Button>
-                    <Button size="sm" variant="outline" className="shadow-lg" onClick={handleFullscreen}
+                    <Button size="sm" variant="ghost" className={cn(OVERLAY_BTN, FOCUS_OVERLAY, 'h-8 w-8 px-0 hover:text-overlay-text')} onClick={handleFullscreen}
                         aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
                         title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}>
                         {isFullscreen ? <Shrink size={14} /> : <Expand size={14} />}

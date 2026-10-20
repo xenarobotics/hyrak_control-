@@ -49,11 +49,11 @@ function Chip({ children, title }: { children: React.ReactNode; title?: string }
         <div
             title={title}
             style={{
-                display: 'flex', alignItems: 'center', gap: 5,
-                padding: '4px 9px', borderRadius: 8,
+                display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
+                height: 32, padding: '0 10px', borderRadius: 6,
                 background: 'hsl(var(--app-surface-2))',
                 border: '1px solid hsl(var(--app-border))',
-                fontSize: 11, fontFamily: 'monospace', whiteSpace: 'nowrap',
+                fontSize: 12, fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap',
                 color: 'hsl(var(--app-text-muted))',
             }}
         >
@@ -63,28 +63,40 @@ function Chip({ children, title }: { children: React.ReactNode; title?: string }
 }
 
 function Divider() {
-    return <div style={{ width: 1, height: 20, background: 'hsl(var(--app-border))', flexShrink: 0 }} />
+    return <div aria-hidden style={{ width: 1, height: 20, background: 'hsl(var(--app-border))', flexShrink: 0 }} />
 }
 
-function BarButton({ onClick, disabled, color, title, children }: {
-    onClick: () => void; disabled?: boolean; color: string; title?: string; children: React.ReactNode
+// Disabled never fades the label away (design system 8): the word stays
+// readable in muted text on surface-2 with a dashed edge, and the tooltip
+// says why it cannot be pressed.
+function BarButton({ onClick, disabled, disabledReason, color, title, strong, children }: {
+    onClick: () => void; disabled?: boolean; disabledReason?: string; color: string; title?: string
+    /** The one control that must out-shout the rest (KILL). */
+    strong?: boolean
+    children: React.ReactNode
 }) {
     return (
         <button
+            type="button"
             onClick={onClick}
             disabled={disabled}
-            title={title}
+            title={disabled && disabledReason ? disabledReason : title}
             style={{
-                display: 'flex', alignItems: 'center', gap: 5,
-                padding: '5px 11px', borderRadius: 7, fontSize: 11, fontFamily: 'monospace', fontWeight: 600,
-                background: 'transparent', border: `1px solid ${color}60`, color,
-                cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.4 : 1, whiteSpace: 'nowrap',
+                display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
+                height: 32, padding: '0 12px', borderRadius: 6, fontSize: 13, fontWeight: 700,
+                background: disabled ? 'hsl(var(--app-surface-2))' : strong ? `color-mix(in srgb, ${color} 16%, transparent)` : 'transparent',
+                border: disabled ? '1px dashed hsl(var(--app-border-strong))' : `${strong ? 2 : 1}px solid ${color}`,
+                color: disabled ? 'hsl(var(--app-text-muted))' : color,
+                cursor: disabled ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap',
+                transition: 'background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out)',
             }}
         >
             {children}
         </button>
     )
 }
+
+const NO_LINK_REASON = 'No drone link. Connect a drone first.'
 
 export function StatusBar() {
     const telemetry = useDroneStore(s => s.telemetry)
@@ -221,22 +233,28 @@ export function StatusBar() {
 
     return (
         <div
+            role="region" aria-label="Drone status and quick controls"
             style={{
                 display: 'flex', alignItems: 'center', gap: 8,
-                padding: '0 14px', height: 44, flexShrink: 0, overflowX: 'auto',
+                padding: '0 12px', height: 48, flexShrink: 0, minWidth: 0,
                 background: 'hsl(var(--app-surface))',
                 borderBottom: '1px solid hsl(var(--app-border))',
             }}
         >
+            {/* Read-only status and the arm/altitude tools scroll inside
+                their own strip on a narrow window; LAND and KILL sit outside
+                it, so they are always on screen and the page never scrolls
+                sideways (design system 10). */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, overflowX: 'auto', height: '100%' }}>
             {/* ── Connectivity ─────────────────────────────────────────── */}
             <Chip title="Browser internet connectivity">
-                <Globe size={12} style={{ color: online ? '#4ade80' : '#f87171' }} />
+                <Globe size={14} style={{ color: online ? 'var(--app-ok)' : 'var(--app-danger)' }} />
                 <span>{online ? 'INTERNET' : 'OFFLINE'}</span>
             </Chip>
             <Chip title="Backend ↔ drone telemetry link">
                 {droneLinked
-                    ? <Wifi size={12} style={{ color: '#4ade80' }} />
-                    : <WifiOff size={12} style={{ color: '#f87171' }} />}
+                    ? <Wifi size={14} style={{ color: 'var(--app-ok)' }} />
+                    : <WifiOff size={14} style={{ color: 'var(--app-danger)' }} />}
                 <span>{droneLinked ? 'DRONE LINK' : 'NO DRONE LINK'}</span>
             </Chip>
             {isStreaming && stats && (() => {
@@ -244,7 +262,7 @@ export function StatusBar() {
                 const qColor = connectionQualityColor(q)
                 return (
                     <Chip title={`Video link - ${q}, ${stats.roundTripTime.toFixed(0)}ms`}>
-                        <SignalMedium size={12} style={{ color: qColor }} />
+                        <SignalMedium size={14} style={{ color: qColor }} />
                         <span style={{ color: qColor, textTransform: 'uppercase' }}>{q}</span>
                     </Chip>
                 )
@@ -260,22 +278,23 @@ export function StatusBar() {
             <BarButton
                 onClick={armed ? disarm : arm}
                 disabled={!droneLinked || armPending}
-                color={armed ? '#fb923c' : '#4ade80'}
+                disabledReason={armPending ? 'Waiting for the drone to acknowledge' : NO_LINK_REASON}
+                color={armed ? 'var(--app-warn)' : 'var(--app-ok)'}
                 title={armPending
                     ? 'Waiting for the drone to acknowledge'
                     : armed ? 'Disarm motors' : 'Arm motors'}
             >
                 {armPending
-                    ? <Loader size={13} className="animate-spin" />
-                    : armed ? <ShieldOff size={13} /> : <Shield size={13} />}
+                    ? <Loader size={14} className="animate-spin" />
+                    : armed ? <ShieldOff size={14} /> : <Shield size={14} />}
                 {armPending ? (armed ? 'DISARMING' : 'ARMING') : armed ? 'DISARM' : 'ARM'}
             </BarButton>
 
             {refusal && (
                 <Chip title={`${refusal.action.replace(/_/g, ' ')} refused by the drone - ${refusal.reason}. The refusal came back over the telemetry link, so the link itself is working.`}>
-                    <TriangleAlert size={12} style={{ color: '#f87171' }} />
+                    <TriangleAlert size={14} style={{ color: 'var(--app-danger)' }} />
                     <span style={{
-                        color: '#f87171', maxWidth: 340, overflow: 'hidden',
+                        color: 'var(--app-danger)', maxWidth: 340, overflow: 'hidden',
                         textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                     }}>
                         {refusal.reason}
@@ -284,7 +303,7 @@ export function StatusBar() {
             )}
 
             <Chip title="Current flight mode">
-                <span style={{ color: '#22d3ee' }}>{modeLabel(flightMode)}</span>
+                <span style={{ color: droneLinked ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))' }}>{modeLabel(flightMode)}</span>
             </Chip>
             {/* Bound to the LIVE mode, not to "". A select that always shows a
                 placeholder cannot show you that the mode you picked was
@@ -293,12 +312,14 @@ export function StatusBar() {
                 disabled={!droneLinked || modePending}
                 value={modeOptionFor(flightMode)}
                 onChange={e => { const m = e.target.value; if (m) sendAction('set_mode', { mode: m }) }}
-                title="Change flight mode"
+                title={droneLinked ? 'Change flight mode' : NO_LINK_REASON}
+                aria-label="Change flight mode"
                 style={{
-                    fontSize: 11, fontFamily: 'monospace', padding: '4px 6px', borderRadius: 6,
-                    background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
-                    color: 'hsl(var(--app-text-muted))', outline: 'none', maxWidth: 92,
-                    cursor: droneLinked ? 'pointer' : 'not-allowed', opacity: droneLinked ? 1 : 0.4,
+                    flexShrink: 0, height: 32, fontSize: 13, fontWeight: 600, padding: '0 6px', borderRadius: 6,
+                    background: 'hsl(var(--app-surface-2))',
+                    border: `1px ${droneLinked ? 'solid' : 'dashed'} hsl(var(--app-border-strong))`,
+                    color: droneLinked ? 'hsl(var(--app-text))' : 'hsl(var(--app-text-muted))', maxWidth: 104,
+                    cursor: droneLinked ? 'pointer' : 'not-allowed',
                 }}
             >
                 <option value="">{modePending ? 'Switching…' : 'Mode…'}</option>
@@ -308,12 +329,12 @@ export function StatusBar() {
             </select>
 
             <Chip title={`GPS: ${sats} satellites visible`}>
-                <Satellite size={12} style={{ color: gpsFixColor(fix) }} />
+                <Satellite size={14} style={{ color: gpsFixColor(fix) }} />
                 <span style={{ color: gpsFixColor(fix) }}>{gpsFixLabel(fix)}</span>
                 <span>{sats}</span>
             </Chip>
             <Chip title="Battery">
-                <Battery size={12} style={{ color: batteryTextColor(bat) }} />
+                <Battery size={14} style={{ color: batteryTextColor(bat) }} />
                 <span style={{ color: batteryTextColor(bat), fontWeight: 700 }}>{bat.toFixed(0)}%</span>
             </Chip>
 
@@ -329,29 +350,29 @@ export function StatusBar() {
             <Chip title={commandedAlt != null
                 ? `Commanded ${commandedAlt.toFixed(1)} m - drone reports ${alt.toFixed(1)} m`
                 : 'Current altitude (relative to takeoff)'}>
-                <Navigation size={12} style={{ color: altMismatch ? '#f87171' : '#60a5fa' }} />
-                <span style={{ fontWeight: 700, color: altMismatch ? '#f87171' : undefined }}>
+                <Navigation size={14} style={{ color: altMismatch ? 'var(--app-danger)' : 'var(--app-accent)' }} />
+                <span style={{ fontSize: 14, fontWeight: 700, color: altMismatch ? 'var(--app-danger)' : 'hsl(var(--app-text))' }}>
                     {alt.toFixed(1)}
                 </span>
                 <span>m</span>
                 {commandedAlt != null && (
-                    <span style={{ opacity: 0.65 }}>
+                    <span>
                         / {commandedAlt.toFixed(0)} set
                     </span>
                 )}
             </Chip>
             {altWarning && (
                 <Chip title={altWarning}>
-                    <TriangleAlert size={12} style={{ color: '#f87171' }} />
+                    <TriangleAlert size={14} style={{ color: 'var(--app-danger)' }} />
                     <span style={{
-                        color: '#f87171', maxWidth: 300, overflow: 'hidden',
+                        color: 'var(--app-danger)', maxWidth: 300, overflow: 'hidden',
                         textOverflow: 'ellipsis',
                     }}>
                         {altWarning}
                     </span>
                 </Chip>
             )}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
                 <input
                     type="number" min={1} max={120} step={1}
                     placeholder="alt"
@@ -365,47 +386,46 @@ export function StatusBar() {
                     title={altitudeLocked
                         ? 'Altitude is controlled from the AI tracking panel (Fixed/Auto) while a tracking mode is active'
                         : 'Target altitude in meters'}
+                    aria-label="Target altitude in meters"
                     style={{
-                        width: 46, fontSize: 11, fontFamily: 'monospace', padding: '4px 6px',
+                        width: 56, height: 32, fontSize: 13, fontVariantNumeric: 'tabular-nums', padding: '0 6px',
                         borderRadius: 6, background: 'hsl(var(--app-surface-2))',
-                        border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))',
-                        outline: 'none', opacity: altitudeLocked ? 0.4 : 1,
+                        border: `1px ${altitudeLocked ? 'dashed' : 'solid'} hsl(var(--app-border-strong))`,
+                        color: altitudeLocked ? 'hsl(var(--app-text-muted))' : 'hsl(var(--app-text))',
                     }}
                 />
                 {inAir ? (
                     <button
                         onClick={handleAltAction}
                         disabled={!canSetAlt || !altInput}
-                        title="Re-position to this altitude while airborne"
+                        title={!droneLinked ? NO_LINK_REASON : !altInput ? 'Type an altitude first' : 'Re-position to this altitude while airborne'}
                         style={{
-                            display: 'flex', alignItems: 'center', gap: 4,
-                            padding: '4px 9px', borderRadius: 6, fontSize: 10.5, fontFamily: 'monospace', fontWeight: 700,
-                            background: 'transparent',
-                            border: `1px solid ${altError ? '#f87171' : 'hsl(var(--app-border))'}`,
-                            color: altError ? '#f87171' : 'hsl(var(--app-text-muted))',
+                            display: 'flex', alignItems: 'center', gap: 6, height: 32,
+                            padding: '0 10px', borderRadius: 6, fontSize: 13, fontWeight: 700,
+                            background: (!canSetAlt || !altInput) ? 'hsl(var(--app-surface-2))' : 'transparent',
+                            border: `1px ${(!canSetAlt || !altInput) ? 'dashed' : 'solid'} ${altError ? 'var(--app-danger)' : 'hsl(var(--app-border-strong))'}`,
+                            color: altError ? 'var(--app-danger)' : (!canSetAlt || !altInput) ? 'hsl(var(--app-text-muted))' : 'hsl(var(--app-text))',
                             cursor: (!canSetAlt || !altInput) ? 'not-allowed' : 'pointer',
-                            opacity: (!canSetAlt || !altInput) ? 0.4 : 1,
                         }}
                     >
-                        <MoveVertical size={10} />
+                        <MoveVertical size={14} />
                         {altError ? altError : altSent != null ? `→ ${altSent}m` : 'SET ALT'}
                     </button>
                 ) : (
                     <button
                         onClick={handleAltAction}
                         disabled={!canTakeoff || !altInput}
-                        title={!armed ? 'Arm first' : 'Arm and take off to this altitude'}
+                        title={!droneLinked ? NO_LINK_REASON : !armed ? 'Arm first' : !altInput ? 'Type an altitude first' : 'Take off to this altitude'}
                         style={{
-                            display: 'flex', alignItems: 'center', gap: 4,
-                            padding: '4px 9px', borderRadius: 6, fontSize: 10.5, fontFamily: 'monospace', fontWeight: 700,
-                            background: 'transparent',
-                            border: `1px solid ${altError ? '#f87171' : 'hsl(var(--app-border))'}`,
-                            color: altError ? '#f87171' : 'hsl(var(--app-text-muted))',
+                            display: 'flex', alignItems: 'center', gap: 6, height: 32,
+                            padding: '0 10px', borderRadius: 6, fontSize: 13, fontWeight: 700,
+                            background: (!canTakeoff || !altInput) ? 'hsl(var(--app-surface-2))' : 'transparent',
+                            border: `1px ${(!canTakeoff || !altInput) ? 'dashed' : 'solid'} ${altError ? 'var(--app-danger)' : 'hsl(var(--app-border-strong))'}`,
+                            color: altError ? 'var(--app-danger)' : (!canTakeoff || !altInput) ? 'hsl(var(--app-text-muted))' : 'hsl(var(--app-text))',
                             cursor: (!canTakeoff || !altInput) ? 'not-allowed' : 'pointer',
-                            opacity: (!canTakeoff || !altInput) ? 0.4 : 1,
                         }}
                     >
-                        <PlaneTakeoff size={10} /> {altError ? altError : 'TAKEOFF'}
+                        <PlaneTakeoff size={14} /> {altError ? altError : 'TAKEOFF'}
                     </button>
                 )}
             </div>
@@ -418,38 +438,44 @@ export function StatusBar() {
                 </>
             )}
 
+            </div>
+
             {/* ── Controls ─────────────────────────────────────────────── */}
-            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                 <FcMessageLog />
-                <BarButton onClick={() => sendAction('land')} disabled={!droneLinked} color="#38bdf8" title="Descend and land now">
-                    <PlaneLanding size={13} /> LAND
+                <BarButton onClick={() => sendAction('land')} disabled={!droneLinked} disabledReason={NO_LINK_REASON}
+                    color="var(--app-accent)" title="Descend and land now">
+                    <PlaneLanding size={16} /> LAND
                 </BarButton>
 
                 {killConfirm ? (
                     <div style={{ display: 'flex', gap: 5 }}>
                         <button
+                            type="button"
                             onClick={handleKillClick}
                             style={{
-                                padding: '5px 11px', borderRadius: 7, fontSize: 11, fontFamily: 'monospace', fontWeight: 700,
-                                background: '#dc2626', border: '1px solid #f87171', color: 'white', cursor: 'pointer',
+                                height: 32, padding: '0 12px', borderRadius: 6, fontSize: 13, fontWeight: 800,
+                                background: '#b91c1c', border: '2px solid #b91c1c', color: '#ffffff', cursor: 'pointer',
                             }}
                         >
                             CONFIRM KILL
                         </button>
                         <button
+                            type="button"
                             onClick={() => { if (killTimer.current) clearTimeout(killTimer.current); setKillConfirm(false) }}
                             style={{
-                                padding: '5px 11px', borderRadius: 7, fontSize: 11, fontFamily: 'monospace',
-                                background: 'transparent', border: '1px solid hsl(var(--app-border))',
-                                color: 'hsl(var(--app-text-muted))', cursor: 'pointer',
+                                height: 32, padding: '0 12px', borderRadius: 6, fontSize: 13, fontWeight: 600,
+                                background: 'transparent', border: '1px solid hsl(var(--app-border-strong))',
+                                color: 'hsl(var(--app-text))', cursor: 'pointer',
                             }}
                         >
                             Cancel
                         </button>
                     </div>
                 ) : (
-                    <BarButton onClick={handleKillClick} disabled={!droneLinked} color="#f87171" title="Immediately cuts motors - use only for genuine emergencies">
-                        <TriangleAlert size={13} /> KILL
+                    <BarButton onClick={handleKillClick} disabled={!droneLinked} disabledReason={NO_LINK_REASON}
+                        color="var(--app-danger)" strong title="Cuts the motors at once. Emergencies only. Press twice.">
+                        <TriangleAlert size={16} /> KILL
                     </BarButton>
                 )}
             </div>

@@ -1,37 +1,68 @@
 'use client'
+import { useState } from 'react'
 import {
-    Battery, Satellite, Gauge, Navigation,
-    Compass, Wifi, WifiOff, Shield, ShieldOff, Clock, Video
+    Battery, Satellite, Gauge, Navigation, Home,
+    Compass, Wifi, WifiOff, Shield, ShieldOff, Clock, Video, ChevronDown,
 } from 'lucide-react'
 
 import { useDroneStore } from '@/store/drone'
-import {
-    batteryTextColor, batteryBorderColor, gpsFixLabel,
-    gpsFixColor, headingToCardinal, formatDuration
-} from '@/lib/osd'
+import { gpsFixLabel, headingToCardinal, formatDuration } from '@/lib/osd'
 import { useFlightTimer } from '@/hooks/useFlightTimer'
-import { connectionColor } from '@/lib/utils'
 import { cn } from '@/lib/utils'
+import { FOCUS } from '@/components/controls/flightStyles'
 
-function Pill({ children, className, style, title }: {
-    children: React.ReactNode
-    className?: string
-    style?: React.CSSProperties
-    title?: string
+type Tone = 'ok' | 'warn' | 'danger' | 'accent' | 'muted'
+const TONE_TEXT: Record<Tone, string> = {
+    ok: 'text-app-ok', warn: 'text-app-warn', danger: 'text-app-danger',
+    accent: 'text-app-accent', muted: 'text-app-text-muted',
+}
+const TONE_CHIP: Record<Tone, string> = {
+    ok: 'border-app-border bg-app-surface-2',
+    warn: 'border-app-warn bg-app-warn-soft',
+    danger: 'border-app-danger bg-app-danger-soft',
+    accent: 'border-app-accent bg-app-accent-soft',
+    muted: 'border-app-border bg-app-surface-2',
+}
+const DOT: Record<Tone, string> = {
+    ok: 'bg-app-ok', warn: 'bg-app-warn', danger: 'bg-app-danger', accent: 'bg-app-accent', muted: 'bg-app-text-subtle',
+}
+
+/** Status chip: icon + word + colour, 12px bold. */
+function Chip({ children, tone = 'muted', title }: {
+    children: React.ReactNode; tone?: Tone; title?: string
 }) {
     return (
-        <div
-            className={cn(
-                'flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono',
-                'bg-secondary border border-border',
-                className
-            )}
-            style={style}
-            title={title}
-        >
+        <div title={title}
+            className={cn('flex items-center gap-1.5 h-7 px-2.5 rounded-full border text-[12px] font-bold whitespace-nowrap',
+                TONE_CHIP[tone], TONE_TEXT[tone])}>
             {children}
         </div>
     )
+}
+
+/** A main readout: small label, big bold value, small muted unit. */
+function Readout({ icon, label, value, unit, tone, title }: {
+    icon: React.ReactNode; label: string; value: string; unit?: string; tone?: Tone; title?: string
+}) {
+    return (
+        <div title={title} className="flex flex-col min-w-0 px-2 sm:px-3 py-1.5 rounded-[10px] border border-app-border bg-app-surface-2">
+            <span className="flex items-center gap-1 text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">
+                <span className="hidden sm:inline-flex">{icon}</span>{label}
+            </span>
+            <span className="flex items-baseline gap-1 min-w-0">
+                <span className={cn('text-[20px] sm:text-[26px] leading-[1.1] font-extrabold tabular-nums truncate',
+                    tone ? TONE_TEXT[tone] : 'text-app-text')}>{value}</span>
+                {unit && <span className="text-[12px] font-semibold text-app-text-muted">{unit}</span>}
+            </span>
+        </div>
+    )
+}
+
+function batteryTone(pct: number): Tone {
+    return pct > 50 ? 'ok' : pct > 20 ? 'warn' : 'danger'
+}
+function gpsTone(fix: number): Tone {
+    return fix >= 6 ? 'accent' : fix >= 3 ? 'ok' : fix === 2 ? 'warn' : 'danger'
 }
 
 export function OSDBar() {
@@ -42,6 +73,8 @@ export function OSDBar() {
     const streamStatus = useDroneStore(s => s.streamStatus)
     const telemetryStatus = useDroneStore(s => s.telemetryStatus)
     const { elapsed, running } = useFlightTimer()
+    // Below 768px the status chips fold into one summary chip.
+    const [open, setOpen] = useState(false)
 
     const alt = telemetry?.position.relative_altitude_m ?? 0
     const speed = telemetry?.groundspeed_m_s ?? 0
@@ -53,128 +86,102 @@ export function OSDBar() {
     const mode = telemetry?.flight_mode.mode ?? 'NO LINK'
     const armed = telemetry?.flight_mode.is_armed ?? false
     const homeDist = telemetry?.home_distance_m ?? 0
+    const linkLost = !!telemetry && telemetry.link_ok === false
+    const has = !!telemetry
+
+    const cloudTone: Tone = connectionStatus === 'connected' ? 'ok'
+        : connectionStatus === 'connecting' || connectionStatus === 'reconnecting' ? 'warn' : 'danger'
+    const videoTone: Tone = streamStatus === 'connected' ? 'ok' : streamStatus === 'error' ? 'danger' : 'warn'
+
+    // The one-line summary: the worst thing first.
+    const summary = linkLost ? { tone: 'danger' as Tone, text: `Link lost ${Math.round(telemetry?.link_lost_s ?? 0)}s` }
+        : armed ? { tone: 'danger' as Tone, text: `Armed · ${mode}` }
+            : !has ? { tone: 'muted' as Tone, text: 'No drone link' }
+                : { tone: 'ok' as Tone, text: `Disarmed · ${mode}` }
+
+    const chips = (
+        <>
+            {/* Cloud socket - never the video stream, which has its own chip */}
+            <Chip tone={cloudTone} title="Browser to cloud (socket)">
+                <span className={cn('w-2 h-2 rounded-full', DOT[cloudTone])} />
+                {connectionStatus === 'connected' ? 'ONLINE' : connectionStatus.toUpperCase()}
+            </Chip>
+
+            {/* Video stream - only shown once a stream has been attempted */}
+            {streamStatus !== 'idle' && (
+                <Chip tone={videoTone} title="Video stream (WebRTC)">
+                    <Video size={13} />
+                    {streamStatus === 'connected' ? 'VIDEO' : streamStatus.toUpperCase()}
+                </Chip>
+            )}
+
+            {/* Drone link lost (backend watchdog, ~2 s) - distinct from the
+                socket to the cloud, which the chip above shows */}
+            {linkLost && (
+                <Chip tone="danger">
+                    <span className="w-2 h-2 rounded-full bg-app-danger animate-pulse" />
+                    DRONE LINK LOST {Math.round(telemetry?.link_lost_s ?? 0)}s
+                </Chip>
+            )}
+
+            {/* Armed */}
+            <Chip tone={armed ? 'danger' : 'muted'}>
+                {armed ? <Shield size={13} /> : <ShieldOff size={13} />}
+                {armed ? 'ARMED' : 'DISARMED'}
+            </Chip>
+
+            {/* Mode */}
+            <Chip tone={has ? 'accent' : 'muted'} title="Flight mode">{mode}</Chip>
+
+            {/* GPS */}
+            <Chip tone={has ? gpsTone(fix) : 'muted'} title="GPS fix and satellites">
+                <Satellite size={13} />
+                {gpsFixLabel(fix)}
+                <span className="text-app-text-muted font-semibold">{sats}</span>
+            </Chip>
+
+            {/* Flight timer */}
+            <Chip tone={running ? 'ok' : 'muted'} title="Flight time">
+                <Clock size={13} />
+                <span className="tabular-nums">{formatDuration(elapsed)}</span>
+            </Chip>
+
+            {/* Telemetry link */}
+            <Chip tone={telemetryStatus === 'connected' ? 'ok' : 'muted'} title="Telemetry link">
+                {telemetryStatus === 'connected' ? <Wifi size={13} /> : <WifiOff size={13} />}
+                TEL
+            </Chip>
+        </>
+    )
 
     return (
-        <div className="flex flex-col px-2.5 py-1.5 gap-1.5">
+        <div className="flex flex-col p-2 gap-2">
 
-            {/* Row 1 - status */}
-            <div className="flex items-center gap-2 flex-wrap">
-                {/* Cloud socket - never the video stream, which has its own pill */}
-                <Pill title="Browser to cloud (socket)">
-                    <span className={cn('w-2 h-2 rounded-full', connectionColor(connectionStatus))} />
-                    <span className="text-muted-foreground">
-                        {connectionStatus === 'connected' ? 'ONLINE' : connectionStatus.toUpperCase()}
+            {/* Row 1 - status. Wraps on desktop; one summary chip on phones. */}
+            <div className="hidden md:flex items-center gap-1.5 flex-wrap">{chips}</div>
+            <div className="md:hidden">
+                <button onClick={() => setOpen(o => !o)} aria-expanded={open}
+                    className={cn('w-full min-h-9 flex items-center gap-2 px-3 rounded-full border text-[13px] font-bold',
+                        TONE_CHIP[summary.tone], TONE_TEXT[summary.tone], FOCUS)}>
+                    <span className={cn('w-2 h-2 rounded-full shrink-0', DOT[cloudTone])} />
+                    <span className="truncate">{summary.text}</span>
+                    <span className="ml-auto flex items-center gap-1 text-[12px] text-app-text-muted">
+                        {open ? 'Hide' : 'Status'}
+                        <ChevronDown size={14} className={cn('transition-transform duration-[var(--dur)]', open && 'rotate-180')} />
                     </span>
-                </Pill>
-
-                {/* Video stream - only shown once a stream has been attempted */}
-                {streamStatus !== 'idle' && (
-                    <Pill title="Video stream (WebRTC)">
-                        <Video size={12} className={cn(
-                            streamStatus === 'connected' ? 'text-green-500'
-                                : streamStatus === 'error' ? 'text-red-500' : 'text-yellow-500',
-                        )} />
-                        <span className="text-muted-foreground">
-                            {streamStatus === 'connected' ? 'VIDEO' : streamStatus.toUpperCase()}
-                        </span>
-                    </Pill>
-                )}
-
-                {/* Drone link lost (backend watchdog, ~2 s) - distinct from the
-                    socket to the cloud, which the pill above shows */}
-                {telemetry && telemetry.link_ok === false && (
-                    <Pill className="border-red-500/50 bg-red-500/15">
-                        <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                        <span className="text-red-500 font-semibold">
-                            DRONE LINK LOST {Math.round(telemetry.link_lost_s ?? 0)}s
-                        </span>
-                    </Pill>
-                )}
-
-                {/* Armed */}
-                <Pill className={cn(
-                    armed && 'border-red-500/40 bg-red-500/10'
-                )}>
-                    {armed
-                        ? <Shield size={12} className="text-red-500" />
-                        : <ShieldOff size={12} className="text-muted-foreground" />
-                    }
-                    <span className={armed ? 'text-red-500 font-semibold' : 'text-muted-foreground'}>
-                        {armed ? 'ARMED' : 'DISARMED'}
-                    </span>
-                </Pill>
-
-                {/* Mode */}
-                <Pill className="border-cyan-500/30 bg-cyan-500/5">
-                    <span className="text-cyan-500 font-semibold">{mode}</span>
-                </Pill>
-
-                {/* Flight timer */}
-                <Pill>
-                    <Clock size={12} className={running ? 'text-green-500' : 'text-muted-foreground'} />
-                    <span className={running ? 'text-green-500' : 'text-muted-foreground'}>
-                        {formatDuration(elapsed)}
-                    </span>
-                </Pill>
-
-                {/* Telemetry link */}
-                <Pill className="ml-auto">
-                    {telemetryStatus === 'connected'
-                        ? <Wifi size={12} className="text-green-500" />
-                        : <WifiOff size={12} className="text-muted-foreground" />
-                    }
-                    <span className="text-muted-foreground">TEL</span>
-                </Pill>
+                </button>
+                {open && <div className="flex flex-wrap gap-1.5 pt-2">{chips}</div>}
             </div>
 
-            {/* Row 2 - flight data */}
-            <div className="flex items-center gap-2 flex-wrap">
-                {/* Altitude */}
-                <Pill>
-                    <Navigation size={12} className="text-blue-400" />
-                    <span className="text-muted-foreground">ALT</span>
-                    <span className="font-semibold">{alt.toFixed(1)}</span>
-                    <span className="text-muted-foreground text-[10px]">m</span>
-                </Pill>
-
-                {/* Speed */}
-                <Pill>
-                    <Gauge size={12} className="text-purple-400" />
-                    <span className="text-muted-foreground">SPD</span>
-                    <span className="font-semibold">{speed.toFixed(1)}</span>
-                    <span className="text-muted-foreground text-[10px]">m/s</span>
-                </Pill>
-
-                {/* Heading */}
-                <Pill>
-                    <Compass size={12} className="text-orange-400" />
-                    <span className="text-muted-foreground">HDG</span>
-                    <span className="font-semibold">{Math.round(hdg).toString().padStart(3, '0')}°</span>
-                    <span className="text-muted-foreground text-[10px]">{headingToCardinal(hdg)}</span>
-                </Pill>
-
-                {/* Home distance */}
-                <Pill>
-                    <span className="text-muted-foreground">HOME</span>
-                    <span className="font-semibold">{homeDist.toFixed(0)}</span>
-                    <span className="text-muted-foreground text-[10px]">m</span>
-                </Pill>
-
-                {/* Battery */}
-                <Pill style={{ borderColor: batteryBorderColor(bat) }}>
-                    <Battery size={12} style={{ color: batteryTextColor(bat) }} />
-                    <span style={{ color: batteryTextColor(bat) }} className="font-bold">
-                        {bat.toFixed(0)}%
-                    </span>
-                    <span className="text-muted-foreground text-[10px]">{volts.toFixed(1)}V</span>
-                </Pill>
-
-                {/* GPS */}
-                <Pill>
-                    <Satellite size={12} className={gpsFixColor(fix)} />
-                    <span className={gpsFixColor(fix)}>{gpsFixLabel(fix)}</span>
-                    <span className="text-muted-foreground">{sats}</span>
-                </Pill>
+            {/* Row 2 - the main readouts */}
+            <div className="grid grid-cols-3 gap-1.5 sm:flex sm:flex-wrap sm:gap-2">
+                <Readout icon={<Navigation size={13} />} label="ALT" value={alt.toFixed(1)} unit="m" title="Altitude above home" />
+                <Readout icon={<Gauge size={13} />} label="SPD" value={speed.toFixed(1)} unit="m/s" title="Ground speed" />
+                <Readout icon={<Compass size={13} />} label="HDG"
+                    value={`${Math.round(hdg).toString().padStart(3, '0')}°`} unit={headingToCardinal(hdg)} title="Heading" />
+                <Readout icon={<Home size={13} />} label="HOME" value={homeDist.toFixed(0)} unit="m" title="Distance to home" />
+                <Readout icon={<Battery size={13} />} label="BAT" value={`${bat.toFixed(0)}%`}
+                    unit={`${volts.toFixed(1)}V`} tone={has ? batteryTone(bat) : undefined} title="Battery" />
             </div>
 
         </div>

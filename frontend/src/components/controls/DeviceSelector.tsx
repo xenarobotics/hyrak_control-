@@ -27,6 +27,9 @@ import { useHydrated } from '@/hooks/useClientValue'
 import Link from 'next/link'
 import { useLiveScope } from '@/hooks/useLiveScope'
 import { ViewOnlyNote } from '@/components/layout/ViewOnly'
+import { FOCUS, DISABLED } from './flightStyles'
+import { WhyDisabled } from './WhyDisabled'
+import { cameraLabel } from '@/components/video/cameraLabel'
 
 export function DeviceSelector() {
     const mounted = useHydrated()
@@ -119,6 +122,12 @@ export function DeviceSelector() {
     // (docs/ACCESS_MODEL.md section 8a). The camera above stays theirs.
     const { viewOnly } = useLiveScope()
 
+    const camIdx = cameras.findIndex(c => c.deviceId === camId)
+    // The trigger shows the option's label, not its raw value ("sitl", "radio-0").
+    const telLabel = source.startsWith('nradio-') ? nativeRadios[Number(source.slice(7))]?.label ?? source
+        : source.startsWith('radio-') ? radios[Number(source.slice(6))]?.label ?? source
+            : options.find(o => o.value === source)?.label ?? source
+
     if (!mounted) {
         return <div className="space-y-3 min-h-[190px]" />
     }
@@ -128,22 +137,23 @@ export function DeviceSelector() {
 
             {/* Camera selector - not applicable to server-sourced feeds */}
             <div>
-                <div className="flex items-center gap-1.5 mb-1.5">
-                    <Camera size={12} className="text-app-text-muted" />
-                    <span className="text-xs text-app-text-muted font-mono">{needsCamera ? 'CAMERA' : 'VIDEO SOURCE'}</span>
+                <div className="flex items-center gap-1.5 mb-1.5 min-h-8">
+                    <Camera size={14} className="text-app-text-muted" />
+                    <span id="dev-cam-label" className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">{needsCamera ? 'Camera' : 'Video source'}</span>
                     {needsCamera && (
                         <button
                             onClick={scanCams}
-                            className="ml-auto text-zinc-600 hover:text-zinc-400 transition-colors"
+                            className={cn('ml-auto h-8 w-8 flex items-center justify-center rounded-md text-app-text-muted hover:text-app-text hover:bg-app-surface-2 transition-colors duration-[var(--dur-fast)]', FOCUS)}
                             title="Refresh cameras"
+                            aria-label="Refresh cameras"
                         >
-                            <RefreshCw size={11} className={cn(camLoading && 'animate-spin')} />
+                            <RefreshCw size={15} className={cn(camLoading && 'animate-spin')} />
                         </button>
                     )}
                 </div>
 
                 {!needsCamera ? (
-                    <div className="h-8 flex items-center px-2 rounded text-xs font-mono bg-app-surface border border-app-border text-app-text-muted truncate">
+                    <div className="h-9 flex items-center px-2.5 rounded-md text-[14px] bg-app-surface-2 border border-app-border text-app-text-muted truncate">
                         {specFor(videoSource)?.label ?? videoSource} - set in Settings
                     </div>
                 ) : (
@@ -154,13 +164,16 @@ export function DeviceSelector() {
                         >
                             {/* w-full + truncate keeps long webcam labels from
                                 widening the side panel into horizontal scroll */}
-                            <SelectTrigger className="h-8 w-full max-w-full text-xs font-mono bg-app-surface border-app-border overflow-hidden [&>span]:truncate [&>span]:min-w-0 [&>span]:text-left">
-                                <SelectValue placeholder={camLoading ? 'Scanning...' : 'No cameras found'} />
+                            <SelectTrigger aria-labelledby="dev-cam-label" className={cn('data-[size=default]:h-9 w-full max-w-full text-[14px] bg-app-surface border-app-border-strong rounded-md overflow-hidden [&>span]:truncate [&>span]:min-w-0 [&>span]:text-left disabled:opacity-100 data-[disabled]:opacity-100 disabled:border-dashed data-[disabled]:border-dashed disabled:text-app-text-subtle data-[disabled]:text-app-text-subtle', FOCUS)}>
+                                {/* Show a friendly name, never the raw device id the value holds. */}
+                                <SelectValue placeholder={camLoading ? 'Scanning...' : 'No cameras found'}>
+                                    {camIdx >= 0 ? cameraLabel(cameras[camIdx].label, camIdx) : (camLoading ? 'Scanning...' : 'No cameras found')}
+                                </SelectValue>
                             </SelectTrigger>
                             <SelectContent>
-                                {cameras.map(cam => (
-                                    <SelectItem key={cam.deviceId} value={cam.deviceId} className="text-xs font-mono max-w-[280px] [&>span:last-child]:truncate">
-                                        {cam.label}
+                                {cameras.map((cam, i) => (
+                                    <SelectItem key={cam.deviceId} value={cam.deviceId} title={cam.label || undefined} className="text-[14px] max-w-[280px] [&>span:last-child]:truncate">
+                                        {cameraLabel(cam.label, i)}
                                     </SelectItem>
                                 ))}
                             </SelectContent>
@@ -168,21 +181,18 @@ export function DeviceSelector() {
                 )}
                 {videoSourceNow === 'air_unit_udp' && meshUnits.length > 0 && (
                     <div className="mt-1.5">
-                        <div className="text-[10px] font-mono text-app-text-muted mb-1">MESH UNITS - tap to view (port 5600 + id)</div>
+                        <div className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted mb-1" title="Port 5600 + unit id">Mesh units</div>
                         <div className="flex flex-wrap gap-1.5">
                             {meshUnits.map(u => {
                                 const active = u.port === airPort
                                 return (
                                     <button key={u.id} onClick={() => pickUnit(u)} disabled={switching || !u.live && !u.in_use}
                                         title={`udp ${u.port}${u.source ? ` from ${u.source}` : ''}${u.kbps ? ` - ${u.kbps} kbit/s` : ''}${u.in_use ? ' - on screen' : ''}`}
-                                        className="px-2 py-1 rounded border text-[11px] font-mono flex items-center gap-1.5 disabled:opacity-40"
-                                        style={{
-                                            borderColor: active ? '#22d3ee88' : 'hsl(var(--app-border))',
-                                            background: active ? '#22d3ee18' : 'hsl(var(--app-surface))',
-                                            color: active ? '#22d3ee' : 'hsl(var(--app-text))',
-                                        }}>
-                                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: (u.live || u.in_use) ? '#4ade80' : '#8a94a8' }} />
-                                        {u.id === 0 ? 'Sim / 5600' : `Unit ${u.id}`}{u.kbps ? <span style={{ color: 'hsl(var(--app-text-muted))' }}>{u.kbps} k</span> : null}
+                                        aria-pressed={active}
+                                        className={cn('h-8 px-2.5 rounded-full border text-[13px] font-semibold flex items-center gap-1.5 disabled:border-dashed disabled:text-app-text-subtle disabled:cursor-not-allowed', FOCUS,
+                                            active ? 'border-app-accent bg-app-accent-soft text-app-accent' : 'border-app-border-strong bg-app-surface text-app-text')}>
+                                        <span className={cn('w-2 h-2 rounded-full', (u.live || u.in_use) ? 'bg-app-ok' : 'bg-app-text-subtle')} />
+                                        {u.id === 0 ? 'Sim / 5600' : `Unit ${u.id}`}{u.kbps ? <span className="text-app-text-muted">{u.kbps} k</span> : null}
                                     </button>
                                 )
                             })}
@@ -193,26 +203,28 @@ export function DeviceSelector() {
 
             {/* Telemetry source - detected client radios (like the camera) or SITL */}
             <div>
-                <div className="flex items-center gap-1.5 mb-1.5">
-                    <Satellite size={12} className="text-app-text-muted" />
-                    <span className="text-xs text-app-text-muted font-mono">TELEMETRY</span>
+                <div className="flex items-center gap-1.5 mb-1.5 min-h-8">
+                    <Satellite size={14} className="text-app-text-muted" />
+                    <span id="dev-tel-label" className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Telemetry</span>
                     {/* Desktop needs no grant, so "+" (which opens nothing in
                         Electron) is replaced by a plain re-scan. */}
                     {desktop ? (
                         <button
                             onClick={() => { void refreshNativeRadios() }}
-                            className="ml-auto text-zinc-600 hover:text-zinc-400 transition-colors"
+                            className={cn('ml-auto h-8 w-8 flex items-center justify-center rounded-md text-app-text-muted hover:text-app-text hover:bg-app-surface-2 transition-colors duration-[var(--dur-fast)]', FOCUS)}
                             title="Re-scan serial ports on this device"
+                            aria-label="Re-scan serial ports"
                         >
-                            <RefreshCw size={11} />
+                            <RefreshCw size={15} />
                         </button>
                     ) : browserSerialSupported && (
                         <button
                             onClick={addRadio}
-                            className="ml-auto text-zinc-600 hover:text-zinc-400 transition-colors"
+                            className={cn('ml-auto h-8 w-8 flex items-center justify-center rounded-md text-app-text-muted hover:text-app-text hover:bg-app-surface-2 transition-colors duration-[var(--dur-fast)]', FOCUS)}
                             title="Add a USB radio or flight controller plugged into this device"
+                            aria-label="Add a USB radio"
                         >
-                            <Plus size={12} />
+                            <Plus size={16} />
                         </button>
                     )}
                 </div>
@@ -222,7 +234,7 @@ export function DeviceSelector() {
                     simply unsupported in the browser, and the usual cause is
                     the page's ORIGIN rather than the browser. */}
                 {serialUnavailable && (
-                    <p className="text-[10px] font-mono text-amber-400/80 leading-relaxed mb-1.5 break-words">
+                    <p className="text-[13px] text-app-warn leading-snug mb-1.5 break-words">
                         {serialUnavailable}
                     </p>
                 )}
@@ -232,15 +244,15 @@ export function DeviceSelector() {
                     onValueChange={(v) => v && setSource(v)}
                     disabled={isConnected}
                 >
-                    <SelectTrigger className="h-8 w-full max-w-full text-xs font-mono bg-app-surface border-app-border overflow-hidden [&>span]:truncate [&>span]:min-w-0 [&>span]:text-left">
-                        <SelectValue />
+                    <SelectTrigger aria-labelledby="dev-tel-label" className={cn('data-[size=default]:h-9 w-full max-w-full text-[14px] bg-app-surface border-app-border-strong rounded-md overflow-hidden [&>span]:truncate [&>span]:min-w-0 [&>span]:text-left disabled:opacity-100 data-[disabled]:opacity-100 disabled:border-dashed data-[disabled]:border-dashed disabled:text-app-text-subtle data-[disabled]:text-app-text-subtle', FOCUS)}>
+                        <SelectValue>{telLabel}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                         {nativeRadios.map((radio, i) => (
                             <SelectItem
                                 key={`nradio-${i}`}
                                 value={`nradio-${i}`}
-                                className="text-xs font-mono max-w-[280px] [&>span:last-child]:truncate"
+                                className="text-[14px] max-w-[280px] [&>span:last-child]:truncate"
                             >
                                 {radio.label}
                             </SelectItem>
@@ -249,7 +261,7 @@ export function DeviceSelector() {
                             <SelectItem
                                 key={`radio-${i}`}
                                 value={`radio-${i}`}
-                                className="text-xs font-mono max-w-[280px] [&>span:last-child]:truncate"
+                                className="text-[14px] max-w-[280px] [&>span:last-child]:truncate"
                             >
                                 {radio.label}
                             </SelectItem>
@@ -265,7 +277,7 @@ export function DeviceSelector() {
                         {options
                             .filter(o => !o.value.startsWith('radio-') && !o.value.startsWith('nradio-'))
                             .map(o => (
-                                <SelectItem key={o.value} value={o.value} disabled={o.disabled} className="text-xs font-mono">
+                                <SelectItem key={o.value} value={o.value} disabled={o.disabled} className="text-[14px]">
                                     {o.label}
                                 </SelectItem>
                             ))}
@@ -275,25 +287,25 @@ export function DeviceSelector() {
                     default and what PX4's TELEM ports ship at; 115200 is the
                     other one people actually hit. */}
                 {selectedIsFc && (
-                    <p className="mt-1.5 text-[10px] font-mono text-app-text-muted leading-relaxed">
+                    <p className="mt-1.5 text-[13px] text-app-text-muted leading-snug">
                         Flight controller over USB - the baud rate is ignored by
                         the CDC serial link, so there is nothing to match.
                     </p>
                 )}
                 {!selectedIsFc && (source.startsWith('radio-') || source.startsWith('nradio-')) && (
                     <div className="mt-1.5 flex items-center gap-1.5">
-                        <span className="text-[10px] font-mono text-app-text-muted">BAUD</span>
+                        <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Baud</span>
                         <Select
                             value={String(baud)}
                             onValueChange={(v) => { if (v) setBaud(Number(v)) }}
                             disabled={isConnected}
                         >
-                            <SelectTrigger className="h-7 flex-1 text-[11px] font-mono bg-app-surface border-app-border">
+                            <SelectTrigger aria-label="Baud rate" className={cn('flex-1 data-[size=default]:h-9 w-full max-w-full text-[14px] bg-app-surface border-app-border-strong rounded-md overflow-hidden [&>span]:truncate [&>span]:min-w-0 [&>span]:text-left disabled:opacity-100 data-[disabled]:opacity-100 disabled:border-dashed data-[disabled]:border-dashed disabled:text-app-text-subtle data-[disabled]:text-app-text-subtle', FOCUS)}>
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
                                 {BAUD_OPTIONS.map(b => (
-                                    <SelectItem key={b} value={String(b)} className="text-xs font-mono">
+                                    <SelectItem key={b} value={String(b)} className="text-[14px]">
                                         {b}
                                     </SelectItem>
                                 ))}
@@ -302,14 +314,14 @@ export function DeviceSelector() {
                     </div>
                 )}
                 {desktop && nativeRadios.length === 0 && (
-                    <p className="mt-1.5 text-[10px] font-mono text-app-text-muted leading-relaxed">
+                    <p className="mt-1.5 text-[13px] text-app-text-muted leading-snug">
                         No serial ports found. Plug the radio in and hit refresh - on Linux you
-                        may also need to be in the <span className="text-zinc-400">dialout</span> group.
+                        may also need to be in the <span className="font-code text-app-text">dialout</span> group.
                     </p>
                 )}
                 {source === 'air-unit-udp' && (
                     <>
-                        <p className="mt-1.5 text-[10px] font-mono text-app-text-muted leading-relaxed">
+                        <p className="mt-1.5 text-[13px] text-app-text-muted leading-snug">
                             Reads udp:{getRfDownlinkPort()} / {isRfUplinkAuto(rfUplinkHost)
                                 ? 'replies to whoever sends (QGC style)'
                                 : `sends to ${rfUplinkHost}:${getRfUplinkPort()}`} -
@@ -323,7 +335,7 @@ export function DeviceSelector() {
                             command vanishes into loopback with no error anywhere
                             and telemetry keeps streaming perfectly. */}
                         <div className="mt-1.5 flex items-center gap-1.5">
-                            <span className="text-[10px] font-mono text-app-text-muted shrink-0">TX HOST</span>
+                            <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted shrink-0 w-[72px]">TX host</span>
                             <input
                                 value={rfUplinkHost}
                                 onChange={e => {
@@ -333,11 +345,11 @@ export function DeviceSelector() {
                                 disabled={isConnected}
                                 placeholder={`${DEFAULT_RF_UPLINK_HOST} or auto`}
                                 title="Where commands are sent. wfb-ng: the decoder running wfb_tx (this machine only if the decoder runs here - otherwise commands go nowhere while telemetry keeps working). 'auto': reply to the sender, like QGroundControl - use for SITL or a single-process ground station. Editable only while disconnected."
-                                className="h-7 w-full rounded px-2 text-[11px] font-mono bg-app-surface border border-app-border text-app-text outline-none disabled:opacity-60"
+                                className="h-9 w-full rounded-md px-2.5 text-[14px] bg-app-surface border border-app-border-strong text-app-text outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg disabled:bg-app-surface-2 disabled:text-app-text-subtle disabled:border-dashed font-code"
                             />
                         </div>
                         <div className="mt-1.5 flex items-center gap-1.5">
-                            <span className="text-[10px] font-mono text-app-text-muted shrink-0">QGC PORT</span>
+                            <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted shrink-0 w-[72px]">QGC port</span>
                             <input
                                 type="number"
                                 min={0}
@@ -351,10 +363,10 @@ export function DeviceSelector() {
                                     if (v >= 0 && v < 65536 && v !== getRfUplinkPort()) setRfFanoutPort(v)
                                 }}
                                 disabled={isConnected}
-                                className="h-7 w-full rounded px-2 text-[11px] font-mono bg-app-surface border border-app-border text-app-text outline-none disabled:opacity-60"
+                                className="h-9 w-full rounded-md px-2.5 text-[14px] bg-app-surface border border-app-border-strong text-app-text outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg disabled:bg-app-surface-2 disabled:text-app-text-subtle disabled:border-dashed font-code"
                             />
                         </div>
-                        <p className="mt-1 text-[10px] font-mono text-app-text-muted leading-relaxed">
+                        <p className="mt-1 text-[13px] text-app-text-muted leading-snug">
                             {rfFanout === getRfUplinkPort()
                                 ? `${rfFanout} is the uplink port - a copy of the downlink sent there goes straight back into the aircraft. Use another port, or 0.`
                                 : rfFanout > 0
@@ -365,7 +377,7 @@ export function DeviceSelector() {
                 )}
                 {source === CLOUD_SIM_LINK && (
                     <CloudSimNote entitled={!options.find(o => o.value === CLOUD_SIM_LINK)?.disabled}
-                        className="mt-1.5 text-[10px] font-mono text-app-text-muted leading-relaxed" />
+                        className="mt-1.5 text-[13px] text-app-text-muted leading-snug" />
                 )}
                 {source === 'local-relay' && (
                     <input
@@ -373,7 +385,7 @@ export function DeviceSelector() {
                         onChange={e => { setRelayUrl(e.target.value); setLocalRelayUrl(e.target.value) }}
                         disabled={isConnected}
                         placeholder={DEFAULT_LOCAL_RELAY_URL}
-                        className="mt-1.5 h-7 w-full rounded px-2 text-[11px] font-mono bg-app-surface border border-app-border text-app-text outline-none disabled:opacity-60"
+                        className="mt-1.5 h-9 w-full rounded-md px-2.5 text-[14px] bg-app-surface border border-app-border-strong text-app-text outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg disabled:bg-app-surface-2 disabled:text-app-text-subtle disabled:border-dashed font-code"
                     />
                 )}
                 {source === 'siyi-udp' && (
@@ -383,16 +395,16 @@ export function DeviceSelector() {
                             onChange={e => { setSiyiTarget(e.target.value); setSiyiTelemetryTarget(e.target.value) }}
                             disabled={isConnected}
                             placeholder={DEFAULT_SIYI_TELEMETRY_TARGET}
-                            className="mt-1.5 h-7 w-full rounded px-2 text-[11px] font-mono bg-app-surface border border-app-border text-app-text outline-none disabled:opacity-60"
+                            className="mt-1.5 h-9 w-full rounded-md px-2.5 text-[14px] bg-app-surface border border-app-border-strong text-app-text outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg disabled:bg-app-surface-2 disabled:text-app-text-subtle disabled:border-dashed font-code"
                         />
-                        <p className="mt-1 text-[10px] font-mono text-app-text-muted leading-relaxed">
+                        <p className="mt-1 text-[13px] text-app-text-muted leading-snug">
                             Target host:port, same as QGC&apos;s UDP link. Local port is ephemeral - the ground unit replies to us.
                         </p>
                     </>
                 )}
                 {sitlNeedsDesktop && (
-                    <p className="mt-1.5 text-[10px] font-mono text-app-text-muted leading-relaxed">
-                        SITL requires the HYRAK desktop app - <Link href="/" className="underline text-zinc-400 hover:text-zinc-200">download it here</Link>, then connect to the PX4 SITL running on your machine.
+                    <p className="mt-1.5 text-[13px] text-app-text-muted leading-snug">
+                        SITL requires the HYRAK desktop app - <Link href="/" className="underline font-semibold text-app-accent rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-accent">download it here</Link>, then connect to the PX4 SITL running on your machine.
                     </p>
                 )}
             </div>
@@ -408,42 +420,44 @@ export function DeviceSelector() {
                 simply not true. Now it is. */}
             {isConnected ? (
                 <div className="flex gap-2">
-                    <div className="flex-1 flex items-center justify-center gap-2 rounded-md border border-green-500/40 text-green-500 font-mono text-xs h-8">
-                        <Wifi size={12} /> CONNECTED
+                    <div className="flex-1 flex items-center justify-center gap-2 rounded-md border border-app-ok bg-app-ok-soft text-app-ok text-[13px] font-bold h-9">
+                        <Wifi size={15} /> Connected
                     </div>
                     <Button
                         size="sm"
                         variant="outline"
-                        className="font-mono text-xs gap-2"
+                        className={cn('h-9 rounded-md text-[13px] font-bold gap-2 text-app-text', FOCUS, DISABLED)}
                         disabled={disconnecting}
                         onClick={handleDisconnect}
                         title="Release the drone link and stop whichever local relay owns the radio"
                     >
                         {disconnecting
                             ? <><Loader size={12} className="animate-spin" /> …</>
-                            : <><WifiOff size={12} /> DISCONNECT</>}
+                            : <><WifiOff size={15} /> Disconnect</>}
                     </Button>
                 </div>
             ) : viewOnly ? (
                 <ViewOnlyNote />
             ) : (
-                <Button
-                    size="sm"
-                    className="w-full font-mono text-xs gap-2"
-                    disabled={isConnecting || sitlNeedsDesktop}
-                    onClick={handleConnect}
-                >
-                    {isConnecting
-                        ? <><Loader size={12} className="animate-spin" /> CONNECTING...</>
-                        : <><WifiOff size={12} /> CONNECT TELEMETRY</>
-                    }
-                </Button>
+                <WhyDisabled reason={isConnecting ? 'Connecting' : sitlNeedsDesktop ? 'SITL needs the HYRAK desktop app' : null}>
+                    <Button
+                        size="sm"
+                        className={cn('w-full h-10 rounded-md text-[14px] font-bold gap-2 bg-app-accent text-[var(--app-accent-ink)] hover:bg-app-accent hover:brightness-110', FOCUS, DISABLED)}
+                        disabled={isConnecting || sitlNeedsDesktop}
+                        onClick={handleConnect}
+                    >
+                        {isConnecting
+                            ? <><Loader size={15} className="animate-spin" /> Connecting...</>
+                            : <><Wifi size={15} /> Connect telemetry</>
+                        }
+                    </Button>
+                </WhyDisabled>
             )}
 
             {/* Why the last attempt failed - a silent spinner-stop tells the
                 operator nothing; the actual reason always does. */}
             {telemetryError && !isConnected && !isConnecting && (
-                <p className="text-[10px] font-mono text-red-400/90 leading-relaxed break-words">
+                <p role="alert" className="text-[13px] text-app-danger leading-snug break-words">
                     {telemetryError}
                 </p>
             )}

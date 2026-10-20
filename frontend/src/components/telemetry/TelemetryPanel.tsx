@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/collapsible'
 import { ChevronDown, Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { FOCUS } from '@/components/controls/flightStyles'
 
 interface TelemetryField {
     key: string
@@ -118,8 +119,8 @@ export function TelemetryPanel() {
 
     if (!telemetry) {
         return (
-            <div className="flex items-center justify-center h-32 text-zinc-600 text-xs font-mono">
-                NO TELEMETRY
+            <div className="flex items-center justify-center h-24 text-app-text-muted text-[13px]">
+                No telemetry yet. Connect a drone.
             </div>
         )
     }
@@ -128,12 +129,13 @@ export function TelemetryPanel() {
         <div className="flex flex-col gap-2 h-full">
             {/* Search */}
             <div className="relative">
-                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-app-text-muted" />
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-app-text-muted" />
                 <Input
                     value={search}
                     onChange={e => setSearch(e.target.value)}
                     placeholder="Search fields..."
-                    className="h-7 pl-7 text-xs font-mono bg-app-surface border-app-border"
+                    aria-label="Search telemetry fields"
+                    className="h-8 pl-8 text-[14px] bg-app-surface border-app-border-strong rounded-md"
                 />
             </div>
 
@@ -146,14 +148,14 @@ export function TelemetryPanel() {
                             open={openGroups.has(group.name)}
                             onOpenChange={() => toggleGroup(group.name)}
                         >
-                            <CollapsibleTrigger className="flex items-center justify-between w-full px-2 py-1.5 rounded hover:bg-zinc-800 transition-colors group">
-                                <span className="text-xs font-mono font-medium text-zinc-400 group-hover:text-zinc-200">
-                                    {group.name.toUpperCase()}
+                            <CollapsibleTrigger className={cn('flex items-center justify-between w-full min-h-8 px-2 py-1.5 rounded-md hover:bg-app-surface-2 transition-colors duration-[var(--dur-fast)] group', FOCUS)}>
+                                <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted group-hover:text-app-text">
+                                    {group.name}
                                 </span>
                                 <ChevronDown
-                                    size={12}
+                                    size={14}
                                     className={cn(
-                                        'text-zinc-600 transition-transform',
+                                        'text-app-text-muted transition-transform duration-[var(--dur)]',
                                         openGroups.has(group.name) && 'rotate-180'
                                     )}
                                 />
@@ -164,13 +166,13 @@ export function TelemetryPanel() {
                                     {group.fields.map(field => (
                                         <div
                                             key={field.key}
-                                            className="flex justify-between items-center px-2 py-1 rounded hover:bg-zinc-800/50"
+                                            className="flex justify-between items-center gap-3 px-2 py-1 rounded-md hover:bg-app-surface-2"
                                         >
-                                            <span className="text-xs text-app-text-muted">{field.label}</span>
-                                            <span className="text-xs font-mono text-zinc-200 tabular-nums">
+                                            <span className="text-[13px] text-app-text-muted">{field.label}</span>
+                                            <span className="text-[14px] font-semibold text-app-text tabular-nums">
                                                 {field.value}
                                                 {field.unit && (
-                                                    <span className="text-zinc-600 ml-0.5 text-[10px]">{field.unit}</span>
+                                                    <span className="text-app-text-muted font-normal ml-1 text-[12px]">{field.unit}</span>
                                                 )}
                                             </span>
                                         </div>

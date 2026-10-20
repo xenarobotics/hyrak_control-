@@ -8,6 +8,7 @@ import 'leaflet/dist/leaflet.css'
 import { useSwarmStore } from '@/store/swarm'
 import { MAP_LAYERS } from '@/types/mission'
 import { Crosshair } from 'lucide-react'
+import { OVERLAY, FOCUS_OVERLAY } from '@/components/mission/ui'
 
 const TRAIL_LEN = 60   // positions kept per drone (~1 min at fleet rate)
 
@@ -21,7 +22,7 @@ function droneIcon(id: number, color: string, active: boolean, connected: boolea
       background:${bg};border:2px solid ${active ? '#fff' : 'rgba(255,255,255,.7)'};
       box-shadow:0 1px 6px rgba(0,0,0,.5)${active ? `,0 0 0 3px ${color}55` : ''};
       display:flex;align-items:center;justify-content:center;
-      color:#fff;font-family:monospace;font-size:${active ? 12 : 10}px;font-weight:700;
+      color:#fff;font-family:inherit;font-variant-numeric:tabular-nums;font-size:${active ? 13 : 12}px;font-weight:800;
     ">${id}</div>`,
     iconSize: [sz, sz],
     iconAnchor: [sz / 2, sz / 2],
@@ -135,26 +136,25 @@ export default function FleetMap() {
           <button
             key={d.id}
             onClick={() => setActiveDrone(d.id === activeDroneId ? null : d.id)}
-            className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold"
-            style={{
-              background: 'rgba(0,0,0,.65)',
-              color: d.color,
-              border: `1px solid ${d.id === activeDroneId ? d.color : 'transparent'}`,
-            }}
+            className={`${OVERLAY} ${FOCUS_OVERLAY} inline-flex items-center gap-1.5 h-8 px-2.5 rounded-full text-xs font-bold tabular-nums`}
+            style={d.id === activeDroneId ? { borderColor: d.color } : undefined}
+            aria-pressed={d.id === activeDroneId}
+            title={`Drone ${d.id}: tap to ${d.id === activeDroneId ? 'clear' : 'select'}`}
           >
-            {d.id}·{(d.telemetry?.position?.relative_altitude_m ?? 0).toFixed(0)}m
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: d.color }} aria-hidden />
+            {d.id} · {(d.telemetry?.position?.relative_altitude_m ?? 0).toFixed(0)}
+            <span className="text-overlay-muted font-semibold">m</span>
           </button>
         ))}
       </div>
 
       <button
         onClick={() => setFitKey(k => k + 1)}
-        className="absolute top-2 right-2 z-[1000] flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-mono font-bold"
-        style={{ background: 'rgba(0,0,0,.65)', color: '#fff' }}
+        className={`${OVERLAY} ${FOCUS_OVERLAY} absolute top-2 right-2 z-[1000] flex items-center gap-1.5 h-8 px-3 rounded-[6px] text-[13px] font-semibold`}
         title="Fit all drones in view"
       >
-        <Crosshair size={11} />
-        RECENTER
+        <Crosshair size={14} aria-hidden />
+        Recenter
       </button>
     </div>
   )

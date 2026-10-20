@@ -27,11 +27,20 @@ import { useHydrated } from '@/hooks/useClientValue'
  *  unlike MAVLink's own SEVERITY enum, which descends. Reading it the wrong
  *  way round would paint every routine line red and every emergency grey. */
 const SEVERITY_COLOR = (rank: number): string =>
-    rank >= 5 ? '#f87171'          // CRITICAL / ALERT / EMERGENCY
-        : rank === 4 ? '#fb923c'   // ERROR
-            : rank === 3 ? '#fbbf24'   // WARNING
-                : rank === 2 ? '#60a5fa'   // NOTICE
-                    : '#a1a1aa'
+    rank >= 4 ? 'var(--app-danger)'      // ERROR / CRITICAL / ALERT / EMERGENCY
+        : rank === 3 ? 'var(--app-warn)'     // WARNING
+            : rank === 2 ? 'var(--app-accent)'   // NOTICE
+                : 'hsl(var(--app-text-muted))'
+
+/** The same scale for the trigger drawn over video: fixed overlay colours,
+ *  identical in both themes (design system 9). */
+const OVERLAY_SEVERITY_COLOR = (rank: number): string =>
+    rank >= 4 ? 'var(--overlay-danger)'
+        : rank === 3 ? 'var(--overlay-warn)'
+            : rank === 2 ? 'var(--overlay-accent)'
+                : 'var(--overlay-muted)'
+
+const tint = (c: string, pct: number) => `color-mix(in srgb, ${c} ${pct}%, transparent)`
 
 function timeOf(ts: number): string {
     return new Date(ts * 1000).toLocaleTimeString([], { hour12: false })
@@ -52,24 +61,25 @@ export function FcMessageLog({ variant = 'bar' }: { variant?: Variant }) {
 
     const worst = fcMessages.reduce((a, m) => Math.max(a, m.rank), 0)
     const color = fcUnread > 0 ? SEVERITY_COLOR(worst) : undefined
+    const overlayColor = fcUnread > 0 ? OVERLAY_SEVERITY_COLOR(worst) : undefined
 
     const trigger = variant === 'floating' ? (
         <button
             onClick={() => setOpen(true)}
             title="Messages from the drone - preflight results, warnings, failsafes"
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-mono font-bold transition-colors"
+            className="flex min-h-8 items-center gap-1.5 px-2.5 py-1 rounded-md border text-[12px] font-bold transition-colors"
             style={{
-                background: 'rgba(0,0,0,.55)',
-                borderColor: color ? color + '80' : 'hsl(var(--app-border))',
-                color: color ?? '#a1a1aa',
+                background: 'var(--overlay-scrim)',
+                borderColor: overlayColor ?? 'var(--overlay-border)',
+                color: overlayColor ?? 'var(--overlay-text)',
             }}
         >
-            <ScrollText size={11} />
-            MSGS
+            <ScrollText size={14} />
+            Messages
             {fcUnread > 0 && (
                 <span style={{
-                    minWidth: 14, height: 14, padding: '0 4px', borderRadius: 7,
-                    background: color, color: '#0b0b0d', fontSize: 9, fontWeight: 800,
+                    minWidth: 18, height: 18, padding: '0 4px', borderRadius: 999,
+                    background: overlayColor, color: '#0b0b0d', fontSize: 12, fontWeight: 800,
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                 }}>
                     {fcUnread > 99 ? '99+' : fcUnread}
@@ -84,20 +94,21 @@ export function FcMessageLog({ variant = 'bar' }: { variant?: Variant }) {
         <button
             onClick={() => setOpen(true)}
             title={`Drone messages${fcUnread > 0 ? ` - ${fcUnread} new` : ''}`}
+            aria-label={`Drone messages${fcUnread > 0 ? `, ${fcUnread} new` : ''}`}
             style={{
-                position: 'relative', display: 'flex', alignItems: 'center',
-                padding: '5px 7px', borderRadius: 7, flexShrink: 0,
-                background: 'transparent',
-                border: `1px solid ${color ? color + '80' : 'hsl(var(--app-border))'}`,
+                position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 32, height: 32, borderRadius: 6, flexShrink: 0,
+                background: color ? tint(color, 12) : 'transparent',
+                border: `1px solid ${color ?? 'hsl(var(--app-border-strong))'}`,
                 color: color ?? 'hsl(var(--app-text-muted))', cursor: 'pointer',
             }}
         >
-            <ScrollText size={13} />
+            <ScrollText size={16} />
             {fcUnread > 0 && (
                 <span style={{
-                    position: 'absolute', top: -5, right: -5,
-                    minWidth: 14, height: 14, padding: '0 3px', borderRadius: 7,
-                    background: color, color: '#0b0b0d', fontSize: 9, fontWeight: 800,
+                    position: 'absolute', top: -6, right: -6,
+                    minWidth: 18, height: 18, padding: '0 4px', borderRadius: 999,
+                    background: color, color: 'hsl(var(--app-surface))', fontSize: 12, fontWeight: 800,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
                     {fcUnread > 9 ? '9+' : fcUnread}
@@ -154,27 +165,28 @@ function MessageWindow({ onClose, onClear, onRead }: {
             // Same shape as the mission pre-flight confirmation: full-screen
             // scrim, centred card, click-outside to dismiss.
             className="fixed inset-0 z-[4000] flex items-center justify-center p-4"
-            style={{ background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(3px)' }}
+            style={{ background: 'rgba(0,0,0,.6)' }}
             onClick={onClose}
         >
             <div
                 onClick={e => e.stopPropagation()}
-                className="rounded-2xl border shadow-2xl overflow-hidden flex flex-col"
+                role="dialog" aria-modal="true" aria-label="Drone messages"
+                className="rounded-[14px] border overflow-hidden flex flex-col"
                 style={{
-                    background: 'rgba(17,19,24,.98)',
+                    background: 'hsl(var(--app-raised))', boxShadow: 'var(--app-shadow)',
                     borderColor: 'hsl(var(--app-border))',
                     width: 'min(760px, 100%)', height: 'min(520px, 85vh)',
                 }}
             >
                 <div
                     className="flex items-center gap-2.5 px-4 py-3 border-b flex-shrink-0"
-                    style={{ borderColor: 'hsl(var(--app-border))', background: 'rgba(255,255,255,.03)' }}
+                    style={{ borderColor: 'hsl(var(--app-border))', background: 'hsl(var(--app-surface))' }}
                 >
-                    <ScrollText size={15} color="#22d3ee" />
-                    <span className="text-[12px] font-mono font-bold" style={{ color: '#e4e4e7' }}>
-                        DRONE MESSAGES
-                    </span>
-                    <span className="text-[10px] font-mono" style={{ color: '#71717a' }}>
+                    <ScrollText size={18} style={{ color: 'var(--app-accent)' }} />
+                    <h2 className="m-0 text-[18px] font-bold text-app-text">
+                        Drone messages
+                    </h2>
+                    <span className="text-[13px] font-mono text-app-text-muted">
                         {shown.length}{minSeverity > 0 ? ` of ${fcMessages.length}` : ''}
                     </span>
 
@@ -182,10 +194,11 @@ function MessageWindow({ onClose, onClear, onRead }: {
                         value={minSeverity}
                         onChange={e => setMinSeverity(Number(e.target.value))}
                         title="Hide routine chatter"
-                        className="ml-auto text-[10px] font-mono rounded px-1.5 py-1 outline-none"
+                        aria-label="Show messages from this severity up"
+                        className="ml-auto h-8 text-[13px] rounded-md px-2"
                         style={{
-                            background: 'rgba(255,255,255,.06)',
-                            border: '1px solid hsl(var(--app-border))', color: '#a1a1aa',
+                            background: 'hsl(var(--app-surface-2))',
+                            border: '1px solid hsl(var(--app-border-strong))', color: 'hsl(var(--app-text))',
                         }}
                     >
                         <option value={0}>All</option>
@@ -197,18 +210,20 @@ function MessageWindow({ onClose, onClear, onRead }: {
                     <button
                         onClick={onClear}
                         title="Clear the log"
-                        className="flex items-center p-1.5 rounded"
-                        style={{ border: '1px solid hsl(var(--app-border))', color: '#a1a1aa' }}
+                        aria-label="Clear the log"
+                        className="flex size-8 items-center justify-center rounded-md"
+                        style={{ border: '1px solid hsl(var(--app-border-strong))', color: 'hsl(var(--app-text-muted))' }}
                     >
-                        <Trash2 size={12} />
+                        <Trash2 size={16} />
                     </button>
                     <button
                         onClick={onClose}
                         title="Close (Esc)"
-                        className="flex items-center p-1.5 rounded"
-                        style={{ border: '1px solid hsl(var(--app-border))', color: '#a1a1aa' }}
+                        aria-label="Close"
+                        className="flex size-8 items-center justify-center rounded-md"
+                        style={{ border: '1px solid hsl(var(--app-border-strong))', color: 'hsl(var(--app-text-muted))' }}
                     >
-                        <X size={12} />
+                        <X size={16} />
                     </button>
                 </div>
 
@@ -224,27 +239,27 @@ function MessageWindow({ onClose, onClear, onRead }: {
                 >
                     {shown.length === 0 ? (
                         <div className="flex flex-col items-center gap-2 px-8 py-12 text-center">
-                            <AlertTriangle size={20} color="#52525b" />
-                            <p className="text-[11px] font-mono leading-relaxed" style={{ color: '#71717a' }}>
+                            <AlertTriangle size={24} style={{ color: 'hsl(var(--app-text-muted))' }} />
+                            <p className="text-[14px] leading-relaxed max-w-[52ch]" style={{ color: 'hsl(var(--app-text-muted))' }}>
                                 {fcMessages.length === 0
-                                    ? 'Nothing from the drone yet. Messages appear here as the autopilot sends them - preflight results, GPS and EKF changes, failsafes, and the exact reason behind any refused command.'
+                                    ? 'Nothing from the drone yet. Preflight results, failsafes and the reason for any refused command show up here.'
                                     : 'Nothing at this severity. Lower the filter to see the rest.'}
                             </p>
                         </div>
                     ) : shown.map(m => (
                         <div
                             key={m.id}
-                            className="flex gap-3 px-4 py-[3px] text-[11.5px] font-mono leading-relaxed items-baseline"
+                            className="flex gap-3 px-4 py-1 text-[13px] font-mono leading-relaxed items-baseline"
                         >
-                            <span style={{ color: '#52525b', flexShrink: 0 }}>{timeOf(m.ts)}</span>
+                            <span style={{ color: 'hsl(var(--app-text-muted))', flexShrink: 0 }}>{timeOf(m.ts)}</span>
                             <span style={{
-                                color: SEVERITY_COLOR(m.rank), flexShrink: 0, width: 66,
-                                fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3,
+                                color: SEVERITY_COLOR(m.rank), flexShrink: 0, width: 72,
+                                fontSize: 12, fontWeight: 700,
                             }}>
                                 {m.severity}
                             </span>
                             <span style={{
-                                color: m.rank >= 3 ? SEVERITY_COLOR(m.rank) : '#d4d4d8',
+                                color: m.rank >= 3 ? SEVERITY_COLOR(m.rank) : 'hsl(var(--app-text))',
                                 wordBreak: 'break-word',
                             }}>
                                 {m.text}
@@ -261,13 +276,13 @@ function MessageWindow({ onClose, onClear, onRead }: {
                             const el = bodyRef.current
                             if (el) el.scrollTop = el.scrollHeight
                         }}
-                        className="flex items-center justify-center gap-1.5 py-1.5 flex-shrink-0 text-[10px] font-mono border-t"
+                        className="flex min-h-9 items-center justify-center gap-1.5 py-1.5 flex-shrink-0 text-[13px] font-semibold border-t"
                         style={{
-                            background: 'rgba(255,255,255,.04)',
-                            borderColor: 'hsl(var(--app-border))', color: '#a1a1aa',
+                            background: 'hsl(var(--app-surface))',
+                            borderColor: 'hsl(var(--app-border))', color: 'var(--app-accent)',
                         }}
                     >
-                        <ChevronDown size={11} /> jump to newest
+                        <ChevronDown size={14} /> Jump to newest
                     </button>
                 )}
             </div>

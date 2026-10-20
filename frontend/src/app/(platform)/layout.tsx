@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { ThemeToggle } from '@/components/controls/ThemeToggle'
+import { useTheme } from '@/lib/theme'
 import { ZoneBanner } from '@/components/controls/ZoneBanner'
 import { UpdatePrompt } from '@/components/updater/UpdatePrompt'
 import { LocalLinkPanel } from '@/components/controls/LocalLinkPanel'
@@ -15,7 +15,7 @@ import { useDroneStore } from '@/store/drone'
 import { getSocket } from '@/lib/socket'
 import { cn } from '@/lib/utils'
 import Image from 'next/image'
-import { Radio, Map, Bot, Package, SlidersHorizontal, Settings, AlertTriangle, LayoutDashboard, Building2 } from 'lucide-react'
+import { Radio, Map, Bot, Package, SlidersHorizontal, Settings, AlertTriangle, LayoutDashboard, Building2, Sun, Moon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useUiMode } from '@/hooks/useUiMode'
 import { useSwarmStore } from '@/store/swarm'
@@ -122,13 +122,36 @@ function ConsoleLink({ normal }: { normal: boolean }) {
     return (
         <a href="/admin" target="_blank" rel="noopener" title="Console (opens in a new tab)"
             className={cn(
-                'flex flex-col items-center rounded-lg transition-colors',
-                normal ? 'gap-1.5 w-20 py-3' : 'gap-1 w-12 py-2 text-xs text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800',
+                'flex flex-col items-center rounded-[10px] transition-colors duration-[120ms]',
+                normal ? 'gap-1.5 w-20 py-3' : RAIL_ITEM + ' ' + RAIL_IDLE,
             )}
             style={normal ? { color: 'var(--s-ink)' } : undefined}>
-            <Building2 size={normal ? 22 : 18} />
-            <span className={normal ? 'text-[14px] font-bold' : 'text-[10px] font-mono'}>Console</span>
+            <Building2 size={normal ? 22 : 20} />
+            <span className={normal ? 'text-[14px] font-bold' : 'text-[12px] font-semibold'}>Console</span>
         </a>
+    )
+}
+
+// Rail items (Dev mode). Muted text is the token that passes 4.5:1 on the
+// sidebar in every theme; the active item is accent text on the accent wash.
+const RAIL_ITEM = 'flex flex-col items-center justify-center gap-1 w-12 min-h-12 py-1.5'
+const RAIL_IDLE = 'text-app-text-muted hover:text-app-text hover:bg-app-surface-2'
+const RAIL_ACTIVE = 'bg-app-accent-soft text-app-accent font-bold'
+
+// The rail's quick theme switch. Same words as Settings (Dark, Midnight,
+// Light); it flips between light and dark, and Settings reaches Midnight.
+function RailThemeButton() {
+    const { theme, setTheme } = useTheme()
+    const mounted = useHydrated()
+    if (!mounted) return <div className="w-12 h-12" />
+    const light = theme === 'light'
+    return (
+        <button type="button" onClick={() => setTheme(light ? 'dark' : 'light')}
+            title={light ? 'Switch to the dark theme' : 'Switch to the light theme'}
+            className={cn('rounded-[10px] transition-colors duration-[120ms]', RAIL_ITEM, RAIL_IDLE)}>
+            {light ? <Moon size={20} /> : <Sun size={20} />}
+            <span className="text-[12px] font-semibold">{light ? 'Dark' : 'Light'}</span>
+        </button>
     )
 }
 
@@ -167,12 +190,19 @@ function PlatformNav() {
 
     return (
         <>
+            {/* A side rail from 768px up; below that a bottom tab bar, so the
+                rail never eats a phone's width (design system 10). */}
             <aside
-                className={cn('flex flex-col items-center py-4 gap-1 shrink-0 border-r', normal ? 'hy-simple w-24 gap-2' : 'w-16')}
+                aria-label="Main"
+                className={cn(
+                    'order-last flex shrink-0 flex-row items-stretch justify-around gap-0.5 border-t px-1 py-1',
+                    'md:order-none md:flex-col md:items-center md:justify-start md:border-t-0 md:border-r md:px-0 md:py-4',
+                    normal ? 'hy-simple md:w-24 md:gap-2' : 'md:w-16 md:gap-1',
+                )}
                 style={normal ? { borderColor: 'var(--s-line)', background: 'var(--s-panel)' }
                     : { background: 'hsl(var(--app-sidebar))', borderColor: 'hsl(var(--app-border))' }}
             >
-                <div className="mb-6 p-2" title="HYRAK">
+                <div className="mb-4 hidden p-2 md:block" title="HYRAK">
                     {normal ? (
                         <Image src="/brand/icon-dark.png" alt="HYRAK" width={30} height={30} />
                     ) : (
@@ -197,23 +227,20 @@ function PlatformNav() {
                             onClick={(e) => handleNavClick(href, e)}
                             aria-current={active ? 'page' : undefined}
                             className={cn(
-                                'flex flex-col items-center rounded-lg transition-colors',
-                                normal ? 'gap-1.5 w-20 py-3' : 'gap-1 w-12 py-2 text-xs',
-                                normal ? '' : active
-                                    ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400'
-                                    : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                                'flex min-w-0 flex-1 flex-col items-center rounded-[10px] transition-colors duration-[120ms] md:flex-none',
+                                normal ? 'gap-1 py-1.5 md:w-20 md:gap-1.5 md:py-3' : cn(RAIL_ITEM, 'w-auto md:w-12', active ? RAIL_ACTIVE : RAIL_IDLE),
                             )}
                             style={normal ? (active ? { background: 'var(--s-blue)', color: '#fff' } : { color: 'var(--s-ink)' }) : undefined}
                         >
-                            <Icon size={normal ? 26 : 18} />
-                            <span className={normal ? 'text-[16px] font-bold' : 'text-[10px] font-mono'}>{label}</span>
+                            <Icon size={normal ? 26 : 20} className="shrink-0" />
+                            <span className={cn('max-w-full truncate', normal ? 'text-[14px] font-bold md:text-[16px]' : 'text-[12px] font-semibold')}>{label}</span>
                         </Link>
                     )
                 })}
 
-                <div className="mt-auto flex flex-col items-center gap-1">
+                <div className="mt-auto hidden flex-col items-center gap-1 md:flex">
                     <ConsoleLink normal={normal} />
-                    {!normal && <ThemeToggle />}
+                    {!normal && <RailThemeButton />}
                 </div>
             </aside>
 
@@ -222,7 +249,7 @@ function PlatformNav() {
                 <div
                     style={{
                         position: 'fixed', inset: 0, zIndex: 100,
-                        background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
+                        background: 'rgba(0,0,0,0.6)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                     }}
                     onClick={handleStay}
@@ -231,45 +258,46 @@ function PlatformNav() {
                         style={{
                             background: 'hsl(var(--app-surface))',
                             border: '1px solid hsl(var(--app-border))',
-                            borderRadius: 16, padding: '24px 28px',
-                            maxWidth: 360, width: '90%',
+                            borderRadius: 14, padding: 24,
+                            maxWidth: 360, width: 'calc(100% - 32px)',
                             display: 'flex', flexDirection: 'column', gap: 16,
-                            boxShadow: '0 25px 50px rgba(0,0,0,0.5)',
+                            boxShadow: 'var(--app-shadow)',
                         }}
+                        role="alertdialog" aria-modal="true" aria-labelledby="nav-guard-title"
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                             <div style={{
-                                width: 36, height: 36, borderRadius: 10,
-                                background: '#f59e0b18', border: '1px solid #f59e0b60',
+                                width: 40, height: 40, borderRadius: 10,
+                                background: 'var(--app-warn-soft)',
                                 display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
                             }}>
-                                <AlertTriangle size={18} style={{ color: '#f59e0b' }} />
+                                <AlertTriangle size={20} style={{ color: 'var(--app-warn)' }} />
                             </div>
                             <div>
-                                <p style={{
-                                    fontSize: 14, fontWeight: 600,
+                                <p id="nav-guard-title" style={{
+                                    fontSize: 18, fontWeight: 700,
                                     color: 'hsl(var(--app-text))',
                                 }}>
                                     Analysis is running
                                 </p>
                                 <p style={{
-                                    fontSize: 12, color: 'hsl(var(--app-text-muted))',
+                                    fontSize: 13, color: 'hsl(var(--app-text-muted))',
                                     marginTop: 2,
                                 }}>
-                                    Leaving will stop the active analysis session.
+                                    Leaving stops it.
                                 </p>
                             </div>
                         </div>
 
                         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                            <Button variant="outline" size="sm" onClick={handleStay}
-                                className="font-mono text-xs">
+                            <Button variant="outline" onClick={handleStay}
+                                className="h-9 px-3 text-[14px]" autoFocus>
                                 Stay
                             </Button>
-                            <Button variant="destructive" size="sm" onClick={handleLeave}
-                                className="font-mono text-xs">
-                                Stop &amp; Leave
+                            <Button variant="destructive" onClick={handleLeave}
+                                className="h-9 px-3 text-[14px] font-semibold">
+                                Stop and leave
                             </Button>
                         </div>
                     </div>
@@ -305,7 +333,7 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
         return (
             <div className="flex h-full items-center justify-center"
                 style={{ background: 'hsl(var(--app-bg))', color: 'hsl(var(--app-text-muted))' }}>
-                <span style={{ fontSize: 11, fontFamily: 'monospace', letterSpacing: '0.12em' }}>CHECKING SIGN-IN</span>
+                <span role="status" style={{ fontSize: 13 }}>Checking sign-in</span>
             </div>
         )
     }
@@ -317,20 +345,20 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
             <WebRTCProvider>
                 <WorkspaceSwitchTeardown />
                 <div
-                    className="flex h-full overflow-hidden"
+                    className="flex h-full flex-col overflow-hidden md:flex-row"
                     style={{ background: 'hsl(var(--app-bg))', color: 'hsl(var(--app-text))' }}
                 >
                     <PlatformNav />
                     {/* Column to the right of the sidebar - status bar stays out of
                         the sidebar/logo area and persists across tab navigation
                         since this layout mounts once for the whole route group. */}
-                    <div className="flex flex-col flex-1 overflow-hidden">
+                    <div className="flex min-h-0 min-w-0 flex-col flex-1 overflow-hidden">
                         {showStatusBar && <StatusBar />}
                         <ZoneBanner />
                         <CommandRefusalBanner />
                         <TakeoverBanner />
                         <RuleToasts />
-                        <main className="flex-1 overflow-hidden p-3 md:p-4"
+                        <main className="min-h-0 flex-1 overflow-hidden p-3 md:p-4"
                             style={uiMode === 'normal' ? { background: '#F4F7FB' } : undefined}>
                             {/* A staff-only page never renders for a customer,
                                 not even for the frame before the redirect. */}

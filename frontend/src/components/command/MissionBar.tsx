@@ -30,19 +30,27 @@ function dist(a: { lat: number; lng: number }, b: { lat: number; lng: number }) 
 const fmtM = (m: number) => m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${Math.round(m)} m`
 const fmtT = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`
 
-const AVOID_TONE: Record<string, { fg: string; bg: string; label: string }> = {
-    avoiding:  { fg: '#67e8f9', bg: 'rgba(8,51,68,.9)', label: 'AVOIDING' },
-    holding:   { fg: '#fcd34d', bg: 'rgba(66,32,6,.9)', label: 'HOLDING' },
-    returning: { fg: '#fca5a5', bg: 'rgba(69,10,10,.9)', label: 'RETURNING' },
-    rerouted:  { fg: '#67e8f9', bg: 'rgba(8,51,68,.9)', label: 'REROUTED' },
-    climbing:  { fg: '#c4b5fd', bg: 'rgba(46,16,101,.9)', label: 'CLIMBING' },
+// Chip classes per avoidance state: theme tokens so the bar reads in light and dark.
+type Chip = { cls: string; label: string }
+const CHIP = {
+    accent: 'text-app-accent bg-app-accent-soft border-app-accent',
+    warn: 'text-app-warn bg-app-warn-soft border-app-warn',
+    danger: 'text-app-danger bg-app-danger-soft border-app-danger',
+    ok: 'text-app-ok bg-app-ok-soft border-app-ok',
+}
+const AVOID_TONE: Record<string, Chip> = {
+    avoiding:  { cls: CHIP.accent, label: 'AVOIDING' },
+    holding:   { cls: CHIP.warn, label: 'HOLDING' },
+    returning: { cls: CHIP.danger, label: 'RETURNING' },
+    rerouted:  { cls: CHIP.accent, label: 'REROUTED' },
+    climbing:  { cls: CHIP.accent, label: 'CLIMBING' },
 }
 
 function Stat({ k, v }: { k: string; v: string }) {
     return (
         <div className="flex flex-col leading-tight">
-            <span className="text-[8.5px] tracking-[0.2em] text-zinc-500">{k}</span>
-            <span className="text-[13px] text-zinc-100 tabular-nums">{v}</span>
+            <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">{k}</span>
+            <span className="text-[16px] font-bold text-app-text tabular-nums">{v}</span>
         </div>
     )
 }
@@ -93,25 +101,25 @@ export function MissionBar({ avoid }: { avoid: AvoidanceStatus | null }) {
     const area = n > 1 ? `M0,100 L${pts.join(' L')} L1000,100 Z` : ''
     const floorY = floor != null ? 100 - (floor / geo.maxAlt) * 100 : null
 
-    const steer = avoid?.guarding ? { fg: '#67e8f9', bg: 'rgba(8,51,68,.9)', label: 'GUARDING' }
+    const steer: Chip | undefined = avoid?.guarding ? { cls: CHIP.accent, label: 'GUARDING' }
         : avoid?.state && AVOID_TONE[avoid.state]
     const aLine = !avoid ? null
-        : avoid.stale ? { fg: '#fca5a5', bg: 'rgba(69,10,10,.9)', label: `STALE ${avoid.stale_s ?? 0}s`, why: 'No answer from avoidance - not live' }
-        : !avoid.enabled ? { fg: '#fca5a5', bg: 'transparent', label: 'AVOID OFF', why: 'Obstacle avoidance is off for this aircraft' }
-            : !avoid.armed ? { fg: '#fcd34d', bg: 'transparent', label: 'WATCHING', why: 'Detects only - Steer is off' }
+        : avoid.stale ? { cls: CHIP.danger, label: `STALE ${avoid.stale_s ?? 0}s`, why: 'No answer from avoidance - not live' }
+        : !avoid.enabled ? { cls: CHIP.danger, label: 'AVOID OFF', why: 'Obstacle avoidance is off for this aircraft' }
+            : !avoid.armed ? { cls: CHIP.warn, label: 'WATCHING', why: 'Detects only - Steer is off' }
                 : steer ? { ...steer, why: avoid.guarding ? avoid.reason : (avoid.planner?.reason ?? avoid.reason) }
-                    : { fg: '#86efac', bg: 'transparent', label: 'CLEAR', why: avoid.reason || 'Path clear' }
+                    : { cls: CHIP.ok, label: 'CLEAR', why: avoid.reason || 'Path clear' }
     const lowLeg = floor != null && inAir && t && t.position.relative_altitude_m < floor && avoid?.enabled
 
     return (
-        <div className="h-full flex items-stretch gap-4 px-3 font-mono">
+        <div className="h-full flex items-stretch gap-4 px-3">
             <div className="flex flex-col justify-center w-[92px] shrink-0">
-                <span className="text-[8.5px] tracking-[0.2em] text-zinc-500">MISSION</span>
+                <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Mission</span>
                 {n > 0
-                    ? <span className="text-[20px] font-bold tabular-nums leading-none text-zinc-100">
-                        {finished ? n : idx >= 0 ? idx + 1 : '-'}<span className="text-[12px] text-zinc-500"> / {n}</span></span>
-                    : <span className="text-[12px] text-zinc-500">none loaded</span>}
-                {finished && <span className="text-[9px] text-emerald-300 tracking-wider">COMPLETE</span>}
+                    ? <span className="text-[22px] font-extrabold tabular-nums leading-none text-app-text">
+                        {finished ? n : idx >= 0 ? idx + 1 : '-'}<span className="text-[13px] font-semibold text-app-text-muted"> / {n}</span></span>
+                    : <span className="text-[13px] text-app-text-muted">None loaded</span>}
+                {finished && <span className="text-[12px] font-bold text-app-ok">Complete</span>}
             </div>
 
             {/* altitude profile along the route */}
@@ -123,13 +131,13 @@ export function MissionBar({ avoid }: { avoid: AvoidanceStatus | null }) {
                                 <clipPath id="mb-done"><rect x="0" y="0" width={(along / geo.total) * 1000} height="100" /></clipPath>
                             </defs>
                             <path d={area} fill="rgba(148,163,184,.10)" />
-                            <polyline points={pts.join(' ')} fill="none" stroke="#475569" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+                            <polyline points={pts.join(' ')} fill="none" style={{ stroke: 'hsl(var(--app-border-strong))' }} strokeWidth="2" vectorEffect="non-scaling-stroke" />
                             <path d={area} fill="rgba(34,211,238,.16)" clipPath="url(#mb-done)" />
-                            <polyline points={pts.join(' ')} fill="none" stroke="#22d3ee" strokeWidth="2" vectorEffect="non-scaling-stroke" clipPath="url(#mb-done)" />
+                            <polyline points={pts.join(' ')} fill="none" style={{ stroke: 'var(--app-accent)' }} strokeWidth="2" vectorEffect="non-scaling-stroke" clipPath="url(#mb-done)" />
                             {floorY != null && (
                                 <>
                                     <rect x="0" y={floorY} width="1000" height={100 - floorY} fill="rgba(248,113,113,.07)" />
-                                    <line x1="0" y1={floorY} x2="1000" y2={floorY} stroke="#f87171" strokeWidth="1" strokeDasharray="6 5" vectorEffect="non-scaling-stroke" />
+                                    <line x1="0" y1={floorY} x2="1000" y2={floorY} style={{ stroke: 'var(--app-danger)' }} strokeWidth="1" strokeDasharray="6 5" vectorEffect="non-scaling-stroke" />
                                 </>
                             )}
                         </svg>
@@ -142,26 +150,26 @@ export function MissionBar({ avoid }: { avoid: AvoidanceStatus | null }) {
                                     style={{
                                         left: pct(geo.cum[i]), top: yPct(w.altitude),
                                         width: i === idx && !finished ? 9 : 5, height: i === idx && !finished ? 9 : 5,
-                                        background: low ? '#f87171' : done ? '#22d3ee' : i === idx ? '#e0f2fe' : '#64748b',
-                                        boxShadow: i === idx && !finished ? '0 0 0 2px rgba(34,211,238,.5)' : undefined,
+                                        background: low ? 'var(--app-danger)' : done ? 'var(--app-accent)' : i === idx ? 'hsl(var(--app-text))' : 'hsl(var(--app-border-strong))',
+                                        boxShadow: i === idx && !finished ? '0 0 0 2px var(--app-accent-soft), 0 0 0 3px var(--app-accent)' : undefined,
                                     }} />
                             )
                         })}
                         {idx >= 0 && t && (
                             <span className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none"
                                 style={{ left: pct(along), top: yPct(Math.max(0, t.position.relative_altitude_m)) }}>
-                                <svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 1 L13 12 L7 9 L1 12 Z" fill="#fb923c" stroke="#0b0e13" strokeWidth="1.2" transform="rotate(90 7 7)" /></svg>
+                                <svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 1 L13 12 L7 9 L1 12 Z" fill="#fb923c" style={{ stroke: 'hsl(var(--app-surface))' }} strokeWidth="1.2" transform="rotate(90 7 7)" /></svg>
                             </span>
                         )}
                         {floor != null && (
-                            <span className="absolute right-0 text-[9px] text-red-300/90 -translate-y-full pr-0.5" style={{ top: yPct(floor) }}>
+                            <span className="absolute right-0 text-[12px] font-semibold text-app-danger -translate-y-full pr-0.5" style={{ top: yPct(floor) }}>
                                 avoid floor {floor} m</span>
                         )}
                     </>
                 ) : (
-                    <div className="h-full flex items-center text-[11px] text-zinc-500">
+                    <div className="h-full flex items-center text-[13px] text-app-text-muted">
                         <span>Plan and upload a mission on the{' '}
-                            <Link href="/mission" className="text-zinc-300 underline underline-offset-2 hover:text-white">
+                            <Link href="/mission" className="text-app-accent font-semibold underline underline-offset-2 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg">
                                 {normal ? 'Plan' : 'Mission'} tab</Link>
                             {' '}- its altitude profile shows here.</span></div>
                 )}
@@ -174,21 +182,21 @@ export function MissionBar({ avoid }: { avoid: AvoidanceStatus | null }) {
                 <Stat k="GS" v={t ? `${t.groundspeed_m_s.toFixed(1)} m/s` : '-'} />
             </div>
 
-            <div className="w-[300px] shrink-0 flex flex-col justify-center gap-1 min-w-0 border-l border-white/10 pl-3">
+            <div className="w-[300px] shrink-0 flex flex-col justify-center gap-1 min-w-0 border-l border-app-border pl-3">
                 {lowLeg ? (
-                    <div className="flex items-center gap-2 text-[11px] min-w-0">
-                        <span className="px-1.5 rounded font-bold tracking-wider text-red-200 bg-red-900/70 shrink-0">BELOW FLOOR</span>
-                        <span className="truncate text-red-200/90">{t!.position.relative_altitude_m.toFixed(1)} m - avoidance can see but will not steer</span>
+                    <div className="flex items-center gap-2 text-[13px] min-w-0">
+                        <span className={`px-1.5 rounded-md border text-[12px] font-bold shrink-0 ${CHIP.danger}`}>BELOW FLOOR</span>
+                        <span className="truncate text-app-danger">{t!.position.relative_altitude_m.toFixed(1)} m - avoidance can see but will not steer</span>
                     </div>
                 ) : aLine && (
-                    <div className="flex items-center gap-2 text-[11px] min-w-0" title={aLine.why}>
-                        <span className="px-1.5 rounded font-bold tracking-wider shrink-0" style={{ color: aLine.fg, background: aLine.bg, border: `1px solid ${aLine.fg}55` }}>{aLine.label}</span>
-                        <span className="truncate text-zinc-300">{aLine.why}</span>
-                        {steer && avoid?.planner?.ttc_s != null && <span className="shrink-0 text-cyan-200 tabular-nums">TTC {avoid.planner.ttc_s}s</span>}
+                    <div className="flex items-center gap-2 text-[13px] min-w-0" title={aLine.why}>
+                        <span className={`px-1.5 rounded-md border text-[12px] font-bold shrink-0 ${aLine.cls}`}>{aLine.label}</span>
+                        <span className="truncate text-app-text">{aLine.why}</span>
+                        {steer && avoid?.planner?.ttc_s != null && <span className="shrink-0 font-bold text-app-accent tabular-nums">TTC {avoid.planner.ttc_s}s</span>}
                     </div>
                 )}
-                <div className="text-[11px] truncate" title={last?.text}
-                    style={{ color: !last ? '#71717a' : last.rank >= 5 ? '#f87171' : last.rank >= 4 ? '#fbbf24' : '#a1a1aa' }}>
+                <div title={last?.text}
+                    className={`text-[13px] truncate ${!last ? 'text-app-text-muted' : last.rank >= 5 ? 'text-app-danger font-semibold' : last.rank >= 4 ? 'text-app-warn font-semibold' : 'text-app-text-muted'}`}>
                     {last ? last.text : 'No messages from the aircraft'}
                 </div>
             </div>

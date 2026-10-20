@@ -1,32 +1,49 @@
 'use client'
 
 // Small pieces of the HYRAK console's visual language, shared by its tabs:
-// mono uppercase labels, 1px zinc borders, toned outline buttons and tags.
+// theme tokens (dark and light), 12px bold labels, toned outline buttons
+// and status chips that pair an icon with a word.
 
 import { useRef, useState } from 'react'
+import { AlertTriangle, CheckCircle2, Circle, Info, OctagonAlert, FlaskConical } from 'lucide-react'
 import { copyText } from '@/lib/workspaces'
 
-export const INPUT_CLS = 'bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-zinc-500 min-w-0'
-export const LABEL_CLS = 'block text-[9px] tracking-widest text-zinc-500 mb-1'
+/** Focus ring every console control uses (2px accent, offset 2px). */
+export const FOCUS_CLS = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--app-accent)]'
+export const INPUT_CLS = 'h-8 bg-app-surface-2 border border-app-border-strong rounded-md px-2 text-[13px] text-app-text outline-none placeholder:text-app-text-subtle focus:border-app-accent min-w-0 ' + FOCUS_CLS
+export const LABEL_CLS = 'block text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted mb-1'
+/** Table header cell and body row, shared by every console table. */
+export const TH_CLS = 'px-3 h-9 text-left text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted whitespace-nowrap'
+export const TR_CLS = 'h-9 border-b border-app-border last:border-b-0 transition-colors duration-[120ms] hover:bg-app-surface-2'
 
-export function Tag({ label, tone }: { label: string; tone: 'amber' | 'emerald' | 'red' | 'zinc' | 'violet' | 'cyan' }) {
-    const cls = {
-        amber:   'text-amber-500/80 border-amber-500/30',
-        emerald: 'text-emerald-400 border-emerald-500/30',
-        red:     'text-red-400 border-red-500/40',
-        zinc:    'text-zinc-500 border-zinc-700',
-        violet:  'text-violet-400 border-violet-500/30',
-        cyan:    'text-cyan-400 border-cyan-500/30',
-    }[tone]
-    return <span className={`border rounded px-1 text-[10px] whitespace-nowrap ${cls}`}>{label}</span>
+type TagTone = 'amber' | 'emerald' | 'red' | 'zinc' | 'violet' | 'cyan'
+const TAG: Record<TagTone, { cls: string; Icon: typeof Info }> = {
+    amber:   { cls: 'text-app-warn bg-app-warn-soft border-app-warn/40', Icon: AlertTriangle },
+    emerald: { cls: 'text-app-ok bg-app-ok-soft border-app-ok/40', Icon: CheckCircle2 },
+    red:     { cls: 'text-app-danger bg-app-danger-soft border-app-danger/40', Icon: OctagonAlert },
+    zinc:    { cls: 'text-app-text-muted bg-app-surface-2 border-app-border', Icon: Circle },
+    violet:  { cls: 'text-violet-700 dark:text-violet-300 bg-violet-500/10 border-violet-500/40', Icon: FlaskConical },
+    cyan:    { cls: 'text-app-accent bg-app-accent-soft border-app-accent/40', Icon: Info },
+}
+
+/** Status chip: icon + word + colour, so colour never carries the meaning
+ *  alone. `icon={false}` for plain name chips (roles, kinds). */
+export function Tag({ label, tone, icon = true }: { label: string; tone: TagTone; icon?: boolean }) {
+    const { cls, Icon } = TAG[tone]
+    return (
+        <span className={`inline-flex items-center gap-1 h-6 border rounded-full px-2 text-[12px] font-bold whitespace-nowrap ${cls}`}>
+            {icon && <Icon size={12} aria-hidden strokeWidth={2.5} />}
+            {label}
+        </span>
+    )
 }
 
 type Tone = 'plain' | 'cyan' | 'emerald' | 'red'
 const BTN: Record<Tone, string> = {
-    plain:   'border-zinc-700 text-zinc-400 hover:border-zinc-500',
-    cyan:    'border-cyan-700 text-cyan-400 hover:border-cyan-500',
-    emerald: 'border-emerald-700 text-emerald-400 hover:border-emerald-500',
-    red:     'border-red-800 text-red-400 hover:border-red-600',
+    plain:   'border-app-border-strong text-app-text hover:bg-app-surface-2',
+    cyan:    'border-app-accent/60 text-app-accent hover:bg-app-accent-soft',
+    emerald: 'border-app-ok/50 text-app-ok hover:bg-app-ok-soft',
+    red:     'border-app-danger/50 text-app-danger hover:bg-app-danger-soft',
 }
 
 export function Btn({ tone = 'plain', onClick, disabled, type = 'button', children, className = '', title }: {
@@ -40,7 +57,7 @@ export function Btn({ tone = 'plain', onClick, disabled, type = 'button', childr
 }) {
     return (
         <button type={type} onClick={onClick} disabled={disabled} title={title}
-            className={`px-2 py-1 rounded border text-[10px] whitespace-nowrap disabled:border-zinc-800 disabled:text-zinc-600 ${BTN[tone]} ${className}`}>
+            className={`inline-flex items-center justify-center gap-1.5 min-h-8 px-3 rounded-md border text-[13px] font-semibold whitespace-nowrap transition-colors duration-[120ms] disabled:cursor-not-allowed disabled:border-dashed disabled:border-app-border-strong disabled:bg-transparent disabled:text-app-text-muted ${FOCUS_CLS} ${BTN[tone]} ${className}`}>
             {children}
         </button>
     )
@@ -48,10 +65,10 @@ export function Btn({ tone = 'plain', onClick, disabled, type = 'button', childr
 
 export function Section({ title, right, children }: { title: React.ReactNode; right?: React.ReactNode; children: React.ReactNode }) {
     return (
-        <div className="border border-zinc-800 rounded">
-            <div className="px-3 py-2 text-[10px] tracking-widest text-zinc-500 border-b border-zinc-800 flex items-center gap-2">
+        <div className="border border-app-border rounded-[10px] bg-app-surface shadow-[var(--app-shadow)] overflow-hidden">
+            <div className="px-3 min-h-10 py-2 text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted border-b border-app-border flex items-center gap-2">
                 <span className="truncate">{title}</span>
-                {right && <span className="ml-auto flex items-center gap-2">{right}</span>}
+                {right && <span className="ml-auto flex items-center gap-2 normal-case tracking-normal font-normal">{right}</span>}
             </div>
             {children}
         </div>
@@ -62,14 +79,14 @@ export function Section({ title, right, children }: { title: React.ReactNode; ri
 export function Notice({ error, ok }: { error?: string; ok?: string }) {
     if (!error && !ok) return null
     return (
-        <div role={error ? 'alert' : 'status'} className={`text-[10px] ${error ? 'text-red-400' : 'text-emerald-400'}`}>
+        <div role={error ? 'alert' : 'status'} className={`text-[13px] ${error ? 'text-app-danger' : 'text-app-ok'}`}>
             {error || ok}
         </div>
     )
 }
 
 export function Empty({ children }: { children: React.ReactNode }) {
-    return <div className="p-3 text-[10px] text-zinc-600">{children}</div>
+    return <div className="p-4 text-[13px] text-app-text-muted">{children}</div>
 }
 
 /** A one-time link (invite, password reset): read-only field + COPY. */
@@ -84,12 +101,12 @@ export function CopyLink({ label, url, note }: { label: string; url: string; not
                     aria-label={label} className={`${INPUT_CLS} flex-1`} />
                 <Btn tone="cyan" onClick={() => {
                     void copyText(url, ref.current).then(how =>
-                        setMsg(how === 'copied' ? 'COPIED' : 'SELECTED - PRESS CTRL+C'))
+                        setMsg(how === 'copied' ? 'Copied' : 'Selected - press Ctrl+C'))
                 }}>
-                    {msg === 'COPIED' ? 'COPIED' : 'COPY'}
+                    {msg === 'Copied' ? 'Copied' : 'Copy'}
                 </Btn>
             </div>
-            <div className="text-[9px] text-zinc-600">{msg && msg !== 'COPIED' ? msg : note}</div>
+            <div className="text-[12px] text-app-text-muted">{msg && msg !== 'Copied' ? msg : note}</div>
         </div>
     )
 }

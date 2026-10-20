@@ -83,10 +83,10 @@ export default function StaffTab({ zones }: { zones: ZoneFeature[] }) {
 
     const accountActions = (a: AccountRow) => (
         <>
-            <Btn disabled={busy === `reset-${a.id}`} onClick={() => void resetLink(a)}>RESET LINK</Btn>
+            <Btn disabled={busy === `reset-${a.id}`} onClick={() => void resetLink(a)}>Reset link</Btn>
             {a.id !== me?.id && (
                 <Btn tone={a.disabled ? 'emerald' : 'red'} disabled={busy === `dis-${a.id}`} onClick={() => toggleDisabled(a)}>
-                    {a.disabled ? 'ENABLE' : 'DISABLE'}
+                    {a.disabled ? 'Enable' : 'Disable'}
                 </Btn>
             )}
         </>
@@ -110,23 +110,23 @@ export default function StaffTab({ zones }: { zones: ZoneFeature[] }) {
         || (a.display_name ?? '').toLowerCase().includes(q))
 
     return (
-        <div className="flex-1 flex min-w-0">
-            <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 flex flex-col lg:flex-row min-w-0 overflow-y-auto lg:overflow-hidden">
+            <div className="flex-1 lg:overflow-y-auto">
                 <div className="max-w-3xl mx-auto p-5 space-y-4">
-                    <Section title={`STAFF - ${staff?.length ?? 0}`}>
+                    <Section title={`Staff - ${staff?.length ?? 0}`}>
                         {staff === null && !errors.staff && <Empty>Loading staff…</Empty>}
                         {errors.staff && <div className="px-3 py-2"><Notice error={errors.staff} /></div>}
                         {staff?.length === 0 && <Empty>No staff accounts.</Empty>}
-                        <div className="divide-y divide-zinc-900">
+                        <div className="divide-y divide-app-border">
                             {staff?.map(({ user: a, memberships }) => (
-                                <div key={a.id} className="px-3 py-2.5 space-y-1.5 text-[10px]">
+                                <div key={a.id} className="px-3 py-3 space-y-2 text-[13px]">
                                     <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="text-xs font-semibold text-zinc-100">{personName(a)}</span>
-                                        <span className="text-zinc-600">{a.email || a.username}</span>
-                                        {a.id === me?.id && <Tag label="YOU" tone="cyan" />}
-                                        {a.disabled && <Tag label="DISABLED" tone="red" />}
+                                        <span className="text-[14px] font-bold text-app-text">{personName(a)}</span>
+                                        <span className="text-app-text-muted">{a.email || a.username}</span>
+                                        {a.id === me?.id && <Tag label="You" tone="cyan" icon={false} />}
+                                        {a.disabled && <Tag label="Disabled" tone="red" />}
                                         <span className="ml-auto flex gap-2">
-                                            <Btn tone="cyan" onClick={() => setGrantLogin(a.email || a.username)}>GRANT</Btn>
+                                            <Btn tone="cyan" onClick={() => setGrantLogin(a.email || a.username)}>Grant</Btn>
                                             {accountActions(a)}
                                         </span>
                                     </div>
@@ -146,28 +146,28 @@ export default function StaffTab({ zones }: { zones: ZoneFeature[] }) {
                         </div>
                     </Section>
 
-                    <Section title={`ALL ACCOUNTS - ${accounts?.length ?? 0}`}
+                    <Section title={`All accounts - ${accounts?.length ?? 0}`}
                         right={
-                            <span className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-700 rounded px-2">
-                                <Search size={11} className="text-zinc-500" />
+                            <span className="flex items-center gap-1.5 bg-app-surface-2 border border-app-border-strong rounded-md px-2 focus-within:border-app-accent">
+                                <Search size={14} className="text-app-text-muted" aria-hidden />
                                 <input value={search} onChange={e => setSearch(e.target.value)} placeholder="search…"
                                     aria-label="Search accounts"
-                                    className="w-36 bg-transparent py-1 text-[10px] text-zinc-200 outline-none placeholder:text-zinc-600 normal-case tracking-normal" />
+                                    className="w-36 bg-transparent h-8 text-[13px] text-app-text outline-none placeholder:text-app-text-subtle normal-case tracking-normal" />
                             </span>
                         }>
                         {accounts === null && !errors.accounts && <Empty>Loading accounts…</Empty>}
                         {errors.accounts && <div className="px-3 py-2"><Notice error={errors.accounts} /></div>}
                         {accounts && shownAccounts.length === 0 && <Empty>{q ? 'No match.' : 'No accounts.'}</Empty>}
-                        <div className="divide-y divide-zinc-900">
+                        <div className="divide-y divide-app-border">
                             {shownAccounts.map(a => (
-                                <div key={a.id} className="px-3 py-2 space-y-1 text-[10px]">
+                                <div key={a.id} className="px-3 py-2 min-h-11 flex flex-col justify-center space-y-1 text-[13px]">
                                     <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="text-xs text-zinc-100">{personName(a)}</span>
-                                        <span className="text-zinc-600">{a.username}{a.email ? ` · ${a.email}` : ''}</span>
-                                        {a.is_founder && <Tag label="FOUNDER" tone="cyan" />}
-                                        {!a.is_founder && a.is_staff && <Tag label="STAFF" tone="violet" />}
-                                        {a.disabled && <Tag label="DISABLED" tone="red" />}
-                                        <span className="text-zinc-700">last sign-in {fmtWhen(a.last_login_at)}</span>
+                                        <span className="text-[14px] font-semibold text-app-text">{personName(a)}</span>
+                                        <span className="text-app-text-muted">{a.username}{a.email ? ` · ${a.email}` : ''}</span>
+                                        {a.is_founder && <Tag label="Founder" tone="cyan" icon={false} />}
+                                        {!a.is_founder && a.is_staff && <Tag label="Staff" tone="violet" icon={false} />}
+                                        {a.disabled && <Tag label="Disabled" tone="red" />}
+                                        <span className="text-app-text-muted tabular-nums" title="Last sign-in">signed in {fmtWhen(a.last_login_at)}</span>
                                         <span className="ml-auto flex gap-2">{accountActions(a)}</span>
                                     </div>
                                     {accountExtras(a)}
@@ -188,16 +188,16 @@ function MembershipLine({ m, canRemove, busy, onRemove }: {
     m: Membership; canRemove: boolean; busy: boolean; onRemove: () => void
 }) {
     return (
-        <div className="flex items-center gap-2 pl-2 border-l-2 border-zinc-800">
-            <Tag label={roleLabel(m.role, m.workspace_kind).toUpperCase()}
+        <div className="flex items-center gap-2 pl-2 min-h-8 border-l-2 border-app-border">
+            <Tag icon={false} label={roleLabel(m.role, m.workspace_kind)}
                 tone={m.role === 'founder' ? 'cyan' : m.role === 'airspace' ? 'amber' : m.role === 'manager' ? 'violet' : 'zinc'} />
-            <span className="text-zinc-300">{m.workspace_name}</span>
-            {m.title && <span className="text-zinc-600 truncate">{m.title}</span>}
-            {m.area && <Tag label="AREA" tone="amber" />}
+            <span className="text-app-text">{m.workspace_name}</span>
+            {m.title && <span className="text-app-text-muted truncate">{m.title}</span>}
+            {m.area && <Tag label="Area" tone="amber" icon={false} />}
             {canRemove && (
                 <button onClick={onRemove} disabled={busy}
-                    className="ml-auto text-[10px] text-zinc-600 hover:text-red-400 disabled:text-zinc-800">
-                    REMOVE
+                    className="ml-auto h-8 px-2 rounded-md text-[13px] font-semibold text-app-text-muted hover:text-app-danger hover:bg-app-danger-soft disabled:text-app-text-subtle transition-colors duration-[120ms]">
+                    Remove
                 </button>
             )}
         </div>
@@ -255,23 +255,23 @@ function GrantPanel({ initialLogin, staff, workspaces, zones, onGranted }: {
     }
 
     return (
-        <section className="w-[420px] shrink-0 border-l border-zinc-800 flex flex-col">
-            <form onSubmit={e => void grant(e)} className="p-3 space-y-2.5 border-b border-zinc-800 text-xs">
-                <div className="text-[10px] tracking-widest text-zinc-500">GRANT STAFF ROLE</div>
+        <section className="w-full lg:w-[420px] shrink-0 border-t lg:border-t-0 lg:border-l border-app-border bg-app-surface flex flex-col">
+            <form onSubmit={e => void grant(e)} className="p-4 space-y-3 border-b border-app-border text-[13px]">
+                <h2 className="text-[18px] font-bold text-app-text">Grant a staff role</h2>
                 <div className="flex gap-1.5">
                     {(['manager', 'airspace'] as GrantKind[]).map(k => (
                         <button key={k} type="button" onClick={() => { setKind(k); setError('') }}
                             aria-pressed={kind === k}
-                            className={'flex-1 py-1.5 rounded border text-[10px] transition-colors ' +
-                                (kind === k ? 'border-cyan-500 text-cyan-400 bg-cyan-500/10' : 'border-zinc-700 text-zinc-500 hover:border-zinc-500')}>
-                            {roleLabel(k).toUpperCase()}
+                            className={'flex-1 h-8 rounded-md border text-[13px] font-semibold transition-colors duration-[120ms] ' +
+                                (kind === k ? 'border-app-accent text-app-accent bg-app-accent-soft' : 'border-app-border-strong text-app-text-muted hover:border-app-text-subtle')}>
+                            {roleLabel(k)}
                         </button>
                     ))}
                 </div>
-                <div className="text-[10px] text-zinc-600">
+                <div className="text-[13px] text-app-text-muted">
                     {kind === 'manager'
-                        ? 'Runs a customer workspace with the customer: flies, plans, manages members and drones, draws area zones inside its area. Only for existing staff.'
-                        : 'Edits area-layer zones and decides permits inside the drawn area, across all workspaces. Cannot fly or see customer data.'}
+                        ? 'Runs a customer workspace: flies, plans, manages members, drones and area zones. Existing staff only.'
+                        : 'Edits area zones and decides permits inside the drawn area. Cannot fly or see customer data.'}
                 </div>
                 <div>
                     <label htmlFor="grant-login" className={LABEL_CLS}>ACCOUNT</label>
@@ -282,12 +282,12 @@ function GrantPanel({ initialLogin, staff, workspaces, zones, onGranted }: {
                     <div>
                         <label htmlFor="grant-ws" className={LABEL_CLS}>WORKSPACE</label>
                         <select id="grant-ws" value={wsId} onChange={e => setWsId(e.target.value)} className={`${INPUT_CLS} w-full`}>
-                            <option value="">- pick a workspace -</option>
+                            <option value="">Pick a workspace</option>
                             {customers.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                         </select>
                     </div>
                 ) : (
-                    <div className="text-[10px] text-zinc-500">Held on {platform?.name ?? 'HYRAK'}.</div>
+                    <div className="text-[12px] text-app-text-muted">Held on {platform?.name ?? 'HYRAK'}.</div>
                 )}
                 <div>
                     <label htmlFor="grant-title" className={LABEL_CLS}>TITLE</label>
@@ -295,22 +295,23 @@ function GrantPanel({ initialLogin, staff, workspaces, zones, onGranted }: {
                         placeholder={kind === 'manager' ? 'e.g. Service operator, IITH' : 'e.g. Airspace, Hyderabad west'}
                         className={`${INPUT_CLS} w-full`} />
                 </div>
-                <div className="flex items-center gap-2 text-[10px] text-zinc-500">
-                    AREA {kind === 'airspace' ? '(REQUIRED)' : '(OPTIONAL)'} - {draft.length} vertices
+                <div className="flex items-center gap-2 text-[12px] font-bold text-app-text-muted">
+                    <span className="uppercase tracking-[0.04em]">Area</span>
+                    <span className="font-normal">{kind === 'airspace' ? 'required' : 'optional'}, <span className="tabular-nums">{draft.length}</span> points</span>
                     <span className="ml-auto flex gap-1.5">
-                        <Btn disabled={draft.length === 0} onClick={() => setDraft(p => p.slice(0, -1))}>UNDO</Btn>
-                        <Btn disabled={draft.length === 0} onClick={() => setDraft([])}>CLEAR</Btn>
+                        <Btn disabled={draft.length === 0} onClick={() => setDraft(p => p.slice(0, -1))}>Undo</Btn>
+                        <Btn disabled={draft.length === 0} onClick={() => setDraft([])}>Clear</Btn>
                     </span>
                 </div>
                 <Notice error={error} ok={ok} />
                 <Btn type="submit" tone="emerald" disabled={busy} className="w-full py-2">
-                    {busy ? 'GRANTING…' : 'GRANT'}
+                    {busy ? 'Granting…' : 'Grant'}
                 </Btn>
             </form>
             <div className="flex-1 relative min-h-[240px]">
                 <AreaMap outlines={outlines} zones={zones} draft={draft} draftColor="#f59e0b"
                     fitKey={target?.id ?? ''} onMapClick={(lat, lng) => setDraft(p => [...p, [lat, lng]])} />
-                <div className="absolute left-2 bottom-2 z-[1000] text-[9px] text-zinc-400 bg-zinc-950/80 rounded px-1.5 py-0.5 pointer-events-none">
+                <div className="absolute left-2 bottom-2 z-[1000] text-[12px] text-overlay-text bg-overlay-scrim border border-overlay-border rounded-md px-2 py-1 pointer-events-none">
                     click the map to draw the area
                 </div>
             </div>

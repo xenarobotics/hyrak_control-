@@ -189,7 +189,7 @@ export function RulesSection({ model, labels, editable, onSaved }: {
         <section className={s.section} aria-labelledby="cm-rules-title">
             <div className={s.rulesHead}>
                 <span className={s.label} id="cm-rules-title">Rules</span>
-                {rules.length > 0 && <span className={s.mono} style={{ fontSize: 10, color: 'var(--cm-ink-2)' }}>{rules.length}/{MAX_RULES}</span>}
+                {rules.length > 0 && <span className={s.mono} style={{ fontSize: 12, color: 'var(--cm-ink-2)' }}>{rules.length}/{MAX_RULES}</span>}
                 <span role="status" aria-live="polite">{status}</span>
                 {rules.length > 0 && rules.length < MAX_RULES && (
                     <button type="button" className={cn(s.btn, s.ghost)} style={{ marginLeft: 'auto', height: 26 }}

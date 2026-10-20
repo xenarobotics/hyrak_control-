@@ -112,43 +112,48 @@ export function UpdatePrompt() {
 
     return (
         <div
-            className="fixed bottom-4 right-4 z-[3000] w-72 rounded-xl shadow-2xl font-mono text-xs"
+            role="status" aria-label="App update"
+            className="fixed bottom-20 right-4 z-[3000] w-[min(320px,calc(100vw-32px))] rounded-[14px] text-[13px] md:bottom-4"
             style={{
-                background: 'hsl(var(--app-surface))',
+                boxShadow: 'var(--app-shadow)',
+                background: 'hsl(var(--app-raised))',
                 border: '1px solid hsl(var(--app-border))',
                 color: 'hsl(var(--app-text))',
             }}
         >
-            <div className="flex items-center justify-between px-3 py-2 border-b" style={{ borderColor: 'hsl(var(--app-border))' }}>
-                <div className="flex items-center gap-1.5 font-semibold">
-                    <Download size={12} style={{ color: stage === 'failed' ? '#f59e0b' : '#22d3ee' }} />
+            <div className="flex items-center justify-between pl-4 pr-2 py-2 border-b" style={{ borderColor: 'hsl(var(--app-border))' }}>
+                <div className="flex items-center gap-2 text-[14px] font-bold">
+                    <Download size={16} style={{ color: stage === 'failed' ? 'var(--app-warn)' : 'var(--app-accent)' }} />
                     {stage === 'ready' ? 'Update ready' : stage === 'failed' ? 'Update failed' : stage === 'downloading' ? 'Updating' : 'Update available'}
                 </div>
                 {stage !== 'downloading' && (
-                    <button onClick={() => setDismissed(true)} title="Dismiss">
-                        <X size={11} style={{ color: 'hsl(var(--app-text-muted))' }} />
+                    <button type="button" onClick={() => setDismissed(true)} title="Dismiss" aria-label="Dismiss"
+                        className="flex size-8 items-center justify-center rounded-md hover:bg-app-surface-2">
+                        <X size={16} style={{ color: 'hsl(var(--app-text-muted))' }} />
                     </button>
                 )}
             </div>
 
-            <div className="px-3 py-2.5 flex flex-col gap-2">
+            <div className="px-4 py-3 flex flex-col gap-3">
                 {stage === 'available' && (
                     <>
                         <p style={{ color: 'hsl(var(--app-text-muted))' }}>
-                            HYRAK {version} is available. Nothing downloads until you say so.
+                            HYRAK {version} is ready to download.
                         </p>
-                        <div className="flex gap-1.5">
+                        <div className="flex gap-2">
                             <button
+                                type="button"
                                 onClick={handleUpdateNow}
-                                className="flex-1 py-1.5 rounded font-semibold transition-colors"
-                                style={{ background: '#22d3ee', color: 'black' }}
+                                className="flex-1 min-h-8 rounded-md font-bold transition-opacity hover:opacity-90"
+                                style={{ background: 'var(--app-accent)', color: 'var(--app-accent-ink)' }}
                             >
                                 Update now
                             </button>
                             <button
+                                type="button"
                                 onClick={() => setDismissed(true)}
-                                className="px-2.5 py-1.5 rounded border transition-colors"
-                                style={{ borderColor: 'hsl(var(--app-border))', color: 'hsl(var(--app-text-muted))' }}
+                                className="min-h-8 px-3 rounded-md border font-semibold transition-colors"
+                                style={{ borderColor: 'hsl(var(--app-border-strong))', color: 'hsl(var(--app-text))' }}
                             >
                                 Later
                             </button>
@@ -163,7 +168,7 @@ export function UpdatePrompt() {
                                 {progress.transferred === undefined ? 'Starting download…' : `Downloading… ${progress.percent}%`}
                             </span>
                             {progress.total && progress.bytesPerSecond ? (
-                                <span style={{ color: 'hsl(var(--app-text-muted))', fontSize: 10 }}>
+                                <span style={{ color: 'hsl(var(--app-text-muted))', fontSize: 12 }}>
                                     {formatEta(progress.transferred ?? 0, progress.total, progress.bytesPerSecond)}
                                 </span>
                             ) : null}
@@ -172,15 +177,15 @@ export function UpdatePrompt() {
                             {/* No bytes yet means no honest percentage to draw - an
                                 indeterminate sweep says "working" without claiming 0%. */}
                             <div
-                                className={progress.transferred === undefined ? 'h-full w-1/3 animate-pulse rounded-full' : 'h-full rounded-full transition-all'}
+                                className={progress.transferred === undefined ? 'h-full w-1/3 animate-pulse rounded-full' : 'h-full rounded-full transition-[width] duration-[240ms]'}
                                 style={{
                                     width: progress.transferred === undefined ? '33%' : `${progress.percent}%`,
-                                    background: '#22d3ee',
+                                    background: 'var(--app-accent)',
                                 }}
                             />
                         </div>
                         {detail && (
-                            <p style={{ color: 'hsl(var(--app-text-muted))', fontSize: 10 }}>{detail}</p>
+                            <p style={{ color: 'hsl(var(--app-text-muted))', fontSize: 12 }}>{detail}</p>
                         )}
                     </>
                 )}
@@ -188,21 +193,23 @@ export function UpdatePrompt() {
                 {stage === 'failed' && (
                     <>
                         <div className="flex items-start gap-1.5">
-                            <AlertTriangle size={12} style={{ color: '#f59e0b', flexShrink: 0, marginTop: 1 }} />
+                            <AlertTriangle size={16} style={{ color: 'var(--app-warn)', flexShrink: 0, marginTop: 1 }} />
                             <p style={{ color: 'hsl(var(--app-text-muted))' }}>{errorMsg}</p>
                         </div>
-                        <div className="flex gap-1.5">
+                        <div className="flex gap-2">
                             <button
+                                type="button"
                                 onClick={handleUpdateNow}
-                                className="flex-1 py-1.5 rounded border font-semibold transition-colors"
-                                style={{ borderColor: 'hsl(var(--app-border))', color: 'hsl(var(--app-text))' }}
+                                className="flex-1 min-h-8 rounded-md border font-bold transition-colors"
+                                style={{ borderColor: 'hsl(var(--app-border-strong))', color: 'hsl(var(--app-text))' }}
                             >
                                 Try again
                             </button>
                             <button
+                                type="button"
                                 onClick={() => setDismissed(true)}
-                                className="px-2.5 py-1.5 rounded border transition-colors"
-                                style={{ borderColor: 'hsl(var(--app-border))', color: 'hsl(var(--app-text-muted))' }}
+                                className="min-h-8 px-3 rounded-md border font-semibold transition-colors"
+                                style={{ borderColor: 'hsl(var(--app-border-strong))', color: 'hsl(var(--app-text))' }}
                             >
                                 Dismiss
                             </button>
@@ -213,15 +220,16 @@ export function UpdatePrompt() {
                 {stage === 'ready' && (
                     <>
                         <p style={{ color: 'hsl(var(--app-text-muted))' }}>
-                            HYRAK {version} downloaded. Restart to apply - takes a few seconds.
+                            HYRAK {version} is downloaded. Restart to finish (a few seconds).
                         </p>
                         <button
+                            type="button"
                             onClick={handleRestart}
-                            className="flex items-center justify-center gap-1.5 py-1.5 rounded font-semibold transition-colors"
-                            style={{ background: '#22d3ee', color: 'black' }}
+                            className="flex min-h-8 items-center justify-center gap-1.5 rounded-md font-bold transition-opacity hover:opacity-90"
+                            style={{ background: 'var(--app-accent)', color: 'var(--app-accent-ink)' }}
                         >
-                            <RotateCw size={11} />
-                            Restart & install
+                            <RotateCw size={14} />
+                            Restart and install
                         </button>
                     </>
                 )}

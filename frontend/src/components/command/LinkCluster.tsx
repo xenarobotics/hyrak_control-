@@ -26,28 +26,34 @@ import { setParams, type AvoidanceStatus } from '@/lib/avoidance'
 import { PersonCalibration } from './PersonCalibration'
 import { useLiveScope } from '@/hooks/useLiveScope'
 import { VIEW_ONLY_TEXT } from '@/components/layout/ViewOnly'
+import { cn } from '@/lib/utils'
+import { FOCUS } from '@/components/controls/flightStyles'
+import { WhyDisabled } from '@/components/controls/WhyDisabled'
+import { cameraLabel } from '@/components/video/cameraLabel'
 
 function Pill({ on, busy, label, detail, onClick, disabled, title, icon, menuOpen, onMenu }: {
     on: boolean; busy: boolean; label: string; detail: string; onClick: () => void
     disabled?: boolean; title?: string; icon: React.ReactNode; menuOpen: boolean; onMenu: () => void
 }) {
-    const tone = on
-        ? { background: 'rgba(74,222,128,.10)', borderColor: 'rgba(74,222,128,.45)', color: '#bbf7d0' }
-        : { background: 'rgba(34,211,238,.12)', borderColor: 'rgba(34,211,238,.55)', color: '#a5f3fc' }
+    // Live = green, ready to start = accent. Theme tokens, not fixed hex.
+    const tone = on ? 'border-app-ok bg-app-ok-soft text-app-ok' : 'border-app-accent bg-app-accent-soft text-app-accent'
+    const off = disabled || busy
     return (
-        <div className="h-9 flex rounded-lg border overflow-hidden" style={tone}>
-            <button onClick={onClick} disabled={disabled || busy} title={title}
-                className="pl-2.5 pr-2.5 flex items-center gap-2 text-[11px] font-mono disabled:opacity-50 hover:brightness-125">
-                {busy ? <Loader2 size={14} className="animate-spin" /> : icon}
-                <span className="flex flex-col items-start leading-[1.1]">
-                    <span className="font-bold tracking-wider">{label}</span>
-                    <span className="text-[9px] opacity-70 max-w-[120px] truncate">{detail}</span>
-                </span>
-            </button>
-            <button onClick={onMenu} aria-label="Choose source" aria-expanded={menuOpen}
-                className="w-7 flex items-center justify-center border-l hover:brightness-125"
-                style={{ borderColor: tone.borderColor, background: menuOpen ? 'rgba(255,255,255,.08)' : undefined }}>
-                <ChevronDown size={13} className={menuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
+        <div className={cn('h-9 flex rounded-md border', tone, off && !busy && 'border-dashed border-app-border-strong bg-app-surface-2 text-app-text-subtle')}>
+            <WhyDisabled reason={off && !busy ? title : null} className="h-full">
+                <button onClick={onClick} disabled={off} title={off ? undefined : title}
+                    className={cn('h-full pl-2.5 pr-2.5 flex items-center gap-2 text-[12px] rounded-l-md hover:brightness-110', FOCUS)}>
+                    {busy ? <Loader2 size={14} className="animate-spin" /> : icon}
+                    <span className="flex flex-col items-start leading-[1.15]">
+                        <span className="font-extrabold tracking-[0.04em]">{label}</span>
+                        <span className="text-[12px] font-semibold text-app-text-muted max-w-[120px] truncate">{detail}</span>
+                    </span>
+                </button>
+            </WhyDisabled>
+            <button onClick={onMenu} aria-label="Choose source" aria-expanded={menuOpen} title="Choose source"
+                className={cn('w-8 flex items-center justify-center border-l border-current/30 rounded-r-md hover:brightness-110', FOCUS,
+                    menuOpen && 'bg-app-surface-2')}>
+                <ChevronDown size={14} className={cn('transition-transform duration-[var(--dur)]', menuOpen && 'rotate-180')} />
             </button>
         </div>
     )
@@ -63,15 +69,14 @@ function Menu({ children, onClose }: { children: React.ReactNode; onClose: () =>
         return () => { window.removeEventListener('mousedown', down); window.removeEventListener('keydown', key) }
     }, [onClose])
     return (
-        <div ref={ref} className="absolute right-0 top-[calc(100%+6px)] z-[3000] w-[280px] max-h-[70vh] overflow-y-auto rounded-xl border p-1.5 font-mono text-[11px] shadow-2xl"
-            style={{ background: '#0d1117', borderColor: 'rgba(255,255,255,.12)' }}>
+        <div ref={ref} className="absolute right-0 top-[calc(100%+6px)] z-[3000] w-[280px] max-h-[70vh] overflow-y-auto rounded-[10px] border border-app-border bg-app-raised p-1.5 text-[13px] text-app-text shadow-[var(--app-shadow)]">
             {children}
         </div>
     )
 }
 
 const Section = ({ title, action }: { title: string; action?: React.ReactNode }) => (
-    <div className="flex items-center justify-between px-2 pt-2 pb-1 text-[9px] tracking-[0.2em] text-zinc-500">
+    <div className="flex items-center justify-between px-2 pt-2 pb-1 text-[12px] font-bold uppercase tracking-[0.06em] text-app-text-muted">
         <span>{title}</span>{action}
     </div>
 )
@@ -80,20 +85,21 @@ function Item({ active, label, sub, onClick, disabled }: {
     active: boolean; label: string; sub?: string; onClick: () => void; disabled?: boolean
 }) {
     return (
-        <button onClick={onClick} disabled={disabled}
-            className="w-full flex items-start gap-2 px-2 py-1.5 rounded-md text-left disabled:opacity-40 hover:bg-white/5"
-            style={active ? { background: 'rgba(34,211,238,.12)', color: '#a5f3fc' } : { color: '#d4d4d8' }}>
-            <span className="w-3.5 shrink-0 pt-px">{active && <Check size={12} />}</span>
+        <button onClick={onClick} disabled={disabled} aria-pressed={active}
+            className={cn('w-full min-h-8 flex items-start gap-2 px-2 py-1.5 rounded-md text-left disabled:text-app-text-subtle disabled:cursor-not-allowed', FOCUS,
+                active ? 'bg-app-accent-soft text-app-accent font-bold' : 'text-app-text hover:bg-app-surface-2')}>
+            <span className="w-3.5 shrink-0 pt-0.5">{active && <Check size={13} />}</span>
             <span className="flex flex-col min-w-0">
                 <span className="truncate">{label}</span>
-                {sub && <span className="text-[9.5px] text-zinc-500">{sub}</span>}
+                {sub && <span className="text-[12px] font-normal text-app-text-muted">{sub}</span>}
             </span>
         </button>
     )
 }
 
 const Mini = ({ onClick, title, children }: { onClick: () => void; title: string; children: React.ReactNode }) => (
-    <button onClick={onClick} title={title} className="p-1 rounded text-zinc-400 hover:text-zinc-100">{children}</button>
+    <button onClick={onClick} title={title} aria-label={title}
+        className={cn('h-8 w-8 flex items-center justify-center rounded-md text-app-text-muted hover:text-app-text hover:bg-app-surface-2 normal-case', FOCUS)}>{children}</button>
 )
 
 export function LinkCluster({ avoid }: { avoid: AvoidanceStatus | null }) {
@@ -132,7 +138,8 @@ export function LinkCluster({ avoid }: { avoid: AvoidanceStatus | null }) {
     const camMissing = needsCam && !selectedCameraId && !isStreaming
     const radioLabel = options.find(o => o.value === source)?.label ?? source
     const srcLabel = VIDEO_SOURCES.find(v => v.value === src)?.label ?? src
-    const camLabel = needsCam ? cameras.find(c => c.deviceId === selectedCameraId)?.label : undefined
+    const camIdx = cameras.findIndex(c => c.deviceId === selectedCameraId)
+    const camLabel = needsCam && camIdx >= 0 ? cameraLabel(cameras[camIdx].label, camIdx) : undefined
     const desktopApp = isDesktopApp()
 
     type Sense = 'range' | 'camera' | 'bench'
@@ -162,15 +169,15 @@ export function LinkCluster({ avoid }: { avoid: AvoidanceStatus | null }) {
                 {menu === 'telem' && (
                     <Menu onClose={() => setMenu(null)}>
                         <Section title="TELEMETRY LINK" action={
-                            desktop ? <Mini onClick={() => { void refreshNativeRadios() }} title="Re-scan serial ports"><RefreshCw size={11} /></Mini>
-                                : browserSerialSupported ? <Mini onClick={() => { void addRadio() }} title="Add a USB radio plugged into this device"><Plus size={12} /></Mini>
-                                    : <Mini onClick={() => { void refreshRadios() }} title="Re-scan radios"><RefreshCw size={11} /></Mini>} />
-                        {isConnected && <p className="px-2 pb-1 text-[10px] text-amber-300/90">Disconnect to change the link.</p>}
+                            desktop ? <Mini onClick={() => { void refreshNativeRadios() }} title="Re-scan serial ports"><RefreshCw size={14} /></Mini>
+                                : browserSerialSupported ? <Mini onClick={() => { void addRadio() }} title="Add a USB radio plugged into this device"><Plus size={14} /></Mini>
+                                    : <Mini onClick={() => { void refreshRadios() }} title="Re-scan radios"><RefreshCw size={14} /></Mini>} />
+                        {isConnected && <p className="px-2 pb-1 text-[13px] text-app-warn">Disconnect to change the link.</p>}
                         {options.map(o => (
                             <Item key={o.value} active={o.value === source} label={o.label} sub={o.note} disabled={isConnected || o.disabled}
                                 onClick={() => { setSource(o.value); setMenu(null) }} />
                         ))}
-                        <p className="px-2 pt-1.5 pb-1 text-[9.5px] text-zinc-500">Relay URL, baud and uplink host: SETUP tab.</p>
+                        <p className="px-2 pt-1.5 pb-1 text-[12px] text-app-text-muted">Relay URL, baud and uplink host: Setup tab.</p>
                     </Menu>
                 )}
             </div>
@@ -186,7 +193,7 @@ export function LinkCluster({ avoid }: { avoid: AvoidanceStatus | null }) {
                     menuOpen={menu === 'video'} onMenu={() => setMenu(m => (m === 'video' ? null : 'video'))} />
                 {menu === 'video' && (
                     <Menu onClose={() => setMenu(null)}>
-                        {isStreaming && <p className="px-2 pt-1 text-[10px] text-amber-300/90">Changing source or camera restarts the stream.</p>}
+                        {isStreaming && <p className="px-2 pt-1 text-[13px] text-app-warn">Changing source or camera restarts the stream.</p>}
                         {sourceGroupsFor(isCustomer).map(group => (
                             <div key={group}>
                                 <Section title={group.toUpperCase()} />
@@ -200,10 +207,10 @@ export function LinkCluster({ avoid }: { avoid: AvoidanceStatus | null }) {
                         {needsCam && (
                             <>
                                 <Section title="CAMERA ON THIS MACHINE" action={
-                                    <Mini onClick={scanCameras} title="Re-scan cameras"><RefreshCw size={11} /></Mini>} />
-                                {cameras.length === 0 && <p className="px-2 pb-1 text-zinc-500">No cameras found - re-scan, or allow camera access.</p>}
-                                {cameras.map(c => (
-                                    <Item key={c.deviceId} active={c.deviceId === selectedCameraId} label={c.label || 'Camera'}
+                                    <Mini onClick={scanCameras} title="Re-scan cameras"><RefreshCw size={14} /></Mini>} />
+                                {cameras.length === 0 && <p className="px-2 pb-1 text-app-text-muted">No cameras found. Re-scan, or allow camera access.</p>}
+                                {cameras.map((c, i) => (
+                                    <Item key={c.deviceId} active={c.deviceId === selectedCameraId} label={cameraLabel(c.label, i)}
                                         onClick={() => pickCamera(c.deviceId)} />
                                 ))}
                             </>

@@ -38,7 +38,7 @@ function Metric({
     title?: string
 }) {
     const color = tone === 'warn'
-        ? '#f59e0b'
+        ? 'var(--app-warn)'
         : tone === 'muted'
             ? 'hsl(var(--app-text-muted))'
             : 'hsl(var(--app-text))'
@@ -47,7 +47,7 @@ function Metric({
             title={title}
             style={{
                 display: 'flex', flexDirection: 'column', gap: 2,
-                padding: '8px 10px', borderRadius: 8,
+                padding: '8px 12px', borderRadius: 10,
                 background: 'hsl(var(--app-surface-2))',
                 border: '1px solid hsl(var(--app-border))',
                 minWidth: 0,
@@ -55,18 +55,18 @@ function Metric({
         >
             <div style={{
                 display: 'flex', alignItems: 'center', gap: 4,
-                fontSize: 9, letterSpacing: 0.4,
+                fontSize: 12, fontWeight: 700, letterSpacing: '0.05em',
                 color: 'hsl(var(--app-text-muted))', textTransform: 'uppercase',
             }}>
                 {icon}{label}
             </div>
             <div style={{
-                fontFamily: 'var(--font-geist-mono)', fontSize: 15,
-                fontWeight: 600, color, whiteSpace: 'nowrap',
+                fontVariantNumeric: 'tabular-nums', fontSize: 18,
+                fontWeight: 700, color, whiteSpace: 'nowrap',
                 overflow: 'hidden', textOverflow: 'ellipsis',
             }}>
                 {value}
-                {unit && <span style={{ fontSize: 10, opacity: 0.6 }}> {unit}</span>}
+                {unit && <span style={{ fontSize: 12, fontWeight: 600, color: 'hsl(var(--app-text-muted))' }}> {unit}</span>}
             </div>
         </div>
     )
@@ -119,13 +119,12 @@ export function ModulePerformance() {
     if (!isStreaming) {
         return (
             <div style={{
-                padding: '10px 12px', borderRadius: 8,
+                padding: '10px 12px', borderRadius: 10,
                 background: 'hsl(var(--app-surface-2))',
                 border: '1px dashed hsl(var(--app-border))',
-                fontSize: 11, fontFamily: 'monospace',
-                color: 'hsl(var(--app-text-muted))',
+                fontSize: 13, color: 'hsl(var(--app-text-muted))',
             }}>
-                Start analysis to see performance
+                Run a model to see performance
             </div>
         )
     }

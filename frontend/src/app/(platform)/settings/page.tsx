@@ -51,6 +51,7 @@ import { isDesktopApp, nativeUpdater } from '@/lib/nativeBridge'
 import { useAirUnitVideoBridge } from '@/hooks/useAirUnitVideoBridge'
 import { useClientValue, useHydrated } from '@/hooks/useClientValue'
 import { PrefRow } from '@/components/settings/primitives'
+import { Segmented } from '@/components/ui/segmented'
 import { DevicesGroup, PasswordGroup, ProfileGroup } from '@/components/settings/AccountSettings'
 import { InvitesGroup, MembersGroup, WorkspaceGroup } from '@/components/settings/WorkspaceSettings'
 import { useAccess } from '@/hooks/useAccess'
@@ -71,65 +72,44 @@ function lsSet(key: string, val: unknown) {
 
 function GroupLabel({ text }: { text: string }) {
     return (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '20px 0 8px' }}>
-            <span style={{ fontSize: 10, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.12em', color: 'hsl(var(--app-text-muted))' }}>{text}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '24px 0 8px' }}>
+            <h3 style={{ margin: 0, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', color: 'hsl(var(--app-text-muted))' }}>{text}</h3>
             <div style={{ flex: 1, height: 1, background: 'hsl(var(--app-border))' }} />
         </div>
     )
 }
 
-function Toggle({ value, onChange }: { value: boolean; onChange: () => void }) {
+function Toggle({ value, onChange, label }: { value: boolean; onChange: () => void; label?: string }) {
     return (
-        <div onClick={onChange} style={{
-            width: 38, height: 22, borderRadius: 11, cursor: 'pointer',
-            background: value ? '#22d3ee' : 'hsl(var(--app-border))',
-            position: 'relative', transition: 'background 0.18s', flexShrink: 0,
+        <button type="button" role="switch" aria-checked={value} aria-label={label} onClick={onChange} style={{
+            width: 40, height: 24, borderRadius: 999, cursor: 'pointer', padding: 0, flexShrink: 0,
+            background: value ? 'var(--app-accent)' : 'hsl(var(--app-surface-2))',
+            border: `1px solid ${value ? 'var(--app-accent)' : 'hsl(var(--app-border-strong))'}`,
+            position: 'relative', transition: 'background-color var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out)',
         }}>
-            <div style={{ position: 'absolute', top: 4, width: 14, height: 14, borderRadius: '50%', background: 'white', left: value ? 20 : 4, transition: 'left 0.18s' }} />
-        </div>
+            <span style={{
+                position: 'absolute', top: 3, left: 3, width: 16, height: 16, borderRadius: '50%',
+                background: value ? 'var(--app-accent-ink)' : 'hsl(var(--app-text-muted))',
+                transform: value ? 'translateX(16px)' : 'none',
+                transition: 'transform var(--dur) var(--ease-out), background-color var(--dur) var(--ease-out)',
+            }} />
+        </button>
     )
 }
 
+// Both names render the one shared segmented control (components/ui/
+// segmented): this page used to draw three different styles for the same
+// "pick one" job.
 function SegmentControl<T extends string>({ value, options, onChange }: {
     value: T; options: { value: T; label: string; icon?: React.ReactNode }[]; onChange: (v: T) => void
 }) {
-    return (
-        <div style={{ display: 'flex', gap: 2, padding: 3, borderRadius: 9, background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))' }}>
-            {options.map(o => (
-                <button key={o.value} onClick={() => onChange(o.value)} style={{
-                    display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px',
-                    borderRadius: 6, border: 'none', cursor: 'pointer',
-                    background: value === o.value ? 'hsl(var(--app-surface))' : 'transparent',
-                    color: value === o.value ? 'hsl(var(--app-text))' : 'hsl(var(--app-text-muted))',
-                    fontSize: 12, fontFamily: 'monospace', fontWeight: value === o.value ? 600 : 400,
-                    boxShadow: value === o.value ? '0 1px 3px rgba(0,0,0,0.12)' : 'none',
-                    transition: 'all 0.12s',
-                }}>
-                    {o.icon} {o.label}
-                </button>
-            ))}
-        </div>
-    )
+    return <Segmented value={value} options={options} onChange={onChange} />
 }
 
 function ChipGroup<T extends string>({ value, options, onChange }: {
     value: T; options: { value: T; label: string }[]; onChange: (v: T) => void
 }) {
-    return (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {options.map(o => (
-                <button key={o.value} onClick={() => onChange(o.value)} style={{
-                    padding: '5px 12px', borderRadius: 20, border: '1.5px solid',
-                    borderColor: value === o.value ? '#22d3ee' : 'hsl(var(--app-border))',
-                    background: value === o.value ? 'rgba(34,211,238,0.1)' : 'transparent',
-                    color: value === o.value ? '#22d3ee' : 'hsl(var(--app-text-muted))',
-                    fontSize: 12, fontFamily: 'monospace', cursor: 'pointer', transition: 'all 0.12s',
-                }}>
-                    {o.label}
-                </button>
-            ))}
-        </div>
-    )
+    return <Segmented value={value} options={options} onChange={onChange} />
 }
 
 // ── Sections ──────────────────────────────────────────────────────────────────
@@ -145,36 +125,36 @@ function DisplayGroup() {
         <>
             <PrefRow
                 label="Interface"
-                sub="Normal: a simple, bright flight screen anyone can use - big buttons, plain words, only what matters right now. Dev: the full engineering interface with every tab and readout."
+                sub="Normal: big buttons, plain words. Dev: every tab and readout."
                 right={
                     <SegmentControl
                         value={uiMode ?? 'dev'}
                         onChange={v => setMode(v as 'normal' | 'dev')}
                         options={[
-                            { value: 'normal', label: 'Normal', icon: <Sun size={12} /> },
-                            { value: 'dev',    label: 'Dev',    icon: <SlidersHorizontal size={12} /> },
+                            { value: 'normal', label: 'Normal', icon: <Sun size={14} /> },
+                            { value: 'dev',    label: 'Dev',    icon: <SlidersHorizontal size={14} /> },
                         ]}
                     />
                 }
             />
             <PrefRow
                 label="Theme"
-                sub="Classic is the original palette. Midnight is the reworked dark - brighter secondary text and visible panel edges, for reading dense pages at a glance. Bright is the light theme."
+                sub="Midnight is a higher-contrast dark."
                 right={
                     <SegmentControl
                         value={theme ?? 'dark'}
                         onChange={v => setTheme(v as 'dark' | 'midnight' | 'light')}
                         options={[
-                            { value: 'dark',     label: 'Classic',  icon: <Moon size={12} /> },
-                            { value: 'midnight', label: 'Midnight', icon: <MoonStar size={12} /> },
-                            { value: 'light',    label: 'Bright',   icon: <Sun size={12} /> },
+                            { value: 'dark',     label: 'Dark',     icon: <Moon size={14} /> },
+                            { value: 'midnight', label: 'Midnight', icon: <MoonStar size={14} /> },
+                            { value: 'light',    label: 'Light',    icon: <Sun size={14} /> },
                         ]}
                     />
                 }
             />
             <PrefRow
                 label="Font"
-                sub="Interface typeface, applied everywhere - headings, descriptions, status chips and the task bar. The default keeps telemetry monospaced for column alignment; any other choice restyles those too."
+                sub="Used everywhere. Numbers stay lined up in the default."
                 right={
                     <ChipGroup
                         value={font}
@@ -185,7 +165,8 @@ function DisplayGroup() {
             />
             <PrefRow
                 label="Text size"
-                sub="Grows the type only and leaves the layout alone. Combine with Interface scale below if everything should grow."
+                sub="Larger text, same layout."
+                tip="Large is +15%, Extra large +30%. Interface scale below grows the panels too."
                 right={
                     <ChipGroup
                         value={textSize}
@@ -196,7 +177,7 @@ function DisplayGroup() {
             />
             <PrefRow
                 label="Interface scale"
-                sub="Scales the entire interface - panels with their text, so nothing overflows. Use this if the text reads too small."
+                sub="Grows panels and text together, so nothing overflows."
                 right={
                     <ChipGroup
                         value={String(zoom)}
@@ -217,13 +198,15 @@ function StatusBarGroup() {
         <>
             <PrefRow
                 label="Show status bar"
-                sub="Persistent bar on Mission / AI / Config / Settings - altitude, arm/takeoff, flight mode, GPS, connectivity, plus quick Land / Emergency kill. Hidden on the Fly tab, which already has its own controls."
-                right={<Toggle value={enabled} onChange={() => { const v = !enabled; setEnabled(v); setStatusBarEnabled(v) }} />}
+                sub="Status, Land and Kill on Mission, AI, Config and Settings."
+                tip="Shows altitude, arm and takeoff, flight mode, GPS and connectivity. Fly and Command have their own controls, so it is hidden there."
+                right={<Toggle label="Show status bar" value={enabled} onChange={() => { const v = !enabled; setEnabled(v); setStatusBarEnabled(v) }} />}
             />
             <PrefRow
                 label="Link controls in the status bar"
-                sub="Adds video-source, camera and telemetry-link pickers to the bar, so a vehicle can be retasked from Mission or AI without going back to Fly. Off by default - these are setup controls, and they sit next to Emergency kill. They show the SAME selection as the Fly tab, and changing the video source or camera restarts a running stream."
-                right={<Toggle value={links} onChange={() => { const v = !links; setLinks(v); setStatusBarLinksEnabled(v) }} />}
+                sub="Adds video, camera and telemetry pickers to the bar."
+                tip="Off by default: these are setup controls and they sit next to Kill. They share the Fly tab's selection, and changing the video source or camera restarts a running stream."
+                right={<Toggle label="Link controls in the status bar" value={links} onChange={() => { const v = !links; setLinks(v); setStatusBarLinksEnabled(v) }} />}
             />
         </>
     )
@@ -295,7 +278,7 @@ function MapGroup() {
                 label="Tile caching"
                 sub="Cache map tiles locally - faster reload in areas you've already visited"
                 tip="Stored in browser IndexedDB. Clear browser data to remove the cache."
-                right={<Toggle value={cache} onChange={() => { const v = !cache; setCache(v); lsSet('hyrak-map-cache', v) }} />}
+                right={<Toggle label="Tile caching" value={cache} onChange={() => { const v = !cache; setCache(v); lsSet('hyrak-map-cache', v) }} />}
             />
         </>
     )
@@ -325,7 +308,7 @@ function NotificationsGroup() {
     return (
         <>
             {rows.map(r => (
-                <PrefRow key={r.key} label={r.label} sub={r.sub} right={<Toggle value={notifs[r.key]} onChange={() => toggle(r.key)} />} />
+                <PrefRow key={r.key} label={r.label} sub={r.sub} right={<Toggle label={r.label} value={notifs[r.key]} onChange={() => toggle(r.key)} />} />
             ))}
         </>
     )
@@ -341,7 +324,7 @@ function DataGroup() {
             <PrefRow
                 label="Auto-record telemetry"
                 sub="Starts logging to file as soon as a drone connects"
-                right={<Toggle value={autoLog} onChange={() => { const v = !autoLog; setAutoLog(v); lsSet('hyrak-auto-log', v) }} />}
+                right={<Toggle label="Auto-record telemetry" value={autoLog} onChange={() => { const v = !autoLog; setAutoLog(v); lsSet('hyrak-auto-log', v) }} />}
             />
             <PrefRow
                 label="Log directory"
@@ -351,9 +334,9 @@ function DataGroup() {
                         value={logPath}
                         onChange={e => { setLogPath(e.target.value); lsSet('hyrak-log-path', e.target.value) }}
                         style={{
-                            padding: '6px 10px', borderRadius: 8, width: 200,
-                            background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
-                            color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none',
+                            padding: '6px 10px', borderRadius: 6, width: 200,
+                            background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border-strong))',
+                            color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace',
                         }}
                     />
                 }
@@ -362,7 +345,7 @@ function DataGroup() {
                 label="Upload logs after flight"
                 sub="Automatically sync logs to the configured server endpoint after landing"
                 tip="Endpoint can be configured when this feature is implemented."
-                right={<Toggle value={autoUpload} onChange={() => { const v = !autoUpload; setAutoUpload(v); lsSet('hyrak-auto-upload', v) }} />}
+                right={<Toggle label="Upload logs after flight" value={autoUpload} onChange={() => { const v = !autoUpload; setAutoUpload(v); lsSet('hyrak-auto-upload', v) }} />}
             />
         </>
     )
@@ -385,11 +368,11 @@ const SHORTCUTS = [
 function ShortcutsGroup() {
     return (
         <>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0 24px' }}>
                 {SHORTCUTS.map(s => (
                     <div key={s.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid hsl(var(--app-border))' }}>
                         <span style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))' }}>{s.action}</span>
-                        <kbd style={{ padding: '2px 7px', borderRadius: 5, background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))', fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text))', whiteSpace: 'nowrap' }}>{s.key}</kbd>
+                        <kbd style={{ padding: '2px 8px', borderRadius: 6, background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))', fontSize: 12, fontFamily: 'monospace', color: 'hsl(var(--app-text))', whiteSpace: 'nowrap' }}>{s.key}</kbd>
                     </div>
                 ))}
             </div>
@@ -427,7 +410,7 @@ function NativeAirUnitVideoRow({ source }: { source: VideoSource }) {
             <PrefRow
                 label="Native air-unit video bridge"
                 sub="Desktop app only - this browser tab can't run it"
-                right={<span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>-</span>}
+                right={<span style={{ fontSize: 12, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>-</span>}
             />
         )
     }
@@ -437,7 +420,7 @@ function NativeAirUnitVideoRow({ source }: { source: VideoSource }) {
             <PrefRow
                 label="Native air-unit video bridge"
                 sub="Set Video source (above) to 'Camera' first - this feeds a camera device, it doesn't replace that setting"
-                right={<span style={{ fontSize: 11, fontFamily: 'monospace', color: '#f59e0b' }}>Needs Camera source</span>}
+                right={<span style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--app-warn)' }}>Needs Camera source</span>}
             />
         )
     }
@@ -453,11 +436,11 @@ function NativeAirUnitVideoRow({ source }: { source: VideoSource }) {
                         onClick={() => bridge.running ? bridge.stop() : bridge.start({ port, device })}
                         disabled={bridge.busy}
                         style={{
-                            padding: '6px 12px', borderRadius: 8, fontSize: 11, fontFamily: 'monospace',
-                            background: bridge.running ? 'transparent' : '#22d3ee',
-                            border: bridge.running ? '1px solid #ef4444' : 'none',
-                            color: bridge.running ? '#ef4444' : 'black',
-                            opacity: bridge.busy ? 0.5 : 1,
+                            minHeight: 32, padding: '6px 12px', borderRadius: 6, fontSize: 13, fontWeight: 600,
+                            background: bridge.running ? 'transparent' : 'var(--app-accent)',
+                            border: bridge.running ? '1px solid var(--app-danger)' : 'none',
+                            color: bridge.running ? 'var(--app-danger)' : 'var(--app-accent-ink)',
+                            cursor: bridge.busy ? 'progress' : 'pointer',
                         }}
                     >
                         {bridge.busy ? 'Working…' : bridge.running ? 'Stop' : 'Start'}
@@ -472,11 +455,11 @@ function NativeAirUnitVideoRow({ source }: { source: VideoSource }) {
                             <input
                                 type="number" min={1} max={65535} value={port}
                                 onChange={e => setPort(Number(e.target.value) || 5600)}
-                                style={{ padding: '6px 10px', borderRadius: 8, width: 80, background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none' }}
+                                style={{ padding: '6px 10px', borderRadius: 6, width: 80, background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border-strong))', color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace' }}
                             />
                             <input
                                 value={device} onChange={e => setDevice(e.target.value)}
-                                style={{ padding: '6px 10px', borderRadius: 8, width: 120, background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none' }}
+                                style={{ padding: '6px 10px', borderRadius: 6, width: 120, background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border-strong))', color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace' }}
                             />
                         </div>
                     }
@@ -485,12 +468,12 @@ function NativeAirUnitVideoRow({ source }: { source: VideoSource }) {
             {bridge.status && (
                 <PrefRow
                     label="Status"
-                    right={<span style={{ fontSize: 11, fontFamily: 'monospace', color: bridge.status.error ? '#ef4444' : '#22d3ee' }}>{bridge.status.msg}</span>}
+                    right={<span style={{ fontSize: 12, fontFamily: 'monospace', color: bridge.status.error ? 'var(--app-danger)' : 'var(--app-accent)' }}>{bridge.status.msg}</span>}
                 />
             )}
             {bridge.status?.log && (
                 <pre style={{
-                    margin: '4px 0 12px', padding: 10, borderRadius: 8, fontSize: 10, fontFamily: 'monospace',
+                    margin: '4px 0 12px', padding: 10, borderRadius: 10, fontSize: 12, fontFamily: 'monospace',
                     background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
                     color: 'hsl(var(--app-text-muted))', maxHeight: 200, overflowY: 'auto',
                     whiteSpace: 'pre-wrap', wordBreak: 'break-all',
@@ -536,25 +519,25 @@ function NetworkCheckRow() {
             sub="Whether this machine can reach the camera and ground unit right now"
             tip="Green means on your own subnet - reached directly, the reliable case. Amber means reachable but ROUTED through a gateway, which depends on another device forwarding and is what fails intermittently. Red means unreachable: either this machine is on the wrong network, or the hardware is off. This deliberately reports your SUBNET rather than the WiFi name, because a ground unit that bridges to a phone hands out the phone's addresses while the camera stays on its own subnet - so the network name proves nothing."
             right={
-                <div style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 11, maxWidth: 340 }}>
+                <div style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 12, maxWidth: 340 }}>
                     {report?.error && (
-                        <div style={{ color: '#fbbf24', whiteSpace: 'normal', lineHeight: 1.4 }}>{report.error}</div>
+                        <div style={{ color: 'var(--app-warn)', whiteSpace: 'normal', lineHeight: 1.4 }}>{report.error}</div>
                     )}
                     {report?.results.map(r => {
-                        const colour = !r.ok ? '#f87171' : r.onLink ? '#4ade80' : '#fbbf24'
+                        const colour = !r.ok ? 'var(--app-danger)' : r.onLink ? 'var(--app-ok)' : 'var(--app-warn)'
                         return (
                             <div key={r.label} style={{ marginBottom: 4 }}>
                                 <span style={{ color: colour, fontWeight: 600 }}>
                                     {r.label}: {r.ok ? (r.onLink ? 'OK' : 'routed') : 'unreachable'}
                                 </span>
-                                <div style={{ color: 'hsl(var(--app-text-dim))', fontSize: 10, whiteSpace: 'normal', lineHeight: 1.4 }}>
+                                <div style={{ color: 'hsl(var(--app-text-muted))', fontSize: 12, whiteSpace: 'normal', lineHeight: 1.4 }}>
                                     {r.host}:{r.port} - {explainResult(r, report.addresses)}
                                 </div>
                             </div>
                         )
                     })}
                     {report && report.addresses.length > 0 && (
-                        <div style={{ color: 'hsl(var(--app-text-dim))', fontSize: 10, marginTop: 2 }}>
+                        <div style={{ color: 'hsl(var(--app-text-muted))', fontSize: 12, marginTop: 2 }}>
                             this machine: {report.addresses.map(a => a.cidr).join(', ')}
                         </div>
                     )}
@@ -564,7 +547,7 @@ function NetworkCheckRow() {
                         style={{
                             marginTop: 6, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
                             background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
-                            color: 'hsl(var(--app-text))', fontSize: 11, fontFamily: 'monospace',
+                            color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace',
                         }}
                     >
                         {busy ? 'checking…' : 'Re-check'}
@@ -603,10 +586,10 @@ function RtspPathRow() {
     // inter-frame compression, through <img> -> canvas -> rAF -> captureStream.
     // It gets a warning colour so it can never quietly become the norm again.
     const colour = !info.rung
-        ? 'hsl(var(--app-text-dim))'
-        : /MJPEG/i.test(info.rung) ? '#f87171'
-            : /transcode/i.test(info.rung) ? '#fbbf24'
-                : '#4ade80'
+        ? 'hsl(var(--app-text-muted))'
+        : /MJPEG/i.test(info.rung) ? 'var(--app-danger)'
+            : /transcode/i.test(info.rung) ? 'var(--app-warn)'
+                : 'var(--app-ok)'
 
     return (
         <PrefRow
@@ -614,17 +597,17 @@ function RtspPathRow() {
             sub="Which rung of the RTSP fallback ladder is carrying video right now"
             tip="The ladder tries, best first: direct (no re-encode, needs an H.264 camera) → H.264 transcode (for an H.265 camera, since Chromium ships no software HEVC decoder) → MJPEG (last resort, cannot fail on codec but is 20fps and has no inter-frame compression). Green is best, amber is a re-encode, red means you are on the fallback and latency will be roughly 3x worse. Buffer is the browser's own playback backlog - if that number is small while the picture is still late, the delay is upstream of the browser."
             right={
-                <div style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 11, maxWidth: 300 }}>
+                <div style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 12, maxWidth: 300 }}>
                     <div style={{ color: colour, fontWeight: 600 }}>
                         {info.rung ?? 'not streaming'}
                     </div>
-                    <div style={{ color: 'hsl(var(--app-text-dim))', marginTop: 2 }}>
+                    <div style={{ color: 'hsl(var(--app-text-muted))', marginTop: 2 }}>
                         {info.codec ? `camera: ${info.codec}` : 'camera: unknown'}
                         {' · '}
                         buffer: {info.drift}ms
                     </div>
                     {info.failures.length > 0 && (
-                        <div style={{ color: '#f87171', marginTop: 4, fontSize: 10, whiteSpace: 'normal', lineHeight: 1.4 }}>
+                        <div style={{ color: 'var(--app-danger)', marginTop: 4, fontSize: 12, whiteSpace: 'normal', lineHeight: 1.4 }}>
                             {info.failures.map((f, i) => <div key={i}>skipped - {f}</div>)}
                         </div>
                     )}
@@ -681,11 +664,11 @@ function VideoGroup() {
                             setSource(v); setVideoSource(v)
                         }}
                         style={{
-                            padding: '7px 10px', borderRadius: 8, width: 280,
+                            padding: '7px 10px', borderRadius: 6, width: 280,
                             background: 'hsl(var(--app-surface-2))',
-                            border: '1px solid hsl(var(--app-border))',
+                            border: '1px solid hsl(var(--app-border-strong))',
                             color: 'hsl(var(--app-text))',
-                            fontSize: 12, fontFamily: 'monospace', outline: 'none',
+                            fontSize: 12, fontFamily: 'monospace',
                         }}
                     >
                         {/* Derived from the catalogue, NOT a hand-written list.
@@ -714,20 +697,20 @@ function VideoGroup() {
                 enormous tooltip nobody could read at the moment of choosing. */}
             {specFor(source) && (
                 <div style={{
-                    margin: '2px 2px 10px', padding: '10px 12px', borderRadius: 8,
+                    margin: '2px 2px 10px', padding: '10px 12px', borderRadius: 10,
                     background: 'hsl(var(--app-surface-2))',
                     border: '1px solid hsl(var(--app-border))',
-                    fontSize: 11.5, lineHeight: 1.5,
+                    fontSize: 12, lineHeight: 1.5,
                     color: 'hsl(var(--app-text-muted))',
                 }}>
                     {specFor(source)!.blurb}
                     {specFor(source)!.serverReaches && (
-                        <div style={{ marginTop: 6, color: '#f59e0b' }}>
+                        <div style={{ marginTop: 6, color: 'var(--app-warn)' }}>
                             Requires the SERVER to reach the source directly - not this laptop.
                         </div>
                     )}
                     {specFor(source)!.desktopOnly && !isDesktopApp() && (
-                        <div style={{ marginTop: 6, color: '#f59e0b' }}>
+                        <div style={{ marginTop: 6, color: 'var(--app-warn)' }}>
                             Needs the desktop app. In a browser tab this will fall back to the camera.
                         </div>
                     )}
@@ -751,9 +734,9 @@ function VideoGroup() {
                                 if (v > 0 && v < 65536) setAirUnitVideoPort(v)
                             }}
                             style={{
-                                padding: '6px 10px', borderRadius: 8, width: 100,
-                                background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
-                                color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none',
+                                padding: '6px 10px', borderRadius: 6, width: 100,
+                                background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border-strong))',
+                                color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace',
                             }}
                         />
                     }
@@ -776,9 +759,9 @@ function VideoGroup() {
                                 if (v >= 0 && v < 65536) setAirUnitFanoutPort(v)
                             }}
                             style={{
-                                padding: '6px 10px', borderRadius: 8, width: 100,
-                                background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
-                                color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none',
+                                padding: '6px 10px', borderRadius: 6, width: 100,
+                                background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border-strong))',
+                                color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace',
                             }}
                         />
                     }
@@ -799,9 +782,9 @@ function VideoGroup() {
                                 onChange={e => { setRtspUrl(e.target.value); setSiyiRtspUrl(e.target.value) }}
                                 placeholder="rtsp://192.168.144.25:8554/video1"
                                 style={{
-                                    padding: '6px 10px', borderRadius: 8, width: 260,
-                                    background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
-                                    color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none',
+                                    padding: '6px 10px', borderRadius: 6, width: 260,
+                                    background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border-strong))',
+                                    color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace',
                                 }}
                             />
                         }
@@ -853,7 +836,7 @@ function VideoGroup() {
                         label="Live-edge clamp"
                         sub="Drain the browser's playback buffer back toward the newest frame"
                         tip="Chromium settles a few hundred ms behind its own newest buffered frame when it starts a live stream, and never catches up on its own - frames arrive at exactly the rate they are consumed, so the startup backlog is permanent. This nudges playback slightly above 1.0x until the backlog is spent, then returns to normal. Side effect: motion runs a little fast for about a second after a stream starts. Read the current backlog in the DevTools console with __hyrakLiveEdge()."
-                        right={<Toggle value={liveEdge} onChange={() => { const next = !liveEdge; setLiveEdgeState(next); setLiveEdgeClamp(next) }} />}
+                        right={<Toggle label="Live-edge clamp" value={liveEdge} onChange={() => { const next = !liveEdge; setLiveEdgeState(next); setLiveEdgeClamp(next) }} />}
                     />
                 </>
             )}
@@ -897,9 +880,9 @@ function VideoGroup() {
                                         if (v >= 80 && v <= 2000) setRelayLatencyMs(v)
                                     }}
                                     style={{
-                                        padding: '6px 10px', borderRadius: 8, width: 100,
-                                        background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
-                                        color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none',
+                                        padding: '6px 10px', borderRadius: 6, width: 100,
+                                        background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border-strong))',
+                                        color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace',
                                     }}
                                 />
                             }
@@ -925,9 +908,9 @@ function VideoGroup() {
                                 spellCheck={false}
                                 onChange={e => { setRxHostState(e.target.value); setReceiverHost(e.target.value) }}
                                 style={{
-                                    padding: '6px 10px', borderRadius: 8, width: 160,
-                                    background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
-                                    color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none',
+                                    padding: '6px 10px', borderRadius: 6, width: 160,
+                                    background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border-strong))',
+                                    color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace',
                                 }}
                             />
                         }
@@ -973,9 +956,9 @@ function VideoGroup() {
                                     if (v >= 0 && v <= 2000) setReceiverLatencyMs(rxTransport, v)
                                 }}
                                 style={{
-                                    padding: '6px 10px', borderRadius: 8, width: 100,
-                                    background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
-                                    color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none',
+                                    padding: '6px 10px', borderRadius: 6, width: 100,
+                                    background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border-strong))',
+                                    color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace',
                                 }}
                             />
                         }
@@ -984,7 +967,7 @@ function VideoGroup() {
                         label="H.265 passthrough"
                         sub="Send the decoder's H.265 to the screen with nothing transcoding it"
                         tip="Off by default, and that is deliberate. Skipping the transcode sounds strictly better, but Chromium's HEVC support is platform-gated and will report that it supports H.265 and then fail the actual decode - a black picture with only 'Decoding error' to show for it, which is what happened on this machine. With this off, the stream is converted to H.264 first, which every Chromium decodes everywhere; on hardware that conversion costs about 4% of one core. Worth turning ON to test on a Windows machine with a modern NVIDIA GPU, where the platform decoder is solid and the transcode is pure waste. If it fails, the app detects the real decode error and falls back on its own for the rest of the session."
-                        right={<Toggle value={rxPassthrough} onChange={() => { const next = !rxPassthrough; setRxPassthroughState(next); setReceiverPassthrough(next) }} />}
+                        right={<Toggle label="H.265 passthrough" value={rxPassthrough} onChange={() => { const next = !rxPassthrough; setRxPassthroughState(next); setReceiverPassthrough(next) }} />}
                     />
                     <PrefRow
                         label="Decode path"
@@ -1029,9 +1012,9 @@ function VideoGroup() {
                                     if (v >= 30 && v <= 2000) setGstJitterMs(v)
                                 }}
                                 style={{
-                                    padding: '6px 10px', borderRadius: 8, width: 100,
-                                    background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
-                                    color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none',
+                                    padding: '6px 10px', borderRadius: 6, width: 100,
+                                    background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border-strong))',
+                                    color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace',
                                 }}
                             />
                         }
@@ -1203,7 +1186,7 @@ function CrowdGroup() {
                             ] as const).map(([label, value, onChange]) => (
                                 <label key={label} style={{
                                     display: 'flex', alignItems: 'center', gap: 5,
-                                    fontSize: 11, color: 'hsl(var(--app-text-muted))',
+                                    fontSize: 12, color: 'hsl(var(--app-text-muted))',
                                 }}>
                                     {label}
                                     <input
@@ -1241,7 +1224,7 @@ function MissionGroup() {
                 label="Auto-follow on mission start"
                 sub="Switches to 3D view and starts the chase camera when a mission begins"
                 tip="When enabled, the moment the drone enters MISSION flight mode, the map switches to 3D and the camera locks behind the drone automatically. Disable this if you prefer to stay in 2D or control the view manually."
-                right={<Toggle value={autoFollowOnMission} onChange={() => setAutoFollowOnMission(!autoFollowOnMission)} />}
+                right={<Toggle label="Auto-follow on mission start" value={autoFollowOnMission} onChange={() => setAutoFollowOnMission(!autoFollowOnMission)} />}
             />
         </>
     )
@@ -1339,7 +1322,7 @@ function DesktopUpdateRow() {
                 right={
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         {statusMsg && status !== 'error' && (
-                            <span style={{ fontSize: 11, fontFamily: 'monospace', color: status === 'available' || status === 'downloaded' ? '#22d3ee' : 'hsl(var(--app-text-muted))' }}>
+                            <span style={{ fontSize: 12, fontFamily: 'monospace', color: status === 'available' || status === 'downloaded' ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))' }}>
                                 {statusMsg}
                             </span>
                         )}
@@ -1347,13 +1330,12 @@ function DesktopUpdateRow() {
                             onClick={action.onClick}
                             disabled={action.disabled}
                             style={{
-                                padding: '6px 10px', borderRadius: 8, fontSize: 11, fontFamily: 'monospace',
+                                minHeight: 32, padding: '6px 12px', borderRadius: 6, fontSize: 13, fontWeight: 600,
                                 whiteSpace: 'nowrap',
-                                background: action.primary ? '#22d3ee' : 'hsl(var(--app-surface-2))',
-                                border: '1px solid ' + (action.primary ? '#22d3ee' : 'hsl(var(--app-border))'),
-                                color: action.primary ? 'black' : 'hsl(var(--app-text))',
-                                opacity: action.disabled ? 0.5 : 1,
-                                cursor: action.disabled ? 'default' : 'pointer',
+                                background: action.primary && !action.disabled ? 'var(--app-accent)' : 'hsl(var(--app-surface-2))',
+                                border: (action.disabled ? '1px dashed ' : '1px solid ') + (action.primary && !action.disabled ? 'var(--app-accent)' : 'hsl(var(--app-border-strong))'),
+                                color: action.disabled ? 'hsl(var(--app-text-muted))' : action.primary ? 'var(--app-accent-ink)' : 'hsl(var(--app-text))',
+                                cursor: action.disabled ? 'not-allowed' : 'pointer',
                             }}
                         >
                             {action.label}
@@ -1365,10 +1347,10 @@ function DesktopUpdateRow() {
             {status === 'downloading' && (
                 <div style={{ padding: '10px 0', borderBottom: '1px solid hsl(var(--app-border))' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
-                        <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text))' }}>
+                        <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'hsl(var(--app-text))' }}>
                             {progress ? `${progress.percent}%` : 'Starting download…'}
                         </span>
-                        {detail && <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>{detail}</span>}
+                        {detail && <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>{detail}</span>}
                     </div>
                     <div style={{ height: 5, borderRadius: 999, background: 'hsl(var(--app-surface-2))', overflow: 'hidden' }}>
                         {/* Without a first progress event there is no honest percentage
@@ -1376,7 +1358,7 @@ function DesktopUpdateRow() {
                         <div
                             className={progress ? undefined : 'animate-pulse'}
                             style={{
-                                height: '100%', borderRadius: 999, background: '#22d3ee',
+                                height: '100%', borderRadius: 999, background: 'var(--app-accent)',
                                 width: progress ? `${progress.percent}%` : '33%',
                                 transition: progress ? 'width 200ms linear' : undefined,
                             }}
@@ -1387,8 +1369,8 @@ function DesktopUpdateRow() {
 
             {status === 'error' && statusMsg && (
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, padding: '10px 0', borderBottom: '1px solid hsl(var(--app-border))' }}>
-                    <AlertTriangle size={12} style={{ color: '#f59e0b', flexShrink: 0, marginTop: 2 }} />
-                    <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', lineHeight: 1.5 }}>{statusMsg}</span>
+                    <AlertTriangle size={12} style={{ color: 'var(--app-warn)', flexShrink: 0, marginTop: 2 }} />
+                    <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', lineHeight: 1.5 }}>{statusMsg}</span>
                 </div>
             )}
         </>
@@ -1398,13 +1380,13 @@ function DesktopUpdateRow() {
 function AboutGroup() {
     return (
         <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', borderRadius: 12, background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))', margin: '4px 0 12px' }}>
-                <div style={{ width: 44, height: 44, borderRadius: 11, background: 'rgba(6,182,212,0.15)', border: '1px solid rgba(6,182,212,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <Zap size={22} style={{ color: '#22d3ee' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', borderRadius: 10, background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))', margin: '4px 0 12px' }}>
+                <div style={{ width: 44, height: 44, borderRadius: 10, background: 'var(--app-accent-soft)', border: '1px solid hsl(var(--app-border))', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Zap size={22} style={{ color: 'var(--app-accent)' }} />
                 </div>
                 <div>
                     <p style={{ fontSize: 14, fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>Hyrak Control</p>
-                    <p style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>Ground Control Station · 0.1.0-dev</p>
+                    <p style={{ fontSize: 12, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>Ground Control Station · 0.1.0-dev</p>
                 </div>
             </div>
             <DesktopUpdateRow />
@@ -1505,13 +1487,13 @@ function CalibrationRow({ field, onSave, busy }: {
                                     fontFamily: 'monospace', textAlign: 'right',
                                     borderRadius: 6,
                                     background: 'hsl(var(--app-surface))',
-                                    border: `1px solid ${error ? '#f87171'
-                                        : dirty ? '#22d3ee' : 'hsl(var(--app-border))'}`,
+                                    border: `1px solid ${error ? 'var(--app-danger)'
+                                        : dirty ? 'var(--app-accent)' : 'hsl(var(--app-border))'}`,
                                     color: 'hsl(var(--app-text))',
                                 }}
                             />
                             {field.unit && (
-                                <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', width: 28 }}>
+                                <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', width: 28 }}>
                                     {field.unit}
                                 </span>
                             )}
@@ -1552,7 +1534,7 @@ function CameraCalibrationGroup() {
 
     if (offline) {
         return (
-            <p style={{ fontSize: 12, color: '#fbbf24', lineHeight: 1.6 }}>
+            <p style={{ fontSize: 12, color: 'var(--app-warn)', lineHeight: 1.6 }}>
                 Backend unreachable - calibration is stored on the server, so it
                 cannot be read or changed right now.
             </p>
@@ -1569,10 +1551,10 @@ function CameraCalibrationGroup() {
             {!schema.calibrated && (
                 <div style={{
                     display: 'flex', gap: 8, alignItems: 'flex-start',
-                    padding: '8px 10px', marginBottom: 8, borderRadius: 8,
-                    background: 'rgba(251,191,36,0.10)',
-                    border: '1px solid rgba(251,191,36,0.35)',
-                    fontSize: 11, lineHeight: 1.6, color: '#fbbf24',
+                    padding: '8px 12px', marginBottom: 8, borderRadius: 10,
+                    background: 'var(--app-warn-soft)',
+                    border: '1px solid hsl(var(--app-border))',
+                    fontSize: 12, lineHeight: 1.6, color: 'var(--app-warn)',
                 }}>
                     <Info size={13} style={{ marginTop: 1, flexShrink: 0 }} />
                     <span>
@@ -1597,7 +1579,7 @@ function CameraCalibrationGroup() {
                 sub="Derived from the values above - not editable"
                 tip="Vertical FOV is what decides whether ONE fixed mount angle can cover both a shallow view (for reading plates and faces) and a steep one (for ground projection). GSD is metres per pixel at nadir: it tells you whether a target has enough pixels to analyse at that height."
                 right={
-                    <div style={{ fontSize: 11, fontFamily: 'monospace', textAlign: 'right', color: 'hsl(var(--app-text-muted))', lineHeight: 1.6 }}>
+                    <div style={{ fontSize: 12, fontFamily: 'monospace', textAlign: 'right', color: 'hsl(var(--app-text-muted))', lineHeight: 1.6 }}>
                         <div>VFOV {derivedVfov(hfov).toFixed(1)}°</div>
                         <div>{(gsdAtNadir(hfov, 50) * 1000).toFixed(1)} mm/px @ 50 m</div>
                     </div>
@@ -1610,9 +1592,8 @@ function CameraCalibrationGroup() {
                     disabled={busy || !schema.calibrated}
                     style={{
                         border: 'none', background: 'none', padding: 0,
-                        fontSize: 11, cursor: schema.calibrated ? 'pointer' : 'default',
-                        color: schema.calibrated ? '#f87171' : 'hsl(var(--app-text-muted))',
-                        opacity: busy ? 0.5 : 1,
+                        minHeight: 32, fontSize: 13, fontWeight: 600, cursor: schema.calibrated && !busy ? 'pointer' : 'not-allowed',
+                        color: schema.calibrated ? 'var(--app-danger)' : 'hsl(var(--app-text-muted))',
                     }}
                 >
                     Reset calibration to defaults
@@ -1635,7 +1616,7 @@ function FollowTuningGroup() {
     }
     return (
         <>
-            <p style={{ fontSize: 11, color: 'hsl(var(--app-text-muted))', lineHeight: 1.6, margin: '0 0 6px' }}>
+            <p style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))', lineHeight: 1.6, margin: '0 0 6px' }}>
                 How hard the drone turns to keep a subject centred, for{' '}
                 <b>every</b> mode that can follow one - human tracking, person
                 tracking, crowd management, traffic management and vehicle-plate
@@ -1648,12 +1629,12 @@ function FollowTuningGroup() {
             {/* Said plainly, because the alternative is an operator concluding
                 the Settings values "don't work" after watching a panel slider
                 win. The panel sliders are per-session and were here first. */}
-            <p style={{ fontSize: 11, color: 'hsl(var(--app-text-muted))', lineHeight: 1.6, margin: '8px 0 0' }}>
+            <p style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))', lineHeight: 1.6, margin: '8px 0 0' }}>
                 Applied when a tracking mode next <b>starts</b> - unlike the
                 camera calibration above, which takes effect on the next frame.
                 Switch AI mode, or restart the stream, to pick up a change.
             </p>
-            <p style={{ fontSize: 11, color: 'hsl(var(--app-text-muted))', lineHeight: 1.6, margin: '6px 0 0' }}>
+            <p style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))', lineHeight: 1.6, margin: '6px 0 0' }}>
                 These are the values every mode <i>starts</i> from. Human
                 Tracking and Person Tracker also keep their own sliders for
                 changing them between runs - those act on the running session
@@ -1676,7 +1657,7 @@ function VisionLimitsGroup() {
     }
     return (
         <>
-            <p style={{ fontSize: 11, color: 'hsl(var(--app-text-muted))', lineHeight: 1.6, margin: '0 0 6px' }}>
+            <p style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))', lineHeight: 1.6, margin: '0 0 6px' }}>
                 Per-mission limits, kept separate from the camera calibration
                 above: that describes the rig and changes when the lens does,
                 these are decisions an operator makes for a given flight.
@@ -1745,12 +1726,12 @@ function LinkGroup() {
                             }}
                             disabled={busy}
                             style={{
-                                padding: '6px 12px', borderRadius: 8,
+                                padding: '6px 12px', borderRadius: 6,
                                 background: 'hsl(var(--app-surface-2))',
                                 border: '1px solid hsl(var(--app-border))',
                                 color: 'hsl(var(--app-text))',
-                                fontSize: 12, fontFamily: 'monospace',
-                                cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1,
+                                minHeight: 32, fontSize: 13, fontWeight: 600,
+                                cursor: busy ? 'progress' : 'pointer',
                             }}
                         >
                             {busy ? 'Disconnecting...' : 'Disconnect'}
@@ -1775,9 +1756,9 @@ function LinkGroup() {
                         onChange={e => { setAddressState(e.target.value); setTelemetryAddress(e.target.value) }}
                         placeholder={DEFAULT_TELEMETRY_ADDRESS}
                         style={{
-                            padding: '6px 10px', borderRadius: 8, width: 200,
-                            background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
-                            color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none',
+                            padding: '6px 10px', borderRadius: 6, width: 200,
+                            background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border-strong))',
+                            color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace',
                         }}
                     />
                 }
@@ -1794,9 +1775,9 @@ function LinkGroup() {
                             setBaudState(v); setTelemetryBaud(v)
                         }}
                         style={{
-                            padding: '6px 10px', borderRadius: 8, width: 120,
-                            background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
-                            color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace', outline: 'none',
+                            padding: '6px 10px', borderRadius: 6, width: 120,
+                            background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border-strong))',
+                            color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace',
                         }}
                     >
                         {BAUD_OPTIONS.map(b => <option key={b} value={b}>{b}</option>)}
@@ -1875,7 +1856,7 @@ function SensorsGroup() {
     return (
         <>
             <PrefRow label="Monocular camera" sub="The video feed - always available. Assist-grade: scale-ambiguous, so it never outvotes a real range sensor."
-                right={<span style={{ fontSize: 10, fontFamily: 'monospace', color: '#4ade80' }}>ALWAYS ON</span>} />
+                right={<span style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--app-ok)' }}>ALWAYS ON</span>} />
             {(['tof', 'rangefinder', 'lidar'] as const).map(kind => {
                 const s = has(kind)
                 return (
@@ -1883,8 +1864,8 @@ function SensorsGroup() {
                         label={kind === 'tof' ? 'Time-of-flight (ToF)' : kind === 'rangefinder' ? 'Rangefinder' : 'LiDAR'}
                         sub={s ? `Status: ${s.status === 'ok' ? 'receiving data' : 'no data - fitted but not publishing'}` : 'Fit and stream this sensor to the cloud'}
                         right={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            {s && <span style={{ fontSize: 10, fontFamily: 'monospace', color: s.status === 'ok' ? '#4ade80' : '#fbbf24' }}>{s.status === 'ok' ? 'OK' : 'NO DATA'}</span>}
-                            <Toggle value={!!s} onChange={() => toggleKind(kind)} />
+                            {s && <span style={{ fontSize: 12, fontFamily: 'monospace', color: s.status === 'ok' ? 'var(--app-ok)' : 'var(--app-warn)' }}>{s.status === 'ok' ? 'OK' : 'NO DATA'}</span>}
+                            <Toggle label={kind} value={!!s} onChange={() => toggleKind(kind)} />
                         </div>} />
                 )
             })}
@@ -2023,13 +2004,13 @@ function SettingsNav({ categories, active, onSelect }: {
                     onClick={() => onSelect(id)}
                     aria-current={id === active ? 'page' : undefined}
                     className={cn(
-                        'flex shrink-0 cursor-pointer items-center gap-2.5 whitespace-nowrap rounded-lg border px-3 py-2 text-left text-[12.5px] transition-colors',
+                        'flex min-h-9 shrink-0 cursor-pointer items-center gap-2.5 whitespace-nowrap rounded-md border px-3 py-2 text-left text-[14px] transition-colors duration-[120ms]',
                         id === active
-                            ? 'border-[hsl(var(--app-border))] bg-[hsl(var(--app-surface-2))] text-[hsl(var(--app-text))]'
-                            : 'border-transparent text-[hsl(var(--app-text-muted))] hover:bg-[hsl(var(--app-surface-2))] hover:text-[hsl(var(--app-text))]',
+                            ? 'border-app-border bg-app-accent-soft font-semibold text-app-accent'
+                            : 'border-transparent text-app-text-muted hover:bg-app-surface-2 hover:text-app-text',
                     )}
                 >
-                    <Icon size={14} className="shrink-0" />
+                    <Icon size={16} className="shrink-0" />
                     {label}
                 </button>
             ))}
@@ -2061,20 +2042,20 @@ export default function SettingsPage() {
 
     return (
         <div style={{ height: '100%', overflowY: 'auto' }}>
-            <div style={{ maxWidth: 900, margin: '0 auto', padding: '4px 32px 48px' }}>
+            <div className="px-1 md:px-8" style={{ maxWidth: 900, margin: '0 auto', paddingBottom: 48 }}>
 
-                <div style={{ padding: '18px 0 14px' }}>
-                    <h1 style={{ fontSize: 16, fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>App Settings</h1>
-                    <p style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '3px 0 0' }}>Preferences saved to this device - not sent to the drone</p>
+                <div style={{ padding: '16px 0' }}>
+                    <h1 style={{ fontSize: 'var(--fs-xl)', lineHeight: '28px', fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>Settings</h1>
+                    <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: '4px 0 0' }}>Saved on this device. Nothing here is sent to the drone.</p>
                 </div>
 
                 {mounted && (
-                    <div className="flex flex-col gap-7 md:flex-row">
+                    <div className="flex flex-col gap-6 md:flex-row">
                         <SettingsNav categories={categories} active={activeId} onSelect={select} />
 
                         <div style={{ flex: 1, minWidth: 0, maxWidth: 660 }}>
-                            <h2 style={{ fontSize: 14, fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>{active.label}</h2>
-                            <p style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '3px 0 0' }}>{active.blurb}</p>
+                            <h2 style={{ fontSize: 'var(--fs-lg)', lineHeight: '24px', fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>{active.label}</h2>
+                            <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: '4px 0 0' }}>{active.blurb}</p>
 
                             {active.sections.map(({ label, Body }) => (
                                 <div key={label}>

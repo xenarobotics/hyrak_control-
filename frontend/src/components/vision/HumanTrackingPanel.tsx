@@ -5,10 +5,13 @@ import { useDroneStore } from '@/store/drone'
 import { useStableById } from '@/lib/panelSmoothing'
 import { getSocket } from '@/lib/socket'
 import {
-    Users, Crosshair, Square, Info,
+    Crosshair, Square, Info, User,
     ChevronDown, ChevronUp, Mountain, MoveVertical,
 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import {
+    TONE, LABEL, READOUT, UNIT, SECONDARY, NUM, TILE, TEXT, MUTED, SUBTLE,
+    BORDER, BORDER_STRONG, SURFACE, SURFACE_2, chip, btn, DISABLED, FOCUS,
+} from './panelStyle'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { fetchFollowTuning } from '@/lib/calibration'
 
@@ -22,7 +25,7 @@ const PD_DEFAULTS = { kp: 30.0, kd: 4.0, max_output: 55, deadband: 0.05 }
 const PD_PARAMS = [
     {
         key: 'max_output' as const,
-        label: 'Max Speed',
+        label: 'Max turn speed',
         min: 15, max: 55, step: 1,
         unit: '',
         format: (v: number) => v.toFixed(0),
@@ -46,7 +49,7 @@ const PD_PARAMS = [
     },
     {
         key: 'deadband' as const,
-        label: 'Dead Zone',
+        label: 'Dead zone',
         min: 0.01, max: 0.15, step: 0.01,
         unit: '',
         format: (v: number) => v.toFixed(2),
@@ -63,6 +66,20 @@ function distanceLabel(ratio: number): string {
     return 'Very far'
 }
 
+function InfoTip({ children, width = 240 }: { children: React.ReactNode; width?: number }) {
+    return (
+        <Tooltip>
+            <TooltipTrigger className={FOCUS} aria-label="More info"
+                style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', padding: 2, borderRadius: 6, cursor: 'help' }}>
+                <Info size={13} style={{ color: MUTED }} aria-hidden />
+            </TooltipTrigger>
+            <TooltipContent style={{ maxWidth: width, fontSize: 13, lineHeight: 1.45 }}>
+                {children}
+            </TooltipContent>
+        </Tooltip>
+    )
+}
+
 function ParamSlider({
     label, value, min, max, step, unit, format, tooltip, onChange, disabled,
 }: {
@@ -73,57 +90,75 @@ function ParamSlider({
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ fontSize: 13, color: disabled ? SUBTLE : MUTED }}>
                         {label}
                     </span>
-                    <Tooltip>
-                        <TooltipTrigger style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'help' }}>
-                            <Info size={11} style={{ color: 'hsl(var(--app-text-muted))' }} />
-                        </TooltipTrigger>
-                        <TooltipContent style={{ maxWidth: 220, fontSize: 11, lineHeight: 1.5 }}>
-                            {tooltip}
-                        </TooltipContent>
-                    </Tooltip>
+                    <InfoTip width={220}>{tooltip}</InfoTip>
                 </div>
-                <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text))' }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: disabled ? SUBTLE : TEXT, ...NUM }}>
                     {format(value)}{unit}
                 </span>
             </div>
             <input
+                className={FOCUS}
                 type="range"
                 min={min} max={max} step={step}
                 value={value}
                 disabled={disabled}
+                title={disabled ? 'Stop tracking to adjust' : undefined}
+                aria-label={label}
                 onChange={e => onChange(parseFloat(e.target.value))}
                 style={{
-                    width: '100%', accentColor: '#4ade80',
-                    opacity: disabled ? 0.4 : 1, cursor: disabled ? 'not-allowed' : 'pointer',
+                    width: '100%', minHeight: 24,
+                    accentColor: disabled ? 'hsl(var(--app-border-strong))' : 'var(--app-accent)',
+                    cursor: disabled ? 'not-allowed' : 'pointer',
                 }}
             />
         </div>
     )
 }
 
-// ── Pill toggle button ────────────────────────────────────────────────────────
+// ── Segmented toggle button ───────────────────────────────────────────────────
 function PillToggle({ active, onClick, children }: {
     active: boolean; onClick: () => void; children: React.ReactNode
 }) {
     return (
         <button
+            className={FOCUS}
             onClick={onClick}
+            aria-pressed={active}
             style={{
-                padding: '3px 10px', borderRadius: 20, fontSize: 10,
-                fontFamily: 'monospace', fontWeight: 600, cursor: 'pointer',
-                border: active ? '1px solid #4ade80' : '1px solid hsl(var(--app-border))',
-                background: active ? '#4ade8018' : 'hsl(var(--app-surface-2))',
-                color: active ? '#4ade80' : 'hsl(var(--app-text-muted))',
-                transition: 'all 0.15s',
+                minHeight: 28, padding: '0 10px', borderRadius: 6, fontSize: 13,
+                fontWeight: 600, cursor: 'pointer',
+                border: `1px solid ${active ? TONE.accent.fg : BORDER_STRONG}`,
+                background: active ? TONE.accent.bg : SURFACE_2,
+                color: active ? TONE.accent.fg : MUTED,
+                transition: 'color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out)',
             }}
         >
             {children}
         </button>
     )
+}
+
+const stepBtn: React.CSSProperties = {
+    width: 32, height: 32, borderRadius: 6, flexShrink: 0,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    border: `1px solid ${BORDER_STRONG}`,
+    background: SURFACE_2,
+    cursor: 'pointer', fontSize: 18, fontWeight: 700, lineHeight: 1,
+    color: TEXT,
+}
+
+function nudgeBtn(on: boolean): React.CSSProperties {
+    return on
+        ? {
+            flex: 1, minHeight: 32, borderRadius: 6, fontSize: 13, fontWeight: 700,
+            cursor: 'pointer', userSelect: 'none',
+            border: `1px solid ${TONE.warn.border}`, background: TONE.warn.bg, color: TONE.warn.fg,
+        }
+        : { flex: 1, minHeight: 32, borderRadius: 6, fontSize: 13, fontWeight: 600, userSelect: 'none', ...DISABLED }
 }
 
 const DISTANCE_STEP = 0.06
@@ -211,187 +246,129 @@ export function HumanTrackingPanel() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
             {/* Stats */}
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <div style={{
-                    display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px',
-                    background: 'hsl(var(--app-surface-2))',
-                    border: '1px solid hsl(var(--app-border))',
-                    borderRadius: 8, fontSize: 11, fontFamily: 'monospace',
-                    color: 'hsl(var(--app-text-muted))',
-                }}>
-                    <Users size={12} /> {persons.length} detected
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                    <span style={READOUT}>{persons.length}</span>
+                    <span style={{ ...UNIT, marginLeft: 0 }}>{persons.length === 1 ? 'person' : 'people'}</span>
                 </div>
                 {isTracking && (
-                    <div style={{
-                        display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px',
-                        background: '#E1F5EE18', border: '1px solid #5DCAA5',
-                        borderRadius: 8, fontSize: 11, fontFamily: 'monospace', color: '#5DCAA5',
-                    }}>
-                        <Crosshair size={12} /> TRACKING #{selectedId}
-                    </div>
+                    <span style={{ ...chip('warn'), marginLeft: 'auto' }}>
+                        <Crosshair size={13} aria-hidden /> Following #{selectedId}
+                    </span>
                 )}
             </div>
 
-            {/* Track / Stop buttons */}
+            {/* Track / Stop: amber, it moves the drone */}
             <div style={{ display: 'flex', gap: 8 }}>
                 {!isTracking ? (
-                    <Button
-                        size="sm"
-                        className="flex-1 gap-2 font-mono text-xs"
+                    <button
+                        type="button"
+                        className={FOCUS}
                         disabled={selectedId === null}
                         onClick={handleStartTracking}
+                        title={selectedId === null ? 'Pick a person below or on the video first' : 'Fly after this person'}
                         style={{
-                            background: selectedId !== null ? '#0F6E56' : undefined,
-                            opacity: selectedId === null ? 0.5 : 1,
+                            ...btn('warn'), flex: 1, fontWeight: 700,
+                            ...(selectedId === null ? DISABLED : {}),
                         }}
                     >
-                        <Crosshair size={13} />
-                        {selectedId !== null ? `Track Person #${selectedId}` : 'Select a person first'}
-                    </Button>
+                        <Crosshair size={14} aria-hidden />
+                        {selectedId !== null ? `Follow person #${selectedId}` : 'Select a person first'}
+                    </button>
                 ) : (
-                    <Button
-                        size="sm"
-                        variant="destructive"
-                        className="flex-1 gap-2 font-mono text-xs"
+                    <button
+                        type="button"
+                        className={FOCUS}
                         onClick={handleStopTracking}
+                        style={{ ...btn('danger'), flex: 1, fontWeight: 700, background: TONE.danger.bg }}
                     >
-                        <Square size={13} />
-                        Stop Tracking
-                    </Button>
+                        <Square size={14} aria-hidden />
+                        Stop following
+                    </button>
                 )}
             </div>
 
             {/* ── Flight Controls ───────────────────────────────────────────── */}
-            <div style={{ borderRadius: 8, border: '1px solid hsl(var(--app-border))' }}>
+            <div style={{ borderRadius: 10, border: `1px solid ${BORDER}`, overflow: 'hidden' }}>
                 <div style={{
-                    padding: '7px 12px', background: 'hsl(var(--app-surface-2))',
-                    borderBottom: '1px solid hsl(var(--app-border))',
-                    fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))',
+                    padding: '8px 12px', background: SURFACE_2,
+                    borderBottom: `1px solid ${BORDER}`, ...LABEL,
                 }}>
-                    FLIGHT CONTROLS
+                    Flight controls
                 </div>
 
-                <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: 12 }}>
 
                     {/* ── Distance ── */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <MoveVertical size={12} style={{ color: 'hsl(var(--app-text-muted))', transform: 'rotate(90deg)' }} />
-                            <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>Distance</span>
-                            <Tooltip>
-                                <TooltipTrigger style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'help' }}>
-                                    <Info size={10} style={{ color: 'hsl(var(--app-text-muted))' }} />
-                                </TooltipTrigger>
-                                <TooltipContent style={{ maxWidth: 240, fontSize: 11, lineHeight: 1.5 }}>
-                                    Frame height = 100%. The drone moves forward or backward to keep the person filling {Math.round(distanceRatio * 100)}% of the frame.
-                                    Drag the slider or press − / + to step. Each + press moves 6% closer.
-                                </TooltipContent>
-                            </Tooltip>
-                            <span style={{ marginLeft: 'auto', fontSize: 10, fontFamily: 'monospace', color: '#4ade80' }}>
+                            <MoveVertical size={13} style={{ color: MUTED, transform: 'rotate(90deg)' }} aria-hidden />
+                            <span style={{ fontSize: 13, color: MUTED }}>Distance</span>
+                            <InfoTip>
+                                The drone moves in or back so the person fills {Math.round(distanceRatio * 100)}% of the frame height. Each + is 6% closer.
+                            </InfoTip>
+                            <span style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 700, color: TEXT, ...NUM }}>
                                 {distanceLabel(distanceRatio)} · {Math.round(distanceRatio * 100)}%
                             </span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <button
-                                onClick={handleFurther}
-                                title="Step further"
-                                style={{
-                                    width: 28, height: 28, borderRadius: 6, flexShrink: 0,
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    border: '1px solid hsl(var(--app-border))',
-                                    background: 'hsl(var(--app-surface-2))',
-                                    cursor: 'pointer', fontSize: 18, lineHeight: 1,
-                                    color: 'hsl(var(--app-text))',
-                                }}
-                            >−</button>
+                            <button className={FOCUS} onClick={handleFurther} title="Step further" aria-label="Step further" style={stepBtn}>−</button>
                             <input
+                                className={FOCUS}
                                 type="range"
                                 min={DISTANCE_MIN * 100} max={DISTANCE_MAX * 100} step={1}
                                 value={Math.round(distanceRatio * 100)}
                                 onChange={e => handleDistanceChange(parseFloat(e.target.value) / 100)}
-                                style={{ flex: 1, accentColor: '#4ade80', cursor: 'pointer' }}
+                                aria-label="Follow distance"
+                                style={{ flex: 1, minHeight: 24, accentColor: 'var(--app-accent)', cursor: 'pointer' }}
                             />
-                            <button
-                                onClick={handleCloser}
-                                title="Step closer"
-                                style={{
-                                    width: 28, height: 28, borderRadius: 6, flexShrink: 0,
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    border: '1px solid hsl(var(--app-border))',
-                                    background: 'hsl(var(--app-surface-2))',
-                                    cursor: 'pointer', fontSize: 18, lineHeight: 1,
-                                    color: 'hsl(var(--app-text))',
-                                }}
-                            >+</button>
+                            <button className={FOCUS} onClick={handleCloser} title="Step closer" aria-label="Step closer" style={stepBtn}>+</button>
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0 36px' }}>
-                            <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>Far</span>
-                            <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>Close</span>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0 40px', fontSize: 12, color: MUTED }}>
+                            <span>Far</span>
+                            <span>Close</span>
                         </div>
                     </div>
 
-                    <div style={{ height: 1, background: 'hsl(var(--app-border))', margin: '0 -12px' }} />
+                    <div style={{ height: 1, background: BORDER, margin: '0 -12px' }} />
 
                     {/* ── Altitude ── */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <Mountain size={12} style={{ color: 'hsl(var(--app-text-muted))' }} />
-                                <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>Altitude</span>
-                                <Tooltip>
-                                    <TooltipTrigger style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'help' }}>
-                                        <Info size={10} style={{ color: 'hsl(var(--app-text-muted))' }} />
-                                    </TooltipTrigger>
-                                    <TooltipContent style={{ maxWidth: 220, fontSize: 11, lineHeight: 1.5 }}>
-                                        Fixed: drone holds current altitude. Hold ▲/▼ to nudge up or down while tracking.
-                                        Auto: altitude PD follows the person vertically (experimental).
-                                    </TooltipContent>
-                                </Tooltip>
+                                <Mountain size={13} style={{ color: MUTED }} aria-hidden />
+                                <span style={{ fontSize: 13, color: MUTED }}>Altitude</span>
+                                <InfoTip width={220}>
+                                    Fixed: holds the current height; hold Up or Down to nudge. Auto: follows the person up and down (experimental).
+                                </InfoTip>
                             </div>
                             <div style={{ display: 'flex', gap: 4 }}>
-                                <PillToggle active={altitudeMode === 'fixed'} onClick={() => handleAltitudeMode('fixed')}>FIXED</PillToggle>
-                                <PillToggle active={altitudeMode === 'auto'} onClick={() => handleAltitudeMode('auto')}>AUTO</PillToggle>
+                                <PillToggle active={altitudeMode === 'fixed'} onClick={() => handleAltitudeMode('fixed')}>Fixed</PillToggle>
+                                <PillToggle active={altitudeMode === 'auto'} onClick={() => handleAltitudeMode('auto')}>Auto</PillToggle>
                             </div>
                         </div>
                         {altitudeMode === 'fixed' && (
                             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                                 <button
+                                    className={FOCUS}
                                     onPointerDown={() => { if (isTracking) getSocket().emit('set_altitude_nudge', { velocity: -0.4 }) }}
                                     onPointerUp={() => getSocket().emit('set_altitude_nudge', { velocity: 0 })}
                                     onPointerLeave={() => getSocket().emit('set_altitude_nudge', { velocity: 0 })}
                                     disabled={!isTracking}
-                                    style={{
-                                        flex: 1, padding: '5px 0', borderRadius: 6, fontSize: 10,
-                                        fontFamily: 'monospace', fontWeight: 600,
-                                        cursor: isTracking ? 'pointer' : 'not-allowed',
-                                        border: '1px solid hsl(var(--app-border))',
-                                        background: 'hsl(var(--app-surface-2))',
-                                        color: 'hsl(var(--app-text))',
-                                        opacity: isTracking ? 1 : 0.4,
-                                        userSelect: 'none',
-                                    }}
+                                    title={isTracking ? 'Hold to climb' : 'Start following first'}
+                                    style={nudgeBtn(isTracking)}
                                 >▲ Up</button>
-                                <span style={{
-                                    flex: '1 1 0', fontSize: 9, fontFamily: 'monospace',
-                                    color: 'hsl(var(--app-text-muted))', textAlign: 'center',
-                                }}>
-                                    {isTracking ? 'Hold to move' : 'Start tracking first'}
+                                <span style={{ flex: '1 1 0', fontSize: 13, color: MUTED, textAlign: 'center' }}>
+                                    {isTracking ? 'Hold to move' : 'Follow first'}
                                 </span>
                                 <button
+                                    className={FOCUS}
                                     onPointerDown={() => { if (isTracking) getSocket().emit('set_altitude_nudge', { velocity: 0.4 }) }}
                                     onPointerUp={() => getSocket().emit('set_altitude_nudge', { velocity: 0 })}
                                     onPointerLeave={() => getSocket().emit('set_altitude_nudge', { velocity: 0 })}
                                     disabled={!isTracking}
-                                    style={{
-                                        flex: 1, padding: '5px 0', borderRadius: 6, fontSize: 10,
-                                        fontFamily: 'monospace', fontWeight: 600,
-                                        cursor: isTracking ? 'pointer' : 'not-allowed',
-                                        border: '1px solid hsl(var(--app-border))',
-                                        background: 'hsl(var(--app-surface-2))',
-                                        color: 'hsl(var(--app-text))',
-                                        opacity: isTracking ? 1 : 0.4,
-                                        userSelect: 'none',
-                                    }}
+                                    title={isTracking ? 'Hold to descend' : 'Start following first'}
+                                    style={nudgeBtn(isTracking)}
                                 >▼ Down</button>
                             </div>
                         )}
@@ -402,19 +379,15 @@ export function HumanTrackingPanel() {
 
             {/* Live command readout */}
             {isTracking && cmd && (
-                <div style={{
-                    padding: '10px 12px', borderRadius: 8,
-                    background: 'hsl(var(--app-surface-2))',
-                    border: '1px solid hsl(var(--app-border))',
-                }}>
-                    <div style={{ fontSize: 10, color: 'hsl(var(--app-text-muted))', fontFamily: 'monospace', marginBottom: 6 }}>
-                        COMMAND OUTPUT
+                <div style={{ padding: '10px 12px', ...TILE }}>
+                    <div style={{ ...LABEL, marginBottom: 6 }}>
+                        Command output
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, fontFamily: 'monospace', fontSize: 11 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, fontSize: 13, ...NUM }}>
                         {Object.entries(cmd).filter(([k]) => k !== 'type').map(([k, v]) => (
                             <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                                <span style={{ color: 'hsl(var(--app-text-muted))' }}>{k}</span>
-                                <span style={{ color: (v as number) !== 0 ? '#60a5fa' : 'hsl(var(--app-text-muted))', fontWeight: 500 }}>
+                                <span className="font-code" style={{ color: MUTED, fontSize: 12 }}>{k}</span>
+                                <span style={{ color: (v as number) !== 0 ? TONE.accent.fg : MUTED, fontWeight: 700 }}>
                                     {v as number}
                                 </span>
                             </div>
@@ -424,27 +397,25 @@ export function HumanTrackingPanel() {
             )}
 
             {/* PD Parameters - collapsible */}
-            <div style={{
-                borderRadius: 8, overflow: 'hidden',
-                border: '1px solid hsl(var(--app-border))',
-            }}>
+            <div style={{ borderRadius: 10, overflow: 'hidden', border: `1px solid ${BORDER}` }}>
                 <button
+                    className={FOCUS}
                     onClick={() => setPdOpen(o => !o)}
+                    aria-expanded={pdOpen}
                     style={{
                         width: '100%', display: 'flex', alignItems: 'center',
-                        justifyContent: 'space-between', padding: '8px 12px',
-                        background: 'hsl(var(--app-surface-2))',
-                        border: 'none', cursor: 'pointer',
-                        color: 'hsl(var(--app-text-muted))', fontSize: 10, fontFamily: 'monospace',
-                        borderBottom: pdOpen ? '1px solid hsl(var(--app-border))' : 'none',
+                        justifyContent: 'space-between', minHeight: 36, padding: '0 12px',
+                        background: SURFACE_2,
+                        border: 'none', cursor: 'pointer', ...LABEL,
+                        borderBottom: pdOpen ? `1px solid ${BORDER}` : 'none',
                     }}
                 >
-                    <span>PD CONTROLLER TUNING</span>
-                    {pdOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                    <span>Follow tuning</span>
+                    {pdOpen ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
                 </button>
 
                 {pdOpen && (
-                    <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: 12 }}>
                         {PD_PARAMS.map(p => (
                             <ParamSlider
                                 key={p.key}
@@ -459,20 +430,16 @@ export function HumanTrackingPanel() {
                             />
                         ))}
                         {isTracking && (
-                            <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: 0 }}>
-                                Stop tracking to adjust parameters
+                            <p style={{ ...SECONDARY, margin: 0 }}>
+                                Stop following to adjust these.
                             </p>
                         )}
                         <button
+                            className={FOCUS}
                             onClick={() => { setPd(savedPd); emitPdParams(savedPd) }}
                             disabled={isTracking}
-                            style={{
-                                fontSize: 10, fontFamily: 'monospace', padding: '4px 8px',
-                                borderRadius: 6, border: '1px solid hsl(var(--app-border))',
-                                background: 'none', cursor: isTracking ? 'not-allowed' : 'pointer',
-                                color: 'hsl(var(--app-text-muted))', opacity: isTracking ? 0.4 : 1,
-                                alignSelf: 'flex-end',
-                            }}
+                            title={isTracking ? 'Stop following to reset' : 'Back to the values saved in Settings'}
+                            style={{ ...btn(), alignSelf: 'flex-end', ...(isTracking ? DISABLED : {}) }}
                         >
                             Reset to saved
                         </button>
@@ -483,11 +450,11 @@ export function HumanTrackingPanel() {
             {/* Person list */}
             {!isTracking && persons.length > 0 && selectedId === null && (
                 <div style={{
-                    padding: '8px 12px', borderRadius: 8,
-                    background: '#E6F1FB18', border: '1px solid #85B7EB',
-                    fontSize: 11, fontFamily: 'monospace', color: '#60a5fa',
+                    padding: '8px 12px', borderRadius: 10,
+                    background: TONE.accent.bg, border: `1px solid ${TONE.accent.border}`,
+                    fontSize: 13, color: TEXT,
                 }}>
-                    ↓ Click a person to select them - IDs are stable across frames
+                    Pick a person below or tap one on the video.
                 </div>
             )}
 
@@ -495,64 +462,64 @@ export function HumanTrackingPanel() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {persons.map((p) => {
                         const isSelected = p.id === selectedId
+                        const t = isTracking ? TONE.warn : TONE.accent
                         return (
-                            <div
+                            <button
+                                type="button"
                                 key={p.id}
+                                className={FOCUS}
                                 onClick={() => handleSelectPerson(p.id)}
+                                aria-pressed={isSelected}
+                                aria-disabled={isTracking || undefined}
+                                title={isTracking && !isSelected ? 'Stop following to pick someone else' : undefined}
                                 style={{
-                                    display: 'flex', alignItems: 'center',
-                                    justifyContent: 'space-between',
-                                    padding: '10px 12px', borderRadius: 8,
+                                    display: 'flex', alignItems: 'center', width: '100%', textAlign: 'left',
+                                    justifyContent: 'space-between', gap: 10,
+                                    padding: '10px 12px', borderRadius: 10,
                                     cursor: isTracking ? 'default' : 'pointer',
-                                    background: isSelected
-                                        ? (isTracking ? '#E1F5EE18' : '#E6F1FB18')
-                                        : 'hsl(var(--app-surface-2))',
-                                    border: `1px solid ${isSelected
-                                        ? (isTracking ? '#5DCAA5' : '#85B7EB')
-                                        : 'hsl(var(--app-border))'}`,
-                                    transition: 'all 0.15s',
+                                    background: isSelected ? t.bg : SURFACE_2,
+                                    border: `1px solid ${isSelected ? t.fg : BORDER}`,
+                                    color: TEXT,
+                                    transition: 'opacity var(--dur) var(--ease-out), background-color var(--dur-fast) var(--ease-out)',
                                     // Dimmed when held past its last sighting,
                                     // so a row that is about to age out reads
                                     // as fading rather than vanishing.
-                                    opacity: isTracking && !isSelected ? 0.4 : p.stale ? 0.5 : 1,
+                                    opacity: isTracking && !isSelected ? 0.6 : p.stale ? 0.6 : 1,
                                 }}
                             >
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                    <span style={{ fontSize: 18 }}>
-                                        {isTracking && isSelected ? '🎯' : isSelected ? '👆' : '🧍'}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                                    <span style={{
+                                        width: 32, height: 32, borderRadius: 6, flexShrink: 0,
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        background: isSelected ? t.bg : SURFACE, color: isSelected ? t.fg : MUTED,
+                                        border: `1px solid ${isSelected ? t.border : BORDER}`,
+                                    }} aria-hidden>
+                                        {isSelected ? <Crosshair size={16} /> : <User size={16} />}
                                     </span>
-                                    <div>
-                                        <div style={{
-                                            fontSize: 12, fontWeight: 500, fontFamily: 'monospace',
-                                            color: isSelected ? (isTracking ? '#5DCAA5' : '#60a5fa') : 'hsl(var(--app-text))',
-                                        }}>
+                                    <div style={{ minWidth: 0 }}>
+                                        <div style={{ fontSize: 14, fontWeight: 700, color: TEXT, ...NUM }}>
                                             Person #{p.id}
-                                            {isSelected && !isTracking && (
-                                                <span style={{ marginLeft: 8, fontSize: 10, color: '#60a5fa' }}>SELECTED</span>
-                                            )}
-                                            {isTracking && isSelected && (
-                                                <span style={{ marginLeft: 8, fontSize: 10, color: '#5DCAA5' }}>TRACKING</span>
-                                            )}
                                         </div>
-                                        <div style={{ fontSize: 10, color: 'hsl(var(--app-text-muted))', marginTop: 1 }}>
-                                            confidence: {(p.conf * 100).toFixed(0)}%
+                                        <div style={{ ...SECONDARY, ...NUM }}>
+                                            {(p.conf * 100).toFixed(0)}% sure
                                         </div>
                                     </div>
                                 </div>
-                                {isSelected && !isTracking && (
-                                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#60a5fa' }} />
+                                {isSelected && (
+                                    <span style={chip(isTracking ? 'warn' : 'accent')}>
+                                        {isTracking ? 'Following' : 'Selected'}
+                                    </span>
                                 )}
-                            </div>
+                            </button>
                         )
                     })}
                 </div>
             ) : (
                 <div style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    height: 80, color: 'hsl(var(--app-text-muted))',
-                    fontSize: 12, fontFamily: 'monospace',
+                    height: 80, ...SECONDARY,
                 }}>
-                    {cvResults ? 'No persons in frame' : 'Start stream to detect people'}
+                    {cvResults ? 'No one in frame' : 'Start the video to find people'}
                 </div>
             )}
 
