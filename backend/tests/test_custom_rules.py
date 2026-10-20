@@ -596,3 +596,27 @@ async def test_live_rule_edits_need_the_pilot_to_opt_in_again(rig, monkeypatch):
     await actions.set_enabled(rig.s, True)
     await actions.run_moving(rig.s, h, actions._base(h, rig.s))
     assert last_event(rig)["status"] == "done" and rig.tel.calls == ["mode:HOLD"]
+
+
+async def test_renaming_a_class_onto_a_moving_rule_or_shortening_its_wait_is_a_change(rig, monkeypatch):
+    from app.models_custom import runtime
+    live = {}
+    monkeypatch.setattr(runtime, "live", lambda model_id: live if model_id == "m1" else None)
+    spec = rig.s.mode.spec
+    spec.via_catalogue, spec.version, spec.labels = False, 1, ["person", "car"]
+    follow = rules.clean_rule(rule(action="follow", confirm=True))       # label "person"
+    live["rules"] = [follow]
+    await actions.set_enabled(rig.s, True)
+    # An editor renames "car" to "person": the follow rule would now chase cars.
+    live.update({"labels": ["person", "person"], "labels_version": 1})
+    await actions.on_result("sess-1", "custom:m1", {})
+    await settle()
+    assert rig.sio.of("model_control")[-1]["reason_code"] == "rules_changed"
+
+    live.update({"labels": ["person", "car"]})
+    await actions.set_enabled(rig.s, True)
+    live["rules"] = [{**follow, "cooldown_s": 5.0}]                     # fires more often
+    await actions.on_result("sess-1", "custom:m1", {})
+    await settle()
+    assert not actions.is_enabled("sess-1")
+    assert rig.sio.of("model_control")[-1]["reason_code"] == "rules_changed"

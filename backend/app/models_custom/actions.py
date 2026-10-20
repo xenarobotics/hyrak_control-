@@ -150,19 +150,27 @@ def _custom_mode(session) -> Optional[str]:
 
 def _moving_rules(session) -> tuple:
     """The running model's current hover/follow rules, as a comparable
-    snapshot (live edits included, as the analyzer reads them)."""
+    snapshot of everything that decides when they fire (live edits
+    included, as the analyzer reads them). Each rule carries the class
+    indices its label matches under the current class names, so renaming
+    a class onto a moving rule's label counts as a change too."""
     spec = getattr(getattr(session, "mode", None), "spec", None)
     if spec is None:
         return ()
     rules = getattr(spec, "rules", None)
+    labels = list(getattr(spec, "labels", None) or (getattr(spec, "spec", None) or {}).get("labels") or [])
     if not getattr(spec, "via_catalogue", False):
         live = runtime.live(spec.model_id) or {}
         if "rules" in live:
             rules = live["rules"]
+        if live.get("labels") and live.get("labels_version") == getattr(spec, "version", None):
+            labels = list(live["labels"])
+    lowered = [str(n).lower() for n in labels]
     return tuple(sorted(
-        (str(r.get("id")), str(r.get("label")).lower(), float(r.get("min_score", 0)),
-         float(r.get("for_s", 0)), r.get("action"), bool(r.get("confirm", True)),
-         bool(r.get("enabled", True)))
+        (str(r.get("id")), str(r.get("label")).lower(),
+         tuple(i for i, n in enumerate(lowered) if n == str(r.get("label")).lower()),
+         float(r.get("min_score", 0)), float(r.get("for_s", 0)), float(r.get("cooldown_s", 0)),
+         r.get("action"), bool(r.get("confirm", True)), bool(r.get("enabled", True)))
         for r in (rules or []) if r.get("action") in _rules.MOVING))
 
 
