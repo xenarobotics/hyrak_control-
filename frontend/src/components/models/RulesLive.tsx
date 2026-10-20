@@ -1,20 +1,21 @@
 'use client'
 
-// The running model's rules, compact: each switched-on rule with how close
-// it is to firing (a thin bar filling to its "for" time, or "Waiting 12 s"
-// after it fired) and what it did last. When a rule can hover or follow,
-// the "Allow model control" switch for this flight sits here too, with why
-// it switched itself off, and while following, a Stop button.
+// The running model's rules, at a glance. When a rule can hover or follow,
+// the "Model control" switch for this flight comes first (off at the start
+// of every flight; why it turned itself off shows as one chip), and while
+// following, a Stop bar. Then one row per switched-on rule: its action icon
+// inside a ring that fills while the class is seen and drains while the
+// rule waits to fire again, and one status chip. The full sentence and the
+// last message are in the row's tooltip.
 
 import { useEffect } from 'react'
-import { BellRing, Crosshair, Hand, Loader, MapPin, Square, Volume2, VolumeX } from 'lucide-react'
+import { ArrowRight, Crosshair, Loader, ShieldCheck, ShieldOff, Square, Volume2, VolumeX } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { ModelRule, RuleAction } from '@/lib/models'
+import type { ModelRule } from '@/lib/models'
 import { ACTION_WORDS, ensureRulesFeed, movesDrone, pct, reasonText, useRulesStore } from '@/lib/modelRules'
 import type { CVResult, RuleEvent } from '@/types/vision'
+import { ACTION_ICON, sentenceOf } from './ModelRules'
 import { css as s } from './ui'
-
-const ACTION_ICON: Record<RuleAction, typeof BellRing> = { alert: BellRing, mark: MapPin, hover: Hand, follow: Crosshair }
 
 export function RulesLive({ rules, cv }: { rules: ModelRule[]; cv: CVResult | null }) {
     useEffect(() => { ensureRulesFeed() }, [])
@@ -26,7 +27,7 @@ export function RulesLive({ rules, cv }: { rules: ModelRule[]; cv: CVResult | nu
 
     return (
         <div className={s.section}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className={s.rulesHead}>
                 <span className={s.label}>Rules</span>
                 <button type="button" className={s.iconBtn} style={{ marginLeft: 'auto', width: 26, height: 26 }}
                     onClick={() => setMuted(!muted)} aria-label={muted ? 'Turn rule sounds on' : 'Mute rule sounds'}
@@ -34,58 +35,65 @@ export function RulesLive({ rules, cv }: { rules: ModelRule[]; cv: CVResult | nu
                     {muted ? <VolumeX size={13} aria-hidden /> : <Volume2 size={13} aria-hidden />}
                 </button>
             </div>
-            {on.length === 0 && <p className={s.muted}>All rules are off. Turn one on in the model&apos;s settings.</p>}
             {canMove && <ModelControl cv={cv} />}
-            {on.map(r => (
-                <LiveRule key={r.id} rule={r} cv={cv} last={lastByRule[r.id] ?? null} />
-            ))}
+            {on.length === 0
+                ? <p className={s.muted}>All rules are off.</p>
+                : (
+                    <ul className={s.liveRules}>
+                        {on.map(r => <LiveRule key={r.id} rule={r} cv={cv} last={lastByRule[r.id] ?? null} />)}
+                    </ul>
+                )}
         </div>
     )
 }
+
+const RING = 2 * Math.PI * 13
 
 function LiveRule({ rule: r, cv, last }: { rule: ModelRule; cv: CVResult | null; last: RuleEvent | null }) {
     const st = cv?.rules_state?.find(x => x.rule_id === r.id) ?? null
     const Icon = ACTION_ICON[r.action]
-    const cooling = st && st.cooling_s > 0
+    const cooling = !!st && st.cooling_s > 0
     const seen = st?.seen_for_s ?? 0
     const fill = cooling ? Math.min(1, st!.cooling_s / Math.max(1, r.cooldown_s))
         : r.for_s > 0 ? Math.min(1, seen / r.for_s) : seen > 0 ? 1 : 0
-    const state = st?.firing ? 'firing' : cooling ? 'cooling' : 'seen'
-    const line = !cv ? 'Waiting for the first frame...'
-        : st?.firing ? 'Doing it now'
-            : cooling ? `Waiting ${Math.ceil(st!.cooling_s)} s before it can do it again`
-                : seen > 0 ? (r.for_s > 0 ? `Seen for ${seen.toFixed(1)} of ${r.for_s} s` : 'Seen')
-                    : `Watching for ${r.label}`
+    const ring = st?.firing ? 'firing' : cooling ? 'cooling' : 'seen'
+
+    // One chip: what is happening now, or how the last attempt went.
+    const recent = last && last.ts && Date.now() / 1000 - last.ts < 20 ? last : null
+    const chip: { text: string; tone: string } =
+        !cv ? { text: 'Starting', tone: s.chipMute }
+            : recent?.status === 'awaiting_confirm' ? { text: 'Asking you', tone: s.chipInfo }
+                : recent && (recent.status === 'refused' || recent.status === 'stopped') ? { text: 'Not done', tone: s.chipWarn }
+                    : st?.firing ? { text: 'Now', tone: s.chipOk }
+                        : cooling ? { text: `Again in ${Math.ceil(st!.cooling_s)} s`, tone: s.chipMute }
+                            : seen > 0 ? { text: r.for_s > 0 ? `Seen ${seen.toFixed(1)} s` : 'Seen', tone: s.chipInfo }
+                                : { text: 'Watching', tone: s.chipMute }
+    const tip = [sentenceOf(r), last ? `Last: ${last.message}` : null].filter(Boolean).join('\n')
 
     return (
-        <div className={cn(s.inset, s.liveRule)}>
-            <div className={s.liveRuleHead}>
-                <Icon size={13} aria-hidden style={{ color: 'var(--cm-accent)', flexShrink: 0 }} />
-                <span>
-                    <strong style={{ fontWeight: 600 }}>{r.label}</strong>
-                    <span className={s.help}> above {pct(r.min_score)}{r.for_s > 0 ? ` for ${r.for_s} s` : ''}</span>
+        <li className={s.liveRow} title={tip}>
+            <span className={s.ring} data-state={ring} data-moves={movesDrone(r.action)}>
+                <svg viewBox="0 0 32 32" aria-hidden>
+                    <circle cx="16" cy="16" r="13" className={s.ringTrack} />
+                    <circle cx="16" cy="16" r="13" className={s.ringFill}
+                        strokeDasharray={RING} strokeDashoffset={RING * (1 - fill)} />
+                </svg>
+                <Icon size={13} aria-hidden />
+            </span>
+            <span className={s.liveText}>
+                <span className={s.liveFlow}>
+                    <strong>{r.label}</strong>
+                    <ArrowRight size={11} aria-hidden style={{ color: 'var(--cm-ink-2)' }} />
+                    <span>{ACTION_WORDS[r.action].short}</span>
                 </span>
-                <span className={cn(s.chip, s.chipMute)}>{ACTION_WORDS[r.action].short}</span>
-            </div>
-            <span className={s.liveBar} data-state={state} aria-hidden><i style={{ width: `${fill * 100}%` }} /></span>
-            <span className={s.help} aria-live="off">{line}</span>
-            {last && <LastEvent e={last} />}
-        </div>
+                <span className={s.ruleNumbers}>{pct(r.min_score)}{r.for_s > 0 ? ` · ${r.for_s} s` : ''}</span>
+            </span>
+            <span className={cn(s.chip, chip.tone)}>{chip.text}</span>
+        </li>
     )
 }
 
-function LastEvent({ e }: { e: RuleEvent }) {
-    const bad = e.status === 'refused' || e.status === 'stopped'
-    const at = e.ts ? new Date(e.ts * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''
-    return (
-        <span className={s.help} style={{ display: 'flex', gap: 8, justifyContent: 'space-between', color: bad ? 'var(--cm-warn)' : undefined }}>
-            <span style={{ minWidth: 0 }}>Last: {e.message}</span>
-            <span className={s.mono} style={{ flexShrink: 0 }}>{at}</span>
-        </span>
-    )
-}
-
-/** "Allow model control" for this flight. Off at the start of every session. */
+/** "Model control" for this flight. Off at the start of every session. */
 function ModelControl({ cv }: { cv: CVResult | null }) {
     const control = useRulesStore(st => st.control)
     const pending = useRulesStore(st => st.controlPending)
@@ -95,29 +103,33 @@ function ModelControl({ cv }: { cv: CVResult | null }) {
     const lost = cv?.follow?.active && (cv.follow.lost_s ?? 0) > 0
     // Why it is off, when the server switched it off or refused it.
     const why = !on ? reasonText(control.reason_code, control.reason) : null
+    const Shield = on ? ShieldCheck : ShieldOff
 
     return (
         <div className={cn(s.inset, s.control)} data-on={on}>
-            <label className={s.toggle} style={{ color: 'var(--cm-ink)', fontSize: 'var(--cm-text)', fontWeight: 600 }}>
-                <input type="checkbox" checked={on} disabled={pending} aria-describedby="cm-control-help"
-                    onChange={e => request(e.target.checked)} />
-                Allow model control
-                {pending && <Loader size={12} className="animate-spin motion-reduce:animate-none" aria-label="Waiting for the server" />}
+            <label className={s.controlRow}>
+                <Shield size={18} aria-hidden className={s.controlIcon} />
+                <span className={s.controlText}>
+                    <span className={s.controlTitle}>Model control</span>
+                    <span className={s.controlSub} id="cm-control-help">
+                        {on ? 'Rules can stop or move the drone' : 'Rules will not move the drone'}
+                    </span>
+                </span>
+                {pending && <Loader size={13} className="animate-spin motion-reduce:animate-none" aria-label="Waiting for the server" />}
+                <span className={cn(s.toggle, s.toggleBig)}>
+                    <input type="checkbox" checked={on} disabled={pending} aria-describedby="cm-control-help"
+                        aria-label="Allow model control for this flight"
+                        title="Off again at the start of every flight. Taking the remote, a staff takeover or a lost link turns it off."
+                        onChange={e => request(e.target.checked)} />
+                </span>
             </label>
-            <p id="cm-control-help" className={s.help} style={{ margin: 0 }}>
-                {on
-                    ? 'On for this flight. Hover and Follow rules can now stop or move the drone. Taking the remote, a staff takeover or a lost link turns it off.'
-                    : 'Off. Hover and Follow rules will not move the drone until you turn this on. It is off again at the start of every flight.'}
-            </p>
-            {why && (
-                <p className={s.help} role="status" style={{ margin: 0, color: 'var(--cm-warn)' }}>Turned off: {why}</p>
-            )}
+            {why && <span className={cn(s.chip, s.chipWarn, s.whyChip)} role="status" title={why}>Off: {why}</span>}
             {followLabel && on && (
                 <div className={s.following}>
                     <Crosshair size={14} aria-hidden style={{ color: 'var(--cm-accent)' }} />
                     <span style={{ flex: 1, minWidth: 0 }}>Following {followLabel}{lost ? ' (out of sight)' : ''}</span>
                     <button type="button" className={cn(s.btn, s.danger)} style={{ height: 26 }}
-                        onClick={() => request(false)} title="Stops following and turns model control off">
+                        onClick={() => request(false)} title="Stops following, holds, and turns model control off">
                         <Square size={11} aria-hidden /> Stop
                     </button>
                 </div>
