@@ -10,6 +10,7 @@ import { apiFetch, apiJson } from './api'
 import { authHeaders, redirectToLogin } from './auth'
 import { getServerUrl } from './server-url'
 import type { RuleAction } from '@/types/vision'
+import type { AttachmentKind } from './attachments'
 
 export type ModelTask = 'detect' | 'classify'
 export type ModelStatus = 'checking' | 'ready' | 'failed'
@@ -54,10 +55,17 @@ export interface ModelRule {
     /** Seen this long without a break, 0..30 s. */
     for_s: number
     action: RuleAction
-    /** Ask the pilot first (hover and follow only). */
+    /** Ask the pilot first (hover, follow and attachment). Always on for an
+     *  attachment action that can hurt someone. */
     confirm: boolean
     /** After firing it waits this long before it can fire again, 5..600 s. */
     cooldown_s: number
+    /** action 'attachment': which kind of attachment (the first enabled one
+     *  of that kind on the session's drone is used) and which of its actions. */
+    attachment_kind?: AttachmentKind
+    attachment_action?: string
+    /** action 'attachment', sprayer level: 0..100 %. */
+    value?: number
 }
 
 export const MAX_RULES = 6

@@ -1,0 +1,156 @@
+/* Attachments: Config cards, the add/edit panel, the Fly/Command strip and
+   the mission waypoint picker. Reads the --cm-* tokens of the models UI
+   (wrap in useCmClass().root), so Dev and Normal mode both work.
+   Amber = can hurt someone; cyan accent otherwise. */
+
+/* ── Config section ───────────────────────────────────────────────── */
+.section { display: flex; flex-direction: column; gap: 10px; max-width: 760px; }
+.head { display: flex; align-items: center; gap: 8px; min-height: 30px; flex-wrap: wrap; }
+.headDrone { font-size: var(--cm-small); color: var(--cm-ink-2); }
+.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+
+.card {
+  display: grid; grid-template-columns: var(--cm-icon) minmax(0, 1fr) auto; gap: 6px 12px; align-items: center;
+  padding: 10px 12px; background: var(--cm-panel); border: 1px solid var(--cm-line); border-radius: var(--cm-radius);
+}
+.card[data-off='true'] > .tile, .card[data-off='true'] > .main { opacity: 0.5; }
+.normal .card { border-width: 2px; padding: 14px; }
+.tile {
+  width: var(--cm-icon); height: var(--cm-icon); border-radius: var(--cm-radius-sm);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  color: var(--cm-accent); background: var(--cm-accent-soft);
+}
+.tile[data-hazard='true'] { color: var(--cm-warn); background: var(--cm-warn-soft); }
+.main { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.name { font-size: var(--cm-name); font-weight: 650; color: var(--cm-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.tools { display: flex; align-items: center; gap: 2px; }
+.testRow { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding-top: 8px; border-top: 1px dashed var(--cm-line); }
+.testTag { font-family: var(--cm-label-font); font-size: var(--cm-label-size); letter-spacing: var(--cm-label-track); text-transform: var(--cm-label-case); color: var(--cm-ink-2); margin-right: 2px; }
+.confirmRow { grid-column: 1 / -1; }
+.empty { padding: 18px 12px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; color: var(--cm-ink-2); font-size: var(--cm-small); }
+.emptyIcons { display: flex; gap: 14px; color: var(--cm-accent); opacity: 0.8; flex-wrap: wrap; justify-content: center; }
+
+/* ── action buttons (Test, the strip) ─────────────────────────────── */
+.act {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  height: calc(var(--cm-btn-h) - 2px); padding: 0 10px; border-radius: var(--cm-radius-sm);
+  border: 1px solid var(--cm-line); background: var(--cm-panel-2); color: var(--cm-ink);
+  font-size: var(--cm-small); font-weight: 600; white-space: nowrap; cursor: pointer;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+}
+.act:hover:not(:disabled) { border-color: var(--cm-accent-line); }
+.act[data-hazard='true'] { color: var(--cm-warn); border-color: color-mix(in srgb, var(--cm-warn) 40%, transparent); }
+.act[data-armed='true'] { background: var(--cm-warn); border-color: var(--cm-warn); color: var(--cm-panel); }
+.normal .act[data-armed='true'] { background: #FDBA21; border-color: #FDBA21; color: #3D2A00; }
+.act:disabled { opacity: 0.4; cursor: not-allowed; }
+.act:focus-visible { outline: 2px solid var(--cm-accent); outline-offset: 1px; }
+.normal .act { border-width: 2px; }
+
+/* ── the strip (Fly panel / Command rail) ─────────────────────────── */
+.strip { display: flex; flex-direction: column; gap: 6px; }
+.group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.groupHead {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 100%;
+  font-size: var(--cm-small); color: var(--cm-ink-2);
+}
+.groupHead > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.groupIcon { flex-shrink: 0; color: var(--cm-accent); }
+.groupIcon[data-hazard='true'] { color: var(--cm-warn); }
+.last { margin-left: auto; flex-shrink: 0; }
+.dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--cm-ok); }
+.dot[data-ok='false'] { background: var(--cm-warn); }
+
+/* Command rail: 72 px wide, everything stacked, always on the dark rail */
+.rail {
+  gap: 8px;
+  --cm-panel: #0b0e13; --cm-panel-2: rgba(255, 255, 255, 0.04); --cm-line: rgba(255, 255, 255, 0.10);
+  --cm-ink: #e5e7eb; --cm-ink-2: #a1a1aa;
+  --cm-accent: #22d3ee; --cm-accent-line: rgba(34, 211, 238, 0.40);
+  --cm-warn: #fbbf24; --cm-warn-soft: rgba(251, 191, 36, 0.10); --cm-ok: #4ade80;
+}
+.rail .group { flex-direction: column; align-items: stretch; gap: 4px; }
+.rail .groupHead { flex: none; justify-content: center; gap: 4px; font-size: 9px; font-family: var(--cm-label-font); letter-spacing: 0.04em; }
+.rail .groupHead > span { max-width: 44px; }
+.rail .act { width: 100%; height: 40px; padding: 0 2px; flex-direction: column; gap: 2px; font-size: 9.5px; letter-spacing: 0.03em; }
+.rail .act > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.rail .last { margin-left: 0; }
+
+/* sprayer level popover */
+.pop {
+  z-index: 3000; width: 220px; padding: 12px; display: flex; flex-direction: column; gap: 10px;
+  background: var(--cm-panel); color: var(--cm-ink); border: 1px solid var(--cm-line);
+  border-radius: var(--cm-radius); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  font-size: var(--cm-small);
+}
+.popRow { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; }
+.range { width: 100%; accent-color: var(--cm-warn); min-height: 24px; margin: 0; }
+.rangeCyan { accent-color: var(--cm-accent); }
+.value { font-family: var(--cm-label-font); font-weight: 700; min-width: 40px; text-align: right; }
+.levels { display: flex; gap: 4px; }
+.levels button { flex: 1; }
+
+/* ── add / edit panel ─────────────────────────────────────────────── */
+.step { display: flex; flex-direction: column; gap: 8px; }
+.stepHead { display: flex; align-items: center; gap: 6px; }
+.kinds { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.kind {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  min-height: 60px; padding: 6px 4px; border-radius: var(--cm-radius-sm);
+  background: var(--cm-panel-2); border: 1px solid var(--cm-line); color: var(--cm-ink-2);
+  font-size: var(--cm-small); font-weight: 600; cursor: pointer;
+}
+.kind:hover:not(:disabled) { color: var(--cm-ink); border-color: var(--cm-accent-line); }
+.kind[aria-checked='true'] { color: var(--cm-accent); background: var(--cm-accent-soft); border-color: var(--cm-accent); }
+.kind[aria-checked='true'][data-hazard='true'] { color: var(--cm-warn); background: var(--cm-warn-soft); border-color: var(--cm-warn); }
+.kind:disabled { cursor: default; }
+.kind:focus-visible { outline: 2px solid var(--cm-accent); outline-offset: 1px; }
+.normal .kind { min-height: 72px; font-size: 14px; border-width: 2px; }
+
+.wireRow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.hint { display: inline-flex; align-items: center; gap: 5px; font-size: var(--cm-small); color: var(--cm-ink-2); }
+.hint svg { flex-shrink: 0; cursor: help; color: var(--cm-accent); }
+
+.values { display: flex; flex-direction: column; gap: 6px; }
+.valueRow { display: grid; grid-template-columns: 72px 1fr 44px; align-items: center; gap: 8px; }
+.valueName { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; overflow: hidden; }
+.valueName[data-hazard='true'] { color: var(--cm-warn); }
+
+.stateRow { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; }
+.stateRange { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 44px; align-items: center; gap: 8px; }
+.stateBox { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; }
+
+.limitRow { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; }
+.num { width: 76px; text-align: right; }
+
+/* ── mission: "At this waypoint" (dark waypoint panel) ────────────── */
+.wpChips { display: flex; flex-direction: column; gap: 4px; }
+.wpChip {
+  display: flex; align-items: center; gap: 6px; padding: 4px 4px 4px 8px; border-radius: 8px;
+  background: rgba(34, 211, 238, 0.08); border: 1px solid rgba(34, 211, 238, 0.30); color: #cffafe;
+  font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 10px; font-weight: 600;
+}
+.wpChip[data-hazard='true'] { background: rgba(251, 191, 36, 0.08); border-color: rgba(251, 191, 36, 0.40); color: #fde68a; }
+.wpChip > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wpX { padding: 3px; border-radius: 5px; background: transparent; border: none; color: inherit; cursor: pointer; opacity: 0.7; }
+.wpX:hover { opacity: 1; background: rgba(255, 255, 255, 0.1); }
+.wpPick { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.12); }
+.wpGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+.wpBtn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 28px; padding: 0 6px;
+  border-radius: 6px; background: rgba(255, 255, 255, 0.05); border: 1.5px solid rgba(255, 255, 255, 0.10); color: #9ca3af;
+  font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 9.5px; font-weight: 700; cursor: pointer;
+}
+.wpBtn > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wpBtn[aria-pressed='true'] { color: #22d3ee; border-color: #22d3ee; background: rgba(34, 211, 238, 0.12); }
+.wpBtn[aria-pressed='true'][data-hazard='true'] { color: #fbbf24; border-color: #fbbf24; background: rgba(251, 191, 36, 0.12); }
+.wpBtn:disabled { opacity: 0.35; cursor: not-allowed; }
+.wpMuted { font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 9.5px; color: #6b7280; line-height: 1.5; }
+
+@media (prefers-reduced-motion: reduce) {
+  .act { transition: none; }
+}
+
+/* keeps a disabled button's tooltip */
+.tipWrap { display: inline-flex; cursor: not-allowed; }
+.rail .tipWrap { display: flex; width: 100%; }

@@ -14,20 +14,39 @@
 import { useEffect, useRef, useState } from 'react'
 import {
     ArrowRight, BellRing, Check, ChevronDown, Crosshair, Hand, Loader, MapPin, MessageCircleQuestion,
-    Plus, ShieldCheck, Trash2,
+    Plug, Plus, ShieldCheck, Trash2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { updateModel, type ApiProblem, type CustomModel, type ModelPatch, type ModelRule, type RuleAction } from '@/lib/models'
 import {
     ACTION_WORDS, ACTIONS, MAX_RULES, movesDrone, needsBox, newRule, pct, rulesOf, seconds,
 } from '@/lib/modelRules'
+import {
+    KINDS, KIND_META, actionText, isLevel, ruleActionsFor, ruleHazard, type AttachmentKind,
+} from '@/lib/attachments'
 import { Callout, Hint, css as s } from './ui'
 
 const SAVE_DELAY_MS = 400
 const FOR_S = [0, 1, 3, 5, 10]
 const COOLDOWNS = [10, 30, 60, 300]
 
-export const ACTION_ICON: Record<RuleAction, typeof BellRing> = { alert: BellRing, mark: MapPin, hover: Hand, follow: Crosshair }
+export const ACTION_ICON: Record<RuleAction, typeof BellRing> = { alert: BellRing, mark: MapPin, hover: Hand, follow: Crosshair, attachment: Plug }
+
+/** An attachment rule's action, as the drone's button would say it ("Drop",
+ *  "Spray 50%"), and its kind's icon. */
+export function attachmentWords(r: ModelRule): { icon: typeof BellRing; short: string; long: string } {
+    const kind = r.attachment_kind && KIND_META[r.attachment_kind] ? r.attachment_kind : null
+    if (!kind) return { icon: Plug, short: 'Attachment', long: 'use an attachment' }
+    const act = ruleActionsFor(kind).find(a => a.id === r.attachment_action)
+    const short = act ? actionText(act, isLevel(act) ? r.value ?? 50 : null) : 'Attachment'
+    return { icon: KIND_META[kind].icon, short, long: `${KIND_META[kind].defaultName.toLowerCase()}: ${short.toLowerCase()}` }
+}
+
+/** The action's icon and short word, attachment rules included. */
+export function actionFace(r: ModelRule): { icon: typeof BellRing; short: string } {
+    if (r.action === 'attachment') return attachmentWords(r)
+    return { icon: ACTION_ICON[r.action], short: ACTION_WORDS[r.action].short }
+}
 
 /** What the action does, as short facts instead of a paragraph. */
 const ACTION_FACTS: Record<RuleAction, string[]> = {
@@ -35,13 +54,15 @@ const ACTION_FACTS: Record<RuleAction, string[]> = {
     mark: ['Pin on the map', 'Saved with the flight'],
     hover: ['Stops and holds', 'Pauses a mission'],
     follow: ['Up to 3 m/s', 'Keeps its height', 'Lost 3 s: hovers'],
+    attachment: ['First one of that kind', 'Set up in Config'],
 }
 
 type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved' } | { kind: 'error'; error: ApiProblem; patch: ModelPatch }
 
 export function sentenceOf(r: ModelRule): string {
     const when = r.for_s > 0 ? ` for ${seconds(r.for_s)}` : ''
-    return `When ${r.label} is seen above ${pct(r.min_score)}${when}, then ${ACTION_WORDS[r.action].label.toLowerCase()}.`
+    const then = r.action === 'attachment' ? attachmentWords(r).long : ACTION_WORDS[r.action].label.toLowerCase()
+    return `When ${r.label} is seen above ${pct(r.min_score)}${when}, then ${then}.`
 }
 
 /** "50% · 1 s · again after 30 s" */
@@ -110,8 +131,25 @@ export function RulesSection({ model, labels, editable, onSaved }: {
             setNote('Only one Follow rule can be on at a time. Turn the other one off first.')
             return
         }
-        // Asking first only means something for hover and follow.
-        if ('action' in patch && patch.action !== cur.action) next.confirm = movesDrone(next.action)
+        // Asking first only means something for hover, follow and attachments.
+        if ('action' in patch && patch.action !== cur.action) {
+            next.confirm = movesDrone(next.action)
+            if (next.action === 'attachment') {
+                next.attachment_kind = next.attachment_kind ?? 'release'
+                next.attachment_action = next.attachment_action ?? 'drop'
+            } else {
+                delete next.attachment_kind
+                delete next.attachment_action
+                delete next.value
+            }
+        }
+        if (next.action === 'attachment') {
+            const lvl = next.attachment_action === 'level'
+            if (lvl && next.value == null) next.value = 50
+            if (!lvl) delete next.value
+            // It can hurt someone: it always asks first.
+            if (ruleHazard(next.attachment_kind, next.attachment_action)) next.confirm = true
+        }
         commit(rules.map(r => (r.id === id ? next : r)))
     }
 
@@ -193,7 +231,7 @@ export function RulesSection({ model, labels, editable, onSaved }: {
 
 /** The card's face: class -> action, and the numbers underneath. */
 function RuleSummary({ rule: r }: { rule: ModelRule }) {
-    const Icon = ACTION_ICON[r.action]
+    const { icon: Icon, short } = actionFace(r)
     const moves = movesDrone(r.action)
     return (
         <span className={s.ruleFace}>
@@ -201,7 +239,7 @@ function RuleSummary({ rule: r }: { rule: ModelRule }) {
                 <span className={s.ruleClass}>{r.label || 'pick a class'}</span>
                 <ArrowRight size={13} aria-hidden style={{ color: 'var(--cm-ink-2)', flexShrink: 0 }} />
                 <span className={s.ruleAction} data-moves={moves}>
-                    <Icon size={12} aria-hidden /> {ACTION_WORDS[r.action].short}
+                    <Icon size={12} aria-hidden /> {short}
                 </span>
                 {moves && r.confirm && (
                     <MessageCircleQuestion size={13} aria-label="Asks first" style={{ color: 'var(--cm-ink-2)', flexShrink: 0 }} />
@@ -230,6 +268,7 @@ function RuleCard({ rule: r, n, labels, classify, open, onToggle, followTaken, o
     const labelValue = known ?? r.label
     const options = known || !r.label ? labels : [...labels, r.label]
     const moves = movesDrone(r.action)
+    const forcedAsk = r.action === 'attachment' && ruleHazard(r.attachment_kind, r.attachment_action)
 
     return (
         <li className={cn(s.inset, s.ruleCard)} data-off={!r.enabled} data-open={open} aria-label={`Rule ${n}`}>
@@ -290,17 +329,19 @@ function RuleCard({ rule: r, n, labels, classify, open, onToggle, followTaken, o
                                 )
                             })}
                         </div>
+                        {r.action === 'attachment' && <AttachmentPicker id={id} rule={r} onChange={onChange} />}
                         <span className={s.factRow}>
                             {ACTION_FACTS[r.action].map(f => <span key={f} className={s.fact}>{f}</span>)}
                         </span>
                         {moves && (
                             <div className={s.movesRow}>
-                                <label className={s.toggle} style={{ color: 'var(--cm-ink)' }}>
-                                    <input type="checkbox" checked={r.confirm}
+                                <label className={s.toggle} style={{ color: 'var(--cm-ink)' }}
+                                    title={forcedAsk ? 'Always asks first: it can hurt someone' : undefined}>
+                                    <input type="checkbox" checked={r.confirm || forcedAsk} disabled={forcedAsk}
                                         onChange={e => onChange({ confirm: e.target.checked })} />
                                     Ask me first
                                 </label>
-                                <span className={s.movesNote} title="Hover and Follow only work after the pilot turns on Allow model control during the flight.">
+                                <span className={s.movesNote} title="Hover, Follow and Attachment rules only work after the pilot turns on Allow model control during the flight.">
                                     <ShieldCheck size={12} aria-hidden /> Pilot allows in flight
                                 </span>
                             </div>
@@ -337,5 +378,56 @@ function Segment({ label, values, value, show, onPick }: {
                 <button key={v} type="button" aria-pressed={v === value} onClick={() => onPick(v)}>{show(v)}</button>
             ))}
         </span>
+    )
+}
+
+/** Which attachment and what it does: kind tiles, then the kind's actions;
+ *  a sprayer adds its level. */
+function AttachmentPicker({ id, rule: r, onChange }: {
+    id: string
+    rule: ModelRule
+    onChange: (patch: Partial<ModelRule>) => void
+}) {
+    const kind: AttachmentKind = r.attachment_kind && KIND_META[r.attachment_kind] ? r.attachment_kind : 'release'
+    const actions = ruleActionsFor(kind)
+    const current = actions.find(a => a.id === r.attachment_action) ?? null
+    const pick = (k: AttachmentKind) => {
+        const first = ruleActionsFor(k)[0]
+        onChange({ attachment_kind: k, attachment_action: first?.id })
+    }
+    return (
+        <div className={s.attPick}>
+            <div className={s.attKinds} role="radiogroup" aria-label="Which attachment">
+                {KINDS.map(k => {
+                    const I = KIND_META[k].icon
+                    return (
+                        <button key={k} type="button" role="radio" aria-checked={kind === k}
+                            className={s.attKind} title={KIND_META[k].hint} onClick={() => pick(k)}>
+                            <I size={15} aria-hidden />
+                            <span>{KIND_META[k].word}</span>
+                        </button>
+                    )
+                })}
+            </div>
+            <div className={s.ruleField}>
+                <span className={s.ruleFieldName} id={`${id}-att`}>Does</span>
+                <span className={cn(s.segment, s.ruleSegment)} role="group" aria-labelledby={`${id}-att`}>
+                    {actions.map(a => (
+                        <button key={a.id} type="button" aria-pressed={current?.id === a.id}
+                            data-hazard={a.hazard} title={a.hazard ? 'Can hurt someone: always asks first' : undefined}
+                            onClick={() => onChange({ attachment_action: a.id })}>{a.label}</button>
+                    ))}
+                </span>
+            </div>
+            {isLevel(current) && (
+                <div className={s.ruleField}>
+                    <label htmlFor={`${id}-lvl`} className={s.ruleFieldName}>Level</label>
+                    <input id={`${id}-lvl`} type="range" min={0} max={100} step={5}
+                        value={r.value ?? 50} aria-valuetext={`${r.value ?? 50}%`} className={s.ruleRange}
+                        onChange={e => onChange({ value: Number(e.target.value) })} />
+                    <span className={s.ruleValue}>{r.value ?? 50}%</span>
+                </div>
+            )}
+        </div>
     )
 }

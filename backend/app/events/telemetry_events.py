@@ -271,6 +271,10 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 # a red-zone lock, a pilot or a takeover.
                 from app.models_custom import actions as model_actions
                 model_actions.on_telemetry(session.session_id)
+                # A mission's "at this waypoint" attachment actions run when
+                # the drone gets there (app/attachments/mission.py).
+                from app.attachments import mission as attachment_mission
+                attachment_mission.on_telemetry(session, manager)
                 # Mirror to any /admin observers watching this session
                 if observer.has_watchers(session.session_id):
                     asyncio.create_task(
@@ -581,6 +585,8 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         session.zone_lock = False
         from app.models_custom import actions as model_actions
         await model_actions.switch_off(session.session_id, "link_lost")
+        from app.attachments import mission as attachment_mission
+        attachment_mission.clear(session.session_id)
         session.telemetry_connected = False
         session.hardware_uid = None
         session.drone = None
@@ -1120,6 +1126,21 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                     f"for {session.session_id[:8]}"
                 )
 
+            # Attachment actions at waypoints (app/attachments/mission.py):
+            # checked against the drone's attachments now, run by the
+            # backend when each waypoint is reached, never written into the
+            # flight controller's mission. Hazard ones need the pilot's tick.
+            from app.attachments import mission as attachment_mission
+            try:
+                attachment_plan = await attachment_mission.prepare(
+                    session, waypoints, allow=data.get("allow_attachment_actions") is True,
+                    terrain=terrain_follow)
+            except attachment_mission.MissionActionError as e:
+                await sio.emit("mission_upload_result", {
+                    "ok": False, "msg": str(e), "code": e.code,
+                }, to=sid)
+                return
+
             logger.info(
                 f"Uploading {len(waypoints)} waypoints "
                 f"(terrain_follow={terrain_follow}) for session {session.session_id[:8]}"
@@ -1127,6 +1148,7 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
 
             ok, err_msg = await tel.upload_mission(waypoints, terrain_follow=terrain_follow)
             if ok:
+                attachment_mission.arm(session.session_id, attachment_plan)
                 # Tell avoidance where this aircraft is now going, so an
                 # obstacle on the way is routed around, not just held for.
                 try:
@@ -1149,6 +1171,8 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 "count": len(waypoints) if ok else 0,
                 "terrain_follow": terrain_follow,
                 "permit_id": permit["id"] if ok and permit else None,
+                "attachment_actions": sum(len(v) for v in attachment_plan.by_wp.values())
+                if ok and attachment_plan else 0,
                 "msg": f"Mission uploaded: {len(waypoints)} waypoints" if ok
                        else f"Upload failed: {err_msg}",
             }, to=sid)

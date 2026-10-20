@@ -25,12 +25,14 @@ export const ACTION_WORDS: Record<RuleAction, { label: string; short: string; hi
     mark: { label: 'Pin it on the map', short: 'Pin', hint: 'Drops a pin where it is on the ground and keeps it with the flight, even when Record to map is off.' },
     hover: { label: 'Hover (drone stops)', short: 'Hover', hint: 'The drone stops and holds where it is. A running mission is paused.' },
     follow: { label: 'Follow it (drone follows)', short: 'Follow', hint: 'The drone follows it at up to 3 m/s and keeps its height. It stops and holds if it loses sight for 3 s.' },
+    attachment: { label: 'Use an attachment', short: 'Attachment', hint: 'Runs an attachment on the drone: drop, open, light on, spray. Set them up in Config, Attachments.' },
 }
 
-export const ACTIONS: RuleAction[] = ['alert', 'mark', 'hover', 'follow']
+export const ACTIONS: RuleAction[] = ['alert', 'mark', 'hover', 'follow', 'attachment']
 
-/** hover and follow move the drone. */
-export const movesDrone = (a: RuleAction) => a === 'hover' || a === 'follow'
+/** hover, follow and attachment actions move the drone or something on it:
+ *  amber, and they need the pilot to allow model control. */
+export const movesDrone = (a: RuleAction) => a === 'hover' || a === 'follow' || a === 'attachment'
 
 /** Classify models have no box, so nothing to pin or follow. */
 export const needsBox = (a: RuleAction) => a === 'mark' || a === 'follow'
@@ -50,7 +52,13 @@ export const REASON_TEXT: Record<string, string> = {
     mode_changed: 'The AI model was stopped or changed.',
     link_lost: 'The link to the drone was lost.',
     failed: 'The drone did not accept the command.',
-    rules_changed: 'The hover or follow rules were changed. Turn it on again to accept the new rules.',
+    rules_changed: 'The hover, follow or attachment rules were changed. Turn it on again to accept the new rules.',
+    no_attachment: 'The drone has no such attachment switched on.',
+    too_low: 'The drone is below the minimum height for this.',
+    too_high: 'The drone is above the maximum height for this.',
+    people_below: 'The AI sees a person below.',
+    disabled: 'This attachment is switched off in Config.',
+    not_supported: 'This flight controller cannot drive it.',
 }
 
 export function reasonText(code?: string | null, message?: string | null): string | null {

@@ -2,20 +2,21 @@
 
 // App-wide notices from custom model rules (rule_event) and the old single
 // alert (model_alert): a small stack, top centre, below the zone, refusal and
-// takeover banners. Info goes away by itself after 6 s; a question
+// takeover banners. Attachment results (attachment_result) share the stack. Info goes away by itself after 6 s; a question
 // ("Person seen (82%). Follow it?") stays until answered or its 10 s run out.
 // Mounted once in the platform layout.
 
 import { useEffect, useState } from 'react'
 import { BellRing, Info, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react'
 import { ACTION_WORDS, ensureRulesFeed, useRulesStore, type RuleToast } from '@/lib/modelRules'
+import { ensureAttachmentFeed } from '@/lib/attachments'
 
 const INFO_MS = 6000
 const WARN_MS = 9000
 
 export function RuleToasts() {
     const toasts = useRulesStore(s => s.toasts)
-    useEffect(() => { ensureRulesFeed() }, [])
+    useEffect(() => { ensureRulesFeed(); ensureAttachmentFeed() }, [])
     if (toasts.length === 0) return null
     return (
         <div aria-label="AI rule notices"
@@ -54,7 +55,8 @@ function Toast({ t }: { t: RuleToast }) {
             ? { bg: 'rgba(120, 53, 15, .96)', line: 'rgba(251, 191, 36, .55)', ink: '#fef3c7', icon: '#fbbf24' }
             : { bg: 'rgba(15, 23, 32, .96)', line: 'rgba(148, 163, 184, .35)', ink: '#e2e8f0', icon: '#22d3ee' }
     const Icon = confirm || t.action === 'alert' ? BellRing : t.kind === 'warn' ? TriangleAlert : Info
-    const verb = t.action ? ACTION_WORDS[t.action].short : 'Do it'
+    const verb = t.action && t.action !== 'attachment' ? ACTION_WORDS[t.action].short : 'Do it'
+    const ask = t.action === 'attachment' ? ' Do it?' : ` ${verb} it?`
     const secs = Math.ceil(left / 1000)
 
     return (
@@ -64,7 +66,7 @@ function Toast({ t }: { t: RuleToast }) {
             <div className="flex items-start gap-2.5">
                 <Icon size={15} className="mt-px shrink-0" style={{ color: tone.icon }} aria-hidden />
                 <span className="min-w-0 flex-1 leading-relaxed">
-                    {t.message}{confirm && t.action && !t.message.trim().endsWith('?') ? ` ${verb} it?` : ''}
+                    {t.message}{confirm && t.action && !t.message.trim().endsWith('?') ? ask : ''}
                 </span>
                 <button type="button" onClick={() => setMuted(!muted)}
                     aria-label={muted ? 'Turn rule sounds on' : 'Mute rule sounds'} title={muted ? 'Sounds off' : 'Sounds on'}

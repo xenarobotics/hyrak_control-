@@ -14,7 +14,7 @@ import {
     Search, AlertTriangle, Cpu, Move, Zap,
     Download, Upload, Power,
     Satellite, Compass as CompassIcon, Activity, Mountain,
-    Move3d, Camera, AlignCenterHorizontal, RotateCw, Loader,
+    Move3d, Camera, AlignCenterHorizontal, RotateCw, Loader, Package,
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { PX4_META, getGroupFromKey, humanizeParamKey, type PX4Group, type PX4Meta } from '@/lib/px4-params-meta'
@@ -22,6 +22,8 @@ import { getRfDownlinkPort, setRfDownlinkPort, getRfUplinkPort, setRfUplinkPort,
 import { useLiveScope } from '@/hooks/useLiveScope'
 import { disconnectTelemetryLink } from '@/hooks/useDrone'
 import { ViewOnlyFence } from '@/components/layout/ViewOnly'
+import { AttachmentsSection } from '@/components/attachments/AttachmentsConfig'
+import { useSessionAttachments } from '@/lib/attachments'
 
 function ls<T>(key: string, fallback: T): T {
     if (typeof window === 'undefined') return fallback
@@ -38,7 +40,7 @@ function hColor(pct: number, locked = false) {
     return '#f87171'
 }
 
-type SectionId = 'connection' | 'vehicle' | 'sensors' | 'radio' | 'power' | 'safety' | 'flight' | 'parameters'
+type SectionId = 'connection' | 'vehicle' | 'sensors' | 'radio' | 'power' | 'safety' | 'flight' | 'parameters' | 'attachments'
 type VehicleProfile = { name: string; airframe: string; firmware: string; frameId: string }
 type PowerProfile   = { cells: string; capacity: string; warnPct: number; critPct: number; critAction: string }
 type SafetyProfile  = { signalLoss: string; maxAltEnabled: boolean; maxAlt: number; maxDistEnabled: boolean; maxDist: number; rthAlt: number }
@@ -83,6 +85,7 @@ const DOMAIN_META: { id: SectionId; label: string; icon: React.ElementType; desc
     { id: 'safety',     label: 'Safety',      icon: Shield,            desc: 'Failsafes, terrain following, and geofence limits' },
     { id: 'flight',     label: 'Flight',      icon: Navigation,        desc: 'Altitude defaults and return-to-home behaviour' },
     { id: 'parameters', label: 'Advanced',     icon: Terminal,          desc: '50+ PX4 parameters across 8 subsystems - search, browse, and edit' },
+    { id: 'attachments', label: 'Attachments', icon: Package,           desc: 'What is fitted to the drone: drop hook, gripper, winch, light, speaker, sprayer' },
 ]
 
 const PARAM_CATS = [
@@ -3061,6 +3064,7 @@ export default function ConfigPage() {
     const telStatus    = useDroneStore(s => s.telemetryStatus)
     const telemetry    = useDroneStore(s => s.telemetry)
     const terrainFollow = useMissionStore(s => s.terrainFollow)
+    const fitted = useSessionAttachments()
 
     const [view, setView]       = useState<'grid' | 'workspace'>('grid')
     const [section, setSection] = useState<SectionId>('connection')
@@ -3099,6 +3103,7 @@ export default function ConfigPage() {
         safety:      100,
         flight:      100,
         parameters:  80,
+        attachments: 100,
     }
     const readiness = Math.round(DOMAIN_META.slice(0, 7).reduce((s, d) => s + domainPcts[d.id], 0) / 7)
     const tabs = DOMAIN_META.map(d => ({ ...d, color: hColor(domainPcts[d.id], d.id === 'parameters'), pct: domainPcts[d.id] }))
@@ -3152,6 +3157,7 @@ export default function ConfigPage() {
                                   : d.id === 'power'       ? [{ k: 'pack', v: `${power.cells}S · ${power.capacity}mAh` }, { k: 'critical', v: `${power.critAction.toUpperCase()} @ ${power.critPct}%` }]
                                   : d.id === 'safety'      ? [{ k: 'terrain', v: terrainFollow ? 'Follow ON' : 'Follow OFF' }, { k: 'loss', v: `${safety.signalLoss.toUpperCase()} on loss` }]
                                   : d.id === 'flight'      ? [{ k: 'takeoff', v: `${flight.takeoffAlt}m` }, { k: 'RTH', v: `${safety.rthAlt}m` }]
+                                  : d.id === 'attachments' ? [{ k: 'fitted', v: !fitted.droneId ? 'No drone' : fitted.attachments.length ? fitted.attachments.map(x => x.name).join(', ') : 'None' }]
                                   : [{ k: 'params', v: `${PARAMS_DB.length} available` }, { k: 'subsystems', v: `${PARAM_CATS.length} sections` }]
                                 }
                                 onClick={() => openSection(d.id)} />
@@ -3175,6 +3181,8 @@ export default function ConfigPage() {
                         {section === 'flight'     && <FlightWorkspace f={flight} onUpdate={upF} rthAlt={safety.rthAlt} maxAlt={safety.maxAlt} maxAltEnabled={safety.maxAltEnabled} />}
                         {section === 'parameters' && <ParametersWorkspace />}
                         </ViewOnlyFence>
+                        {/* Reads for everyone; owners and admins edit (the server says who). */}
+                        {section === 'attachments' && <AttachmentsSection />}
                     </div>
                     <SectionTabBar current={section} onSelect={setSection} onBack={goToGrid} tabs={tabs} />
                 </div>

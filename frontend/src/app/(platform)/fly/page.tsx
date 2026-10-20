@@ -21,6 +21,7 @@ import { SurfaceCard } from '@/components/layout/SurfaceCard'
 import { useHydrated } from '@/hooks/useClientValue'
 import { useAccess } from '@/hooks/useAccess'
 import { ViewOnlyFence } from '@/components/layout/ViewOnly'
+import { AttachmentStrip } from '@/components/attachments/AttachmentStrip'
 
 // Leaflet touches `window` - no SSR
 const FleetMap = dynamic(() => import('@/components/swarm/FleetMap'), {
@@ -242,6 +243,11 @@ export default function FlyPage() {
                         <SurfaceCard title="FLIGHT CONTROLS">
                             <ViewOnlyFence><DroneControls /></ViewOnlyFence>
                         </SurfaceCard>
+
+                        {/* Hidden when the drone has no attachments, and for viewers. */}
+                        {!swarmEnabled && (
+                            <AttachmentStrip frame={strip => <SurfaceCard title="ATTACHMENTS">{strip}</SurfaceCard>} />
+                        )}
 
                         {!swarmEnabled && (
                             <SurfaceCard title="AVOIDANCE">

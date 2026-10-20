@@ -439,6 +439,20 @@ setting still runs unchanged.
   follow commands HOLD only when nobody else owns the drone: not after a
   takeover (`_stop_ai_steering` holds), a pilot override, a red-zone lock
   (the pushback flies it out) or a lost link.
+* Attachment action (2026-10-21, docs/ATTACHMENTS.md): `action:
+  "attachment"` with `attachment_kind` (release, gripper, winch, light,
+  speaker, sprayer, custom), `attachment_action` (an action id of that
+  kind; any `[a-z0-9_]{1,24}` state id for custom) and, for the sprayer's
+  `level`, `attachment_value` 0 to 100 (default 50). Validated in
+  `rules.validate_rules` (so `service._valid_rules`). It needs model
+  control like hover and follow (`rules.NEEDS_CONTROL`), is part of the
+  accepted snapshot (`actions._moving_rules`, attachment fields included),
+  so a live edit switches control off with `rules_changed`. An action
+  that can hurt someone (and every custom one) is stored with `confirm:
+  true` and always asks first. At fire time `actions.run_attachment`
+  resolves the first enabled attachment of that kind on the session's
+  drone (`no_attachment` when none) and runs it through
+  `app/attachments/control.use`, the same guards as a button press.
 
 ## Original design (2026-10-17)
 

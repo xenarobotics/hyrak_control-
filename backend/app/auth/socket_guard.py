@@ -193,6 +193,11 @@ async def _refuse(sid: str, session, event: str, msg: str, code: str = FORBIDDEN
                 # The button waits for an action_result; give it one.
                 await _sio.emit("action_result", {"action": data.get("action"), "ok": False,
                                                   "error": msg, "code": code}, to=sid)
+            elif event == "attachment_action" and isinstance(data, dict):
+                # The strip's button waits for an attachment_result.
+                await _sio.emit("attachment_result", {
+                    "attachment_id": data.get("attachment_id"), "action_id": data.get("action_id"),
+                    "ok": False, "reason_code": code, "message": msg, "ts": time.time()}, to=sid)
         except Exception:
             pass
     return False

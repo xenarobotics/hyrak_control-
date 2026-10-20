@@ -5,6 +5,7 @@ import { useMissionStore, RTL_SENTINEL_ID } from '@/store/mission'
 import { WP_META } from '@/types/mission'
 import type { WaypointType } from '@/types/mission'
 import { Trash2, X, Home, RotateCcw, Compass } from 'lucide-react'
+import { WaypointActions } from '@/components/attachments/WaypointActions'
 
 function computeBearing(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const φ1 = (lat1 * Math.PI) / 180
@@ -406,6 +407,12 @@ export default function WaypointEditor() {
           onChange={v => updateWaypoint(wp.id, { turnRadius: v })}
         />
       </div>
+
+      {/* Attachment actions run here (uploaded with the mission) */}
+      <WaypointActions
+        actions={wp.actions ?? []}
+        onChange={next => updateWaypoint(wp.id, { actions: next.length ? next : undefined })}
+      />
 
       {/* Delete */}
       <button

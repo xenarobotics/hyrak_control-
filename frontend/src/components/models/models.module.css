@@ -565,7 +565,8 @@
 .ruleSegment { width: fit-content; max-width: 100%; flex-wrap: wrap; }
 .ruleSegment button { padding: 0 9px; }
 
-.actionTiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.actionTiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.actionTiles .actionTile > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .actionTile {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
   min-height: 56px; padding: 6px 4px; border-radius: var(--cm-radius-sm);
@@ -613,6 +614,24 @@
 .toggleBig input:checked::after { transform: translateX(16px); }
 .whyChip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; text-transform: none; letter-spacing: 0; font-family: inherit; }
 .following { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--cm-radius-sm); background: var(--cm-accent-soft); border: 1px solid var(--cm-accent-line); color: var(--cm-ink); font-size: var(--cm-small); font-weight: 600; }
+/* attachment rule: kind tiles, then the action segment (hazard = amber) */
+.attPick { display: flex; flex-direction: column; gap: 8px; }
+.attKinds { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.attKind {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  min-height: 44px; padding: 4px 2px; border-radius: var(--cm-radius-sm);
+  background: var(--cm-panel); border: 1px solid var(--cm-line); color: var(--cm-ink-2);
+  font-size: 9.5px; font-weight: 600; cursor: pointer;
+}
+.attKind > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attKind:hover { color: var(--cm-ink); border-color: var(--cm-accent-line); }
+.attKind[aria-checked='true'] { color: var(--cm-warn); background: var(--cm-warn-soft); border-color: var(--cm-warn); }
+.attKind:focus-visible { outline: 2px solid var(--cm-accent); outline-offset: 1px; }
+.normal .attKinds { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.normal .attKind { min-height: 56px; font-size: 13px; }
+.ruleSegment button[data-hazard='true'][aria-pressed='true'] { color: var(--cm-warn); }
+@media (max-width: 420px) { .attKinds { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
 @media (prefers-reduced-motion: reduce) {
   .ruleCard, .ruleChev, .actionTile, .ringFill { transition: none; }
 }

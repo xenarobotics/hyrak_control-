@@ -6,6 +6,7 @@
 //   MISSION  a dedicated START (becomes RESUME after a hold mid-mission,
 //            RESTART once the mission finished) - HOLD pauses it
 //   RECOVER  RTL, land
+//   PAYLOAD  the drone's attachments (only when it has some)
 //   KILL     alone at the bottom, second tap within 3 s
 // Same commands the Fly tab sends (useDrone.sendAction). The aircraft's
 // refusal, if any, shows under the buttons for a few seconds.
@@ -16,6 +17,7 @@ import { useDrone } from '@/hooks/useDrone'
 import { useDroneStore, type ActionResult } from '@/store/drone'
 import type { AvoidanceStatus } from '@/lib/avoidance'
 import { actingFloorM } from './avoidFloor'
+import { AttachmentStrip } from '@/components/attachments/AttachmentStrip'
 
 type Tone = 'default' | 'go' | 'warn' | 'danger' | 'fire'
 const TONES: Record<Tone, { fg: string; bg: string; bd: string }> = {
@@ -153,6 +155,8 @@ export function ActionRail({ avoid }: { avoid?: AvoidanceStatus | null }) {
                 title="Return to launch" />
             <RailButton icon={<ArrowDownToLine size={17} />} label="LAND" tone="warn" disabled={!linked || !inAir}
                 active={mode === 'LAND'} pending={pend('land')} onClick={() => sendAction('land')} title="Land here" />
+
+            <AttachmentStrip variant="rail" frame={strip => <><Group label="PAYLOAD" />{strip}</>} />
 
             <div className="flex-1 min-h-2" />
             {flash && (

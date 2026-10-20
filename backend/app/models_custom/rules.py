@@ -7,9 +7,12 @@ A rule is a sentence on a model, stored in models.settings.rules:
 
     {id, enabled, label, min_score, for_s, action, confirm, cooldown_s}
 
-action is alert, mark, hover or follow. hover and follow move the drone;
-app/models_custom/actions.py runs them behind the pilot's "Allow model
-control" switch and its guards. This module has:
+action is alert, mark, hover, follow or attachment. hover and follow move
+the drone; attachment uses something fitted to it (app/attachments) and
+adds {attachment_kind, attachment_action, attachment_value?}. Those three
+need the pilot's "Allow model control" switch and run behind its guards in
+app/models_custom/actions.py; an attachment action that can hurt someone
+always asks first. This module has:
 
   * validate_rules: the PATCH check (service.py turns RuleError into a
     400 bad_request with the reason).
@@ -34,8 +37,11 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 MAX_RULES = 6
-ACTIONS = ("alert", "mark", "hover", "follow")
+ACTIONS = ("alert", "mark", "hover", "follow", "attachment")
 MOVING = frozenset({"hover", "follow"})
+# Everything that needs model control on, and whose rules the pilot accepts
+# by switching it on (actions._moving_rules).
+NEEDS_CONTROL = MOVING | {"attachment"}
 BOX_ACTIONS = frozenset({"mark", "follow"})      # need a box: not for classify models
 GAP_S = 0.5            # a gap this long still counts as "seen continuously"
 CONFIRM_S = 10.0       # "Ask me first": the chip is on screen this long
@@ -85,22 +91,47 @@ def clean_rule(r, *, labels: Optional[List[str]] = None, task: str = "detect") -
         label = by_lower[label.lower()]
     action = r.get("action")
     if action not in ACTIONS:
-        raise RuleError("a rule's action is alert, mark, hover or follow")
+        raise RuleError("a rule's action is alert, mark, hover, follow or attachment")
     if task == "classify" and action in BOX_ACTIONS:
         raise RuleError(f"{action} needs boxes, and this model names the whole picture")
     enabled = r.get("enabled", True)
     confirm = r.get("confirm", True)
     if not isinstance(enabled, bool) or not isinstance(confirm, bool):
         raise RuleError("enabled and confirm are true or false")
-    return {
+    out = {
         "id": rid, "enabled": enabled, "label": label,
         "min_score": _num(r, "min_score", 0.5, 0.05, 0.99, "min_score"),
         "for_s": _num(r, "for_s", 1.0, 0.0, 30.0, "for_s"),
         "action": action,
-        # Only moving actions ask first; alert and mark just happen.
-        "confirm": confirm if action in MOVING else False,
+        # Only actions that need model control ask first; alert and mark
+        # just happen.
+        "confirm": confirm if action in NEEDS_CONTROL else False,
         "cooldown_s": _num(r, "cooldown_s", 30.0, 5.0, 600.0, "cooldown_s"),
     }
+    if action == "attachment":
+        out.update(_attachment_fields(r))
+        if out.pop("_hazard"):
+            out["confirm"] = True        # can hurt someone: always asks first
+    return out
+
+
+def _attachment_fields(r: dict) -> dict:
+    from app.attachments import kinds
+    kind = r.get("attachment_kind")
+    if kind not in kinds.KINDS:
+        raise RuleError("pick which kind of attachment the rule uses")
+    act = r.get("attachment_action")
+    known = kinds.kind_action_ids(kind)
+    if not isinstance(act, str) or not re.match(r"^[a-z0-9_]{1,24}$", act) \
+            or (known is not None and act not in known):
+        names = ", ".join(sorted(known)) if known else "one of its states"
+        raise RuleError(f"a {kind} rule's attachment action is {names}")
+    out = {"attachment_kind": kind, "attachment_action": act,
+           "_hazard": kinds.default_hazard(kind, act)}
+    if kind == "sprayer" and act == "level":
+        out["attachment_value"] = _num(r, "attachment_value", kinds.DEFAULT_LEVEL, 0.0, 100.0,
+                                       "the spray level")
+    return out
 
 
 def validate_rules(rules, *, labels: Optional[List[str]] = None,

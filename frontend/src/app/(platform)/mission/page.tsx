@@ -22,6 +22,8 @@ import { AirspaceStrip, PermitRequestDialog, PermitsPanel } from '@/components/m
 import { useAccess, useActiveWorkspace } from '@/hooks/useAccess'
 import { fromWire, planningAccess, requestPlanFit, type Permit } from '@/lib/planning'
 import { getSocket } from '@/lib/socket'
+import { useSessionAttachments } from '@/lib/attachments'
+import { waypointActionHazard } from '@/components/attachments/WaypointActions'
 import { cn } from '@/lib/utils'
 import {
   Upload, Trash2, FileUp, FileDown,
@@ -221,6 +223,12 @@ export default function MissionPage() {
   // orange-zone acknowledgment (or a red-zone permit request) can re-send
   // it unchanged.
   const lastUploadRef = useRef<ReturnType<typeof expandWaypointsWithTurnRadius> | null>(null)
+  // "Allow attachment actions in this mission": asked only when the plan has
+  // an attachment action that can hurt someone; the last upload's answer is
+  // re-sent with an orange-zone acknowledgement.
+  const { attachments: fittedAttachments } = useSessionAttachments()
+  const [allowAttachments, setAllowAttachments] = useState(false)
+  const allowAttachRef = useRef<{ allow_attachment_actions?: true }>({})
 
   // ── Red-zone permits ──────────────────────────────────────────────────
   type MyPermit = {
@@ -345,12 +353,14 @@ export default function MissionPage() {
             terrain_follow: terrainFollow,
             waypoints: lastUploadRef.current,
             ack_orange: true,
+            ...allowAttachRef.current,
           })
         } else {
           getSocket().emit('upload_mission', {
             terrain_follow: terrainFollow,
             waypoints: lastUploadRef.current,
             ack_orange: true,
+            ...allowAttachRef.current,
           })
         }
       }
@@ -623,10 +633,14 @@ export default function MissionPage() {
   }, [importWaypoints])
 
   // ── Upload to drone ───────────────────────────────────────────────────
+  const planHasHazardActions = useMemo(
+    () => waypoints.some(w => w.actions?.some(x => waypointActionHazard(x, fittedAttachments))),
+    [waypoints, fittedAttachments])
   const handleUpload = useCallback(() => {
     if (waypoints.length === 0) return
     const { enabled, activeDroneId, drones } = useSwarmStore.getState()
     const uploadWaypoints = expandWaypointsWithTurnRadius(waypoints, autoHeading)
+    allowAttachRef.current = planHasHazardActions && allowAttachments ? { allow_attachment_actions: true } : {}
 
     if (enabled && activeDroneId !== null) {
       const d = drones[activeDroneId]
@@ -643,6 +657,7 @@ export default function MissionPage() {
         drone_id: activeDroneId,
         terrain_follow: terrainFollow,
         waypoints: uploadWaypoints,
+        ...allowAttachRef.current,
       })
     } else {
       if (telStatus !== 'connected') {
@@ -657,9 +672,10 @@ export default function MissionPage() {
       getSocket().emit('upload_mission', {
         terrain_follow: terrainFollow,
         waypoints: uploadWaypoints,
+        ...allowAttachRef.current,
       })
     }
-  }, [waypoints, telStatus, terrainFollow, autoHeading])
+  }, [waypoints, telStatus, terrainFollow, autoHeading, planHasHazardActions, allowAttachments])
 
   return (
     <div className="relative w-full h-full overflow-hidden rounded-xl border"
@@ -1290,6 +1306,17 @@ export default function MissionPage() {
               />
             )}
           </div>}
+          {canFly && planHasHazardActions && (
+            <label
+              className="flex items-center gap-1.5 rounded-md px-2 py-1.5 cursor-pointer select-none"
+              style={{ background: 'rgba(251,191,36,.10)', border: '1px solid rgba(251,191,36,.35)', color: '#fde68a' }}
+              title="This plan has attachment actions that can hurt someone (drop, open, lower, spray). Without this tick they are refused. The other safety checks still apply."
+            >
+              <input type="checkbox" checked={allowAttachments} onChange={e => setAllowAttachments(e.target.checked)}
+                className="h-3 w-3" style={{ accentColor: '#fbbf24' }} />
+              <span className="text-[10px] font-mono font-bold">Allow attachment actions in this mission</span>
+            </label>
+          )}
           {/* Pause stays for anyone holding the link (a safety action). */}
           {(canFly || missionExecuting) && <ToolBtn
             icon={missionExecuting ? <PauseCircle size={13} /> : <PlayCircle size={13} />}

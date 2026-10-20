@@ -77,6 +77,28 @@ class Drone(Base):
         }
 
 
+class DroneAttachment(Base):
+    """
+    Something fitted to a drone and how the flight controller drives it
+    (app/attachments, docs/ATTACHMENTS.md): a release, gripper, winch,
+    light, speaker, sprayer or custom actuator. Per physical drone, so it
+    follows the drone between workspaces and sessions. `data` is the
+    record app/attachments/kinds.clean produced (kind, name, icon, wiring,
+    actions, limits, enabled); `position` keeps the order they were added.
+    """
+    __tablename__ = "drone_attachments"
+
+    # Attachment ids are unique across drones: the live app keys the last
+    # command per attachment by id alone.
+    id: Mapped[str] = mapped_column(String(16), primary_key=True)
+    drone_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("drones.id", ondelete="CASCADE"), index=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    data: Mapped[dict] = mapped_column(JSONB_COL, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class Zone(Base):
     """
     A flight zone: green (free), orange (warning), red (restricted).

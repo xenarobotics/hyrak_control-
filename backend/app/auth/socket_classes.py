@@ -87,6 +87,9 @@ EVENTS: dict[str, str] = {
     "set_model_control": SESSION_COMMAND,  # "Allow model control": rules may move the drone
     "rule_confirm": SESSION_COMMAND,       # yes / no to a rule's "Ask me first" chip
 
+    # ── attachments fitted to the drone (app/attachments/events.py) ─────
+    "attachment_action": SESSION_COMMAND,  # drop, open, light on: the guards are in control.py
+
     # ── staff only ──────────────────────────────────────────────────────
     "connect_telemetry": STAFF,       # arbitrary address: server Gazebo udp:14600, LAN, anything
     "connect_rf_bridge": STAFF,       # the one shared RF bridge / ground-station relay
@@ -135,6 +138,11 @@ PUSHED_EVENTS: dict[str, str] = {
     # model control state, and what each fired rule did.
     "model_control": "session",
     "rule_event": "session",
+    # Attachments (app/attachments/control.py): what a use did, and the
+    # last command per attachment, to the session whose drone it is (and
+    # the staff session that sent it during a takeover).
+    "attachment_result": "session",
+    "attachment_state": "session",
 }
 
 # Other namespaces: the ground-station relay agent (a script, operator token).
@@ -156,14 +164,14 @@ DRONE_EVENTS = frozenset({
     "set_tracking", "set_vehicle_tracking", "set_follow_vehicle", "set_follow_person",
     "set_multi_follow", "select_person", "set_pd_params", "set_altitude_mode",
     "set_altitude_nudge", "set_tracking_params", "upload_mission",
-    "set_model_control", "rule_confirm",
+    "set_model_control", "rule_confirm", "attachment_action",
 })
 
 # Session commands a staff console socket may route to ANOTHER session's
 # drone by naming `target_session` (docs/ACCESS_MODEL.md 8b "Takeover"):
 # hold / return / land as quick actions, anything while it holds the
 # takeover. Everything else stays bound to the caller's own session.
-ROUTABLE_EVENTS = frozenset({"drone_action", "drone_command"})
+ROUTABLE_EVENTS = frozenset({"drone_action", "drone_command", "attachment_action"})
 
 # What a session in TAKEOVER may no longer send (socket_guard.takeover_stops):
 # every SESSION_COMMAND, safety actions included - staff own the decision

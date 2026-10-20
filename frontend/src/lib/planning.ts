@@ -104,6 +104,7 @@ export function toWire(wps: Waypoint[]): UploadWp[] {
     return wps.map(w => ({
         lat: w.lat, lng: w.lng, altitude: w.altitude, speed: w.speed,
         hold_time: w.holdTime, type: w.type, yaw: w.yaw, turn_radius: w.turnRadius ?? 0,
+        ...(w.actions?.length ? { actions: w.actions } : {}),
     }))
 }
 
@@ -117,6 +118,7 @@ export function fromWire(wps: UploadWp[], prefix: string): Waypoint[] {
         type: (w.type ?? 'waypoint') as Waypoint['type'],
         yaw: w.yaw ?? null,
         turnRadius: w.turn_radius ?? 0,
+        ...(Array.isArray(w.actions) && w.actions.length ? { actions: w.actions } : {}),
     }))
 }
 

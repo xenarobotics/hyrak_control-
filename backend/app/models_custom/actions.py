@@ -23,8 +23,12 @@ Actions:
   follow  Offboard, then the analyzer steers toward the locked box
           (analyzer.start_follow); stopped with HOLD when the target is
           lost for rules.LOST_S, or when a guard fails on any frame.
+  attachment  the first enabled attachment of the rule's kind on the
+          session's drone does the rule's action (app/attachments). Its
+          own guards (app/attachments/control.py) run as for a button
+          press; one that can hurt someone always asks first.
 
-hover and follow need model control on (per session, in memory, off by
+hover, follow and attachment need model control on (per session, in memory, off by
 default, never stored) and, unless the rule says otherwise, the pilot's
 yes on a confirm chip (rules.PendingConfirms, 10 s). Every moving action
 checks ALL guards at the moment it runs, a confirmed one included
@@ -68,7 +72,8 @@ REASONS = {
     "mode_changed": "the AI model is no longer running",
     "link_lost": "the drone link was lost",
     "failed": "the drone did not accept the command",
-    "rules_changed": "the model's hover or follow rules changed; turn model control on again to accept them",
+    "rules_changed": "the model's hover, follow or attachment rules changed; turn model control "
+                     "on again to accept them",
 }
 # Ending a follow for these leaves the drone to whoever owns it now.
 _NO_HOLD = frozenset({"taken_over", "pilot_control", "red_zone", "link_lost"})
@@ -149,11 +154,12 @@ def _custom_mode(session) -> Optional[str]:
 
 
 def _moving_rules(session) -> tuple:
-    """The running model's current hover/follow rules, as a comparable
-    snapshot of everything that decides when they fire (live edits
-    included, as the analyzer reads them). Each rule carries the class
-    indices its label matches under the current class names, so renaming
-    a class onto a moving rule's label counts as a change too."""
+    """The running model's current hover/follow/attachment rules (all that
+    need model control), as a comparable snapshot of everything that
+    decides when they fire and what they do (live edits included, as the
+    analyzer reads them). Each rule carries the class indices its label
+    matches under the current class names, so renaming a class onto such
+    a rule's label counts as a change too."""
     spec = getattr(getattr(session, "mode", None), "spec", None)
     if spec is None:
         return ()
@@ -170,8 +176,9 @@ def _moving_rules(session) -> tuple:
         (str(r.get("id")), str(r.get("label")).lower(),
          tuple(i for i, n in enumerate(lowered) if n == str(r.get("label")).lower()),
          float(r.get("min_score", 0)), float(r.get("for_s", 0)), float(r.get("cooldown_s", 0)),
-         r.get("action"), bool(r.get("confirm", True)), bool(r.get("enabled", True)))
-        for r in (rules or []) if r.get("action") in _rules.MOVING))
+         r.get("action"), bool(r.get("confirm", True)), bool(r.get("enabled", True)),
+         r.get("attachment_kind"), r.get("attachment_action"), r.get("attachment_value"))
+        for r in (rules or []) if r.get("action") in _rules.NEEDS_CONTROL))
 
 
 def _linked(tel) -> bool:
@@ -496,6 +503,8 @@ def handle_fire(session, mode: str, fire: dict, meta=None, capture=None, frame=N
             _spawn(_emit(sid, "rule_event", _event(base, "done", f"{seen}: marked on the map")))
     elif action in _rules.MOVING:
         _spawn(run_moving(session, fire, base))
+    elif action == "attachment":
+        _spawn(run_attachment(session, fire, base))
 
 
 _QUESTION = {"hover": "Stop and hover here?", "follow": "Follow it?"}
@@ -655,4 +664,71 @@ async def confirm(session, token, accept: bool) -> None:
         await _emit(sid, "rule_event", _event(
             base, "declined", f"{_seen(base['label'], base['score'])}: left as is", token=p.token))
         return
+    if base.get("action") == "attachment":
+        await run_attachment(session, p.entry["fire"], base, token=p.token)
+        return
     await run_moving(session, p.entry["fire"], base, token=p.token)
+
+
+# ── attachment rules (app/attachments) ────────────────────────────────────
+
+def _control_reason(session) -> Optional[str]:
+    """model control on, for this model, with the rules the pilot accepted."""
+    c = _controls.get(session.session_id)
+    if c is None or not c.enabled:
+        return "model_control_off"
+    if _custom_mode(session) != c.mode:
+        return "mode_changed"
+    if _moving_rules(session) != c.accepted:
+        return "rules_changed"
+    return None
+
+
+async def run_attachment(session, fire: dict, base: dict, *, token: Optional[str] = None) -> None:
+    """An attachment rule: model control, then the attachment's own guards,
+    then the confirm chip (always for an action that can hurt someone, else
+    as the rule says), then the command through app/attachments/control.use,
+    which checks every guard again at that moment."""
+    from app.attachments import control as att_control
+    from app.attachments import kinds as att_kinds
+    sid = session.session_id
+    rule = fire.get("rule") or {}
+    kind, action_id = rule.get("attachment_kind"), rule.get("attachment_action")
+    value = rule.get("attachment_value")
+    seen = _seen(base["label"], base["score"])
+    base = {**base, "attachment_kind": kind, "attachment_action": action_id}
+
+    async def refuse(code: str, text: str) -> None:
+        await _emit(sid, "rule_event", _event(base, "refused", f"{text} not done: "
+                                              f"{_reason(code) if code in REASONS else att_control.reason(code)}",
+                                              reason_code=code, token=token))
+
+    code = _control_reason(session)
+    if code:
+        await refuse(code, "Attachment")
+        return
+    att = await att_control.first_of_kind(session, kind)
+    action = att_kinds.find_action(att, action_id) if att else None
+    if att is None or action is None:
+        await refuse("no_attachment", "Attachment")
+        return
+    what = att_control.label_of(att, action, None if value is None else float(value))
+    base["attachment_id"] = att["id"]
+    # A custom attachment's states are the user's own: always ask first.
+    hazard = bool(action.get("hazard")) or kind == "custom"
+    code, _, _, _ = await att_control.check(session, att, action_id, value=value, confirm=True)
+    if code:
+        await refuse(code, what)
+        return
+    if (hazard or rule.get("confirm", True)) and token is None:
+        p = _pending.add(sid, {"fire": fire, "base": base})
+        await _emit(sid, "rule_event", _event(
+            base, "awaiting_confirm", f"{seen}. {what}?", token=p.token, expires_at=p.expires_at))
+        return
+    out = await att_control.use(session, att["id"], action_id, value=value, confirm=True,
+                                source="rule", att=att, extra={"rule_id": base.get("rule_id")})
+    if out["ok"]:
+        await _emit(sid, "rule_event", _event(base, "done", f"{seen}: {out['message']}", token=token))
+    else:
+        await _emit(sid, "rule_event", _event(base, "refused", f"{seen}: {out['message']}",
+                                              reason_code=out.get("reason_code"), token=token))

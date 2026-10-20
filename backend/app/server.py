@@ -96,6 +96,8 @@ def create_app() -> socketio.ASGIApp:
     fastapi_app.include_router(models_router)
     from app.mapdetect.routes import router as map_sightings_router
     fastapi_app.include_router(map_sightings_router)
+    from app.attachments.routes import router as attachments_router
+    fastapi_app.include_router(attachments_router)
 
     # Desktop app installers + electron-updater manifests - plain static
     # files, no auth (same tier as a public download page). Directory is
@@ -448,6 +450,10 @@ def create_app() -> socketio.ASGIApp:
         zone_monitor.drop(session.session_id)
         from app.models_custom import actions as model_actions
         model_actions.drop(session.session_id)
+        from app.attachments import control as attachment_control
+        from app.attachments import mission as attachment_mission
+        attachment_control.drop(session.session_id)
+        attachment_mission.clear(session.session_id)
         # A relay listener holds a port AND its own ffmpeg, neither tied
         # to the peer connection - a client that vanishes without the pc
         # ever changing state would leak both.
@@ -501,6 +507,8 @@ def create_app() -> socketio.ASGIApp:
     register_rule_events(sio, session_manager, vision_pool)
     from app.mapdetect.events import register_map_events
     register_map_events(sio, session_manager)
+    from app.attachments.events import register_attachment_events
+    register_attachment_events(sio, session_manager)
 
     # ------------------------------------------------------------------ #
     # Mount                                                                #

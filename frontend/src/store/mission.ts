@@ -46,7 +46,8 @@ export const planKeyForDrone = (id: number) => `drone-${id}`
 // comparison, so switching between fleet drones can never forget upload state
 // and any edit invalidates it automatically.
 export const planSignature = (wps: Waypoint[]) =>
-  JSON.stringify(wps.map(w => [w.lat, w.lng, w.altitude, w.speed, w.holdTime, w.type, w.yaw, w.turnRadius]))
+  JSON.stringify(wps.map(w => [w.lat, w.lng, w.altitude, w.speed, w.holdTime, w.type, w.yaw, w.turnRadius,
+    ...(w.actions?.length ? [w.actions] : [])]))
 
 interface MissionStore {
   // State

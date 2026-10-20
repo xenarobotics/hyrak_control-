@@ -1983,6 +1983,78 @@ class TelemetryManager:
             logger.error(f"Reboot failed: {e}")
             return False
 
+    # ── Attachments (app/attachments, docs/ATTACHMENTS.md) ────────────────
+    # The guards live in app/attachments/control.py; these only send the
+    # command and keep the drone's reason when it says no. A plugin missing
+    # from the installed MAVSDK raises NotImplementedError so the caller can
+    # answer "not supported" instead of "failed".
+
+    def _plugin(self, name: str):
+        if self._drone is None:
+            return None
+        try:
+            return getattr(self._drone, name)
+        except Exception:
+            return None
+
+    async def set_actuator(self, index: int, value: float) -> bool:
+        """MAV_CMD_DO_SET_ACTUATOR: an output set to "Peripheral via
+        Actuator Set N" in PX4 moves to `value` (-1..1)."""
+        import time as _time
+        action = self._plugin("action")
+        if action is None or not hasattr(action, "set_actuator"):
+            raise NotImplementedError("action.set_actuator")
+        sent = _time.monotonic()
+        self.last_action_error = None
+        try:
+            await action.set_actuator(int(index), float(value))
+            logger.info(f"Actuator {index} -> {value:+.2f}")
+            return True
+        except Exception as e:
+            self.last_action_error = await self._failure_reason(
+                e, sent, "the drone did not accept the actuator command")
+            logger.warning(f"Actuator {index} failed: {e} | {self.last_action_error}")
+            return False
+
+    async def gripper_command(self, instance: int, op: str) -> bool:
+        """MAVSDK gripper plugin (PX4 payload deliverer): op grab or release."""
+        import time as _time
+        gripper = self._plugin("gripper")
+        call = getattr(gripper, op, None) if gripper is not None else None
+        if op not in ("grab", "release") or call is None:
+            raise NotImplementedError(f"gripper.{op}")
+        sent = _time.monotonic()
+        self.last_action_error = None
+        try:
+            await call(int(instance))
+            logger.info(f"Gripper {instance}: {op}")
+            return True
+        except Exception as e:
+            self.last_action_error = await self._failure_reason(
+                e, sent, "the drone did not accept the gripper command")
+            logger.warning(f"Gripper {instance} {op} failed: {e} | {self.last_action_error}")
+            return False
+
+    async def winch_command(self, instance: int, op: str) -> bool:
+        """MAVSDK winch plugin: op deliver (lower, release, reel up, lock),
+        retract or hold."""
+        import time as _time
+        winch = self._plugin("winch")
+        call = getattr(winch, op, None) if winch is not None else None
+        if op not in ("deliver", "retract", "hold") or call is None:
+            raise NotImplementedError(f"winch.{op}")
+        sent = _time.monotonic()
+        self.last_action_error = None
+        try:
+            await call(int(instance))
+            logger.info(f"Winch {instance}: {op}")
+            return True
+        except Exception as e:
+            self.last_action_error = await self._failure_reason(
+                e, sent, "the drone did not accept the winch command")
+            logger.warning(f"Winch {instance} {op} failed: {e} | {self.last_action_error}")
+            return False
+
     # ── Who is flying: Offboard <-> pilot handover ────────────────────────
     #
     # THE APP'S BELIEF THAT IT IS FLYING WAS NEVER CHECKED AGAINST THE

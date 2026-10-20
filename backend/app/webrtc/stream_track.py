@@ -323,6 +323,13 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
                              f"Map detections failed for session {self.session_id[:8]}: {e!r}")
             self._frame_cache[mode.value] = annotated_bgr
             self._meta_cache[mode.value] = meta
+            # Attachments' people check (app/attachments/people.py): is
+            # anyone below, in this session's latest frame of any mode.
+            try:
+                from app.attachments import people as _att_people
+                _att_people.note(self.session_id, mode.value, meta)
+            except Exception:
+                pass
 
             # ── DB persistence (crowd/plate modules queue writes here
             # since that's where their per-session state lives; this is

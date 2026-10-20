@@ -12,9 +12,9 @@ import { useEffect } from 'react'
 import { ArrowRight, Crosshair, Loader, ShieldCheck, ShieldOff, Square, Volume2, VolumeX } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { ModelRule } from '@/lib/models'
-import { ACTION_WORDS, ensureRulesFeed, movesDrone, pct, reasonText, useRulesStore } from '@/lib/modelRules'
+import { ensureRulesFeed, movesDrone, pct, reasonText, useRulesStore } from '@/lib/modelRules'
 import type { CVResult, RuleEvent } from '@/types/vision'
-import { ACTION_ICON, sentenceOf } from './ModelRules'
+import { actionFace, sentenceOf } from './ModelRules'
 import { css as s } from './ui'
 
 export function RulesLive({ rules, cv }: { rules: ModelRule[]; cv: CVResult | null }) {
@@ -51,7 +51,7 @@ const RING = 2 * Math.PI * 13
 
 function LiveRule({ rule: r, cv, last }: { rule: ModelRule; cv: CVResult | null; last: RuleEvent | null }) {
     const st = cv?.rules_state?.find(x => x.rule_id === r.id) ?? null
-    const Icon = ACTION_ICON[r.action]
+    const { icon: Icon, short } = actionFace(r)
     const cooling = !!st && st.cooling_s > 0
     const seen = st?.seen_for_s ?? 0
     const fill = cooling ? Math.min(1, st!.cooling_s / Math.max(1, r.cooldown_s))
@@ -84,7 +84,7 @@ function LiveRule({ rule: r, cv, last }: { rule: ModelRule; cv: CVResult | null;
                 <span className={s.liveFlow}>
                     <strong>{r.label}</strong>
                     <ArrowRight size={11} aria-hidden style={{ color: 'var(--cm-ink-2)' }} />
-                    <span>{ACTION_WORDS[r.action].short}</span>
+                    <span>{short}</span>
                 </span>
                 <span className={s.ruleNumbers}>{pct(r.min_score)}{r.for_s > 0 ? ` · ${r.for_s} s` : ''}</span>
             </span>

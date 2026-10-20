@@ -1,3 +1,5 @@
+import type { WaypointAction } from '@/lib/attachments'
+
 // ── MAVLink frame constants ──────────────────────────────────────────────────
 // Frame 3  = MAV_FRAME_GLOBAL_RELATIVE_ALT  (altitude relative to home - default)
 // Frame 10 = MAV_FRAME_GLOBAL_TERRAIN_ALT   (altitude AGL above terrain - terrain follow)
@@ -18,6 +20,8 @@ export interface Waypoint {
   type: WaypointType
   yaw: number | null // heading degrees - null = auto
   turnRadius: number // metres - 0 = sharp turn, >0 = smooth curve
+  /** Attachment actions to run here (max 3), uploaded with the mission. */
+  actions?: WaypointAction[]
 }
 
 export interface MissionStats {

@@ -23,7 +23,9 @@ export interface ClassScore { name: string; score: number }
 export interface AlertHit { label: string; score: number; at?: number }
 
 /** What a custom model rule does when it fires (lib/models.ts ModelRule). */
-export type RuleAction = 'alert' | 'mark' | 'hover' | 'follow'
+/** attachment runs an attachment action (drop, light, spray...): it needs
+ *  model control like hover and follow. */
+export type RuleAction = 'alert' | 'mark' | 'hover' | 'follow' | 'attachment'
 
 /** One rule's live progress on this frame (cv_results.rules_state). */
 export interface RuleState {

@@ -3,10 +3,13 @@
 // the same geometry the map displays.
 
 import type { Waypoint } from '@/types/mission'
+import type { WaypointAction } from '@/lib/attachments'
 
 export type UploadWp = {
     lat: number; lng: number; altitude: number; speed: number
     hold_time: number; type: string; yaw: number | null; turn_radius: number
+    /** Attachment actions to run at this point (only when there are some). */
+    actions?: WaypointAction[]
 }
 
 // Bearing (true heading, deg, 0=N clockwise) between two WGS-84 points.
@@ -34,6 +37,7 @@ export function expandWaypointsWithTurnRadius(allWaypoints: Waypoint[], autoHead
         lat: wp.lat, lng: wp.lng, altitude: wp.altitude,
         speed: wp.speed, hold_time: wp.holdTime, type: wp.type, yaw: wp.yaw,
         turn_radius: 0,
+        ...(wp.actions?.length ? { actions: wp.actions.map(a => ({ ...a })) } : {}),
     })
 
     // No expansion needed if < 3 points or no turn radii set
@@ -99,6 +103,9 @@ export function expandWaypointsWithTurnRadius(allWaypoints: Waypoint[], autoHead
                 type: 'waypoint',
                 yaw: null,
                 turn_radius: arcStepAcceptance,
+                // The waypoint's attachment actions run at the arc's middle,
+                // the point closest to the corner.
+                ...(s === 4 && waypoints[i].actions?.length ? { actions: waypoints[i].actions!.map(a => ({ ...a })) } : {}),
             })
         }
     }
