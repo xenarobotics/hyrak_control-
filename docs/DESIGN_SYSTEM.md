@@ -133,3 +133,59 @@ they turn dark-on-dark.
   visible at all times; no horizontal page scroll.
 - Maps open on the drone, else the workspace's area, else the user's last
   view. Never (0, 0).
+
+## 11. Visual direction (pass 2): the glass cockpit
+
+HYRAK is a ground station. Its look comes from the instrument panels pilots
+already trust, not from a SaaS dashboard kit.
+
+**Colour language** (glass-cockpit convention, so it carries meaning):
+
+| role | dark | light | meaning |
+|------|------|-------|---------|
+| cyan | `#4FD1E0` | `#0B6F80` | selectable, selected, what the pilot set |
+| magenta | `#E08AF5` | `#9B1FA8` | the active route, the active target, what HYRAK is following |
+| green | `#5BD38B` | `#1D7444` | engaged, healthy, done |
+| amber | `#F2B544` | `#8F5500` | caution, and anything that moves the drone or can hurt someone |
+| red | `#F2787A` | `#B42323` | warning, failure, kill |
+
+**Surfaces** (never pure black or pure white). Midnight is a deeper,
+higher-contrast dark (page `#0B0D11`, text `#FFFFFF`).
+
+| role | dark ("night sortie") | light ("overcast day") |
+|------|------|-------|
+| page | `#12171E` | `#E9EEF3` |
+| panel | `#19202A` | `#F8FAFC` |
+| inset | `#1F2833` | `#EFF3F7` |
+| raised (popovers) | `#242E3A` | `#FCFDFE` |
+| line | `#313C4B` | `#C9D3DE` |
+| strong line, inputs | `#6B7989` | `#7B8797` |
+| ink / ink-2 / ink-3 | `#EAF0F6` / `#B4BFCC` / `#8E9AA9` | `#16202C` / `#45525F` / `#5E6B79` |
+
+Every ink and colour above passes 4.5:1 on every surface of its theme.
+
+**Overlays follow the theme.** Over maps and video in light mode: frosted
+paper (`rgb(248 250 252 / .86)`) with dark ink; in dark mode frosted night
+(`rgb(18 23 30 / .78)`) with light ink. The area around live video is slate
+`#1A2129` in both themes; with no video, the placeholder is the theme's
+inset colour with an icon and one line, never a black box. The 3D globe
+uses daylight in light mode.
+
+**Type.** Nunito only. Labels are sentence case, 12-13px 600-700, no
+tracking (all-caps only for aviation status words: ARMED, HOLD, RTL, LAND,
+KILL). Readouts 22-28px 800 with a 12px muted unit. No middle-dot meta
+strings: use separate chips or a small key/value grid.
+
+**Layout.** One status bar for every page: read-only status on the left
+(grey "-" when there is no drone, red only for real faults), and HOLD, RTL,
+LAND and KILL fixed at the right edge, KILL the strongest, named "Kill" the
+same everywhere. Flight screens (Fly, Command, Mission): the live view
+(video or map) dominates, readouts sit beside it at eye level, one-time
+setup collapses into a strip. Setup screens (AI, Config, Settings, Admin):
+section navigation on the left, content up to 960px, cards only for real
+groups (no card soup, no identical shadow on everything).
+
+**Motion answers the user.** Hover: colour and border 140ms. Press: scale
+.98 for 90ms. Panels and sheets: slide and fade 220ms. Toasts: 240ms in,
+180ms out. Tabs: the underline slides. Nothing moves on its own except a
+single pulse when the link state changes.

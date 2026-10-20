@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
 /* Make dark: utilities follow the .dark class set by the theme toggle
    (Tailwind v4 defaults them to the OS prefers-color-scheme instead). */
@@ -55,6 +56,8 @@
   --color-app-warn-soft: var(--app-warn-soft);
   --color-app-danger: var(--app-danger);
   --color-app-danger-soft: var(--app-danger-soft);
+  --color-app-magenta: var(--app-magenta);
+  --color-app-magenta-soft: var(--app-magenta-soft);
   --color-overlay-scrim: var(--overlay-scrim);
   --color-overlay-text: var(--overlay-text);
   --color-overlay-muted: var(--overlay-muted);
@@ -62,6 +65,37 @@
 }
 
 :root {
+  --app-bg: 210 29% 93.3%;
+  --app-surface: 210 40% 98.0%;
+  --app-surface-2: 210 33% 95.3%;
+  --app-raised: 210 50% 99.2%;
+  --app-border: 211 24% 82.9%;
+  --app-border-strong: 214 12% 53.7%;
+  --app-text: 213 33% 12.9%;
+  --app-text-muted: 210 16% 32.2%;
+  --app-text-subtle: 211 13% 42.2%;
+  --app-sidebar: 210 33% 96.5%;
+  --app-accent: #0B6F80;
+  --app-accent-ink: #FFFFFF;
+  --app-accent-soft: rgba(11, 111, 128, 0.10);
+  --app-ok: #1D7444;
+  --app-ok-soft: color-mix(in srgb, #1D7444 12%, transparent);
+  --app-warn: #8F5500;
+  --app-warn-soft: color-mix(in srgb, #8F5500 14%, transparent);
+  --app-danger: #B42323;
+  --app-danger-soft: color-mix(in srgb, #B42323 12%, transparent);
+  --app-magenta: #9B1FA8;
+  --app-magenta-soft: color-mix(in srgb, #9B1FA8 12%, transparent);
+  --app-shadow: 0 1px 2px rgb(22 32 44 / 0.06), 0 6px 16px rgb(22 32 44 / 0.06);
+  --overlay-scrim: rgba(248, 250, 252, 0.86);
+  --overlay-text: #16202C;
+  --overlay-muted: #45525F;
+  --overlay-border: rgba(22, 32, 44, 0.14);
+  --overlay-accent: #0B6F80;
+  --overlay-ok: #1D7444;
+  --overlay-warn: #8F5500;
+  --overlay-danger: #B42323;
+  --input: 214 12% 53.7%;
   --background: 0 0% 100%;
   --foreground: 240 10% 3.9%;
   --card: 0 0% 100%;
@@ -83,26 +117,6 @@
   --ring: 240 5.9% 10%;
   --radius: 0.5rem;
 
-  --app-bg: 216 33% 96%;
-  --app-surface: 0 0% 100%;
-  --app-surface-2: 215 28% 95%;
-  --app-raised: 0 0% 100%;
-  --app-border: 215 20% 80%;
-  --app-border-strong: 215 16% 52%;
-  --app-text: 220 40% 11%;
-  --app-text-muted: 217 20% 32%;
-  --app-text-subtle: 216 12% 42%;
-  --app-sidebar: 0 0% 100%;
-  --app-accent: #0e7490;
-  --app-accent-ink: #ffffff;
-  --app-accent-soft: rgba(14, 116, 144, 0.10);
-  --app-ok: #166534;
-  --app-ok-soft: rgba(22, 101, 52, 0.10);
-  --app-warn: #a15c07;
-  --app-warn-soft: rgba(202, 138, 4, 0.14);
-  --app-danger: #b91c1c;
-  --app-danger-soft: rgba(185, 28, 28, 0.10);
-  --app-shadow: 0 1px 2px rgb(15 23 42 / 0.06), 0 4px 12px rgb(15 23 42 / 0.05);
 
   /* Type scale (docs/DESIGN_SYSTEM.md section 2). */
   --fs-2xs: 12px; --fs-xs: 12px; --fs-sm: 13px; --fs-base: 14px;
@@ -112,17 +126,40 @@
   --dur-fast: 120ms; --dur: 180ms; --dur-slow: 240ms;
 
   /* Over video and map tiles: one fixed set in both themes (design system 9). */
-  --overlay-scrim: rgba(8, 12, 18, 0.72);
-  --overlay-text: #F2F6FA;
-  --overlay-muted: #C3CCD8;
-  --overlay-border: rgba(255, 255, 255, 0.18);
-  --overlay-accent: #22d3ee;
-  --overlay-ok: #4ade80;
-  --overlay-warn: #fbbf24;
-  --overlay-danger: #f87171;
 }
 
 .dark {
+  --app-bg: 215 25% 9.4%;
+  --app-surface: 215 25% 13.1%;
+  --app-surface-2: 213 24% 16.1%;
+  --app-raised: 213 23% 18.4%;
+  --app-border: 215 21% 24.3%;
+  --app-border-strong: 212 12% 47.8%;
+  --app-text: 210 40% 94.1%;
+  --app-text-muted: 212 19% 75.3%;
+  --app-text-subtle: 213 14% 61.0%;
+  --app-sidebar: 214 25% 11.0%;
+  --app-accent: #4FD1E0;
+  --app-accent-ink: #06171B;
+  --app-accent-soft: rgba(79, 209, 224, 0.12);
+  --app-ok: #5BD38B;
+  --app-ok-soft: color-mix(in srgb, #5BD38B 12%, transparent);
+  --app-warn: #F2B544;
+  --app-warn-soft: color-mix(in srgb, #F2B544 14%, transparent);
+  --app-danger: #F2787A;
+  --app-danger-soft: color-mix(in srgb, #F2787A 12%, transparent);
+  --app-magenta: #E08AF5;
+  --app-magenta-soft: color-mix(in srgb, #E08AF5 12%, transparent);
+  --app-shadow: 0 1px 2px rgb(0 0 0 / 0.35), 0 8px 24px rgb(0 0 0 / 0.22);
+  --overlay-scrim: rgba(18, 23, 30, 0.78);
+  --overlay-text: #EAF0F6;
+  --overlay-muted: #B4BFCC;
+  --overlay-border: rgba(234, 240, 246, 0.16);
+  --overlay-accent: #4FD1E0;
+  --overlay-ok: #5BD38B;
+  --overlay-warn: #F2B544;
+  --overlay-danger: #F2787A;
+  --input: 212 12% 47.8%;
   --background: 240 10% 3.9%;
   --foreground: 0 0% 98%;
   --card: 240 10% 3.9%;
@@ -143,26 +180,6 @@
   --input: 240 3.7% 15.9%;
   --ring: 240 4.9% 83.9%;
 
-  --app-bg: 220 22% 8%;
-  --app-surface: 220 20% 11%;
-  --app-surface-2: 219 18% 14%;
-  --app-raised: 219 17% 17%;
-  --app-border: 218 15% 24%;
-  --app-border-strong: 217 14% 44%;
-  --app-text: 214 30% 96%;
-  --app-text-muted: 215 16% 74%;
-  --app-text-subtle: 216 12% 60%;
-  --app-sidebar: 220 21% 10%;
-  --app-accent: #22d3ee;
-  --app-accent-ink: #04161b;
-  --app-accent-soft: rgba(34, 211, 238, 0.12);
-  --app-ok: #4ade80;
-  --app-ok-soft: rgba(74, 222, 128, 0.12);
-  --app-warn: #fbbf24;
-  --app-warn-soft: rgba(251, 191, 36, 0.12);
-  --app-danger: #f87171;
-  --app-danger-soft: rgba(248, 113, 113, 0.12);
-  --app-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.25);
 }
 
 /* Midnight: the reworked dark. Stacked ON TOP of .dark (the theme toggle
@@ -175,26 +192,37 @@
    - a slate-blue cast instead of neutral gray: separates surfaces without
      making them lighter. */
 .midnight {
-  --app-bg: 220 22% 8%;
-  --app-surface: 220 20% 11%;
-  --app-surface-2: 219 18% 14%;
-  --app-raised: 219 17% 17%;
-  --app-border: 218 15% 24%;
-  --app-border-strong: 217 14% 44%;
-  --app-text: 214 30% 96%;
-  --app-text-muted: 215 16% 74%;
-  --app-text-subtle: 216 12% 60%;
-  --app-sidebar: 220 21% 10%;
-  --app-accent: #22d3ee;
-  --app-accent-ink: #04161b;
-  --app-accent-soft: rgba(34, 211, 238, 0.12);
-  --app-ok: #4ade80;
-  --app-ok-soft: rgba(74, 222, 128, 0.12);
-  --app-warn: #fbbf24;
-  --app-warn-soft: rgba(251, 191, 36, 0.12);
-  --app-danger: #f87171;
-  --app-danger-soft: rgba(248, 113, 113, 0.12);
-  --app-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.25);
+  --app-bg: 220 21% 5.5%;
+  --app-surface: 220 21% 8.4%;
+  --app-surface-2: 218 19% 11.2%;
+  --app-raised: 219 19% 14.5%;
+  --app-border: 219 17% 19.8%;
+  --app-border-strong: 218 12% 47.8%;
+  --app-text: 0 0% 100.0%;
+  --app-text-muted: 215 21% 82.2%;
+  --app-text-subtle: 215 14% 66.7%;
+  --app-sidebar: 218 22% 7.1%;
+  --app-accent: #67E8F9;
+  --app-accent-ink: #041315;
+  --app-accent-soft: rgba(103, 232, 249, 0.12);
+  --app-ok: #6EE7A0;
+  --app-ok-soft: color-mix(in srgb, #6EE7A0 12%, transparent);
+  --app-warn: #FBC756;
+  --app-warn-soft: color-mix(in srgb, #FBC756 14%, transparent);
+  --app-danger: #FF8A8C;
+  --app-danger-soft: color-mix(in srgb, #FF8A8C 12%, transparent);
+  --app-magenta: #EBA3FA;
+  --app-magenta-soft: color-mix(in srgb, #EBA3FA 12%, transparent);
+  --app-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 24px rgb(0 0 0 / 0.35);
+  --overlay-scrim: rgba(11, 13, 17, 0.82);
+  --overlay-text: #FFFFFF;
+  --overlay-muted: #C8D0DB;
+  --overlay-border: rgba(255, 255, 255, 0.2);
+  --overlay-accent: #67E8F9;
+  --overlay-ok: #6EE7A0;
+  --overlay-warn: #FBC756;
+  --overlay-danger: #FF8A8C;
+  --input: 218 12% 47.8%;
 }
 
 /* Percentage height chain for the app shell. The shell used h-screen
@@ -473,3 +501,14 @@ html[data-fontsize='xlarge'] .text-\[13px\] { font-size: 17px !important; }
     scroll-behavior: auto !important;
   }
 }
+
+/* Motion standard (design system 11): every interactive element answers
+   hover and press the same way. Only colour, border, shadow, opacity,
+   filter and transform move; never layout. */
+:where(button, a, [role='button'], [role='tab'], [role='switch'], [role='menuitem'], [role='option'], summary, input, select, textarea) {
+  transition-property: color, background-color, border-color, box-shadow, opacity, filter, transform;
+  transition-duration: 140ms;
+  transition-timing-function: var(--ease-out);
+}
+:where(button, [role='button'], [role='tab'], [role='switch'], [role='menuitem'], [role='option'], summary, label[for], select):not(:disabled):not([aria-disabled='true']) { cursor: pointer; }
+:where(button, [role='button']):not(:disabled):not([aria-disabled='true']):active { transform: scale(0.98); transition-duration: 90ms; }

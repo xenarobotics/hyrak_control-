@@ -1,5 +1,6 @@
 'use client'
 
+import { useAccess } from '@/hooks/useAccess'
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useDroneStore } from '@/store/drone'
 import { useCalibration } from '@/hooks/useCalibration'
@@ -1596,8 +1597,13 @@ function RadioWorkspace() {
     // pure function of when the last frame came and what time it is now.
     const [lastFrameAt, setLastFrameAt] = useState(0)
     const [now, setNow] = useState(0)
+    // The RC monitor binds one server port for the whole server, so it is a
+    // staff tool (socket_classes: STAFF); a customer asking for it only got
+    // a refusal toast.
+    const { isStaff } = useAccess()
 
     useEffect(() => {
+        if (!isStaff) return
         const socket = getSocket()
         const onChans = (p: { channels: number[]; count: number }) => {
             const t = Date.now()
@@ -1613,7 +1619,7 @@ function RadioWorkspace() {
         // The "live" light must go OUT when frames stop - poll the recency.
         const t = setInterval(() => setNow(Date.now()), 1000)
         return () => { socket.off('rc_channels', onChans); socket.off('rc_monitor_status', onStatus); clearInterval(t) }
-    }, [])
+    }, [isStaff])
 
     const live = lastFrameAt > 0 && now - lastFrameAt < 3000 && channels.length > 0
 
