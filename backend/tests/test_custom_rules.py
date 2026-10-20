@@ -470,6 +470,9 @@ async def following_rig(rig):
     (lambda r: takeover.start(r.s.session_id, "staff-1", user_id="u", username="ops",
                               workspace_id=None), "taken_over", False),
     (lambda r: setattr(r.s, "mode", SimpleNamespace(value="object-detection")), "mode_changed", True),
+    # A workspace editor adds a "follow, don't ask" rule mid-flight.
+    (lambda r: setattr(r.s.mode.spec, "rules", [rules.clean_rule(rule(action="follow", confirm=False))]),
+     "rules_changed", True),
 ])
 async def test_model_control_switches_itself_off(rig, trigger, code, holds):
     await following_rig(rig)
@@ -565,3 +568,31 @@ async def test_handlers_are_guarded_and_answer(live):  # noqa: F811
 
 
 from test_live_scope import live  # noqa: E402,F401  (fixture)
+
+
+async def test_live_rule_edits_need_the_pilot_to_opt_in_again(rig, monkeypatch):
+    from app.models_custom import runtime
+    live = {}
+    monkeypatch.setattr(runtime, "live", lambda model_id: live if model_id == "m1" else None)
+    rig.s.mode.spec.via_catalogue = False
+    hover = rules.clean_rule(rule(action="hover", confirm=True))
+    live["rules"] = [hover]
+    await actions.set_enabled(rig.s, True)
+    # Alert and pin rules may change freely.
+    live["rules"] = [hover, rules.clean_rule(rule(action="alert"))]
+    await actions.on_result("sess-1", "custom:m1", {})
+    assert actions.is_enabled("sess-1")
+    # Turning off "Ask me first" on the hover rule is a change the pilot must accept.
+    live["rules"] = [{**hover, "confirm": False}]
+    h = fire("hover")
+    await actions.run_moving(rig.s, h, actions._base(h, rig.s))
+    ev = last_event(rig)
+    assert (ev["status"], ev["reason_code"]) == ("refused", "rules_changed") and rig.tel.calls == []
+    await actions.on_result("sess-1", "custom:m1", {})
+    await settle()
+    assert not actions.is_enabled("sess-1")
+    assert rig.sio.of("model_control")[-1]["reason_code"] == "rules_changed"
+    # Switching it on again accepts the new rules.
+    await actions.set_enabled(rig.s, True)
+    await actions.run_moving(rig.s, h, actions._base(h, rig.s))
+    assert last_event(rig)["status"] == "done" and rig.tel.calls == ["mode:HOLD"]

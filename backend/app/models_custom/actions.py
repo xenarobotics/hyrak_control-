@@ -47,6 +47,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from app.models_custom import rules as _rules
+from app.models_custom import runtime
 
 logger = logging.getLogger("verocore.models.actions")
 
@@ -67,6 +68,7 @@ REASONS = {
     "mode_changed": "the AI model is no longer running",
     "link_lost": "the drone link was lost",
     "failed": "the drone did not accept the command",
+    "rules_changed": "the model's hover or follow rules changed; turn model control on again to accept them",
 }
 # Ending a follow for these leaves the drone to whoever owns it now.
 _NO_HOLD = frozenset({"taken_over", "pilot_control", "red_zone", "link_lost"})
@@ -83,6 +85,11 @@ class Control:
     mode: str = ""                          # the custom mode it was switched on for
     follow: Optional[Dict[str, Any]] = None  # {rule_id, label, since, model_id}
     busy: bool = False                      # a follow is starting
+    # The hover/follow rules the pilot accepted by switching control on.
+    # Rules are edited live by workspace owners and admins: a change to any
+    # rule that moves the drone switches control off, so the pilot opts in
+    # to the new rules instead of an editor arming them mid-flight.
+    accepted: tuple = ()
 
 
 _controls: Dict[str, Control] = {}
@@ -139,6 +146,24 @@ def _custom_mode(session) -> Optional[str]:
     if mode is None or getattr(mode, "spec", None) is None:
         return None
     return mode.value
+
+
+def _moving_rules(session) -> tuple:
+    """The running model's current hover/follow rules, as a comparable
+    snapshot (live edits included, as the analyzer reads them)."""
+    spec = getattr(getattr(session, "mode", None), "spec", None)
+    if spec is None:
+        return ()
+    rules = getattr(spec, "rules", None)
+    if not getattr(spec, "via_catalogue", False):
+        live = runtime.live(spec.model_id) or {}
+        if "rules" in live:
+            rules = live["rules"]
+    return tuple(sorted(
+        (str(r.get("id")), str(r.get("label")).lower(), float(r.get("min_score", 0)),
+         float(r.get("for_s", 0)), r.get("action"), bool(r.get("confirm", True)),
+         bool(r.get("enabled", True)))
+        for r in (rules or []) if r.get("action") in _rules.MOVING))
 
 
 def _linked(tel) -> bool:
@@ -234,6 +259,8 @@ def _off_reason(session, c: Control) -> Optional[str]:
         return "red_zone"
     if _custom_mode(session) != c.mode:
         return "mode_changed"
+    if _moving_rules(session) != c.accepted:
+        return "rules_changed"
     return None
 
 
@@ -287,6 +314,8 @@ async def _guard(session, action: str) -> Optional[str]:
         return "red_zone"
     if _custom_mode(session) != c.mode:
         return "mode_changed"
+    if _moving_rules(session) != c.accepted:
+        return "rules_changed"
     if action == "follow":
         return await _zone_reason(session, tel)
     return None
@@ -596,6 +625,7 @@ async def set_enabled(session, enabled: bool) -> dict:
         return out
     c = _controls.setdefault(sid, Control())
     c.enabled, c.mode = True, _custom_mode(session)
+    c.accepted = _moving_rules(session)
     logger.info(f"Session {sid[:8]}: model control on for {c.mode}")
     out = state(sid)
     await _emit(sid, "model_control", out)

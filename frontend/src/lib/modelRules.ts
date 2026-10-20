@@ -50,6 +50,7 @@ export const REASON_TEXT: Record<string, string> = {
     mode_changed: 'The AI model was stopped or changed.',
     link_lost: 'The link to the drone was lost.',
     failed: 'The drone did not accept the command.',
+    rules_changed: 'The hover or follow rules were changed. Turn it on again to accept the new rules.',
 }
 
 export function reasonText(code?: string | null, message?: string | null): string | null {
