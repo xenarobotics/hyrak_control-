@@ -36,6 +36,11 @@ export interface Sighting {
     thumb?: string | null
     agl_m?: number | null
     angle_source?: string
+    /** Placed by a model rule's "Pin it on the map": kept with the flight
+     *  even when Record to map is off. */
+    pinned?: boolean
+    /** The rule's class name, for pinned sightings. */
+    rule?: string | null
 }
 
 export interface MapCameraState {

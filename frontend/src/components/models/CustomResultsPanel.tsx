@@ -4,7 +4,8 @@
 // (each opens that setting in the model's panel), what it finds with counts
 // now and over the run (detect), or its answers (classify: every class when
 // there are 10 or fewer, else the top 5, plus how often each was the top
-// answer), plus the alert rule's hits.
+// answer), plus the rules' live progress (RulesLive), or for a model with
+// only the old single alert, its hits.
 // The boxes themselves are drawn by CvOverlayCanvas, as for Objects.
 
 import { useEffect, useMemo, useState } from 'react'
@@ -17,6 +18,7 @@ import type { AlertHit, CVResult } from '@/types/vision'
 import { cn } from '@/lib/utils'
 import { ModelDetailPanel } from './ModelDetailPanel'
 import { SettingsChips, type SettingFocus } from './ModelSettings'
+import { RulesLive } from './RulesLive'
 import { useModelAccess } from './useModelLibrary'
 import { css as s } from './ui'
 
@@ -59,7 +61,10 @@ export function CustomResultsPanel({ mode }: { mode: string }) {
     const id = customIdOf(mode)
     const model = useModelsStore(st => st.workspace.find(m => m.id === id)
         ?? (st.hyrak.find(m => (m as CustomModel).id === id) as CustomModel | undefined) ?? null)
-    const rule = model?.alert ?? null
+    // The no-code rules; a model with only the old single alert keeps the
+    // Alert block below until its rules are saved once.
+    const rules = Array.isArray(model?.rules) ? model!.rules : []
+    const rule = rules.length === 0 ? model?.alert ?? null : null
     const cv = useDroneStore(st => st.cvResults) as CustomCv | null
     const access = useModelAccess()
     const ours = useModelsStore(st => !!id && st.workspace.some(m => m.id === id))
@@ -120,7 +125,9 @@ export function CustomResultsPanel({ mode }: { mode: string }) {
                 <CountsTable now={stable} run={runCounts} waiting={!cv} />
             )}
 
-            {rule && (
+            {rules.length > 0 && <RulesLive rules={rules} cv={cv} />}
+
+            {rule && rules.length === 0 && (
                 <div className={s.section}>
                     <span className={s.label}>Alert</span>
                     <p className={s.help}>When {rule.label} is seen above {Math.round(rule.min_score * 100)}% sure.</p>

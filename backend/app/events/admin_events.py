@@ -222,6 +222,10 @@ def register_admin_events(sio, session_manager: SessionManager):
             # avoidance, the Offboard re-send loop. The staff holder decides.
             takeover.lock_link(session_manager.get_telemetry(target.session_id), True)
             await _stop_ai_steering(session_manager, target)
+            # Custom-model rules lose control (no HOLD here: _stop_ai_steering
+            # has already held an Offboard follow).
+            from app.models_custom import actions as model_actions
+            await model_actions.switch_off(target.session_id, "taken_over")
         await notify_takeover(target, t)
         await sio.emit("takeover_result", {"ok": True, "session_id": target.session_id,
                                            "active": True, **t.public()}, to=sid)

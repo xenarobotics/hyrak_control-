@@ -73,6 +73,8 @@ class RunSpec:
     name: str = ""
     threshold: float = 0.25
     alert: Optional[dict] = None
+    # No-code rules (app/models_custom/rules.py), already validated.
+    rules: Optional[list] = None
     labels: list = field(default_factory=list)
     # Only these class names reach cv_results, counts and alerts (None: all).
     classes_shown: Optional[list] = None
@@ -409,7 +411,7 @@ class RunnerPool:
 _pool = RunnerPool()
 
 # model id -> the owning workspace's current run settings (threshold,
-# classes_shown, tiling, alert), set by a PATCH, read by analyzers per frame.
+# classes_shown, tiling, alert, rules), set by a PATCH, read by analyzers per frame.
 _live: dict[str, dict] = {}
 
 

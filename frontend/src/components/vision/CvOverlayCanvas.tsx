@@ -451,6 +451,19 @@ function drawSubjectRing(
     ctx.restore()
 }
 
+/** A custom model's follow rule: the box the drone is following, drawn
+ *  like the person tracker's target. Fades while the target is lost. */
+function drawCustomFollow(ctx: CanvasRenderingContext2D, r: CVResult) {
+    const f = r.follow
+    if (!f?.active || !f.box) return
+    const [x1, y1, x2, y2] = f.box
+    const lost = (f.lost_s ?? 0) > 0
+    ctx.globalAlpha = lost ? 0.5 : 1
+    drawLockedRing(ctx, x1, y1, x2, y2, C.active)
+    drawPill(ctx, lost ? `FOLLOWING ${f.label.toUpperCase()} (LOST)` : `FOLLOWING ${f.label.toUpperCase()}`, x1, y1, C.active)
+    ctx.globalAlpha = 1
+}
+
 function drawVehicleTracking(ctx: CanvasRenderingContext2D, r: CVResult, W: number, H: number) {
     // One vehicle, one identity: this module attaches plate/colour/type/speed
     // to a persistent vehicle_id rather than a raw tracker id - same unified
@@ -929,6 +942,9 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
                 case 'vehicle-plate-tracking': drawVehicleTracking(ctx, view, W, H); break
                 case 'traffic-management': drawTrafficManagement(ctx, view, W, H); break
             }
+            // A custom model's follow rule: the followed box, louder than the
+            // rest. Only custom models send `follow`.
+            drawCustomFollow(ctx, r)
 
             // Hover affordance, drawn last so it sits over the module's own
             // boxes. Only in modes where a click does something.

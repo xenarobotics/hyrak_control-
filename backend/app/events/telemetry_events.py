@@ -267,6 +267,10 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                         sio, session_manager, session, manager, snapshot_dict
                     )
                 )
+                # Custom-model control switches itself off on link loss,
+                # a red-zone lock, a pilot or a takeover.
+                from app.models_custom import actions as model_actions
+                model_actions.on_telemetry(session.session_id)
                 # Mirror to any /admin observers watching this session
                 if observer.has_watchers(session.session_id):
                     asyncio.create_task(
@@ -309,6 +313,10 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                     await sio.emit("tracking_status", {"active": False}, to=sid)
                     await sio.emit("vehicle_tracking_status", {"active": False}, to=sid)
                     await sio.emit("pilot_override", {"mode": mode}, to=sid)
+                    # A custom model's rules lose control too (no HOLD: the
+                    # pilot is flying).
+                    from app.models_custom import actions as model_actions
+                    await model_actions.switch_off(session.session_id, "pilot_control")
                 except Exception as e:
                     logger.error(f"Pilot-override stand-down failed: {e}")
             try:
@@ -571,6 +579,8 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         from app.zones import monitor as zone_monitor
         zone_monitor.drop(session.session_id)
         session.zone_lock = False
+        from app.models_custom import actions as model_actions
+        await model_actions.switch_off(session.session_id, "link_lost")
         session.telemetry_connected = False
         session.hardware_uid = None
         session.drone = None
@@ -812,6 +822,11 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             await sio.emit("model_status", {"status": "loading", "mode": mode.value}, to=sid)
 
             async def _do_switch():
+                # Leaving a custom model: its model control ends, and a rule
+                # follow stops with HOLD before the analyzer goes.
+                if getattr(old_mode, "spec", None) is not None:
+                    from app.models_custom import actions as model_actions
+                    await model_actions.switch_off(session.session_id, "mode_changed")
                 # If we're leaving human-tracking, stop offboard cleanly BEFORE
                 # the analyzer is swapped - this gives the drone a proper HOLD
                 # command instead of letting PX4 hit its setpoint-loss failsafe.

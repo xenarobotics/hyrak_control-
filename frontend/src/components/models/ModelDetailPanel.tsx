@@ -2,13 +2,13 @@
 
 // One model's detail as a slide-over from its card: preview, Settings
 // (what it does, sensitivity, shown classes, small-object tiling; saved on
-// change), classes, versions, the optional alert rule, and Rename (in place), Re-test,
+// change), classes, the no-code rules (ModelRules), versions, and Rename (in place), Re-test,
 // Delete (named confirmation inside the panel, never a second modal) and,
 // for founders, Publish to HYRAK catalogue. Technical facts sit behind a
 // Details disclosure.
 
 import { useEffect, useRef, useState } from 'react'
-import { BellRing, ChevronRight, Globe, Pencil, Play, RefreshCw, Trash2, Loader } from 'lucide-react'
+import { ChevronRight, Globe, Pencil, Play, RefreshCw, Trash2, Loader } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatBytes } from '@/lib/formatBytes'
 import { useApiObjectUrl } from '@/hooks/useApiMedia'
@@ -19,9 +19,8 @@ import {
 import { useModelsStore } from '@/store/models'
 import { ClassChips } from './ClassChips'
 import { ModelSettingsSection, type SettingFocus } from './ModelSettings'
+import { RulesSection } from './ModelRules'
 import { Callout, Hint, SlideOver, StatusChip, css as s } from './ui'
-
-const SCORES = [0.3, 0.5, 0.6, 0.7, 0.8, 0.9]
 
 // Mount with key={modelId}: each model starts with a clean panel.
 export function ModelDetailPanel({ modelId, open, onOpenChange, editable, canPublish, canRun, running, onRun, onDeleted, focus }: {
@@ -169,8 +168,7 @@ export function ModelDetailPanel({ modelId, open, onOpenChange, editable, canPub
             </div>
 
             {labels.length > 0 && (
-                <AlertRuleEditor model={m} labels={labels} editable={editable}
-                    onSave={alert => run('alert', () => updateModel(m.id, { alert }))} />
+                <RulesSection model={m} labels={labels} editable={editable} onSaved={apply} />
             )}
 
             {(m.versions?.length ?? 0) > 0 && (
@@ -300,49 +298,6 @@ function DeleteConfirm({ name, busy, onCancel, onConfirm }: {
                 <button type="button" className={cn(s.btn, s.danger)} onClick={onConfirm} aria-busy={busy || undefined}>
                     {busy ? <Loader size={13} className="animate-spin motion-reduce:animate-none" aria-hidden /> : <Trash2 size={13} aria-hidden />} Delete model
                 </button>
-            </div>
-        </div>
-    )
-}
-
-/** "Alert me when [class] is seen above [score]". Saves as soon as it changes. */
-function AlertRuleEditor({ model, labels, editable, onSave }: {
-    model: CustomModel; labels: string[]; editable: boolean
-    onSave: (rule: { label: string; min_score: number } | null) => void
-}) {
-    const rule = model.alert ?? null
-    const [label, setLabel] = useState(rule?.label ?? labels[0])
-    const [score, setScore] = useState(rule?.min_score ?? 0.5)
-    const on = !!rule
-    if (!editable) {
-        return (
-            <div className={s.section}>
-                <span className={s.label}>Alert</span>
-                <p className={s.muted}>{rule ? `Alerts when ${rule.label} is seen above ${Math.round(rule.min_score * 100)}% sure.` : 'No alert set.'}</p>
-            </div>
-        )
-    }
-    return (
-        <div className={s.section}>
-            <span className={s.label}>Alert</span>
-            <div className={s.inset} style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <input id="cm-alert-on" type="checkbox" checked={on} style={{ accentColor: 'var(--cm-accent)', width: 16, height: 16 }}
-                        onChange={e => onSave(e.target.checked ? { label, min_score: score } : null)} />
-                    <label htmlFor="cm-alert-on" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                        <BellRing size={14} aria-hidden style={{ color: 'var(--cm-accent)' }} />Alert me when
-                    </label>
-                    <select className={s.input} style={{ width: 'auto', maxWidth: 180 }} value={label} aria-label="Class to watch for"
-                        onChange={e => { setLabel(e.target.value); if (on) onSave({ label: e.target.value, min_score: score }) }}>
-                        {labels.map(l => <option key={l} value={l}>{l}</option>)}
-                    </select>
-                    <span>is seen above</span>
-                    <select className={s.input} style={{ width: 'auto' }} value={score} aria-label="How sure the model must be"
-                        onChange={e => { const v = Number(e.target.value); setScore(v); if (on) onSave({ label, min_score: v }) }}>
-                        {SCORES.map(x => <option key={x} value={x}>{Math.round(x * 100)}% sure</option>)}
-                    </select>
-                </div>
-                <p className={s.help}>{on ? 'On. Alerts show in the results panel while the model runs.' : 'Off. Tick the box to turn it on.'}</p>
             </div>
         </div>
     )

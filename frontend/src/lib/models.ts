@@ -9,6 +9,7 @@
 import { apiFetch, apiJson } from './api'
 import { authHeaders, redirectToLogin } from './auth'
 import { getServerUrl } from './server-url'
+import type { RuleAction } from '@/types/vision'
 
 export type ModelTask = 'detect' | 'classify'
 export type ModelStatus = 'checking' | 'ready' | 'failed'
@@ -35,7 +36,31 @@ export interface AlertRule {
     label: string
     /** 0..1 */
     min_score: number
+    cooldown_s?: number
 }
+
+/** What a rule does when it fires. hover and follow move the drone. */
+export type { RuleAction }
+
+/** A no-code rule: "When [label] is seen above [min_score] for [for_s] s,
+ *  then [action]". The server is the final check (service.py). */
+export interface ModelRule {
+    /** 8-16 chars [a-z0-9], made here and kept stable. */
+    id: string
+    enabled: boolean
+    label: string
+    /** 0.05..0.99 */
+    min_score: number
+    /** Seen this long without a break, 0..30 s. */
+    for_s: number
+    action: RuleAction
+    /** Ask the pilot first (hover and follow only). */
+    confirm: boolean
+    /** After firing it waits this long before it can fire again, 5..600 s. */
+    cooldown_s: number
+}
+
+export const MAX_RULES = 6
 
 export interface CustomModel {
     id: string
@@ -65,6 +90,8 @@ export interface CustomModel {
     step?: string | null
     progress?: number | null
     alert?: AlertRule | null
+    /** No-code rules; when missing, a legacy `alert` shows as one rule. */
+    rules?: ModelRule[] | null
     /** Sensitivity: show a box from this score (0..1). Default 0.25. */
     threshold?: number
     /** Only these class names show; null or missing: all. */
@@ -231,6 +258,7 @@ export interface ModelPatch {
     task?: ModelTask
     /** Beyond section 0: the optional alert rule, null to clear it. */
     alert?: AlertRule | null
+    rules?: ModelRule[]
     threshold?: number
     /** null shows every class again. */
     classes_shown?: string[] | null

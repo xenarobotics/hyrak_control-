@@ -22,6 +22,71 @@ export interface ClassScore { name: string; score: number }
 /** A custom model's alert rule firing on a frame. */
 export interface AlertHit { label: string; score: number; at?: number }
 
+/** What a custom model rule does when it fires (lib/models.ts ModelRule). */
+export type RuleAction = 'alert' | 'mark' | 'hover' | 'follow'
+
+/** One rule's live progress on this frame (cv_results.rules_state). */
+export interface RuleState {
+    rule_id: string
+    label: string
+    action: RuleAction
+    /** How long the class has been seen without a break, seconds. */
+    seen_for_s: number
+    firing: boolean
+    /** Seconds left before it can fire again; 0 when ready. */
+    cooling_s: number
+}
+
+/** The box a follow rule is following (cv_results.follow). */
+export interface FollowState {
+    active: boolean
+    label: string
+    score: number
+    box: [number, number, number, number]
+    /** Seconds the target has been out of sight; 0 while seen. */
+    lost_s: number
+}
+
+export type RuleEventStatus = 'done' | 'awaiting_confirm' | 'refused' | 'expired' | 'declined' | 'stopped'
+
+/** Server push "rule_event": a rule fired, asks to confirm, or was refused. */
+export interface RuleEvent {
+    id: string
+    /** Present while status is awaiting_confirm; sent back with rule_confirm. */
+    token?: string
+    rule_id: string
+    model_id: string
+    model_name: string
+    label: string
+    score: number
+    action: RuleAction
+    status: RuleEventStatus
+    reason_code?: string
+    /** Ready-to-show plain text. */
+    message: string
+    /** Server time, seconds. */
+    ts: number
+    expires_at?: number
+}
+
+/** Server push "model_control": may rules move the drone this session. */
+export interface ModelControlState {
+    enabled: boolean
+    reason?: string
+    reason_code?: string
+    following?: { label: string; since: number } | null
+}
+
+/** Legacy server push "model_alert" (the old single alert setting). */
+export interface ModelAlertEvent {
+    model_id?: string
+    model_name?: string
+    label?: string
+    score?: number
+    message?: string
+    ts?: number
+}
+
 export interface CVResult {
     mode: string
     session_id: string
@@ -46,6 +111,12 @@ export interface CVResult {
     // alert rule's hits on this frame. Detect models use detections/objects.
     predictions?: ClassScore[]
     alert_hits?: AlertHit[]
+    /** Each rule's live progress. */
+    rules_state?: RuleState[]
+    /** Set while a follow rule is following something. */
+    follow?: FollowState | null
+    /** "Allow model control" is on for this session. */
+    model_control?: boolean
     // Object detection
     objects?: Record<string, number>
     detections?: Detection[]

@@ -54,12 +54,14 @@ TILINGS = ("off", "auto", "2x2", "3x3")
 
 def _run_settings(st: dict) -> dict:
     """The settings a run uses, with their defaults: sensitivity, the shown
-    classes (None = all), tiling and the alert rule."""
+    classes (None = all), tiling, the alert rule and the no-code rules."""
     shown = st.get("classes_shown")
+    rules = st.get("rules")
     return {"threshold": float(st.get("threshold", DEFAULT_THRESHOLD)),
             "classes_shown": list(shown) if isinstance(shown, list) else None,
             "tiling": st.get("tiling") if st.get("tiling") in TILINGS else "off",
-            "alert": st.get("alert")}
+            "alert": st.get("alert"),
+            "rules": [dict(r) for r in rules] if isinstance(rules, list) else []}
 PREMIUM_REASON = ("Adding your own models is a premium feature. Ask HYRAK to turn on Custom "
                   "models for this workspace.")
 
@@ -233,6 +235,7 @@ def card(rec: ModelRecord, versions: list[VersionRecord], *, kind: Optional[str]
         "classes_shown": _run_settings(st)["classes_shown"],
         "tiling": _run_settings(st)["tiling"],
         "alert": st.get("alert"),
+        "rules": _run_settings(st)["rules"],
         "created_by": rec.created_by,
         "created_at": model_store.public_dt(rec.created_at),
         "updated_at": model_store.public_dt(rec.updated_at),
@@ -258,6 +261,7 @@ def catalogue_card(rec: ModelRecord) -> dict:
         "threshold": float(snap.get("threshold", DEFAULT_THRESHOLD)),
         "classes_shown": _run_settings(snap)["classes_shown"],
         "tiling": _run_settings(snap)["tiling"],
+        "rules": [],                    # rules are the owning workspace's
         "version": {"n": rec.published_version, "latency_ms": latency,
                     "fps": round(1000.0 / latency, 1) if latency else None,
                     "gpu_mem_mb": snap.get("gpu_mem_mb"), "provider": snap.get("provider"),
@@ -742,6 +746,16 @@ def _valid_alert(alert) -> Optional[dict]:
             "cooldown_s": cooldown}
 
 
+def _valid_rules(rules, labels, task) -> Optional[list]:
+    """The no-code rules (app/models_custom/rules.py): at most six, one
+    follow on, class names from the model's own."""
+    from app.models_custom import rules as model_rules
+    try:
+        return model_rules.validate_rules(rules, labels=labels, task=task or "detect")
+    except model_rules.RuleError as e:
+        raise _refuse(400, "bad_request", reason=str(e))
+
+
 async def patch_model(actor, model_id: str, body: dict, *, ip: str = "") -> dict:
     rec, ms, tree, ws = await _manageable(actor, model_id)
     store = model_store.write_store()
@@ -812,6 +826,14 @@ async def patch_model(actor, model_id: str, body: dict, *, ip: str = "") -> dict
                     details["labels"] = labels
                     details["label_source"] = "user"
                 await store.update_version(model_id, n, labels=labels, details=details)
+    if "rules" in body:
+        # Checked last: the class names and task may change in this PATCH.
+        labels = list(settings.get("labels") or [])
+        if not labels:
+            n = rec.current_version or await _latest_n(model_id)
+            v = await store.get_version(model_id, n) if n else None
+            labels = list((v.labels if v else None) or [])
+        settings["rules"] = _valid_rules(body["rules"], labels, settings.get("task") or rec.task)
     if settings != (rec.settings or {}):
         fields["settings"] = settings
     if fields:
@@ -1003,7 +1025,7 @@ async def resolve_run(session, model_id: str):
     run = _run_settings(st)
     spec = runtime.RunSpec(workspace_id=ws_id, model_id=rec.id, version=v.n,
                            model_path=str(path), spec=v.details, name=rec.name,
-                           threshold=run["threshold"], alert=run["alert"],
+                           threshold=run["threshold"], alert=run["alert"], rules=run["rules"],
                            labels=list(v.labels or []), files=files,
                            classes_shown=run["classes_shown"], tiling=run["tiling"])
     return CustomModelMode(spec)
@@ -1013,7 +1035,7 @@ def _catalogue_mode(rec: ModelRecord, ws_id: str):
     """The pinned catalogue version, run from the catalogue's own copy of
     its files (hash-checked before every start) with the snapshot's spec,
     labels and threshold, never the owning workspace's later edits or
-    files. No alert rule: alerts are the owning workspace's."""
+    files. No alert rule and no rules: those are the owning workspace's."""
     from app.models_custom.analyzer import CustomModelMode
     snap = rec.catalogue or {}
     n = rec.published_version

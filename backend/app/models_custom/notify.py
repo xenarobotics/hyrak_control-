@@ -102,6 +102,8 @@ async def stop_sessions_running(model_id: Optional[str], reason: str, *,
             continue
         if skip_staff and s.is_staff:
             continue
+        from app.models_custom import actions
+        await actions.switch_off(s.session_id, "mode_changed")
         _session_manager.set_mode(s.session_id, AnalysisMode.MANUAL_CONTROL)
         if _vision_pool is not None:
             try:

@@ -23,7 +23,12 @@ to map_sightings every FLUSH_S seconds and once more when the session ends,
 under the flight that is armed at the time. Turning it on also saves what is
 already on the map, so what the operator sees is what gets kept.
 
-Clearing empties the LIVE map only. Recorded rows stay with their flight and
+Pins: a custom model's "mark" rule (app/models_custom/actions.py) pins
+the detection that fired it (pin): a sighting of its own with `pinned:
+true` and `rule`, pushed at once and saved to map_sightings under the
+current flight whether recording is on or not.
+
+Clearing empties the LIVE map only, pins excepted. Recorded rows stay with their flight and
 are deleted from Settings > Flights, never as a side effect of tidying the
 live view.
 """
@@ -69,6 +74,7 @@ class SessionMap:
     dirty: set = field(default_factory=set)          # to push
     thumb_dirty: set = field(default_factory=set)    # push with thumb
     unsaved: set = field(default_factory=set)        # to persist
+    pins_unsaved: set = field(default_factory=set)   # pins whose write failed
     flight_of: dict = field(default_factory=dict)    # sighting id -> flight id
     cleared: bool = False
     status_dirty: bool = False                       # reason changed: push even with no sightings
@@ -349,6 +355,75 @@ async def flush(session_id: str) -> int:
     return n
 
 
+def pin(session_id: str, mode: str, meta: Dict[str, Any], capture: Optional[Dict[str, Any]],
+        frame=None, *, label: str, score: Optional[float], box, rule: Optional[str],
+        now: Optional[float] = None) -> tuple[Optional[dict], Optional[str]]:
+    """Pin one detection on the map with the telemetry of its own frame.
+    (sighting dict, None), or (None, reason) when it cannot be placed
+    (no_gps, no_altitude, above_horizon, too_shallow, no_frame)."""
+    capture = capture or {}
+    tel = capture.get("telemetry")
+    w, h = int(capture.get("width") or 0), int(capture.get("height") or 0)
+    if not tel:
+        return None, "no_gps"
+    m = ensure(session_id)
+    task = "detect" if box else "classify"
+    u, v = geo.box_anchor(box, task, w, h)
+    res = geo.project_pixel(tel, u, v, w, h, m.camera, terrain_offset(tel))
+    if not res.ok:
+        return None, res.reason
+    f = res.fix
+    now = time.time() if now is None else now
+    source, model_name = source_of(mode, meta or {})
+    s = m.tracker.pin(Observation(
+        label=label, lat=f.lat, lon=f.lon, accuracy_m=f.accuracy_m,
+        t=float(capture.get("wall_time") or now), score=score, source=source,
+        model_name=model_name, task=task, agl_m=f.agl_m, angle_source=f.angle_source), rule)
+    if s is None:
+        return None, "no_gps"
+    if task == "detect":
+        t = _thumb(frame, box)
+        if t:
+            s.thumb, s._thumb_score = t, score or 0.0
+            m.thumb_dirty.add(s.id)
+    m.dirty.add(s.id)
+    try:
+        loop = asyncio.get_running_loop()
+        m.last_push = now
+        loop.create_task(push(session_id))
+        loop.create_task(save_pins(session_id, {s.id}))
+    except RuntimeError:
+        m.pins_unsaved.add(s.id)
+    return s.to_dict(), None
+
+
+async def save_pins(session_id: str, ids: Optional[set] = None) -> int:
+    """Write pinned sightings to map_sightings under the current flight,
+    recording or not. Failed writes are kept and tried again with the next
+    pin and when the session ends."""
+    m = _sessions.get(session_id)
+    if m is None:
+        return 0
+    from app.mapdetect import store
+    ids = set(ids or ()) | m.pins_unsaved
+    m.pins_unsaved = set()
+    ws, drone = _session_ids(session_id)
+    fid = _current_flight(session_id)
+    rows = []
+    for sid in ids:
+        s = m.tracker.sightings.get(sid)
+        if s is None:
+            continue
+        if fid and not m.flight_of.get(sid):
+            m.flight_of[sid] = fid
+        rows.append({**s.to_dict(), "session_id": session_id, "workspace_id": ws,
+                     "drone_id": drone, "flight_id": m.flight_of.get(sid)})
+    n = await store.upsert(rows)
+    if rows and n == 0:
+        m.pins_unsaved |= {r["id"] for r in rows}
+    return n
+
+
 # ── controls (socket handlers and REST call these) ───────────────────────
 
 async def set_camera(session_id: str, data: Optional[dict]) -> dict:
@@ -375,12 +450,18 @@ async def clear(session_id: str) -> dict:
     m = ensure(session_id)
     if m.recording and m.unsaved:
         await flush(session_id)
+    # Pins (mark rules) stay: they are part of the flight, not clutter.
+    pins = {k: v for k, v in m.tracker.sightings.items() if v.pinned}
     m.tracker.clear()
+    m.tracker.sightings.update(pins)
     m.dirty.clear()
     m.thumb_dirty.clear()
     m.unsaved.clear()
-    m.flight_of.clear()
+    m.flight_of = {k: v for k, v in m.flight_of.items() if k in pins}
     m.cleared = True
+    # The full state after a clear carries the pins back (thumbs included).
+    m.dirty |= set(pins)
+    m.thumb_dirty |= set(pins)
     return await push(session_id, payload=m.state()) or m.state()
 
 
@@ -399,4 +480,6 @@ async def end_session(session_id: str) -> None:
         return
     if m.recording and m.unsaved:
         await flush(session_id)
+    if m.pins_unsaved:
+        await save_pins(session_id)
     _sessions.pop(session_id, None)

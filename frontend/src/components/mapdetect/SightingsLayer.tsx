@@ -5,7 +5,8 @@
 // zoom (a 44 px screen grid - no clustering library needed for a few
 // thousand points). Clicking a dot opens its details; clicking a bubble
 // zooms in on it. While a popover is open the estimated accuracy is drawn as
-// a circle, so "+/- 8 m" is visible, not just written.
+// a circle, so "+/- 8 m" is visible, not just written. Sightings a rule
+// pinned ("Pin it on the map") draw as a pin and are never grouped.
 //
 // Lives inside a react-leaflet <MapContainer>.
 
@@ -36,6 +37,21 @@ function bubbleIcon(n: number, color: string): L.DivIcon {
             + `box-shadow:0 1px 6px rgba(0,0,0,.55);cursor:pointer">${n}</div>`,
         iconSize: [sz, sz],
         iconAnchor: [sz / 2, sz / 2],
+    })
+}
+
+/** A rule's pin: a teardrop in the class colour, so it reads as "placed on
+ *  purpose" next to the plain dots. Never grouped into a bubble. */
+function pinIcon(color: string): L.DivIcon {
+    return L.divIcon({
+        className: '',
+        html: `<div style="width:22px;height:22px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);`
+            + `background:${color};border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.6);cursor:pointer;`
+            + `display:flex;align-items:center;justify-content:center">`
+            + `<div style="width:7px;height:7px;border-radius:50%;background:#fff"></div></div>`,
+        iconSize: [22, 22],
+        iconAnchor: [11, 26],
+        popupAnchor: [0, -24],
     })
 }
 
@@ -82,6 +98,11 @@ export function SightingPopover({ s }: { s: Sighting }) {
                         {Math.round(s.best_score * 100)}%</span>
                 )}
             </div>
+            {s.pinned && (
+                <p style={{ margin: '4px 0 0', fontWeight: 600, color: '#0e7490' }}>
+                    Pinned by a rule{s.rule ? ` (${s.rule})` : ''}. Saved with the flight.
+                </p>
+            )}
             <dl style={{ margin: '6px 0 0', display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: 10, rowGap: 2 }}>
                 <dt style={{ color: '#6b7280' }}>Seen</dt>
                 <dd style={{ margin: 0 }}>
@@ -106,7 +127,9 @@ export function SightingPopover({ s }: { s: Sighting }) {
 /** `list`: the sightings to draw (already filtered by the caller). */
 export function SightingsLayer({ list }: { list: Sighting[] }) {
     const map = useMap()
-    const groups = useGroups(list)
+    const pins = useMemo(() => list.filter(s => s.pinned), [list])
+    const loose = useMemo(() => list.filter(s => !s.pinned), [list])
+    const groups = useGroups(loose)
     const [openId, setOpenId] = useState<string | null>(null)
     const open = openId ? list.find(s => s.id === openId) : undefined
     return (
@@ -116,6 +139,18 @@ export function SightingsLayer({ list }: { list: Sighting[] }) {
                     pathOptions={{ color: classColor(open.label), weight: 1.5, fillOpacity: 0.12,
                         dashArray: '4 4', interactive: false }} />
             )}
+            {pins.map(p => (
+                <Marker key={p.id} position={[p.lat, p.lon]} icon={pinIcon(classColor(p.label))} zIndexOffset={700}
+                    title={`${p.label}, pinned by a rule, about +/- ${p.accuracy_m} m`}
+                    eventHandlers={{
+                        popupopen: () => setOpenId(p.id),
+                        popupclose: () => setOpenId(id => (id === p.id ? null : id)),
+                    }}>
+                    <Popup autoPan closeButton autoPanPaddingTopLeft={[24, 150]} autoPanPaddingBottomRight={[24, 24]}>
+                        <SightingPopover s={p} />
+                    </Popup>
+                </Marker>
+            ))}
             {groups.map(g => g.items.length === 1 ? (
                 <Marker key={g.items[0].id} position={[g.items[0].lat, g.items[0].lon]}
                     icon={dotIcon(g.color)} zIndexOffset={600}

@@ -34,17 +34,29 @@ socket event and the cv_results frame carries it as `alert` and
 consoles watching the workspace get it through the existing admin_alert
 path. At most one per cooldown per session.
 
-No drone actions in step 1: nothing here sets `drone_command`, so nothing
-can move the drone, and there is nothing for a takeover to stop.
+Rules (app/models_custom/rules.py): the model's no-code rules are checked
+on every frame here (RuleEngine: seen-for with gaps, cooldown). The frame
+carries `rules_state` for the panel and, when rules fired, a private
+`_rule_fires` that app/models_custom/actions.py picks up on the event loop
+(stream_track) and runs behind its guards.
+
+Follow: actions.py starts a follow with start_follow() once the drone is
+in Offboard. While it is on, each frame keeps the lock on the followed box
+(rules.FollowTarget), shows it as `follow {active, label, score, box,
+lost_s}`, and sets `drone_command` (a capped velocity) for the existing
+stream_track path; an unseen target gets a zero command, and after
+rules.LOST_S the frame says `_follow_lost` so actions.py stops it. No
+follow, no `drone_command`: nothing else here can move the drone.
 """
 from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
+from app.models_custom import rules as _rules
 from app.models_custom import runtime
 from app.models_custom.errors import describe
 from app.vision.base import BaseAnalyzer, warn_limited
@@ -121,6 +133,15 @@ class CustomModelAnalyzer(BaseAnalyzer):
         self.hold(handle)
         self.runner = runner
         self._last_alert = 0.0
+        self._rule_engine = _rules.RuleEngine()
+        # Set and cleared from the event loop (actions.py) by plain
+        # assignment; a frame reads it once, so a stop mid-frame at worst
+        # lets one command through to actions.py, which drops it.
+        self._follow: Optional[_rules.FollowTarget] = None
+        self._follow_ctl: Optional[_rules.FollowController] = None
+        # The last frame's boxes (monotonic time, hits): a follow confirmed
+        # seconds after its rule fired locks on where the target is now.
+        self._last_hits: Tuple[float, list] = (0.0, [])
         self._run_frames = 0
         self._run_counts: Dict[str, Dict[str, int]] = {}
         logger.info(f"CustomModelAnalyzer: {spec.name or spec.model_id[:8]} v{spec.version} "
@@ -134,7 +155,8 @@ class CustomModelAnalyzer(BaseAnalyzer):
         """This frame's settings: the spec's, with the owning workspace's
         live edits on top (catalogue runs keep the published snapshot)."""
         out = {"threshold": self.spec.threshold, "classes_shown": self.spec.classes_shown,
-               "tiling": self.spec.tiling or "off", "alert": self.spec.alert}
+               "tiling": self.spec.tiling or "off", "alert": self.spec.alert,
+               "rules": self.spec.rules}
         if not self.spec.via_catalogue:
             live = runtime.live(self.spec.model_id)
             if live:
@@ -190,6 +212,8 @@ class CustomModelAnalyzer(BaseAnalyzer):
             warn_limited(f"custom:{self.spec.model_id}", f"Custom model {self.spec.model_id[:8]}: "
                                                          f"{e.code} {e.detail}")
             meta.update({"error": msg, "runner": e.code})
+            # A follow sees nothing on this frame: zero command, then lost.
+            self._follow_frame(meta, [], w, h, time.monotonic())
             return frame_bgr, meta
         meta["infer_ms"] = res.get("infer_ms")
         meta["tiling"] = res.get("tiling", "off")
@@ -222,7 +246,56 @@ class CustomModelAnalyzer(BaseAnalyzer):
             hits = [(d["name"], d["score"], d["box"]) for d in dets]
             self._tally(meta, [d["name"] for d in dets])
         self._check_alert(meta, hits, st["alert"])
+        now = time.monotonic()
+        if st.get("rules"):
+            fires, state = self._rule_engine.update(st["rules"], hits, now)
+            meta["rules_state"] = state
+            if fires:
+                meta["_rule_fires"] = fires
+        self._last_hits = (now, hits)
+        self._follow_frame(meta, hits, w, h, now)
         return frame_bgr, meta
+
+    # ── follow (started and stopped by actions.py) ─────────────────────── #
+    def start_follow(self, label: str, box, score: float) -> None:
+        self._follow_ctl = _rules.FollowController()
+        self._follow = _rules.FollowTarget(label, box, score, time.monotonic())
+
+    def current_box(self, label: str, near) -> Optional[Tuple[Any, float]]:
+        """(box, score) of `label` on the latest frame (under 1 s old): the
+        box whose centre is nearest `near`, or None when it is not in view."""
+        at, hits = self._last_hits
+        if time.monotonic() - at > 1.0:
+            return None
+        want = label.lower()
+        boxes = [(b, sc) for n, sc, b in hits if b is not None and n.lower() == want]
+        if not boxes:
+            return None
+        if not near:
+            return max(boxes, key=lambda x: x[1])
+        cx, cy = (near[0] + near[2]) / 2, (near[1] + near[3]) / 2
+        return min(boxes, key=lambda x: ((x[0][0] + x[0][2]) / 2 - cx) ** 2
+                   + ((x[0][1] + x[0][3]) / 2 - cy) ** 2)
+
+    def stop_follow(self) -> None:
+        self._follow = None
+
+    @property
+    def following(self) -> bool:
+        return self._follow is not None
+
+    def _follow_frame(self, meta: Dict[str, Any], hits, w: int, h: int, now: float) -> None:
+        target, ctl = self._follow, self._follow_ctl
+        if target is None or ctl is None:
+            return
+        if target.update(hits, w, h, now) is not None:
+            meta["drone_command"] = ctl.command(target, w, h)
+        elif target.lost_s(now) >= _rules.LOST_S:
+            meta["_follow_lost"] = True
+        else:
+            # Unseen for a moment: stay put rather than fly the last command.
+            meta["drone_command"] = _rules.velocity()
+        meta["follow"] = target.public(now)
 
     def _check_alert(self, meta: Dict[str, Any], hits, rule=None) -> None:
         rule = rule or {}

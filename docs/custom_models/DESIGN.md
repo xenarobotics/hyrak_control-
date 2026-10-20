@@ -394,6 +394,52 @@ model_status pushes reach only sockets in the model's workspace (a
 founder adding a model from the console sees it on the REST card).
 A check interrupted by a backend restart is re-run at startup.
 
+### As built: rules (backend, 2026-10-20)
+
+No-code rules replace "no drone actions" for step 1. A rule is a sentence
+on a model: "When `label` is seen above `min_score` for `for_s` s, then
+`action`", stored in `models.settings.rules` (no migration) and returned
+as `rules` on every model card (`[]` when none; catalogue cards always
+`[]`, as rules and alerts are the owning workspace's). The legacy `alert`
+setting still runs unchanged.
+
+* `app/models_custom/rules.py` (pure): `validate_rules` (id 8 to 16
+  `[a-z0-9]`, label one of the model's classes case-insensitively,
+  min_score 0.05 to 0.99, for_s 0 to 30, cooldown_s 5 to 600, at most 6
+  rules, at most one enabled follow, no mark/follow on a classifier;
+  PATCH answers 400 `bad_request` with the reason); `RuleEngine` (seen-for
+  survives gaps up to 0.5 s, cooldown from each firing); `PendingConfirms`
+  (single-use, per-session tokens, 10 s); `FollowTarget` (lock kept by
+  IoU >= 0.1 or the nearest same-class centre within 20% of the frame
+  diagonal) and `FollowController` (yaw PD from the shared calibration,
+  forward PD on the range error against the box height at lock; caps
+  forward 3 m/s, right 1.5 m/s, yaw 30 deg/s, down 0).
+* The analyzer evaluates rules per frame: `rules_state` in cv_results, a
+  private `_rule_fires`, and while a follow is on `follow {active, label,
+  score, box, lost_s}` plus `drone_command` (zero while the target is
+  unseen, `_follow_lost` after 3 s).
+* `app/models_custom/actions.py` runs on the event loop from stream_track
+  before the drone_command step: alert (rule_event + admin alert), mark
+  (`mapdetect.live.pin`: a pinned sighting, pushed at once, written to
+  `map_sightings` under the current flight whether recording is on or
+  not; the table stores it as `source + "#pin"` and reads it back as
+  `pinned: true, rule`; "Clear map" keeps pins), hover (pause the mission,
+  else HOLD) and follow (`start_offboard`, then the analyzer steers).
+  `drone_command` is stripped unless a rule follow is on.
+* Moving actions need "Allow model control" (`set_model_control`, per
+  session, in memory) and, unless the rule turns `confirm` off, the
+  pilot's yes (`rule_confirm`). Every run re-checks all guards: model
+  control, takeover, pilot control, link, in air, red-zone lock, model
+  still running, and for follow the zone at the current position (red;
+  orange that needs a permit and has none; no position fix = no zone, as
+  in the zone monitor). The same checks run on every frame of a follow.
+* Model control switches itself off on staff takeover, pilot override,
+  red-zone lock, link loss (watchdog or link released), leaving the model
+  (mode change, model removed) and the pilot's socket going away. Ending a
+  follow commands HOLD only when nobody else owns the drone: not after a
+  takeover (`_stop_ai_steering` holds), a pilot override, a red-zone lock
+  (the pushback flies it out) or a lost link.
+
 ## Original design (2026-10-17)
 
 Status: DESIGN (2026-10-17). Superseded where section 0 differs.

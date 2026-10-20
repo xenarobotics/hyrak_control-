@@ -269,6 +269,22 @@ async def test_patch_retest_publish_delete(env, onnx_files):
     ok(await env.api.patch(url, headers=hdr(w.olga[1]), json={"alert": None}))
     assert ok(await env.api.get(url, headers=hdr(w.olga[1])))["model"]["alert"] is None
 
+    # No-code rules: validated, shown on the card, live for running sessions.
+    assert ok(await env.api.get(url, headers=hdr(w.olga[1])))["model"]["rules"] == []
+    rule = {"id": "abcd1234", "label": "CRACK", "action": "follow", "min_score": 0.6}
+    m3 = ok(await env.api.patch(url, headers=hdr(w.olga[1]), json={"rules": [rule], "alert": None}))["model"]
+    assert m3["rules"] == [{"id": "abcd1234", "enabled": True, "label": "crack", "min_score": 0.6,
+                            "for_s": 1.0, "action": "follow", "confirm": True, "cooldown_s": 30.0}]
+    assert runtime.live(m["id"])["rules"] == m3["rules"]
+    lst = ok(await env.api.get(f"/api/models?workspace_id={w.iith['id']}", headers=hdr(w.olga[1])))
+    assert any(x.get("rules") == m3["rules"] for x in lst["workspace"])
+    for bad in ([{**rule, "label": "pothole"}], [{**rule, "id": "x"}],
+                [rule, {**rule, "id": "efgh5678"}], [{**rule, "id": f"rule000{i}"} for i in range(7)]):
+        r = await env.api.patch(url, headers=hdr(w.olga[1]), json={"rules": bad})
+        assert r.status_code == 400 and r.json()["detail"]["code"] == "bad_request", bad
+    ok(await env.api.patch(url, headers=hdr(w.olga[1]), json={"rules": None}))
+    assert ok(await env.api.get(url, headers=hdr(w.olga[1])))["model"]["rules"] == []
+
     r = ok(await env.api.post(f"{url}/retest", headers=hdr(w.olga[1])))["model"]
     assert r["status"] == "checking"
     await service.wait_for_checks()
@@ -504,7 +520,18 @@ async def test_analyzer_results_shape_alerts_and_shared_runners(env, onnx_files)
     assert meta["_pending_model_alerts"] and meta["_pending_admin_alerts"][0]["source"] == "custom_model"
     _, meta2 = await asyncio.to_thread(a._analyze_frame_blocking, frame)
     assert "alert" not in meta2                                          # cooldown
-    assert "drone_command" not in meta                                   # step 1: no drone actions
+    # No follow, no command; a follow (actions.py starts it) steers toward
+    # the locked box with a capped velocity, down always 0.
+    assert "drone_command" not in meta and "follow" not in meta
+    a.start_follow("crack", [44, 44, 84, 84], 0.9)
+    _, mf = await asyncio.to_thread(a._analyze_frame_blocking, frame)
+    cmd = mf["drone_command"]
+    assert cmd["type"] == "velocity" and cmd["down_m_s"] == 0.0 and abs(cmd["forward_m_s"]) <= 3.0
+    assert abs(cmd["yaw_deg_s"]) <= 30.0 and abs(cmd["right_m_s"]) <= 1.5
+    assert mf["follow"]["active"] and mf["follow"]["box"] == [44, 44, 84, 84]
+    a.stop_follow()
+    _, mo = await asyncio.to_thread(a._analyze_frame_blocking, frame)
+    assert "drone_command" not in mo and "follow" not in mo
     # A big frame is scaled for the buffer and the boxes scaled back.
     _, big = await asyncio.to_thread(a._analyze_frame_blocking, np.zeros((2160, 3840, 3), np.uint8))
     assert big["detections"][0]["box"][0] > 1000
@@ -568,7 +595,7 @@ async def test_a_model_that_dies_on_load_fails_cleanly(env, onnx_files, tmp_path
 # ── the catalogue: reduced cards, pinned versions ────────────────────────
 
 CATALOGUE_KEYS = {"id", "kind", "run_mode", "name", "description", "icon", "task", "status",
-                  "runnable", "published", "labels", "threshold", "classes_shown", "tiling",
+                  "runnable", "published", "labels", "threshold", "classes_shown", "tiling", "rules",
                   "version"}
 
 

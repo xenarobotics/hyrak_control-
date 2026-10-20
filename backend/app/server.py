@@ -409,6 +409,10 @@ def create_app() -> socketio.ASGIApp:
             # unless it comes back (the customer is not locked out for 90 s).
             from app.events.admin_events import on_staff_socket_gone
             await on_staff_socket_gone(session)
+            # Model control is the pilot's, given while watching: with the
+            # pilot gone (and the video with them) it ends, a follow too.
+            from app.models_custom import actions as model_actions
+            await model_actions.switch_off(session.session_id, "link_lost", hold=True)
             _expiry_tasks[session.session_id] = asyncio.create_task(
                 _expire_session(session.session_id))
         logger.info(f"Disconnected {sid[:8]}")
@@ -442,6 +446,8 @@ def create_app() -> socketio.ASGIApp:
         await recorder.end_flight(session.session_id)
         from app.zones import monitor as zone_monitor
         zone_monitor.drop(session.session_id)
+        from app.models_custom import actions as model_actions
+        model_actions.drop(session.session_id)
         # A relay listener holds a port AND its own ffmpeg, neither tied
         # to the peer connection - a client that vanishes without the pc
         # ever changing state would leak both.
@@ -491,6 +497,8 @@ def create_app() -> socketio.ASGIApp:
     register_gs_relay_events(sio)
     from app.models_custom import notify as model_notify
     model_notify.configure(sio, session_manager, vision_pool)
+    from app.models_custom.events import register_rule_events
+    register_rule_events(sio, session_manager, vision_pool)
     from app.mapdetect.events import register_map_events
     register_map_events(sio, session_manager)
 

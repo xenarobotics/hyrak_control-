@@ -372,6 +372,20 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
                 for alert in model_alerts:
                     asyncio.create_task(_model_notify.model_alert(self.session_id, alert))
 
+            # Custom-model rules (app/models_custom/actions.py): what fired
+            # runs, an active follow is kept or ended, and drone_command
+            # survives only while a rule follow is on and passes its guards.
+            if mode.value.startswith("custom:"):
+                try:
+                    from app.models_custom import actions as _model_actions
+                    await _model_actions.on_result(self.session_id, mode.value, meta,
+                                                   capture, annotated_bgr)
+                except Exception as e:
+                    meta.pop("drone_command", None)
+                    from app.vision.base import warn_limited
+                    warn_limited(f"rules:{self.session_id}",
+                                 f"Model rules failed for session {self.session_id[:8]}: {e!r}")
+
             # ── Send drone command directly to MAVLink ──────────────
             drone_cmd = meta.get("drone_command")
             if drone_cmd and drone_cmd.get("type") == "velocity":

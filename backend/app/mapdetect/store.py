@@ -21,6 +21,21 @@ def _dt(t: Optional[float]) -> datetime:
     return datetime.fromtimestamp(float(t or 0.0), tz=timezone.utc)
 
 
+# A pinned sighting (a "mark" rule) is stored with this suffix on its
+# source, so the table needs no new column; list_rows reads it back as
+# pinned: true and rule: <label>.
+PIN_SUFFIX = "#pin"
+
+
+def _decode_pin(row: dict) -> dict:
+    src = str(row.get("source") or "")
+    if src.endswith(PIN_SUFFIX):
+        row["source"] = src[:-len(PIN_SUFFIX)]
+        row["pinned"] = True
+        row["rule"] = row.get("label")
+    return row
+
+
 async def upsert(rows: Iterable[dict]) -> int:
     """Insert or update sightings by id. Each row is a Sighting.to_dict()
     plus session_id, flight_id, workspace_id, drone_id. Returns rows written."""
@@ -33,7 +48,9 @@ async def upsert(rows: Iterable[dict]) -> int:
             for r in rows:
                 rec = MapSighting(
                     id=r["id"], session_id=r["session_id"], flight_id=r.get("flight_id"),
-                    drone_id=r.get("drone_id"), source=str(r.get("source") or "")[:80],
+                    drone_id=r.get("drone_id"),
+                    source=(str(r.get("source") or "")[:80 - len(PIN_SUFFIX)] + PIN_SUFFIX
+                            if r.get("pinned") else str(r.get("source") or "")[:80]),
                     model_name=str(r.get("model_name") or "")[:120],
                     label=str(r.get("label") or "")[:80],
                     task=r.get("task") if r.get("task") in ("detect", "classify") else "detect",
@@ -69,7 +86,7 @@ async def list_rows(*, session_id: Optional[str] = None, flight_id: Optional[str
         q = q.where(MapSighting.workspace_id.in_(list(workspace_ids)))
     try:
         async with get_session() as db:
-            return [r.to_dict() for r in (await db.execute(q)).scalars().all()]
+            return [_decode_pin(r.to_dict()) for r in (await db.execute(q)).scalars().all()]
     except Exception as e:
         logger.warning(f"map sightings read failed: {e}")
         return []

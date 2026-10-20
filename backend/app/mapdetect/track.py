@@ -73,6 +73,10 @@ class Sighting:
     agl_m: Optional[float] = None
     angle_source: str = ""
     track_id: Optional[int] = None
+    # Pinned by a model's "mark" rule (app/models_custom/rules.py): one
+    # sighting per firing, never merged with anything, kept with the flight.
+    pinned: bool = False
+    rule: Optional[str] = None
     # Running weighted sums for the position mean.
     _w: float = field(default=0.0, repr=False)
     _wlat: float = field(default=0.0, repr=False)
@@ -80,7 +84,7 @@ class Sighting:
     _thumb_score: float = field(default=0.0, repr=False)
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "id": self.id, "label": self.label, "source": self.source,
             "model_name": self.model_name, "task": self.task,
             "lat": round(self.lat, 7), "lon": round(self.lon, 7),
@@ -89,6 +93,9 @@ class Sighting:
             "best_score": self.best_score, "thumb": self.thumb,
             "agl_m": self.agl_m, "angle_source": self.angle_source,
         }
+        if self.pinned:
+            d.update(pinned=True, rule=self.rule)
+        return d
 
 
 def match_radius(a: float, b: float) -> float:
@@ -115,7 +122,7 @@ class SightingTracker:
 
     def _candidates(self, ob: Observation):
         for s in self.sightings.values():
-            if s.source != ob.source or s.label != ob.label:
+            if s.pinned or s.source != ob.source or s.label != ob.label:
                 continue
             if ob.t - s.last_seen > self.window_s:
                 continue
@@ -168,6 +175,21 @@ class SightingTracker:
             s.best_score, s.best_t = ob.score, ob.t
             s.agl_m, s.angle_source = ob.agl_m, ob.angle_source
         return s, False, improved
+
+    def pin(self, ob: Observation, rule: Optional[str]) -> Optional[Sighting]:
+        """A pinned sighting for this observation: always a new one, and
+        allowed past MAX_SIGHTINGS (a rule's cooldown bounds how many)."""
+        if not (math.isfinite(ob.lat) and math.isfinite(ob.lon)):
+            return None
+        w = _weight(ob.accuracy_m)
+        s = Sighting(id=str(uuid.uuid4()), label=ob.label, source=ob.source,
+                     model_name=ob.model_name, task=ob.task, lat=ob.lat, lon=ob.lon,
+                     accuracy_m=ob.accuracy_m, first_seen=ob.t, last_seen=ob.t,
+                     best_score=ob.score, best_t=ob.t, agl_m=ob.agl_m,
+                     angle_source=ob.angle_source, track_id=ob.track_id,
+                     pinned=True, rule=rule, _w=w, _wlat=w * ob.lat, _wlon=w * ob.lon)
+        self.sightings[s.id] = s
+        return s
 
     def counts_by_label(self) -> Dict[str, int]:
         out: Dict[str, int] = {}
