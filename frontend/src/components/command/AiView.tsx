@@ -52,7 +52,7 @@ export function AiView() {
 
     const objectFit = fit === 'fit' ? 'contain' : 'cover'
     return (
-        <div className="absolute inset-0 bg-black">
+        <div className={isStreaming ? 'absolute inset-0 bg-[#1A2129]' : 'absolute inset-0 bg-app-surface-2'}>
             {wcUrl ? (
                 <WebCodecsVideo src={wcUrl} codec={wcCodec}
                     onDecodeError={wcCodec === 'hevc' ? fallbackFromHevc : undefined}
@@ -64,7 +64,7 @@ export function AiView() {
             {isStreaming && overlayActive && mode !== '3d-reconstruction' && <CvOverlayCanvas fit={fit} />}
             {isStreaming && mode === '3d-reconstruction' && <Recon3DView />}
             {!isStreaming && (
-                <div className="absolute inset-0 flex items-center justify-center text-[13px] text-overlay-muted">
+                <div className="absolute inset-0 flex items-center justify-center text-[13px] text-app-text-muted">
                     AI view starts with the video
                 </div>
             )}

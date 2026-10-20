@@ -134,7 +134,7 @@ export function DroneControls() {
                 place a refusal or a substitution has to be visible. */}
             <div className="flex items-end gap-2">
                 <div className="flex-1 min-w-0">
-                    <label className="block text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted mb-1">
+                    <label className="block text-[13px] font-semibold text-app-text-muted mb-1">
                         Mode
                     </label>
                     {isGroup ? (
@@ -178,7 +178,7 @@ export function DroneControls() {
 
                 {/* Takeoff altitude */}
                 <div className="w-[88px] shrink-0">
-                    <label htmlFor="fly-takeoff-alt" className="block text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted mb-1">
+                    <label htmlFor="fly-takeoff-alt" className="block text-[13px] font-semibold text-app-text-muted mb-1">
                         Takeoff
                     </label>
                     <div className="h-9 flex items-center gap-1 px-2 rounded-md border border-app-border-strong bg-app-surface-2 focus-within:ring-2 focus-within:ring-app-accent focus-within:ring-offset-2 focus-within:ring-offset-app-bg"
@@ -263,28 +263,45 @@ export function DroneControls() {
                 </WhyDisabled>
             )}
 
-            {/* Arm / Disarm */}
-            <WhyDisabled reason={armReason}>
-                <Button
-                    size="sm"
-                    className={cn(
-                        ACTION, 'h-10 text-[14px]',
-                        armed && !isGroup
-                            ? 'border-app-warn text-app-warn hover:bg-app-warn-soft'
-                            : 'border-app-ok text-app-ok hover:bg-app-ok-soft'
-                    )}
-                    variant="outline"
-                    disabled={!connected || armPending}
-                    onClick={(!isGroup && armed) ? disarm : arm}
-                >
-                    {armPending
-                        ? <><Loader size={15} className="animate-spin" /> {armed ? 'DISARMING' : 'ARMING'}…</>
-                        : (!isGroup && armed)
-                            ? <><ShieldOff size={15} /> DISARM</>
-                            : <><Shield size={15} /> ARM{groupTargets.length > 1 ? ' ALL' : ''}</>
-                    }
-                </Button>
-            </WhyDisabled>
+            {/* Arm and take off, side by side: the two presses that start a
+                flight. Hold, RTL and Land live in the status bar for a single
+                drone; a swarm group keeps its own row below, because those
+                go to every ticked drone. */}
+            <div className="grid grid-cols-2 gap-2">
+                <WhyDisabled reason={armReason}>
+                    <Button
+                        size="sm"
+                        className={cn(
+                            ACTION, 'h-10 text-[14px]',
+                            armed && !isGroup
+                                ? 'border-app-warn text-app-warn hover:bg-app-warn-soft'
+                                : 'border-app-ok text-app-ok hover:bg-app-ok-soft'
+                        )}
+                        variant="outline"
+                        disabled={!connected || armPending}
+                        onClick={(!isGroup && armed) ? disarm : arm}
+                    >
+                        {armPending
+                            ? <><Loader size={15} className="animate-spin" /> {armed ? 'Disarming' : 'Arming'}</>
+                            : (!isGroup && armed)
+                                ? <><ShieldOff size={15} /> Disarm</>
+                                : <><Shield size={15} /> Arm{groupTargets.length > 1 ? ' all' : ''}</>
+                        }
+                    </Button>
+                </WhyDisabled>
+
+                <WhyDisabled reason={takeoffReason}>
+                    <Button
+                        size="sm" variant="outline"
+                        className={cn(ACTION, 'h-10 text-[14px] hover:border-app-accent hover:text-app-accent')}
+                        disabled={!canTakeoff}
+                        onClick={() => sendAction('takeoff', { altitude: takeoffAlt })}
+                        title={isGroup ? `Takeoff ${groupTargets.length} drones to ${takeoffAlt} m` : `Take off to ${takeoffAlt} m`}
+                    >
+                        <PlaneTakeoff size={15} /> Take off
+                    </Button>
+                </WhyDisabled>
+            </div>
 
             {/* Group disarm is its own button - group members can be in mixed
                 armed states, so arm/disarm can't share one toggle */}
@@ -295,61 +312,39 @@ export function DroneControls() {
                     className={cn(ACTION, 'border-app-warn text-app-warn hover:bg-app-warn-soft')}
                     onClick={disarm}
                 >
-                    <ShieldOff size={15} /> DISARM{groupTargets.length > 1 ? ' ALL' : ''}
+                    <ShieldOff size={15} /> Disarm{groupTargets.length > 1 ? ' all' : ''}
                 </Button>
             )}
 
-            {/* Action grid */}
-            <div className="grid grid-cols-2 gap-2">
-                <WhyDisabled reason={takeoffReason}>
-                    <Button
-                        size="sm" variant="outline"
-                        className={cn(ACTION, 'hover:border-app-accent hover:text-app-accent')}
-                        disabled={!canTakeoff}
-                        onClick={() => sendAction('takeoff', { altitude: takeoffAlt })}
-                        title={isGroup ? `Takeoff ${groupTargets.length} drones to ${takeoffAlt} m` : `Take off to ${takeoffAlt} m`}
-                    >
-                        <PlaneTakeoff size={14} /> Takeoff
-                    </Button>
-                </WhyDisabled>
-
-                <WhyDisabled reason={flyReason}>
-                    <Button
-                        size="sm" variant="outline"
-                        className={cn(ACTION, 'hover:border-app-accent hover:text-app-accent')}
-                        disabled={!canFly}
-                        onClick={() => sendAction('land')}
-                    >
-                        <PlaneLanding size={14} /> Land
-                    </Button>
-                </WhyDisabled>
-
-                <WhyDisabled reason={flyReason}>
-                    <Button
-                        size="sm" variant="outline"
-                        className={cn(ACTION, 'hover:border-app-accent hover:text-app-accent')}
-                        disabled={!canFly}
-                        onClick={() => sendAction('hold')}
-                    >
-                        <MapPin size={14} /> Hold
-                    </Button>
-                </WhyDisabled>
-
-                <WhyDisabled reason={flyReason}>
-                    <Button
-                        size="sm" variant="outline"
-                        className={cn(ACTION, 'hover:border-app-accent hover:text-app-accent')}
-                        disabled={!canFly}
-                        onClick={() => sendAction('return')}
-                    >
-                        <RotateCcw size={14} /> RTL
-                    </Button>
-                </WhyDisabled>
-            </div>
+            {swarmEnabled && (
+                <div className="grid grid-cols-3 gap-2">
+                    <WhyDisabled reason={flyReason}>
+                        <Button size="sm" variant="outline"
+                            className={cn(ACTION, 'hover:border-app-accent hover:text-app-accent')}
+                            disabled={!canFly} onClick={() => sendAction('land')}>
+                            <PlaneLanding size={14} /> Land
+                        </Button>
+                    </WhyDisabled>
+                    <WhyDisabled reason={flyReason}>
+                        <Button size="sm" variant="outline"
+                            className={cn(ACTION, 'hover:border-app-accent hover:text-app-accent')}
+                            disabled={!canFly} onClick={() => sendAction('hold')}>
+                            <MapPin size={14} /> Hold
+                        </Button>
+                    </WhyDisabled>
+                    <WhyDisabled reason={flyReason}>
+                        <Button size="sm" variant="outline"
+                            className={cn(ACTION, 'hover:border-app-accent hover:text-app-accent')}
+                            disabled={!canFly} onClick={() => sendAction('return')}>
+                            <RotateCcw size={14} /> RTL
+                        </Button>
+                    </WhyDisabled>
+                </div>
+            )}
 
             {/* One readable line saying why everything above is greyed out. */}
             {linkReason && (
-                <p className="text-[13px] text-app-text-muted text-center">{linkReason}</p>
+                <p className="text-[13px] text-app-text-muted">{linkReason}</p>
             )}
 
             {/* RC takeover readiness.

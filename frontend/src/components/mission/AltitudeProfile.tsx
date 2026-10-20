@@ -34,7 +34,7 @@ export default function AltitudeProfile({ waypoints }: { waypoints: Waypoint[] }
     return (
         <div>
             <div className="flex items-baseline justify-between gap-2 mb-1">
-                <span className="text-xs font-bold uppercase tracking-[0.05em] text-app-text-muted">Altitude profile</span>
+                <span className="text-[13px] font-semibold text-app-text-muted">Altitude profile</span>
                 <span className="text-[13px] text-app-text tabular-nums">
                     <b className="font-bold">{Math.max(...plan.map(w => w.altitude))}</b>
                     <span className="text-xs text-app-text-muted"> m max</span>

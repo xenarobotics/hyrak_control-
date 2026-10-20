@@ -55,8 +55,8 @@ function Metric({
         >
             <div style={{
                 display: 'flex', alignItems: 'center', gap: 4,
-                fontSize: 12, fontWeight: 700, letterSpacing: '0.05em',
-                color: 'hsl(var(--app-text-muted))', textTransform: 'uppercase',
+                fontSize: 13, fontWeight: 600,
+                color: 'hsl(var(--app-text-muted))',
             }}>
                 {icon}{label}
             </div>

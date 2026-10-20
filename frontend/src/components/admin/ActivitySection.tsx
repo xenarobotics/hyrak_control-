@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { apiFetch } from '@/lib/api'
 import { getServerUrl } from '@/lib/server-url'
 import { Empty, Section, Tag } from '@/components/admin/console'
+import { fmtShort } from '@/components/settings/primitives'
 
 type ActivitySession = {
     session_id: string
@@ -51,9 +52,7 @@ type Activity = {
 }
 
 function when(iso: string | null): string {
-    if (!iso) return '-'
-    const d = new Date(iso)
-    return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+    return fmtShort(iso)
 }
 
 export function ActivitySection({ workspaceId }: { workspaceId: string }) {
@@ -78,42 +77,42 @@ export function ActivitySection({ workspaceId }: { workspaceId: string }) {
     }, [load])
 
     return (
-        <Section title="ACTIVITY">
+        <Section title="Activity">
             {error && <Empty>{error}</Empty>}
             {!data && !error && <Empty>Loading activity</Empty>}
             {data && (
                 <div className="divide-y divide-app-border text-[13px]">
                     <div className="p-3 space-y-1.5">
-                        <div className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Live sessions - {data.sessions.length}</div>
+                        <div className="text-[13px] font-semibold text-app-text-muted">Live sessions ({data.sessions.length})</div>
                         {data.sessions.length === 0 && <div className="text-app-text-muted">Nobody is connected right now.</div>}
                         {data.sessions.map(s => (
                             <div key={s.session_id} className="flex items-center gap-2 min-h-8 text-app-text">
                                 <span className="truncate">{s.username ?? '?'}{s.role ? ` (${s.role})` : ''}</span>
                                 <span className="text-app-text-muted truncate">{s.workspace_name}</span>
                                 <span className="truncate">{s.drone?.name ?? (s.telemetry_connected ? 'identifying' : 'no drone')}</span>
-                                {s.in_air ? <Tag label="IN AIR" tone="amber" /> : s.armed ? <Tag label="ARMED" tone="red" /> : null}
-                                {s.video && <Tag label="VIDEO" tone="emerald" />}
+                                {s.in_air ? <Tag label="In air" tone="amber" /> : s.armed ? <Tag label="ARMED" tone="red" /> : null}
+                                {s.video && <Tag label="Video" tone="emerald" />}
                                 {s.ai_mode !== 'manual-control' && <Tag label={s.ai_mode} tone="violet" />}
                                 {s.takeover && <Tag label={`HYRAK CONTROL (${s.takeover.by})`} tone="red" />}
                             </div>
                         ))}
                     </div>
                     <div className="p-3 space-y-1.5">
-                        <div className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Recent flights - {data.flights.length}</div>
+                        <div className="text-[13px] font-semibold text-app-text-muted">Recent flights ({data.flights.length})</div>
                         {data.flights.length === 0 && <div className="text-app-text-muted">No flights recorded yet.</div>}
                         {data.flights.map(f => (
                             <div key={f.id} className="flex items-center gap-3 min-h-8 text-app-text tabular-nums">
                                 <span>{when(f.started_at)}</span>
                                 <span className="text-app-text-muted truncate">{f.drone_name ?? f.drone_id.slice(0, 8)}</span>
                                 <span className="text-app-text-muted">
-                                    {f.in_progress ? 'in flight' : `${Math.round(f.duration_s)} s`} · {f.max_alt_m.toFixed(0)} m · {(f.distance_m / 1000).toFixed(2)} km
+                                    {f.in_progress ? 'In flight' : `${Math.round(f.duration_s)} s`}, {f.max_alt_m.toFixed(0)} m, {(f.distance_m / 1000).toFixed(2)} km
                                 </span>
                             </div>
                         ))}
                     </div>
                     {data.audit && (
                         <div className="p-3 space-y-1.5">
-                            <div className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Recent audit - {data.audit.length}</div>
+                            <div className="text-[13px] font-semibold text-app-text-muted">Recent audit ({data.audit.length})</div>
                             {data.audit.length === 0 && <div className="text-app-text-muted">No audit events yet.</div>}
                             {data.audit.map(a => (
                                 <div key={a.id} className="flex items-center gap-3 min-h-8 text-app-text tabular-nums">

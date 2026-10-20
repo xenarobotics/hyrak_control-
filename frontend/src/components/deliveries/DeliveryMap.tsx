@@ -19,7 +19,7 @@ import Delivery3D, { warmCesium } from './Delivery3D'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { FOCUS, FOCUS_OVERLAY, OVERLAY, PANEL } from '@/components/mission/ui'
+import { FOCUS, OVERLAY, PANEL, ovBtn } from '@/components/mission/ui'
 
 export type MapPad = {
     id: string; name: string; lat: number; lng: number; kind?: 'pad' | 'station'
@@ -290,7 +290,7 @@ function DroneCard({ drone, onClose }: { drone: MapDroneLive; onClose: () => voi
             {showVideo ? (
                 <div className="relative">
                     <video ref={videoRef} autoPlay muted playsInline
-                        className="w-full aspect-video object-cover bg-black" />
+                        className="w-full aspect-video object-cover bg-[#1A2129]" />
                     <span className={`${OVERLAY} absolute top-1.5 left-1.5 flex items-center gap-1.5 h-6 px-2 rounded-full text-xs font-bold`}>
                         <span className="w-1.5 h-1.5 rounded-full animate-pulse motion-reduce:animate-none"
                             style={{ background: 'var(--overlay-danger)' }} aria-hidden /> Live
@@ -333,15 +333,16 @@ function DroneCard({ drone, onClose }: { drone: MapDroneLive; onClose: () => voi
 
 // ── Shared control styles ────────────────────────────────────────────────
 
-// Map buttons sit on the tiles: always-dark overlay chips, accent when on.
-// Plain concatenation (not cn): tailwind-merge cannot tell the custom
-// colour utilities apart and would drop one of them.
-const mapBtn = (on: boolean) =>
-    'inline-flex items-center h-8 px-3 rounded-[6px] border bg-overlay-scrim backdrop-blur-[6px] ' +
-    'text-[13px] font-semibold whitespace-nowrap transition-colors duration-[120ms] hover:bg-[rgba(8,12,18,0.88)] ' +
-    FOCUS_OVERLAY + ' ' +
-    (on ? 'text-[color:var(--overlay-accent)] border-[color:var(--overlay-accent)]'
-        : 'text-overlay-text border-overlay-border')
+// Map buttons sit on the tiles, grouped in one overlay toolbar (follows the
+// theme), accent when on.
+const mapBtn = (on: boolean) => ovBtn(on)
+
+/** The one toolbar surface on the map, top-right. */
+const MAP_BAR =
+    `${OVERLAY} absolute top-2 right-2 z-[500] flex flex-nowrap items-center gap-0.5 p-1 rounded-[10px] ` +
+    'shadow-[var(--app-shadow)] max-w-[calc(100%-16px)] overflow-x-auto [scrollbar-width:none]'
+
+const BarDivider = () => <span className="w-px h-5 mx-0.5 bg-overlay-border" aria-hidden />
 
 function ModeButtons({ mode, setMode }: {
     mode: '2d' | '3d'; setMode: (m: '2d' | '3d') => void
@@ -352,7 +353,7 @@ function ModeButtons({ mode, setMode }: {
                 <button key={m} onClick={() => setMode(m)}
                     aria-pressed={mode === m}
                     className={mapBtn(mode === m)}>
-                    {m.toUpperCase()}
+                    {m === '2d' ? '2D' : '3D'}
                 </button>
             ))}
         </>
@@ -389,17 +390,17 @@ export default function DeliveryMap({ pads, selection, drones, routes = [] }: {
 
     if (mode === '3d') {
         return (
-            <div className="relative h-full w-full rounded-lg overflow-hidden border"
-                style={{ borderColor: 'hsl(var(--app-border))', background: '#05070a' }}>
+            <div className="relative h-full w-full rounded-[10px] overflow-hidden border border-app-border bg-app-surface-2">
                 <Delivery3D pads={pads} selection={selection} drones={drones}
                     showAirspace={showAirspace} />
-                <div className="absolute top-2 right-2 z-[500] flex flex-wrap justify-end gap-1 max-w-[calc(100%-16px)]">
+                <div className={MAP_BAR} role="toolbar" aria-label="Map">
                     <button onClick={() => setShowAirspace(v => !v)}
                         title="Show restricted airspace as 3D volumes (zone floor to ceiling)"
                         aria-pressed={showAirspace}
                         className={mapBtn(showAirspace)}>
                         Airspace
                     </button>
+                    <BarDivider />
                     <ModeButtons mode={mode} setMode={setMode} />
                 </div>
                 {focused && (
@@ -411,9 +412,9 @@ export default function DeliveryMap({ pads, selection, drones, routes = [] }: {
     }
 
     return (
-        <div className="relative h-full w-full rounded-lg overflow-hidden border"
-            style={{ borderColor: 'hsl(var(--app-border))' }}>
+        <div className="relative h-full w-full rounded-[10px] overflow-hidden border border-app-border">
             <MapContainer center={center} zoom={15} className="h-full w-full"
+                style={{ background: 'hsl(var(--app-surface-2))' }}
                 zoomControl={false} attributionControl={false}>
                 <TileLayer key={layer.key} url={layer.url}
                     maxNativeZoom={layer.maxNativeZoom} maxZoom={layer.maxZoom} />
@@ -448,7 +449,7 @@ export default function DeliveryMap({ pads, selection, drones, routes = [] }: {
                 ))}
             </MapContainer>
 
-            <div className="absolute top-2 right-2 z-[500] flex flex-wrap justify-end gap-1 max-w-[calc(100%-16px)]">
+            <div className={MAP_BAR} role="toolbar" aria-label="Map">
                 {(['nav', 'street', 'satellite'] as const).map(k => (
                     <button key={k} onClick={() => setLayerKey(k)}
                         aria-pressed={layerKey === k}
@@ -462,11 +463,13 @@ export default function DeliveryMap({ pads, selection, drones, routes = [] }: {
                     className={mapBtn(showLandUse)}>
                     Land use
                 </button>
+                <BarDivider />
                 <ModeButtons mode={mode} setMode={setMode} />
             </div>
 
-            {/* Legend - the map must explain itself */}
-            <div className={`${OVERLAY} absolute top-2 left-2 z-[500] px-3 py-2 rounded-[10px] flex flex-col gap-1 text-xs font-semibold`}>
+            {/* Legend - the map must explain itself. Bottom-left, clear of the
+                toolbar; the drone and station cards cover it while open. */}
+            <div className={`${OVERLAY} absolute bottom-2 left-2 z-[500] px-3 py-2 rounded-[10px] flex flex-col gap-1 text-xs font-semibold shadow-[var(--app-shadow)]`}>
                 {([
                     [LEG_COLOR.delivery, 'Delivery leg', false],
                     [LEG_COLOR.pickup, 'Pickup leg', true],
@@ -529,7 +532,7 @@ export default function DeliveryMap({ pads, selection, drones, routes = [] }: {
                             </div>
                         )}
                         <p className="mt-2 text-[13px] text-app-text-muted">
-                            {here.length} connected · tap a drone for detail
+                            {here.length} connected. Tap a drone for detail.
                         </p>
                     </div>
                 )

@@ -1,23 +1,25 @@
 'use client'
 
-// COMMAND - the all-in-one flight window.
+// COMMAND - the all-in-one flight window (design audit 2, 5.2).
 //
-// Fixed places, no chrome floating over the picture:
-//   top     status cells (links, mode, armed, battery, GPS, home, time,
-//           avoidance) + the two link switches: telemetry CONNECT and
-//           START VIDEO, side by side + the panel toggle
-//   left    action rail: arm, take off, START mission, hold, RTL, land, kill
-//   centre  the view - video (with the Fly tab's configurable OSD), map (2D
+// The global status bar above carries the link, the aircraft's state and
+// HOLD / RTL / LAND / KILL; this page adds its avoidance state to that bar
+// (AvoidChips). Below it, fixed places, no chrome floating over the picture
+// except the stage's own switches:
+//   centre  the stage - video (with the Fly tab's configurable OSD), map (2D
 //           or 3D) or, while an AI module runs, the AI view - and the others
-//           as pictures-in-picture pinned to corners. Click a PiP to make it
-//           the main view; drag it to another corner. The AI drawer (slim tab
-//           on the left edge) starts and stops the AI modules.
-//   right   the dock, one tab at a time: avoidance (+ optional radar and
-//           forward-depth views), the running AI module's panel, telemetry,
-//           setup (devices + full controls), message log. Drag its edge to
-//           resize; P hides it.
-//   bottom  mission bar: altitude profile along the route with the
-//           avoidance floor, next/left/time, avoidance state, last message.
+//           as pictures-in-picture pinned to corners. Video | Map switch top
+//           left; click a PiP to make it the main view, drag it to another
+//           corner. The AI drawer (slim tab on the left edge) starts and stops
+//           the AI modules.
+//   right   the dock, icon tabs, one at a time: avoidance (+ optional radar
+//           and forward-depth views), the running AI module's panel,
+//           telemetry, setup (devices + full controls), message log. Drag its
+//           edge to resize; P hides it.
+//   bottom  the action bar: the two links (telemetry, video), arm, take off,
+//           fly the mission; then the mission's altitude profile and
+//           next / left / time.
+// Below 768px: stage, links, dock, with the action bar pinned at the bottom.
 //
 // Keys: M swaps video and map, P shows/hides the dock.
 // Swapping never remounts the video or the map, so the stream never restarts.
@@ -25,7 +27,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
-import { Maximize2, Minimize2, PanelRightClose, PanelRightOpen, X } from 'lucide-react'
+import { Maximize2, Minimize2, PanelRightClose, PanelRightOpen, X, ShieldCheck, Bot, Activity, SlidersHorizontal, ScrollText, Video, Map as MapIcon } from 'lucide-react'
 import { getSocket } from '@/lib/socket'
 import { useSwarmStore } from '@/store/swarm'
 import { useDroneStore } from '@/store/drone'
@@ -38,9 +40,9 @@ import { DeviceSelector } from '@/components/controls/DeviceSelector'
 import { DroneControls } from '@/components/controls/DroneControls'
 import { AvoidancePanel } from '@/components/avoidance/AvoidancePanel'
 import { TelemetryPanel } from '@/components/telemetry/TelemetryPanel'
-import { StatusStrip } from '@/components/command/StatusStrip'
+import { AvoidChips } from '@/components/command/AvoidChips'
 import { LinkCluster } from '@/components/command/LinkCluster'
-import { ActionRail } from '@/components/command/ActionRail'
+import { ActionBar } from '@/components/command/ActionBar'
 import { MissionBar } from '@/components/command/MissionBar'
 import { ObstacleRadar, DepthStrip } from '@/components/command/ObstacleRadar'
 import { useAvoidanceLive } from '@/components/command/useAvoidanceLive'
@@ -58,8 +60,8 @@ import { useLiveScope } from '@/hooks/useLiveScope'
 import { FOCUS, FOCUS_OVERLAY, OVERLAY_BTN } from '@/components/controls/flightStyles'
 
 const mapLoading = () => (
-    <div className="w-full h-full flex items-center justify-center bg-[#0b0e13]">
-        <p className="text-[13px] text-overlay-muted">Loading map…</p>
+    <div className="w-full h-full flex items-center justify-center bg-app-surface-2">
+        <p className="text-[13px] text-app-text-muted">Loading map</p>
     </div>
 )
 const MissionMap = dynamic(() => import('@/components/mission/MissionMap'), { ssr: false, loading: mapLoading })
@@ -85,12 +87,15 @@ const OLD_STORE_KEY = 'hyrak-command-layout-v3'   // single-PiP layout, migrated
 const PIP_DIMS: Record<PipSize, [number, number]> = { s: [240, 150], m: [336, 210], l: [460, 288] }
 const EDGE = 10             // PiP gap to the stage edge
 const DOCK_MIN = 280, DOCK_MAX = 600
-const TABS: { id: DockTab; label: string }[] = [
-    { id: 'avoid', label: 'Avoid' }, { id: 'ai', label: 'AI' }, { id: 'telemetry', label: 'Telemetry' },
-    { id: 'setup', label: 'Setup' }, { id: 'log', label: 'Log' },
+const TABS: { id: DockTab; label: string; hint: string; icon: typeof Bot }[] = [
+    { id: 'avoid', label: 'Avoid', hint: 'Obstacle avoidance', icon: ShieldCheck },
+    { id: 'ai', label: 'AI', hint: 'The running AI module', icon: Bot },
+    { id: 'telemetry', label: 'Telemetry', hint: 'Every telemetry value', icon: Activity },
+    { id: 'setup', label: 'Setup', hint: 'Devices, link and full flight controls', icon: SlidersHorizontal },
+    { id: 'log', label: 'Log', hint: 'Messages from the aircraft', icon: ScrollText },
 ]
-// Top bar, action rail and mission bar follow the theme like the dock.
-const PANEL = "bg-app-surface border-app-border shadow-[var(--app-shadow)]"
+// The dock and the action bar follow the theme.
+const PANEL = "bg-app-surface border-app-border"
 
 function loadLayout(): Layout {
     try {
@@ -164,11 +169,30 @@ function MessageLog() {
 function Toggle({ on, label, hint, onClick }: { on: boolean; label: string; hint: string; onClick: () => void }) {
     return (
         <button onClick={onClick} title={hint} aria-pressed={on}
-            className={cn('flex-1 h-9 rounded-md border text-[13px] font-bold transition-colors duration-[var(--dur-fast)]', FOCUS,
+            className={cn('flex-1 h-9 rounded-md border text-[13px] font-semibold transition-colors duration-[140ms] active:scale-[.98]', FOCUS,
                 on ? 'bg-app-accent-soft border-app-accent text-app-accent'
-                    : 'border-app-border-strong text-app-text-muted hover:text-app-text')}>
-            {label} {on ? 'on' : 'off'}
+                    : 'border-app-border-strong text-app-text-muted hover:text-app-text hover:bg-app-surface-2')}>
+            {label} <span className="font-normal">{on ? 'on' : 'off'}</span>
         </button>
+    )
+}
+
+/** A segmented switch drawn over the stage (video or map). */
+function StageSeg<T extends string>({ value, options, onChange, label }: {
+    value: T; options: { id: T; label: string; icon?: React.ReactNode }[]; onChange: (v: T) => void; label: string
+}) {
+    return (
+        <div role="group" aria-label={label}
+            className="flex gap-0.5 p-0.5 rounded-md border border-overlay-border bg-overlay-scrim backdrop-blur-[6px] shadow-[var(--app-shadow)]">
+            {options.map(o => (
+                <button key={o.id} onClick={() => onChange(o.id)} aria-pressed={value === o.id}
+                    className={cn('flex items-center gap-1.5 h-8 px-3 rounded text-[13px] font-bold transition-colors duration-[140ms]', FOCUS_OVERLAY,
+                        value === o.id ? 'bg-[color-mix(in_srgb,var(--overlay-accent)_18%,transparent)] text-[var(--overlay-accent)]'
+                            : 'text-overlay-muted hover:text-overlay-text')}>
+                    {o.icon}{o.label}
+                </button>
+            ))}
+        </div>
     )
 }
 
@@ -358,111 +382,118 @@ function DevCommand() {
         if (starting) update({ tab: 'ai' })
     }
 
+    const tabs = TABS.filter(tb => !(tb.id === 'avoid' && noAvoid))
+    const tabIdx = Math.max(0, tabs.findIndex(tb => tb.id === activeTab))
+    const bigSel: 'video' | 'map' | 'ai' = layout.big
+
     return (
-        <div className="flex flex-col h-full min-h-0 gap-2 text-app-text">
-            {/* ── Top bar ─────────────────────────────────────────────────── */}
-            <div className={cn('h-12 shrink-0 flex items-center gap-2 px-2 rounded-[10px] border', PANEL)}>
-                <div className="flex-1 min-w-0"><StatusStrip avoid={avoid} /></div>
-                {mounted && runningMod && (
-                    <div className="h-9 flex items-center rounded-lg border overflow-hidden text-[13px] shrink-0"
-                        style={{ borderColor: `${runningMod.color}66`, background: `${runningMod.color}14` }}>
-                        <button onClick={() => update({ tab: 'ai', dockHidden: false })} title="Show the module's panel"
-                            className={cn('h-full pl-2.5 pr-2 flex items-center gap-1.5', FOCUS)} style={{ color: runningMod.color }}>
-                            <runningMod.icon size={14} />
-                            <span className="font-bold text-app-text">AI: {runningMod.name}</span>
-                        </button>
-                        <button onClick={ai.stop} aria-label={`Stop ${runningMod.name}`} title="Stop the module"
-                            className={cn('h-full w-8 flex items-center justify-center border-l text-app-text-muted hover:text-app-text', FOCUS)}
-                            style={{ borderColor: `${runningMod.color}44` }}>
-                            <X size={13} />
-                        </button>
-                    </div>
-                )}
-                {mounted && !wallOn && getVideoSource() === 'air_unit_udp' && (
-                    <button onClick={() => setWallOn(true)}
-                        className={cn('h-9 px-2.5 rounded-md border border-app-border-strong text-[13px] font-bold text-app-text-muted hover:text-app-text', FOCUS)}
-                        title="Show every mesh unit delivering video">WALL</button>
-                )}
-                {mounted && <LinkCluster avoid={avoid} />}
-                <button onClick={toggleDock} title={dockHidden ? 'Show panel (P)' : 'Hide panel (P)'}
-                    aria-label={dockHidden ? 'Show panel' : 'Hide panel'}
-                    className={cn('h-9 w-9 rounded-md border border-app-border-strong text-app-text-muted hover:text-app-text flex items-center justify-center', FOCUS)}>
-                    {dockHidden ? <PanelRightOpen size={15} /> : <PanelRightClose size={15} />}
-                </button>
-            </div>
+        <div className="flex flex-col h-full min-h-0 gap-3 text-app-text overflow-y-auto md:overflow-hidden">
+            {/* Command's own status (avoidance, home) goes into the global bar. */}
+            <AvoidChips avoid={avoid} />
 
-            <div className="flex flex-1 min-h-0 gap-2">
-                {/* ── Action rail ─────────────────────────────────────────── */}
-                <div className={cn('shrink-0 rounded-[10px] border p-1.5 overflow-y-auto', PANEL)}>
-                    <ViewOnlyFence compact>
-                        <ActionRail avoid={avoid} />
-                    </ViewOnlyFence>
-                </div>
-
+            <div className="flex flex-col md:flex-row md:flex-1 md:min-h-0 gap-3">
                 {/* ── Stage ───────────────────────────────────────────────── */}
-                <div ref={stageRef} className="relative flex-1 min-w-0 rounded-[10px] border border-app-border overflow-hidden bg-black">
-                    <div style={boxFor('video')} className="flex">
+                <div ref={stageRef} className="relative shrink-0 aspect-video min-h-[200px] md:aspect-auto md:min-h-0 md:shrink md:flex-1 min-w-0 rounded-[10px] border border-app-border overflow-hidden bg-app-surface-2">
+                    <div style={boxFor('video')} className={cn('flex', layout.big !== 'video' && 'max-md:hidden')}>
                         <div className="absolute inset-0 flex">
                             {wallOn ? <CameraWall onClose={() => setWallOn(false)} /> : <VideoStream bare cleanFeed />}
                         </div>
-                        {layout.big !== 'video' && pipChrome('video', 'VIDEO')}
+                        {layout.big !== 'video' && pipChrome('video', 'Video')}
                     </div>
-                    <div style={boxFor('map')}>
+                    <div style={boxFor('map')} className={cn(!mapBig && 'max-md:hidden')}>
                         {mounted && (layout.map3d
                             ? <MissionMap3D readOnly showNav={mapBig} />
                             : <MissionMap readOnly follow compact={!mapBig} />)}
-                        {!mapBig && pipChrome('map', layout.map3d ? 'MAP 3D' : 'MAP')}
-                        {mapBig && (
-                            <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1600] flex gap-0.5 p-0.5 rounded-md border border-overlay-border bg-overlay-scrim backdrop-blur-[6px] text-[13px] font-bold">
-                                {([false, true] as const).map(is3d => (
-                                    <button key={String(is3d)} onClick={() => update({ map3d: is3d })} aria-pressed={layout.map3d === is3d}
-                                        className={cn('px-3 h-8 rounded', FOCUS_OVERLAY,
-                                            layout.map3d === is3d ? 'bg-[rgba(34,211,238,.22)] text-[var(--overlay-accent)]' : 'text-overlay-muted hover:text-overlay-text')}>
-                                        {is3d ? '3D' : '2D'}</button>
-                                ))}
-                            </div>
-                        )}
+                        {!mapBig && pipChrome('map', layout.map3d ? 'Map 3D' : 'Map')}
                     </div>
                     {mounted && ai.running && (
-                        <div style={boxFor('ai')}>
+                        <div style={boxFor('ai')} className={cn(layout.big !== 'ai' && 'max-md:hidden')}>
                             <AiView />
-                            {layout.big !== 'ai' && pipChrome('ai', `AI ${runningMod?.name.toUpperCase() ?? ''}`)}
+                            {layout.big !== 'ai' && pipChrome('ai', `AI ${runningMod?.name ?? ''}`)}
                         </div>
                     )}
+
+                    {/* Stage switches: what is big, and the map's 2D / 3D. */}
+                    <div className="absolute top-2 left-2 z-[1600] flex items-center gap-1.5">
+                        <StageSeg label="Main view" value={bigSel}
+                            onChange={v => makeBig(v)}
+                            options={[
+                                { id: 'video', label: 'Video', icon: <Video size={14} /> },
+                                { id: 'map', label: 'Map', icon: <MapIcon size={14} /> },
+                                ...(mounted && ai.running ? [{ id: 'ai' as const, label: 'AI', icon: <Bot size={14} /> }] : []),
+                            ]} />
+                        {mapBig && (
+                            <StageSeg label="Map view" value={layout.map3d ? '3d' : '2d'}
+                                onChange={v => update({ map3d: v === '3d' })}
+                                options={[{ id: '2d', label: '2D' }, { id: '3d', label: '3D' }]} />
+                        )}
+                    </div>
+                    <div className="absolute top-2 right-2 z-[1600] flex items-center gap-1.5">
+                        {mounted && runningMod && (
+                            <div className="h-9 flex items-center rounded-md border border-overlay-border bg-overlay-scrim backdrop-blur-[6px] overflow-hidden text-[13px]">
+                                <button onClick={() => update({ tab: 'ai', dockHidden: false })} title="Show the module's panel"
+                                    className={cn('h-full pl-2.5 pr-2 flex items-center gap-1.5', FOCUS_OVERLAY)} style={{ color: runningMod.color }}>
+                                    <runningMod.icon size={14} />
+                                    <span className="font-bold text-overlay-text">AI: {runningMod.name}</span>
+                                </button>
+                                <button onClick={ai.stop} aria-label={`Stop ${runningMod.name}`} title="Stop the module"
+                                    className={cn('h-full w-8 flex items-center justify-center border-l border-overlay-border text-overlay-muted hover:text-overlay-text', FOCUS_OVERLAY)}>
+                                    <X size={13} />
+                                </button>
+                            </div>
+                        )}
+                        {mounted && !wallOn && getVideoSource() === 'air_unit_udp' && (
+                            <button onClick={() => setWallOn(true)} className={cn(OVERLAY_BTN, FOCUS_OVERLAY, 'h-9')}
+                                title="Show every mesh unit delivering video">Wall</button>
+                        )}
+                        <button onClick={toggleDock} title={dockHidden ? 'Show panel (P)' : 'Hide panel (P)'}
+                            aria-label={dockHidden ? 'Show panel' : 'Hide panel'} aria-expanded={!dockHidden}
+                            className={cn(OVERLAY_BTN, FOCUS_OVERLAY, 'hidden md:inline-flex h-9 w-9 px-0')}>
+                            {dockHidden ? <PanelRightOpen size={16} /> : <PanelRightClose size={16} />}
+                        </button>
+                    </div>
+
                     {mounted && !viewOnly && (
                         <AiDrawer open={drawerOpen} onOpen={() => setDrawerOpen(true)}
                             onClose={() => setDrawerOpen(false)} mode={ai.mode} onToggle={toggleModule} />
                     )}
                 </div>
 
-                {/* ── Dock: tabs, resizable, hideable ─────────────────────── */}
+                {/* Links: on a phone they sit under the stage (the action bar
+                    at the bottom carries only the flight actions there). */}
+                {mounted && <div className="md:hidden flex flex-wrap gap-2"><LinkCluster avoid={avoid} /></div>}
+
+                {/* ── Dock: icon tabs, resizable, hideable ────────────────── */}
                 {!dockHidden && (
                     <>
-                        <div onMouseDown={onDockDrag} className="w-1.5 -mx-1 shrink-0 cursor-col-resize flex items-center justify-center group"
+                        <div onMouseDown={onDockDrag} className="hidden md:flex w-1.5 -mx-1.5 shrink-0 cursor-col-resize items-center justify-center group"
                             title="Drag to resize">
-                            <div className="w-0.5 h-10 rounded bg-app-border-strong group-hover:bg-app-accent" />
+                            <div className="w-0.5 h-10 rounded bg-app-border-strong transition-colors duration-[140ms] group-hover:bg-app-accent" />
                         </div>
-                        <aside className={cn('shrink-0 flex flex-col min-h-0 rounded-[10px] border overflow-hidden', PANEL)}
-                            style={{ width: layout.dockW }}>
-                            {/* Tabs: each a separate pill so neighbours never read as one word. */}
-                            <div role="tablist" aria-label="Panel" className="flex shrink-0 gap-1 p-1.5 border-b border-app-border bg-app-surface-2">
-                                {TABS.filter(tb => !(tb.id === 'avoid' && noAvoid)).map(tb => (
+                        <aside className={cn('w-full md:w-[var(--dock-w)] shrink-0 flex flex-col md:min-h-0 rounded-[10px] border overflow-hidden', PANEL)}
+                            style={{ '--dock-w': `${layout.dockW}px` } as React.CSSProperties}>
+                            {/* Tabs: icon and a short word, the full name in the
+                                tooltip; the underline slides to the open one. */}
+                            <div role="tablist" aria-label="Panel" className="relative flex shrink-0 border-b border-app-border">
+                                {tabs.map(tb => (
                                     <button key={tb.id} role="tab" aria-selected={activeTab === tb.id} onClick={() => update({ tab: tb.id })}
-                                        className={cn('flex-1 min-w-0 h-8 px-1.5 rounded-md text-[13px] font-bold truncate transition-colors duration-[var(--dur-fast)]', FOCUS,
-                                            activeTab === tb.id
-                                                ? 'bg-app-surface text-app-accent shadow-[inset_0_-2px_0_var(--app-accent)] border border-app-border'
-                                                : 'text-app-text-muted hover:text-app-text hover:bg-app-surface border border-transparent')}>
-                                        {tb.label}
+                                        title={tb.hint} aria-label={tb.hint}
+                                        className={cn('flex-1 min-w-0 h-14 flex flex-col items-center justify-center gap-1 text-[12px] font-semibold transition-colors duration-[140ms]', FOCUS,
+                                            activeTab === tb.id ? 'text-app-accent' : 'text-app-text-muted hover:text-app-text hover:bg-app-surface-2')}>
+                                        <tb.icon size={18} />
+                                        <span className="whitespace-nowrap">{tb.label}</span>
                                     </button>
                                 ))}
+                                <span aria-hidden className="absolute bottom-0 left-0 h-0.5 bg-app-accent transition-transform duration-[220ms] ease-[var(--ease-out)] motion-reduce:transition-none"
+                                    style={{ width: `${100 / tabs.length}%`, transform: `translateX(${tabIdx * 100}%)` }} />
                             </div>
-                            <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-4">
+                            <div key={activeTab} className="md:flex-1 md:min-h-0 overflow-y-auto p-4 flex flex-col gap-4 animate-in fade-in-0 duration-200">
                                 {activeTab === 'avoid' && !noAvoid && (
                                     <>
                                         <div className="flex gap-2">
-                                            <Toggle on={layout.radar} label="RADAR" onClick={() => update({ radar: !layout.radar })}
+                                            <Toggle on={layout.radar} label="Radar" onClick={() => update({ radar: !layout.radar })}
                                                 hint="Top-down view of sensor sectors and mapped obstacles (polls the map once a second while on)" />
-                                            <Toggle on={layout.depth} label="DEPTH" onClick={() => update({ depth: !layout.depth })}
+                                            <Toggle on={layout.depth} label="Depth" onClick={() => update({ depth: !layout.depth })}
                                                 hint="Forward 90 degrees as a proximity bar" />
                                         </div>
                                         {layout.radar && <ObstacleRadar avoid={avoid} />}
@@ -477,7 +508,7 @@ function DevCommand() {
                                         {!noAvoid && <ViewOnlyFence note={false}><IndoorNavCard avoid={avoid} /></ViewOnlyFence>}
                                         {mounted && swarmEnabled
                                             ? <p className="text-[13px] text-app-text-muted">
-                                                Swarm mode - manage the fleet on the Fly tab.</p>
+                                                Swarm mode: manage the fleet on the Fly tab.</p>
                                             : <DeviceSelector />}
                                         <div className="border-t border-app-border pt-4 flex flex-col gap-2">
                                             <ViewOnlyFence><DroneControls /></ViewOnlyFence>
@@ -491,9 +522,17 @@ function DevCommand() {
                 )}
             </div>
 
-            {/* ── Mission bar ─────────────────────────────────────────────── */}
-            <div className={cn('h-[68px] shrink-0 rounded-[10px] border', PANEL)}>
-                <MissionBar avoid={avoid} />
+            {/* ── Action bar: links, arm, take off, mission ───────────────── */}
+            <div className={cn('shrink-0 rounded-[10px] border px-3 py-2.5 flex items-center gap-3 min-w-0',
+                'max-md:sticky max-md:bottom-0 max-md:z-20 max-md:mt-auto max-md:shadow-[var(--app-shadow)]', PANEL)}>
+                {mounted && <div className="hidden md:flex items-center shrink-0"><LinkCluster avoid={avoid} /></div>}
+                <span aria-hidden className="hidden md:block w-px h-6 bg-app-border shrink-0" />
+                <ViewOnlyFence compact>
+                    <ActionBar avoid={avoid} />
+                </ViewOnlyFence>
+                <div className="hidden lg:block flex-1 min-w-[240px] h-12 border-l border-app-border pl-3">
+                    <MissionBar avoid={avoid} />
+                </div>
             </div>
         </div>
     )

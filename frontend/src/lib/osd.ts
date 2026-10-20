@@ -15,23 +15,31 @@ export function gpsFixLabel(fixType: number): string {
     }
 }
 
-export function gpsFixColor(fixType: number): string {
-    if (fixType >= 6) return '#22d3ee'
-    if (fixType >= 3) return '#4ade80'
-    if (fixType === 2) return '#facc15'
-    return '#f87171'
+// Status colours. Over video and map tiles ('overlay', the default) they
+// come from the --overlay-* set; on themed panels ('app') from the theme
+// tokens, so both read in light, dark and midnight without a remap.
+export type ColorOn = 'overlay' | 'app'
+type StatusTone = 'accent' | 'ok' | 'warn' | 'danger'
+export function statusColor(tone: StatusTone, on: ColorOn = 'overlay'): string {
+    return on === 'overlay' ? `var(--overlay-${tone})` : `var(--app-${tone})`
 }
 
-export function batteryTextColor(pct: number): string {
-    if (pct > 50) return '#4ade80'
-    if (pct > 20) return '#facc15'
-    return '#f87171'
+export function gpsFixColor(fixType: number, on: ColorOn = 'overlay'): string {
+    if (fixType >= 6) return statusColor('accent', on)
+    if (fixType >= 3) return statusColor('ok', on)
+    if (fixType === 2) return statusColor('warn', on)
+    return statusColor('danger', on)
 }
 
-export function batteryBorderColor(pct: number): string {
-    if (pct > 50) return 'rgba(74,222,128,0.3)'
-    if (pct > 20) return 'rgba(250,204,21,0.4)'
-    return 'rgba(248,113,113,0.6)'
+export function batteryTextColor(pct: number, on: ColorOn = 'overlay'): string {
+    if (pct > 50) return statusColor('ok', on)
+    if (pct > 20) return statusColor('warn', on)
+    return statusColor('danger', on)
+}
+
+export function batteryBorderColor(pct: number, on: ColorOn = 'overlay'): string {
+    const mix = pct > 50 ? 30 : pct > 20 ? 40 : 60
+    return `color-mix(in srgb, ${batteryTextColor(pct, on)} ${mix}%, transparent)`
 }
 
 export function formatDuration(seconds: number): string {
@@ -45,10 +53,10 @@ export function climbRate(downMs: number): number {
     return -downMs
 }
 
-export function climbRateColor(rate: number): string {
-    if (rate > 0.5) return '#4ade80'
-    if (rate < -0.5) return '#f87171'
-    return 'rgba(255,255,255,0.7)'
+export function climbRateColor(rate: number, on: ColorOn = 'overlay'): string {
+    if (rate > 0.5) return statusColor('ok', on)
+    if (rate < -0.5) return statusColor('danger', on)
+    return on === 'overlay' ? 'var(--overlay-text)' : 'hsl(var(--app-text))'
 }
 
 export function connectionQuality(rtt: number, packetLoss: number): 'excellent' | 'good' | 'fair' | 'poor' {
@@ -58,12 +66,12 @@ export function connectionQuality(rtt: number, packetLoss: number): 'excellent' 
     return 'poor'
 }
 
-export function connectionQualityColor(q: ReturnType<typeof connectionQuality>): string {
+export function connectionQualityColor(q: ReturnType<typeof connectionQuality>, on: ColorOn = 'overlay'): string {
     switch (q) {
-        case 'excellent': return '#22d3ee'
-        case 'good': return '#4ade80'
-        case 'fair': return '#facc15'
-        case 'poor': return '#f87171'
+        case 'excellent': return statusColor('accent', on)
+        case 'good': return statusColor('ok', on)
+        case 'fair': return statusColor('warn', on)
+        case 'poor': return statusColor('danger', on)
     }
 }
 

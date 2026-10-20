@@ -32,7 +32,7 @@ import { Camera, Satellite, Plug, PlugZap, Loader, RefreshCw, Plus } from 'lucid
 import { useClientValue } from '@/hooks/useClientValue'
 
 const selectStyle: React.CSSProperties = {
-    flexShrink: 0, height: 32, maxWidth: 150, padding: '0 6px', borderRadius: 6,
+    flexShrink: 0, height: 36, maxWidth: 150, padding: '0 6px', borderRadius: 6,
     background: 'hsl(var(--app-surface-2))',
     border: '1px solid hsl(var(--app-border-strong))',
     color: 'hsl(var(--app-text))',
@@ -44,7 +44,7 @@ function Label({ icon, text }: { icon: React.ReactNode; text: string }) {
     return (
         <span style={{
             display: 'flex', alignItems: 'center', gap: 4,
-            fontSize: 12, fontWeight: 700, color: 'hsl(var(--app-text-muted))',
+            fontSize: 13, fontWeight: 600, color: 'hsl(var(--app-text-muted))',
             whiteSpace: 'nowrap', flexShrink: 0,
         }}>
             {icon}{text}
@@ -233,7 +233,7 @@ export function StatusBarLinks() {
                     : isConnected ? 'Disconnect telemetry' : 'Connect telemetry'}
                 style={{
                     display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
-                    height: 32, padding: '0 10px', borderRadius: 6,
+                    height: 36, padding: '0 10px', borderRadius: 6,
                     fontSize: 13, fontWeight: 700,
                     background: linkBlocked ? 'hsl(var(--app-surface-2))' : 'transparent',
                     border: linkBlocked ? '1px dashed hsl(var(--app-border-strong))'
@@ -243,10 +243,10 @@ export function StatusBarLinks() {
                 }}
             >
                 {isConnecting || disconnecting
-                    ? <><Loader size={14} className="animate-spin" />{isConnecting ? 'LINKING' : 'CLOSING'}</>
+                    ? <><Loader size={14} className="animate-spin" />{isConnecting ? 'Connecting' : 'Disconnecting'}</>
                     : isConnected
-                        ? <><PlugZap size={14} /> DROP</>
-                        : <><Plug size={14} /> LINK</>}
+                        ? <><PlugZap size={14} /> Disconnect</>
+                        : <><Plug size={14} /> Connect</>}
             </button>
         </>
     )

@@ -25,7 +25,7 @@ interface TelemetryGroup {
 
 function fmt(v: unknown, decimals = 2): string {
     if (v === null || v === undefined) return '-'
-    if (typeof v === 'boolean') return v ? 'YES' : 'NO'
+    if (typeof v === 'boolean') return v ? 'Yes' : 'No'
     if (typeof v === 'number') return isNaN(v) ? '-' : v.toFixed(decimals)
     return String(v)
 }
@@ -44,11 +44,11 @@ export function TelemetryPanel() {
                 name: 'Flight',
                 fields: [
                     { key: 'mode', label: 'Mode', value: telemetry.flight_mode.mode },
-                    { key: 'armed', label: 'Armed', value: telemetry.flight_mode.is_armed ? 'YES' : 'NO' },
-                    { key: 'in_air', label: 'In Air', value: telemetry.flight_mode.is_in_air ? 'YES' : 'NO' },
+                    { key: 'armed', label: 'Armed', value: telemetry.flight_mode.is_armed ? 'Yes' : 'No' },
+                    { key: 'in_air', label: 'In air', value: telemetry.flight_mode.is_in_air ? 'Yes' : 'No' },
                     { key: 'heading', label: 'Heading', value: fmt(telemetry.heading_deg, 1), unit: '°' },
                     { key: 'groundspeed', label: 'Groundspeed', value: fmt(telemetry.groundspeed_m_s, 2), unit: 'm/s' },
-                    { key: 'home_dist', label: 'Home Dist', value: fmt(telemetry.home_distance_m, 1), unit: 'm' },
+                    { key: 'home_dist', label: 'Home distance', value: fmt(telemetry.home_distance_m, 1), unit: 'm' },
                 ],
             },
             {
@@ -57,9 +57,9 @@ export function TelemetryPanel() {
                     { key: 'roll', label: 'Roll', value: fmt(telemetry.attitude.roll_deg, 2), unit: '°' },
                     { key: 'pitch', label: 'Pitch', value: fmt(telemetry.attitude.pitch_deg, 2), unit: '°' },
                     { key: 'yaw', label: 'Yaw', value: fmt(telemetry.attitude.yaw_deg, 2), unit: '°' },
-                    { key: 'rollspeed', label: 'Roll Rate', value: fmt(telemetry.attitude.rollspeed, 3), unit: 'rad/s' },
-                    { key: 'pitchspeed', label: 'Pitch Rate', value: fmt(telemetry.attitude.pitchspeed, 3), unit: 'rad/s' },
-                    { key: 'yawspeed', label: 'Yaw Rate', value: fmt(telemetry.attitude.yawspeed, 3), unit: 'rad/s' },
+                    { key: 'rollspeed', label: 'Roll rate', value: fmt(telemetry.attitude.rollspeed, 3), unit: 'rad/s' },
+                    { key: 'pitchspeed', label: 'Pitch rate', value: fmt(telemetry.attitude.pitchspeed, 3), unit: 'rad/s' },
+                    { key: 'yawspeed', label: 'Yaw rate', value: fmt(telemetry.attitude.yawspeed, 3), unit: 'rad/s' },
                 ],
             },
             {
@@ -89,7 +89,7 @@ export function TelemetryPanel() {
             {
                 name: 'GPS',
                 fields: [
-                    { key: 'gps_fix', label: 'Fix Type', value: fmt(telemetry.gps.fix_type, 0) },
+                    { key: 'gps_fix', label: 'Fix type', value: fmt(telemetry.gps.fix_type, 0) },
                     { key: 'gps_sats', label: 'Satellites', value: fmt(telemetry.gps.satellites_visible, 0) },
                 ],
             },
@@ -133,7 +133,7 @@ export function TelemetryPanel() {
                 <Input
                     value={search}
                     onChange={e => setSearch(e.target.value)}
-                    placeholder="Search fields..."
+                    placeholder="Search fields"
                     aria-label="Search telemetry fields"
                     className="h-8 pl-8 text-[14px] bg-app-surface border-app-border-strong rounded-md"
                 />
@@ -149,7 +149,7 @@ export function TelemetryPanel() {
                             onOpenChange={() => toggleGroup(group.name)}
                         >
                             <CollapsibleTrigger className={cn('flex items-center justify-between w-full min-h-8 px-2 py-1.5 rounded-md hover:bg-app-surface-2 transition-colors duration-[var(--dur-fast)] group', FOCUS)}>
-                                <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted group-hover:text-app-text">
+                                <span className="text-[13px] font-semibold text-app-text-muted group-hover:text-app-text">
                                     {group.name}
                                 </span>
                                 <ChevronDown

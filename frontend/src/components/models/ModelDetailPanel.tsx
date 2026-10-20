@@ -87,29 +87,10 @@ export function ModelDetailPanel({ modelId, open, onOpenChange, editable, canPub
     const speed = speedSentence(v?.latency_ms)
     const ready = m.status === 'ready'
 
-    // The named confirmation takes the footer's place, right where Delete
-    // was pressed, instead of stacking a second dialog on the panel.
-    const foot = confirmDelete ? (
-                <DeleteConfirm name={m.name} busy={busy === 'delete'}
-                    onCancel={() => setConfirmDelete(false)}
-                    onConfirm={async () => {
-                        setBusy('delete'); setErr(null)
-                        const r = await deleteModel(m.id)
-                        setBusy(null)
-                        if (!r.ok) { setErr(r.error); setConfirmDelete(false); return }
-                        useModelsStore.getState().remove(m.id)
-                        onDeleted(m.name)
-                    }} />
-    ) : (
+    // Delete lives in Details, away from the everyday actions; its named
+    // confirmation opens in place there, never as a second dialog.
+    const foot = (
         <>
-            {editable && (
-                <button type="button" className={s.btn} onClick={() => setConfirmDelete(true)}
-                    aria-expanded={confirmDelete}
-                    style={{ color: 'var(--cm-bad)', borderColor: 'color-mix(in srgb, var(--cm-bad) 45%, transparent)' }}>
-                    <Trash2 size={13} aria-hidden /> Delete
-                </button>
-            )}
-            {/* Delete stays on the far left, away from the everyday actions. */}
             <span className={s.spacer} />
             {editable && (
                 <button type="button" className={s.btn} aria-busy={busy === 'retest' || undefined}
@@ -227,6 +208,25 @@ export function ModelDetailPanel({ modelId, open, onOpenChange, editable, canPub
                     </>}
                     <dt>Model id</dt><dd>{m.id}</dd>
                 </dl>
+                {editable && (confirmDelete ? (
+                    <div style={{ marginTop: 14 }}>
+                        <DeleteConfirm name={m.name} busy={busy === 'delete'}
+                            onCancel={() => setConfirmDelete(false)}
+                            onConfirm={async () => {
+                                setBusy('delete'); setErr(null)
+                                const r = await deleteModel(m.id)
+                                setBusy(null)
+                                if (!r.ok) { setErr(r.error); setConfirmDelete(false); return }
+                                useModelsStore.getState().remove(m.id)
+                                onDeleted(m.name)
+                            }} />
+                    </div>
+                ) : (
+                    <button type="button" className={cn(s.btn, s.dangerQuiet)} style={{ marginTop: 14 }}
+                        onClick={() => setConfirmDelete(true)} aria-expanded={confirmDelete}>
+                        <Trash2 size={13} aria-hidden /> Delete model
+                    </button>
+                ))}
             </details>
         </SlideOver>
     )

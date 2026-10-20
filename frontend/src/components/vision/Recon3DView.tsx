@@ -357,9 +357,9 @@ export function Recon3DView() {
             }}>
                 <span style={{ ...pill, color: OVERLAY.text }}>
                     <span style={{ width: 6, height: 6, borderRadius: 999, background: OVERLAY.ok }} aria-hidden />
-                    Live 3D map · {nPoints.toLocaleString()} pts
+                    Live 3D map: {nPoints.toLocaleString()} points
                 </span>
-                <span style={pill}>Drag to orbit · wheel to zoom · shift-drag to pan</span>
+                <span style={pill}>Drag to orbit, scroll to zoom, shift-drag to pan</span>
                 {inputW > 0 && (
                     <span title={inputDegraded
                         ? 'The network is shrinking your video in transit. Detail below this cannot be rebuilt; a better connection gives a better scan.'
@@ -369,7 +369,7 @@ export function Recon3DView() {
                             color: inputDegraded ? OVERLAY.warn : OVERLAY.muted,
                             borderColor: inputDegraded ? OVERLAY.warn : OVERLAY.border,
                         }}>
-                        Input {inputW}x{inputH}{inputDegraded ? ' · link degraded' : ''}
+                        Input {inputW}x{inputH}{inputDegraded ? ', link degraded' : ''}
                     </span>
                 )}
             </div>
@@ -392,7 +392,7 @@ export function Recon3DView() {
                 <div style={{
                     position: 'absolute', bottom: 10, left: 10, width: 200,
                     aspectRatio: '16/9', borderRadius: 10, overflow: 'hidden',
-                    border: `1px solid ${OVERLAY.border}`, background: '#000',
+                    border: `1px solid ${OVERLAY.border}`, background: '#1A2129',
                 }}>
                     {/* The engine's echo of what it receives - also live proof
                         that frames are reaching the reconstruction. */}

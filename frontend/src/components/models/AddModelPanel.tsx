@@ -49,7 +49,7 @@ const STAGES: { key: Stage; label: string }[] = [
 
 export type AddSource = 'recommended' | 'all' | 'upload'
 const SOURCES: { key: AddSource; label: string; short: string; icon: typeof Search }[] = [
-    { key: 'recommended', label: 'Recommended for drones', short: 'Recommended', icon: Sparkles },
+    { key: 'recommended', label: 'Recommended', short: 'Recommended', icon: Sparkles },
     { key: 'all', label: 'All vision models', short: 'All models', icon: Layers },
     { key: 'upload', label: 'Upload a file', short: 'Upload', icon: Upload },
 ]

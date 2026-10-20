@@ -31,7 +31,9 @@ import { FOCUS, DISABLED } from './flightStyles'
 import { WhyDisabled } from './WhyDisabled'
 import { cameraLabel } from '@/components/video/cameraLabel'
 
-export function DeviceSelector() {
+/** `strip`: camera, telemetry and Connect side by side (the Fly page's
+ *  one-time setup strip under the video); `stack` (default): one column. */
+export function DeviceSelector({ layout = 'stack' }: { layout?: 'stack' | 'strip' } = {}) {
     const mounted = useHydrated()
     const {
         cameras, selectedCameraId: camId, setSelectedCameraId: setCamId,
@@ -129,17 +131,19 @@ export function DeviceSelector() {
             : options.find(o => o.value === source)?.label ?? source
 
     if (!mounted) {
-        return <div className="space-y-3 min-h-[190px]" />
+        return <div className={layout === 'strip' ? 'min-h-[72px]' : 'space-y-3 min-h-[190px]'} />
     }
 
     return (
-        <div className="space-y-3">
+        <div className={layout === 'strip'
+            ? 'grid gap-x-4 gap-y-3 items-start md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(180px,auto)] md:[&>*:nth-child(3)]:mt-[38px] md:[&>*:nth-child(n+4)]:col-span-3'
+            : 'space-y-3'}>
 
             {/* Camera selector - not applicable to server-sourced feeds */}
             <div>
                 <div className="flex items-center gap-1.5 mb-1.5 min-h-8">
                     <Camera size={14} className="text-app-text-muted" />
-                    <span id="dev-cam-label" className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">{needsCamera ? 'Camera' : 'Video source'}</span>
+                    <span id="dev-cam-label" className="text-[13px] font-semibold text-app-text-muted">{needsCamera ? 'Camera' : 'Video source'}</span>
                     {needsCamera && (
                         <button
                             onClick={scanCams}
@@ -181,7 +185,7 @@ export function DeviceSelector() {
                 )}
                 {videoSourceNow === 'air_unit_udp' && meshUnits.length > 0 && (
                     <div className="mt-1.5">
-                        <div className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted mb-1" title="Port 5600 + unit id">Mesh units</div>
+                        <div className="text-[13px] font-semibold text-app-text-muted mb-1" title="Port 5600 + unit id">Mesh units</div>
                         <div className="flex flex-wrap gap-1.5">
                             {meshUnits.map(u => {
                                 const active = u.port === airPort
@@ -205,7 +209,7 @@ export function DeviceSelector() {
             <div>
                 <div className="flex items-center gap-1.5 mb-1.5 min-h-8">
                     <Satellite size={14} className="text-app-text-muted" />
-                    <span id="dev-tel-label" className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Telemetry</span>
+                    <span id="dev-tel-label" className="text-[13px] font-semibold text-app-text-muted">Telemetry</span>
                     {/* Desktop needs no grant, so "+" (which opens nothing in
                         Electron) is replaced by a plain re-scan. */}
                     {desktop ? (
@@ -294,7 +298,7 @@ export function DeviceSelector() {
                 )}
                 {!selectedIsFc && (source.startsWith('radio-') || source.startsWith('nradio-')) && (
                     <div className="mt-1.5 flex items-center gap-1.5">
-                        <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Baud</span>
+                        <span className="text-[13px] font-semibold text-app-text-muted">Baud</span>
                         <Select
                             value={String(baud)}
                             onValueChange={(v) => { if (v) setBaud(Number(v)) }}
@@ -335,7 +339,7 @@ export function DeviceSelector() {
                             command vanishes into loopback with no error anywhere
                             and telemetry keeps streaming perfectly. */}
                         <div className="mt-1.5 flex items-center gap-1.5">
-                            <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted shrink-0 w-[72px]">TX host</span>
+                            <span className="text-[13px] font-semibold text-app-text-muted shrink-0 w-[72px]">TX host</span>
                             <input
                                 value={rfUplinkHost}
                                 onChange={e => {
@@ -349,7 +353,7 @@ export function DeviceSelector() {
                             />
                         </div>
                         <div className="mt-1.5 flex items-center gap-1.5">
-                            <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted shrink-0 w-[72px]">QGC port</span>
+                            <span className="text-[13px] font-semibold text-app-text-muted shrink-0 w-[72px]">QGC port</span>
                             <input
                                 type="number"
                                 min={0}

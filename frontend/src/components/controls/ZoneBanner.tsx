@@ -8,6 +8,8 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { getSocket } from '@/lib/socket'
+import { toastStyle, toneColor, TOAST_IN } from '@/components/notifications/toast'
+import { cn } from '@/lib/utils'
 
 type ZoneStatus = {
     zone_class: 'green' | 'orange' | 'red'
@@ -41,38 +43,23 @@ export function ZoneBanner() {
 
     if (!status) return null
 
-    const styles = {
-        green: {
-            background: 'rgba(21, 128, 61, .95)',
-            border: '1px solid rgba(34, 197, 94, .5)',
-            color: '#dcfce7',
-        },
-        orange: {
-            background: 'rgba(120, 53, 15, .95)',
-            border: '1px solid rgba(251, 191, 36, .5)',
-            color: '#fde68a',
-        },
-        red: {
-            background: 'rgba(153, 27, 27, .97)',
-            border: '1px solid rgba(248, 113, 113, .6)',
-            color: '#fecaca',
-        },
-    }[status.zone_class]
+    const tone = status.zone_class === 'red' ? 'danger' : status.zone_class === 'orange' ? 'warn' : 'ok'
 
     const Icon = status.locked ? ShieldAlert
         : status.zone_class === 'green' ? ShieldCheck : AlertTriangle
 
     return (
         <div
-            className={
-                'fixed top-3 left-1/2 -translate-x-1/2 z-[3000] flex max-w-[calc(100vw-32px)] items-center gap-2.5 ' +
-                'px-4 py-2.5 rounded-[10px] text-[14px] font-bold shadow-2xl ' +
-                (status.zone_class === 'red' ? 'animate-pulse' : '')
-            }
+            className={cn(
+                'fixed top-[60px] left-1/2 -translate-x-1/2 z-[3000] flex w-max max-w-[calc(100vw-32px)] items-center gap-2.5',
+                'px-4 py-2.5 rounded-[10px] text-[14px] font-bold', TOAST_IN,
+                // A live alarm is the one thing allowed to pulse.
+                status.zone_class === 'red' && 'motion-safe:animate-pulse',
+            )}
             role={status.zone_class === 'green' ? 'status' : 'alert'}
-            style={styles}
+            style={toastStyle(tone, status.zone_class === 'red' ? 20 : 14)}
         >
-            <Icon size={18} className="shrink-0" aria-hidden />
+            <Icon size={18} className="shrink-0" style={{ color: toneColor(tone) }} aria-hidden />
             {status.message}
         </div>
     )

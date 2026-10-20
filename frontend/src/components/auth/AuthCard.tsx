@@ -25,7 +25,7 @@ export const AUTH_PRIMARY: React.CSSProperties = {
     minHeight: 40, padding: '10px 16px', borderRadius: 6, border: 'none',
     background: 'var(--app-accent)', color: 'var(--app-accent-ink)',
     fontSize: 14, fontWeight: 700,
-    transition: 'opacity var(--dur-fast) var(--ease-out)',
+    transition: 'background-color var(--dur-fast) var(--ease-out)',
 }
 
 export function AuthFrame({ title, sub, children, onSubmit }: {
@@ -40,7 +40,7 @@ export function AuthFrame({ title, sub, children, onSubmit }: {
                 <Image src="/brand/icon-dark.png" alt="" width={32} height={32} className="dark:hidden" />
                 <Image src="/brand/icon.png" alt="" width={32} height={32} className="hidden dark:block" />
                 <div style={{ minWidth: 0 }}>
-                    <h1 style={{ fontSize: 'var(--fs-xl)', lineHeight: '28px', fontWeight: 700, margin: 0 }}>{title}</h1>
+                    <h1 style={{ fontSize: 'var(--fs-xl)', lineHeight: '28px', fontWeight: 800, margin: 0 }}>{title}</h1>
                     {sub && (
                         <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>
                             {sub}
@@ -52,7 +52,7 @@ export function AuthFrame({ title, sub, children, onSubmit }: {
         </>
     )
     const card: React.CSSProperties = {
-        width: '100%', maxWidth: 400, padding: 24, borderRadius: 14,
+        width: '100%', maxWidth: 400, padding: 28, borderRadius: 10,
         background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))',
         boxShadow: 'var(--app-shadow)',
         display: 'flex', flexDirection: 'column', gap: 16,
@@ -63,8 +63,8 @@ export function AuthFrame({ title, sub, children, onSubmit }: {
             padding: 16, background: 'hsl(var(--app-bg))', color: 'hsl(var(--app-text))',
         }}>
             {onSubmit
-                ? <form onSubmit={onSubmit} noValidate style={card}>{body}</form>
-                : <div style={card}>{body}</div>}
+                ? <form onSubmit={onSubmit} noValidate style={card} className="animate-in fade-in-0 slide-in-from-bottom-2 duration-300">{body}</form>
+                : <div style={card} className="animate-in fade-in-0 slide-in-from-bottom-2 duration-300">{body}</div>}
         </div>
     )
 }
@@ -82,6 +82,7 @@ export function AuthField({ id, label, error, hint, ...input }: {
                 id={id} aria-invalid={error ? true : undefined}
                 aria-describedby={error || hint ? `${id}-note` : undefined}
                 {...input}
+                className={'transition-colors hover:border-app-text-muted focus-visible:border-app-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-accent ' + (input.className ?? '')}
                 style={{ ...AUTH_INPUT, ...(error ? { borderColor: 'var(--app-danger)' } : null), ...input.style }}
             />
             {(error || hint) && (
@@ -111,13 +112,16 @@ export function AuthButton({ busy, children, busyText, onClick, type = 'submit',
     subtle?: boolean
 }) {
     return (
-        <button type={type} disabled={busy} onClick={onClick} style={{
-            ...AUTH_PRIMARY,
-            cursor: busy ? 'progress' : 'pointer',
-            border: subtle ? '1px solid hsl(var(--app-border-strong))' : 'none',
-            background: subtle ? 'transparent' : 'var(--app-accent)',
-            color: subtle ? 'hsl(var(--app-text))' : 'var(--app-accent-ink)',
-        }}>
+        // Colours live in classes so hover can step the background (inline
+        // styles would pin it).
+        <button type={type} disabled={busy} onClick={onClick}
+            className={'transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-accent ' + (subtle
+                ? 'border border-app-border-strong bg-transparent text-app-text hover:bg-app-surface-2'
+                : 'border-0 bg-app-accent text-app-accent-ink hover:bg-[color-mix(in_srgb,var(--app-accent)_85%,hsl(var(--app-text)))]')}
+            style={{
+                ...AUTH_PRIMARY, background: undefined, border: undefined, color: undefined,
+                cursor: busy ? 'progress' : 'pointer',
+            }}>
             {busy && <Loader2 size={14} className="animate-spin" />}
             {busy && busyText ? busyText : children}
         </button>

@@ -243,7 +243,7 @@ export function FlightHistory() {
                         <span>{fmtWhen(f.started_at)}</span>
                         <span style={muted}>{f.drone_name ?? f.drone_id.slice(0, 8)}</span>
                         <span style={muted}>{f.in_progress ? 'in flight' : fmtDur(f.duration_s)}</span>
-                        <span style={muted}>{f.max_alt_m.toFixed(0)} m · {(f.distance_m / 1000).toFixed(2)} km</span>
+                        <span style={muted}>{f.max_alt_m.toFixed(0)} m, {(f.distance_m / 1000).toFixed(2)} km</span>
                         {f.crossed_orange && <span className="text-app-warn" title="Passed through an orange zone" aria-label="Passed through an orange zone">●</span>}
                         {f.crossed_red && <span className="text-app-danger" title="Entered a red zone" aria-label="Entered a red zone">●</span>}
                         {!!f.sightings && <span style={muted}>{f.sightings} detections</span>}

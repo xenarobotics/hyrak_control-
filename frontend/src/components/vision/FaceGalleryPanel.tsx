@@ -201,7 +201,7 @@ export function FaceGalleryPanel({
                             ...SECONDARY, ...NUM, cursor: 'help', background: 'none',
                             border: 'none', padding: 0, textAlign: 'left', borderRadius: 4,
                         }}>
-                            {activeCount}/{people.length} active · {totalFaces} photos
+                            {activeCount} of {people.length} active, {totalFaces} photos
                         </TooltipTrigger>
                         <TooltipContent style={{ maxWidth: 260, fontSize: 13, lineHeight: 1.5 }}>
                             Saved faces are matched against every face the drone sees.
@@ -307,7 +307,7 @@ export function FaceGalleryPanel({
                                     {id.similarity.toFixed(2)}
                                     {/* Vote count is the redundancy made visible:
                                         how many independent frames agree. */}
-                                    <span style={{ color: SUBTLE }}> · {id.votes}v</span>
+                                    <span style={{ color: SUBTLE }}> ({id.votes} votes)</span>
                                 </span>
                                 {id.margin != null && id.margin < 0.08 && (
                                     <span style={chip('warn')} title="Two saved people score alike">
@@ -340,7 +340,7 @@ export function FaceGalleryPanel({
                     {margin != null && margin < 0.08 && (
                         <span style={{ ...chip('warn'), marginLeft: 'auto' }}
                             title="Two saved people score alike on this frame">
-                            Unsure · gap {margin.toFixed(2)}
+                            Unsure (gap {margin.toFixed(2)})
                         </span>
                     )}
                 </div>

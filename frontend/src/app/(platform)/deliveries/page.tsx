@@ -622,10 +622,13 @@ function OrdersTab() {
     return (
         <div className="flex flex-col xl:flex-row gap-3 xl:h-full">
             <div className="xl:flex-1 min-w-0 flex flex-col gap-3 xl:overflow-y-auto xl:pr-1">
-            <div className="flex flex-wrap items-center gap-2">
-                <button className={btnPrimary} onClick={() => setShowNew(v => !v)}>
-                    <Plus size={14} aria-hidden /> New order
-                </button>
+            <div className="flex flex-wrap items-center gap-2 min-h-8">
+                {/* With no orders the empty state below carries this action. */}
+                {(tasks.length > 0 || !loaded || showNew) && (
+                    <button className={btnPrimary} onClick={() => setShowNew(v => !v)}>
+                        <Plus size={14} aria-hidden /> New order
+                    </button>
+                )}
                 <button className={btnGhost}
                     onClick={refresh}>
                     <RefreshCw size={14} aria-hidden /> Refresh
@@ -651,9 +654,6 @@ function OrdersTab() {
                                 {n} {STATUS_STYLE[s]?.label ?? s}
                             </span>
                         ))}
-                    <span className="text-[13px] text-app-text-muted tabular-nums">
-                        {onlineIds.size} drone{onlineIds.size === 1 ? '' : 's'} online
-                    </span>
                 </span>
             </div>
 
@@ -674,11 +674,24 @@ function OrdersTab() {
 
             <SectionCard>
                 {tasks.length === 0 ? (
-                    <p className="text-sm py-6 text-center text-app-text-muted">
-                        {loaded
-                            ? 'No orders yet. Create one here, or through the client API (POST /v1/tasks).'
-                            : 'Loading orders...'}
-                    </p>
+                    loaded ? (
+                        <div className="flex flex-col items-center gap-3 py-10 text-center">
+                            <span className="w-10 h-10 rounded-[10px] flex items-center justify-center bg-app-accent-soft text-app-accent">
+                                <Package size={20} aria-hidden />
+                            </span>
+                            <div>
+                                <p className="text-[16px] font-bold text-app-text">No orders yet</p>
+                                <p className="text-[13px] text-app-text-muted mt-0.5">Orders you create show up here with their route and drone.</p>
+                            </div>
+                            {!showNew && (
+                                <button className={btnPrimary} onClick={() => setShowNew(true)}>
+                                    <Plus size={14} aria-hidden /> New order
+                                </button>
+                            )}
+                        </div>
+                    ) : (
+                        <p className="text-sm py-6 text-center text-app-text-muted">Loading orders...</p>
+                    )
                 ) : (
                     <div className="overflow-x-auto">
                         <table className="w-full text-sm">
@@ -721,7 +734,16 @@ function OrdersTab() {
 
             {/* CENTER: the operational picture - map on top, live-mission
                 strip beneath it whenever anything is airborne. */}
-            <div className="shrink-0 xl:w-[38%] min-w-0 flex flex-col gap-2 h-[440px] xl:h-auto">
+            <div className="shrink-0 xl:w-[38%] min-w-0 flex flex-col gap-3 h-[480px] xl:h-auto">
+                {/* Same 32px header row as the other two columns, so the
+                    orders card, the map and the drones list share a top edge. */}
+                <div className="h-8 shrink-0 flex items-center gap-2">
+                    <h2 className="text-[13px] font-semibold text-app-text-muted">Live map</h2>
+                    <span className="ml-auto inline-flex items-center gap-1.5 text-[13px] text-app-text-muted tabular-nums">
+                        <span className={'w-2 h-2 rounded-full ' + (onlineIds.size > 0 ? 'bg-app-ok' : 'bg-app-border-strong')} aria-hidden />
+                        {onlineIds.size} drone{onlineIds.size === 1 ? '' : 's'} online
+                    </span>
+                </div>
                 <div className="flex-1 min-h-0">
                     <DeliveryMap pads={pads} selection={selection}
                         drones={mapDrones} routes={routes} />
@@ -753,10 +775,10 @@ function OrdersTab() {
 
             {/* RIGHT: the fleet, always at hand and hidable. */}
             {panelOpen ? (
-                <div className="xl:w-[250px] shrink-0 flex flex-col gap-2 xl:overflow-y-auto">
-                    <div className="flex items-center gap-2">
+                <div className="xl:w-[250px] shrink-0 flex flex-col gap-3 xl:overflow-y-auto">
+                    <div className="h-8 shrink-0 flex items-center gap-2">
                         <Plane size={16} className="text-app-accent" aria-hidden />
-                        <h2 className="text-[18px] leading-6 font-bold">Drones</h2>
+                        <h2 className="text-[16px] leading-6 font-bold">Drones</h2>
                         <button className={'ml-auto w-8 h-8 inline-flex items-center justify-center rounded-[6px] text-app-text-muted hover:text-app-text hover:bg-app-surface-2 ' + FOCUS}
                             title="Hide the drones panel" aria-label="Hide the drones panel"
                             onClick={() => setPanelOpen(false)}>
@@ -839,12 +861,12 @@ function OrderRow({
                 <tr>
                     <td colSpan={5} className="pb-4">
                         <div className="mx-2 mt-1 rounded-[10px] border border-app-border bg-app-surface-2 p-4 grid gap-4 md:grid-cols-[1fr_1fr]">
-                            <p className="text-[13px] md:col-span-2 text-app-text-muted">
-                                {task.client_name}
-                                {task.payload.description && <> · {task.payload.description}</>}
-                                {task.payload.kg > 0 && <span className="tabular-nums"> · {task.payload.kg} kg</span>}
-                                <span className="tabular-nums"> · {fmtTime(task.created_at)}</span>
-                            </p>
+                            <dl className="md:col-span-2 flex flex-wrap gap-x-6 gap-y-1 text-[13px]">
+                                <div className="flex gap-1.5"><dt className="text-app-text-muted">Client</dt><dd className="font-semibold">{task.client_name}</dd></div>
+                                {task.payload.description && <div className="flex gap-1.5"><dt className="text-app-text-muted">Payload</dt><dd className="font-semibold">{task.payload.description}</dd></div>}
+                                {task.payload.kg > 0 && <div className="flex gap-1.5"><dt className="text-app-text-muted">Weight</dt><dd className="font-semibold tabular-nums">{task.payload.kg} kg</dd></div>}
+                                <div className="flex gap-1.5"><dt className="text-app-text-muted">Created</dt><dd className="font-semibold tabular-nums">{fmtTime(task.created_at)}</dd></div>
+                            </dl>
                             {/* Timeline */}
                             <div>
                                 <p className={LABEL + ' mb-2'}>Timeline</p>
@@ -1275,7 +1297,7 @@ function DronesPanel() {
                 </div>
             )}
 
-            <div className="grid gap-2 grid-cols-1">
+            <div className="grid gap-2 grid-cols-1 empty:hidden">
                 {online.map(d => {
                     const lv = live.get(d.id)!
                     const task = activeTaskFor(d.id)

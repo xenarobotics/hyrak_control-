@@ -175,8 +175,8 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
                     : failed ? <CircleAlert size={16} color={T_FAIL} aria-hidden />
                     : idle ? <Gauge size={16} color={tone} aria-hidden />
                     : <X size={16} color={T_MUTED} aria-hidden />}
-                <span style={{ fontSize: 12, fontWeight: 700, color: tone, letterSpacing: '0.05em' }}>
-                    {(state.label || state.sensor || 'CALIBRATION').toUpperCase()}
+                <span style={{ fontSize: 13, fontWeight: 700, color: tone }}>
+                    {(() => { const t = state.label || state.sensor || 'Calibration'; return t.charAt(0).toUpperCase() + t.slice(1) })()}
                 </span>
                 {oriented && (
                     <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -285,14 +285,14 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
                         {doneList.length > 0 && (
                             <>
                                 <span style={{ color: T_DONE, fontWeight: 700 }}>Done:</span>
-                                <span> {doneList.join(' · ')}</span>
+                                <span> {doneList.join(', ')}</span>
                             </>
                         )}
                         {doneList.length > 0 && pendingList.length > 0 && <br />}
                         {pendingList.length > 0 && (
                             <>
                                 <span style={{ fontWeight: 700 }}>Still to do:</span>
-                                <span> {pendingList.join(' · ')}</span>
+                                <span> {pendingList.join(', ')}</span>
                             </>
                         )}
                         {pendingList.length === 0 && doneList.length > 0 && (

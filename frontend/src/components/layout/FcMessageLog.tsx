@@ -79,7 +79,7 @@ export function FcMessageLog({ variant = 'bar' }: { variant?: Variant }) {
             {fcUnread > 0 && (
                 <span style={{
                     minWidth: 18, height: 18, padding: '0 4px', borderRadius: 999,
-                    background: overlayColor, color: '#0b0b0d', fontSize: 12, fontWeight: 800,
+                    background: overlayColor, color: 'var(--overlay-scrim)', fontSize: 12, fontWeight: 800,
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                 }}>
                     {fcUnread > 99 ? '99+' : fcUnread}
@@ -164,14 +164,14 @@ function MessageWindow({ onClose, onClear, onRead }: {
         <div
             // Same shape as the mission pre-flight confirmation: full-screen
             // scrim, centred card, click-outside to dismiss.
-            className="fixed inset-0 z-[4000] flex items-center justify-center p-4"
-            style={{ background: 'rgba(0,0,0,.6)' }}
+            className="fixed inset-0 z-[4000] flex items-center justify-center p-4 animate-in fade-in-0 duration-200"
+            style={{ background: 'rgba(10,14,20,.45)' }}
             onClick={onClose}
         >
             <div
                 onClick={e => e.stopPropagation()}
                 role="dialog" aria-modal="true" aria-label="Drone messages"
-                className="rounded-[14px] border overflow-hidden flex flex-col"
+                className="rounded-[14px] border overflow-hidden flex flex-col animate-in fade-in-0 slide-in-from-bottom-2 duration-[240ms] ease-[var(--ease-out)]"
                 style={{
                     background: 'hsl(var(--app-raised))', boxShadow: 'var(--app-shadow)',
                     borderColor: 'hsl(var(--app-border))',
@@ -186,7 +186,7 @@ function MessageWindow({ onClose, onClear, onRead }: {
                     <h2 className="m-0 text-[18px] font-bold text-app-text">
                         Drone messages
                     </h2>
-                    <span className="text-[13px] font-mono text-app-text-muted">
+                    <span className="text-[13px] tabular-nums text-app-text-muted">
                         {shown.length}{minSeverity > 0 ? ` of ${fcMessages.length}` : ''}
                     </span>
 
@@ -249,7 +249,7 @@ function MessageWindow({ onClose, onClear, onRead }: {
                     ) : shown.map(m => (
                         <div
                             key={m.id}
-                            className="flex gap-3 px-4 py-1 text-[13px] font-mono leading-relaxed items-baseline"
+                            className="flex gap-3 px-4 py-1 text-[13px] tabular-nums leading-relaxed items-baseline"
                         >
                             <span style={{ color: 'hsl(var(--app-text-muted))', flexShrink: 0 }}>{timeOf(m.ts)}</span>
                             <span style={{

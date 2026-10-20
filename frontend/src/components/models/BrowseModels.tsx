@@ -18,8 +18,8 @@
 // Browsing is open to everyone who can see the library; Add still needs
 // models.manage and the premium feature (the parent decides via `addState`).
 
-import { useCallback, useEffect, useState } from 'react'
-import { AlertTriangle, Download, ExternalLink, Heart, Layers, Loader, Lock, Play, Plus, Search } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { AlertTriangle, ChevronRight, Download, ExternalLink, Heart, Layers, Loader, Lock, Play, Plus, Search } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import {
@@ -53,9 +53,20 @@ type CardActions = Pick<Common, 'addState' | 'canRun' | 'onRun' | 'onOpenModel' 
 
 // ── shared bits ────────────────────────────────────────────────────────
 
+/** A licence id as people write it: "Apache 2.0", "AGPL-3.0", "MIT". */
+const LICENCE_NAMES: Record<string, string> = {
+    'mit': 'MIT', 'apache-2.0': 'Apache 2.0', 'agpl-3.0': 'AGPL-3.0', 'gpl-3.0': 'GPL-3.0', 'lgpl-3.0': 'LGPL-3.0',
+    'bsd-3-clause': 'BSD 3-clause', 'bsd-2-clause': 'BSD 2-clause', 'cc-by-4.0': 'CC BY 4.0', 'cc-by-sa-4.0': 'CC BY-SA 4.0',
+    'cc-by-nc-4.0': 'CC BY-NC 4.0', 'cc-by-nc-sa-4.0': 'CC BY-NC-SA 4.0', 'openrail': 'OpenRAIL', 'other': 'Other licence',
+    'unknown': 'Licence unknown', 'unspecified': 'Licence not given',
+}
+function licenceName(id: string): string {
+    return LICENCE_NAMES[id.toLowerCase()] ?? id
+}
+
 function LicenceBadge({ license, note }: { license: string | null; note: string | null }) {
     if (!license && !note) return null
-    const label = license ? license.toUpperCase() : 'Licence'
+    const label = license ? licenceName(license) : 'Licence'
     if (!note) return <span className={cn(s.chip, s.chipMute)} title={`Licence: ${license}`}>{label}</span>
     return (
         <Tooltip>
@@ -127,7 +138,7 @@ function BrowseSkeleton({ rows = 4 }: { rows?: number }) {
     return (
         <div className={s.browseList} aria-hidden>
             {Array.from({ length: rows }, (_, i) => (
-                <div key={i} className={s.browseCard}>
+                <div key={i} className={s.browseCard} style={{ borderTop: i ? undefined : 'none' }}>
                     <span style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         <span className={s.skel} style={{ height: 13, width: '50%' }} />
                         <span className={s.skel} style={{ height: 10, width: '85%' }} />
@@ -196,42 +207,109 @@ export function RecommendedTab({ workspaceId, adding, onAdd, onSearch, ...act }:
             </div>
         )
     }
+    return <RecommendedList cats={state.cats} adding={adding} onAdd={onAdd} onSearch={onSearch} act={act} />
+}
+
+/** How many of a category show in the All view before "Show all". */
+const PER_CATEGORY = 3
+
+/** The recommended list, built to stay calm at 100+ models: a search, a
+ *  category filter, and in the All view each category capped at a few rows
+ *  with "Show all" opening that category. */
+function RecommendedList({ cats, adding, onAdd, onSearch, act }: {
+    cats: { name: string; models: RecommendedModel[] }[]
+    adding: string | null
+    onAdd: (t: AddTarget) => void
+    onSearch: () => void
+    act: CardActions
+}) {
+    const [query, setQuery] = useState('')
+    const [cat, setCat] = useState<string | null>(null)
+    const total = cats.reduce((n, c) => n + c.models.length, 0)
+    const q = query.trim().toLowerCase()
+    const shown = useMemo(() => cats
+        .filter(c => !cat || c.name === cat)
+        .map(c => ({
+            name: c.name,
+            all: c.models.length,
+            models: q ? c.models.filter(m => [m.name, m.what, m.repo, c.name, ...m.classes_preview].some(x => x.toLowerCase().includes(q))) : c.models,
+        }))
+        .filter(c => c.models.length > 0), [cats, cat, q])
+    const capped = !cat && !q
+    const found = shown.reduce((n, c) => n + c.models.length, 0)
+
     return (
         <div className={s.section}>
             <p className={s.muted}>
                 Picked and tested by HYRAK for drone video. Add one and it is ready to run in about a minute.
-                Looking for something else? <button type="button" className={s.link} onClick={onSearch}>Browse all vision models</button>
+                {' '}<button type="button" className={s.link} onClick={onSearch}>Browse all vision models</button>
             </p>
-            {state.cats.map(cat => (
-                <section key={cat.name} className={s.section} aria-label={cat.name}>
-                    <h3 className={cn(s.label, s.groupLabel)}>{cat.name}</h3>
-                    <div className={s.browseList}>
-                        {cat.models.map(m => (
-                            <div key={`${m.repo}/${m.file}`} className={s.browseCard}>
-                                <div className={s.browseMain}>
-                                    <span className={s.cardName}>{m.name}</span>
-                                    <span className={s.cardBlurb}>{m.what}</span>
-                                    {m.classes_preview.length > 0 && (
-                                        <span className={s.chips} aria-label={m.task === 'classify' ? 'Example answers' : 'Example things it finds'}>
-                                            {m.classes_preview.slice(0, 4).map(c => <span key={c} className={cn(s.chip, s.chipMute, s.classPreview)}>{c}</span>)}
-                                        </span>
-                                    )}
-                                    <span className={s.browseMeta}>
-                                        <span>{TASK_WORDS[m.task].title}</span>
-                                        {m.fps ? <span>about {Math.round(m.fps)} fps on HYRAK</span> : null}
-                                        <LicenceBadge license={m.license} note={m.license_note} />
-                                    </span>
-                                </div>
-                                <div className={s.cardActions}>
-                                    <AddButton {...act} name={m.name} added={m.added} addedStatus={m.added_status}
-                                        busy={adding === m.repo}
-                                        onAdd={() => onAdd({ repo: m.repo, file: m.file, name: m.name })} />
-                                </div>
-                            </div>
-                        ))}
+            <label className={s.search} style={{ flex: 'none' }}>
+                <Search size={14} aria-hidden />
+                <span className="sr-only">Search recommended models</span>
+                <input type="search" value={query} placeholder={`Search ${total} recommended models`}
+                    autoComplete="off" spellCheck={false} onChange={e => setQuery(e.target.value)} />
+            </label>
+            <div className={s.catRow} role="group" aria-label="Category">
+                <button type="button" className={s.catChip} aria-pressed={cat === null} onClick={() => setCat(null)}>
+                    All <span className={s.count}>{total}</span>
+                </button>
+                {cats.map(c => (
+                    <button key={c.name} type="button" className={s.catChip} aria-pressed={cat === c.name}
+                        onClick={() => setCat(x => (x === c.name ? null : c.name))}>
+                        {c.name} <span className={s.count}>{c.models.length}</span>
+                    </button>
+                ))}
+            </div>
+
+            {found === 0 ? (
+                <div className={cn(s.inset, s.empty)}>
+                    <h3>No recommended models match &quot;{query.trim()}&quot;</h3>
+                    <p className={s.muted}>Try a broader word, or search every vision model on Hugging Face.</p>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <button type="button" className={s.btn} onClick={() => { setQuery(''); setCat(null) }}>Clear search</button>
+                        <button type="button" className={s.btn} onClick={onSearch}><Layers size={13} aria-hidden /> All vision models</button>
                     </div>
-                </section>
-            ))}
+                </div>
+            ) : shown.map(c => {
+                const rows = capped ? c.models.slice(0, PER_CATEGORY) : c.models
+                return (
+                    <section key={c.name} className={s.browseGroup} aria-label={c.name}>
+                        {(!cat || q) && (
+                            <h3 className={s.browseGroupHead}>
+                                <span>{c.name}</span>
+                                <span className={s.count}>{q ? `${c.models.length} of ${c.all}` : c.all}</span>
+                            </h3>
+                        )}
+                        <ul className={s.browseList}>
+                            {rows.map(m => (
+                                <li key={`${m.repo}/${m.file}`} className={s.browseCard}
+                                    title={m.classes_preview.length ? `${m.task === 'classify' ? 'Answers' : 'Finds'}: ${m.classes_preview.join(', ')}` : undefined}>
+                                    <div className={s.browseMain}>
+                                        <span className={s.browseName}>{m.name}</span>
+                                        <span className={s.browseWhat}>{m.what}</span>
+                                        <span className={s.browseMeta}>
+                                            <span className={cn(s.chip, s.chipMute)}>{TASK_WORDS[m.task].title}</span>
+                                            {m.fps ? <span className={cn(s.chip, s.chipMute)} title="Measured on the HYRAK server">{Math.round(m.fps)} fps</span> : null}
+                                            <LicenceBadge license={m.license} note={m.license_note} />
+                                        </span>
+                                    </div>
+                                    <div className={s.browseActions}>
+                                        <AddButton {...act} name={m.name} added={m.added} addedStatus={m.added_status}
+                                            busy={adding === m.repo}
+                                            onAdd={() => onAdd({ repo: m.repo, file: m.file, name: m.name })} />
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                        {capped && c.models.length > PER_CATEGORY && (
+                            <button type="button" className={s.showAll} onClick={() => setCat(c.name)}>
+                                Show all {c.models.length} in {c.name} <ChevronRight size={14} aria-hidden />
+                            </button>
+                        )}
+                    </section>
+                )
+            })}
         </div>
     )
 }
@@ -366,12 +444,12 @@ export function AllModelsTab({ workspaceId, adding, onAdd, inputRef, ...act }: C
                             ? 'None of these run on HYRAK yet; they show what is coming.'
                             : `${runnable} ready to run${list.results.length > runnable ? '; the greyed ones need a later HYRAK update.' : '.'}`}
                     </p>
-                    <div className={s.browseList}>
+                    <ul className={s.browseList}>
                         {list.results.map(c => (
                             <SearchCard key={c.repo} card={c} busy={adding === c.repo} {...act}
                                 onAdd={() => onAdd({ repo: c.repo, file: c.suggested_file })} />
                         ))}
-                    </div>
+                    </ul>
                     {state.s === 'ok' && state.more !== 'idle' && state.more !== 'loading' && (
                         <LoadFailed error={state.more} onRetry={loadMore} what="More results" kept />
                     )}
@@ -395,11 +473,11 @@ function SearchCard({ card: c, busy, onAdd, ...act }: CardActions & {
     const taskWord = c.task === 'detect' || c.task === 'classify' ? TASK_WORDS[c.task].title
         : c.task === 'segment' ? 'Outlines objects' : null
     return (
-        <div className={s.browseCard} data-runnable={c.runnable || !!c.added}>
+        <li className={s.browseCard} data-runnable={c.runnable || !!c.added}>
             <div className={s.browseMain}>
-                <span className={cn(s.cardName, s.browseRepo)}>{c.repo}</span>
+                <span className={cn(s.browseName, s.browseRepo)}>{c.repo}</span>
                 <span className={s.browseMeta}>
-                    {taskWord && <span>{taskWord}</span>}
+                    {taskWord && <span className={cn(s.chip, s.chipMute)}>{taskWord}</span>}
                     <span title={`${c.downloads.toLocaleString()} downloads`}><Download size={11} aria-hidden /> {compactCount(c.downloads)}</span>
                     <span title={`${c.likes.toLocaleString()} likes`}><Heart size={11} aria-hidden /> {compactCount(c.likes)}</span>
                     {updated && <span>Updated {updated}</span>}
@@ -407,7 +485,7 @@ function SearchCard({ card: c, busy, onAdd, ...act }: CardActions & {
                 </span>
                 {!c.runnable && !c.added && c.reason && <span className={s.browseReason}>{c.reason}</span>}
             </div>
-            <div className={s.cardActions}>
+            <div className={s.browseActions}>
                 <a href={c.url} target="_blank" rel="noopener noreferrer" className={cn(s.btn, s.ghost)}
                     aria-label={`View ${c.repo} on Hugging Face (opens in a new tab)`} title="View on Hugging Face">
                     <ExternalLink size={13} aria-hidden />{!c.runnable && !c.added && <span>View</span>}
@@ -416,6 +494,6 @@ function SearchCard({ card: c, busy, onAdd, ...act }: CardActions & {
                     <AddButton {...act} name={c.repo} added={c.added} addedStatus={c.added_status} busy={busy} onAdd={onAdd} />
                 )}
             </div>
-        </div>
+        </li>
     )
 }

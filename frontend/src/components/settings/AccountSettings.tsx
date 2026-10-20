@@ -9,10 +9,10 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { fetchMe, storeUser, type AuthUser } from '@/lib/auth'
 import { useAccess } from '@/hooks/useAccess'
 import {
-    changePassword, fmtWhen, listSessions, revokeOtherSessions, revokeSession, updateMe, type SessionRow,
+    changePassword, listSessions, revokeOtherSessions, revokeSession, updateMe, type SessionRow,
 } from '@/lib/workspaces'
 import { passwordProblem } from '@/components/auth/AuthCard'
-import { Pill, PrefRow, S_FIELD_LABEL, S_INPUT, S_NOTE, SButton, Status } from '@/components/settings/primitives'
+import { describeDevice, fmtShort, Pill, PrefRow, S_FIELD_LABEL, S_INPUT, S_NOTE, SButton, Status } from '@/components/settings/primitives'
 
 export function ProfileGroup() {
     const { user } = useAccess()
@@ -171,22 +171,37 @@ export function DevicesGroup() {
         <>
             {rows === null && !error && <p style={{ ...S_NOTE, padding: '10px 0' }}>Loading devices</p>}
             {rows?.length === 0 && <p style={{ ...S_NOTE, padding: '10px 0' }}>No signed-in devices.</p>}
-            {rows?.map(r => (
-                <PrefRow key={r.id}
-                    label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                        {r.label || 'Unnamed device'}
-                        {r.current && <Pill tone="cyan">This device</Pill>}
-                    </span>}
-                    sub={`Signed in ${fmtWhen(r.created_at)} - last active ${fmtWhen(r.last_seen_at)}`}
-                    right={r.current ? null : (
-                        // Neutral on purpose: one red button per row read as a
-                        // column of alarms. Red is kept for "sign out all".
-                        <SButton disabled={busyId === r.id} onClick={() => void signOut(r)}
-                            title={`Sign out ${r.label || 'this device'}`}>
-                            {busyId === r.id ? 'Signing out' : 'Sign out device'}
-                        </SButton>
-                    )} />
-            ))}
+            {/* People's browsers first; scripts and API clients (a token used
+                from code) under their own heading, so a raw client name does
+                not read like a strange device. */}
+            {[false, true].map(scripts => {
+                const list = (rows ?? []).filter(r => describeDevice(r.label).script === scripts)
+                if (!list.length) return null
+                return (
+                    <div key={String(scripts)}>
+                        {scripts && <h4 style={{ margin: 0, padding: '16px 0 0', fontSize: 14, fontWeight: 700, color: 'hsl(var(--app-text))' }}>Apps and scripts</h4>}
+                        {list.map(r => {
+                            const name = describeDevice(r.label).name
+                            return (
+                                <PrefRow key={r.id}
+                                    label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                        {name}
+                                        {r.current && <Pill tone="cyan">This device</Pill>}
+                                    </span>}
+                                    sub={`Signed in ${fmtShort(r.created_at)}, last active ${fmtShort(r.last_seen_at)}`}
+                                    right={r.current ? null : (
+                                        // Neutral on purpose: one red button per row read as a
+                                        // column of alarms. Red is kept for "sign out all".
+                                        <SButton disabled={busyId === r.id} onClick={() => void signOut(r)}
+                                            title={`Sign out ${name}`}>
+                                            {busyId === r.id ? 'Signing out' : 'Sign out'}
+                                        </SButton>
+                                    )} />
+                            )
+                        })}
+                    </div>
+                )
+            })}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', flexWrap: 'wrap' }}>
                 {others > 0 && (
                     <SButton tone="danger" disabled={busyId === 'others'} onClick={() => void signOutOthers()}>

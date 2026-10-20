@@ -72,10 +72,7 @@ function lsSet(key: string, val: unknown) {
 
 function GroupLabel({ text }: { text: string }) {
     return (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '24px 0 8px' }}>
-            <h3 style={{ margin: 0, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', color: 'hsl(var(--app-text-muted))' }}>{text}</h3>
-            <div style={{ flex: 1, height: 1, background: 'hsl(var(--app-border))' }} />
-        </div>
+        <h3 style={{ margin: 0, padding: '28px 0 4px', fontSize: 16, lineHeight: '22px', fontWeight: 700, color: 'hsl(var(--app-text))' }}>{text}</h3>
     )
 }
 
@@ -166,7 +163,7 @@ function DisplayGroup() {
             <PrefRow
                 label="Text size"
                 sub="Larger text, same layout."
-                tip="Large is +15%, Extra large +30%. Interface scale below grows the panels too."
+                tip="Large is +15%, Extra large +30%."
                 right={
                     <ChipGroup
                         value={textSize}
@@ -175,7 +172,7 @@ function DisplayGroup() {
                     />
                 }
             />
-            <PrefRow
+            {uiMode === 'dev' && <PrefRow
                 label="Interface scale"
                 sub="Grows panels and text together, so nothing overflows."
                 right={
@@ -185,7 +182,7 @@ function DisplayGroup() {
                         options={UI_ZOOMS.map(z => ({ value: String(z), label: `${z}%` }))}
                     />
                 }
-            />
+            />}
         </>
     )
 }
@@ -545,8 +542,8 @@ function NetworkCheckRow() {
                         onClick={run}
                         disabled={busy}
                         style={{
-                            marginTop: 6, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
-                            background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))',
+                            marginTop: 6, padding: '4px 10px', minHeight: 32, borderRadius: 6, cursor: 'pointer',
+                            background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border-strong))',
                             color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace',
                         }}
                     >
@@ -602,9 +599,7 @@ function RtspPathRow() {
                         {info.rung ?? 'not streaming'}
                     </div>
                     <div style={{ color: 'hsl(var(--app-text-muted))', marginTop: 2 }}>
-                        {info.codec ? `camera: ${info.codec}` : 'camera: unknown'}
-                        {' · '}
-                        buffer: {info.drift}ms
+                        {info.codec ? `Camera ${info.codec}` : 'Camera unknown'}, buffer {info.drift} ms
                     </div>
                     {info.failures.length > 0 && (
                         <div style={{ color: 'var(--app-danger)', marginTop: 4, fontSize: 12, whiteSpace: 'normal', lineHeight: 1.4 }}>
@@ -1199,7 +1194,7 @@ function CrowdGroup() {
                                             width: 62, padding: '4px 6px', borderRadius: 6,
                                             fontSize: 12, fontFamily: 'monospace',
                                             textAlign: 'right',
-                                            border: '1px solid hsl(var(--app-border))',
+                                            border: '1px solid hsl(var(--app-border-strong))',
                                             background: 'hsl(var(--app-surface-2))',
                                             color: 'hsl(var(--app-text))',
                                         }}
@@ -1310,7 +1305,7 @@ function DesktopUpdateRow() {
             progress.rate ? formatRate(progress.rate) : null,
             progress.transferred !== undefined && progress.total && progress.rate
                 ? formatEta(progress.transferred, progress.total, progress.rate) : null,
-        ].filter(Boolean).join(' · ')
+        ].filter(Boolean).join(', ')
         : ''
 
     return (
@@ -1386,18 +1381,18 @@ function AboutGroup() {
                 </div>
                 <div>
                     <p style={{ fontSize: 14, fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>Hyrak Control</p>
-                    <p style={{ fontSize: 12, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>Ground Control Station · 0.1.0-dev</p>
+                    <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>Ground control station, version 0.1.0-dev</p>
                 </div>
             </div>
             <DesktopUpdateRow />
             {[
-                { k: 'Frontend',   v: 'Next.js 15 · React 19 · TypeScript' },
-                { k: 'Backend',    v: 'FastAPI · MAVSDK · aiortc' },
-                { k: 'AI Runtime', v: 'CUDA 12 · PyTorch 2 · Ultralytics' },
-                { k: 'Autopilots', v: 'PX4 · ArduPilot via MAVLink / MAVSDK' },
-                { k: 'Platform',   v: 'Linux · RTX 4070 Laptop · 8 GB VRAM' },
+                { k: 'Frontend',   v: 'Next.js 15, React 19, TypeScript' },
+                { k: 'Backend',    v: 'FastAPI, MAVSDK, aiortc' },
+                { k: 'AI runtime', v: 'CUDA 12, PyTorch 2, Ultralytics' },
+                { k: 'Autopilots', v: 'PX4 and ArduPilot via MAVLink' },
+                { k: 'Platform',   v: 'Linux, RTX 4070 laptop, 8 GB VRAM' },
             ].map(r => (
-                <PrefRow key={r.k} label={r.k} right={<span style={{ fontSize: 12, fontFamily: 'monospace', color: 'hsl(var(--app-text-muted))' }}>{r.v}</span>} />
+                <PrefRow key={r.k} label={r.k} right={<span style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))' }}>{r.v}</span>} />
             ))}
         </>
     )
@@ -1447,7 +1442,7 @@ function CalibrationRow({ field, onSave, busy }: {
     const sub = [
         field.overridden ? 'measured' : 'default',
         field.min !== undefined ? `${field.min}-${field.max}${field.unit ? ' ' + field.unit : ''}` : '',
-    ].filter(Boolean).join('  ·  ')
+    ].filter(Boolean).join(', ')
 
     return (
         <PrefRow
@@ -1728,7 +1723,7 @@ function LinkGroup() {
                             style={{
                                 padding: '6px 12px', borderRadius: 6,
                                 background: 'hsl(var(--app-surface-2))',
-                                border: '1px solid hsl(var(--app-border))',
+                                border: '1px solid hsl(var(--app-border-strong))',
                                 color: 'hsl(var(--app-text))',
                                 minHeight: 32, fontSize: 13, fontWeight: 600,
                                 cursor: busy ? 'progress' : 'pointer',
@@ -1881,7 +1876,7 @@ function SensorsGroup() {
                         right={<input type="number" value={params[key]}
                             onChange={e => setParam(key, Number(e.target.value))}
                             style={{ width: 76, padding: '5px 8px', borderRadius: 6, fontFamily: 'monospace', fontSize: 12,
-                                background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))' }} />} />
+                                background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border-strong))', color: 'hsl(var(--app-text))' }} />} />
                 ))}
             </>)}
         </>
@@ -1893,91 +1888,91 @@ const CATEGORIES: Category[] = [
         id: 'general', label: 'General', icon: SlidersHorizontal,
         blurb: 'Theme, status bar, and the units used across every tab',
         sections: [
-            { label: 'APPEARANCE', Body: DisplayGroup },
-            { label: 'STATUS BAR', Body: StatusBarGroup },
-            { label: 'UNITS',      Body: UnitsGroup },
+            { label: 'Appearance', Body: DisplayGroup },
+            { label: 'Status bar', Body: StatusBarGroup },
+            { label: 'Units',      Body: UnitsGroup },
         ],
     },
     {
         id: 'account', label: 'Account', icon: UserRound,
         blurb: 'Your profile, password and signed-in devices - saved on the server, not this device',
         sections: [
-            { label: 'PROFILE',    Body: ProfileGroup },
-            { label: 'PASSWORD',   Body: PasswordGroup },
-            { label: 'MY DEVICES', Body: DevicesGroup },
+            { label: 'Profile',    Body: ProfileGroup },
+            { label: 'Password',   Body: PasswordGroup },
+            { label: 'My devices', Body: DevicesGroup },
         ],
     },
     {
         id: 'workspace', label: 'Workspace', icon: Users,
         blurb: 'Who is in the active workspace, and invite links for new people',
         sections: [
-            { label: 'WORKSPACE', Body: WorkspaceGroup },
-            { label: 'MEMBERS',   Body: MembersGroup },
-            { label: 'INVITES',   Body: InvitesGroup },
+            { label: 'Workspace', Body: WorkspaceGroup },
+            { label: 'Members',   Body: MembersGroup },
+            { label: 'Invites',   Body: InvitesGroup },
         ],
     },
     {
         id: 'flights', label: 'Flights', icon: History,
         blurb: 'Recorded flights of the workspace: replay a track with its detections, or save it as CSV or GeoJSON',
-        sections: [{ label: 'FLIGHT HISTORY', Body: FlightHistory }],
+        sections: [{ label: 'Flight history', Body: FlightHistory }],
     },
     {
         id: 'video', label: 'Video', icon: Video,
         blurb: 'Where the feed comes from, its quality, and how AI results are drawn',
         sections: [
-            { label: 'VIDEO', Body: VideoGroup },
-            { label: 'DETECTIONS ON THE MAP', Body: MapCameraGroup },
-            { label: 'CAMERA CALIBRATION', Body: CameraCalibrationGroup, staffOnly: true },
+            { label: 'Video', Body: VideoGroup },
+            { label: 'Detections on the map', Body: MapCameraGroup },
+            { label: 'Camera calibration', Body: CameraCalibrationGroup, staffOnly: true },
         ],
     },
     {
         id: 'links', label: 'Comm links', icon: Radio,
         blurb: 'Telemetry link defaults and the active connection',
-        sections: [{ label: 'COMM LINKS', Body: LinkGroup }],
+        sections: [{ label: 'Comm links', Body: LinkGroup }],
     },
     {
         id: 'ai', label: 'AI Modules', icon: Bot, staffOnly: true,
         blurb: 'Per-mode tuning for the vision modules',
         sections: [
-            { label: 'FOLLOW TUNING', Body: FollowTuningGroup },
-            { label: 'CROWD MANAGEMENT', Body: CrowdGroup },
-            { label: 'TRACKING & SPEED LIMITS', Body: VisionLimitsGroup },
+            { label: 'Follow tuning', Body: FollowTuningGroup },
+            { label: 'Crowd management', Body: CrowdGroup },
+            { label: 'Tracking and speed limits', Body: VisionLimitsGroup },
         ],
     },
     {
         id: 'map', label: 'Map', icon: Map,
         blurb: 'Default basemap and tile caching for the Mission tab',
-        sections: [{ label: 'MAP', Body: MapGroup }],
+        sections: [{ label: 'Map', Body: MapGroup }],
     },
     {
         id: 'mission', label: 'Mission', icon: Route, staffOnly: true,
         blurb: 'Behaviour when a mission starts',
-        sections: [{ label: 'MISSION', Body: MissionGroup }],
+        sections: [{ label: 'Mission', Body: MissionGroup }],
     },
     {
         id: 'avoidance', label: 'Avoidance', icon: Radar,
         blurb: 'Obstacle sensors and how the drone avoids them',
-        sections: [{ label: 'SENSORS & AVOIDANCE', Body: SensorsGroup }],
+        sections: [{ label: 'Sensors and avoidance', Body: SensorsGroup }],
     },
     {
         id: 'alerts', label: 'Alerts', icon: Bell,
         blurb: 'Which events raise a notification',
-        sections: [{ label: 'ALERTS', Body: NotificationsGroup }],
+        sections: [{ label: 'Alerts', Body: NotificationsGroup }],
     },
     {
         id: 'data', label: 'Data & Logs', icon: Database, staffOnly: true,
         blurb: 'Telemetry recording and where logs are written',
-        sections: [{ label: 'DATA & LOGS', Body: DataGroup }],
+        sections: [{ label: 'Data and logs', Body: DataGroup }],
     },
     {
         id: 'shortcuts', label: 'Shortcuts', icon: Keyboard,
         blurb: 'Keyboard shortcuts available while flying',
-        sections: [{ label: 'SHORTCUTS', Body: ShortcutsGroup }],
+        sections: [{ label: 'Shortcuts', Body: ShortcutsGroup }],
     },
     {
         id: 'about', label: 'About', icon: Info,
         blurb: 'Version, updates, and the stack this build runs on',
-        sections: [{ label: 'ABOUT', Body: AboutGroup }],
+        sections: [{ label: 'About', Body: AboutGroup }],
     },
 ]
 
@@ -1994,26 +1989,27 @@ function SettingsNav({ categories, active, onSelect }: {
     categories: Category[]; active: string; onSelect: (id: string) => void
 }) {
     return (
-        // Column beside the content on a normal window; a horizontally
-        // scrollable row when the pane is too narrow for both (the desktop
-        // app can be resized well below a comfortable two-column width).
-        <nav className="flex shrink-0 gap-1 overflow-x-auto pb-2 md:sticky md:top-1 md:w-[172px] md:flex-col md:overflow-x-visible md:pb-0">
-            {categories.map(({ id, label, icon: Icon }) => (
-                <button
-                    key={id}
-                    onClick={() => onSelect(id)}
-                    aria-current={id === active ? 'page' : undefined}
-                    className={cn(
-                        'flex min-h-9 shrink-0 cursor-pointer items-center gap-2.5 whitespace-nowrap rounded-md border px-3 py-2 text-left text-[14px] transition-colors duration-[120ms]',
-                        id === active
-                            ? 'border-app-border bg-app-accent-soft font-semibold text-app-accent'
-                            : 'border-transparent text-app-text-muted hover:bg-app-surface-2 hover:text-app-text',
-                    )}
-                >
-                    <Icon size={16} className="shrink-0" />
-                    {label}
-                </button>
-            ))}
+        <nav aria-label="Settings sections" className="flex flex-col gap-0.5">
+            {categories.map(({ id, label, icon: Icon }) => {
+                const on = id === active
+                return (
+                    <button
+                        key={id}
+                        onClick={() => onSelect(id)}
+                        aria-current={on ? 'page' : undefined}
+                        className={cn(
+                            'relative flex min-h-[38px] cursor-pointer items-center gap-2.5 whitespace-nowrap rounded-md px-3 text-left text-[14px] transition-colors',
+                            on
+                                ? 'bg-app-accent-soft font-bold text-app-text'
+                                : 'font-semibold text-app-text-muted hover:bg-app-surface-2 hover:text-app-text',
+                        )}
+                    >
+                        <span aria-hidden className={cn('absolute inset-y-2 left-0 w-[3px] rounded-full bg-app-accent transition-opacity', on ? 'opacity-100' : 'opacity-0')} />
+                        <Icon size={16} className={cn('shrink-0', on && 'text-app-accent')} />
+                        {label}
+                    </button>
+                )
+            })}
         </nav>
     )
 }
@@ -2040,38 +2036,56 @@ export default function SettingsPage() {
 
     const select = (id: string) => { setActiveId(id); lsSet(TAB_KEY, id) }
 
+    const intro = (
+        <>
+            <h1 style={{ fontSize: 'var(--fs-xl)', lineHeight: '28px', fontWeight: 800, color: 'hsl(var(--app-text))', margin: 0 }}>Settings</h1>
+            <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: '4px 0 0', lineHeight: 1.45 }}>Saved on this device. Nothing here is sent to the drone.</p>
+        </>
+    )
+
     return (
-        <div style={{ height: '100%', overflowY: 'auto' }}>
-            <div className="px-1 md:px-8" style={{ maxWidth: 900, margin: '0 auto', paddingBottom: 48 }}>
+        <div className="flex h-full min-h-0">
+            {/* Section navigation on the left (setup-screen layout). */}
+            <aside className="flex w-[232px] shrink-0 flex-col gap-5 overflow-y-auto border-r border-app-border bg-app-surface px-2.5 py-5 max-md:hidden">
+                <div className="px-3">{intro}</div>
+                {mounted && <SettingsNav categories={categories} active={activeId} onSelect={select} />}
+            </aside>
 
-                <div style={{ padding: '16px 0' }}>
-                    <h1 style={{ fontSize: 'var(--fs-xl)', lineHeight: '28px', fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>Settings</h1>
-                    <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: '4px 0 0' }}>Saved on this device. Nothing here is sent to the drone.</p>
-                </div>
+            <div className="min-w-0 flex-1 overflow-y-auto">
+                <div style={{ maxWidth: 824, padding: '24px clamp(16px, 3vw, 32px) 56px' }}>
+                    {/* Phone width: the section list becomes a select. */}
+                    <div className="mb-6 flex flex-col gap-4 md:hidden">
+                        <div>{intro}</div>
+                        {mounted && (
+                            <label className="flex flex-col gap-1.5">
+                                <span style={{ fontSize: 13, fontWeight: 600, color: 'hsl(var(--app-text-muted))' }}>Section</span>
+                                <select value={activeId} onChange={e => select(e.target.value)}
+                                    className="h-11 w-full rounded-md border border-app-border-strong bg-app-surface px-3 text-[15px] font-semibold text-app-text">
+                                    {categories.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                                </select>
+                            </label>
+                        )}
+                    </div>
 
-                {mounted && (
-                    <div className="flex flex-col gap-6 md:flex-row">
-                        <SettingsNav categories={categories} active={activeId} onSelect={select} />
-
-                        <div style={{ flex: 1, minWidth: 0, maxWidth: 660 }}>
-                            <h2 style={{ fontSize: 'var(--fs-lg)', lineHeight: '24px', fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>{active.label}</h2>
-                            <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: '4px 0 0' }}>{active.blurb}</p>
+                    {mounted && (
+                        <div key={activeId} className="animate-in fade-in-0 slide-in-from-bottom-1 duration-200">
+                            <h2 style={{ fontSize: 'var(--fs-xl)', lineHeight: '28px', fontWeight: 800, color: 'hsl(var(--app-text))', margin: 0 }}>{active.label}</h2>
+                            <p style={{ fontSize: 14, color: 'hsl(var(--app-text-muted))', margin: '4px 0 0' }}>{active.blurb}</p>
 
                             {active.sections.map(({ label, Body }) => (
                                 <div key={label}>
                                     {/* A lone section whose name just repeats the category heading
-                                        would be pure noise - only show the divider when it adds
+                                        would be pure noise - only show the heading when it adds
                                         information (several sections, or a different name). */}
-                                    {(active.sections.length > 1 || label !== active.label.toUpperCase()) && (
+                                    {(active.sections.length > 1 || label.toLowerCase() !== active.label.toLowerCase()) && (
                                         <GroupLabel text={label} />
                                     )}
                                     <Body />
                                 </div>
                             ))}
                         </div>
-                    </div>
-                )}
-
+                    )}
+                </div>
             </div>
         </div>
     )

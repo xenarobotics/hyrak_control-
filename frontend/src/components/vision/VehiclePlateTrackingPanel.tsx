@@ -245,7 +245,7 @@ export function VehiclePlateTrackingPanel() {
                                                     <span style={{ ...NUM, fontSize: 12, color: MUTED }}
                                                         title="Plate width in pixels, and how many frames agreed">
                                                         {v.plate_px_w}px
-                                                        {v.plate_votes ? ` · ${v.plate_votes} votes` : ''}
+                                                        {v.plate_votes ? `, ${v.plate_votes} votes` : ''}
                                                     </span>
                                                 )}
                                             </div>
@@ -280,10 +280,10 @@ export function VehiclePlateTrackingPanel() {
                 <div style={{
                     ...SECONDARY, ...NUM, lineHeight: 1.6,
                 }}>
-                    {Object.entries(vehicleTypes).map(([k, n]) => `${n} ${k}`).join(' · ')}
+                    {Object.entries(vehicleTypes).map(([k, n]) => `${n} ${k}`).join(', ')}
                     {Object.keys(vehicleColors).length > 0 && (
                         <><br />{Object.entries(vehicleColors)
-                            .map(([k, n]) => `${n} ${k}`).join(' · ')}</>
+                            .map(([k, n]) => `${n} ${k}`).join(', ')}</>
                     )}
                 </div>
             )}
@@ -342,11 +342,11 @@ export function VehiclePlateTrackingPanel() {
                                             </div>
                                             <span style={{ ...NUM, fontSize: 13, color: MUTED, textTransform: 'capitalize' }}>
                                                 {[ev.vehicle_color, ev.vehicle_type].filter(Boolean).join(' ') || 'unknown'}
-                                                {ev.speed_est_kmh != null && ` · ~${Math.round(ev.speed_est_kmh)} km/h`}
+                                                {ev.speed_est_kmh != null && `, about ${Math.round(ev.speed_est_kmh)} km/h`}
                                             </span>
                                             <span style={{ ...NUM, fontSize: 12, color: MUTED }}>
                                                 {ev.first_seen ? new Date(ev.first_seen).toLocaleString() : ''}
-                                                {loc && ` · ${loc}`}
+                                                {loc && `, ${loc}`}
                                             </span>
                                         </div>
                                         {isFirstOfSession && (

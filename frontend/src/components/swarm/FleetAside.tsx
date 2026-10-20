@@ -167,7 +167,7 @@ export function FleetAside() {
                 style={{ borderColor: 'hsl(var(--app-border))' }}
             >
                 <span
-                    className="text-[12px] font-bold uppercase tracking-[0.04em]"
+                    className="text-[13px] font-semibold"
                     style={{ color: 'hsl(var(--app-text-muted))' }}
                 >
                     FLEET
@@ -226,7 +226,7 @@ export function FleetAside() {
                     style={{ borderColor: 'hsl(var(--app-border))' }}
                 >
                     <div className="flex items-center justify-between mb-0.5">
-                        <span className="text-[12px] font-bold uppercase tracking-[0.04em]" style={{ color: 'hsl(var(--app-text-muted))' }}>
+                        <span className="text-[13px] font-semibold" style={{ color: 'hsl(var(--app-text-muted))' }}>
                             REMOTE SWARM RELAY
                         </span>
                         <button onClick={() => setShowRelay(false)} aria-label="Close" title="Close" className="h-8 w-8 -mr-2 flex items-center justify-center rounded-md hover:bg-app-surface-2 outline-none focus-visible:ring-2 focus-visible:ring-app-accent">
@@ -403,7 +403,7 @@ export function FleetAside() {
                                 background: lastGroupResult.okCount === lastGroupResult.total ? 'var(--app-ok-soft)' : 'var(--app-warn-soft)',
                             }}
                         >
-                            {lastGroupResult.action.toUpperCase()}: {lastGroupResult.okCount}/{lastGroupResult.total} OK
+                            {lastGroupResult.action.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase())}: {lastGroupResult.okCount} of {lastGroupResult.total} done
                         </div>
                     )}
 
@@ -436,7 +436,7 @@ export function FleetAside() {
                     style={{ borderColor: 'hsl(var(--app-border))' }}
                 >
                     <div className="flex items-center justify-between mb-0.5">
-                        <span className="text-[12px] font-bold uppercase tracking-[0.04em]" style={{ color: 'hsl(var(--app-text-muted))' }}>
+                        <span className="text-[13px] font-semibold" style={{ color: 'hsl(var(--app-text-muted))' }}>
                             MANUAL CONNECT
                         </span>
                         <button onClick={() => setShowAdd(false)}>
@@ -629,7 +629,7 @@ export function FleetAside() {
                                     {([
                                         ['Mode',    tel?.flight_mode?.mode ?? '-'],
                                         ['Battery', tel?.battery
-                                            ? `${tel.battery.remaining_percent.toFixed(0)}% · ${tel.battery.voltage_v.toFixed(1)}v`
+                                            ? `${tel.battery.remaining_percent.toFixed(0)}%, ${tel.battery.voltage_v.toFixed(1)} V`
                                             : '-'],
                                         ['Alt',     tel?.position
                                             ? `${tel.position.relative_altitude_m.toFixed(1)} m AGL`
@@ -638,7 +638,7 @@ export function FleetAside() {
                                             ? `${tel.groundspeed_m_s.toFixed(1)} m/s`
                                             : '-'],
                                         ['GPS',     tel?.gps
-                                            ? `${tel.gps.fix_type === 3 ? '3D' : tel.gps.fix_type === 2 ? '2D' : 'No'} Fix · ${tel.gps.satellites_visible} sat`
+                                            ? `${tel.gps.fix_type === 3 ? '3D fix' : tel.gps.fix_type === 2 ? '2D fix' : 'No fix'}, ${tel.gps.satellites_visible} satellites`
                                             : '-'],
                                         ['Port',    `UDP ${portForDrone(drone.id)}`],
                                     ] as [string, string][]).map(([label, value]) => (
@@ -679,7 +679,7 @@ export function FleetAside() {
                 className="px-3 py-2 shrink-0 border-t text-[12px] text-center"
                 style={{ borderColor: 'hsl(var(--app-border))', color: 'hsl(var(--app-text-muted))' }}
             >
-                Click a drone to control · ☐ for group cmds
+                Click a drone to control it. Tick drones to command them as a group.
             </div>
         </aside>
     )

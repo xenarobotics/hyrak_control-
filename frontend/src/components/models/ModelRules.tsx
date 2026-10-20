@@ -1,7 +1,7 @@
 'use client'
 
 // The detail panel's Rules. Each rule is a card that reads at a glance,
-//   [pedestrian] -> [Alert]   50% · 1 s · again after 30 s
+//   [pedestrian] -> [Alert]   (50% sure) (for 1 s) (again after 30 s)
 // and opens to edit: what it looks for (class, how sure, for how long) and
 // what it does (four action tiles). Saved by itself a moment after each
 // change, like Settings. Up to 6 rules, at most one Follow switched on.
@@ -65,9 +65,9 @@ export function sentenceOf(r: ModelRule): string {
     return `When ${r.label} is seen above ${pct(r.min_score)}${when}, then ${then}.`
 }
 
-/** "50% · 1 s · again after 30 s" */
-function summaryOf(r: ModelRule): string {
-    return [pct(r.min_score), r.for_s > 0 ? `${r.for_s} s` : 'at once', `again after ${seconds(r.cooldown_s)}`].join(' · ')
+/** The numbers as small separate facts: "50% sure", "for 1 s", "again after 30 s". */
+function summaryOf(r: ModelRule): string[] {
+    return [`${pct(r.min_score)} sure`, r.for_s > 0 ? `for ${r.for_s} s` : 'at once', `again after ${seconds(r.cooldown_s)}`]
 }
 
 export function RulesSection({ model, labels, editable, onSaved }: {
@@ -245,7 +245,9 @@ function RuleSummary({ rule: r }: { rule: ModelRule }) {
                     <MessageCircleQuestion size={13} aria-label="Asks first" style={{ color: 'var(--cm-ink-2)', flexShrink: 0 }} />
                 )}
             </span>
-            <span className={s.ruleNumbers}>{summaryOf(r)}</span>
+            <span className={s.factRow}>
+                {summaryOf(r).map(f => <span key={f} className={s.fact}>{f}</span>)}
+            </span>
         </span>
     )
 }

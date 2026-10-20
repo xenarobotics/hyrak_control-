@@ -12,10 +12,12 @@
 import { useEffect } from 'react'
 import { ShieldAlert, Info } from 'lucide-react'
 import { useDroneStore } from '@/store/drone'
+import { toastStyle, toneColor, TOAST_IN } from '@/components/notifications/toast'
+import { cn } from '@/lib/utils'
 
 const INTERVENTION_MS = 12000
 const ACTION_LABELS: Record<string, string> = {
-    hold: 'HOLD', return: 'RETURN TO LAUNCH', land: 'LAND', pause_mission: 'PAUSE MISSION', set_mode: 'a mode change',
+    hold: 'Hold', return: 'Return to launch', land: 'Land', pause_mission: 'Pause mission', set_mode: 'a mode change',
 }
 
 export function TakeoverBanner() {
@@ -34,14 +36,14 @@ export function TakeoverBanner() {
     if (takeover) {
         return (
             <div role="alert" aria-live="assertive"
-                className="fixed top-3 left-1/2 -translate-x-1/2 z-[3100] flex max-w-[min(640px,calc(100vw-32px))] items-start gap-3 px-4 py-3 rounded-[10px] shadow-2xl"
-                style={{ background: 'rgba(127, 29, 29, .97)', border: '1px solid rgba(248, 113, 113, .7)', color: '#fee2e2' }}>
-                <ShieldAlert size={20} className="shrink-0 mt-0.5" aria-hidden />
+                className={cn('fixed top-[60px] left-1/2 -translate-x-1/2 z-[3100] flex w-max max-w-[min(640px,calc(100vw-32px))] items-start gap-3 px-4 py-3 rounded-[10px]', TOAST_IN)}
+                style={toastStyle('danger', 16)}>
+                <ShieldAlert size={20} className="shrink-0 mt-0.5" style={{ color: toneColor('danger') }} aria-hidden />
                 <span className="flex flex-col gap-1 min-w-0">
                     <span className="text-[14px] font-bold">
                         HYRAK operations has control ({takeover.by})
                     </span>
-                    <span className="text-[13px] leading-relaxed" style={{ color: '#fecaca' }}>
+                    <span className="text-[13px] leading-relaxed text-app-text-muted">
                         Your commands, including hold, return and land, are held until they hand
                         control back. Video and telemetry keep running.
                     </span>
@@ -52,9 +54,9 @@ export function TakeoverBanner() {
     if (!intervention) return null
     return (
         <div role="status"
-            className="fixed top-3 left-1/2 -translate-x-1/2 z-[3100] flex max-w-[min(560px,calc(100vw-32px))] items-center gap-2.5 px-4 py-2.5 rounded-[10px] text-[13px] shadow-2xl"
-            style={{ background: 'rgba(30, 41, 59, .97)', border: '1px solid rgba(148, 163, 184, .5)', color: '#e2e8f0' }}>
-            <Info size={18} className="shrink-0" aria-hidden />
+            className={cn('fixed top-[60px] left-1/2 -translate-x-1/2 z-[3100] flex w-max max-w-[min(560px,calc(100vw-32px))] items-center gap-2.5 px-4 py-2.5 rounded-[10px] text-[13px]', TOAST_IN)}
+            style={toastStyle('info')}>
+            <Info size={18} className="shrink-0" style={{ color: toneColor('info') }} aria-hidden />
             <span>
                 HYRAK operations ({intervention.by}) sent {ACTION_LABELS[intervention.action] ?? intervention.action} to your drone.
             </span>

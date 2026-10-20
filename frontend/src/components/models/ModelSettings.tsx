@@ -280,7 +280,7 @@ export function ModelSettingsSection({ model, labels, editable, onSaved, focus }
     return (
         <section className={s.section} aria-labelledby="cm-settings-title">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 18 }}>
-                <span className={s.label} id="cm-settings-title">Settings</span>
+                <span className={cn(s.label, s.sectionTitle)} id="cm-settings-title">Settings</span>
                 <span role="status" aria-live="polite">{status}</span>
             </div>
             {editable && <p className={s.help} style={{ marginTop: -4 }}>Changes save by themselves and apply to the running video within a second.</p>}

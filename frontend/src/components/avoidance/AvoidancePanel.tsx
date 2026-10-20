@@ -78,7 +78,7 @@ function Switch({ on, onClick, disabled, title, why, onTone = 'accent' }: Toggle
                     'disabled:border-dashed disabled:cursor-not-allowed', FOCUS,
                     on ? ON_BG[onTone] : 'bg-app-surface-2 border-app-border-strong')}>
                 <span className={cn('absolute left-0 top-1/2 -translate-y-1/2 w-[18px] h-[18px] rounded-full shadow-md transition-transform duration-[var(--dur)]',
-                    on ? 'translate-x-[21px] bg-white' : 'translate-x-[2px] bg-app-text-muted')} />
+                    on ? 'translate-x-[21px] bg-[hsl(var(--app-raised))]' : 'translate-x-[2px] bg-app-text-muted')} />
             </button>
         </WhyDisabled>
     )
@@ -87,7 +87,7 @@ function Switch({ on, onClick, disabled, title, why, onTone = 'accent' }: Toggle
 function Row({ label, value, tone, hint }: { label: string; value: string; tone?: Tone; hint?: string }) {
     return (
         <div className="flex items-center justify-between gap-3 min-h-8 text-[13px] px-2.5 py-1 rounded-md bg-app-surface-2" title={hint}>
-            <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted shrink-0">{label}</span>
+            <span className="text-[13px] font-semibold text-app-text-muted shrink-0">{label}</span>
             <span className={cn('font-semibold text-right min-w-0 break-words', tone ? TEXT[tone] : 'text-app-text')}>{value}</span>
         </div>
     )
@@ -182,7 +182,7 @@ export function AvoidancePanel() {
                 </div>
                 <div className={cn('flex items-center gap-1.5 h-7 px-2.5 rounded-full', SOFT[tone])}>
                     <span className={cn('w-2 h-2 rounded-full', DOT[tone])} />
-                    <span className={cn('text-[12px] font-bold', TEXT[tone])}>{state.toUpperCase()}</span>
+                    <span className={cn('text-[12px] font-bold', TEXT[tone])}>{state.charAt(0).toUpperCase() + state.slice(1)}</span>
                 </div>
             </div>
 
@@ -281,7 +281,7 @@ export function AvoidancePanel() {
                 <div className="flex flex-col gap-1.5">
                     {TUNING.map(t => (
                         <div key={t.key} className="flex items-center gap-2" title={t.hint}>
-                            <label htmlFor={`avoid-${t.key}`} className="text-[12px] font-bold uppercase tracking-[0.04em] w-24 shrink-0 text-app-text-muted">{t.label}</label>
+                            <label htmlFor={`avoid-${t.key}`} className="text-[13px] font-semibold w-24 shrink-0 text-app-text-muted">{t.label}</label>
                             <input id={`avoid-${t.key}`} type="number" step={t.step} min={t.min} max={t.max}
                                 value={draft[t.key] ?? p[t.key]}
                                 onChange={e => setDraft(d => ({ ...d, [t.key]: Number(e.target.value) }))}
@@ -310,7 +310,7 @@ export function AvoidancePanel() {
                 <div className="flex flex-col gap-0.5">
                     {events.slice(0, 3).map(e => (
                         <div key={e.id} className={cn('text-[13px] truncate', TEXT[STATE_TONE[e.state] ?? 'muted'])} title={e.reason}>
-                            {e.t ? new Date(e.t).toLocaleTimeString([], { hour12: false }) : ''} {e.action.toUpperCase()} - {e.reason}
+                            {e.t ? new Date(e.t).toLocaleTimeString([], { hour12: false }) : ''} {e.action.replace(/_/g, ' ')} - {e.reason}
                         </div>
                     ))}
                 </div>

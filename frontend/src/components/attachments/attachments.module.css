@@ -63,13 +63,14 @@
 .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--cm-ok); }
 .dot[data-ok='false'] { background: var(--cm-warn); }
 
-/* Command rail: 72 px wide, everything stacked, always on the dark rail */
+/* Command rail: 72 px wide, everything stacked; follows the theme like
+   the rail it sits on. */
 .rail {
   gap: 8px;
-  --cm-panel: #0b0e13; --cm-panel-2: rgba(255, 255, 255, 0.04); --cm-line: rgba(255, 255, 255, 0.10);
-  --cm-ink: var(--overlay-text); --cm-ink-2: var(--overlay-muted);
-  --cm-accent: #22d3ee; --cm-accent-line: rgba(34, 211, 238, 0.40);
-  --cm-warn: #fbbf24; --cm-warn-soft: rgba(251, 191, 36, 0.10); --cm-ok: #4ade80;
+  --cm-panel: hsl(var(--app-surface)); --cm-panel-2: hsl(var(--app-surface-2)); --cm-line: hsl(var(--app-border));
+  --cm-ink: hsl(var(--app-text)); --cm-ink-2: hsl(var(--app-text-muted));
+  --cm-accent: var(--app-accent); --cm-accent-line: color-mix(in srgb, var(--app-accent) 45%, transparent);
+  --cm-warn: var(--app-warn); --cm-warn-soft: var(--app-warn-soft); --cm-ok: var(--app-ok);
 }
 .rail .group { flex-direction: column; align-items: stretch; gap: 4px; }
 .rail .groupHead { flex: none; justify-content: center; gap: 4px; font-size: 12px; font-weight: 700; }

@@ -39,19 +39,19 @@ function Pill({ on, busy, label, detail, onClick, disabled, title, icon, menuOpe
     const tone = on ? 'border-app-ok bg-app-ok-soft text-app-ok' : 'border-app-accent bg-app-accent-soft text-app-accent'
     const off = disabled || busy
     return (
-        <div className={cn('h-9 flex rounded-md border', tone, off && !busy && 'border-dashed border-app-border-strong bg-app-surface-2 text-app-text-subtle')}>
+        <div className={cn('h-10 flex rounded-md border transition-colors duration-[140ms]', tone, off && !busy && 'border-dashed border-app-border-strong bg-app-surface-2 text-app-text-subtle')}>
             <WhyDisabled reason={off && !busy ? title : null} className="h-full">
                 <button onClick={onClick} disabled={off} title={off ? undefined : title}
-                    className={cn('h-full pl-2.5 pr-2.5 flex items-center gap-2 text-[12px] rounded-l-md hover:brightness-110', FOCUS)}>
+                    className={cn('h-full pl-3 pr-3 flex items-center gap-2 text-[13px] rounded-l-md transition-colors duration-[140ms] hover:bg-[color-mix(in_srgb,currentColor_8%,transparent)]', FOCUS)}>
                     {busy ? <Loader2 size={14} className="animate-spin" /> : icon}
                     <span className="flex flex-col items-start leading-[1.15]">
-                        <span className="font-extrabold tracking-[0.04em]">{label}</span>
-                        <span className="text-[12px] font-semibold text-app-text-muted max-w-[120px] truncate">{detail}</span>
+                        <span className="font-bold">{label}</span>
+                        <span className="text-[12px] font-semibold text-app-text-muted max-w-[130px] truncate">{detail}</span>
                     </span>
                 </button>
             </WhyDisabled>
             <button onClick={onMenu} aria-label="Choose source" aria-expanded={menuOpen} title="Choose source"
-                className={cn('w-8 flex items-center justify-center border-l border-current/30 rounded-r-md hover:brightness-110', FOCUS,
+                className={cn('w-8 flex items-center justify-center border-l border-current/30 rounded-r-md transition-colors duration-[140ms] hover:bg-[color-mix(in_srgb,currentColor_8%,transparent)]', FOCUS,
                     menuOpen && 'bg-app-surface-2')}>
                 <ChevronDown size={14} className={cn('transition-transform duration-[var(--dur)]', menuOpen && 'rotate-180')} />
             </button>
@@ -69,14 +69,14 @@ function Menu({ children, onClose }: { children: React.ReactNode; onClose: () =>
         return () => { window.removeEventListener('mousedown', down); window.removeEventListener('keydown', key) }
     }, [onClose])
     return (
-        <div ref={ref} className="absolute right-0 top-[calc(100%+6px)] z-[3000] w-[280px] max-h-[70vh] overflow-y-auto rounded-[10px] border border-app-border bg-app-raised p-1.5 text-[13px] text-app-text shadow-[var(--app-shadow)]">
+        <div ref={ref} className="absolute left-0 top-[calc(100%+6px)] md:top-auto md:bottom-[calc(100%+6px)] z-[3000] w-[280px] animate-in fade-in-0 slide-in-from-bottom-1 duration-[180ms] max-h-[70vh] overflow-y-auto rounded-[10px] border border-app-border bg-app-raised p-1.5 text-[13px] text-app-text shadow-[var(--app-shadow)]">
             {children}
         </div>
     )
 }
 
 const Section = ({ title, action }: { title: string; action?: React.ReactNode }) => (
-    <div className="flex items-center justify-between px-2 pt-2 pb-1 text-[12px] font-bold uppercase tracking-[0.06em] text-app-text-muted">
+    <div className="flex items-center justify-between px-2 pt-2 pb-1 text-[13px] font-semibold text-app-text-muted">
         <span>{title}</span>{action}
     </div>
 )
@@ -158,7 +158,7 @@ export function LinkCluster({ avoid }: { avoid: AvoidanceStatus | null }) {
             <div className="relative">
                 <Pill on={isConnected} busy={isConnecting || disconnecting}
                     icon={isConnected ? <PlugZap size={14} /> : <Plug size={14} />}
-                    label={isConnected ? (link === false ? 'TELEM LOST' : 'TELEMETRY') : 'CONNECT'}
+                    label={isConnected ? (link === false ? 'Telemetry lost' : 'Telemetry') : 'Connect'}
                     detail={radioLabel}
                     disabled={!isConnected && (sitlNeedsDesktop || viewOnly)}
                     title={isConnected ? 'Disconnect telemetry'
@@ -168,7 +168,7 @@ export function LinkCluster({ avoid }: { avoid: AvoidanceStatus | null }) {
                     menuOpen={menu === 'telem'} onMenu={() => setMenu(m => (m === 'telem' ? null : 'telem'))} />
                 {menu === 'telem' && (
                     <Menu onClose={() => setMenu(null)}>
-                        <Section title="TELEMETRY LINK" action={
+                        <Section title="Telemetry link" action={
                             desktop ? <Mini onClick={() => { void refreshNativeRadios() }} title="Re-scan serial ports"><RefreshCw size={14} /></Mini>
                                 : browserSerialSupported ? <Mini onClick={() => { void addRadio() }} title="Add a USB radio plugged into this device"><Plus size={14} /></Mini>
                                     : <Mini onClick={() => { void refreshRadios() }} title="Re-scan radios"><RefreshCw size={14} /></Mini>} />
@@ -185,7 +185,7 @@ export function LinkCluster({ avoid }: { avoid: AvoidanceStatus | null }) {
             <div className="relative">
                 <Pill on={isStreaming} busy={isLoading}
                     icon={isStreaming ? <Video size={14} /> : <VideoOff size={14} />}
-                    label={isStreaming ? 'VIDEO' : 'START VIDEO'}
+                    label={isStreaming ? 'Video on' : 'Start video'}
                     detail={camLabel ?? srcLabel}
                     disabled={camMissing}
                     title={camMissing ? 'Pick a camera in the menu first' : isStreaming ? 'Stop the video' : 'Start the video'}
@@ -196,7 +196,7 @@ export function LinkCluster({ avoid }: { avoid: AvoidanceStatus | null }) {
                         {isStreaming && <p className="px-2 pt-1 text-[13px] text-app-warn">Changing source or camera restarts the stream.</p>}
                         {sourceGroupsFor(isCustomer).map(group => (
                             <div key={group}>
-                                <Section title={group.toUpperCase()} />
+                                <Section title={group} />
                                 {catalogue.filter(v => v.group === group).map(v => (
                                     <Item key={v.value} active={v.value === src}
                                         label={v.label + (v.desktopOnly && !desktopApp ? '  (desktop)' : '')}
@@ -206,7 +206,7 @@ export function LinkCluster({ avoid }: { avoid: AvoidanceStatus | null }) {
                         ))}
                         {needsCam && (
                             <>
-                                <Section title="CAMERA ON THIS MACHINE" action={
+                                <Section title="Camera on this machine" action={
                                     <Mini onClick={scanCameras} title="Re-scan cameras"><RefreshCw size={14} /></Mini>} />
                                 {cameras.length === 0 && <p className="px-2 pb-1 text-app-text-muted">No cameras found. Re-scan, or allow camera access.</p>}
                                 {cameras.map((c, i) => (
@@ -217,7 +217,7 @@ export function LinkCluster({ avoid }: { avoid: AvoidanceStatus | null }) {
                         )}
                         {avoid?.enabled && !viewOnly && (
                             <>
-                                <Section title="AVOIDANCE SENSES WITH" action={sensorBusy ? <Loader2 size={11} className="animate-spin" /> : undefined} />
+                                <Section title="Avoidance senses with" action={sensorBusy ? <Loader2 size={11} className="animate-spin" /> : undefined} />
                                 <Item active={sense === 'range'} label="Depth / range sensor when present"
                                     sub="the aircraft's own range data wins (default)" onClick={() => { void setAvoidSensor('range') }} />
                                 <Item active={sense === 'camera'} label="This video stream (camera)"
@@ -225,7 +225,7 @@ export function LinkCluster({ avoid }: { avoid: AvoidanceStatus | null }) {
                                 <Item active={sense === 'bench'} label="Camera bench test (fixed webcam)"
                                     sub="model metres x the person-ruler scale, camera level ~1 m up - hold things 0.5-3 m away. Not for flight."
                                     onClick={() => { void setAvoidSensor('bench') }} />
-                                <Section title="CAMERA DISTANCE CALIBRATION" />
+                                <Section title="Camera distance calibration" />
                                 <PersonCalibration droneId={avoid.drone_id} />
                             </>
                         )}

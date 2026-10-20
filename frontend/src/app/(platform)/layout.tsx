@@ -134,7 +134,7 @@ function ConsoleLink({ normal }: { normal: boolean }) {
 
 // Rail items (Dev mode). Muted text is the token that passes 4.5:1 on the
 // sidebar in every theme; the active item is accent text on the accent wash.
-const RAIL_ITEM = 'flex flex-col items-center justify-center gap-1 w-12 min-h-12 py-1.5'
+const RAIL_ITEM = 'flex flex-col items-center justify-center gap-1 w-16 min-h-14 py-1.5'
 const RAIL_IDLE = 'text-app-text-muted hover:text-app-text hover:bg-app-surface-2'
 const RAIL_ACTIVE = 'bg-app-accent-soft text-app-accent font-bold'
 
@@ -143,7 +143,7 @@ const RAIL_ACTIVE = 'bg-app-accent-soft text-app-accent font-bold'
 function RailThemeButton() {
     const { theme, setTheme } = useTheme()
     const mounted = useHydrated()
-    if (!mounted) return <div className="w-12 h-12" />
+    if (!mounted) return <div className="w-16 h-14" />
     const light = theme === 'light'
     return (
         <button type="button" onClick={() => setTheme(light ? 'dark' : 'light')}
@@ -197,7 +197,7 @@ function PlatformNav() {
                 className={cn(
                     'order-last flex shrink-0 flex-row items-stretch justify-around gap-0.5 border-t px-1 py-1',
                     'md:order-none md:flex-col md:items-center md:justify-start md:border-t-0 md:border-r md:px-0 md:py-4',
-                    normal ? 'hy-simple md:w-24 md:gap-2' : 'md:w-16 md:gap-1',
+                    normal ? 'hy-simple md:w-24 md:gap-2' : 'md:w-[72px] md:gap-1',
                 )}
                 style={normal ? { borderColor: 'var(--s-line)', background: 'var(--s-panel)' }
                     : { background: 'hsl(var(--app-sidebar))', borderColor: 'hsl(var(--app-border))' }}
@@ -228,12 +228,12 @@ function PlatformNav() {
                             aria-current={active ? 'page' : undefined}
                             className={cn(
                                 'flex min-w-0 flex-1 flex-col items-center rounded-[10px] transition-colors duration-[120ms] md:flex-none',
-                                normal ? 'gap-1 py-1.5 md:w-20 md:gap-1.5 md:py-3' : cn(RAIL_ITEM, 'w-auto md:w-12', active ? RAIL_ACTIVE : RAIL_IDLE),
+                                normal ? 'gap-1 py-1.5 md:w-20 md:gap-1.5 md:py-3' : cn(RAIL_ITEM, 'w-auto md:w-16', active ? RAIL_ACTIVE : RAIL_IDLE),
                             )}
                             style={normal ? (active ? { background: 'var(--s-blue)', color: '#fff' } : { color: 'var(--s-ink)' }) : undefined}
                         >
                             <Icon size={normal ? 26 : 20} className="shrink-0" />
-                            <span className={cn('max-w-full truncate', normal ? 'text-[14px] font-bold md:text-[16px]' : 'text-[12px] font-semibold')}>{label}</span>
+                            <span className={cn('whitespace-nowrap leading-tight', normal ? 'text-[14px] font-bold md:text-[16px]' : 'text-[12px] font-semibold')}>{label}</span>
                         </Link>
                     )
                 })}
@@ -249,7 +249,7 @@ function PlatformNav() {
                 <div
                     style={{
                         position: 'fixed', inset: 0, zIndex: 100,
-                        background: 'rgba(0,0,0,0.6)',
+                        background: 'rgba(10,14,20,0.45)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                     }}
                     onClick={handleStay}
@@ -322,12 +322,16 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
     const { isCustomer } = useAccess()
     const pathname = usePathname()
 
-    // Fly and Command carry their own status and flight controls - the global
-    // bar would only duplicate them (and cover their OSD), so it's shown
-    // everywhere else instead.
-    const ownBar = ['/fly', '/command'].some(p => pathname === p || pathname.startsWith(p + '/'))
+    // ONE status bar for every page (docs/DESIGN_SYSTEM.md section 10). Fly
+    // and Command no longer carry their own status strip or Kill, so the bar
+    // is always on there whatever the Settings toggle says; elsewhere the
+    // toggle still decides. Normal mode's Command (SimpleCommand) has its own
+    // plain controls, so the bar stays off there.
+    const flightPage = ['/fly', '/command'].some(p => pathname === p || pathname.startsWith(p + '/'))
     const [uiMode] = useUiMode()
-    const showStatusBar = mounted && statusBarOn && !ownBar && uiMode !== 'normal'
+    const normalCommand = uiMode === 'normal' && (pathname === '/command' || pathname.startsWith('/command/'))
+    const showStatusBar = mounted && !normalCommand
+        && (flightPage || (statusBarOn && uiMode !== 'normal'))
 
     if (gate !== 'ok') {
         return (
@@ -353,7 +357,7 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
                         the sidebar/logo area and persists across tab navigation
                         since this layout mounts once for the whole route group. */}
                     <div className="flex min-h-0 min-w-0 flex-col flex-1 overflow-hidden">
-                        {showStatusBar && <StatusBar />}
+                        {showStatusBar && <StatusBar tools={!flightPage} />}
                         <ZoneBanner />
                         <CommandRefusalBanner />
                         <TakeoverBanner />

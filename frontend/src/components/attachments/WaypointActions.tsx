@@ -14,6 +14,18 @@ import {
 } from '@/lib/attachments'
 import a from './attachments.module.css'
 
+// The waypoint editor now sits in the docked plan panel (app surface), not
+// over the map: point the overlay set the styles read at the app tokens.
+const PANEL_TOKENS = {
+    '--overlay-text': 'hsl(var(--app-text))',
+    '--overlay-muted': 'hsl(var(--app-text-muted))',
+    '--overlay-border': 'hsl(var(--app-border))',
+    '--overlay-accent': 'var(--app-accent)',
+    '--overlay-warn': 'var(--app-warn)',
+} as React.CSSProperties
+/** Sentence-case section label, like the editor's other labels. */
+const HEAD_STYLE: React.CSSProperties = { fontSize: 13, fontWeight: 600, textTransform: 'none', letterSpacing: 0 }
+
 /** Can this waypoint action hurt someone? Unknown attachments count as yes. */
 export function waypointActionHazard(wa: WaypointAction, list: Attachment[]): boolean {
     const att = list.find(x => x.id === wa.attachment_id)
@@ -51,9 +63,9 @@ export function WaypointActions({ actions, onChange }: {
     }
 
     return (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2" style={PANEL_TOKENS}>
             <div className="flex items-center justify-between">
-                <span className={a.wpHead}>At this waypoint</span>
+                <span className={a.wpHead} style={HEAD_STYLE}>At this waypoint</span>
                 {!picking && !full && list.length > 0 && (
                     <button type="button" onClick={() => setPicking(true)} className={a.wpAdd}>
                         <Plus size={13} aria-hidden /> Add

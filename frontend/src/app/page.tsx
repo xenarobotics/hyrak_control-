@@ -124,7 +124,7 @@ export default function LandingPage() {
             className="min-h-screen flex flex-col items-center justify-center px-4 py-12 sm:px-6 bg-app-bg text-app-text"
         >
             <div className="flex flex-col items-center gap-2 mb-12">
-                <h1 className="text-[28px] leading-[34px] font-extrabold tracking-[0.06em]">HYRAK</h1>
+                <h1 className="text-[28px] leading-[34px] font-extrabold">HYRAK</h1>
                 <span className="text-[14px] text-app-text-muted">
                     Cloud-native drone intelligence
                 </span>
@@ -134,7 +134,7 @@ export default function LandingPage() {
                 {/* Browser */}
                 <button
                     onClick={() => router.push('/fly')}
-                    className="group flex flex-col items-start gap-3 rounded-[10px] border border-app-border bg-app-surface p-6 text-left shadow-[var(--app-shadow)] transition-colors hover:border-app-accent h-full"
+                    className="group flex flex-col items-start gap-3 rounded-[10px] border border-app-border bg-app-surface p-6 text-left transition-colors hover:border-app-accent hover:bg-app-surface-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-accent h-full"
                 >
                     <div className="flex items-center justify-center w-10 h-10 rounded-[10px] bg-app-accent-soft text-app-accent">
                         <Globe size={20} />

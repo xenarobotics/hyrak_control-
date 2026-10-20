@@ -11,7 +11,7 @@ import { getVideoFit, setVideoFit, type VideoFit } from '@/lib/videoSettings'
 import { ModulePerformance } from '@/components/vision/ModulePerformance'
 import { RecordingControls } from '@/components/video/RecordingControls'
 import {
-    VideoOff, Loader, Square,
+    VideoOff, Loader, Square, Play, Camera, ChevronRight,
     ChevronDown, ChevronUp, Maximize, Minimize, Expand, Shrink, Ratio, Crop
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -32,8 +32,8 @@ import { AddModelPanel, type AddSource } from '@/components/models/AddModelPanel
 import { ModelDetailPanel } from '@/components/models/ModelDetailPanel'
 import { CustomResultsPanel } from '@/components/models/CustomResultsPanel'
 import { MapDetectionsControls } from '@/components/mapdetect/MapDetectionsUi'
-import { useModelAccess, useModelLibrary, useModeName, type LibraryEntry } from '@/components/models/useModelLibrary'
-import { css, Callout, useCmClass } from '@/components/models/ui'
+import { useModelAccess, useModelLibrary, useModeName } from '@/components/models/useModelLibrary'
+import { css, Callout, SlideOver, useCmClass } from '@/components/models/ui'
 import { customMode, isCustomMode, type CustomModel } from '@/lib/models'
 
 function ResultsPanel() {
@@ -168,6 +168,11 @@ export default function ModulesPage() {
     const access = useModelAccess()
     const modeName = useModeName(mode)
     const [runHelp, setRunHelp] = useState<RunHelp>(null)
+    // The model the live view runs: picked in the list, else the running
+    // one, else the first ready model in list order (ours lead).
+    const [picked, setPicked] = useState<string | null>(null)
+    // Phones: the full list opens as a sheet.
+    const [allOpen, setAllOpen] = useState(false)
     const [addOpen, setAddOpen] = useState(false)
     const [addSource, setAddSource] = useState<AddSource>('recommended')
     const openAdd = useCallback((src: AddSource) => { setAddSource(src); setAddOpen(true) }, [])
@@ -207,9 +212,11 @@ export default function ModulesPage() {
             return
         }
         setRunHelp(null)
+        // What runs is what the list shows as picked.
+        const k = lib.entries.find(e => e.mode === m)?.key
+        if (k) setPicked(k)
         ai.start(m)
-    }, [needsCamera, cameras.length, selectedCameraId, ai])
-    const onRun = useCallback((e: LibraryEntry) => runMode(e.mode), [runMode])
+    }, [needsCamera, cameras.length, selectedCameraId, ai, lib.entries])
     const onStop = useCallback(() => {
         stopStream()
         sendMode('manual-control')
@@ -219,95 +226,113 @@ export default function ModulesPage() {
     const starting = isLoading && mode !== 'manual-control' ? mode : null
 
     const detailEntry = detail ? lib.entries.find(e => e.model?.id === detail.id) ?? null : null
+    const ordered = [...lib.entries.filter(e => e.group === 'ours'), ...lib.entries.filter(e => e.group === 'hyrak')]
+    const selected = lib.entries.find(e => e.key === picked)
+        ?? lib.entries.find(e => e.mode === running)
+        ?? ordered.find(e => e.status === 'ready')
+        ?? null
+    const live = isStreaming || isLoading
+    const canRunSelected = access.canRun && !!selected && selected.status === 'ready'
+    // Run shows when it would change something: nothing runs, or another model is picked.
+    const showRun = canRunSelected && selected!.mode !== running
+    const SelIcon = selected?.icon ?? VideoOff
+    const libraryProps = {
+        entries: lib.entries,
+        loading: lib.loading,
+        loadError: lib.loadError,
+        onRetryLoad: () => void lib.reload(),
+        runningMode: running,
+        startingMode: starting,
+        canRun: access.canRun,
+        canManage: access.canManage,
+        premiumEnabled: lib.premium.enabled,
+        selectedKey: selected?.key ?? null,
+        onStop,
+        highlightKey: highlight,
+    }
 
     return (
         <div className={cn(root, css.page, normal && 'hy-simple')}>
             <aside className={css.pageAside} aria-label="Model library">
                 <ModelLibrary
-                    entries={lib.entries}
-                    loading={lib.loading}
-                    loadError={lib.loadError}
-                    onRetryLoad={() => void lib.reload()}
-                    runningMode={running}
-                    startingMode={starting}
-                    canRun={access.canRun}
-                    canManage={access.canManage}
-                    premiumEnabled={lib.premium.enabled}
-                    onRun={onRun}
-                    onStop={onStop}
+                    {...libraryProps}
+                    onSelect={e => setPicked(e.key)}
                     onAdd={() => openAdd('recommended')}
                     onBrowse={() => openAdd('all')}
                     onOpen={e => e.model && setDetail({ id: e.model.id, open: true })}
-                    highlightKey={highlight}
                 />
             </aside>
 
-            <div className={css.pageMain}>
-                <div className={cn(css.panel, css.videoBar)}>
-                    <span className={css.label}>Video</span>
-                    {serverSourced ? (
-                        <span className={css.muted} style={{ flex: 1, minWidth: 0 }}>
-                            {specFor(videoSource)?.label ?? videoSource} - change it in <a href="/settings" className={css.link}>Settings</a>
-                        </span>
-                    ) : (
-                        <select
-                            className={css.input}
-                            style={{ flex: 1, minWidth: 0, maxWidth: 320 }}
-                            aria-label="Camera"
-                            value={selectedCameraId}
-                            onChange={e => { setSelectedCameraId(e.target.value); setRunHelp(null) }}
-                            disabled={isStreaming}
-                        >
-                            {cameras.length === 0 && <option value="">{camerasScanned ? 'No cameras found' : 'Looking for cameras...'}</option>}
-                            {cameras.map(c => (
-                                <option key={c.deviceId} value={c.deviceId}>{c.label}</option>
-                            ))}
-                        </select>
-                    )}
-                    <span style={{ flex: serverSourced ? 0 : 1 }} />
-                    {isLoading && (
-                        <span className={css.muted} role="status" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                            <Loader size={14} className="animate-spin motion-reduce:animate-none" aria-hidden />
-                            {startPhase === 'model' ? `Loading ${modeName}` : 'Starting video'}
-                        </span>
-                    )}
-                    {(isStreaming || isLoading) && (
-                        <ViewOnlyFence note={false}>
-                            <button type="button" className={css.btn} onClick={onStop}>
-                                <Square size={13} aria-hidden /> Stop {mode !== 'manual-control' ? modeName : 'video'}
+            <section className={cn(css.panel, css.pageMain)} aria-labelledby="cm-live-title" data-perf-open={uiMode === 'dev' && statsOpen}>
+                <div className={css.liveHead}>
+                    <h2 id="cm-live-title" className={css.panelTitle}>Live view</h2>
+                    <div className={css.camera}>
+                        <Camera size={15} aria-hidden style={{ color: 'var(--cm-ink-2)', flexShrink: 0 }} />
+                        {serverSourced ? (
+                            <span className={css.muted} style={{ minWidth: 0 }}>
+                                {specFor(videoSource)?.label ?? videoSource}, change it in <a href="/settings" className={css.link}>Settings</a>
+                            </span>
+                        ) : (
+                            <select
+                                className={css.cameraSelect}
+                                aria-label="Camera"
+                                value={selectedCameraId}
+                                onChange={e => { setSelectedCameraId(e.target.value); setRunHelp(null) }}
+                                disabled={isStreaming}
+                            >
+                                {cameras.length === 0 && <option value="">{camerasScanned ? 'No cameras found' : 'Looking for cameras...'}</option>}
+                                {cameras.map(c => (
+                                    <option key={c.deviceId} value={c.deviceId}>{c.label}</option>
+                                ))}
+                            </select>
+                        )}
+                    </div>
+                    <div className={css.liveActions}>
+                        {isLoading && (
+                            <span className={css.muted} role="status" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                <Loader size={14} className="animate-spin motion-reduce:animate-none" aria-hidden />
+                                {startPhase === 'model' ? `Loading ${modeName}` : 'Starting video'}
+                            </span>
+                        )}
+                        {live && (
+                            <ViewOnlyFence note={false}>
+                                <button type="button" className={css.btn} onClick={onStop}>
+                                    <Square size={13} aria-hidden /> Stop {mode !== 'manual-control' ? modeName : 'video'}
+                                </button>
+                            </ViewOnlyFence>
+                        )}
+                        {showRun && live && (
+                            <button type="button" className={cn(css.btn, css.primary)} onClick={() => runMode(selected!.mode)}
+                                aria-label={`Run ${selected!.name}`}>
+                                <Play size={13} aria-hidden /> Run {selected!.name}
                             </button>
-                        </ViewOnlyFence>
-                    )}
+                        )}
+                    </div>
                 </div>
 
-                {runHelp && (
-                    <Callout tone="warn" title={runHelp.title}
-                        actions={<>
-                            {runHelp.settings && <a href="/settings" className={css.btn}>Open video settings</a>}
-                            <button type="button" className={css.btn} onClick={() => setRunHelp(null)}>Dismiss</button>
-                        </>}>
-                        {runHelp.body}
-                    </Callout>
-                )}
-
-                {/* What the connect is blocked on, so the wait is explained
-                    instead of blamed on the model that was picked. */}
-                {startDetail && !isStreaming && (
-                    <Callout tone="warn">{startDetail}</Callout>
+                {(runHelp || (startDetail && !isStreaming)) && (
+                    <div className={css.liveNotes}>
+                        {runHelp && (
+                            <Callout tone="warn" title={runHelp.title}
+                                actions={<>
+                                    {runHelp.settings && <a href="/settings" className={css.btn}>Open video settings</a>}
+                                    <button type="button" className={css.btn} onClick={() => setRunHelp(null)}>Dismiss</button>
+                                </>}>
+                                {runHelp.body}
+                            </Callout>
+                        )}
+                        {/* What the connect is blocked on, so the wait is explained
+                            instead of blamed on the model that was picked. */}
+                        {startDetail && !isStreaming && (
+                            <Callout tone="warn">{startDetail}</Callout>
+                        )}
+                    </div>
                 )}
 
                 <div
                     ref={containerRef}
-                    className={cn(
-                        'relative overflow-hidden',
-                        maximized && !isFullscreen ? 'fixed inset-4 z-50' : ''
-                    )}
-                    style={{
-                        flex: maximized && !isFullscreen ? undefined : 1,
-                        borderRadius: 10,
-                        background: '#000', border: '1px solid hsl(var(--app-border))',
-                        minHeight: 0,
-                    }}
+                    className={cn(css.stage, maximized && !isFullscreen && 'fixed inset-4 z-50')}
+                    data-live={isStreaming}
                 >
                     {/* Main video - clean, no OSD */}
                     {wcUrl ? (
@@ -338,19 +363,41 @@ export default function ModulesPage() {
                         cloud growing over the camera pane, camera in PiP. */}
                     {isStreaming && mode === '3d-reconstruction' && <Recon3DView />}
 
-                    {!isStreaming && !isLoading && (
+                    {/* No video: the theme's inset with the picked model,
+                        one line and one action. */}
+                    {!isStreaming && (
                         <div className={css.idle}>
-                            <VideoOff size={36} strokeWidth={1.5} aria-hidden />
-                            {lastError ? (
+                            {isLoading ? (
                                 <>
-                                    <strong>The video did not start</strong>
-                                    <p className={css.idleErr}>{lastError}</p>
-                                    <p>Check the video source above, then press Run again.</p>
+                                    <Loader size={26} className="animate-spin motion-reduce:animate-none" style={{ color: 'var(--cm-accent)' }} aria-hidden />
+                                    <p>{startPhase === 'model' ? `Loading ${modeName}` : 'Starting the video'}</p>
                                 </>
                             ) : (
                                 <>
-                                    <strong>No video yet</strong>
-                                    <p>Press Run on a model to start it.</p>
+                                    <span className={css.idleIcon} aria-hidden
+                                        style={selected ? { color: selected.color, background: `${selected.color}1f` } : undefined}>
+                                        <SelIcon size={22} />
+                                    </span>
+                                    {lastError ? (
+                                        <>
+                                            <strong>The video did not start</strong>
+                                            <p className={css.idleErr}>{lastError}</p>
+                                        </>
+                                    ) : (
+                                        <p>
+                                            {canRunSelected
+                                                ? <>See what <strong>{selected!.name}</strong> finds on the live video.</>
+                                                : access.canRun
+                                                    ? 'Pick a ready model in the list to run it on the live video.'
+                                                    : 'The live video shows here when someone in your workspace runs a model.'}
+                                        </p>
+                                    )}
+                                    {canRunSelected && (
+                                        <button type="button" className={cn(css.btn, css.primary)} onClick={() => runMode(selected!.mode)}
+                                            aria-label={`Run ${selected!.name}`}>
+                                            <Play size={13} aria-hidden /> {lastError ? 'Try again' : `Run ${selected!.name}`}
+                                        </button>
+                                    )}
                                 </>
                             )}
                         </div>
@@ -367,7 +414,7 @@ export default function ModulesPage() {
                     {/* PiP - raw local feed (redundant when the main view IS the raw feed) */}
                     {isStreaming && localStream && !overlayActive && (
                         <div style={{
-                            position: 'absolute', bottom: 44, left: 8,
+                            position: 'absolute', bottom: 48, left: 8,
                             width: 100, borderRadius: 6, overflow: 'hidden',
                             border: '1px solid var(--overlay-border)', aspectRatio: '16/9',
                         }}>
@@ -376,59 +423,58 @@ export default function ModulesPage() {
                                 autoPlay playsInline muted
                                 style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                             />
-                            <span className={css.vidTag}>RAW</span>
+                            <span className={css.vidTag}>Raw</span>
                         </div>
                     )}
 
-                    {/* Bottom bar */}
-                    {/* Over the video: fixed dark scrim and light text in
-                        every theme (theme ink would vanish on black). */}
-                    <div className={css.vidBar}>
-                        {previewOnSrc
-                            ? <span />
-                            : <RecordingControls videoRef={remoteVideoRef} isStreaming={isStreaming} />}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <button type="button" className={css.vidBtn}
-                                title={videoFit === 'fit'
-                                    ? 'Showing the whole frame (letterboxed). Click to fill the panel.'
-                                    : 'Filling the panel - a 4:3 or 16:10 camera is cropped. Click to show the whole frame.'}
-                                onClick={() => {
-                                    const next: VideoFit = videoFit === 'fit' ? 'fill' : 'fit'
-                                    setVideoFitState(next); setVideoFit(next)
-                                }}>
-                                {videoFit === 'fit' ? <><Ratio size={14} aria-hidden /> Fit</> : <><Crop size={14} aria-hidden /> Fill</>}
-                            </button>
-                            <button type="button" className={css.vidBtn}
-                                aria-label={maximized ? 'Restore video size' : 'Maximize video'}
-                                title={maximized ? 'Restore video size' : 'Maximize video'}
-                                onClick={() => setMaximized(m => !m)}>
-                                {maximized ? <Minimize size={15} aria-hidden /> : <Maximize size={15} aria-hidden />}
-                            </button>
-                            <button type="button" className={css.vidBtn}
-                                aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-                                title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-                                onClick={handleFullscreen}>
-                                {isFullscreen ? <Shrink size={15} aria-hidden /> : <Expand size={15} aria-hidden />}
-                            </button>
+                    {/* Video tools: only with a picture to act on. */}
+                    {live && (
+                        <div className={css.vidBar}>
+                            {previewOnSrc
+                                ? <span />
+                                : <RecordingControls videoRef={remoteVideoRef} isStreaming={isStreaming} />}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <button type="button" className={css.vidBtn}
+                                    title={videoFit === 'fit'
+                                        ? 'Showing the whole frame (letterboxed). Click to fill the panel.'
+                                        : 'Filling the panel - a 4:3 or 16:10 camera is cropped. Click to show the whole frame.'}
+                                    onClick={() => {
+                                        const next: VideoFit = videoFit === 'fit' ? 'fill' : 'fit'
+                                        setVideoFitState(next); setVideoFit(next)
+                                    }}>
+                                    {videoFit === 'fit' ? <><Ratio size={14} aria-hidden /> Fit</> : <><Crop size={14} aria-hidden /> Fill</>}
+                                </button>
+                                <button type="button" className={css.vidBtn}
+                                    aria-label={maximized ? 'Restore video size' : 'Maximize video'}
+                                    title={maximized ? 'Restore video size' : 'Maximize video'}
+                                    onClick={() => setMaximized(m => !m)}>
+                                    {maximized ? <Minimize size={15} aria-hidden /> : <Maximize size={15} aria-hidden />}
+                                </button>
+                                <button type="button" className={css.vidBtn}
+                                    aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+                                    title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+                                    onClick={handleFullscreen}>
+                                    {isFullscreen ? <Shrink size={15} aria-hidden /> : <Expand size={15} aria-hidden />}
+                                </button>
+                            </div>
                         </div>
-                    </div>
+                    )}
                 </div>
 
                 {/* Performance: a Dev-mode diagnostic. */}
                 {uiMode === 'dev' && (
-                    <div className={css.panel} style={{ flexShrink: 0, overflow: 'hidden' }}>
+                    <div className={css.perf}>
                         <button
                             type="button"
                             aria-expanded={statsOpen}
                             onClick={() => setStatsOpen(o => !o)}
                             className={css.perfToggle}
-                            style={{ borderBottom: statsOpen ? '1px solid var(--cm-line)' : 'none' }}
                         >
-                            <span className={css.label}>Performance</span>
+                            <span>Performance</span>
                             {statsOpen ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
                         </button>
                         {statsOpen && (
-                            <div style={{ padding: 12 }}>
+                            <div style={{ padding: '4px 12px 12px' }}>
                                 {/* Every row here used to come from pc.getStats(), which
                                     reports NOTHING in overlay mode - no video crosses the
                                     PeerConnection, so FPS/bitrate/RTT/jitter/loss all sat
@@ -440,7 +486,28 @@ export default function ModulesPage() {
                         )}
                     </div>
                 )}
-            </div>
+            </section>
+
+            {/* Phones: the models as one row of chips under the video, the
+                full list in a sheet. */}
+            <nav className={css.quickModels} aria-label="Models">
+                <div className={css.quickScroll} role="group" aria-label="Pick a model">
+                    {ordered.map(e => {
+                        const I = e.icon
+                        return (
+                            <button key={e.key} type="button" className={css.quickChip}
+                                aria-pressed={selected?.key === e.key} onClick={() => setPicked(e.key)}>
+                                <I size={14} aria-hidden style={{ color: e.color }} className={css.quickIcon} />
+                                {e.name}
+                                {e.mode === running && <span className={css.dot} aria-label="running" />}
+                            </button>
+                        )
+                    })}
+                </div>
+                <button type="button" className={cn(css.btn, css.ghost)} style={{ alignSelf: 'flex-start' }} onClick={() => setAllOpen(true)}>
+                    All models <ChevronRight size={14} aria-hidden />
+                </button>
+            </nav>
 
             {mode !== 'manual-control' && (
                 <section className={cn(css.panel, css.pageResults)} data-active="true" aria-label="Results">
@@ -458,6 +525,17 @@ export default function ModulesPage() {
                     </div>
                 </section>
             )}
+
+            <SlideOver open={allOpen} onOpenChange={setAllOpen} title="Models">
+                <ModelLibrary
+                    {...libraryProps}
+                    bare
+                    onSelect={e => { setPicked(e.key); setAllOpen(false) }}
+                    onAdd={() => { setAllOpen(false); openAdd('recommended') }}
+                    onBrowse={() => { setAllOpen(false); openAdd('all') }}
+                    onOpen={e => { if (e.model) { setAllOpen(false); setDetail({ id: e.model.id, open: true }) } }}
+                />
+            </SlideOver>
 
             <AddModelPanel
                 open={addOpen}

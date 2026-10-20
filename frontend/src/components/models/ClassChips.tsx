@@ -3,7 +3,8 @@
 // Class names as chips. Click a chip to rename it in place: the chip and
 // its input share one box, so nothing around it moves. Enter saves, Escape
 // cancels. Classes are tied to the model's outputs, so they can be renamed
-// but not added or removed.
+// but not added or removed. The output index is developer detail: it is
+// only in the tooltip, not on the chip.
 
 import { useRef, useState } from 'react'
 import { Pencil } from 'lucide-react'
@@ -55,12 +56,12 @@ function ClassChip({ index, value, onSave }: { index: number; value: string; onS
     return (
         <span className={s.classChip}>
             <button type="button" tabIndex={editing ? -1 : 0} aria-hidden={editing || undefined} onClick={() => { setDraft(value); setEditing(true) }}
-                aria-label={`Rename class ${index}: ${value}`}
+                aria-label={`Rename class ${value}`} title={`Rename (output ${index})`}
                 style={{ visibility: editing ? 'hidden' : undefined }}>
-                <span className={s.idx}>{index}</span>{value}<Pencil size={12} aria-hidden style={{ color: 'var(--cm-ink-2)' }} />
+                {value}<Pencil size={12} aria-hidden style={{ color: 'var(--cm-ink-2)' }} />
             </button>
             {editing && (
-                <input autoFocus size={1} value={draft} style={{ width: '100%', minWidth: 0 }} aria-label={`Class ${index} name`}
+                <input autoFocus size={1} value={draft} style={{ width: '100%', minWidth: 0 }} aria-label={`New name for ${value}`}
                     onChange={e => setDraft(e.target.value)}
                     onBlur={commit}
                     onKeyDown={e => {

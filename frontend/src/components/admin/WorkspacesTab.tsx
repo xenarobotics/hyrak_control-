@@ -17,7 +17,7 @@ import {
     type MemberRole, type WorkspaceInfo, type WorkspaceKind, type WorkspaceNode,
 } from '@/lib/access'
 import {
-    absoluteUrl, addMember, createInvite, createWorkspace, deleteWorkspace, fmtWhen, isPendingInvite,
+    absoluteUrl, addMember, createInvite, createWorkspace, deleteWorkspace, isPendingInvite,
     listInvites, listMembers, listWorkspaceDrones, listWorkspaces, moveDrone, personName, removeMember,
     revokeInvite, updateMember, updateWorkspace, type ApiResult, type Invite, type Member, type WorkspaceDrone,
 } from '@/lib/workspaces'
@@ -25,6 +25,7 @@ import { pointsFromPolygon, polygonFromPoints, type ZoneFeature } from '@/compon
 import type { Outline } from '@/components/admin/AreaMap'
 import { Btn, CopyLink, Empty, INPUT_CLS, LABEL_CLS, Notice, Section, Tag } from '@/components/admin/console'
 import { ActivitySection } from '@/components/admin/ActivitySection'
+import { fmtShort } from '@/components/settings/primitives'
 
 const AreaMap = dynamic(() => import('@/components/admin/AreaMap'), { ssr: false })
 
@@ -83,8 +84,9 @@ export default function WorkspacesTab({ zones }: { zones: ZoneFeature[] }) {
         <div className="flex-1 flex flex-col md:flex-row min-w-0 overflow-y-auto md:overflow-hidden">
             {/* Tree column */}
             <div className="w-full md:w-80 shrink-0 border-b md:border-b-0 md:border-r border-app-border bg-app-surface flex flex-col max-h-[45vh] md:max-h-none">
-                <div className="px-3 min-h-10 py-2 text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted border-b border-app-border flex items-center gap-2">
-                    WORKSPACES - {list?.length ?? 0}
+                <div className="px-3 min-h-10 py-2 text-[13px] font-semibold text-app-text-muted border-b border-app-border flex items-center gap-2">
+                    <h1 className="m-0 text-[16px] font-bold text-app-text">Workspaces</h1>
+                    <span className="tabular-nums">{list?.length ?? 0}</span>
                     {isFounder && platform && (
                         <span className="ml-auto flex gap-1.5">
                             <Btn tone="cyan" onClick={() => startCreate('organization', platform)}>+ Org</Btn>
@@ -103,7 +105,7 @@ export default function WorkspacesTab({ zones }: { zones: ZoneFeature[] }) {
                             placeholder="name" aria-label="Workspace name" className={`${INPUT_CLS} w-full`} />
                         <Notice error={createError} />
                         <div className="flex gap-2">
-                            <Btn type="submit" tone="emerald" disabled={creating} className="flex-1">
+                            <Btn type="submit" tone="primary" disabled={creating} className="flex-1">
                                 {creating ? 'Creating…' : 'Create'}
                             </Btn>
                             <Btn onClick={() => setCreate(null)}>Cancel</Btn>
@@ -166,7 +168,7 @@ function TreeNode({ node, depth, selectedId, onSelect }: {
                     <Tag icon={false} label={KIND_TAG[node.kind]} tone={node.kind === 'platform' ? 'cyan' : 'zinc'} />
                     {node.my_role && (
                         <span className="ml-auto text-[12px] text-app-text-muted truncate">
-                            {roleLabel(node.my_role, node.kind).toUpperCase()}{node.inherited ? ' ↓' : ''}
+                            {roleLabel(node.my_role, node.kind)}{node.inherited ? ' ↓' : ''}
                         </span>
                     )}
                 </button>
@@ -277,7 +279,7 @@ function WorkspaceDetail({ ws, list, zones, isFounder, onChanged, onDeleted, onS
     const children = list.filter(w => w.parent_id === ws.id)
 
     return (
-        <div className="max-w-3xl mx-auto p-5 space-y-4">
+        <div className="max-w-[960px] p-5 lg:px-8 lg:py-6 space-y-5">
             <div className="space-y-1">
                 <div className="flex items-center gap-3 flex-wrap">
                     <h2 className="text-[22px] font-bold text-app-text">{ws.name}</h2>
@@ -310,7 +312,7 @@ function WorkspaceDetail({ ws, list, zones, isFounder, onChanged, onDeleted, onS
                     </span>
                 </div>
                 <div className="text-[13px] text-app-text-muted">
-                    {parent ? <>in <button className="font-semibold text-app-text hover:text-app-accent hover:underline" onClick={() => onSelect(parent.id)}>{parent.name}</button> · </> : null}
+                    {parent ? <>in <button className="font-semibold text-app-text hover:text-app-accent hover:underline" onClick={() => onSelect(parent.id)}>{parent.name}</button>, </> : null}
                     your role {roleLabel(ws.my_role, ws.kind)}{ws.inherited ? ' (inherited)' : ''}
                 </div>
                 {note('head')}
@@ -333,7 +335,7 @@ function WorkspaceDetail({ ws, list, zones, isFounder, onChanged, onDeleted, onS
                 canManage={canDrones} isFounder={isFounder} busy={busy} act={act} note={note} reload={loadDrones} />
 
             {ws.kind === 'organization' && (
-                <Section title={`CLIENTS - ${children.length}`}
+                <Section title={`Clients (${children.length})`}
                     right={canChildren ? <Btn tone="cyan" onClick={onCreateClient}>+ Client</Btn> : null}>
                     {children.length === 0 ? (
                         <Empty>No clients yet. A client is a customer of {ws.name} with its own members and drones.</Empty>
@@ -385,7 +387,7 @@ function OperatingArea({ ws, parent, zones, canEdit, onChanged }: {
     }
 
     return (
-        <Section title="OPERATING AREA"
+        <Section title="Operating area"
             right={canEdit && !draft ? (
                 <>
                     <Btn tone="cyan" onClick={() => { setDraft(pointsFromPolygon(ws.operating_area)); setOk(''); setError('') }}>
@@ -410,7 +412,7 @@ function OperatingArea({ ws, parent, zones, canEdit, onChanged }: {
                             {parent?.operating_area && " The dashed outline is the parent workspace's area."}
                         </div>
                         <div className="flex gap-2">
-                            <Btn tone="emerald" disabled={draft.length < 3 || busy} onClick={() => void save(polygonFromPoints(draft))}>
+                            <Btn tone="primary" disabled={draft.length < 3 || busy} onClick={() => void save(polygonFromPoints(draft))}>
                                 {busy ? 'Saving…' : 'Save area'}
                             </Btn>
                             <Btn disabled={draft.length === 0} onClick={() => setDraft(p => (p ?? []).slice(0, -1))}>Undo</Btn>
@@ -469,11 +471,11 @@ function MembersSection({ ws, list, members, loadError, canManage, isFounder, se
                     <div className="flex flex-wrap items-center gap-2 text-[14px]">
                         <span className="text-app-text truncate">{personName(m.user)}</span>
                         {self && <Tag label="You" tone="cyan" icon={false} />}
-                        {inh && <Tag icon={false} label={`Inherited · ${wsName(m.inherited_from)}`} tone="violet" />}
+                        {inh && <Tag icon={false} label={`Inherited from ${wsName(m.inherited_from)}`} tone="violet" />}
                         {m.area && <Tag label="Area" tone="amber" icon={false} />}
                     </div>
                     <div className="text-app-text-muted truncate">
-                        {[m.user.email || m.user.username, m.title].filter(Boolean).join(' · ')}
+                        {[m.user.email || m.user.username, m.title].filter(Boolean).join(', ')}
                     </div>
                 </div>
                 {editable ? (
@@ -491,21 +493,21 @@ function MembersSection({ ws, list, members, loadError, canManage, isFounder, se
                             const t = window.prompt(`Title for ${personName(m.user)} (empty to clear)`, m.title ?? '')
                             if (t === null) return
                             void act('members', m.id, () => updateMember(ws.id, m.id, { title: t.trim() }), 'Title saved.', () => void reload())
-                        }}>TITLE</Btn>
+                        }}>Title</Btn>
                         <Btn tone="red" disabled={busy === m.id} onClick={() => {
                             if (!window.confirm(`Remove ${personName(m.user)} from ${ws.name}?`)) return
                             void act('members', m.id, () => removeMember(ws.id, m.id), `Removed ${personName(m.user)}.`, () => void reload())
                         }}>Remove</Btn>
                     </>
                 ) : (
-                    <span className="text-app-text-muted whitespace-nowrap">{roleLabel(m.role, ws.kind).toUpperCase()}</span>
+                    <span className="text-app-text-muted whitespace-nowrap">{roleLabel(m.role, ws.kind)}</span>
                 )}
             </div>
         )
     }
 
     return (
-        <Section title={`MEMBERS - ${direct.length}${inherited.length ? ` + ${inherited.length} inherited` : ''}`}>
+        <Section title={`Members (${direct.length}${inherited.length ? `, plus ${inherited.length} inherited` : ''})`}>
             {members === null && !loadError && <Empty>Loading members…</Empty>}
             {loadError && <div className="px-3 py-2"><Notice error={loadError} /></div>}
             {members?.length === 0 && <Empty>No members yet.</Empty>}
@@ -516,18 +518,18 @@ function MembersSection({ ws, list, members, loadError, canManage, isFounder, se
             {canManage && addRole && (
                 <form onSubmit={e => void add(e)} className="px-3 py-2 border-t border-app-border flex flex-wrap items-end gap-2">
                     <div className="flex-[2_1_160px] min-w-0">
-                        <label htmlFor={`add-login-${ws.id}`} className={LABEL_CLS}>ADD EXISTING ACCOUNT</label>
+                        <label htmlFor={`add-login-${ws.id}`} className={LABEL_CLS}>Add existing account</label>
                         <input id={`add-login-${ws.id}`} value={login} onChange={e => setLogin(e.target.value)}
                             placeholder="email or username" autoCapitalize="none" spellCheck={false} className={`${INPUT_CLS} w-full`} />
                     </div>
                     <div>
-                        <label htmlFor={`add-role-${ws.id}`} className={LABEL_CLS}>ROLE</label>
+                        <label htmlFor={`add-role-${ws.id}`} className={LABEL_CLS}>Role</label>
                         <select id={`add-role-${ws.id}`} value={addRole} onChange={e => setRole(e.target.value as MemberRole)} className={INPUT_CLS}>
                             {grantable.map(r => <option key={r} value={r}>{roleLabel(r, ws.kind)}</option>)}
                         </select>
                     </div>
                     <div className="flex-[1_1_120px] min-w-0">
-                        <label htmlFor={`add-title-${ws.id}`} className={LABEL_CLS}>TITLE</label>
+                        <label htmlFor={`add-title-${ws.id}`} className={LABEL_CLS}>Title</label>
                         <input id={`add-title-${ws.id}`} value={title} onChange={e => setTitle(e.target.value)}
                             placeholder="optional" className={`${INPUT_CLS} w-full`} />
                     </div>
@@ -571,28 +573,28 @@ function InvitesSection({ ws, invites, loadError, isFounder, busy, act, note, re
     const pending = invites?.filter(i => isPendingInvite(i)) ?? []
 
     return (
-        <Section title={`INVITES - ${pending.length} PENDING`}>
+        <Section title={`Invites (${pending.length} pending)`}>
             {inviteRole ? (
                 <form onSubmit={e => void create(e)} className="px-3 py-2 border-b border-app-border space-y-2">
                     <div className="flex flex-wrap items-end gap-2">
                         <div>
-                            <label htmlFor={`inv-role-${ws.id}`} className={LABEL_CLS}>ROLE</label>
+                            <label htmlFor={`inv-role-${ws.id}`} className={LABEL_CLS}>Role</label>
                             <select id={`inv-role-${ws.id}`} value={inviteRole} onChange={e => setRole(e.target.value as MemberRole)} className={INPUT_CLS}>
                                 {roles.map(r => <option key={r} value={r}>{roleLabel(r, ws.kind)}</option>)}
                             </select>
                         </div>
                         <div className="flex-[2_1_160px] min-w-0">
-                            <label htmlFor={`inv-email-${ws.id}`} className={LABEL_CLS}>LOCK TO EMAIL</label>
+                            <label htmlFor={`inv-email-${ws.id}`} className={LABEL_CLS}>Lock to email</label>
                             <input id={`inv-email-${ws.id}`} type="email" value={email} onChange={e => setEmail(e.target.value)}
                                 placeholder="optional - anyone with the link" spellCheck={false} className={`${INPUT_CLS} w-full`} />
                         </div>
                         <div className="flex-[1_1_100px] min-w-0">
-                            <label htmlFor={`inv-title-${ws.id}`} className={LABEL_CLS}>TITLE</label>
+                            <label htmlFor={`inv-title-${ws.id}`} className={LABEL_CLS}>Title</label>
                             <input id={`inv-title-${ws.id}`} value={title} onChange={e => setTitle(e.target.value)}
                                 placeholder="optional" className={`${INPUT_CLS} w-full`} />
                         </div>
                         <div>
-                            <label htmlFor={`inv-days-${ws.id}`} className={LABEL_CLS}>EXPIRES</label>
+                            <label htmlFor={`inv-days-${ws.id}`} className={LABEL_CLS}>Expires</label>
                             <select id={`inv-days-${ws.id}`} value={days} onChange={e => setDays(Number(e.target.value))} className={INPUT_CLS}>
                                 {EXPIRY_DAYS.map(d => <option key={d} value={d}>{d}d</option>)}
                             </select>
@@ -601,7 +603,7 @@ function InvitesSection({ ws, invites, loadError, isFounder, busy, act, note, re
                     </div>
                     {link && (
                         <CopyLink label="INVITE LINK" url={link.url}
-                            note={`Single use${link.expires ? `, expires ${fmtWhen(link.expires)}` : ''}. Not shown again.`} />
+                            note={`Single use${link.expires ? `, expires ${fmtShort(link.expires)}` : ''}. Not shown again.`} />
                     )}
                 </form>
             ) : (
@@ -616,7 +618,7 @@ function InvitesSection({ ws, invites, loadError, isFounder, busy, act, note, re
                         <Tag icon={false} label={roleLabel(i.role, ws.kind)} tone="zinc" />
                         <span className="text-app-text truncate">{i.email || 'anyone with the link'}</span>
                         {i.title && <span className="text-app-text-muted truncate">{i.title}</span>}
-                        <span className="ml-auto text-app-text-muted whitespace-nowrap">expires {fmtWhen(i.expires_at)}</span>
+                        <span className="ml-auto text-app-text-muted whitespace-nowrap">expires {fmtShort(i.expires_at)}</span>
                         <Btn tone="red" disabled={busy === i.id} onClick={() => {
                             if (!window.confirm(`Revoke this ${roleLabel(i.role, ws.kind)} invite?`)) return
                             void act('invites', i.id, () => revokeInvite(ws.id, i.id), 'Invite revoked.', () => void reload())
@@ -638,7 +640,7 @@ function DronesSection({ ws, list, drones, loadError, canManage, isFounder, busy
     const [target, setTarget] = useState<Record<string, string>>({})
 
     return (
-        <Section title={`DRONES - ${drones?.length ?? 0}`}>
+        <Section title={`Drones (${drones?.length ?? 0})`}>
             {drones === null && !loadError && <Empty>Loading drones…</Empty>}
             {loadError && <div className="px-3 py-2"><Notice error={loadError} /></div>}
             {drones?.length === 0 && <Empty>No drones in this workspace. Move one here from the workspace that holds it.</Empty>}
@@ -648,9 +650,9 @@ function DronesSection({ ws, list, drones, loadError, canManage, isFounder, busy
                     return (
                         <div key={d.id} className="px-3 py-2 min-h-11 text-[13px] flex items-center gap-3">
                             <span className="text-app-text text-[14px] font-semibold truncate">{d.name}</span>
-                            {d.is_simulated && <Tag label="SIM" tone="amber" />}
+                            {d.is_simulated && <Tag label="Sim" tone="amber" />}
                             <span className="text-app-text-muted truncate">{d.hardware_uid.slice(0, 12)}</span>
-                            <span className="text-app-text-muted whitespace-nowrap">seen {fmtWhen(d.last_seen)}</span>
+                            <span className="text-app-text-muted whitespace-nowrap">seen {fmtShort(d.last_seen)}</span>
                             {canManage && targets.length > 0 && (
                                 <span className="ml-auto flex items-center gap-2">
                                     <select value={to} aria-label={`Move ${d.name} to`}

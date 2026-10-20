@@ -11,7 +11,7 @@ import { getSocket } from '@/lib/socket'
 import {
     Radio, Wifi, WifiOff, Check, RotateCcw,
     Plane, Gauge, SlidersHorizontal, Battery, Shield, Navigation,
-    Terminal, Lock, Info, ChevronLeft,
+    Terminal, Lock, Info, ChevronLeft, ChevronRight, LayoutList,
     Search, AlertTriangle, Cpu, Move, Zap,
     Download, Upload, Power,
     Satellite, Compass as CompassIcon, Activity, Mountain,
@@ -25,6 +25,7 @@ import { disconnectTelemetryLink } from '@/hooks/useDrone'
 import { ViewOnlyFence } from '@/components/layout/ViewOnly'
 import { AttachmentsSection } from '@/components/attachments/AttachmentsConfig'
 import { useSessionAttachments } from '@/lib/attachments'
+import { useUiMode } from '@/hooks/useUiMode'
 
 function ls<T>(key: string, fallback: T): T {
     if (typeof window === 'undefined') return fallback
@@ -182,6 +183,29 @@ const PARAMS_DB: Param[] = [
 
 // ── Base SVG ──────────────────────────────────────────────────────────────────
 
+// ── Diagram labels at a fixed reading size ──────────────────────────────────
+//
+// The setup diagrams are SVGs in viewBox units, so their text used to scale
+// with the panel: 9 px on a phone, 36 px on a wide screen. This measures the
+// rendered width and hands back a font size in viewBox units that lands on
+// 12-16 px on screen, whatever the panel width.
+function useSvgPx(viewBoxWidth: number) {
+    const ref = useRef<SVGSVGElement>(null)
+    const [scale, setScale] = useState(1)
+    useEffect(() => {
+        const el = ref.current
+        if (!el || typeof ResizeObserver === 'undefined') return
+        const ro = new ResizeObserver(entries => {
+            const w = entries[0]?.contentRect.width ?? 0
+            if (w > 0) setScale(w / viewBoxWidth)
+        })
+        ro.observe(el)
+        return () => ro.disconnect()
+    }, [viewBoxWidth])
+    const px = useCallback((size: number) => Math.min(16, Math.max(12, size)) / scale, [scale])
+    return [ref, px] as const
+}
+
 function DroneSVG({ airframe, size = 56 }: { airframe: string; size?: number }) {
     const s = size, c = s / 2
     if (airframe === 'coaxial') return (
@@ -257,29 +281,30 @@ function NetworkTopology({ connected, address }: { connected: boolean; address: 
     const host  = address.split('://')[1]?.split(':')[0] ?? '-'
     const lc = connected ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))'
     const lc2 = connected ? 'var(--app-ok)' : 'hsl(var(--app-text-muted))'
+    const [ref, px] = useSvgPx(340)
     return (
-        <svg viewBox="0 0 340 64" style={{ width: '100%', display: 'block', overflow: 'visible' }}>
+        <svg ref={ref} viewBox="0 0 340 64" style={{ width: '100%', maxWidth: 480, display: 'block', overflow: 'visible', margin: '0 auto' }} role="img" aria-label="Ground station to link to autopilot">
             {/* GCS */}
             <rect x={2} y={18} width={60} height={28} rx={6} fill="color-mix(in srgb, var(--app-accent) 8%, transparent)" stroke="var(--app-accent)" strokeWidth={1.5} />
-            <text x={32} y={30} textAnchor="middle" fontSize={11} fontFamily="inherit" fontWeight="700" fill="var(--app-accent)">GCS</text>
-            <text x={32} y={42} textAnchor="middle" fontSize={9} fontFamily="inherit" fill="hsl(var(--app-text-muted))">hyrak</text>
+            <text x={32} y={30} textAnchor="middle" fontSize={px(13)} fontFamily="inherit" fontWeight="700" fill="var(--app-accent)">GCS</text>
+            <text x={32} y={42} textAnchor="middle" fontSize={px(12)} fontFamily="inherit" fill="hsl(var(--app-text-muted))">hyrak</text>
             {/* Line 1 */}
             <line x1={62} y1={32} x2={118} y2={32} stroke={lc} strokeWidth={1.5} strokeDasharray={connected ? undefined : '4 3'} />
             {connected && <circle r={2.5} fill="var(--app-accent)"><animateMotion dur="1.4s" repeatCount="indefinite" path="M 62,32 L 118,32" /></circle>}
             {/* Link node */}
             <rect x={118} y={18} width={84} height={28} rx={6} fill={connected ? 'color-mix(in srgb, var(--app-accent) 6%, transparent)' : 'hsl(var(--app-text-subtle) / 0.06)'} stroke={lc} strokeWidth={1.5} />
-            <text x={160} y={30} textAnchor="middle" fontSize={11} fontFamily="inherit" fontWeight="700" fill={lc}>{proto}</text>
-            <text x={160} y={42} textAnchor="middle" fontSize={9} fontFamily="inherit" fill="hsl(var(--app-text-muted))">{host}</text>
+            <text x={160} y={30} textAnchor="middle" fontSize={px(13)} fontFamily="inherit" fontWeight="700" fill={lc}>{proto}</text>
+            <text x={160} y={42} textAnchor="middle" fontSize={px(12)} fontFamily="inherit" fill="hsl(var(--app-text-muted))">{host}</text>
             {/* Line 2 */}
             <line x1={202} y1={32} x2={258} y2={32} stroke={lc2} strokeWidth={1.5} strokeDasharray={connected ? undefined : '4 3'} />
             {connected && <circle r={2.5} fill="var(--app-ok)"><animateMotion dur="1.4s" repeatCount="indefinite" path="M 202,32 L 258,32" begin="0.7s" /></circle>}
             {/* FC */}
             <rect x={258} y={18} width={60} height={28} rx={6} fill={connected ? 'color-mix(in srgb, var(--app-ok) 8%, transparent)' : 'hsl(var(--app-text-subtle) / 0.06)'} stroke={lc2} strokeWidth={1.5} />
-            <text x={288} y={30} textAnchor="middle" fontSize={11} fontFamily="inherit" fontWeight="700" fill={lc2}>FC</text>
-            <text x={288} y={42} textAnchor="middle" fontSize={9} fontFamily="inherit" fill="hsl(var(--app-text-muted))">autopilot</text>
+            <text x={288} y={30} textAnchor="middle" fontSize={px(13)} fontFamily="inherit" fontWeight="700" fill={lc2}>FC</text>
+            <text x={288} y={42} textAnchor="middle" fontSize={px(12)} fontFamily="inherit" fill="hsl(var(--app-text-muted))">autopilot</text>
             {/* Labels */}
-            <text x={90} y={14} textAnchor="middle" fontSize={9} fontFamily="inherit" fill={connected ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))'}>MAVLink</text>
-            <text x={230} y={14} textAnchor="middle" fontSize={9} fontFamily="inherit" fill={connected ? 'var(--app-ok)' : 'hsl(var(--app-text-muted))'}>MAVSDK</text>
+            <text x={90} y={14} textAnchor="middle" fontSize={px(12)} fontFamily="inherit" fill={connected ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))'}>MAVLink</text>
+            <text x={230} y={14} textAnchor="middle" fontSize={px(12)} fontFamily="inherit" fill={connected ? 'var(--app-ok)' : 'hsl(var(--app-text-muted))'}>MAVSDK</text>
         </svg>
     )
 }
@@ -298,7 +323,6 @@ function BatteryCellsViz({ cells, totalV }: { cells: string; totalV?: number }) 
                     <div style={{ width: 8, height: 5, background: `${mix(cellColor, 38)}`, borderRadius: '2px 2px 0 0' }} />
                     <div style={{ width: 20, height: 52, borderRadius: 3, background: 'hsl(var(--app-surface-2))', border: `1.5px solid ${mix(cellColor, 25)}`, position: 'relative', overflow: 'hidden' }}>
                         <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${fillPct}%`, background: `linear-gradient(to top, ${cellColor}, ${mix(cellColor, 25)})` }} />
-                        <span style={{ position: 'absolute', bottom: 2, left: 0, right: 0, textAlign: 'center', fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', lineHeight: 1 }}>{estV.toFixed(1)}</span>
                     </div>
                     <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>S{i+1}</span>
                 </div>
@@ -316,8 +340,9 @@ function DischargeCurve({ warnPct, critPct }: { warnPct: number; critPct: number
     const warnX = (1 - warnPct / 100) * W
     const critX = (1 - critPct / 100) * W
     const curve = `M 0,${H*0.04} C ${W*0.12},${H*0.08} ${W*0.35},${H*0.18} ${W*0.62},${H*0.24} C ${W*0.78},${H*0.3} ${W*0.88},${H*0.56} ${W},${H*0.97}`
+    const [ref, px] = useSvgPx(W)
     return (
-        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block' }}>
+        <svg ref={ref} viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', maxWidth: 420, display: 'block' }} role="img" aria-label="Battery discharge curve with warning and critical levels">
             <defs><clipPath id="dcc"><rect x={0} y={0} width={W} height={H} /></clipPath></defs>
             <rect x={0} y={0} width={critX} height={H} fill="color-mix(in srgb, var(--app-danger) 7%, transparent)" clipPath="url(#dcc)" />
             <rect x={critX} y={0} width={warnX-critX} height={H} fill="color-mix(in srgb, var(--app-warn) 6%, transparent)" clipPath="url(#dcc)" />
@@ -325,19 +350,20 @@ function DischargeCurve({ warnPct, critPct }: { warnPct: number; critPct: number
             <path d={`${curve} L ${W},${H} L 0,${H} Z`} fill="color-mix(in srgb, var(--app-accent) 5%, transparent)" />
             <path d={curve} fill="none" stroke="var(--app-accent)" strokeWidth={1.8} opacity={0.7} />
             <line x1={warnX} y1={0} x2={warnX} y2={H} stroke="var(--app-warn)" strokeWidth={1.5} strokeDasharray="4 3" />
-            <text x={warnX-3} y={10} textAnchor="end" fontSize={9} fontFamily="inherit" fill="var(--app-warn)">{warnPct}%</text>
+            <text x={warnX-3} y={px(12)} textAnchor="end" fontSize={px(12)} fontFamily="inherit" fill="var(--app-warn)">{warnPct}%</text>
             <line x1={critX} y1={0} x2={critX} y2={H} stroke="var(--app-danger)" strokeWidth={1.5} strokeDasharray="4 3" />
-            <text x={critX-3} y={10} textAnchor="end" fontSize={9} fontFamily="inherit" fill="var(--app-danger)">{critPct}%</text>
-            <text x={1} y={H-2} fontSize={8} fontFamily="inherit" fill="hsl(var(--app-text-muted))">100% · 4.2V</text>
-            <text x={W-1} y={H-2} textAnchor="end" fontSize={8} fontFamily="inherit" fill="hsl(var(--app-text-muted))">0% · 3.0V</text>
+            <text x={critX-3} y={px(12)} textAnchor="end" fontSize={px(12)} fontFamily="inherit" fill="var(--app-danger)">{critPct}%</text>
+            <text x={1} y={H-2} fontSize={px(12)} fontFamily="inherit" fill="hsl(var(--app-text-muted))">100%, 4.2 V</text>
+            <text x={W-1} y={H-2} textAnchor="end" fontSize={px(12)} fontFamily="inherit" fill="hsl(var(--app-text-muted))">0%, 3.0 V</text>
         </svg>
     )
 }
 
 function GeofenceMap({ maxDist, maxDistEnabled, rthAlt }: { maxDist: number; maxDistEnabled: boolean; rthAlt: number }) {
     const labels: [string, number, string][] = [['N',0,'var(--app-danger)'],['E',90,'hsl(var(--app-text-muted))'],['S',180,'hsl(var(--app-text-muted))'],['W',270,'hsl(var(--app-text-muted))']]
+    const [ref, px] = useSvgPx(224)
     return (
-        <svg viewBox="-112 -112 224 224" style={{ width: '100%', display: 'block' }} role="img" aria-label="Top-down view of the distance fence and return altitude">
+        <svg ref={ref} viewBox="-112 -112 224 224" style={{ width: '100%', display: 'block' }} role="img" aria-label="Top-down view of the distance fence and return altitude">
             <defs>
                 <radialGradient id="gfbg" cx="50%" cy="50%" r="50%">
                     <stop offset="0%" stopColor="color-mix(in srgb, var(--app-accent) 4%, transparent)" />
@@ -359,7 +385,7 @@ function GeofenceMap({ maxDist, maxDistEnabled, rthAlt }: { maxDist: number; max
             })}
             {labels.map(([l,d,col]) => {
                 const rad=(d-90)*Math.PI/180
-                return <text key={l} x={82*Math.cos(rad)} y={82*Math.sin(rad)+3} textAnchor="middle" fontSize={11} fontFamily="inherit" fontWeight="700" fill={col}>{l}</text>
+                return <text key={l} x={82*Math.cos(rad)} y={82*Math.sin(rad)+3} textAnchor="middle" fontSize={px(13)} fontFamily="inherit" fontWeight="700" fill={col}>{l}</text>
             })}
             {/* Safe zone */}
             <circle r={48} fill="color-mix(in srgb, var(--app-ok) 3%, transparent)" stroke="color-mix(in srgb, var(--app-ok) 45%, transparent)" strokeWidth={1} strokeDasharray="2 5" />
@@ -367,7 +393,7 @@ function GeofenceMap({ maxDist, maxDistEnabled, rthAlt }: { maxDist: number; max
             {maxDistEnabled ? (
                 <>
                     <circle r={78} fill="color-mix(in srgb, var(--app-danger) 4%, transparent)" stroke="var(--app-danger)" strokeWidth={1.5} strokeDasharray="5 3" opacity={0.7} />
-                    <text x={80} y={-3} fontSize={9.5} fontFamily="inherit" fill="var(--app-danger)">{maxDist}m</text>
+                    <text x={80} y={-3} fontSize={px(12)} fontFamily="inherit" fill="var(--app-danger)">{maxDist} m</text>
                 </>
             ) : (
                 <circle r={78} fill="none" stroke="hsl(var(--app-text-subtle) / 0.2)" strokeWidth={1} strokeDasharray="4 4" />
@@ -377,8 +403,8 @@ function GeofenceMap({ maxDist, maxDistEnabled, rthAlt }: { maxDist: number; max
             {/* Home */}
             <circle r={5} fill="var(--app-accent)" opacity={0.9} />
             <line x1={0} y1={0} x2={0} y2={-10} stroke="var(--app-accent)" strokeWidth={1.5} opacity={0.7} />
-            <text x={7} y={-8} fontSize={9.5} fontFamily="inherit" fill="var(--app-accent)">H</text>
-            <text x={0} y={-31} textAnchor="middle" fontSize={9} fontFamily="inherit" fill="var(--app-accent)">RTH {rthAlt}m</text>
+            <text x={7} y={-8} fontSize={px(12)} fontFamily="inherit" fill="var(--app-accent)">H</text>
+            <text x={0} y={-31} textAnchor="middle" fontSize={px(12)} fontFamily="inherit" fill="var(--app-accent)">Return {rthAlt} m</text>
         </svg>
     )
 }
@@ -388,8 +414,9 @@ function AltitudeProfile({ takeoffAlt, rthAlt, maxAlt, maxAltEnabled }: { takeof
     const ceiling = maxAltEnabled ? Math.max(maxAlt, rthAlt * 1.2) : Math.max(rthAlt * 1.4, 60)
     const py = (alt: number) => H - (alt / ceiling) * H * 0.88
     const ty = py(takeoffAlt), ry = py(rthAlt), my = maxAltEnabled ? py(maxAlt) : 0
+    const [ref, px] = useSvgPx(W)
     return (
-        <svg viewBox={`0 0 ${W} ${H+22}`} style={{ width: '100%', display: 'block' }}>
+        <svg ref={ref} viewBox={`0 0 ${W} ${H+22}`} style={{ width: '100%', maxWidth: 480, display: 'block' }} role="img" aria-label="Side view of takeoff and return altitudes">
             {/* Sky gradient */}
             <defs>
                 <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
@@ -402,24 +429,24 @@ function AltitudeProfile({ takeoffAlt, rthAlt, maxAlt, maxAltEnabled }: { takeof
             {maxAltEnabled && <>
                 <rect x={0} y={0} width={W} height={my} fill="color-mix(in srgb, var(--app-danger) 4%, transparent)" />
                 <line x1={0} y1={my} x2={W} y2={my} stroke="var(--app-danger)" strokeWidth={1.5} strokeDasharray="6 3" />
-                <text x={W-4} y={my-4} textAnchor="end" fontSize={7} fontFamily="inherit" fill="var(--app-danger)">{maxAlt}m ceiling</text>
+                <text x={W-4} y={my-4} textAnchor="end" fontSize={px(12)} fontFamily="inherit" fill="var(--app-danger)">{maxAlt} m ceiling</text>
             </>}
             {/* RTH altitude */}
             <line x1={0} y1={ry} x2={W} y2={ry} stroke="var(--app-accent)" strokeWidth={1} strokeDasharray="6 4" opacity={0.45} />
-            <text x={W-4} y={ry-4} textAnchor="end" fontSize={7} fontFamily="inherit" fill="var(--app-accent)">RTH {rthAlt}m</text>
+            <text x={W-4} y={ry-4} textAnchor="end" fontSize={px(12)} fontFamily="inherit" fill="var(--app-accent)">Return {rthAlt} m</text>
             {/* Takeoff */}
             <line x1={44} y1={H} x2={44} y2={ty} stroke="var(--app-ok)" strokeWidth={2.5} opacity={0.7} />
             <polygon points={`${44},${ty-9} ${40},${ty} ${48},${ty}`} fill="var(--app-ok)" opacity={0.8} />
             <circle cx={44} cy={ty} r={3.5} fill="var(--app-ok)" />
-            <text x={50} y={ty+4} fontSize={7} fontFamily="inherit" fill="var(--app-ok)">{takeoffAlt}m</text>
+            <text x={50} y={ty+4} fontSize={px(12)} fontFamily="inherit" fill="var(--app-ok)">{takeoffAlt} m</text>
             {/* RTH flight path */}
             <path d={`M 110,${ty} L 110,${ry} L 200,${ry}`} fill="none" stroke="var(--app-accent)" strokeWidth={1.5} strokeDasharray="5 3" opacity={0.35} />
-            <text x={204} y={ry+4} fontSize={7} fontFamily="inherit" fill="var(--app-accent)">→ H</text>
+            <text x={204} y={ry + px(12) + 3} fontSize={px(12)} fontFamily="inherit" fill="var(--app-accent)">Home</text>
             {/* Ground */}
             <rect x={0} y={H} width={W} height={22} fill="color-mix(in srgb, var(--app-ok) 6%, transparent)" />
             <line x1={0} y1={H} x2={W} y2={H} stroke="color-mix(in srgb, var(--app-ok) 40%, transparent)" strokeWidth={1.5} />
-            <text x={44} y={H+15} textAnchor="middle" fontSize={8} fontFamily="inherit" fill="hsl(var(--app-text-muted))">H</text>
-            <text x={W-4} y={H+15} textAnchor="end" fontSize={7} fontFamily="inherit" fill="hsl(var(--app-text-muted))">0m AGL</text>
+            <text x={44} y={H+15} textAnchor="middle" fontSize={px(12)} fontFamily="inherit" fill="hsl(var(--app-text-muted))">Home</text>
+            <text x={W-4} y={H+15} textAnchor="end" fontSize={px(12)} fontFamily="inherit" fill="hsl(var(--app-text-muted))">0 m AGL</text>
         </svg>
     )
 }
@@ -439,7 +466,7 @@ function Tip({ text }: { text: string }) {
 function Label({ text, tip }: { text: string; tip?: string }) {
     return (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-            <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'hsl(var(--app-text-muted))' }}>{text}</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'hsl(var(--app-text-muted))' }}>{text}</span>
             {tip && <Tip text={tip} />}
         </div>
     )
@@ -478,60 +505,61 @@ function LockedNote({ text }: { text: string }) {
 
 // ── Layout shells ─────────────────────────────────────────────────────────────
 
-const PANEL_TITLE: React.CSSProperties = { padding: '10px 16px', fontSize: 12, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', borderBottom: '1px solid hsl(var(--app-border))' }
+const PANEL_TITLE: React.CSSProperties = { padding: '14px 16px 0', fontSize: 14, fontWeight: 700, margin: 0 }
 
-// An instrument panel block
-function Panel({ title, children, accent }: { title?: string; children: React.ReactNode; accent?: string }) {
+// An instrument panel or a form group: one quiet surface, a sentence-case
+// title, no shadow (cards are for real groups, not decoration).
+function Panel({ title, children }: { title?: string; children: React.ReactNode; accent?: string }) {
     return (
-        <div style={{ borderRadius: 10, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', boxShadow: 'var(--app-shadow)', overflow: 'hidden' }}>
-            {title && <div style={{ ...PANEL_TITLE, color: 'hsl(var(--app-text-muted))', display: 'flex', alignItems: 'center', gap: 8 }}>{accent && <span aria-hidden style={{ width: 8, height: 8, borderRadius: 2, background: accent }} />}{title}</div>}
+        <section style={{ borderRadius: 10, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', minWidth: 0 }}>
+            {title && <h3 style={{ ...PANEL_TITLE, color: 'hsl(var(--app-text))' }}>{title}</h3>}
             <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>{children}</div>
-        </div>
+        </section>
     )
 }
-// Surface card for settings/form content
 function Card({ title, children }: { title?: string; children: React.ReactNode }) {
     return (
-        <div style={{ borderRadius: 10, border: '1px solid hsl(var(--app-border))', background: 'hsl(var(--app-surface))', boxShadow: 'var(--app-shadow)', overflow: 'hidden' }}>
-            {title && <div style={{ ...PANEL_TITLE, color: 'hsl(var(--app-text-muted))' }}>{title}</div>}
+        <section style={{ borderRadius: 10, border: '1px solid hsl(var(--app-border))', background: 'hsl(var(--app-surface))', minWidth: 0 }}>
+            {title && <h3 style={{ ...PANEL_TITLE, color: 'hsl(var(--app-text))' }}>{title}</h3>}
             <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>{children}</div>
-        </div>
+        </section>
     )
 }
 function G2({ children, gap = 16 }: { children: React.ReactNode; gap?: number }) {
     return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap, alignItems: 'start' }}>{children}</div>
 }
 
-// ── Domain Card ───────────────────────────────────────────────────────────────
+// ── Readiness checklist ─────────────────────────────────────────────────────
 
-/** Overview card for one setup section. `pct` is null when nothing is
- *  measured for it (no drone, or a local setting): no ring then, never a
- *  made-up percentage. */
-function DomainCard({ label, icon: Icon, pct, color, metrics, onClick }: {
-    id: SectionId; label: string; icon: React.ElementType
-    pct: number | null; color: string; metrics: { k: string; v: string }[]
-    onClick: () => void
+type RowState = 'ok' | 'warn' | 'idle' | 'none'
+
+/** One line of the overview: a state mark, the section, what it is set to,
+ *  and at most one action. The whole row opens the section. */
+function ReadinessRow({ label, icon: Icon, state, value, action, onClick }: {
+    label: string; icon: React.ElementType; state: RowState; value: string
+    action?: string; onClick: () => void
 }) {
+    const mark = state === 'ok' ? <Check size={16} strokeWidth={2.75} style={{ color: 'var(--app-ok)' }} aria-label="Set" />
+        : state === 'warn' ? <AlertTriangle size={16} style={{ color: 'var(--app-warn)' }} aria-label="Needs attention" />
+        : state === 'idle' ? <span aria-label="Not checked" style={{ width: 10, height: 2, borderRadius: 1, background: 'hsl(var(--app-text-subtle))' }} />
+        : <span aria-hidden style={{ width: 10 }} />
     return (
-        <button onClick={onClick}
-            className={'border border-app-border bg-app-surface hover:border-app-border-strong hover:bg-app-surface-2 transition-colors duration-[120ms] ' + FOCUS_RING}
-            style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 16, borderRadius: 10, textAlign: 'left', cursor: 'pointer', width: '100%', minWidth: 0, boxShadow: 'var(--app-shadow)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%' }}>
-                <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--app-accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <Icon size={18} style={{ color: 'var(--app-accent)' }} />
-                </div>
-                <span style={{ flex: 1, minWidth: 0, fontSize: 16, fontWeight: 700, color: 'hsl(var(--app-text))' }}>{label}</span>
-                {pct != null && <ReadinessRing pct={pct} color={color} size={40} />}
-            </div>
-            <dl style={{ display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', columnGap: 12, rowGap: 4, margin: 0, width: '100%' }}>
-                {metrics.map((m, i) => (
-                    <React.Fragment key={i}>
-                        <dt style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))' }}>{m.k}</dt>
-                        <dd style={{ margin: 0, fontSize: 13, color: 'hsl(var(--app-text))', fontWeight: 600, fontVariantNumeric: 'tabular-nums', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.v}</dd>
-                    </React.Fragment>
-                ))}
-            </dl>
-        </button>
+        <li style={{ listStyle: 'none' }}>
+            <button type="button" onClick={onClick}
+                className={'group w-full text-left hover:bg-app-surface-2 transition-colors ' + FOCUS_RING}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', minHeight: 52, background: 'transparent', border: 'none', cursor: 'pointer' }}>
+                <span style={{ width: 20, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{mark}</span>
+                <Icon size={16} aria-hidden style={{ color: 'hsl(var(--app-text-muted))', flexShrink: 0 }} />
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
+                    <span className="sm:w-[150px] sm:shrink-0" style={{ fontSize: 14, fontWeight: 700, color: 'hsl(var(--app-text))' }}>{label}</span>
+                    <span className="sm:truncate" style={{ minWidth: 0, fontSize: 14, color: state === 'idle' ? 'hsl(var(--app-text-muted))' : 'hsl(var(--app-text))', fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+                </span>
+                <span className="text-app-text-muted group-hover:text-app-text transition-colors" style={{ display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    {action && <span className="max-sm:hidden">{action}</span>}
+                    <ChevronRight size={16} aria-hidden />
+                </span>
+            </button>
+        </li>
     )
 }
 
@@ -539,79 +567,75 @@ function DomainCard({ label, icon: Icon, pct, color, metrics, onClick }: {
 
 function VehicleBanner({ vehicle, readiness, telStatus, address }: { vehicle: VehicleProfile; readiness: number | null; telStatus: string; address: string }) {
     const connected = telStatus === 'connected'
-    const chip: React.CSSProperties = { fontSize: 12, fontWeight: 700, padding: '2px 8px', borderRadius: 999, border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text-muted))', background: 'hsl(var(--app-surface-2))' }
+    const chip: React.CSSProperties = { fontSize: 12, fontWeight: 700, padding: '2px 8px', borderRadius: 999, color: 'hsl(var(--app-text-muted))', background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border))' }
     return (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '12px 20px', borderBottom: '1px solid hsl(var(--app-border))', background: 'hsl(var(--app-surface))', flexShrink: 0, flexWrap: 'wrap' }}>
-            <DroneSVG airframe={vehicle.airframe} size={48} />
-            <div style={{ flex: 1, minWidth: 0 }}>
+        <header style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px clamp(16px, 3vw, 24px)', borderBottom: '1px solid hsl(var(--app-border))', background: 'hsl(var(--app-surface))', flexShrink: 0, flexWrap: 'wrap' }}>
+            <DroneSVG airframe={vehicle.airframe} size={40} />
+            <div style={{ flex: '1 1 220px', minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <h1 style={{ fontSize: 20, fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>{vehicle.name}</h1>
-                    <span style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))' }}>{AIRFRAME_LABELS[vehicle.airframe] ?? vehicle.airframe}</span>
-                    {vehicle.frameId && <span style={{ ...chip, color: 'var(--app-accent)', background: 'var(--app-accent-soft)', borderColor: 'color-mix(in srgb, var(--app-accent) 35%, transparent)' }}>#{vehicle.frameId}</span>}
-                    <span style={chip}>{vehicle.firmware.toUpperCase()}</span>
+                    <h1 style={{ fontSize: 20, fontWeight: 800, color: 'hsl(var(--app-text))', margin: 0, lineHeight: 1.2 }}>{vehicle.name}</h1>
+                    <span style={chip}>{AIRFRAME_LABELS[vehicle.airframe] ?? vehicle.airframe}</span>
+                    <span style={chip}>{vehicle.firmware === 'ardupilot' ? 'ArduPilot' : vehicle.firmware.toUpperCase()}</span>
+                    {vehicle.frameId && <span style={chip}>Frame #{vehicle.frameId}</span>}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, minWidth: 0 }}>
                     {connected ? <Wifi size={14} style={{ color: 'var(--app-ok)', flexShrink: 0 }} /> : <WifiOff size={14} style={{ color: 'hsl(var(--app-text-muted))', flexShrink: 0 }} />}
                     <span style={{ fontSize: 13, fontWeight: 600, color: connected ? 'var(--app-ok)' : 'hsl(var(--app-text-muted))' }}>{connected ? 'Connected' : 'Not connected'}</span>
-                    {connected && <span className="font-code" style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>· {address}</span>}
+                    {connected && <span className="font-code" style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{address}</span>}
                 </div>
             </div>
-            {readiness != null ? (
+            {readiness != null && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}
                     title="Sensor health measured on the connected drone (GPS, gyro and accel, compass, baro)">
-                    <ReadinessRing pct={readiness} color={hColor(readiness)} size={52} />
-                    <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'hsl(var(--app-text-muted))' }}>Ready</span>
+                    <ReadinessRing pct={readiness} color={hColor(readiness)} size={44} />
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'hsl(var(--app-text-muted))' }}>Ready</span>
                 </div>
-            ) : (
-                <span style={{ ...chip, fontSize: 13, padding: '4px 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                    title="Readiness is measured from a connected drone">
-                    <WifiOff size={14} /> Connect a drone to check readiness
-                </span>
             )}
-        </div>
+        </header>
     )
 }
 
-// ── Section Tab Bar ───────────────────────────────────────────────────────────
+// ── Section navigation ──────────────────────────────────────────────────────
 
-function SectionTabBar({ current, onSelect, onBack, tabs }: {
-    current: SectionId; onSelect: (id: SectionId) => void; onBack: () => void
-    tabs: { id: SectionId; label: string; icon: React.ElementType }[]
+type NavId = SectionId | 'overview'
+
+/** Setup sections, always visible on the left (a select at phone width). */
+function SectionNav({ current, onSelect, items }: {
+    current: NavId; onSelect: (id: NavId) => void
+    items: { id: NavId; label: string; icon: React.ElementType }[]
 }) {
     return (
-        <div role="tablist" aria-label="Setup sections" style={{ display: 'flex', alignItems: 'stretch', gap: 4, padding: '0 12px', borderBottom: '1px solid hsl(var(--app-border))', background: 'hsl(var(--app-surface))', flexShrink: 0, overflowX: 'auto' }}>
-            <button onClick={onBack}
-                className={'text-app-text-muted hover:text-app-text transition-colors duration-[120ms] ' + FOCUS_RING}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 12px 0 4px', minHeight: 44, background: 'none', border: 'none', borderRight: '1px solid hsl(var(--app-border))', cursor: 'pointer', fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0 }}>
-                <ChevronLeft size={16} /> Overview
-            </button>
-            {tabs.map(t => {
+        <nav role="tablist" aria-label="Setup sections" aria-orientation="vertical"
+            className="max-md:hidden flex flex-col"
+            style={{ width: 216, flexShrink: 0, gap: 2, padding: '16px 10px', borderRight: '1px solid hsl(var(--app-border))', background: 'hsl(var(--app-surface))', overflowY: 'auto' }}>
+            {items.map((t, i) => {
                 const active = t.id === current, Icon = t.icon
                 return (
-                    <button key={t.id} role="tab" aria-selected={active} onClick={() => onSelect(t.id)}
-                        className={(active ? 'text-app-accent' : 'text-app-text-muted hover:text-app-text') + ' transition-colors duration-[120ms] ' + FOCUS_RING}
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 12px', minHeight: 44, background: 'none', border: 'none', borderBottom: `2px solid ${active ? 'var(--app-accent)' : 'transparent'}`, marginBottom: -1, cursor: 'pointer', fontSize: 14, fontWeight: active ? 700 : 600, whiteSpace: 'nowrap' }}>
-                        <Icon size={16} />{t.label}
-                    </button>
+                    <React.Fragment key={t.id}>
+                        {i === 1 && <div aria-hidden style={{ height: 1, background: 'hsl(var(--app-border))', margin: '6px 8px' }} />}
+                        <button role="tab" aria-selected={active} onClick={() => onSelect(t.id)}
+                            className={(active ? 'bg-app-accent-soft text-app-text' : 'text-app-text-muted hover:text-app-text hover:bg-app-surface-2') + ' transition-colors ' + FOCUS_RING}
+                            style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 10, padding: '0 12px', minHeight: 38, borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: active ? 700 : 600, textAlign: 'left', whiteSpace: 'nowrap' }}>
+                            <span aria-hidden style={{ position: 'absolute', left: 0, top: 8, bottom: 8, width: 3, borderRadius: 2, background: 'var(--app-accent)', opacity: active ? 1 : 0, transition: 'opacity var(--dur) var(--ease-out)' }} />
+                            <Icon size={16} style={{ color: active ? 'var(--app-accent)' : undefined, flexShrink: 0 }} />{t.label}
+                        </button>
+                    </React.Fragment>
                 )
             })}
-        </div>
+        </nav>
     )
 }
 
 // ── Section header ────────────────────────────────────────────────────────────
 
-function SectionHead({ meta, pct }: { meta: typeof DOMAIN_META[0]; pct: number | null }) {
+function SectionHead({ meta, pct }: { meta: { label: string; desc: string }; pct: number | null }) {
     return (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24, paddingBottom: 16, borderBottom: '1px solid hsl(var(--app-border))' }}>
-            <div style={{ width: 44, height: 44, borderRadius: 10, background: 'var(--app-accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <meta.icon size={22} style={{ color: 'var(--app-accent)' }} />
-            </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-                <h2 style={{ fontSize: 22, fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>{meta.label}</h2>
-                <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>{meta.desc}</p>
+                <h2 style={{ fontSize: 22, fontWeight: 800, color: 'hsl(var(--app-text))', margin: 0, lineHeight: 1.25 }}>{meta.label}</h2>
+                <p style={{ fontSize: 14, color: 'hsl(var(--app-text-muted))', margin: '4px 0 0' }}>{meta.desc}</p>
             </div>
-            {pct != null && <ReadinessRing pct={pct} color={hColor(pct)} size={52} />}
+            {pct != null && <ReadinessRing pct={pct} color={hColor(pct)} size={48} />}
         </div>
     )
 }
@@ -653,7 +677,7 @@ function LinkThroughput() {
                 const want = asked[k] ?? 0
                 return (
                     <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                        <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', textTransform: 'uppercase' }}>{k}</span>
+                        <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>{k}</span>
                         <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: rateTone(v as number, want) }}>
                             {(v as number).toFixed(1)} Hz
                             {want > 0 && <span style={{ color: 'hsl(var(--app-text-muted))' }}> / {want} asked</span>}
@@ -683,6 +707,7 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
     // staff-only (docs/ACCESS_MODEL.md section 8a). Customers connect from
     // the Fly tab through a relay on their own device.
     const { customer } = useLiveScope()
+    const [uiMode] = useUiMode()
     const connected = telStatus === 'connected'
     const connect    = useCallback(() => {
         lsSet('hyrak-mav-address', address)
@@ -702,11 +727,6 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* Topology diagram */}
-            <Panel title="Network topology" accent="var(--app-accent)">
-                <NetworkTopology connected={connected} address={address} />
-            </Panel>
-
             <G2>
                 {/* Left: link setup */}
                 <Card title="Link setup">
@@ -723,11 +743,11 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                         </p>
                     )}
                     {!connected && !customer && (
-                        <Field label="MAVLINK ADDRESS" tip="Connection string for your autopilot.">
+                        <Field label="MAVLink address" tip="Connection string for your autopilot.">
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                                 <div style={{ display: 'flex', gap: 6 }}>
                                     <AppInput value={address} onChange={setAddress} placeholder="udpin://0.0.0.0:14540" />
-                                    <button onClick={() => setShowPresets(s => !s)} style={{ padding: '9px 10px', borderRadius: 6, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text-muted))', fontSize: 13, fontVariantNumeric: 'tabular-nums', cursor: 'pointer', whiteSpace: 'nowrap' }}>Presets</button>
+                                    <button onClick={() => setShowPresets(s => !s)} className={'hover:bg-app-surface-2 ' + FOCUS_RING} style={{ padding: '0 12px', height: 36, borderRadius: 6, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border-strong))', color: 'hsl(var(--app-text))', fontSize: 13, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>Presets</button>
                                 </div>
                                 {showPresets && (
                                     <div style={{ borderRadius: 6, overflow: 'hidden', border: '1px solid hsl(var(--app-border))' }}>
@@ -750,7 +770,7 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                         - so "what is it actually using?" has to be answerable
                         without disconnecting first. */}
                     {address === RF_BRIDGE_ADDR && !customer && (
-                        <Field label="RF BRIDGE PORTS" tip="UDP ports the ground station's wfb_rx/wfb_tx use - see communication/start-gs.sh. The uplink HOST matters once the decoder is not on this machine: downlink arrives from anywhere (we bind 0.0.0.0), but the uplink is sent to a fixed listener, so leaving it on 127.0.0.1 with an off-box decoder gives perfect telemetry and no commands.">
+                        <Field label="RF bridge ports" tip="UDP ports the ground station's wfb_rx/wfb_tx use - see communication/start-gs.sh. The uplink HOST matters once the decoder is not on this machine: downlink arrives from anywhere (we bind 0.0.0.0), but the uplink is sent to a fixed listener, so leaving it on 127.0.0.1 with an off-box decoder gives perfect telemetry and no commands.">
                             <div style={{ display: 'flex', gap: 6 }}>
                                 <div style={{ flex: 1 }}>
                                     <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>Downlink (video/mavlink dn)</span>
@@ -759,7 +779,7 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                                         value={downlinkPort}
                                         disabled={connected}
                                         onChange={e => { const v = Number(e.target.value); setDownlinkPort(v); if (v > 0 && v < 65536) setRfDownlinkPort(v) }}
-                                        style={{ width: '100%', padding: '8px 10px', borderRadius: 6, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 12, fontVariantNumeric: 'tabular-nums', outline: 'none', boxSizing: 'border-box', marginTop: 3 }}
+                                        className={FOCUS_RING} style={{ ...INPUT_STYLE(connected), marginTop: 4 }}
                                     />
                                 </div>
                                 <div style={{ flex: 1 }}>
@@ -769,7 +789,7 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                                         value={uplinkPort}
                                         disabled={connected}
                                         onChange={e => { const v = Number(e.target.value); setUplinkPort(v); if (v > 0 && v < 65536) setRfUplinkPort(v) }}
-                                        style={{ width: '100%', padding: '8px 10px', borderRadius: 6, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 12, fontVariantNumeric: 'tabular-nums', outline: 'none', boxSizing: 'border-box', marginTop: 3 }}
+                                        className={FOCUS_RING} style={{ ...INPUT_STYLE(connected), marginTop: 4 }}
                                     />
                                 </div>
                             </div>
@@ -789,7 +809,7 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                                     placeholder="127.0.0.1"
                                     disabled={connected}
                                     onChange={e => { const v = e.target.value; setUplinkHost(v); setRfUplinkHost(v) }}
-                                    style={{ width: '100%', padding: '8px 10px', borderRadius: 6, background: 'hsl(var(--app-surface))', border: '1px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 12, fontVariantNumeric: 'tabular-nums', outline: 'none', boxSizing: 'border-box', marginTop: 3 }}
+                                    className={FOCUS_RING} style={{ ...INPUT_STYLE(connected), marginTop: 4 }}
                                 />
                                 <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', display: 'block', marginTop: 4, lineHeight: 1.5 }}>
                                     Commands go to <b>{uplinkHost}:{uplinkPort}</b>.
@@ -820,9 +840,9 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                         <Panel title="Live telemetry" accent="var(--app-ok)">
                             {[
-                                { k: 'Flight Mode', v: fm?.mode ?? '-', hi: !!fm?.is_armed },
-                                { k: 'Armed',       v: fm?.is_armed ? 'YES' : 'no' },
-                                { k: 'Battery',     v: bat ? `${bat.remaining_percent?.toFixed(0)}%  ·  ${bat.voltage_v?.toFixed(2)}V` : '-', hi: (bat?.remaining_percent ?? 100) < 20 },
+                                { k: 'Flight mode', v: fm?.mode ?? '-', hi: !!fm?.is_armed },
+                                { k: 'Armed',       v: fm?.is_armed ? 'Yes' : 'No' },
+                                { k: 'Battery',     v: bat ? `${bat.remaining_percent?.toFixed(0)}%, ${bat.voltage_v?.toFixed(2)} V` : '-', hi: (bat?.remaining_percent ?? 100) < 20 },
                                 { k: 'Altitude AGL',v: pos ? `${pos.relative_altitude_m?.toFixed(2)} m` : '-' },
                                 { k: 'Lat / Lon',   v: pos ? `${pos.latitude_deg?.toFixed(5)}° / ${pos.longitude_deg?.toFixed(5)}°` : '-' },
                                 { k: 'Roll / Pitch',v: att ? `${att.roll_deg?.toFixed(1)}° / ${att.pitch_deg?.toFixed(1)}°` : '-' },
@@ -847,8 +867,21 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                         </Panel>
                         <LinkThroughput />
                     </div>
-                ) : (
-                    <Panel title="Protocol reference">
+                ) : null}
+            </G2>
+
+            {/* Engineering detail: how the link is wired, and the address
+                formats per autopilot. Dev mode only, folded by default. */}
+            {uiMode === 'dev' && (
+                <details className="group" style={{ borderRadius: 10, border: '1px solid hsl(var(--app-border))', background: 'hsl(var(--app-surface))' }}>
+                    <summary className={'flex cursor-pointer list-none items-center gap-2 rounded-[10px] px-4 py-3 text-app-text hover:bg-app-surface-2 transition-colors ' + FOCUS_RING} style={{ fontSize: 14, fontWeight: 700 }}>
+                        <ChevronRight size={16} aria-hidden className="text-app-text-muted transition-transform duration-200 group-open:rotate-90" />
+                        Details
+                        <span style={{ fontSize: 13, fontWeight: 400, color: 'hsl(var(--app-text-muted))' }}>Network topology and address formats</span>
+                    </summary>
+                    <div style={{ padding: '4px 16px 16px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                        <NetworkTopology connected={connected} address={address} />
+
                         {[
                             { badge: 'PX4', color: 'light-dark(#1d4ed8, #60a5fa)', text: 'MAVSDK over UDP. Default SITL port: 14540. Physical radio: serial:///dev/ttyUSB0:57600' },
                             { badge: 'ArduPilot', color: 'var(--app-ok)', text: 'Compatible via MAVLink dialect. Default SITL port: 14550. Set TERRAIN_ENABLE=1 for terrain follow.' },
@@ -859,9 +892,9 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                                 <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', lineHeight: 1.6, margin: 0 }}>{p.text}</p>
                             </div>
                         ))}
-                    </Panel>
-                )}
-            </G2>
+                    </div>
+                </details>
+            )}
         </div>
     )
 }
@@ -871,30 +904,20 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
 function VehicleWorkspace({ v, onUpdate }: { v: VehicleProfile; onUpdate: (p: Partial<VehicleProfile>) => void }) {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* Identity hero */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: '20px 24px', borderRadius: 10, background: 'hsl(var(--app-surface-2))', border: '1px solid color-mix(in srgb, var(--app-accent) 12%, transparent)' }}>
-                <DroneSVG airframe={v.airframe} size={96} />
-                <div>
-                    <h2 style={{ fontSize: 24, fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>{v.name}</h2>
-                    <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', margin: '4px 0 0' }}>
-                        {AIRFRAME_LABELS[v.airframe] ?? v.airframe} · {v.firmware.toUpperCase()}{v.frameId ? ` · Frame #${v.frameId}` : ''}
-                    </p>
-                </div>
-            </div>
             <G2>
                 <Card title="Identity">
-                    <Field label="VEHICLE NAME">
+                    <Field label="Vehicle name">
                         <AppInput value={v.name} onChange={name => onUpdate({ name })} placeholder="My Drone" />
                     </Field>
-                    <Field label="CUSTOM FRAME ID" tip="PX4: SYS_AUTOSTART (e.g. 4302). ArduPilot: FRAME_TYPE.">
+                    <Field label="Custom frame ID" tip="PX4: SYS_AUTOSTART (e.g. 4302). ArduPilot: FRAME_TYPE.">
                         <AppInput value={v.frameId} onChange={frameId => onUpdate({ frameId })} placeholder="e.g. 4302" />
                     </Field>
                 </Card>
                 <Card title="Hardware">
-                    <Field label="AIRFRAME TYPE">
+                    <Field label="Airframe type">
                         <AppSelect value={v.airframe} onChange={airframe => onUpdate({ airframe })} options={Object.entries(AIRFRAME_LABELS).map(([k, l]) => ({ value: k, label: l }))} />
                     </Field>
-                    <Field label="AUTOPILOT FIRMWARE">
+                    <Field label="Autopilot firmware">
                         <AppSelect value={v.firmware} onChange={firmware => onUpdate({ firmware })} options={[{ value: 'px4', label: 'PX4' }, { value: 'ardupilot', label: 'ArduPilot' }, { value: 'other', label: 'Other / Unknown' }]} />
                     </Field>
                 </Card>
@@ -946,8 +969,8 @@ function SectionHeader({ title, hint, right }: {
     title: string; hint?: string; right?: React.ReactNode
 }) {
     return (
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '2px 2px 0' }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', columnGap: 10, rowGap: 2, padding: '2px 2px 0' }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0, whiteSpace: 'nowrap' }}>
                 {title}
             </h3>
             {hint && (
@@ -984,7 +1007,7 @@ function SensorCard({ icon, title, status, statusText, value, sub }: {
     const c = STATUS_COLOUR[status]
     return (
         <div style={{
-            display: 'flex', flexDirection: 'column', gap: 8,
+            display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0,
             padding: '11px 12px', borderRadius: 10,
             background: 'hsl(var(--app-surface-2))',
             border: `1px solid ${status === 'off' ? 'hsl(var(--app-border))' : `${mix(c, 26)}`}`,
@@ -1051,9 +1074,9 @@ function CalCard({ sensor, verdict, connected, busy, isActive, phase, progress, 
         : verdict === false ? 'var(--app-warn)'
         : verdict === true ? 'var(--app-ok)'
         : null
-    const chip = running ? <StatusChip status="warn" text={`RUNNING · ${progress}%`} />
-        : verdict === false ? <StatusChip status="warn" text="NEEDS CAL" />
-        : verdict === true ? <StatusChip status="ok" text="CALIBRATED" />
+    const chip = running ? <StatusChip status="warn" text={`Running ${progress}%`} />
+        : verdict === false ? <StatusChip status="warn" text="Needs calibration" />
+        : verdict === true ? <StatusChip status="ok" text="Calibrated" />
         : null
     const clickable = connected && !busy
     return (
@@ -1157,12 +1180,12 @@ function rpyOf(v: number): Rpy | null {
 
 function rotationLabel(v: number | null): string {
     if (v === null) return '…'
-    if (v === -1) return 'AUTO'
+    if (v === -1) return 'Auto'
     const d = rpyOf(v)
     if (!d) return `#${v}`
     if (d.r === 0 && d.p === 0 && d.y === 0) return 'None (level, nose forward)'
     return [d.r ? `Roll ${d.r}°` : '', d.p ? `Pitch ${d.p}°` : '', d.y ? `Yaw ${d.y}°` : '']
-        .filter(Boolean).join(' · ')
+        .filter(Boolean).join(', ')
 }
 
 function MountOrientation({ connected }: { connected: boolean }) {
@@ -1223,13 +1246,13 @@ function MountOrientation({ connected }: { connected: boolean }) {
             // Shown but not written: the operator can finish assembling a
             // valid combination, or read why this one cannot exist.
             setDrafts(d => ({ ...d, [key]: next }))
-            setError(`PX4 defines no rotation for Roll ${next.r}° · Pitch ${next.p}° · Yaw ${next.y}° - adjust one axis`)
+            setError(`PX4 defines no rotation for roll ${next.r}°, pitch ${next.p}°, yaw ${next.y}°. Adjust one axis.`)
         }
     }
 
     const axisSelect = (key: string, shown: Rpy, axis: 'r' | 'p' | 'y', label: string, opts: number[], enabled: boolean) => (
         <label style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1, minWidth: 76 }}>
-            <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', letterSpacing: '0.04em' }}>{label}</span>
+            <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', fontWeight: 600 }}>{label}</span>
             <select
                 value={shown[axis]}
                 disabled={!enabled}
@@ -1267,8 +1290,8 @@ function MountOrientation({ connected }: { connected: boolean }) {
                 const shown: Rpy = drafts[pm.key] ?? (known && !isAuto ? rpyOf(v) : null) ?? { r: 0, p: 0, y: 0 }
                 return (
                     <div key={pm.key} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', letterSpacing: '0.06em' }}>
-                            {pm.label.toUpperCase()} <Tip text={pm.tip} />
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: 'hsl(var(--app-text-muted))' }}>
+                            {pm.label} <Tip text={pm.tip} />
                             <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: known ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))' }}>
                                 {connected ? (known ? rotationLabel(v) : 'reading…') : '-'}
                             </span>
@@ -1288,17 +1311,17 @@ function MountOrientation({ connected }: { connected: boolean }) {
                                         padding: '6px 10px', borderRadius: 6, marginBottom: 0,
                                         background: isAuto ? 'color-mix(in srgb, var(--app-accent) 14%, transparent)' : 'transparent',
                                         border: `1px solid ${isAuto ? 'color-mix(in srgb, var(--app-accent) 60%, transparent)' : 'hsl(var(--app-border))'}`,
-                                        color: isAuto ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))',
+                                        color: isAuto ? 'hsl(var(--app-text))' : 'hsl(var(--app-text-muted))',
                                         fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 700,
                                         cursor: enabled ? 'pointer' : 'not-allowed',
                                     }}
                                 >
-                                    AUTO
+                                    Auto
                                 </button>
                             )}
-                            {axisSelect(pm.key, shown, 'r', 'ROLL', ROLL_OPTS, enabled)}
-                            {axisSelect(pm.key, shown, 'p', 'PITCH', PITCH_OPTS, enabled)}
-                            {axisSelect(pm.key, shown, 'y', 'YAW', YAW_OPTS, enabled)}
+                            {axisSelect(pm.key, shown, 'r', 'Roll', ROLL_OPTS, enabled)}
+                            {axisSelect(pm.key, shown, 'p', 'Pitch', PITCH_OPTS, enabled)}
+                            {axisSelect(pm.key, shown, 'y', 'Yaw', YAW_OPTS, enabled)}
                         </div>
                     </div>
                 )
@@ -1320,7 +1343,7 @@ function MountOrientation({ connected }: { connected: boolean }) {
                         }}
                         title="Restarts the flight controller. Only works while disarmed - the link will drop and reconnect."
                     >
-                        REBOOT FC
+                        Reboot FC
                     </button>
                 </div>
             )}
@@ -1387,15 +1410,15 @@ function SensorsWorkspace() {
                     hint="live from the autopilot"
                     right={
                         <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: connected ? (healthyCount === 4 ? 'var(--app-ok)' : 'var(--app-warn)') : 'hsl(var(--app-text-muted))' }}>
-                            {connected ? `${healthyCount}/4 healthy` : 'not connected'}
+                            {connected ? `${healthyCount} of 4 healthy` : 'Not connected'}
                         </span>
                     }
                 />
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 168px), 1fr))', gap: 8 }}>
                     <SensorCard
                         icon={<Satellite size={14} />} title="GPS"
                         status={gpsStatus}
-                        statusText={!connected ? 'OFF' : GPS_FIX_LABEL[fix] ?? `Fix ${fix}`}
+                        statusText={!connected ? 'Off' : GPS_FIX_LABEL[fix] ?? `Fix ${fix}`}
                         value={connected ? `${sats} satellites` : '-'}
                         sub={connected && telemetry?.position && fix >= 2
                             ? `${telemetry.position.latitude_deg?.toFixed(5)}°, ${telemetry.position.longitude_deg?.toFixed(5)}°`
@@ -1404,7 +1427,7 @@ function SensorsWorkspace() {
                     <SensorCard
                         icon={<Activity size={14} />} title="IMU"
                         status={imuStatus}
-                        statusText={!connected ? 'OFF' : imuStatus === 'ok' ? 'OK' : health ? 'NEEDS CAL' : 'NO DATA'}
+                        statusText={!connected ? 'Off' : imuStatus === 'ok' ? 'OK' : health ? 'Needs calibration' : 'No data'}
                         value={connected && att
                             ? `R ${att.roll_deg?.toFixed(1)}°  P ${att.pitch_deg?.toFixed(1)}°`
                             : '-'}
@@ -1413,7 +1436,7 @@ function SensorsWorkspace() {
                     <SensorCard
                         icon={<CompassIcon size={14} />} title="Compass"
                         status={magStatus}
-                        statusText={!connected ? 'OFF' : magStatus === 'ok' ? 'OK' : 'NEEDS CAL'}
+                        statusText={!connected ? 'Off' : magStatus === 'ok' ? 'OK' : 'Needs calibration'}
                         value={connected && telemetry?.heading_deg != null
                             ? `${telemetry.heading_deg.toFixed(0)}° heading`
                             : '-'}
@@ -1422,7 +1445,7 @@ function SensorsWorkspace() {
                     <SensorCard
                         icon={<Mountain size={14} />} title="Barometer"
                         status={baroStatus}
-                        statusText={connected ? 'REPORTING' : 'OFF'}
+                        statusText={connected ? 'Reporting' : 'Off'}
                         value={connected && telemetry?.position
                             ? `${(telemetry.position.relative_altitude_m ?? 0).toFixed(1)} m AGL`
                             : '-'}
@@ -1528,16 +1551,16 @@ const STICK_LAYOUT: Record<string, { left: { x: string; y: string }; right: { x:
     '4': { left: { x: 'roll', y: 'throttle' }, right: { x: 'yaw', y: 'pitch' } },
 }
 
-const AXIS_SHORT: Record<string, string> = { roll: 'ROLL', pitch: 'PITCH', yaw: 'YAW', throttle: 'THR' }
+const AXIS_SHORT: Record<string, string> = { roll: 'Roll', pitch: 'Pitch', yaw: 'Yaw', throttle: 'Throttle' }
 
 /** Which mode slots a physical switch can actually reach. PX4 splits the
  *  channel into six equal bands; a 3-position switch lands in bands 1, 4
  *  and 6, a 2-position in 1 and 6. Slots a switch cannot reach are shown
  *  dimmed instead of silently accepting a mode that will never engage. */
 const SWITCH_REACH: Record<string, Record<number, string>> = {
-    '2': { 1: 'LOW', 6: 'HIGH' },
-    '3': { 1: 'LOW', 4: 'MID', 6: 'HIGH' },
-    '6': { 1: 'POS 1', 2: 'POS 2', 3: 'POS 3', 4: 'POS 4', 5: 'POS 5', 6: 'POS 6' },
+    '2': { 1: 'Low', 6: 'High' },
+    '3': { 1: 'Low', 4: 'Mid', 6: 'High' },
+    '6': { 1: 'Pos 1', 2: 'Pos 2', 3: 'Pos 3', 4: 'Pos 4', 5: 'Pos 5', 6: 'Pos 6' },
 }
 
 /** Which slot a channel value selects: PX4's six-band split. */
@@ -1712,7 +1735,7 @@ function RadioWorkspace() {
                     hint="as the autopilot sees it"
                     right={<StatusChip
                         status={!connected ? 'off' : rc?.available ? 'ok' : 'warn'}
-                        text={!connected ? 'OFF' : rc?.available ? `RECEIVER OK${rc.signal_pct > 0 ? ` · ${rc.signal_pct.toFixed(0)}%` : ''}` : rc?.was_available ? 'SIGNAL LOST' : 'NO RECEIVER'}
+                        text={!connected ? 'Off' : rc?.available ? `Receiver OK${rc.signal_pct > 0 ? `, ${rc.signal_pct.toFixed(0)}%` : ''}` : rc?.was_available ? 'Signal lost' : 'No receiver'}
                     />}
                 />
                 {/* The honest line about live channels. */}
@@ -1758,16 +1781,16 @@ function RadioWorkspace() {
                         unreachable slots dim; with live data the slot your
                         switch is on RIGHT NOW is ringed. */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', flex: 1, letterSpacing: '0.06em' }}>SWITCH TYPE</span>
+                        <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', flex: 1 }}>Switch type</span>
                         {['2', '3', '6'].map(t => (
                             <button key={t} onClick={() => { setSwitchType(t); lsSet('hyrak-rc-switch-type', t) }} style={{
-                                padding: '3px 9px', borderRadius: 6,
+                                padding: '0 10px', minHeight: 32, borderRadius: 6,
                                 background: switchType === t ? 'color-mix(in srgb, var(--app-accent) 14%, transparent)' : 'transparent',
-                                border: `1px solid ${switchType === t ? 'color-mix(in srgb, var(--app-accent) 60%, transparent)' : 'hsl(var(--app-border))'}`,
-                                color: switchType === t ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))',
+                                border: `1px solid ${switchType === t ? 'var(--app-accent)' : 'hsl(var(--app-border-strong))'}`,
+                                color: switchType === t ? 'hsl(var(--app-text))' : 'hsl(var(--app-text-muted))',
                                 fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 700, cursor: 'pointer',
                                 transition: 'border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out)',
-                            }}>{t}-POS</button>
+                            }}>{t}-pos</button>
                         ))}
                     </div>
                     {Array.from({ length: 6 }, (_, i) => {
@@ -1780,20 +1803,20 @@ function RadioWorkspace() {
                         return (
                             <div key={key} style={{
                                 display: 'flex', alignItems: 'center', gap: 10,
-                                opacity: reachable ? 1 : 0.6,
-                                transition: 'opacity var(--dur) var(--ease-out)',
                             }}>
+                                {/* Unreachable slots read as quiet, not faded:
+                                    muted ink on the panel still passes 4.5:1. */}
                                 <span style={{
                                     width: 24, height: 24, borderRadius: 6, flexShrink: 0,
                                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                                     fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 700,
-                                    background: isActive ? 'color-mix(in srgb, var(--app-ok) 16%, transparent)' : 'color-mix(in srgb, var(--app-accent) 10%, transparent)',
-                                    color: isActive ? 'var(--app-ok)' : 'var(--app-accent)',
-                                    border: `1px solid ${isActive ? 'var(--app-ok)' : 'color-mix(in srgb, var(--app-accent) 30%, transparent)'}`,
+                                    background: isActive ? 'var(--app-ok-soft)' : reachable ? 'hsl(var(--app-surface))' : 'transparent',
+                                    color: isActive ? 'hsl(var(--app-text))' : reachable ? 'hsl(var(--app-text))' : 'hsl(var(--app-text-muted))',
+                                    border: `1px ${reachable ? 'solid' : 'dashed'} ${isActive ? 'var(--app-ok)' : 'hsl(var(--app-border-strong))'}`,
                                     boxShadow: isActive ? '0 0 0 3px color-mix(in srgb, var(--app-ok) 15%, transparent)' : 'none',
                                     transition: 'background-color var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out), color var(--dur) var(--ease-out)',
                                 }}>{i + 1}</span>
-                                <span style={{ width: 42, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: isActive ? 'var(--app-ok)' : 'hsl(var(--app-text-muted))', letterSpacing: '0.04em', transition: 'color var(--dur) var(--ease-out)' }}>
+                                <span style={{ width: 42, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: isActive ? 'var(--app-ok)' : 'hsl(var(--app-text-muted))', transition: 'color var(--dur) var(--ease-out)' }}>
                                     {reachable ? posLabel : ''}
                                 </span>
                                 <select
@@ -1856,15 +1879,15 @@ function RadioWorkspace() {
                 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                         <span style={{ fontSize: 14, fontWeight: 700, color: 'hsl(var(--app-text))', flex: 1 }}>
-                            Transmitter {live && <span className="rc-pulse" style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--app-ok)', marginLeft: 6 }}>● LIVE</span>}
+                            Transmitter {live && <span className="rc-pulse" style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--app-ok)', marginLeft: 6 }}>Live</span>}
                         </span>
-                        <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>stick layout</span>
+                        <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>Stick layout</span>
                         {['1', '2', '3', '4'].map(m => (
                             <button key={m} onClick={() => { setVisualMode(m); lsSet('hyrak-rc-visual-mode', m) }} style={{
-                                width: 24, height: 24, borderRadius: 6, padding: 0,
+                                width: 32, height: 32, borderRadius: 6, padding: 0,
                                 background: visualMode === m ? 'color-mix(in srgb, var(--app-accent) 14%, transparent)' : 'transparent',
-                                border: `1px solid ${visualMode === m ? 'color-mix(in srgb, var(--app-accent) 60%, transparent)' : 'hsl(var(--app-border))'}`,
-                                color: visualMode === m ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))',
+                                border: `1px solid ${visualMode === m ? 'var(--app-accent)' : 'hsl(var(--app-border-strong))'}`,
+                                color: visualMode === m ? 'hsl(var(--app-text))' : 'hsl(var(--app-text-muted))',
                                 fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 700, cursor: 'pointer',
                             }}>{m}</button>
                         ))}
@@ -1889,7 +1912,7 @@ function RadioWorkspace() {
                                             <div style={{ height: '100%', width: `${pct}%`, background: 'var(--app-accent)', transition: 'width 80ms linear' }} />
                                         </div>
                                         <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>
-                                            {i + 1} · {v > 0 ? v : '-'}
+                                            Ch {i + 1}: {v > 0 ? v : '-'}
                                         </span>
                                     </div>
                                 )
@@ -1921,12 +1944,12 @@ function RadioWorkspace() {
                     {wiz === 'idle' && (
                         <>
                             <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', margin: 0, lineHeight: 1.6 }}>
-                                {!live ? 'Needs live channel data - see the RC LINK note on the left.'
+                                {!live ? 'Needs live channel data. See the RC link note.'
                                     : armed ? 'Refused while armed.'
                                     : 'Records your sticks\' real endpoints while you move them, then writes the result to the aircraft.'}
                             </p>
                             <button onClick={startCapture} disabled={!live || armed} style={wizBtn(live && !armed, 'var(--app-accent)')}>
-                                START CAPTURE
+                                Start capture
                             </button>
                         </>
                     )}
@@ -1939,18 +1962,18 @@ function RadioWorkspace() {
                                 Finish with everything centred and the throttle all the way DOWN - that final position becomes the trim - then press done.
                             </p>
                             <div style={{ display: 'flex', gap: 8 }}>
-                                <button onClick={finishCapture} style={wizBtn(true, 'var(--app-ok)')}>DONE - REVIEW</button>
-                                <button onClick={() => setWiz('idle')} style={wizBtn(true, 'var(--app-danger)')}>CANCEL</button>
+                                <button onClick={finishCapture} style={wizBtn(true, 'var(--app-ok)')}>Review capture</button>
+                                <button onClick={() => setWiz('idle')} style={wizBtn(true, 'var(--app-danger)')}>Cancel</button>
                             </div>
                         </>
                     )}
                     {(wiz === 'review' || wiz === 'writing' || wiz === 'done') && (
                         <>
                             <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr', gap: '3px 12px', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
-                                <span style={{ color: 'hsl(var(--app-text-muted))' }}>CH</span>
-                                <span style={{ color: 'hsl(var(--app-text-muted))' }}>MIN</span>
-                                <span style={{ color: 'hsl(var(--app-text-muted))' }}>TRIM</span>
-                                <span style={{ color: 'hsl(var(--app-text-muted))' }}>MAX</span>
+                                <span style={{ color: 'hsl(var(--app-text-muted))' }}>Ch</span>
+                                <span style={{ color: 'hsl(var(--app-text-muted))' }}>Min</span>
+                                <span style={{ color: 'hsl(var(--app-text-muted))' }}>Trim</span>
+                                <span style={{ color: 'hsl(var(--app-text-muted))' }}>Max</span>
                                 {calRows().map(r => (
                                     <React.Fragment key={r.ch}>
                                         <span style={{ color: 'var(--app-accent)', fontWeight: 700 }}>{r.ch}</span>
@@ -1969,10 +1992,10 @@ function RadioWorkspace() {
                                 <div style={{ display: 'flex', gap: 8 }}>
                                     <button onClick={writeCalibration} disabled={calRows().length === 0 || armed}
                                         style={wizBtn(calRows().length > 0 && !armed, 'var(--app-ok)')}>
-                                        WRITE TO AIRCRAFT
+                                        Write to aircraft
                                     </button>
-                                    <button onClick={startCapture} style={wizBtn(true, 'var(--app-warn)')}>RECAPTURE</button>
-                                    <button onClick={() => setWiz('idle')} style={wizBtn(true, 'var(--app-danger)')}>DISCARD</button>
+                                    <button onClick={startCapture} style={wizBtn(true, 'var(--app-warn)')}>Capture again</button>
+                                    <button onClick={() => setWiz('idle')} style={wizBtn(true, 'var(--app-danger)')}>Discard</button>
                                 </div>
                             )}
                             {wiz === 'writing' && (
@@ -1985,7 +2008,7 @@ function RadioWorkspace() {
                                     <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'var(--app-ok)', margin: 0, flex: 1 }}>
                                         Written. Verify on the bars above: full stick = full bar, centred = middle.
                                     </p>
-                                    <button onClick={() => setWiz('idle')} style={wizBtn(true, 'var(--app-accent)')}>DONE</button>
+                                    <button onClick={() => setWiz('idle')} style={wizBtn(true, 'var(--app-accent)')}>Done</button>
                                 </div>
                             )}
                         </>
@@ -2033,6 +2056,7 @@ function TransmitterSvg({ layout, axisValue, live, modeChannel, modeValue, switc
     switchType: string
     flightMode: string
 }) {
+    const [svgRef, px] = useSvgPx(420)
     const R = 30
     const stickOffset = (ax: { x: string; y: string }) => ({
         dx: axisValue(ax.x) * R,
@@ -2047,7 +2071,7 @@ function TransmitterSvg({ layout, axisValue, live, modeChannel, modeValue, switc
     const detent = slot === 0 ? 0
         : Math.round(((slot - 1) / 5) * (positions - 1))
     return (
-        <svg viewBox="0 0 420 240" style={{ width: '100%', height: 'auto', display: 'block' }}>
+        <svg ref={svgRef} viewBox="0 0 420 240" style={{ width: '100%', height: 'auto', display: 'block' }} role="img" aria-label="Transmitter stick layout">
             <defs>
                 <linearGradient id="tx-body" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0" stopColor="hsl(var(--app-surface))" />
@@ -2080,9 +2104,9 @@ function TransmitterSvg({ layout, axisValue, live, modeChannel, modeValue, switc
                 (CSS transition), so flipping the real switch visibly clicks
                 through LOW / MID / HIGH on screen. */}
             <g>
-                <text x={318} y={20} textAnchor="middle" fontSize={9} fontFamily="inherit"
+                <text x={318} y={20} textAnchor="middle" fontSize={px(12)} fontFamily="inherit"
                     fill={modeChannel > 0 ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))'}>
-                    MODE{modeChannel > 0 ? ` CH${modeChannel}` : ' (unassigned)'}
+                    {modeChannel > 0 ? `Mode ch${modeChannel}` : 'Mode (unassigned)'}
                 </text>
                 <rect x={288} y={26} width={60} height={16} rx={6}
                     fill={modeChannel > 0 ? 'color-mix(in srgb, var(--app-accent) 10%, transparent)' : 'hsl(var(--app-surface))'}
@@ -2113,21 +2137,22 @@ function TransmitterSvg({ layout, axisValue, live, modeChannel, modeValue, switc
                         <circle r={6} fill="hsl(var(--app-surface))" />
                         <circle cx={-3} cy={-3.5} r={2.2} fill="hsl(var(--app-text-muted))" />
                     </g>
-                    <text x={cx} y={190} textAnchor="middle" fontSize={9} fontFamily="inherit" fill="hsl(var(--app-text-muted))">
-                        {AXIS_SHORT[ax.y]} ↑↓ · {AXIS_SHORT[ax.x]} ←→
+                    <text x={cx} y={192} textAnchor="middle" fontSize={px(12)} fontFamily="inherit" fill="hsl(var(--app-text-muted))">
+                        <tspan x={cx}>{AXIS_SHORT[ax.y]} ↕</tspan>
+                        <tspan x={cx} dy={px(12) * 1.2}>{AXIS_SHORT[ax.x]} ↔</tspan>
                     </text>
                 </g>
             ))}
             {/* screen: the mode the AIRCRAFT reports, which is the whole
                 point of a mode switch */}
             <rect x={178} y={96} width={64} height={34} rx={6} fill="hsl(var(--app-bg))" stroke="hsl(var(--app-border))" strokeWidth={1.2} />
-            <text x={210} y={110} textAnchor="middle" fontSize={9} fontFamily="inherit"
+            <text x={210} y={110} textAnchor="middle" fontSize={px(12)} fontFamily="inherit"
                 fill={live ? 'var(--app-ok)' : 'hsl(var(--app-text-muted))'}>
-                {live ? 'RC LIVE' : 'NO RX'}
+                {live ? 'RC live' : 'No RC'}
             </text>
-            <text x={210} y={123} textAnchor="middle" fontSize={10} fontFamily="inherit" fontWeight="700"
+            <text x={210} y={123} textAnchor="middle" fontSize={px(13)} fontFamily="inherit" fontWeight="700"
                 fill={flightMode !== 'NO LINK' ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))'}>
-                {flightMode.slice(0, 9)}
+                {flightMode === 'NO LINK' ? 'No link' : flightMode.slice(0, 9)}
             </text>
         </svg>
     )
@@ -2156,11 +2181,12 @@ function PowerWorkspace({ p, onUpdate }: { p: PowerProfile; onUpdate: (patch: Pa
                             { label: 'Full charge', val: `${fullV} V` },
                             { label: 'Nominal',     val: `${nomV} V` },
                             { label: 'Min safe',    val: `${minV} V` },
+                            ...(totalV ? [{ label: 'Per cell', val: `${(totalV / n).toFixed(2)} V` }] : []),
                             ...(totalV ? [{ label: 'Live voltage', val: `${totalV.toFixed(2)} V` }] : []),
                         ].map(r => (
                             <div key={r.label} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', width: 80 }}>{r.label}</span>
-                                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: r.label === 'Live voltage' ? 'var(--app-ok)' : 'hsl(var(--app-text))' }}>{r.val}</span>
+                                <span style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', width: 92 }}>{r.label}</span>
+                                <span style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: r.label === 'Live voltage' ? 'var(--app-ok)' : 'hsl(var(--app-text))' }}>{r.val}</span>
                             </div>
                         ))}
                     </div>
@@ -2169,13 +2195,13 @@ function PowerWorkspace({ p, onUpdate }: { p: PowerProfile; onUpdate: (patch: Pa
 
             <G2>
                 <Card title="Pack config">
-                    <Field label="CELL COUNT (S)">
-                        <AppSelect value={p.cells} onChange={cells => onUpdate({ cells })} options={['2','3','4','5','6','8','10','12'].map(v => ({ value: v, label: `${v}S  ·  ${(+v*4.2).toFixed(1)}V full` }))} />
+                    <Field label="Cell count (S)">
+                        <AppSelect value={p.cells} onChange={cells => onUpdate({ cells })} options={['2','3','4','5','6','8','10','12'].map(v => ({ value: v, label: `${v}S, ${(+v*4.2).toFixed(1)} V full` }))} />
                     </Field>
-                    <Field label="CAPACITY (mAh)">
+                    <Field label="Capacity (mAh)">
                         <AppInput value={p.capacity} onChange={capacity => onUpdate({ capacity })} placeholder="5000" />
                     </Field>
-                    <Field label="CRITICAL ACTION" tip="What autopilot does at critical battery level.">
+                    <Field label="Critical action" tip="What autopilot does at critical battery level.">
                         <AppSelect value={p.critAction} onChange={critAction => onUpdate({ critAction })} options={[
                             { value: 'warn',   label: 'Warning only - pilot decides' },
                             { value: 'land',   label: 'Land immediately' },
@@ -2192,14 +2218,14 @@ function PowerWorkspace({ p, onUpdate }: { p: PowerProfile; onUpdate: (patch: Pa
                     <Card title="Thresholds">
                         <div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                                <Label text={`WARNING - ${p.warnPct}%`} tip="Triggers a warning alert. Fly home well before this." />
+                                <Label text="Warning level" tip="Triggers a warning alert. Fly home well before this." />
                                 <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--app-warn)' }}>{p.warnPct}%</span>
                             </div>
                             <input type="range" min={10} max={40} step={5} value={p.warnPct} onChange={e => onUpdate({ warnPct: +e.target.value })} style={{ width: '100%', accentColor: 'var(--app-warn)' }} />
                         </div>
                         <div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                                <Label text={`CRITICAL - ${p.critPct}%`} tip="Triggers the action below." />
+                                <Label text="Critical level" tip="Triggers the action below." />
                                 <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--app-danger)' }}>{p.critPct}%</span>
                             </div>
                             <input type="range" min={5} max={20} step={1} value={p.critPct} onChange={e => onUpdate({ critPct: +e.target.value })} style={{ width: '100%', accentColor: 'var(--app-danger)' }} />
@@ -2218,7 +2244,7 @@ function LimitRow({ label, tip, value, unit, toggle }: { label: string; tip?: st
     return (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'hsl(var(--app-text-muted))' }}>{label}</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'hsl(var(--app-text-muted))' }}>{label}</span>
                 {tip && <Tip text={tip} />}
             </div>
             <span style={{ fontSize: 16, fontWeight: 700, color: 'hsl(var(--app-text))', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
@@ -2306,48 +2332,50 @@ function SafetyWorkspace({ s, onUpdate }: { s: SafetyProfile; onUpdate: (p: Part
 function FlightWorkspace({ f, onUpdate, rthAlt, maxAlt, maxAltEnabled }: { f: FlightProfile; onUpdate: (p: Partial<FlightProfile>) => void; rthAlt: number; maxAlt: number; maxAltEnabled: boolean }) {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <Panel title="Altitude profile, side view" accent="var(--app-ok)">
-                <AltitudeProfile takeoffAlt={f.takeoffAlt} rthAlt={rthAlt} maxAlt={maxAlt} maxAltEnabled={maxAltEnabled} />
-                <div style={{ display: 'flex', gap: 16 }}>
-                    {[
-                        { color: 'var(--app-ok)', label: `Takeoff - ${f.takeoffAlt}m` },
-                        { color: 'var(--app-accent)', label: `RTH altitude - ${rthAlt}m` },
-                        ...(maxAltEnabled ? [{ color: 'var(--app-danger)', label: `Max altitude - ${maxAlt}m` }] : []),
-                    ].map(l => (
-                        <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <div style={{ width: 16, height: 2, background: l.color }} />
-                            <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>{l.label}</span>
-                        </div>
-                    ))}
-                </div>
-            </Panel>
             <G2>
+                <Panel title="Altitude profile, side view" accent="var(--app-ok)">
+                    <AltitudeProfile takeoffAlt={f.takeoffAlt} rthAlt={rthAlt} maxAlt={maxAlt} maxAltEnabled={maxAltEnabled} />
+                    <div style={{ display: 'flex', gap: '6px 16px', flexWrap: 'wrap' }}>
+                        {[
+                            { color: 'var(--app-ok)', label: `Takeoff ${f.takeoffAlt} m` },
+                            { color: 'var(--app-accent)', label: `Return altitude ${rthAlt} m` },
+                            ...(maxAltEnabled ? [{ color: 'var(--app-danger)', label: `Max altitude ${maxAlt} m` }] : []),
+                        ].map(l => (
+                            <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <div style={{ width: 16, height: 2, background: l.color }} />
+                                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>{l.label}</span>
+                            </div>
+                        ))}
+                    </div>
+                </Panel>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <Card title="Altitude defaults">
                     <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                            <Label text="DEFAULT TAKEOFF" tip="Height for automated takeoff commands." />
+                            <Label text="Default takeoff" tip="Height for automated takeoff commands." />
                             <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--app-ok)' }}>{f.takeoffAlt} m</span>
                         </div>
                         <input type="range" min={2} max={50} step={1} value={f.takeoffAlt} onChange={e => onUpdate({ takeoffAlt: +e.target.value })} style={{ width: '100%', accentColor: 'var(--app-ok)' }} />
                     </div>
                     <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                            <Label text="LOITER RADIUS" tip="Circle radius in loiter/hold. Mostly for fixed-wing." />
+                            <Label text="Loiter radius" tip="Circle radius in loiter/hold. Mostly for fixed-wing." />
                             <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--app-accent)' }}>{f.loiterRadius} m</span>
                         </div>
                         <input type="range" min={10} max={200} step={10} value={f.loiterRadius} onChange={e => onUpdate({ loiterRadius: +e.target.value })} style={{ width: '100%', accentColor: 'var(--app-accent)' }} />
                     </div>
                 </Card>
                 <Card title="Return to home">
-                    <Field label="RTH MODE" tip="What the drone does when RTL triggers.">
+                    <Field label="Return mode" tip="What the drone does when RTL triggers.">
                         <AppSelect value={f.rthMode} onChange={rthMode => onUpdate({ rthMode })} options={[
                             { value: 'ascend',  label: 'Climb to RTH alt → fly home → land' },
                             { value: 'current', label: 'Fly home at current altitude → land' },
                             { value: 'mission', label: 'Finish waypoint → return' },
                         ]} />
                     </Field>
-                    <LockedNote text="Flight parameters saved locally - autopilot upload in a future update" />
+                    <LockedNote text="Saved on this device only. Sending these to the autopilot comes in a later update." />
                 </Card>
+                </div>
             </G2>
         </div>
     )
@@ -2436,7 +2464,7 @@ function ParamCard({ p, currentVal, catColor, isSearching, onSet, onRevert }: {
                             </span>
                         )}
                         <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', padding: '1px 5px', borderRadius: 6, background: `${mix(catColor, 8)}`, color: catColor }}>
-                            {p.type.toUpperCase()}
+                            {p.type}
                         </span>
                     </div>
                 </div>
@@ -2452,7 +2480,7 @@ function ParamCard({ p, currentVal, catColor, isSearching, onSet, onRevert }: {
                     </div>
                 )}
                 {p.type === 'enum' && p.opts && (
-                    <select value={currentVal} onChange={e => onSet(p.key, +e.target.value)} style={{ width: '100%', padding: '8px 10px', borderRadius: 6, background: 'hsl(var(--app-surface-2))', border: `1px solid ${mix(catColor, 16)}`, color: 'hsl(var(--app-text))', fontSize: 13, fontVariantNumeric: 'tabular-nums', cursor: 'pointer', outline: 'none' }}>
+                    <select value={currentVal} onChange={e => onSet(p.key, +e.target.value)} style={{ width: '100%', padding: '8px 10px', borderRadius: 6, background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border-strong))', color: 'hsl(var(--app-text))', fontSize: 13, fontVariantNumeric: 'tabular-nums', cursor: 'pointer', outline: 'none' }}>
                         {p.opts.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
                     </select>
                 )}
@@ -2545,12 +2573,12 @@ function LiveParamCard({ dp, localVal, pending, lastOk, expert, originalVal, onS
                             {modified  && <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--app-warn)', flexShrink: 0 }} />}
                             {pending   && <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'light-dark(#1d4ed8, #60a5fa)', flexShrink: 0 }} />}
                         </div>
-                        <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: accentColor, letterSpacing: '0.02em' }}>{dp.key}</span>
+                        <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }} className="font-code">{dp.key}</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, marginTop: 1 }}>
                         {lastOk === true  && !pending && <span style={{ fontSize: 12, color: 'var(--app-ok)' }}>✓</span>}
                         {lastOk === false && !pending && <AlertTriangle size={10} style={{ color: 'var(--app-danger)' }} />}
-                        {isExpert && <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', padding: '1px 5px', borderRadius: 6, background: 'color-mix(in srgb, var(--app-warn) 10%, transparent)', color: 'var(--app-warn)', letterSpacing: '0.04em' }}>EXPERT</span>}
+                        {isExpert && <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', padding: '1px 5px', borderRadius: 6, background: 'color-mix(in srgb, var(--app-warn) 10%, transparent)', color: 'var(--app-warn)' }}>Expert</span>}
                     </div>
                 </div>
                 {meta?.desc && (
@@ -2584,7 +2612,7 @@ function LiveParamCard({ dp, localVal, pending, lastOk, expert, originalVal, onS
                 {/* 3+ option enum → dropdown */}
                 {hasOpts && !isTwoOpt && (
                     <select value={val} onChange={e => onSet(dp.key, +e.target.value, dp.paramType)}
-                        style={{ width: '100%', padding: '7px 10px', borderRadius: 6, background: 'hsl(var(--app-surface-2))', border: `1px solid ${mix(accentColor, 19)}`, color: 'hsl(var(--app-text))', fontSize: 12, cursor: 'pointer', outline: 'none' }}>
+                        style={{ width: '100%', padding: '7px 10px', borderRadius: 6, background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border-strong))', color: 'hsl(var(--app-text))', fontSize: 13, cursor: 'pointer', outline: 'none' }}>
                         {optEntries.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                     </select>
                 )}
@@ -2604,7 +2632,7 @@ function LiveParamCard({ dp, localVal, pending, lastOk, expert, originalVal, onS
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <input type="number" value={localVal ?? dp.liveValue} step={isIntType ? 1 : 'any'}
                             onChange={e => { const n = +e.target.value; if (!isNaN(n)) onSet(dp.key, n, dp.paramType) }}
-                            style={{ flex: 1, padding: '7px 10px', borderRadius: 6, background: 'hsl(var(--app-surface-2))', border: `1px solid ${mix(accentColor, 19)}`, color: 'hsl(var(--app-text))', fontSize: 12, fontVariantNumeric: 'tabular-nums', outline: 'none' }} />
+                            style={{ flex: 1, padding: '7px 10px', borderRadius: 6, background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border-strong))', color: 'hsl(var(--app-text))', fontSize: 13, fontVariantNumeric: 'tabular-nums', outline: 'none' }} />
                         {meta?.unit && <span style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))' }}>{meta.unit}</span>}
                     </div>
                 )}
@@ -2612,7 +2640,7 @@ function LiveParamCard({ dp, localVal, pending, lastOk, expert, originalVal, onS
                     <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>
                         drone: {dp.liveValue}{meta?.unit ? ` ${meta.unit}` : ''}
                         {originalVal !== undefined && originalVal !== dp.liveValue
-                            ? ` · was: ${isIntType ? Math.round(originalVal) : Number(originalVal.toFixed(4))}${meta?.unit ? ` ${meta.unit}` : ''}`
+                            ? `, was ${isIntType ? Math.round(originalVal) : Number(originalVal.toFixed(4))}${meta?.unit ? ` ${meta.unit}` : ''}`
                             : ''}
                     </span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -2880,17 +2908,15 @@ function ParametersWorkspace() {
                     <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'hsl(var(--app-text-muted))', pointerEvents: 'none' }} />
                     {liveParams
                         ? <input value={query} onChange={e => setQuery(e.target.value)} placeholder={`Search all ${displayParams.length} parameters…`}
-                            style={{ width: '100%', padding: '10px 12px 10px 36px', borderRadius: 6, background: 'hsl(var(--app-surface))', border: '1.5px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
-                            onFocus={e => { (e.target as HTMLInputElement).style.borderColor = 'hsl(var(--app-border-strong))' }}
-                            onBlur={e =>  { (e.target as HTMLInputElement).style.borderColor = 'hsl(var(--app-border))' }} />
+                            aria-label="Search parameters" className={FOCUS_RING}
+                            style={{ ...INPUT_STYLE(), height: 40, paddingLeft: 36 }} />
                         : <input value={demoQuery} onChange={e => setDemoQuery(e.target.value)} placeholder="Search demo parameters - connect drone to see live values…"
-                            style={{ width: '100%', padding: '10px 12px 10px 36px', borderRadius: 6, background: 'hsl(var(--app-surface))', border: '1.5px solid hsl(var(--app-border))', color: 'hsl(var(--app-text))', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
-                            onFocus={e => { (e.target as HTMLInputElement).style.borderColor = 'hsl(var(--app-border-strong))' }}
-                            onBlur={e =>  { (e.target as HTMLInputElement).style.borderColor = 'hsl(var(--app-border))' }} />
+                            aria-label="Search parameters" className={FOCUS_RING}
+                            style={{ ...INPUT_STYLE(), height: 40, paddingLeft: 36 }} />
                     }
                 </div>
                 <button onClick={() => liveParams ? setExpert(e => !e) : setDemoExpert(e => !e)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 13px', borderRadius: 6, border: `1.5px solid ${isExpertOn ? 'var(--app-warn)' : 'hsl(var(--app-border))'}`, background: isExpertOn ? 'color-mix(in srgb, var(--app-warn) 10%, transparent)' : 'hsl(var(--app-surface))', color: isExpertOn ? 'var(--app-warn)' : 'hsl(var(--app-text-muted))', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', fontWeight: isExpertOn ? 600 : 400 }}>
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 13px', borderRadius: 6, border: `1px solid ${isExpertOn ? 'var(--app-warn)' : 'hsl(var(--app-border-strong))'}`, background: isExpertOn ? 'color-mix(in srgb, var(--app-warn) 10%, transparent)' : 'hsl(var(--app-surface))', color: isExpertOn ? 'var(--app-warn)' : 'hsl(var(--app-text-muted))', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', fontWeight: isExpertOn ? 600 : 400 }}>
                     <Zap size={12} />{isExpertOn ? 'Expert on' : 'Beginner'}
                 </button>
                 {(originalModCount > 0 || modifiedCount > 0) && liveParams && (
@@ -2906,12 +2932,12 @@ function ParametersWorkspace() {
                     </>
                 )}
                 {liveParams
-                    ? <button onClick={fetchParams} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 13px', borderRadius: 6, border: '1px solid hsl(var(--app-border))', background: 'hsl(var(--app-surface))', color: 'hsl(var(--app-text-muted))', fontSize: 13, cursor: 'pointer' }}>
+                    ? <button onClick={fetchParams} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 13px', borderRadius: 6, border: '1px solid hsl(var(--app-border-strong))', background: 'hsl(var(--app-surface))', color: 'hsl(var(--app-text-muted))', fontSize: 13, cursor: 'pointer' }}>
                         <RotateCcw size={12} /> Refresh
                       </button>
                     : connected && !loading
                     ? <button onClick={fetchParams} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 15px', borderRadius: 6, border: '1.5px solid color-mix(in srgb, var(--app-ok) 35%, transparent)', background: 'color-mix(in srgb, var(--app-ok) 8%, transparent)', color: 'var(--app-ok)', fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>
-                        <Wifi size={12} /> Load from Drone
+                        <Wifi size={12} /> Load from drone
                       </button>
                     : null
                 }
@@ -2958,7 +2984,7 @@ function ParametersWorkspace() {
                     <div>
                         <p style={{ fontSize: 13, color: 'var(--app-accent)', margin: 0, fontWeight: 600 }}>Demo mode - example parameters only</p>
                         <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: '2px 0 0' }}>
-                            {connected ? 'Drone is connected - click "Load from Drone" to read real values' : 'Connect your drone, then click "Load from Drone" to browse and edit live parameters'}
+                            {connected ? 'Drone is connected. Select "Load from drone" to read real values.' : 'Connect your drone, then select "Load from drone" to browse and edit live parameters.'}
                         </p>
                     </div>
                 </div>
@@ -2970,8 +2996,7 @@ function ParametersWorkspace() {
                     <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--app-ok)', flexShrink: 0 }} />
                     <span style={{ fontSize: 12, color: 'var(--app-ok)', fontWeight: 600 }}>{displayParams.length} parameters from drone</span>
                     <span style={{ fontSize: 12, color: 'hsl(var(--app-text-muted))' }}>
-                        · {Object.keys(PX4_META).filter(k => liveParams[k]).length} with descriptions
-                        · {displayParams.filter(d => !d.meta).length} raw (no metadata)
+                        {Object.keys(PX4_META).filter(k => liveParams[k]).length} with descriptions, {displayParams.filter(d => !d.meta).length} without
                     </span>
                 </div>
             )}
@@ -3127,8 +3152,7 @@ export default function ConfigPage() {
     const terrainFollow = useMissionStore(s => s.terrainFollow)
     const fitted = useSessionAttachments()
 
-    const [view, setView]       = useState<'grid' | 'workspace'>('grid')
-    const [section, setSection] = useState<SectionId>('connection')
+    const [section, setSection] = useState<NavId>('overview')
     const [address, setAddress] = useState(() => ls('hyrak-mav-address', 'udpin://0.0.0.0:14540'))
 
     const [vehicle, setVehicle] = useState<VehicleProfile>(() => ls('hyrak-vehicle', { name: 'My Drone', airframe: 'quad-x', firmware: 'px4', frameId: '' }))
@@ -3170,9 +3194,11 @@ export default function ConfigPage() {
         attachments: null,
     }
     const readiness = connected ? Math.round((sensorOK / 4) * 100) : null
-    const tabs = DOMAIN_META
 
     // ── Two-finger swipe back interception ────────────────────────────────────
+    // Opening a section from the overview pushes a history entry, so the
+    // browser's back gesture returns to the overview instead of leaving.
+    const view = section === 'overview' ? 'grid' : 'workspace'
     const viewRef        = useRef(view)
     const navBackRef     = useRef(false)
     useEffect(() => { viewRef.current = view }, [view])
@@ -3186,68 +3212,97 @@ export default function ConfigPage() {
     useEffect(() => {
         const handle = () => {
             if (navBackRef.current) { navBackRef.current = false; return }
-            if (viewRef.current === 'workspace') setView('grid')
+            if (viewRef.current === 'workspace') setSection('overview')
         }
         window.addEventListener('popstate', handle)
         return () => window.removeEventListener('popstate', handle)
     }, [])
 
-    const goToGrid = useCallback(() => {
-        navBackRef.current = true
-        setView('grid')
-        if (window.history.state?.hyrakConfig) window.history.back()
+    const select = useCallback((id: NavId) => {
+        if (id === 'overview' && viewRef.current === 'workspace') {
+            navBackRef.current = true
+            setSection('overview')
+            if (window.history.state?.hyrakConfig) window.history.back()
+            return
+        }
+        setSection(id)
     }, [])
 
-    const openSection = (id: SectionId) => { setSection(id); setView('workspace') }
-    const inGrid = view === 'grid'
-    const meta = DOMAIN_META.find(d => d.id === section) ?? DOMAIN_META[0]
+    const navItems: { id: NavId; label: string; icon: React.ElementType }[] = [
+        { id: 'overview', label: 'Overview', icon: LayoutList },
+        ...DOMAIN_META.filter(d => d.id !== 'parameters'),
+        ...DOMAIN_META.filter(d => d.id === 'parameters'),
+    ]
+    const meta = section === 'overview'
+        ? { label: 'Overview', desc: 'Is the drone ready to fly? Open any line to change it.' }
+        : (DOMAIN_META.find(d => d.id === section) ?? DOMAIN_META[0])
+
+    const ACTION_WORD: Record<string, string> = { rtl: 'RTL', land: 'Land', hold: 'Hold', continue: 'Continue mission', warn: 'Warn only', disarm: 'Disarm' }
+    const attachmentsValue = !fitted.droneId ? 'Needs a drone' : fitted.attachments.length ? fitted.attachments.map(x => x.name).join(', ') : 'None fitted'
+    const rows: { id: SectionId; state: RowState; value: string; action?: string }[] = [
+        { id: 'vehicle',     state: 'ok', value: `${vehicle.name}, ${AIRFRAME_LABELS[vehicle.airframe] ?? vehicle.airframe}` },
+        { id: 'connection',  state: connected ? 'ok' : 'idle', value: connected ? 'Connected' : 'Not connected', action: connected ? undefined : 'Connect' },
+        { id: 'sensors',     state: !connected ? 'idle' : sensorOK === 4 ? 'ok' : 'warn', value: !connected ? 'Needs a drone' : `${sensorOK} of 4 healthy`, action: connected && sensorOK < 4 ? 'Calibrate' : undefined },
+        { id: 'radio',       state: 'ok', value: `Mode ${radio.rcMode}, ${radio.modes.length} modes set` },
+        { id: 'power',       state: 'ok', value: `${power.cells}S ${power.capacity} mAh, ${ACTION_WORD[power.critAction] ?? power.critAction} at ${power.critPct}%` },
+        { id: 'safety',      state: 'ok', value: `Link loss: ${ACTION_WORD[safety.signalLoss] ?? safety.signalLoss}, terrain ${terrainFollow ? 'on' : 'off'}` },
+        { id: 'flight',      state: 'ok', value: `Takeoff ${flight.takeoffAlt} m, return ${safety.rthAlt} m` },
+        { id: 'attachments', state: fitted.droneId ? 'ok' : 'idle', value: attachmentsValue },
+        { id: 'parameters',  state: 'none', value: `${PARAMS_DB.length} parameters`, action: 'Open' },
+    ]
 
     return (
         <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <VehicleBanner vehicle={vehicle} readiness={readiness} telStatus={telStatus ?? 'disconnected'} address={address} />
 
-            <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-                {/* ── Grid overview ──────────────────────────────────────── */}
-                <div style={{ position: 'absolute', inset: 0, overflowY: 'auto', padding: '16px clamp(12px, 3vw, 20px)', opacity: inGrid ? 1 : 0, transform: inGrid ? 'scale(1)' : 'scale(0.97)', transition: 'opacity var(--dur-slow) var(--ease-out), transform var(--dur-slow) var(--ease-out)', pointerEvents: inGrid ? 'auto' : 'none' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 240px), 1fr))', gap: 12 }}>
-                        {DOMAIN_META.map(d => (
-                            <DomainCard key={d.id} id={d.id} label={d.label} icon={d.icon}
-                                pct={domainPcts[d.id]} color={hColor(domainPcts[d.id] ?? 0)}
-                                metrics={
-                                    d.id === 'connection'  ? [{ k: 'Status', v: connected ? 'Connected' : 'Not connected' }, { k: 'Link', v: address.split('//')[1]?.split(':')[0] ?? '-' }]
-                                  : d.id === 'vehicle'     ? [{ k: 'Name', v: vehicle.name }, { k: 'Frame', v: AIRFRAME_LABELS[vehicle.airframe] ?? vehicle.airframe }]
-                                  : d.id === 'sensors'     ? [{ k: 'Health', v: connected ? `${sensorOK}/4 OK` : 'Connect a drone' }]
-                                  : d.id === 'radio'       ? [{ k: 'Sticks', v: `Mode ${radio.rcMode}` }, { k: 'Modes', v: `${radio.modes.length} set` }]
-                                  : d.id === 'power'       ? [{ k: 'Pack', v: `${power.cells}S · ${power.capacity} mAh` }, { k: 'Critical', v: `${power.critAction.toUpperCase()} @ ${power.critPct}%` }]
-                                  : d.id === 'safety'      ? [{ k: 'Terrain', v: terrainFollow ? 'Follow on' : 'Follow off' }, { k: 'Link loss', v: safety.signalLoss.toUpperCase() }]
-                                  : d.id === 'flight'      ? [{ k: 'Takeoff', v: `${flight.takeoffAlt} m` }, { k: 'Return', v: `${safety.rthAlt} m` }]
-                                  : d.id === 'attachments' ? [{ k: 'Fitted', v: !fitted.droneId ? 'Connect a drone' : fitted.attachments.length ? fitted.attachments.map(x => x.name).join(', ') : 'None' }]
-                                  : [{ k: 'Params', v: `${PARAMS_DB.length} available` }, { k: 'Groups', v: `${PARAM_CATS.length}` }]
-                                }
-                                onClick={() => openSection(d.id)} />
-                        ))}
-                    </div>
-                </div>
+            <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+                <SectionNav current={section} onSelect={select} items={navItems} />
 
-                {/* ── Workspace ──────────────────────────────────────────── */}
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', opacity: !inGrid ? 1 : 0, transform: !inGrid ? 'scale(1)' : 'scale(1.015)', transition: 'opacity var(--dur-slow) var(--ease-out), transform var(--dur-slow) var(--ease-out)', pointerEvents: !inGrid ? 'auto' : 'none' }}>
-                    <SectionTabBar current={section} onSelect={setSection} onBack={goToGrid} tabs={tabs} />
-                    <div role="tabpanel" style={{ flex: 1, overflowY: 'auto', padding: '24px clamp(12px, 3vw, 24px) 24px' }}>
-                        <SectionHead meta={meta} pct={domainPcts[section]} />
-                        {/* Parameter writes, calibration and reboots are
-                            commands: a workspace viewer reads this page only. */}
-                        <ViewOnlyFence>
-                        {section === 'connection' && <ConnectionWorkspace address={address} setAddress={v => { setAddress(v); lsSet('hyrak-mav-address', v) }} />}
-                        {section === 'vehicle'    && <VehicleWorkspace v={vehicle} onUpdate={upV} />}
-                        {section === 'sensors'    && <SensorsWorkspace />}
-                        {section === 'radio'      && <RadioWorkspace />}
-                        {section === 'power'      && <PowerWorkspace p={power} onUpdate={upP} />}
-                        {section === 'safety'     && <SafetyWorkspace s={safety} onUpdate={upS} />}
-                        {section === 'flight'     && <FlightWorkspace f={flight} onUpdate={upF} rthAlt={safety.rthAlt} maxAlt={safety.maxAlt} maxAltEnabled={safety.maxAltEnabled} />}
-                        {section === 'parameters' && <ParametersWorkspace />}
-                        </ViewOnlyFence>
-                        {/* Reads for everyone; owners and admins edit (the server says who). */}
-                        {section === 'attachments' && <AttachmentsSection />}
+                <div style={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>
+                    <div style={{ maxWidth: 1024, padding: '24px clamp(16px, 3vw, 32px) 40px' }}>
+                        {/* Phone width: the section list becomes a select. */}
+                        <label className="flex flex-col md:hidden" style={{ gap: 6, marginBottom: 20 }}>
+                            <span style={{ fontSize: 13, fontWeight: 600, color: 'hsl(var(--app-text-muted))' }}>Section</span>
+                            <select value={section} onChange={e => select(e.target.value as NavId)} className={FOCUS_RING} style={{ ...INPUT_STYLE(), height: 44, fontSize: 15, fontWeight: 600 }}>
+                                {navItems.map(n => <option key={n.id} value={n.id}>{n.label}</option>)}
+                            </select>
+                        </label>
+
+                        <div key={section} role="tabpanel" className="animate-in fade-in-0 slide-in-from-bottom-1 duration-200">
+                            <SectionHead meta={meta} pct={section === 'overview' ? null : domainPcts[section]} />
+
+                            {section === 'overview' && (
+                                <section aria-label="Readiness" style={{ borderRadius: 10, border: '1px solid hsl(var(--app-border))', background: 'hsl(var(--app-surface))', overflow: 'hidden' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', borderBottom: '1px solid hsl(var(--app-border))' }}>
+                                        <h3 style={{ fontSize: 14, fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0, flex: 1 }}>Readiness</h3>
+                                        {!connected && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'hsl(var(--app-text-muted))' }}><WifiOff size={14} aria-hidden /> Connect a drone to check sensors</span>}
+                                    </div>
+                                    <ul style={{ margin: 0, padding: 0 }} className="divide-y divide-app-border">
+                                        {rows.map(r => {
+                                            const d = DOMAIN_META.find(x => x.id === r.id)!
+                                            return <ReadinessRow key={r.id} label={d.label} icon={d.icon} state={r.state} value={r.value} action={r.action} onClick={() => select(r.id)} />
+                                        })}
+                                    </ul>
+                                </section>
+                            )}
+
+                            {/* Parameter writes, calibration and reboots are
+                                commands: a workspace viewer reads this page only. */}
+                            {section !== 'overview' && section !== 'attachments' && (
+                                <ViewOnlyFence>
+                                {section === 'connection' && <ConnectionWorkspace address={address} setAddress={v => { setAddress(v); lsSet('hyrak-mav-address', v) }} />}
+                                {section === 'vehicle'    && <VehicleWorkspace v={vehicle} onUpdate={upV} />}
+                                {section === 'sensors'    && <SensorsWorkspace />}
+                                {section === 'radio'      && <RadioWorkspace />}
+                                {section === 'power'      && <PowerWorkspace p={power} onUpdate={upP} />}
+                                {section === 'safety'     && <SafetyWorkspace s={safety} onUpdate={upS} />}
+                                {section === 'flight'     && <FlightWorkspace f={flight} onUpdate={upF} rthAlt={safety.rthAlt} maxAlt={safety.maxAlt} maxAltEnabled={safety.maxAltEnabled} />}
+                                {section === 'parameters' && <ParametersWorkspace />}
+                                </ViewOnlyFence>
+                            )}
+                            {/* Reads for everyone; owners and admins edit (the server says who). */}
+                            {section === 'attachments' && <AttachmentsSection />}
+                        </div>
                     </div>
                 </div>
             </div>

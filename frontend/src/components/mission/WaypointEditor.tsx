@@ -4,7 +4,7 @@ import { useMemo } from 'react'
 import { useMissionStore, RTL_SENTINEL_ID } from '@/store/mission'
 import { WP_META } from '@/types/mission'
 import type { WaypointType } from '@/types/mission'
-import { Trash2, X, Home, RotateCcw, Compass, MousePointerClick } from 'lucide-react'
+import { Trash2, ChevronLeft, Home, RotateCcw, Compass, MousePointerClick } from 'lucide-react'
 import { WaypointActions } from '@/components/attachments/WaypointActions'
 import { cn } from '@/lib/utils'
 import { FOCUS, LABEL, INPUT, BTN, BTN_DANGER } from '@/components/mission/ui'
@@ -90,27 +90,27 @@ function Coord({ label, value, step, onChange }: {
   )
 }
 
-/** Panel header: icon tile, title, close. */
+/** Editor header: back to the plan, then icon tile and title. */
 function Header({ badge, title, sub, onClose }: {
   badge: React.ReactNode; title: string; sub?: string; onClose: () => void
 }) {
   return (
-    <div className="flex items-center justify-between gap-2">
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        onClick={onClose}
+        className={cn('self-start inline-flex items-center gap-1 h-8 -ml-1 pl-1 pr-2.5 rounded-[6px] text-[13px] font-semibold text-app-text-muted hover:text-app-text hover:bg-app-surface-2', FOCUS)}
+        title="Back to the plan" aria-label="Back to the plan"
+      >
+        <ChevronLeft size={16} aria-hidden /> Plan
+      </button>
       <div className="flex items-center gap-2.5 min-w-0">
         {badge}
         <div className="min-w-0 leading-tight">
           <p className="text-[16px] font-bold text-app-text truncate">{title}</p>
-          {sub && <p className="text-xs text-app-text-muted truncate">{sub}</p>}
+          {sub && <p className="text-[13px] text-app-text-muted truncate">{sub}</p>}
         </div>
       </div>
-      <button
-        type="button"
-        onClick={onClose}
-        className={cn('w-8 h-8 shrink-0 flex items-center justify-center rounded-[6px] text-app-text-muted hover:text-app-text hover:bg-app-surface-2 transition-colors duration-[120ms]', FOCUS)}
-        title="Close" aria-label="Close"
-      >
-        <X size={16} aria-hidden />
-      </button>
     </div>
   )
 }

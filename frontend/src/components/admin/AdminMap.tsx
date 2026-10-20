@@ -86,6 +86,21 @@ function FitAll({ points, fitKey }: { points: [number, number][]; fitKey: number
     return null
 }
 
+// With no drone to show, open on the airspace zones instead of a whole
+// subcontinent: once, the first time zones arrive.
+function FitZones({ zones, skip }: { zones: ZoneFeature[]; skip: boolean }) {
+    const map = useMap()
+    const done = useRef(false)
+    useEffect(() => {
+        if (done.current || skip) return
+        const pts = zones.filter(z => z.properties.active).flatMap(z => zoneRings(z).flat()) as [number, number][]
+        if (pts.length < 2) return
+        done.current = true
+        map.fitBounds(L.latLngBounds(pts), { padding: [60, 60], maxZoom: 16 })
+    }, [zones, skip, map])
+    return null
+}
+
 // Flies to the selected drone whenever the selection changes.
 function FlyToSelected({ target }: { target: { lat: number; lng: number; approx: boolean } | null }) {
     const map = useMap()
@@ -119,7 +134,7 @@ export default function AdminMap({
         <div className="absolute inset-0">
             <MapContainer
                 center={[17.445, 78.349]}
-                zoom={5}
+                zoom={10}
                 className="w-full h-full"
                 zoomControl={false}
                 attributionControl={false}
@@ -130,6 +145,7 @@ export default function AdminMap({
                     maxZoom={layer.maxZoom}
                 />
                 <FitAll points={points} fitKey={fitKey} />
+                <FitZones zones={zones} skip={points.length > 0} />
                 <FlyToSelected
                     target={sel ? { lat: sel.lat, lng: sel.lng, approx: sel.approx } : null}
                 />

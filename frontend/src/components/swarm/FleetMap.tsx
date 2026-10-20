@@ -8,7 +8,7 @@ import 'leaflet/dist/leaflet.css'
 import { useSwarmStore } from '@/store/swarm'
 import { MAP_LAYERS } from '@/types/mission'
 import { Crosshair } from 'lucide-react'
-import { OVERLAY, FOCUS_OVERLAY } from '@/components/mission/ui'
+import { OVERLAY, OVERLAY_HOVER, FOCUS_OVERLAY } from '@/components/mission/ui'
 
 const TRAIL_LEN = 60   // positions kept per drone (~1 min at fleet rate)
 
@@ -85,9 +85,8 @@ export default function FleetMap() {
 
   if (points.length === 0) {
     return (
-      <div className="w-full h-full flex items-center justify-center rounded-xl border"
-        style={{ borderColor: 'hsl(var(--app-border))', background: 'hsl(var(--app-surface))' }}>
-        <p className="text-xs font-mono" style={{ color: 'hsl(var(--app-text-muted))' }}>
+      <div className="w-full h-full flex items-center justify-center rounded-[10px] border border-app-border bg-app-surface-2">
+        <p className="text-[13px] text-app-text-muted">
           Waiting for drone positions…
         </p>
       </div>
@@ -95,12 +94,12 @@ export default function FleetMap() {
   }
 
   return (
-    <div className="relative w-full h-full rounded-xl overflow-hidden border"
-      style={{ borderColor: 'hsl(var(--app-border))' }}>
+    <div className="relative w-full h-full rounded-[10px] overflow-hidden border border-app-border">
       <MapContainer
         center={points[0]}
         zoom={18}
         className="w-full h-full"
+        style={{ background: 'hsl(var(--app-surface-2))' }}
         zoomControl={false}
         attributionControl={false}
       >
@@ -136,13 +135,15 @@ export default function FleetMap() {
           <button
             key={d.id}
             onClick={() => setActiveDrone(d.id === activeDroneId ? null : d.id)}
-            className={`${OVERLAY} ${FOCUS_OVERLAY} inline-flex items-center gap-1.5 h-8 px-2.5 rounded-full text-xs font-bold tabular-nums`}
+            className={`${OVERLAY} ${FOCUS_OVERLAY} inline-flex items-center gap-1 h-8 px-2.5 rounded-full text-xs font-bold tabular-nums shadow-[var(--app-shadow)] ${OVERLAY_HOVER}`}
             style={d.id === activeDroneId ? { borderColor: d.color } : undefined}
             aria-pressed={d.id === activeDroneId}
             title={`Drone ${d.id}: tap to ${d.id === activeDroneId ? 'clear' : 'select'}`}
           >
             <span className="w-2 h-2 rounded-full shrink-0" style={{ background: d.color }} aria-hidden />
-            {d.id} · {(d.telemetry?.position?.relative_altitude_m ?? 0).toFixed(0)}
+            {d.id}
+            <span className="text-overlay-muted font-semibold">alt</span>
+            {(d.telemetry?.position?.relative_altitude_m ?? 0).toFixed(0)}
             <span className="text-overlay-muted font-semibold">m</span>
           </button>
         ))}
@@ -150,7 +151,7 @@ export default function FleetMap() {
 
       <button
         onClick={() => setFitKey(k => k + 1)}
-        className={`${OVERLAY} ${FOCUS_OVERLAY} absolute top-2 right-2 z-[1000] flex items-center gap-1.5 h-8 px-3 rounded-[6px] text-[13px] font-semibold`}
+        className={`${OVERLAY} ${FOCUS_OVERLAY} absolute top-2 right-2 z-[1000] flex items-center gap-1.5 h-8 px-3 rounded-[6px] text-[13px] font-semibold shadow-[var(--app-shadow)] ${OVERLAY_HOVER}`}
         title="Fit all drones in view"
       >
         <Crosshair size={14} aria-hidden />

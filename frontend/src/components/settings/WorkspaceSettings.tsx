@@ -12,10 +12,10 @@ import {
     KIND_LABELS, canTouchMember, grantableRoles, hasPerm, roleLabel, type MemberRole, type WorkspaceInfo,
 } from '@/lib/access'
 import {
-    absoluteUrl, addMember, copyText, createInvite, fmtWhen, isPendingInvite, listInvites, listMembers,
+    absoluteUrl, addMember, copyText, createInvite, isPendingInvite, listInvites, listMembers,
     personName, removeMember, revokeInvite, updateMember, type Invite, type Member,
 } from '@/lib/workspaces'
-import { Pill, PrefRow, S_FIELD_LABEL, S_INPUT, S_NOTE, SButton, Status } from '@/components/settings/primitives'
+import { fmtShort, Pill, PrefRow, S_FIELD_LABEL, S_INPUT, S_NOTE, SButton, Status } from '@/components/settings/primitives'
 
 function NoWorkspace() {
     return <p style={{ ...S_NOTE, padding: '10px 0' }}>You are not in a workspace yet. Ask for an invite link.</p>
@@ -140,8 +140,8 @@ export function MembersGroup() {
                     <PrefRow key={`${m.id}-${m.workspace_id}`}
                         label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                             {personName(m.user)}
-                            {self && <Pill tone="cyan">YOU</Pill>}
-                            {inherited && <Pill>VIA {wsName(m.inherited_from).toUpperCase()}</Pill>}
+                            {self && <Pill tone="cyan">You</Pill>}
+                            {inherited && <Pill>Via {wsName(m.inherited_from)}</Pill>}
                         </span>}
                         sub={[m.user.email || m.user.username, m.title].filter(Boolean).join(' - ')}
                         right={editable ? (
@@ -288,7 +288,7 @@ export function InvitesGroup() {
                                 <SButton tone="primary" onClick={copy}>Copy</SButton>
                             </div>
                             <p style={{ ...S_NOTE, marginTop: 5 }}>
-                                {copied || `Send it yourself. It works once${link.expires ? ` and expires ${fmtWhen(link.expires)}` : ''}. It is not shown again.`}
+                                {copied || `Send it yourself. It works once${link.expires ? ` and expires ${fmtShort(link.expires)}` : ''}. It is not shown again.`}
                             </p>
                         </div>
                     )}
@@ -304,9 +304,9 @@ export function InvitesGroup() {
                 <PrefRow key={i.id}
                     label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                         {i.email || 'Anyone with the link'}
-                        <Pill>{roleLabel(i.role, ws.kind).toUpperCase()}</Pill>
+                        <Pill>{roleLabel(i.role, ws.kind)}</Pill>
                     </span>}
-                    sub={[i.title, `Created ${fmtWhen(i.created_at)}`, `expires ${fmtWhen(i.expires_at)}`].filter(Boolean).join(' - ')}
+                    sub={[i.title, `Created ${fmtShort(i.created_at)}`, `expires ${fmtShort(i.expires_at)}`].filter(Boolean).join(', ')}
                     right={<SButton tone="danger" disabled={busy === i.id} onClick={() => void revoke(i)}>Revoke</SButton>} />
             ))}
             <Status error={error} ok={ok} />

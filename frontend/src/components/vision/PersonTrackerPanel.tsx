@@ -505,8 +505,8 @@ export function PersonTrackerPanel() {
                     border: `1px solid ${TONE[lockTone].border}`,
                     color: TONE[lockTone].fg,
                 }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                        {lockState}
+                    <span style={{ fontSize: 13, fontWeight: 700 }}>
+                        {lockState.charAt(0).toUpperCase() + lockState.slice(1)}
                     </span>
                     <span style={{ color: TEXT, minWidth: 0 }}>{lockMessage}</span>
                 </div>
@@ -694,7 +694,7 @@ export function PersonTrackerPanel() {
                                 The drone moves in or out to keep the person {Math.round(distanceRatio * 100)}% of the frame height. Each + is 6% closer.
                             </InfoTip>
                             <span style={{ ...NUM, marginLeft: 'auto', fontSize: 13, fontWeight: 700, color: TONE.accent.fg }}>
-                                {distanceLabel(distanceRatio)} · {Math.round(distanceRatio * 100)}%
+                                {distanceLabel(distanceRatio)} ({Math.round(distanceRatio * 100)}%)
                             </span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

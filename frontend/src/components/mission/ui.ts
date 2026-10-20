@@ -3,7 +3,8 @@
 // Two families:
 // - Panels, toolbars and dialogs follow the app theme (--app-* tokens).
 // - Anything drawn straight on map tiles (legends, chips, map buttons) uses
-//   the always-dark --overlay-* set, the same in both themes.
+//   the --overlay-* set: frosted paper in light, frosted night in the dark
+//   themes (docs/DESIGN_SYSTEM.md section 11).
 //
 // Never use inline hex colours for text on overlays: globals.css remaps a
 // set of hex colours in light mode, which is what turned "+ Pin hazard" into
@@ -13,13 +14,14 @@
 export const FOCUS =
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-accent'
 
-/** Focus ring for controls on map tiles (always-dark surfaces). */
+/** Focus ring for controls on map tiles (overlay surfaces). */
 export const FOCUS_OVERLAY =
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--overlay-accent)]'
 
-/** Floating panel on the map that follows the theme. */
+/** Floating panel on the map: the overlay surface (frosted paper in light,
+ *  frosted night in dark), so a map has one kind of chrome. */
 export const PANEL =
-  'rounded-[10px] border border-app-border bg-app-surface/95 text-app-text shadow-[var(--app-shadow)] backdrop-blur-md'
+  'rounded-[10px] border border-overlay-border bg-overlay-scrim text-app-text shadow-[var(--app-shadow)] backdrop-blur-md'
 
 /** Popover / menu that follows the theme. */
 export const POPOVER =
@@ -30,17 +32,28 @@ export const DIALOG =
   'rounded-[14px] border border-app-border bg-app-raised text-app-text shadow-[var(--app-shadow)]'
 
 /** Dialog backdrop. */
-export const BACKDROP = 'bg-black/60'
+export const BACKDROP = 'bg-[rgb(10_14_20/0.55)]'
 
-/** Always-dark chip or card drawn directly on map tiles. */
+/** Chip or card drawn directly on map tiles (follows the theme). */
 export const OVERLAY =
   'border border-overlay-border bg-overlay-scrim text-overlay-text backdrop-blur-[6px]'
+
+/** Hover for a control on an overlay surface. */
+export const OVERLAY_HOVER = 'hover:bg-overlay-text/10 hover:text-overlay-text'
+
+/** Option in an overlay toolbar (map view, base map, profile). */
+export const ovBtn = (active: boolean) =>
+  'inline-flex items-center justify-center gap-1.5 h-8 px-2.5 rounded-[6px] text-[13px] font-semibold whitespace-nowrap ' +
+  'transition-colors duration-[140ms] ' + FOCUS_OVERLAY + ' ' +
+  (active
+    ? 'bg-[color-mix(in_srgb,var(--overlay-accent)_16%,transparent)] text-[color:var(--overlay-accent)]'
+    : 'text-overlay-muted ' + OVERLAY_HOVER)
 
 /** Panel title (18px 700). */
 export const TITLE = 'text-[18px] leading-6 font-bold text-app-text'
 
-/** Section label (12px 700 uppercase, tracking <= 0.06em). */
-export const LABEL = 'text-xs font-bold uppercase tracking-[0.05em] text-app-text-muted'
+/** Section label (13px 600, sentence case, muted). */
+export const LABEL = 'text-[13px] font-semibold text-app-text-muted'
 
 /** Small count / fact chip. */
 export const CHIP =
@@ -48,7 +61,7 @@ export const CHIP =
 
 const BTN_BASE =
   'inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-[6px] text-[13px] font-semibold whitespace-nowrap select-none ' +
-  'transition-colors duration-[120ms] ease-[var(--ease-out)] ' + FOCUS +
+  'transition-colors duration-[140ms] ease-[var(--ease-out)] ' + FOCUS +
   ' disabled:cursor-not-allowed disabled:bg-app-surface-2 disabled:text-app-text-subtle disabled:border-dashed disabled:border-app-border'
 
 /** Neutral outline button. */

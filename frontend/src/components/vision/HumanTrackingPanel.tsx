@@ -308,7 +308,7 @@ export function HumanTrackingPanel() {
                                 The drone moves in or back so the person fills {Math.round(distanceRatio * 100)}% of the frame height. Each + is 6% closer.
                             </InfoTip>
                             <span style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 700, color: TEXT, ...NUM }}>
-                                {distanceLabel(distanceRatio)} · {Math.round(distanceRatio * 100)}%
+                                {distanceLabel(distanceRatio)} ({Math.round(distanceRatio * 100)}%)
                             </span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

@@ -9,6 +9,12 @@ import type { Waypoint } from '@/types/mission'
 import type * as CesiumNS from 'cesium'
 import { Map3DNavControls } from '@/components/mission/Map3DNavControls'
 import { bodyFont } from '@/components/mission/ui'
+import { useTheme } from '@/lib/theme'
+
+/** What shows past the horizon: the page colour in light mode, night in the dark themes. */
+function spaceColour(theme: string): string {
+  return theme === 'light' ? '#C9D6E3' : theme === 'midnight' ? '#0B0D11' : '#12171E'
+}
 
 // ── Bezier smooth-path ──────────────────────────────────────────────────────
 
@@ -225,6 +231,8 @@ export default function MissionMap3D({ readOnly = false, showNav = true, navStyl
 } = {}) {
   const readOnlyRef     = useRef(readOnly)
   readOnlyRef.current = readOnly
+  const { theme } = useTheme()
+  const themeRef        = useRef(theme)
   const containerRef    = useRef<HTMLDivElement>(null)
   const viewerRef       = useRef<CesiumNS.Viewer | null>(null)
   const CesiumRef       = useRef<typeof CesiumNS | null>(null)
@@ -275,6 +283,19 @@ export default function MissionMap3D({ readOnly = false, showNav = true, navStyl
   const [viewerReady, setViewerReady] = useState(false)
   // The viewer once built, for the on-screen controls.
   const [navViewer, setNavViewer] = useState<CesiumNS.Viewer | null>(null)
+
+  // Theme-following globe: daylight (no sun shading) in light mode, so the
+  // imagery is never a night globe on a light page; the dark themes keep
+  // the real sun. Only presentation: nothing else on the viewer changes.
+  useEffect(() => {
+    themeRef.current = theme
+    const viewer = viewerRef.current
+    const Cesium = CesiumRef.current
+    if (!viewer || !Cesium || viewer.isDestroyed()) return
+    viewer.scene.globe.enableLighting = theme !== 'light'
+    viewer.scene.backgroundColor = Cesium.Color.fromCssColorString(spaceColour(theme))
+    viewer.scene.requestRender()
+  }, [theme, viewerReady])
 
   const cameraMode          = useMissionStore(s => s.cameraMode)
   const rawWaypoints        = useMissionStore(s => s.waypoints)
@@ -411,7 +432,9 @@ export default function MissionMap3D({ readOnly = false, showNav = true, navStyl
         baseLayerPicker: false,
         fullscreenButton: false,
         geocoder: false,
-        homeButton: true,
+        // The stock grey home button is off: Map3DNavControls is the one
+        // control stack (compass, zoom, rotate, tilt).
+        homeButton: false,
         infoBox: false,
         sceneModePicker: false,
         selectionIndicator: false,
@@ -421,11 +444,13 @@ export default function MissionMap3D({ readOnly = false, showNav = true, navStyl
       })
 
       // Cleaner globe look
-      viewer.scene.globe.enableLighting = true
+      // Sun lighting follows the theme (see the theme effect below): daylight
+      // in light mode, the real sun position in the dark themes.
+      viewer.scene.globe.enableLighting = themeRef.current !== 'light'
       viewer.scene.fog.enabled = true
       viewer.scene.globe.showGroundAtmosphere = true
       if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = true
-      viewer.scene.backgroundColor = Cesium.Color.BLACK
+      viewer.scene.backgroundColor = Cesium.Color.fromCssColorString(spaceColour(themeRef.current))
 
       // Opening view: IITH from 3 km up instead of the whole globe, when
       // there is no plan to fly to yet (the plan / drone fly-to still runs).

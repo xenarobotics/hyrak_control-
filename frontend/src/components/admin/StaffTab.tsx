@@ -7,18 +7,19 @@
 // Account actions are founder-only by design (docs/ACCESS_MODEL.md section
 // 2): a customer admin must never be able to reset a staff password.
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { Fragment, useCallback, useEffect, useState, type FormEvent } from 'react'
 import dynamic from 'next/dynamic'
 import { Search } from 'lucide-react'
 import { useAccess } from '@/hooks/useAccess'
 import { platformOf, roleLabel, type GeoPolygon, type Membership, type WorkspaceInfo } from '@/lib/access'
 import {
-    absoluteUrl, addMember, fmtWhen, issueResetLink, listStaff, listUsers, listWorkspaces, personName,
+    absoluteUrl, addMember, issueResetLink, listStaff, listUsers, listWorkspaces, personName,
     removeMember, updateMember, updateUser, type AccountRow, type StaffAccount,
 } from '@/lib/workspaces'
 import { polygonFromPoints, type ZoneFeature } from '@/components/admin/zones'
 import type { Outline } from '@/components/admin/AreaMap'
-import { Btn, CopyLink, Empty, INPUT_CLS, LABEL_CLS, Notice, Section, Tag } from '@/components/admin/console'
+import { Btn, CopyLink, Empty, INPUT_CLS, LABEL_CLS, Notice, PageHead, Section, Tag, TH_CLS, TR_CLS } from '@/components/admin/console'
+import { fmtShort } from '@/components/settings/primitives'
 
 const AreaMap = dynamic(() => import('@/components/admin/AreaMap'), { ssr: false })
 
@@ -96,7 +97,7 @@ export default function StaffTab({ zones }: { zones: ZoneFeature[] }) {
             {resetLinks[a.id] && (
                 <div className="pt-1">
                     <CopyLink label="PASSWORD RESET LINK" url={resetLinks[a.id].url}
-                        note={`Single use${resetLinks[a.id].expires ? `, expires ${fmtWhen(resetLinks[a.id].expires)}` : ''}. Send it to ${personName(a)} yourself.`} />
+                        note={`Single use${resetLinks[a.id].expires ? `, expires ${fmtShort(resetLinks[a.id].expires)}` : ''}. Send it to ${personName(a)} yourself.`} />
                 </div>
             )}
             {note(`acct-${a.id}`)}
@@ -112,8 +113,9 @@ export default function StaffTab({ zones }: { zones: ZoneFeature[] }) {
     return (
         <div className="flex-1 flex flex-col lg:flex-row min-w-0 overflow-y-auto lg:overflow-hidden">
             <div className="flex-1 lg:overflow-y-auto">
-                <div className="max-w-3xl mx-auto p-5 space-y-4">
-                    <Section title={`Staff - ${staff?.length ?? 0}`}>
+                <div className="max-w-[960px] p-5 lg:px-8 lg:py-6 space-y-5">
+                    <PageHead title="Staff" sub="Founders, managers and airspace staff, and every account on the platform" />
+                    <Section title={`Staff (${staff?.length ?? 0})`}>
                         {staff === null && !errors.staff && <Empty>Loading staff…</Empty>}
                         {errors.staff && <div className="px-3 py-2"><Notice error={errors.staff} /></div>}
                         {staff?.length === 0 && <Empty>No staff accounts.</Empty>}
@@ -146,34 +148,60 @@ export default function StaffTab({ zones }: { zones: ZoneFeature[] }) {
                         </div>
                     </Section>
 
-                    <Section title={`All accounts - ${accounts?.length ?? 0}`}
+                    <Section title={`All accounts (${accounts?.length ?? 0})`}
                         right={
                             <span className="flex items-center gap-1.5 bg-app-surface-2 border border-app-border-strong rounded-md px-2 focus-within:border-app-accent">
                                 <Search size={14} className="text-app-text-muted" aria-hidden />
-                                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="search…"
+                                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search accounts"
                                     aria-label="Search accounts"
-                                    className="w-36 bg-transparent h-8 text-[13px] text-app-text outline-none placeholder:text-app-text-subtle normal-case tracking-normal" />
+                                    className="w-36 bg-transparent h-8 text-[13px] text-app-text outline-none placeholder:text-app-text-subtle " />
                             </span>
                         }>
                         {accounts === null && !errors.accounts && <Empty>Loading accounts…</Empty>}
                         {errors.accounts && <div className="px-3 py-2"><Notice error={errors.accounts} /></div>}
                         {accounts && shownAccounts.length === 0 && <Empty>{q ? 'No match.' : 'No accounts.'}</Empty>}
-                        <div className="divide-y divide-app-border">
-                            {shownAccounts.map(a => (
-                                <div key={a.id} className="px-3 py-2 min-h-11 flex flex-col justify-center space-y-1 text-[13px]">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="text-[14px] font-semibold text-app-text">{personName(a)}</span>
-                                        <span className="text-app-text-muted">{a.username}{a.email ? ` · ${a.email}` : ''}</span>
-                                        {a.is_founder && <Tag label="Founder" tone="cyan" icon={false} />}
-                                        {!a.is_founder && a.is_staff && <Tag label="Staff" tone="violet" icon={false} />}
-                                        {a.disabled && <Tag label="Disabled" tone="red" />}
-                                        <span className="text-app-text-muted tabular-nums" title="Last sign-in">signed in {fmtWhen(a.last_login_at)}</span>
-                                        <span className="ml-auto flex gap-2">{accountActions(a)}</span>
-                                    </div>
-                                    {accountExtras(a)}
-                                </div>
-                            ))}
-                        </div>
+                        {shownAccounts.length > 0 && (
+                            <div className="max-lg:overflow-x-auto">
+                                <table className="w-full border-collapse text-[13px]">
+                                    <thead className="sticky top-0 z-[1] bg-app-surface">
+                                        <tr className="border-b border-app-border">
+                                            <th className={TH_CLS}>Name</th>
+                                            <th className={TH_CLS}>Username and email</th>
+                                            <th className={TH_CLS}>Role</th>
+                                            <th className={TH_CLS}>Last sign-in</th>
+                                            <th className={TH_CLS}><span className="sr-only">Actions</span></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {shownAccounts.map(a => {
+                                            const extras = accountExtras(a)
+                                            return (
+                                                <Fragment key={a.id}>
+                                                    <tr className={TR_CLS}>
+                                                        <td className="px-3 py-2 text-[14px] font-semibold text-app-text">{personName(a)}</td>
+                                                        <td className="px-3 py-2 text-app-text-muted">
+                                                            <div>{a.username}</div>
+                                                            {a.email && <div className="break-all">{a.email}</div>}
+                                                        </td>
+                                                        <td className="px-3 py-2">
+                                                            <span className="flex flex-wrap gap-1.5">
+                                                                {a.is_founder ? <Tag label="Founder" tone="cyan" icon={false} />
+                                                                    : a.is_staff ? <Tag label="Staff" tone="violet" icon={false} />
+                                                                    : <span className="text-app-text-muted">-</span>}
+                                                                {a.disabled && <Tag label="Disabled" tone="red" />}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-3 py-2 whitespace-nowrap tabular-nums text-app-text-muted">{fmtShort(a.last_login_at)}</td>
+                                                        <td className="px-3 py-2"><span className="flex justify-end gap-2">{accountActions(a)}</span></td>
+                                                    </tr>
+                                                    {extras && <tr><td colSpan={5} className="px-3 pb-3">{extras}</td></tr>}
+                                                </Fragment>
+                                            )
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
                     </Section>
                 </div>
             </div>
@@ -263,7 +291,7 @@ function GrantPanel({ initialLogin, staff, workspaces, zones, onGranted }: {
                         <button key={k} type="button" onClick={() => { setKind(k); setError('') }}
                             aria-pressed={kind === k}
                             className={'flex-1 h-8 rounded-md border text-[13px] font-semibold transition-colors duration-[120ms] ' +
-                                (kind === k ? 'border-app-accent text-app-accent bg-app-accent-soft' : 'border-app-border-strong text-app-text-muted hover:border-app-text-subtle')}>
+                                (kind === k ? 'border-app-accent text-app-text font-bold bg-app-accent-soft' : 'border-app-border-strong text-app-text-muted hover:border-app-text-subtle')}>
                             {roleLabel(k)}
                         </button>
                     ))}
@@ -274,13 +302,13 @@ function GrantPanel({ initialLogin, staff, workspaces, zones, onGranted }: {
                         : 'Edits area zones and decides permits inside the drawn area. Cannot fly or see customer data.'}
                 </div>
                 <div>
-                    <label htmlFor="grant-login" className={LABEL_CLS}>ACCOUNT</label>
+                    <label htmlFor="grant-login" className={LABEL_CLS}>Account</label>
                     <input id="grant-login" value={login} onChange={e => setLogin(e.target.value)}
                         placeholder="email or username" autoCapitalize="none" spellCheck={false} className={`${INPUT_CLS} w-full`} />
                 </div>
                 {kind === 'manager' ? (
                     <div>
-                        <label htmlFor="grant-ws" className={LABEL_CLS}>WORKSPACE</label>
+                        <label htmlFor="grant-ws" className={LABEL_CLS}>Workspace</label>
                         <select id="grant-ws" value={wsId} onChange={e => setWsId(e.target.value)} className={`${INPUT_CLS} w-full`}>
                             <option value="">Pick a workspace</option>
                             {customers.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
@@ -290,13 +318,13 @@ function GrantPanel({ initialLogin, staff, workspaces, zones, onGranted }: {
                     <div className="text-[12px] text-app-text-muted">Held on {platform?.name ?? 'HYRAK'}.</div>
                 )}
                 <div>
-                    <label htmlFor="grant-title" className={LABEL_CLS}>TITLE</label>
+                    <label htmlFor="grant-title" className={LABEL_CLS}>Title</label>
                     <input id="grant-title" value={title} onChange={e => setTitle(e.target.value)}
                         placeholder={kind === 'manager' ? 'e.g. Service operator, IITH' : 'e.g. Airspace, Hyderabad west'}
                         className={`${INPUT_CLS} w-full`} />
                 </div>
                 <div className="flex items-center gap-2 text-[12px] font-bold text-app-text-muted">
-                    <span className="uppercase tracking-[0.04em]">Area</span>
+                    <span>Area</span>
                     <span className="font-normal">{kind === 'airspace' ? 'required' : 'optional'}, <span className="tabular-nums">{draft.length}</span> points</span>
                     <span className="ml-auto flex gap-1.5">
                         <Btn disabled={draft.length === 0} onClick={() => setDraft(p => p.slice(0, -1))}>Undo</Btn>
@@ -304,7 +332,7 @@ function GrantPanel({ initialLogin, staff, workspaces, zones, onGranted }: {
                     </span>
                 </div>
                 <Notice error={error} ok={ok} />
-                <Btn type="submit" tone="emerald" disabled={busy} className="w-full py-2">
+                <Btn type="submit" tone="primary" disabled={busy} className="w-full py-2">
                     {busy ? 'Granting…' : 'Grant'}
                 </Btn>
             </form>
@@ -312,7 +340,7 @@ function GrantPanel({ initialLogin, staff, workspaces, zones, onGranted }: {
                 <AreaMap outlines={outlines} zones={zones} draft={draft} draftColor="#f59e0b"
                     fitKey={target?.id ?? ''} onMapClick={(lat, lng) => setDraft(p => [...p, [lat, lng]])} />
                 <div className="absolute left-2 bottom-2 z-[1000] text-[12px] text-overlay-text bg-overlay-scrim border border-overlay-border rounded-md px-2 py-1 pointer-events-none">
-                    click the map to draw the area
+                    Click the map to draw the area
                 </div>
             </div>
         </section>

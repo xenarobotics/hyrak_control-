@@ -1,15 +1,15 @@
 'use client'
 
-// The AI tab's model library (Pattern 1, List / Index): heading, one line,
-// Browse models (everyone; opens the panel on All vision models) and Add
-// model (roles that can add; opens it on HYRAK's recommendations) in the
-// header; a filter (All, HYRAK models, Our models) and a
-// search in the toolbar; then one framed list of model cards. Each card has
-// an icon, a plain name, one line, a status chip and Run. Clicking a model
-// of ours (or a catalogue model) opens its detail slide-over.
+// The AI tab's model library: a compact list to pick from. Header: title,
+// Browse (everyone; opens the panel on All vision models) and Add (roles
+// that can add; opens it on HYRAK's recommendations); then search and a
+// filter (All, HYRAK, Ours); then one row per model: icon, name, one line,
+// a status chip only when it is not simply ready, and a details button for
+// models that have one. Pressing a row selects it; Run lives once, in the
+// live view, for the selected model.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, Compass, Eye, Play, Plus, Search, Square, Upload, Wand2, CheckCircle2 } from 'lucide-react'
+import { ChevronRight, Compass, Eye, Plus, Search, Square, Upload, Wand2, CheckCircle2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { LibraryEntry } from './useModelLibrary'
 import { css as s, StatusChip, Callout } from './ui'
@@ -18,8 +18,8 @@ export type LibraryFilter = 'all' | 'hyrak' | 'ours'
 
 const FILTERS: { value: LibraryFilter; label: string; short: string }[] = [
     { value: 'all', label: 'All', short: 'All' },
-    { value: 'hyrak', label: 'HYRAK models', short: 'HYRAK' },
-    { value: 'ours', label: 'Our models', short: 'Ours' },
+    { value: 'hyrak', label: 'HYRAK', short: 'HYRAK' },
+    { value: 'ours', label: 'Ours', short: 'Ours' },
 ]
 
 export interface LibraryProps {
@@ -33,14 +33,18 @@ export interface LibraryProps {
     canRun: boolean
     canManage: boolean
     premiumEnabled: boolean
-    onRun: (e: LibraryEntry) => void
+    /** The model the live view would run. */
+    selectedKey: string | null
+    onSelect: (e: LibraryEntry) => void
     onStop: () => void
     onAdd: () => void
     /** Open the panel on "All vision models". */
     onBrowse: () => void
     onOpen: (e: LibraryEntry) => void
-    /** Briefly highlight a card (just added). */
+    /** Briefly highlight a row (just added). */
     highlightKey?: string | null
+    /** Shown in a sheet (phones): no outer frame. */
+    bare?: boolean
 }
 
 export function ModelLibrary(p: LibraryProps) {
@@ -50,6 +54,7 @@ export function ModelLibrary(p: LibraryProps) {
 
     // "/" focuses search, as on every list in the product.
     useEffect(() => {
+        if (p.bare) return
         const key = (e: KeyboardEvent) => {
             const t = e.target as HTMLElement | null
             if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return
@@ -60,7 +65,7 @@ export function ModelLibrary(p: LibraryProps) {
         }
         window.addEventListener('keydown', key)
         return () => window.removeEventListener('keydown', key)
-    }, [])
+    }, [p.bare])
 
     const counts = useMemo(() => ({
         all: p.entries.length,
@@ -75,18 +80,19 @@ export function ModelLibrary(p: LibraryProps) {
     const ours = shown.filter(e => e.group === 'ours')
     const showAdd = p.canManage
 
-    const card = (e: LibraryEntry) => (
-        <ModelCard key={e.key} entry={e} running={p.runningMode === e.mode}
-            starting={p.startingMode === e.mode} canRun={p.canRun} canManage={p.canManage}
-            onRun={() => p.onRun(e)} onStop={p.onStop}
+    const row = (e: LibraryEntry) => (
+        <ModelRow key={e.key} entry={e} selected={p.selectedKey === e.key}
+            running={p.runningMode === e.mode} starting={p.startingMode === e.mode}
+            canRun={p.canRun} canManage={p.canManage}
+            onSelect={() => p.onSelect(e)} onStop={p.onStop}
             onOpen={e.model ? () => p.onOpen(e) : undefined}
             highlight={p.highlightKey === e.key} />
     )
 
     const oursBlock = (
         <>
-            {filter === 'all' && (ours.length > 0 || !q) && <p className={cn(s.label, s.groupLabel)}>Our models</p>}
-            {p.loading && ours.length === 0 ? <CardSkeleton /> : ours.map(card)}
+            {filter === 'all' && (ours.length > 0 || !q) && <h3 className={cn(s.label, s.groupLabel)}>Our models</h3>}
+            {p.loading && ours.length === 0 ? <RowSkeleton /> : ours.length > 0 && <ul className={s.rows}>{ours.map(row)}</ul>}
             {!p.loading && !p.loadError && ours.length === 0 && !q && (
                 <OursEmpty compact={filter === 'all'} canManage={p.canManage}
                     onAdd={p.onAdd} onBrowse={p.onBrowse} />
@@ -95,23 +101,19 @@ export function ModelLibrary(p: LibraryProps) {
     )
 
     return (
-        <section className={cn(s.panel, s.library)} aria-labelledby="cm-lib-title">
+        <section className={cn(!p.bare && s.panel, s.library, p.bare && s.libraryBare)} aria-labelledby={p.bare ? undefined : 'cm-lib-title'} aria-label={p.bare ? 'Models' : undefined}>
             <div className={s.libHead}>
                 <div className={s.libTitleRow}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                        <h2 id="cm-lib-title" className={s.title}>Models</h2>
-                        <p className={s.muted}>Press Run to watch the live video and mark what the model finds.</p>
-                    </div>
-                </div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    <button type="button" className={s.btn} onClick={p.onBrowse}
+                    {!p.bare && <h2 id="cm-lib-title" className={s.title} style={{ flex: 1, minWidth: 0 }}>Models</h2>}
+                    <button type="button" className={cn(s.btn, s.ghost)} onClick={p.onBrowse}
                         title="Every vision model on Hugging Face, most downloaded first">
-                        <Compass size={14} aria-hidden /> Browse models
+                        <Compass size={14} aria-hidden /> Browse
                     </button>
                     {showAdd && (
                         <button type="button" className={cn(s.btn, s.primary)} onClick={p.onAdd}
+                            aria-label="Add model"
                             title="Pick a model recommended for drones, browse Hugging Face, or upload your own">
-                            <Plus size={14} aria-hidden /> Add model
+                            <Plus size={14} aria-hidden /> Add
                         </button>
                     )}
                 </div>
@@ -121,24 +123,21 @@ export function ModelLibrary(p: LibraryProps) {
                         <span>View only. Your role in this workspace can see the models but not run them.</span>
                     </p>
                 )}
-                <div className={s.toolbar}>
-                    <div className={s.segment} role="group" aria-label="Show">
-                        {FILTERS.map(f => (
-                            <button key={f.value} type="button" aria-pressed={filter === f.value}
-                                aria-label={`${f.label}, ${counts[f.value]}`}
-                                onClick={() => setFilter(f.value)}>
-                                <span className={s.segLong}>{f.label}</span>
-                                <span className={s.segShort} aria-hidden>{f.short}</span>
-                                <span className={s.count} aria-hidden>{counts[f.value]}</span>
-                            </button>
-                        ))}
-                    </div>
-                    <label className={s.search}>
-                        <Search size={13} aria-hidden />
-                        <span className="sr-only">Search models</span>
-                        <input ref={searchRef} type="search" value={query} placeholder="Search"
-                            onChange={e => setQuery(e.target.value)} aria-keyshortcuts="/" />
-                    </label>
+                <label className={s.search}>
+                    <Search size={14} aria-hidden />
+                    <span className="sr-only">Search models</span>
+                    <input ref={searchRef} type="search" value={query} placeholder="Search models"
+                        onChange={e => setQuery(e.target.value)} aria-keyshortcuts={p.bare ? undefined : '/'} />
+                </label>
+                <div className={cn(s.segment, s.libFilter)} role="group" aria-label="Show">
+                    {FILTERS.map(f => (
+                        <button key={f.value} type="button" aria-pressed={filter === f.value}
+                            aria-label={`${f.label}, ${counts[f.value]}`}
+                            onClick={() => setFilter(f.value)}>
+                            {f.label}
+                            <span className={s.count} aria-hidden>{counts[f.value]}</span>
+                        </button>
+                    ))}
                 </div>
             </div>
 
@@ -164,8 +163,8 @@ export function ModelLibrary(p: LibraryProps) {
                         {ours.length > 0 && filter !== 'hyrak' && oursBlock}
                         {filter !== 'ours' && hyrak.length > 0 && (
                             <>
-                                {filter === 'all' && <p className={cn(s.label, s.groupLabel)}>HYRAK models</p>}
-                                {hyrak.map(card)}
+                                {filter === 'all' && <h3 className={cn(s.label, s.groupLabel)}>HYRAK models</h3>}
+                                <ul className={s.rows}>{hyrak.map(row)}</ul>
                             </>
                         )}
                         {ours.length === 0 && filter !== 'hyrak' && oursBlock}
@@ -176,69 +175,62 @@ export function ModelLibrary(p: LibraryProps) {
     )
 }
 
-function ModelCard({ entry: e, running, starting, canRun, canManage, onRun, onStop, onOpen, highlight }: {
-    entry: LibraryEntry; running: boolean; starting: boolean; canRun: boolean; canManage: boolean
-    onRun: () => void; onStop: () => void; onOpen?: () => void; highlight?: boolean
+function ModelRow({ entry: e, selected, running, starting, canRun, canManage, onSelect, onStop, onOpen, highlight }: {
+    entry: LibraryEntry; selected: boolean; running: boolean; starting: boolean; canRun: boolean; canManage: boolean
+    onSelect: () => void; onStop: () => void; onOpen?: () => void; highlight?: boolean
 }) {
     const Icon = e.icon
-    const ref = useRef<HTMLDivElement>(null)
+    const ref = useRef<HTMLLIElement>(null)
     useEffect(() => { if (highlight) ref.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }, [highlight])
-    const text = (
-        <>
-            <span className={s.cardName}><span>{e.name}</span></span>
-            <span className={s.cardBlurb}>{e.blurb}</span>
-            {running ? (
-                <span className={cn(s.chip, s.chipInfo)}><span className={s.dot} aria-hidden />{starting ? 'Starting' : 'Running'}</span>
-            ) : e.group === 'ours' || e.status !== 'ready' ? (
-                <StatusChip status={e.status} step={e.step} progress={e.progress} source={e.model?.source} />
-            ) : null}
-        </>
-    )
+    const failed = e.status === 'failed'
     return (
-        <div ref={ref} className={cn(s.card, highlight && s.cardNew)} data-running={running} data-clickable={!!onOpen}>
-            <span className={s.iconTile} style={{ background: `${e.color}1f`, color: e.color }} aria-hidden>
-                <Icon size={18} />
+        <li ref={ref} className={cn(s.row, highlight && s.cardNew)} data-selected={selected} data-running={running}>
+            <span className={s.rowIcon} style={{ background: `${e.color}1f`, color: e.color }} aria-hidden>
+                <Icon size={16} />
             </span>
-            {onOpen ? (
-                <button type="button" className={s.cardOpen} onClick={onOpen}
-                    aria-label={`${e.name}: open details`}>{text}</button>
-            ) : (
-                // Built-in: no detail view, so the card is plain text (no
-                // hover, no chevron) and its full description shows on hover.
-                <div className={s.cardMain} title={e.blurb}>{text}</div>
-            )}
-            <div className={s.cardActions}>
-                {canRun && e.status === 'ready' && (running ? (
-                    <button type="button" className={s.btn} onClick={onStop} aria-label={`Stop ${e.name}`}>
-                        <Square size={12} aria-hidden /> Stop
-                    </button>
-                ) : (
-                    <button type="button" className={cn(s.btn, s.primary)} onClick={onRun}
-                        aria-label={`Run ${e.name}`} aria-busy={starting || undefined}>
-                        <Play size={12} aria-hidden /> {starting ? 'Starting' : 'Run'}
-                    </button>
-                ))}
-                {e.status === 'failed' && onOpen && (
-                    <button type="button" className={s.btn} onClick={onOpen}>{canManage && e.group === 'ours' ? 'See how to fix' : 'See details'}</button>
+            <button type="button" className={s.rowMain} onClick={onSelect} aria-pressed={selected}
+                title={e.blurb}>
+                <span className={s.rowName}>{e.name}</span>
+                {/* Not ready yet: its status in place of the line. */}
+                {e.status !== 'ready' && !running
+                    ? <StatusChip status={e.status} step={e.step} progress={e.progress} source={e.model?.source} />
+                    : <span className={s.rowBlurb}>{e.blurb}</span>}
+            </button>
+            <span className={s.rowSide}>
+                {running && (
+                    <span className={cn(s.chip, s.chipInfo)}><span className={s.dot} aria-hidden />{starting ? 'Starting' : 'Running'}</span>
                 )}
-                {onOpen && <ChevronRight size={16} className={s.chev} aria-hidden />}
-            </div>
-            {e.status === 'failed' && e.error && (
-                <div className={s.attention}>{e.error}</div>
+                {running && canRun && (
+                    <button type="button" className={s.iconBtn} onClick={onStop}
+                        aria-label={`Stop ${e.name}`} title={`Stop ${e.name}`}>
+                        <Square size={13} aria-hidden />
+                    </button>
+                )}
+                {onOpen && (
+                    <button type="button" className={s.iconBtn} onClick={onOpen}
+                        aria-label={`${e.name}: open details`} title="Details and settings">
+                        <ChevronRight size={16} aria-hidden />
+                    </button>
+                )}
+            </span>
+            {failed && e.error && (
+                <div className={s.attention}>
+                    {e.error}{' '}
+                    {onOpen && <button type="button" className={s.link} onClick={onOpen}>{canManage && e.group === 'ours' ? 'See how to fix' : 'See details'}</button>}
+                </div>
             )}
-        </div>
+        </li>
     )
 }
 
-function CardSkeleton() {
+function RowSkeleton() {
     return (
-        <div className={s.card} aria-hidden>
-            <span className={cn(s.iconTile, s.skel)} />
+        <div className={s.row} aria-hidden>
+            <span className={cn(s.rowIcon, s.skel)} />
             <span style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <span className={s.skel} style={{ height: 12, width: '45%' }} />
                 <span className={s.skel} style={{ height: 10, width: '80%' }} />
             </span>
-            <span className={s.skel} style={{ width: 56, height: 28 }} />
         </div>
     )
 }

@@ -38,29 +38,33 @@ export function WorkspaceSwitcher({ normal }: { normal: boolean }) {
                 aria-label={`Workspace: ${workspace.name}. Switch workspace`}
                 className={cn(
                     'flex flex-col items-center rounded-[10px] border transition-colors duration-[120ms]',
-                    normal ? 'mb-3 w-20 gap-1 py-2' : 'w-12 gap-1 py-1.5 md:mb-3',
+                    normal ? 'mb-3 w-20 gap-1 py-2' : 'w-12 gap-1 py-1 md:mb-3',
                     normal ? '' : 'border-app-border text-app-text-muted hover:text-app-text hover:bg-app-surface-2',
                 )}
                 style={normal ? { borderColor: 'var(--s-line)', color: 'var(--s-ink)' } : undefined}
             >
                 <span className={cn(
                     'flex items-center justify-center rounded-md font-bold',
-                    normal ? 'h-8 w-8 text-[14px]' : 'h-7 w-7 text-[12px] bg-app-accent-soft text-app-accent',
+                    normal ? 'h-8 w-8 text-[14px]' : 'h-9 w-9 text-[13px] bg-app-accent-soft text-app-text',
                 )}
                     style={normal ? { background: 'var(--s-blue-soft)', color: 'var(--s-blue)' } : undefined}>
                     {initials(workspace.name)}
                 </span>
-                <span className={cn('max-w-full truncate px-1 text-[12px]', normal ? 'font-bold' : 'font-semibold')}>
-                    {workspace.name}
-                </span>
+                {/* The dev rail is 64px: a monogram reads there, a cut-off name
+                    ("HYR...") does not. The full name is in the title and the menu. */}
+                {normal && (
+                    <span className="max-w-full truncate px-1 text-[12px] font-bold">
+                        {workspace.name}
+                    </span>
+                )}
             </DropdownMenuTrigger>
             <DropdownMenuContent side="right" align="start" sideOffset={8} className="w-64">
                 <DropdownMenuGroup>
-                    <DropdownMenuLabel className="flex items-center gap-1.5 text-[12px] font-bold tracking-[0.06em]">
-                        <Building2 size={14} /> WORKSPACE
+                    <DropdownMenuLabel className="flex items-center gap-1.5 text-[12px] font-bold">
+                        <Building2 size={14} /> Workspace
                     </DropdownMenuLabel>
                     {isCustomer && workspaces.length > 1 && (
-                        <p className="px-2 pb-1.5 text-[12px] leading-snug text-muted-foreground">
+                        <p className="px-2 pb-1.5 text-[12px] leading-snug text-app-text-muted">
                             Switching ends the live session: video stops and the drone link is released.
                         </p>
                     )}
@@ -69,7 +73,7 @@ export function WorkspaceSwitcher({ normal }: { normal: boolean }) {
                             <DropdownMenuRadioItem key={w.id} value={w.id} className="items-start">
                                 <span className="flex min-w-0 flex-col">
                                     <span className="truncate">{w.name}</span>
-                                    <span className="truncate text-[12px] text-muted-foreground">
+                                    <span className="truncate text-[12px] text-app-text-muted">
                                         {KIND_LABELS[w.kind] ?? w.kind}
                                         {w.my_role ? ` - ${roleLabel(w.my_role, w.kind)}` : ''}
                                         {w.inherited ? ' (inherited)' : ''}

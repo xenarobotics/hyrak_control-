@@ -152,11 +152,18 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
 
     const startBlocked = needsCamera && camerasScanned && !selectedCameraId && !isStreaming
 
+    // Live picture: slate surround (the same in every theme). No picture:
+    // the theme's inset colour with an icon, one line and one action, never
+    // a black box in light mode (docs/DESIGN_SYSTEM.md section 11).
+    const live = isStreaming || !!localPreviewUrl
+    const pickCamera = needsCamera && camerasScanned && !selectedCameraId
+
     return (
         <div
             ref={containerRef}
             className={cn(
-                'relative flex flex-col rounded-[10px] border border-app-border overflow-hidden bg-black',
+                'relative flex flex-col rounded-[10px] border overflow-hidden transition-colors duration-[180ms]',
+                live ? 'bg-[#1A2129] border-[#1A2129]' : 'bg-app-surface-2 border-app-border',
                 maximized && !isFullscreen ? 'fixed inset-4 z-50' : 'flex-1'
             )}
         >
@@ -184,19 +191,26 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
             )}
 
             {/* Offline state - the relay preview is live before the backend
-                stream negotiates, so "VIDEO OFFLINE" over a working picture
+                stream negotiates, so "Video offline" over a working picture
                 would be wrong. */}
-            {!isStreaming && !localPreviewUrl && !noOsd && (
-                <div className="flex-1 flex flex-col items-center justify-center gap-2 px-4 text-center">
-                    <VideoOff size={36} strokeWidth={1.75} className="text-overlay-muted" />
-                    <p className="text-[16px] font-bold text-overlay-text">Video offline</p>
-                    {needsCamera && camerasScanned && !selectedCameraId ? (
-                        <p className="text-[13px] text-overlay-muted">Pick a camera in Devices</p>
-                    ) : !bare && (
-                        <p className="text-[13px] text-overlay-muted">Press Start below to bring it up</p>
+            {!live && !noOsd && (
+                <div className={cn("flex-1 flex flex-col items-center justify-center gap-3 px-4 text-center animate-in fade-in-0 duration-200", bare && "pt-10")}>
+                    <span className="flex size-12 items-center justify-center rounded-full bg-app-surface text-app-text-muted border border-app-border">
+                        {isLoading ? <Loader size={22} className="animate-spin" /> : <VideoOff size={22} strokeWidth={1.75} />}
+                    </span>
+                    <p className="text-[14px] font-semibold text-app-text">
+                        {isLoading ? 'Starting video' : pickCamera ? 'Pick a camera to start the video' : 'Video offline'}
+                    </p>
+                    {!isLoading && (
+                        <WhyDisabled reason={startBlocked ? 'Pick a camera first' : null} className="inline-block">
+                            <Button size="sm" onClick={startStream} disabled={startBlocked}
+                                className="h-9 px-4 gap-1.5 rounded-md text-[13px] font-bold bg-app-accent text-[var(--app-accent-ink)] hover:bg-app-accent hover:brightness-110 transition-[filter,transform] duration-[140ms] active:scale-[.98] disabled:opacity-100 disabled:bg-app-surface disabled:text-app-text-muted disabled:border disabled:border-dashed disabled:border-app-border-strong">
+                                <Video size={15} /> Start video
+                            </Button>
+                        </WhyDisabled>
                     )}
                     {lastError && (
-                        <p role="alert" className="text-[13px] font-semibold max-w-xs text-[var(--overlay-danger)]">{lastError}</p>
+                        <p role="alert" className="text-[13px] font-semibold max-w-xs text-app-danger">{lastError}</p>
                     )}
                 </div>
             )}
@@ -221,8 +235,8 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
             )}
 
             {/* Controls */}
-            {!bare && <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-2"
-                style={{ background: 'linear-gradient(to top, rgba(8,12,18,0.75), transparent)' }}
+            {!bare && live && <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-2"
+                style={{ background: 'linear-gradient(to top, rgba(26,33,41,0.8), transparent)' }}
             >
                 {/* The recorder captures the <video>'s MediaStream. A WebCodecs
                     canvas has no <video>, and a local preview URL plays via
@@ -236,7 +250,7 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
                             {(['fill', 'fit', '16:9', '4:3', '1:1'] as const).map(r => (
                                 <button key={r} onClick={() => setAspectRatio(r)} aria-pressed={aspectRatio === r}
                                     className={cn('h-8 min-w-8 px-2 rounded text-[12px] font-bold capitalize transition-colors duration-[var(--dur-fast)]', FOCUS_OVERLAY,
-                                        aspectRatio === r ? 'bg-[rgba(34,211,238,.22)] text-[var(--overlay-accent)]' : 'text-overlay-muted hover:text-overlay-text')}
+                                        aspectRatio === r ? 'bg-[color-mix(in_srgb,var(--overlay-accent)_18%,transparent)] text-[var(--overlay-accent)]' : 'text-overlay-muted hover:text-overlay-text')}
                                 >
                                     {r}
                                 </button>
@@ -248,7 +262,7 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
                         variant={isStreaming ? 'ghost' : 'default'}
                         className={cn(OVERLAY_BTN, FOCUS_OVERLAY, 'h-8 text-[13px] shadow-none disabled:opacity-100 disabled:border-dashed disabled:text-overlay-muted',
                             isStreaming ? 'border-[var(--overlay-danger)] text-[var(--overlay-danger)] hover:text-[var(--overlay-danger)]'
-                                : 'bg-[var(--overlay-accent)] border-[var(--overlay-accent)] text-[#04161b] hover:bg-[#67e8f9] disabled:bg-overlay-scrim')}
+                                : 'bg-[var(--overlay-accent)] border-[var(--overlay-accent)] text-[var(--overlay-scrim)] hover:bg-[var(--overlay-accent)] hover:brightness-110 disabled:bg-overlay-scrim')}
                         onClick={isStreaming ? stopStream : startStream}
                         // `needsCamera`, NOT `!serverSourced`. Only a real webcam
                         // requires the operator to pick a device. 'rtsp_camera'

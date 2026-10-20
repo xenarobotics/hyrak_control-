@@ -22,7 +22,7 @@ import {
 } from '@/lib/planning'
 import type { UploadWp } from '@/lib/uploadPath'
 import { cn } from '@/lib/utils'
-import { BACKDROP, BTN, BTN_ACCENT, BTN_DANGER, BTN_PRIMARY, DIALOG, FOCUS, INPUT, LABEL, PANEL, POPOVER } from './ui'
+import { BACKDROP, BTN, BTN_ACCENT, BTN_DANGER, BTN_PRIMARY, DIALOG, FOCUS, INPUT, LABEL, POPOVER } from './ui'
 
 type Tone = 'muted' | 'ok' | 'warn' | 'danger'
 const TONE_TEXT: Record<Tone, string> = {
@@ -98,7 +98,7 @@ export function AirspaceStrip({ workspaceId, droneId, path, canPlan, nonce, onRe
             detail = `Approved until ${fmtWhen(check.permit.valid_until)}. Upload this exact plan; any edit needs a new permit.`
         } else if (red.length) {
             tone = 'danger'; icon = <ShieldAlert size={14} />
-            text = `No-fly (red): ${names(red)}${orange.length ? ` · orange: ${names(orange)}` : ''}`
+            text = `No-fly (red): ${names(red)}${orange.length ? `; orange: ${names(orange)}` : ''}`
             detail = 'Upload is refused unless an approved permit covers this plan for this drone.'
         } else if (orange.length && check.needs === 'none') {
             tone = 'ok'; icon = <FileCheck size={14} />
@@ -116,21 +116,24 @@ export function AirspaceStrip({ workspaceId, droneId, path, canPlan, nonce, onRe
     const canAsk = canPlan && check && check.needs !== 'prohibited' && check.needs !== 'none'
 
     return (
-        <div className={cn(PANEL, TONE_BORDER[tone], 'flex items-center gap-3 px-3 py-2 max-w-[640px] w-full')}
+        <div className={cn('rounded-[8px] border bg-app-surface-2 pl-3 pr-1.5 py-1.5 flex flex-col gap-1.5 w-full', TONE_BORDER[tone])}
             title={detail} role="status">
-            <span className={cn('shrink-0', TONE_TEXT[tone])}>{icon}</span>
-            <div className="min-w-0 flex-1">
-                <div className={cn('text-[14px] font-bold truncate', TONE_TEXT[tone])}>{text}</div>
-                {detail && <div className="text-[13px] text-app-text-muted truncate">{detail}</div>}
+            <div className="flex items-center gap-2 min-w-0 min-h-8">
+                <span className={cn('shrink-0', TONE_TEXT[tone])}>{icon}</span>
+                <span className={cn('flex-1 min-w-0 text-[14px] font-bold leading-5 line-clamp-2', TONE_TEXT[tone])}>{text}</span>
+                <button onClick={onShowPermits} title="Permits for this workspace"
+                    className={cn(BTN, 'shrink-0 h-7 px-2 bg-transparent border-transparent text-app-text-muted hover:text-app-text')}>
+                    Permits
+                </button>
             </div>
+            {detail && (tone === 'warn' || tone === 'danger' || red.length > 0) && (
+                <p className="pr-1.5 text-[13px] leading-[18px] text-app-text-muted">{detail}</p>
+            )}
             {canAsk && (
-                <button onClick={onRequest} className={cn(BTN_ACCENT, 'shrink-0')}>
+                <button onClick={onRequest} className={cn(BTN_ACCENT, 'mr-1.5 mb-0.5')}>
                     Request permit
                 </button>
             )}
-            <button onClick={onShowPermits} title="Permits for this workspace" className={cn(BTN, 'shrink-0')}>
-                Permits
-            </button>
         </div>
     )
 }

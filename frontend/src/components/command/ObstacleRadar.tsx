@@ -21,7 +21,7 @@ import { cn } from '@/lib/utils'
 const NO_READING = 65535
 const SECTOR = 5
 // Fill colours on the always-dark scope (overlay set); text tones follow the theme.
-const tone = (m: number) => (m < 2 ? '#f87171' : m < 5 ? '#fbbf24' : '#22d3ee')
+const tone = (m: number) => (m < 2 ? 'var(--app-danger)' : m < 5 ? 'var(--app-warn)' : 'var(--app-accent)')
 const toneText = (m: number) => (m < 2 ? 'text-app-danger' : m < 5 ? 'text-app-warn' : 'text-app-accent')
 
 interface Obstacle { lat: number; lng: number; radius_m: number; dn_m?: number; de_m?: number }
@@ -80,18 +80,18 @@ export function ObstacleRadar({ avoid, rangeM = 15 }: { avoid: AvoidanceStatus |
 
     return (
         <div className="flex flex-col gap-1.5">
-            <div className="flex justify-between text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">
-                <span>Radar · {rangeM} m</span>
+            <div className="flex justify-between text-[13px] font-semibold text-app-text-muted">
+                <span>Radar, {rangeM} m range</span>
                 <span className={cn('normal-case text-[13px]', nearest != null && toneText(nearest))}>
                     {nearest != null ? `nearest ${nearest.toFixed(1)} m` : 'nothing in range'}</span>
             </div>
             <svg viewBox="-104 -104 208 208" className="w-full max-w-[260px] self-center aspect-square">
-                <circle r="100" fill="rgba(15,23,32,.9)" stroke="rgba(148,163,184,.25)" />
-                {[1 / 3, 2 / 3].map(f => <circle key={f} r={100 * f} fill="none" stroke="rgba(148,163,184,.15)" strokeDasharray="2 3" />)}
-                <line x1="0" y1="-100" x2="0" y2="100" stroke="rgba(148,163,184,.10)" />
-                <line x1="-100" y1="0" x2="100" y2="0" stroke="rgba(148,163,184,.10)" />
+                <circle r="100" style={{ fill: 'hsl(var(--app-surface-2))', stroke: 'hsl(var(--app-border-strong))' }} />
+                {[1 / 3, 2 / 3].map(f => <circle key={f} r={100 * f} fill="none" style={{ stroke: 'hsl(var(--app-border))' }} strokeDasharray="2 3" />)}
+                <line x1="0" y1="-100" x2="0" y2="100" style={{ stroke: 'hsl(var(--app-border))' }} />
+                <line x1="-100" y1="0" x2="100" y2="0" style={{ stroke: 'hsl(var(--app-border))' }} />
                 {sectors.map((d, i) => d != null && d <= rangeM && (
-                    <path key={i} d={wedge(i, d)} fill={tone(d)} fillOpacity=".28" />
+                    <path key={i} d={wedge(i, d)} style={{ fill: tone(d) }} fillOpacity=".28" />
                 ))}
                 {obs.map((o, i) => {
                     const p = place(o)
@@ -101,12 +101,12 @@ export function ObstacleRadar({ avoid, rangeM = 15 }: { avoid: AvoidanceStatus |
                 })}
                 {plan != null && (
                     <line x1="0" y1="0" x2={70 * Math.sin((plan - hdg) * Math.PI / 180)} y2={-70 * Math.cos((plan - hdg) * Math.PI / 180)}
-                        stroke="#67e8f9" strokeWidth="2" strokeDasharray="5 4" />
+                        style={{ stroke: 'var(--app-accent)' }} strokeWidth="2" strokeDasharray="5 4" />
                 )}
-                <path d="M0 -9 L6 7 L0 3 L-6 7 Z" fill="#fb923c" stroke="#0b0e13" strokeWidth="1" />
-                <text x="0" y="-88" fontSize="10" fontWeight="700" textAnchor="middle" fill="#C3CCD8">NOSE</text>
-                <text x={100 / 3 + 2} y="-3" fontSize="10" fontWeight="600" fill="#C3CCD8">{Math.round(rangeM / 3)}</text>
-                <text x={200 / 3 + 2} y="-3" fontSize="10" fontWeight="600" fill="#C3CCD8">{Math.round(rangeM * 2 / 3)}</text>
+                <path d="M0 -9 L6 7 L0 3 L-6 7 Z" fill="#fb923c" style={{ stroke: 'hsl(var(--app-surface))' }} strokeWidth="1" />
+                <text x="0" y="-88" fontSize="10" fontWeight="700" textAnchor="middle" style={{ fill: 'hsl(var(--app-text-muted))' }}>Nose</text>
+                <text x={100 / 3 + 2} y="-3" fontSize="10" fontWeight="600" style={{ fill: 'hsl(var(--app-text-muted))' }}>{Math.round(rangeM / 3)}</text>
+                <text x={200 / 3 + 2} y="-3" fontSize="10" fontWeight="600" style={{ fill: 'hsl(var(--app-text-muted))' }}>{Math.round(rangeM * 2 / 3)}</text>
             </svg>
             <p className="text-[13px] text-app-text-muted">
                 Wedges: live sensors. Orange: mapped obstacles. Dashed: planned direction.</p>
@@ -120,15 +120,15 @@ export function DepthStrip({ avoid, rangeM = 10 }: { avoid: AvoidanceStatus | nu
     const idx = [...Array(9)].map((_, k) => 63 + k).concat([...Array(9)].map((_, k) => k))
     return (
         <div className="flex flex-col gap-1.5">
-            <div className="flex justify-between text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">
-                <span>Forward depth</span><span className="normal-case">45° L · 45° R</span>
+            <div className="flex justify-between text-[13px] font-semibold text-app-text-muted">
+                <span>Forward depth</span><span>45° left to 45° right</span>
             </div>
-            <div className="flex items-end gap-[2px] h-16 rounded-md px-1 pt-1" style={{ background: 'rgba(15,23,32,.9)' }}>
+            <div className="flex items-end gap-[2px] h-16 rounded-md px-1 pt-1" style={{ background: 'hsl(var(--app-surface-2))' }}>
                 {idx.map(i => {
                     const d = s[i]
                     const h = d == null ? 4 : Math.max(8, (1 - Math.min(d, rangeM) / rangeM) * 100)
                     return <div key={i} title={d == null ? 'clear' : `${d.toFixed(1)} m`} className="flex-1 rounded-t-sm"
-                        style={{ height: `${h}%`, background: d == null ? 'rgba(148,163,184,.18)' : tone(d) }} />
+                        style={{ height: `${h}%`, background: d == null ? 'hsl(var(--app-border))' : tone(d) }} />
                 })}
             </div>
             <p className="text-[13px] text-app-text-muted">

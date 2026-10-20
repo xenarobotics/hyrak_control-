@@ -7,8 +7,9 @@
 import { useEffect, useState } from 'react'
 import { useAccess } from '@/hooks/useAccess'
 import { hasPerm, type WorkspaceInfo } from '@/lib/access'
-import { fmtWhen, listAudit, listWorkspaces, type AuditEvent } from '@/lib/workspaces'
-import { Btn, Empty, INPUT_CLS, Notice, TH_CLS, TR_CLS } from '@/components/admin/console'
+import { listAudit, listWorkspaces, type AuditEvent } from '@/lib/workspaces'
+import { Btn, Empty, INPUT_CLS, Notice, TH_CLS, TR_CLS, PageHead } from '@/components/admin/console'
+import { fmtShort } from '@/components/settings/primitives'
 
 const PAGE = 100
 
@@ -65,12 +66,12 @@ export default function AuditTab() {
 
     return (
         <div className="flex-1 overflow-y-auto p-5">
-            <div className="max-w-5xl mx-auto space-y-3">
-                <div className="flex items-center gap-3">
-                    <h2 className="text-[18px] font-bold text-app-text">Audit log</h2>
+            <div className="max-w-[960px] space-y-4 lg:px-3 lg:py-1">
+                <div className="flex flex-wrap items-end gap-3">
+                    <PageHead title="Audit log" sub="Who changed what, newest first" />
                     <select value={effective} onChange={e => { setWsId(e.target.value); setEvents(null) }}
                         aria-label="Filter by workspace" className={`${INPUT_CLS} ml-auto`}>
-                        {isFounder && <option value="">all workspaces</option>}
+                        {isFounder && <option value="">All workspaces</option>}
                         {options.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                     </select>
                     <Btn onClick={() => setTick(t => t + 1)}>Refresh</Btn>
@@ -95,7 +96,7 @@ export default function AuditTab() {
                             <tbody>
                                 {events.map(ev => (
                                     <tr key={ev.id} className={`${TR_CLS} align-top`}>
-                                        <td className="px-3 py-2 text-app-text-muted whitespace-nowrap tabular-nums">{fmtWhen(ev.at)}</td>
+                                        <td className="px-3 py-2 text-app-text-muted whitespace-nowrap tabular-nums">{fmtShort(ev.at)}</td>
                                         <td className="px-3 py-2 text-app-text whitespace-nowrap">{ev.actor_name ?? '-'}</td>
                                         <td className="px-3 py-2 font-code text-[12px] text-app-text whitespace-nowrap">{ev.action}</td>
                                         <td className="px-3 py-2 text-app-text-muted whitespace-nowrap">{wsName(ev.workspace_id)}</td>

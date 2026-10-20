@@ -1,7 +1,7 @@
 'use client'
 
 // Small pieces of the HYRAK console's visual language, shared by its tabs:
-// theme tokens (dark and light), 12px bold labels, toned outline buttons
+// theme tokens (dark and light), sentence-case labels, toned buttons
 // and status chips that pair an icon with a word.
 
 import { useRef, useState } from 'react'
@@ -11,10 +11,10 @@ import { copyText } from '@/lib/workspaces'
 /** Focus ring every console control uses (2px accent, offset 2px). */
 export const FOCUS_CLS = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--app-accent)]'
 export const INPUT_CLS = 'h-8 bg-app-surface-2 border border-app-border-strong rounded-md px-2 text-[13px] text-app-text outline-none placeholder:text-app-text-subtle focus:border-app-accent min-w-0 ' + FOCUS_CLS
-export const LABEL_CLS = 'block text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted mb-1'
+export const LABEL_CLS = 'block text-[13px] font-semibold text-app-text-muted mb-1'
 /** Table header cell and body row, shared by every console table. */
-export const TH_CLS = 'px-3 h-9 text-left text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted whitespace-nowrap'
-export const TR_CLS = 'h-9 border-b border-app-border last:border-b-0 transition-colors duration-[120ms] hover:bg-app-surface-2'
+export const TH_CLS = 'px-3 h-10 text-left text-[13px] font-semibold text-app-text-muted whitespace-nowrap'
+export const TR_CLS = 'h-11 border-b border-app-border last:border-b-0 transition-colors duration-[120ms] hover:bg-app-surface-2'
 
 type TagTone = 'amber' | 'emerald' | 'red' | 'zinc' | 'violet' | 'cyan'
 const TAG: Record<TagTone, { cls: string; Icon: typeof Info }> = {
@@ -23,7 +23,7 @@ const TAG: Record<TagTone, { cls: string; Icon: typeof Info }> = {
     red:     { cls: 'text-app-danger bg-app-danger-soft border-app-danger/40', Icon: OctagonAlert },
     zinc:    { cls: 'text-app-text-muted bg-app-surface-2 border-app-border', Icon: Circle },
     violet:  { cls: 'text-violet-700 dark:text-violet-300 bg-violet-500/10 border-violet-500/40', Icon: FlaskConical },
-    cyan:    { cls: 'text-app-accent bg-app-accent-soft border-app-accent/40', Icon: Info },
+    cyan:    { cls: 'text-app-text bg-app-accent-soft border-app-accent/45', Icon: Info },
 }
 
 /** Status chip: icon + word + colour, so colour never carries the meaning
@@ -38,9 +38,11 @@ export function Tag({ label, tone, icon = true }: { label: string; tone: TagTone
     )
 }
 
-type Tone = 'plain' | 'cyan' | 'emerald' | 'red'
+type Tone = 'plain' | 'primary' | 'cyan' | 'emerald' | 'red'
 const BTN: Record<Tone, string> = {
     plain:   'border-app-border-strong text-app-text hover:bg-app-surface-2',
+    // The one filled action of a view (Grant, Create, Save).
+    primary: 'border-app-accent bg-app-accent text-app-accent-ink hover:bg-[color-mix(in_srgb,var(--app-accent)_85%,hsl(var(--app-text)))] hover:border-[color-mix(in_srgb,var(--app-accent)_85%,hsl(var(--app-text)))]',
     cyan:    'border-app-accent/60 text-app-accent hover:bg-app-accent-soft',
     emerald: 'border-app-ok/50 text-app-ok hover:bg-app-ok-soft',
     red:     'border-app-danger/50 text-app-danger hover:bg-app-danger-soft',
@@ -65,12 +67,25 @@ export function Btn({ tone = 'plain', onClick, disabled, type = 'button', childr
 
 export function Section({ title, right, children }: { title: React.ReactNode; right?: React.ReactNode; children: React.ReactNode }) {
     return (
-        <div className="border border-app-border rounded-[10px] bg-app-surface shadow-[var(--app-shadow)] overflow-hidden">
-            <div className="px-3 min-h-10 py-2 text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted border-b border-app-border flex items-center gap-2">
-                <span className="truncate">{title}</span>
-                {right && <span className="ml-auto flex items-center gap-2 normal-case tracking-normal font-normal">{right}</span>}
+        <section className="border border-app-border rounded-[10px] bg-app-surface overflow-clip">
+            <div className="px-4 min-h-12 py-2 text-[14px] font-bold text-app-text border-b border-app-border flex items-center gap-2">
+                <h3 className="truncate m-0 text-[14px] font-bold">{title}</h3>
+                {right && <span className="ml-auto flex items-center gap-2 font-normal">{right}</span>}
             </div>
             {children}
+        </section>
+    )
+}
+
+/** A setup-screen page heading: 22px title and one muted line. */
+export function PageHead({ title, sub, right }: { title: string; sub?: React.ReactNode; right?: React.ReactNode }) {
+    return (
+        <div className="flex flex-wrap items-end gap-3 pb-1">
+            <div className="min-w-0 flex-1">
+                <h1 className="m-0 text-[22px] font-extrabold leading-7 text-app-text">{title}</h1>
+                {sub && <p className="m-0 mt-1 text-[14px] text-app-text-muted">{sub}</p>}
+            </div>
+            {right}
         </div>
     )
 }
@@ -89,7 +104,7 @@ export function Empty({ children }: { children: React.ReactNode }) {
     return <div className="p-4 text-[13px] text-app-text-muted">{children}</div>
 }
 
-/** A one-time link (invite, password reset): read-only field + COPY. */
+/** A one-time link (invite, password reset): read-only field and a Copy button. */
 export function CopyLink({ label, url, note }: { label: string; url: string; note?: string }) {
     const ref = useRef<HTMLInputElement>(null)
     const [msg, setMsg] = useState('')

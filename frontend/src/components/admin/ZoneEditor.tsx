@@ -48,7 +48,7 @@ function FailureBox({ f, onClose }: { f: Failure | null; onClose?: () => void })
     if (!f) return null
     return (
         <div role="alert" className="border border-app-danger/50 bg-app-danger-soft rounded-md p-2 space-y-1">
-            <div className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-[0.04em] text-app-danger">
+            <div className="flex items-center gap-2 text-[13px] font-semibold text-app-danger">
                 {f.title}
                 {onClose && (
                     <button onClick={onClose} className="ml-auto text-app-text-muted hover:text-app-text" aria-label="Dismiss">x</button>
@@ -247,7 +247,7 @@ export default function ZoneEditor({
                     >
                         <Tooltip sticky>
                             {z.properties.name} - {z.properties.zone_class.toUpperCase()}
-                            {z.properties.layer && ` - ${LAYER_LABELS[z.properties.layer].toUpperCase()}`}
+                            {z.properties.layer && `, ${LAYER_LABELS[z.properties.layer]}`}
                         </Tooltip>
                     </Polygon>
                 ))}
@@ -282,7 +282,7 @@ export default function ZoneEditor({
             <div
                 className="absolute left-3 top-3 bottom-3 z-[1000] w-72 max-w-[calc(100%-24px)] rounded-[10px] border border-app-border bg-app-surface shadow-[var(--app-shadow)] flex flex-col overflow-hidden"
             >
-                <div className="px-3 min-h-10 py-2 text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted border-b border-app-border flex items-center gap-2">
+                <div className="px-3 min-h-10 py-2 text-[13px] font-semibold text-app-text-muted border-b border-app-border flex items-center gap-2">
                     Flight zones <span className="ml-auto tabular-nums">{zones.length}</span>
                 </div>
 
@@ -292,7 +292,7 @@ export default function ZoneEditor({
                             {layerOptions.length > 0 ? (
                                 <button
                                     onClick={() => setDrawing(true)}
-                                    className="w-full h-9 rounded-md bg-app-accent text-app-accent-ink text-[14px] font-bold transition-opacity duration-[120ms] hover:opacity-90"
+                                    className="w-full h-9 rounded-md bg-app-accent text-app-accent-ink text-[14px] font-bold transition-colors duration-[120ms] hover:bg-[color-mix(in_srgb,var(--app-accent)_85%,hsl(var(--app-text)))]"
                                 >
                                     + Draw new zone
                                 </button>
@@ -404,14 +404,14 @@ export default function ZoneEditor({
                                             </div>
                                             <div className="mt-1 text-[12px] text-app-text-muted">
                                                 <span className="capitalize">{z.properties.zone_class}</span>
-                                                {z.properties.layer && ` · ${LAYER_LABELS[z.properties.layer]}`}
+                                                {z.properties.layer && `, ${LAYER_LABELS[z.properties.layer]}`}
                                                 {wsName(z.properties.workspace_id) && z.properties.layer !== 'regulatory' &&
-                                                    ` · ${wsName(z.properties.workspace_id)}`}
+                                                    `, ${wsName(z.properties.workspace_id)}`}
                                                 {z.properties.ceiling_m != null &&
-                                                    ` · up to ${z.properties.ceiling_m} m`}
+                                                    `, up to ${z.properties.ceiling_m} m`}
                                                 {z.properties.zone_class === 'red' && z.properties.permission_required === false &&
-                                                    ' · no permits'}
-                                                {!z.properties.active && ' · inactive'}
+                                                    ', no permits'}
+                                                {!z.properties.active && ', inactive'}
                                             </div>
                                         </>
                                     )}
@@ -422,7 +422,7 @@ export default function ZoneEditor({
                 ) : (
                     <div className="p-3 space-y-3 text-[13px] overflow-y-auto">
                         <div className="space-y-1">
-                            <div className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Layer</div>
+                            <div className="text-[13px] font-semibold text-app-text-muted">Layer</div>
                             <div className="flex gap-1.5">
                                 {layerOptions.map(l => (
                                     <button
@@ -431,7 +431,7 @@ export default function ZoneEditor({
                                         aria-pressed={drawLayer === l}
                                         className={'flex-1 h-8 rounded-md border text-[13px] font-semibold capitalize transition-colors duration-[120ms] ' +
                                             (drawLayer === l
-                                                ? 'border-app-accent text-app-accent bg-app-accent-soft'
+                                                ? 'border-app-accent text-app-text font-bold bg-app-accent-soft'
                                                 : 'border-app-border-strong text-app-text-muted hover:border-app-text-subtle')}
                                     >
                                         {LAYER_LABELS[l]}
@@ -442,7 +442,7 @@ export default function ZoneEditor({
 
                         {drawLayer !== 'regulatory' && wsOptions.length > 0 && (
                             <div className="space-y-1">
-                                <label htmlFor="zone-ws" className="block text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Workspace</label>
+                                <label htmlFor="zone-ws" className="block text-[13px] font-semibold text-app-text-muted">Workspace</label>
                                 <select
                                     id="zone-ws"
                                     value={drawWs?.id ?? ''}

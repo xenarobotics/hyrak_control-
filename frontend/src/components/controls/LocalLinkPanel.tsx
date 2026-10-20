@@ -18,7 +18,7 @@ const wallClock = () => Date.now()
 
 const RESULT: Record<number, string> = { 0: 'accepted', 1: 'temporarily rejected', 2: 'denied', 3: 'unsupported', 4: 'failed', 5: 'in progress' }
 
-const K = 'text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted'
+const K = 'text-[13px] font-semibold text-app-text-muted'
 const V = 'text-[14px] font-bold'
 
 export function LocalLinkPanel() {
@@ -68,13 +68,13 @@ export function LocalLinkPanel() {
                     <button key={c} onClick={() => send(c)} disabled={s.sysid === null}
                         title={s.sysid === null ? 'Waiting for the aircraft to be heard' : undefined}
                         className={`h-10 rounded-md border border-app-warn text-[14px] font-bold text-app-text hover:bg-app-warn-soft ${FOCUS} ${DISABLED}`}>
-                        {c === 'hold' ? 'HOLD' : c === 'rtl' ? 'RETURN' : 'LAND'}
+                        {c === 'hold' ? 'Hold' : c === 'rtl' ? 'RTL' : 'Land'}
                     </button>
                 ))}
             </div>
             {sent && (
                 <div className="mt-1.5 text-app-text-muted">
-                    {sent.cmd.toUpperCase()} sent locally{ack ? ` - aircraft: ${RESULT[ack.result] ?? `result ${ack.result}`}` : ' - waiting for the aircraft'}
+                    {sent.cmd === 'rtl' ? 'RTL' : sent.cmd.charAt(0).toUpperCase() + sent.cmd.slice(1)} sent locally{ack ? ` - aircraft: ${RESULT[ack.result] ?? `result ${ack.result}`}` : ' - waiting for the aircraft'}
                 </div>
             )}
         </div>

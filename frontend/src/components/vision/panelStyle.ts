@@ -31,10 +31,9 @@ export const SURFACE_2 = 'hsl(var(--app-surface-2))'
 export const BORDER = 'hsl(var(--app-border))'
 export const BORDER_STRONG = 'hsl(var(--app-border-strong))'
 
-/** Section label: 12px 700, uppercase, light tracking. */
+/** Section label: 13px 600, sentence case, no tracking. */
 export const LABEL: CSSProperties = {
-    fontSize: 12, fontWeight: 700, lineHeight: '16px',
-    textTransform: 'uppercase', letterSpacing: '0.05em', color: MUTED,
+    fontSize: 13, fontWeight: 600, lineHeight: '18px', color: MUTED,
 }
 
 /** Key readout: big tabular number. Pair with UNIT for the unit. */

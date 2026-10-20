@@ -20,14 +20,9 @@ interface Props {
     stats?: WebRTCStats | null
 }
 
-// Over-video colours come from the fixed --overlay-* set: an inline hex such
-// as #4ade80 is remapped to a dark shade in light mode (globals.css), which
-// would put dark text on the video. lib/osd hands out hex, so map it here.
-const OV: Record<string, string> = {
-    '#4ade80': 'var(--overlay-ok)', '#22d3ee': 'var(--overlay-accent)',
-    '#facc15': 'var(--overlay-warn)', '#fbbf24': 'var(--overlay-warn)', '#f87171': 'var(--overlay-danger)',
-}
-const ov = (c: string) => OV[c] ?? c
+// Over-video colours come from the --overlay-* set; lib/osd's helpers
+// already return those vars, so this is the identity, kept for the call sites.
+const ov = (c: string) => c
 const MUTED = 'var(--overlay-muted)'
 
 // Glass pill - all OSD elements use this
@@ -147,7 +142,7 @@ export function VideoOSD({ stats }: Props) {
                     <div style={{ display: 'flex', gap: 6 }}>
                         <GP style={{
                             borderColor: armed ? 'var(--overlay-danger)' : 'var(--overlay-border)',
-                            background: armed ? 'rgba(120,20,20,0.72)' : 'var(--overlay-scrim)',
+                            background: armed ? 'color-mix(in srgb, var(--overlay-danger) 22%, var(--overlay-scrim))' : 'var(--overlay-scrim)',
                             color: armed ? 'var(--overlay-danger)' : MUTED, fontWeight: 700,
                         }}>
                             {armed ? '● ARMED' : '○ DISARMED'}
@@ -186,7 +181,7 @@ export function VideoOSD({ stats }: Props) {
                 {config.batteryWidget && (
                     <GP style={{
                         borderColor: batteryBorderColor(bat),
-                        background: bat <= 20 ? 'rgba(120,20,20,0.72)' : 'var(--overlay-scrim)',
+                        background: bat <= 20 ? 'color-mix(in srgb, var(--overlay-danger) 22%, var(--overlay-scrim))' : 'var(--overlay-scrim)',
                     }}>
                         <span style={{ color: ov(batteryTextColor(bat)), fontWeight: 800, fontSize: 16 }}>
                             {bat.toFixed(0)}%
@@ -194,7 +189,7 @@ export function VideoOSD({ stats }: Props) {
                         <span style={{ color: MUTED, fontSize: 12 }}>{volts.toFixed(2)}V</span>
                         {bat <= 30 && (
                             <span style={{ color: ov(batteryTextColor(bat)), fontSize: 12, fontWeight: 700 }}>
-                                {bat <= 15 ? '⚠ CRITICAL' : '⚠ LOW'}
+                                {bat <= 15 ? 'Critical' : 'Low'}
                             </span>
                         )}
                     </GP>
@@ -254,9 +249,9 @@ export function VideoOSD({ stats }: Props) {
             <div style={{ position: 'absolute', bottom: 56, left: 10, display: 'flex', flexDirection: 'column', gap: 5 }}>
                 {config.networkStats && stats && (
                     <GP>
-                        <span style={{ color: ov(qualColor), fontWeight: 700, textTransform: 'uppercase' }}>{quality}</span>
+                        <span style={{ color: ov(qualColor), fontWeight: 700, textTransform: 'capitalize' }}>{quality}</span>
                         <span style={{ color: MUTED, fontSize: 12 }}>
-                            {fps.toFixed(0)}fps · {(bitrate / 1_000_000).toFixed(1)}Mb · {rtt.toFixed(0)}ms
+                            {fps.toFixed(0)} fps, {(bitrate / 1_000_000).toFixed(1)} Mb/s, {rtt.toFixed(0)} ms
                         </span>
                     </GP>
                 )}
@@ -264,7 +259,7 @@ export function VideoOSD({ stats }: Props) {
                 {config.homeDistance && (
                     <GP>
                         <span style={{ color: MUTED }}>⌂</span>
-                        <span style={{ color: MUTED, fontSize: 12, fontWeight: 700 }}>HOME</span>
+                        <span style={{ color: MUTED, fontSize: 12, fontWeight: 700 }}>Home</span>
                         <span style={{ fontWeight: 800 }}>{homeDist.toFixed(0)}</span>
                         <span style={{ color: MUTED, fontSize: 12 }}>m</span>
                     </GP>
@@ -300,17 +295,17 @@ export function VideoOSD({ stats }: Props) {
                 <div style={{
                     position: 'absolute', top: '60%', left: '50%',
                     transform: 'translateX(-50%)',
-                    background: 'rgba(120,20,20,0.8)',
+                    background: 'color-mix(in srgb, var(--overlay-danger) 26%, var(--overlay-scrim))',
                     backdropFilter: 'blur(8px)',
-                    border: '1px solid rgba(239,68,68,0.6)',
+                    border: '1px solid var(--overlay-danger)',
                     borderRadius: 10, padding: '8px 20px',
                     color: 'var(--overlay-text)',
                     fontSize: 16, fontWeight: 800, textAlign: 'center',
                     animation: 'pulse 1s infinite',
                 }}>
-                    ⚠ CRITICAL BATTERY - {bat.toFixed(0)}%
+                    Critical battery {bat.toFixed(0)}%
                     <div style={{ fontSize: 13, fontWeight: 700, marginTop: 2, color: 'var(--overlay-text)' }}>
-                        LAND IMMEDIATELY
+                        Land now
                     </div>
                 </div>
             )}

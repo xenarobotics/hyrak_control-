@@ -86,7 +86,7 @@ function LiveRule({ rule: r, cv, last }: { rule: ModelRule; cv: CVResult | null;
                     <ArrowRight size={11} aria-hidden style={{ color: 'var(--cm-ink-2)' }} />
                     <span>{short}</span>
                 </span>
-                <span className={s.ruleNumbers}>{pct(r.min_score)}{r.for_s > 0 ? ` · ${r.for_s} s` : ''}</span>
+                <span className={s.ruleNumbers}>{pct(r.min_score)} sure{r.for_s > 0 ? ` for ${r.for_s} s` : ''}</span>
             </span>
             <span className={cn(s.chip, chip.tone)}>{chip.text}</span>
         </li>

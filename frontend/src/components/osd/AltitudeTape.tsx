@@ -1,7 +1,7 @@
 'use client'
 
 import { useDroneStore } from '@/store/drone'
-import { climbRate, climbRateColor } from '@/lib/osd'
+import { climbRate } from '@/lib/osd'
 
 interface Props {
     height?: number
@@ -94,7 +94,7 @@ export function AltitudeTape({ height = 200 }: Props) {
                 position: 'absolute', bottom: -20, left: '50%',
                 transform: 'translateX(-50%)',
                 fontSize: 12, 
-                color: ({ '#4ade80': 'var(--overlay-ok)', '#f87171': 'var(--overlay-danger)' } as Record<string, string>)[climbRateColor(climb)] ?? 'var(--overlay-text)', fontWeight: 700,
+                color: climb > 0.5 ? '#5BD38B' : climb < -0.5 ? '#F2787A' : '#EAF0F6', textShadow: '0 1px 2px rgba(0,0,0,.8)', fontWeight: 700,
                 whiteSpace: 'nowrap',
             }}>
                 {climb >= 0 ? '▲' : '▼'} {Math.abs(climb).toFixed(1)}m/s

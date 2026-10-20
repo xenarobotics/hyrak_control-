@@ -53,6 +53,7 @@ import { getServerUrl } from '@/lib/server-url'
 import { decidePermit as sendDecision, PERMIT_TONE, type Permit } from '@/lib/planning'
 import type { MapDrone } from '@/components/admin/AdminMap'
 import type { ZoneFeature } from '@/components/admin/zones'
+import { fmtShort } from '@/components/settings/primitives'
 
 const AdminMap = dynamic(() => import('@/components/admin/AdminMap'), { ssr: false })
 const ZoneEditor = dynamic(() => import('@/components/admin/ZoneEditor'), { ssr: false })
@@ -595,7 +596,7 @@ export default function AdminPage() {
                             className={
                                 'relative flex flex-col items-center gap-1 w-12 py-2 rounded-md text-[12px] font-semibold transition-colors duration-[120ms] ' +
                                 (tab === key
-                                    ? 'bg-app-accent-soft text-app-accent'
+                                    ? 'bg-app-accent-soft text-app-text'
                                     : 'text-app-text-muted hover:text-app-text hover:bg-app-surface-2')
                             }
                         >
@@ -676,11 +677,11 @@ export default function AdminPage() {
                                         >
                                             <div className="flex flex-wrap items-center gap-1.5 text-[14px]">
                                                 <span className="font-semibold text-app-text truncate">
-                                                    {s.drone?.name ?? 'IDENTIFYING…'}
+                                                    {s.drone?.name ?? 'Identifying…'}
                                                 </span>
-                                                {s.drone?.is_simulated && <Tag label="SIM" tone="amber" />}
+                                                {s.drone?.is_simulated && <Tag label="Sim" tone="amber" />}
                                                 {s.live?.armed && <Tag label="ARMED" tone="red" />}
-                                                {s.in_air && <Tag label="IN AIR" tone="amber" />}
+                                                {s.in_air && <Tag label="In air" tone="amber" />}
                                             </div>
                                             {s.live?.zone_class === 'orange' && (
                                                 <div className="mt-1 flex items-center gap-1 text-[12px] font-bold text-app-warn">
@@ -693,19 +694,19 @@ export default function AdminPage() {
 </div>
                                             )}
                                             <div className="mt-0.5 text-[12px] text-app-text-muted truncate">
-                                                {s.workspace_name || 'workspace ?'} · {s.username ?? '?'}{s.role ? ` (${s.role})` : ''}
+                                                {s.workspace_name || 'Unknown workspace'}, {s.username ?? 'unknown user'}{s.role ? ` (${s.role})` : ''}
                                             </div>
                                             <div className="mt-1 flex items-center gap-3 text-[12px] text-app-text-muted">
-                                                <Badge on={s.is_streaming} label="VIDEO" />
-                                                <Badge on={s.telemetry_connected} label="TELEM" />
+                                                <Badge on={s.is_streaming} label="Video" />
+                                                <Badge on={s.telemetry_connected} label="Telemetry" />
                                                 {s.ai_mode && s.ai_mode !== 'manual-control' && (
                                                     <span className="text-violet-700 dark:text-violet-400 truncate">{s.ai_mode}</span>
                                                 )}
-                                                {s.takeover && <Tag label="HYRAK CONTROL" tone="red" />}
+                                                {s.takeover && <Tag label="HYRAK control" tone="red" />}
                                             </div>
                                             <div className="mt-0.5 text-[12px] text-app-text-muted">
                                                 {s.live
-                                                    ? `${s.live.mode} · ${s.live.alt.toFixed(0)}m · ${s.live.battery.toFixed(0)}%`
+                                                    ? `${s.live.mode}, ${s.live.alt.toFixed(0)} m, ${s.live.battery.toFixed(0)}%`
                                                     : s.approx_location
                                                         ? `~ ${[s.approx_location.city, s.approx_location.country].filter(Boolean).join(', ')}`
                                                         : `session ${s.session_id.slice(0, 8)}`}
@@ -730,7 +731,7 @@ export default function AdminPage() {
                                                     <span className="font-semibold text-app-text truncate">
                                                         {fleetName(f)}
                                                     </span>
-                                                    <Tag label="SIM" tone="violet" />
+                                                    <Tag label="Sim" tone="violet" />
                                                     {f.live?.armed && <Tag label="ARMED" tone="red" />}
                                                 </div>
                                                 {f.live?.zone_class === 'orange' && (
@@ -745,7 +746,7 @@ export default function AdminPage() {
                                                 )}
                                                 <div className="mt-0.5 text-[12px] text-app-text-muted">
                                                     {f.live
-                                                        ? `${f.live.mode} · ${f.live.alt.toFixed(0)}m · ${f.live.battery.toFixed(0)}%`
+                                                        ? `${f.live.mode}, ${f.live.alt.toFixed(0)} m, ${f.live.battery.toFixed(0)}%`
                                                         : 'connecting…'}
                                                 </div>
                                             </button>
@@ -840,7 +841,7 @@ export default function AdminPage() {
                                             <div className="flex flex-wrap items-center gap-1.5 text-[14px]">
                                                 <span className={online ? 'text-app-ok' : 'text-app-text-muted'}>●</span>
                                                 <span className="font-semibold text-app-text truncate">{d.name}</span>
-                                                {d.is_simulated && <Tag label="SIM" tone="amber" />}
+                                                {d.is_simulated && <Tag label="Sim" tone="amber" />}
                                             </div>
                                             <div className="mt-1 text-[12px] text-app-text-muted">
                                                 last seen {fmtDate(d.last_seen)}
@@ -864,7 +865,7 @@ export default function AdminPage() {
                                         <span className="text-[22px] font-bold text-app-text">
                                             {selectedDrone.name}
                                         </span>
-                                        {selectedDrone.is_simulated && <Tag label="SIM" tone="amber" />}
+                                        {selectedDrone.is_simulated && <Tag label="Sim" tone="amber" />}
                                         {selectedDroneSession
                                             ? <Tag label="Online" tone="emerald" />
                                             : <Tag label="Offline" tone="zinc" />}
@@ -886,11 +887,11 @@ export default function AdminPage() {
                                     </div>
 
                                     <div className="border border-app-border rounded-[10px] bg-app-surface p-3 space-y-1.5 text-[12px] text-app-text-muted">
-                                        <div className="text-[12px] font-bold uppercase tracking-[0.04em]">IDENTITY</div>
+                                        <div className="text-[13px] font-semibold">Identity</div>
                                         <Uid uid={selectedDrone.hardware_uid}
                                             copied={copiedUid === selectedDrone.hardware_uid} onCopy={copyUid} />
                                         <div className="text-app-text-muted">
-                                            first seen {fmtDate(selectedDrone.first_seen)} · last seen {fmtDate(selectedDrone.last_seen)}
+                                            First seen {fmtDate(selectedDrone.first_seen)}, last seen {fmtDate(selectedDrone.last_seen)}
                                         </div>
                                         {selectedDroneSession?.approx_location && (
                                             <div className="text-app-text-muted">
@@ -903,7 +904,7 @@ export default function AdminPage() {
                                     {/* Live video + flight data when online */}
                                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                                         <div className="border border-app-border rounded-[10px] bg-app-surface overflow-hidden">
-                                            <div className="px-3 min-h-10 py-2 text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted border-b border-app-border flex items-center gap-2">VIDEO</div>
+                                            <div className="px-3 min-h-10 py-2 text-[13px] font-semibold text-app-text-muted border-b border-app-border flex items-center gap-2">Video</div>
                                             {selectedDroneSession && frameUrl ? (
                                                 // eslint-disable-next-line @next/next/no-img-element
                                                 <img src={frameUrl} alt="drone video" className="w-full" />
@@ -918,7 +919,7 @@ export default function AdminPage() {
                                             )}
                                         </div>
                                         <div className="border border-app-border rounded-[10px] bg-app-surface">
-                                            <div className="px-3 min-h-10 py-2 text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted border-b border-app-border flex items-center gap-2">FLIGHT DATA</div>
+                                            <div className="px-3 min-h-10 py-2 text-[13px] font-semibold text-app-text-muted border-b border-app-border flex items-center gap-2">Flight data</div>
                                             {selectedDroneSession && telem ? (
                                                 <TelemGrid telem={telem} />
                                             ) : (
@@ -933,7 +934,7 @@ export default function AdminPage() {
 
                                     {/* Flight history */}
                                     <div className="border border-app-border rounded-[10px] bg-app-surface">
-                                        <div className="px-3 min-h-10 py-2 text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted border-b border-app-border flex items-center gap-2">
+                                        <div className="px-3 min-h-10 py-2 text-[13px] font-semibold text-app-text-muted border-b border-app-border flex items-center gap-2">
                                             RECENT FLIGHTS - {flights.length}
                                         </div>
                                         {flights.length === 0 ? (
@@ -958,7 +959,7 @@ export default function AdminPage() {
                                                                 <span className="text-app-text-muted">{fmtDur(f.duration_s)}</span>
                                                             )}
                                                             <span className="text-app-text-muted">
-                                                                {f.max_alt_m.toFixed(0)}m max · {(f.distance_m / 1000).toFixed(2)}km
+                                                                {f.max_alt_m.toFixed(0)} m max, {(f.distance_m / 1000).toFixed(2)} km
                                                             </span>
                                                             {f.crossed_orange && (
                                                                 <AlertTriangle size={14} className="text-app-warn" aria-label="Passed through orange zone" />
@@ -992,9 +993,9 @@ export default function AdminPage() {
                                                                     )}
                                                                 </div>
                                                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[12px] text-app-text-muted tabular-nums">
-                                                                    <div>SAMPLES <span className="text-app-text">{flightDetail.flight.samples_count}</span></div>
-                                                                    <div>MAX ALT <span className="text-app-text">{flightDetail.flight.max_alt_m.toFixed(1)}m</span></div>
-                                                                    <div>DIST <span className="text-app-text">{(flightDetail.flight.distance_m / 1000).toFixed(2)}km</span></div>
+                                                                    <div>Samples <span className="text-app-text">{flightDetail.flight.samples_count}</span></div>
+                                                                    <div>Max altitude <span className="text-app-text">{flightDetail.flight.max_alt_m.toFixed(1)} m</span></div>
+                                                                    <div>Distance <span className="text-app-text">{(flightDetail.flight.distance_m / 1000).toFixed(2)} km</span></div>
                                                                     <div>
                                                                         MIN BATT{' '}
                                                                         <span className="text-app-text">
@@ -1162,7 +1163,7 @@ function DetailPanel({
                 <span className="text-[18px] font-bold text-app-text truncate">
                     {session.drone?.name ?? session.session_id.slice(0, 8)}
                 </span>
-                {session.drone?.is_simulated && <Tag label="SIM" tone="amber" />}
+                {session.drone?.is_simulated && <Tag label="Sim" tone="amber" />}
                 {session.live?.armed && <Tag label="ARMED" tone="red" />}
                 {session.live?.zone_class === 'orange' && <Tag label="ORANGE ZONE" tone="amber" />}
                 {session.live?.zone_class === 'red' && <Tag label="RED ZONE" tone="red" />}
@@ -1172,13 +1173,13 @@ function DetailPanel({
             </div>
 
             <dl className="border-b border-app-border px-3 py-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[13px]">
-                <dt className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted self-center">WORKSPACE</dt><dd className="text-app-text min-w-0 truncate">{session.workspace_name || '-'}</dd>
-                <dt className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted self-center">USER</dt>
-                <dd className="text-app-text min-w-0 truncate">{session.username ?? '-'}{session.role ? ` (${session.role})` : ''}{session.staff ? ' · staff' : ''}</dd>
-                <dt className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted self-center">LINK</dt><dd className="text-app-text min-w-0">{session.link_kind ? (LINK_LABELS[session.link_kind] ?? session.link_kind) : 'none'}</dd>
-                <dt className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted self-center">AI MODE</dt><dd className="text-app-text min-w-0">{session.ai_mode}</dd>
-                <dt className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted self-center">STATE</dt>
-                <dd className="text-app-text min-w-0">{session.in_air ? 'In air' : session.armed ? 'Armed' : 'On ground'}{session.detached ? ' · client away' : ''}</dd>
+                <dt className="text-[13px] font-semibold text-app-text-muted self-center">Workspace</dt><dd className="text-app-text min-w-0 truncate">{session.workspace_name || '-'}</dd>
+                <dt className="text-[13px] font-semibold text-app-text-muted self-center">User</dt>
+                <dd className="text-app-text min-w-0 truncate">{session.username ?? '-'}{session.role ? ` (${session.role})` : ''}{session.staff ? ', staff' : ''}</dd>
+                <dt className="text-[13px] font-semibold text-app-text-muted self-center">Link</dt><dd className="text-app-text min-w-0">{session.link_kind ? (LINK_LABELS[session.link_kind] ?? session.link_kind) : 'none'}</dd>
+                <dt className="text-[13px] font-semibold text-app-text-muted self-center">AI mode</dt><dd className="text-app-text min-w-0">{session.ai_mode}</dd>
+                <dt className="text-[13px] font-semibold text-app-text-muted self-center">State</dt>
+                <dd className="text-app-text min-w-0">{session.in_air ? 'In air' : session.armed ? 'Armed' : 'On ground'}{session.detached ? ', client away' : ''}</dd>
             </dl>
 
             {control && session.telemetry_connected && <ControlBlock session={session} telem={telem} control={control} />}
@@ -1189,7 +1190,7 @@ function DetailPanel({
             )}
 
             <div className="border-b border-app-border">
-                <div className="px-3 pt-3 pb-1.5 text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Video</div>
+                <div className="px-3 pt-3 pb-1.5 text-[13px] font-semibold text-app-text-muted">Video</div>
                 {frameUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={frameUrl} alt="session video" className="w-full" />
@@ -1201,7 +1202,7 @@ function DetailPanel({
             </div>
 
             <div className="border-b border-app-border pb-2">
-                <div className="px-3 pt-3 pb-1.5 text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Flight data</div>
+                <div className="px-3 pt-3 pb-1.5 text-[13px] font-semibold text-app-text-muted">Flight data</div>
                 {telem ? (
                     <TelemGrid telem={telem} />
                 ) : (
@@ -1212,7 +1213,7 @@ function DetailPanel({
             </div>
 
             <div className="border-b border-app-border px-3 py-2 space-y-1.5 text-[12px]">
-                <div className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">IDENTITY</div>
+                <div className="text-[13px] font-semibold text-app-text-muted">Identity</div>
                 {session.hardware_uid ? (
                     <Uid uid={session.hardware_uid}
                         copied={copiedUid === session.hardware_uid} onCopy={onCopyUid} />
@@ -1258,10 +1259,10 @@ function ControlBlock({ session, telem, control }: { session: SessionInfo; telem
     const btn = 'min-h-8 px-2 py-1 rounded-md border text-[13px] font-bold transition-colors duration-[120ms] disabled:cursor-not-allowed disabled:border-dashed disabled:border-app-border-strong disabled:text-app-text-muted'
     return (
         <div className="border-b border-app-border px-3 py-2 space-y-2">
-            <div className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">
+            <div className="flex items-center gap-2 text-[13px] font-semibold text-app-text-muted">
                 CONTROL
                 {control.mine && <Tag label="YOU HAVE CONTROL" tone="red" />}
-                {heldByOther && <Tag label={`HELD BY ${session.takeover!.by.toUpperCase()}`} tone="amber" />}
+                {heldByOther && <Tag label={`Held by ${session.takeover!.by}`} tone="amber" />}
             </div>
             <div className="grid grid-cols-3 gap-1.5">
                 <button className={btn + ' border-app-warn/50 text-app-warn hover:border-app-warn'}
@@ -1339,7 +1340,7 @@ function FleetDetailPanel({
         <section className="w-full md:w-96 shrink-0 border-t md:border-t-0 md:border-l border-app-border bg-app-surface overflow-y-auto max-h-[60vh] md:max-h-none">
             <div className="flex items-center gap-2 px-3 py-2.5 border-b border-app-border sticky top-0 bg-app-surface z-10 flex-wrap">
                 <span className="text-[18px] font-bold text-app-text truncate">{name}</span>
-                <Tag label="SIM" tone="violet" />
+                <Tag label="Sim" tone="violet" />
                 {l?.armed && <Tag label="ARMED" tone="red" />}
                 {l?.zone_class === 'orange' && <Tag label="ORANGE ZONE" tone="amber" />}
                 {l?.zone_class === 'red' && <Tag label="RED ZONE" tone="red" />}
@@ -1349,7 +1350,7 @@ function FleetDetailPanel({
             </div>
 
             <div className="border-b border-app-border pb-2">
-                <div className="px-3 pt-3 pb-1.5 text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Flight data</div>
+                <div className="px-3 pt-3 pb-1.5 text-[13px] font-semibold text-app-text-muted">Flight data</div>
                 {l ? (
                     <div className="px-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-[13px] tabular-nums">
                         <span className="text-app-text-muted">MODE</span><span className="text-app-text">{l.mode}</span>
@@ -1369,11 +1370,11 @@ function FleetDetailPanel({
             </div>
 
             <div className="border-b border-app-border px-3 py-2 space-y-1.5 text-[12px]">
-                <div className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">IDENTITY</div>
+                <div className="text-[13px] font-semibold text-app-text-muted">Identity</div>
                 <Uid uid={drone.hardware_uid}
                     copied={copiedUid === drone.hardware_uid} onCopy={onCopyUid} />
                 <div className="text-app-text-muted">
-                    Simulated fleet drone · PX4 SITL instance {drone.drone_id}
+                    Simulated fleet drone, PX4 SITL instance {drone.drone_id}
                 </div>
                 <div className="text-app-text-muted">
                     Connected server-side (UDP) - no client session, no video feed.
@@ -1387,7 +1388,7 @@ function FleetDetailPanel({
 function PermitsBlock() {
     return (
         <div className="border border-app-border rounded-[10px] bg-app-surface p-3 space-y-2 text-[12px]">
-            <div className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Permissions</div>
+            <div className="text-[13px] font-semibold text-app-text-muted">Permissions</div>
             <div className="text-[13px] text-app-text-muted">
                 Per-drone permits are not tracked yet. Zone permit requests are in the Permits tab.
             </div>
@@ -1422,9 +1423,7 @@ function fmtDur(s: number): string {
 }
 
 function fmtDate(iso: string | null): string {
-    if (!iso) return '-'
-    const d = new Date(iso)
-    return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+    return fmtShort(iso)
 }
 
 function Uid({ uid, copied, onCopy }: { uid: string; copied: boolean; onCopy: (u: string) => void }) {
@@ -1451,7 +1450,7 @@ function Badge({ on, label }: { on: boolean; label: string }) {
 function Stat({ k, v, accent }: { k: string; v: string; accent?: boolean }) {
     return (
         <div className="flex justify-between gap-2 border-b border-app-border pb-1">
-            <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">{k}</span>
+            <span className="text-[13px] font-semibold text-app-text-muted">{k}</span>
             <span className={'text-[13px] font-semibold tabular-nums ' + (accent ? 'text-app-ok' : 'text-app-text')}>{v}</span>
         </div>
     )

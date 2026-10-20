@@ -126,6 +126,17 @@
   --dur-fast: 120ms; --dur: 180ms; --dur-slow: 240ms;
 
   /* Over video and map tiles: one fixed set in both themes (design system 9). */
+  /* The component library's surfaces follow the app palette, so nothing
+     falls back to pure white or near black. */
+  --background: var(--app-bg);
+  --foreground: var(--app-text);
+  --card: var(--app-surface);
+  --card-foreground: var(--app-text);
+  --popover: var(--app-raised);
+  --popover-foreground: var(--app-text);
+  --border: var(--app-border);
+  --muted-foreground: var(--app-text-muted);
+  --app-selected-ink: var(--app-text);
 }
 
 .dark {
@@ -180,6 +191,17 @@
   --input: 240 3.7% 15.9%;
   --ring: 240 4.9% 83.9%;
 
+  /* The component library's surfaces follow the app palette, so nothing
+     falls back to pure white or near black. */
+  --background: var(--app-bg);
+  --foreground: var(--app-text);
+  --card: var(--app-surface);
+  --card-foreground: var(--app-text);
+  --popover: var(--app-raised);
+  --popover-foreground: var(--app-text);
+  --border: var(--app-border);
+  --muted-foreground: var(--app-text-muted);
+  --app-selected-ink: var(--app-text);
 }
 
 /* Midnight: the reworked dark. Stacked ON TOP of .dark (the theme toggle
@@ -223,6 +245,17 @@
   --overlay-warn: #FBC756;
   --overlay-danger: #FF8A8C;
   --input: 218 12% 47.8%;
+  /* The component library's surfaces follow the app palette, so nothing
+     falls back to pure white or near black. */
+  --background: var(--app-bg);
+  --foreground: var(--app-text);
+  --card: var(--app-surface);
+  --card-foreground: var(--app-text);
+  --popover: var(--app-raised);
+  --popover-foreground: var(--app-text);
+  --border: var(--app-border);
+  --muted-foreground: var(--app-text-muted);
+  --app-selected-ink: var(--app-text);
 }
 
 /* Percentage height chain for the app shell. The shell used h-screen

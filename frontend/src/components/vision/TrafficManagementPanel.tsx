@@ -59,7 +59,7 @@ function directionLabel(heading?: number | null, direction?: string | null): str
     const parts: string[] = []
     if (heading != null) parts.push(`${compass(heading)} ${Math.round(heading)}°`)
     if (direction && direction !== 'crossing') parts.push(direction)
-    return parts.join(' · ')
+    return parts.join(', ')
 }
 
 const PROFILE_TONE: Record<string, Tone> = {
@@ -290,7 +290,7 @@ export function TrafficManagementPanel() {
                             !hasTelemetry && 'No telemetry, so no speed',
                             !alprOk && 'plate reader off',
                             !facesOk && 'face recognition off',
-                        ].filter(Boolean).join(' · ')}
+                        ].filter(Boolean).join(', ')}
                         {'. The rest works.'}
                     </span>
                 </div>
@@ -311,7 +311,7 @@ export function TrafficManagementPanel() {
                             <span style={{ ...NUM, marginLeft: 'auto', fontSize: 12, color: MUTED }}
                                 title="Match score and how many frames agreed">
                                 {id.similarity.toFixed(2)}
-                                <span> · {id.votes} votes</span>
+                                <span>, {id.votes} votes</span>
                             </span>
                         </div>
                     ))}
@@ -350,7 +350,7 @@ export function TrafficManagementPanel() {
                     <span style={{ ...NUM, marginLeft: 'auto', fontSize: 13, color: MUTED }}>
                         Peak {cvResults?.peak_count ?? 0}
                         {cvResults?.trend_per_min != null && (
-                            ` · ${cvResults.trend_per_min > 0 ? '+' : ''}${cvResults.trend_per_min}/min`
+                            `, ${cvResults.trend_per_min > 0 ? '+' : ''}${cvResults.trend_per_min}/min`
                         )}
                     </span>
                 </div>
@@ -489,7 +489,7 @@ export function TrafficManagementPanel() {
                                             {v.plate && (v.plate_px_w ?? 0) > 0 && (
                                                 <span style={{ ...NUM, fontSize: 12, color: MUTED }}>
                                                     {v.plate_px_w}px across
-                                                    {v.plate_grammar_ok === false && ' · unusual format'}
+                                                    {v.plate_grammar_ok === false && ', unusual format'}
                                                 </span>
                                             )}
                                             <span style={{
@@ -502,7 +502,7 @@ export function TrafficManagementPanel() {
                                                     what the exported report is keyed by. */}
                                                 {[showColour ? v.color : null, v.type]
                                                     .filter(Boolean).join(' ')}
-                                                {' · '}{v.vehicle_id ?? `#${v.track_id}`}
+                                                {' '}({v.vehicle_id ?? `#${v.track_id}`})
                                             </span>
                                             {/* Direction of travel. Absent rather
                                                 than zeroed below ~5km/h, where a
@@ -513,7 +513,7 @@ export function TrafficManagementPanel() {
                                                     ...NUM, fontSize: 12, fontWeight: wrongWay ? 700 : 400,
                                                     color: wrongWay ? TONE.danger.fg : MUTED,
                                                 }}>
-                                                    {wrongWay ? 'Against flow · ' : ''}{heading}
+                                                    {wrongWay ? 'Against flow, ' : ''}{heading}
                                                 </span>
                                             )}
                                         </div>
@@ -540,10 +540,10 @@ export function TrafficManagementPanel() {
                     ...SECONDARY, ...NUM, lineHeight: 1.6,
                 }}>
                     {Object.entries(cvResults?.vehicle_types ?? {})
-                        .map(([k, n]) => `${n} ${k}`).join(' · ')}
+                        .map(([k, n]) => `${n} ${k}`).join(', ')}
                     {Object.keys(cvResults?.vehicle_colors ?? {}).length > 0 && (
                         <><br />{Object.entries(cvResults?.vehicle_colors ?? {})
-                            .map(([k, n]) => `${n} ${k}`).join(' · ')}</>
+                            .map(([k, n]) => `${n} ${k}`).join(', ')}</>
                     )}
                 </div>
             )}

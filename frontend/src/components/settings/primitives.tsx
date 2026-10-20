@@ -17,7 +17,7 @@ export function PrefRow({ label, sub, tip, right }: { label: React.ReactNode; su
                     <span style={{ fontSize: 14, fontWeight: 600, color: 'hsl(var(--app-text))' }}>{label}</span>
                     {tip && (
                         <Tooltip>
-                            <TooltipTrigger aria-label="More about this setting" style={{ background: 'none', border: 'none', padding: 2, margin: -2, borderRadius: 999, cursor: 'help', display: 'flex' }}>
+                            <TooltipTrigger aria-label="More about this setting" className="focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-accent" style={{ background: 'none', border: 'none', padding: 4, margin: -4, borderRadius: 999, cursor: 'help', display: 'flex' }}>
                                 <Info size={14} style={{ color: 'hsl(var(--app-text-muted))' }} />
                             </TooltipTrigger>
                             <TooltipContent style={{ maxWidth: 280, fontSize: 13, lineHeight: 1.5 }}>{tip}</TooltipContent>
@@ -26,7 +26,7 @@ export function PrefRow({ label, sub, tip, right }: { label: React.ReactNode; su
                 </div>
                 {sub && <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: '2px 0 0', lineHeight: 1.45, maxWidth: '70ch' }}>{sub}</p>}
             </div>
-            <div style={{ flexShrink: 0, maxWidth: '100%' }}>{right}</div>
+            <div style={{ flexShrink: 0, maxWidth: '100%', minWidth: 0 }}>{right}</div>
         </div>
     )
 }
@@ -37,10 +37,10 @@ export const S_INPUT: React.CSSProperties = {
     color: 'hsl(var(--app-text))', minWidth: 0,
 }
 
-/** Section caption (PROFILE, MEMBERS ...): 12px 700, short tracking. */
+/** Section heading (Profile, Members ...): sentence case, 16px 700. */
 export const S_LABEL: React.CSSProperties = {
-    display: 'block', fontSize: 12, fontWeight: 700,
-    letterSpacing: '0.06em', color: 'hsl(var(--app-text-muted))', marginBottom: 6,
+    display: 'block', fontSize: 16, fontWeight: 700, lineHeight: '22px',
+    color: 'hsl(var(--app-text))', marginBottom: 6,
 }
 
 /** A form field's label: sentence case, 13px. */
@@ -98,15 +98,48 @@ export function Status({ error, ok }: { error?: string; ok?: string }) {
 }
 
 export function Pill({ children, tone = 'muted' }: { children: React.ReactNode; tone?: 'muted' | 'cyan' | 'amber' }) {
-    const c = tone === 'cyan' ? 'var(--app-accent)' : tone === 'amber' ? 'var(--app-warn)' : 'hsl(var(--app-text-muted))'
+    // Tinted pills keep the full ink colour for text: accent text on its own
+    // soft tint sits right at 4.5:1 in light, the border carries the hue.
+    const c = tone === 'muted' ? 'hsl(var(--app-text-muted))' : 'hsl(var(--app-text))'
     const bg = tone === 'cyan' ? 'var(--app-accent-soft)' : tone === 'amber' ? 'var(--app-warn-soft)' : 'transparent'
+    const bd = tone === 'cyan' ? 'color-mix(in srgb, var(--app-accent) 45%, transparent)' : tone === 'amber' ? 'color-mix(in srgb, var(--app-warn) 45%, transparent)' : 'hsl(var(--app-border))'
     return (
         <span style={{
-            fontSize: 12, fontWeight: 700, letterSpacing: '0.04em', padding: '1px 8px',
-            borderRadius: 999, border: '1px solid', borderColor: tone === 'muted' ? 'hsl(var(--app-border))' : 'transparent',
+            fontSize: 12, fontWeight: 700, padding: '1px 8px',
+            borderRadius: 999, border: '1px solid', borderColor: bd,
             background: bg, color: c, whiteSpace: 'nowrap',
         }}>
             {children}
         </span>
     )
+}
+
+/** A short, local date for setup screens: "21 Oct, 01:15" (the year only
+ *  when it is not this year), in India time - the people using this are. */
+export function fmtShort(iso: string | null | undefined): string {
+    if (!iso) return '-'
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return '-'
+    const tz = 'Asia/Kolkata'
+    const year = d.toLocaleString('en-IN', { year: 'numeric', timeZone: tz })
+    const thisYear = new Date().toLocaleString('en-IN', { year: 'numeric', timeZone: tz })
+    const day = d.toLocaleString('en-IN', { day: 'numeric', month: 'short', timeZone: tz })
+    const time = d.toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz })
+    return `${day}${year !== thisYear ? ` ${year}` : ''}, ${time}`
+}
+
+/** Readable device names from a session label (a user agent or what the
+ *  server derived from one). Scripts and API clients are told apart so the
+ *  device list can group them. */
+export function describeDevice(label: string | null | undefined): { name: string; script: boolean } {
+    const raw = (label || '').trim()
+    if (!raw) return { name: 'Unnamed device', script: false }
+    const script = /^(python|node|curl|wget|okhttp|go-http|axios|postman|insomnia|java|ruby|php|undici|deno|bun)\b/i.test(raw)
+    if (script) return { name: raw.replace(/\//, ' '), script: true }
+    const browser = /edg\//i.test(raw) ? 'Edge' : /firefox\//i.test(raw) ? 'Firefox' : /electron\//i.test(raw) ? 'HYRAK desktop app'
+        : /chrome\//i.test(raw) ? 'Chrome' : /safari\//i.test(raw) ? 'Safari' : null
+    const os = /android/i.test(raw) ? 'Android' : /iphone|ipad|ios/i.test(raw) ? 'iOS' : /windows/i.test(raw) ? 'Windows'
+        : /mac os|macintosh/i.test(raw) ? 'macOS' : /linux|x11/i.test(raw) ? 'Linux' : null
+    if (browser) return { name: os ? `${browser} on ${os}` : browser, script: false }
+    return { name: raw, script: false }
 }

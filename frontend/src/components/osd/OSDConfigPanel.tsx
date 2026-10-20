@@ -111,10 +111,10 @@ function Toggle({ value, onChange, label, disabled }: { value: boolean; onChange
     return (
         <button type="button" role="switch" aria-checked={value} aria-label={label} onClick={onChange} disabled={disabled}
             className={cn('relative w-9 h-5 rounded-full shrink-0 border after:absolute after:-inset-1.5 transition-colors duration-[var(--dur)] disabled:cursor-not-allowed', FOCUS_OVERLAY,
-                value ? 'bg-[var(--overlay-accent)] border-[var(--overlay-accent)]' : 'bg-white/15 border-overlay-border')}
+                value ? 'bg-[var(--overlay-accent)] border-[var(--overlay-accent)]' : 'bg-[color-mix(in_srgb,var(--overlay-text)_15%,transparent)] border-overlay-border')}
         >
             <span className={cn('absolute top-1/2 -translate-y-1/2 left-0 w-3.5 h-3.5 rounded-full transition-transform duration-[var(--dur)]',
-                value ? 'translate-x-[17px] bg-[#04161b]' : 'translate-x-[2px] bg-overlay-text')} />
+                value ? 'translate-x-[17px] bg-[var(--overlay-scrim)]' : 'translate-x-[2px] bg-overlay-text')} />
         </button>
     )
 }
@@ -132,7 +132,7 @@ export function OSDConfigPanel({ config, onUpdate, onPreset }: Props) {
                 onClick={() => setOpen(o => !o)}
                 aria-expanded={open}
                 title="Choose what the video overlay shows"
-                className={cn(OVERLAY_BTN, FOCUS_OVERLAY, open && 'bg-[rgba(8,12,18,0.92)] border-white/30',
+                className={cn(OVERLAY_BTN, FOCUS_OVERLAY, open && 'bg-[color-mix(in_srgb,var(--overlay-text)_10%,var(--overlay-scrim))]',
                     config.enabled ? 'text-overlay-text' : 'text-overlay-muted')}
             >
                 <Settings2 size={14} />
@@ -142,8 +142,8 @@ export function OSDConfigPanel({ config, onUpdate, onPreset }: Props) {
             </button>
 
             {open && (
-                <div className="absolute top-full right-0 mt-1 w-[232px] rounded-[10px] overflow-hidden z-[100] border border-overlay-border text-overlay-text"
-                    style={{ background: 'rgba(8,12,18,0.92)', backdropFilter: 'blur(6px)' }}>
+                <div className="absolute top-full right-0 mt-1 w-[232px] rounded-[10px] overflow-hidden z-[100] border border-overlay-border text-overlay-text animate-in fade-in-0 slide-in-from-top-1 duration-[180ms]"
+                    style={{ background: 'var(--overlay-scrim)', backdropFilter: 'blur(10px)' }}>
                     {/* Header */}
                     <div className="flex items-center justify-between px-3 py-1.5 border-b border-overlay-border">
                         <span className="text-[13px] font-bold">Overlay widgets</span>
@@ -154,7 +154,7 @@ export function OSDConfigPanel({ config, onUpdate, onPreset }: Props) {
                     </div>
 
                     {/* Master toggle */}
-                    <div className={cn('flex items-center justify-between px-3 py-2.5 border-b border-overlay-border', config.enabled && 'bg-[rgba(34,211,238,0.10)]')}>
+                    <div className={cn('flex items-center justify-between px-3 py-2.5 border-b border-overlay-border', config.enabled && 'bg-[color-mix(in_srgb,var(--overlay-accent)_10%,transparent)]')}>
                         <span className={cn('text-[13px] font-bold', config.enabled ? 'text-[var(--overlay-accent)]' : 'text-overlay-muted')}>
                             {config.enabled ? 'Overlay on' : 'Overlay off'}
                         </span>
@@ -167,7 +167,7 @@ export function OSDConfigPanel({ config, onUpdate, onPreset }: Props) {
                             <button
                                 key={p}
                                 onClick={() => onPreset(p)}
-                                className={cn('flex-1 h-8 rounded-md border border-overlay-border bg-white/5 text-[12px] font-bold capitalize text-overlay-muted hover:text-overlay-text', FOCUS_OVERLAY)}
+                                className={cn('flex-1 h-8 rounded-md border border-overlay-border bg-[color-mix(in_srgb,var(--overlay-text)_5%,transparent)] text-[12px] font-bold capitalize text-overlay-muted hover:text-overlay-text', FOCUS_OVERLAY)}
                             >
                                 {p}
                             </button>

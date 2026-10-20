@@ -651,7 +651,7 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
   })
 
   const avoidanceLegend = !compact && !isCustomer ? (
-    <div className={`${OVERLAY} rounded-[10px] px-3 py-2.5 text-[13px] min-w-[160px] shadow-lg`}
+    <div className={`${OVERLAY} rounded-[10px] px-3 py-2.5 text-[13px] min-w-[160px] shadow-[var(--app-shadow)]`}
       style={avoidanceLegendHost === undefined ? { position: 'absolute', bottom: 12, left: 12, zIndex: 1000 } : undefined}>
       <label className="flex items-center gap-2 cursor-pointer font-bold min-h-6">
         <input type="checkbox" checked={showAvoid}
@@ -672,7 +672,7 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
             className={`mt-1 w-full h-8 rounded-[6px] border text-[13px] font-bold transition-colors duration-[120ms] ${FOCUS_OVERLAY}`}
             style={{
               borderColor: pinMode ? 'var(--overlay-accent)' : 'var(--overlay-border)',
-              background: pinMode ? 'rgba(34, 211, 238, 0.18)' : 'rgba(255, 255, 255, 0.06)',
+              background: pinMode ? 'color-mix(in srgb, var(--overlay-accent) 16%, transparent)' : 'transparent',
               color: 'var(--overlay-text)',
             }}
             title="Pin a known hazard: click here, then click the map">
@@ -689,7 +689,7 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
       center={initialView.center}
       zoom={initialView.zoom}
       className="w-full h-full"
-      style={{ background: '#0a0a0a' }}
+      style={{ background: 'hsl(var(--app-surface-2))' }}
       zoomControl={false}
       attributionControl={false}
     >

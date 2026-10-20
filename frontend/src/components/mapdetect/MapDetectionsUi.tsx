@@ -83,16 +83,16 @@ function ClassRows({ list }: { list: Sighting[] }) {
     )
 }
 
-// Drawn on map tiles: the always-dark overlay set (same in both themes).
+// Drawn on map tiles: the overlay set, which follows the theme.
 const BOX: React.CSSProperties = {
     background: 'var(--overlay-scrim)', border: '1px solid var(--overlay-border)', borderRadius: 10,
-    color: 'var(--overlay-text)', fontSize: 13, boxShadow: '0 4px 16px rgba(0,0,0,0.35)',
+    color: 'var(--overlay-text)', fontSize: 13, boxShadow: 'var(--app-shadow)',
     backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
 }
 
 const SMALL_BTN: React.CSSProperties = {
     minHeight: 32, padding: '0 12px', borderRadius: 6, border: '1px solid var(--overlay-border)',
-    background: 'rgba(255,255,255,0.06)', color: 'var(--overlay-text)', cursor: 'pointer',
+    background: 'transparent', color: 'var(--overlay-text)', cursor: 'pointer',
     fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
 }
 
@@ -201,9 +201,9 @@ export function MapDetectionsControls() {
     return (
         <section aria-label="Detections on the map"
             className="rounded-[10px] border border-app-border bg-app-surface-2 p-3 flex flex-col gap-1">
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.05em] text-app-text-muted">
+            <div className="flex items-center gap-2 text-[13px] font-semibold text-app-text-muted">
                 <MapPin size={13} /> Map
-                {s.list.length > 0 && <span className="ml-auto normal-case tracking-normal text-[13px] font-semibold text-app-text tabular-nums">{s.list.length} placed</span>}
+                {s.list.length > 0 && <span className="ml-auto text-[13px] font-semibold text-app-text tabular-nums">{s.list.length} placed</span>}
             </div>
             <label style={row}>
                 <input type="checkbox" checked={s.show} onChange={e => s.setShow(e.target.checked)}

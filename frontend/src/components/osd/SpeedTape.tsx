@@ -84,8 +84,9 @@ export function SpeedTape({ height = 200 }: Props) {
             <div style={{
                 position: 'absolute', bottom: -16, left: '50%',
                 transform: 'translateX(-50%)',
-                fontSize: 12, 
-                color: 'var(--overlay-muted)',
+                fontSize: 12,
+                // Bare text on the picture: fixed light ink with a shadow, like the tape itself.
+                color: '#C3CCD8', textShadow: '0 1px 2px rgba(0,0,0,.8)',
                 whiteSpace: 'nowrap',
             }}>
                 m/s

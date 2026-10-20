@@ -1,6 +1,6 @@
 'use client'
 
-// The bottom bar of the Command window - a solid bar, not an overlay.
+// The mission half of the Command action bar.
 //
 //   left    where in the mission: item N of M
 //   centre  the mission's ALTITUDE PROFILE along its real distance, flown part
@@ -9,11 +9,13 @@
 //           avoidance can see an obstacle but is not allowed to steer (the
 //           2.8 m pillar crash of 2026-09-26 was exactly that).
 //   right   distance to the next item, distance left, time left at the
-//           current speed; then what avoidance is doing and the aircraft's
-//           latest message - the lines that used to float over the video.
+//           current speed, ground speed.
+// What avoidance is doing and the aircraft's latest message moved to the
+// global status bar (AvoidChips, the messages button).
 
 import { useMemo } from 'react'
 import Link from 'next/link'
+import { ChevronRight } from 'lucide-react'
 import { useUiMode } from '@/hooks/useUiMode'
 import { useDroneStore } from '@/store/drone'
 import { useMissionStore } from '@/store/mission'
@@ -30,36 +32,18 @@ function dist(a: { lat: number; lng: number }, b: { lat: number; lng: number }) 
 const fmtM = (m: number) => m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${Math.round(m)} m`
 const fmtT = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`
 
-// Chip classes per avoidance state: theme tokens so the bar reads in light and dark.
-type Chip = { cls: string; label: string }
-const CHIP = {
-    accent: 'text-app-accent bg-app-accent-soft border-app-accent',
-    warn: 'text-app-warn bg-app-warn-soft border-app-warn',
-    danger: 'text-app-danger bg-app-danger-soft border-app-danger',
-    ok: 'text-app-ok bg-app-ok-soft border-app-ok',
-}
-const AVOID_TONE: Record<string, Chip> = {
-    avoiding:  { cls: CHIP.accent, label: 'AVOIDING' },
-    holding:   { cls: CHIP.warn, label: 'HOLDING' },
-    returning: { cls: CHIP.danger, label: 'RETURNING' },
-    rerouted:  { cls: CHIP.accent, label: 'REROUTED' },
-    climbing:  { cls: CHIP.accent, label: 'CLIMBING' },
-}
-
 function Stat({ k, v }: { k: string; v: string }) {
     return (
         <div className="flex flex-col leading-tight">
-            <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">{k}</span>
-            <span className="text-[16px] font-bold text-app-text tabular-nums">{v}</span>
+            <span className="text-[13px] font-semibold text-app-text-muted">{k}</span>
+            <span className="text-[14px] font-bold text-app-text tabular-nums">{v}</span>
         </div>
     )
 }
 
 export function MissionBar({ avoid }: { avoid: AvoidanceStatus | null }) {
     const t = useDroneStore(s => s.telemetry)
-    const msgs = useDroneStore(s => s.fcMessages)
     const plan = useMissionStore(s => s.waypoints)
-    const last = msgs.length ? msgs[msgs.length - 1] : null
     const floor = actingFloorM(avoid)
     // Normal mode names the Mission tab "Plan".
     const normal = useUiMode()[0] === 'normal'
@@ -101,22 +85,23 @@ export function MissionBar({ avoid }: { avoid: AvoidanceStatus | null }) {
     const area = n > 1 ? `M0,100 L${pts.join(' L')} L1000,100 Z` : ''
     const floorY = floor != null ? 100 - (floor / geo.maxAlt) * 100 : null
 
-    const steer: Chip | undefined = avoid?.guarding ? { cls: CHIP.accent, label: 'GUARDING' }
-        : avoid?.state && AVOID_TONE[avoid.state]
-    const aLine = !avoid ? null
-        : avoid.stale ? { cls: CHIP.danger, label: `STALE ${avoid.stale_s ?? 0}s`, why: 'No answer from avoidance - not live' }
-        : !avoid.enabled ? { cls: CHIP.danger, label: 'AVOID OFF', why: 'Obstacle avoidance is off for this aircraft' }
-            : !avoid.armed ? { cls: CHIP.warn, label: 'WATCHING', why: 'Detects only - Steer is off' }
-                : steer ? { ...steer, why: avoid.guarding ? avoid.reason : (avoid.planner?.reason ?? avoid.reason) }
-                    : { cls: CHIP.ok, label: 'CLEAR', why: avoid.reason || 'Path clear' }
-    const lowLeg = floor != null && inAir && t && t.position.relative_altitude_m < floor && avoid?.enabled
+    // No plan yet: say so once and point to where plans are made.
+    if (n === 0) {
+        return (
+            <div className="h-full flex items-center gap-2 min-w-0 text-[13px] text-app-text-muted">
+                <span className="whitespace-nowrap">No mission loaded</span>
+                <Link href="/mission" className="inline-flex items-center gap-1 h-8 px-2.5 rounded-md whitespace-nowrap text-app-accent font-semibold hover:bg-app-accent-soft transition-colors duration-[140ms] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg">
+                    Plan on {normal ? 'Plan' : 'Mission'} <ChevronRight size={14} /></Link>
+            </div>
+        )
+    }
 
     return (
-        <div className="h-full flex items-stretch gap-4 px-3">
-            <div className="flex flex-col justify-center w-[92px] shrink-0">
-                <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-app-text-muted">Mission</span>
+        <div className="h-full flex items-stretch gap-4 min-w-0">
+            <div className="flex flex-col justify-center w-[84px] shrink-0">
+                <span className="text-[13px] font-semibold text-app-text-muted">Mission</span>
                 {n > 0
-                    ? <span className="text-[22px] font-extrabold tabular-nums leading-none text-app-text">
+                    ? <span className="text-[18px] font-extrabold tabular-nums leading-none text-app-text">
                         {finished ? n : idx >= 0 ? idx + 1 : '-'}<span className="text-[13px] font-semibold text-app-text-muted"> / {n}</span></span>
                     : <span className="text-[13px] text-app-text-muted">None loaded</span>}
                 {finished && <span className="text-[12px] font-bold text-app-ok">Complete</span>}
@@ -132,7 +117,7 @@ export function MissionBar({ avoid }: { avoid: AvoidanceStatus | null }) {
                             </defs>
                             <path d={area} fill="rgba(148,163,184,.10)" />
                             <polyline points={pts.join(' ')} fill="none" style={{ stroke: 'hsl(var(--app-border-strong))' }} strokeWidth="2" vectorEffect="non-scaling-stroke" />
-                            <path d={area} fill="rgba(34,211,238,.16)" clipPath="url(#mb-done)" />
+                            <path d={area} style={{ fill: 'var(--app-accent-soft)' }} clipPath="url(#mb-done)" />
                             <polyline points={pts.join(' ')} fill="none" style={{ stroke: 'var(--app-accent)' }} strokeWidth="2" vectorEffect="non-scaling-stroke" clipPath="url(#mb-done)" />
                             {floorY != null && (
                                 <>
@@ -167,39 +152,21 @@ export function MissionBar({ avoid }: { avoid: AvoidanceStatus | null }) {
                         )}
                     </>
                 ) : (
-                    <div className="h-full flex items-center text-[13px] text-app-text-muted">
-                        <span>Plan and upload a mission on the{' '}
-                            <Link href="/mission" className="text-app-accent font-semibold underline underline-offset-2 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg">
-                                {normal ? 'Plan' : 'Mission'} tab</Link>
-                            {' '}- its altitude profile shows here.</span></div>
+                    <div className="h-full flex items-center gap-3 text-[13px] text-app-text-muted">
+                        <span>No mission loaded.</span>
+                        <Link href="/mission" className="inline-flex items-center gap-1 h-8 px-2.5 rounded-md text-app-accent font-semibold hover:bg-app-accent-soft transition-colors duration-[140ms] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg">
+                            Plan on {normal ? 'Plan' : 'Mission'} <ChevronRight size={14} /></Link>
+                    </div>
                 )}
             </div>
 
             <div className="flex items-center gap-4 shrink-0">
-                <Stat k="NEXT" v={localNav ? 'local' : nextM != null ? fmtM(nextM) : '-'} />
-                <Stat k="LEFT" v={localNav ? 'nav' : leftM != null && idx >= 0 ? fmtM(leftM) : '-'} />
-                <Stat k="TIME" v={localNav ? '-' : leftM != null && idx >= 0 && inAir ? fmtT(leftM / speed) : '-'} />
-                <Stat k="GS" v={t ? `${t.groundspeed_m_s.toFixed(1)} m/s` : '-'} />
+                <Stat k="Next" v={localNav ? 'local' : nextM != null ? fmtM(nextM) : '-'} />
+                <Stat k="Left" v={localNav ? 'nav' : leftM != null && idx >= 0 ? fmtM(leftM) : '-'} />
+                <Stat k="Time" v={localNav ? '-' : leftM != null && idx >= 0 && inAir ? fmtT(leftM / speed) : '-'} />
+                <Stat k="Speed" v={t ? `${t.groundspeed_m_s.toFixed(1)} m/s` : '-'} />
             </div>
 
-            <div className="w-[300px] shrink-0 flex flex-col justify-center gap-1 min-w-0 border-l border-app-border pl-3">
-                {lowLeg ? (
-                    <div className="flex items-center gap-2 text-[13px] min-w-0">
-                        <span className={`px-1.5 rounded-md border text-[12px] font-bold shrink-0 ${CHIP.danger}`}>BELOW FLOOR</span>
-                        <span className="truncate text-app-danger">{t!.position.relative_altitude_m.toFixed(1)} m - avoidance can see but will not steer</span>
-                    </div>
-                ) : aLine && (
-                    <div className="flex items-center gap-2 text-[13px] min-w-0" title={aLine.why}>
-                        <span className={`px-1.5 rounded-md border text-[12px] font-bold shrink-0 ${aLine.cls}`}>{aLine.label}</span>
-                        <span className="truncate text-app-text">{aLine.why}</span>
-                        {steer && avoid?.planner?.ttc_s != null && <span className="shrink-0 font-bold text-app-accent tabular-nums">TTC {avoid.planner.ttc_s}s</span>}
-                    </div>
-                )}
-                <div title={last?.text}
-                    className={`text-[13px] truncate ${!last ? 'text-app-text-muted' : last.rank >= 5 ? 'text-app-danger font-semibold' : last.rank >= 4 ? 'text-app-warn font-semibold' : 'text-app-text-muted'}`}>
-                    {last ? last.text : 'No messages from the aircraft'}
-                </div>
-            </div>
         </div>
     )
 }

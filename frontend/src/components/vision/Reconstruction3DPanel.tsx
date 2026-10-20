@@ -174,7 +174,7 @@ export function Reconstruction3DPanel() {
                         </span>
                         <span style={{ ...SECONDARY, ...NUM }}
                             title="Keyframes and landmarks in the map">
-                            {cvResults?.keyframes ?? 0} frames · {cvResults?.landmarks ?? 0} points
+                            {cvResults?.keyframes ?? 0} frames, {cvResults?.landmarks ?? 0} points
                         </span>
                         {(cvResults?.input_w ?? 0) > 0 && (
                             <span style={{ ...SECONDARY, ...NUM, color: lowInput ? TONE.warn.fg : MUTED }}
@@ -184,7 +184,7 @@ export function Reconstruction3DPanel() {
                         )}
                     </div>
                     <div style={{
-                        borderRadius: 10, overflow: 'hidden', background: '#000',
+                        borderRadius: 10, overflow: 'hidden', background: depthStream.src ? '#1A2129' : SURFACE_2,
                         border: `1px solid ${BORDER}`, aspectRatio: '16/9',
                     }}>
                         {/* Depth map - the network's per-frame view of the scene;
