@@ -194,6 +194,27 @@ function makeDroneCanvas(): HTMLCanvasElement {
 // ── Component ───────────────────────────────────────────────────────────────
 
 // readOnly: a flight view (Command window) - no waypoint add/drag/select.
+/**
+ * Fly so a ground point sits in the middle of the view: about 400 m above
+ * it, looking 45 degrees down, north up. The ground height comes from the
+ * full-detail terrain first - right after the viewer opens, the globe only
+ * holds coarse tiles that can read hundreds of metres low, which put the
+ * camera underground (a view of nothing but stars).
+ */
+function flyToPoint(Cesium: typeof CesiumNS, viewer: CesiumNS.Viewer, lng: number, lat: number, duration: number) {
+  const fly = (ground: number | undefined) => {
+    if (viewer.isDestroyed()) return
+    viewer.camera.flyToBoundingSphere(
+      new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(lng, lat, ground ?? 0), 0),
+      // Height unknown: stand far enough back to clear high ground anywhere.
+      { offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), ground == null ? 6000 : 570), duration },
+    )
+  }
+  Cesium.sampleTerrainMostDetailed(viewer.scene.terrainProvider, [Cesium.Cartographic.fromDegrees(lng, lat)])
+    .then(([c]) => fly(Number.isFinite(c?.height) ? c.height : undefined))
+    .catch(() => fly(undefined))
+}
+
 export default function MissionMap3D({ readOnly = false, showNav = true, navStyle }: {
   readOnly?: boolean
   /** On-screen zoom / rotate / tilt controls (off for a small corner picture). */
@@ -1083,13 +1104,7 @@ export default function MissionMap3D({ readOnly = false, showNav = true, navStyl
     if (waypoints.length > 0 && !flewRef.current) {
       flewRef.current = true
       const wp0 = waypoints[0]
-      const wp0Carto  = Cesium.Cartographic.fromDegrees(wp0.lng, wp0.lat)
-      const wp0Ground = viewer.scene.globe.getHeight(wp0Carto) ?? 0
-      viewer.camera.flyTo({
-        destination: Cesium.Cartesian3.fromDegrees(wp0.lng, wp0.lat, Math.max(wp0Ground + 400, 800)),
-        orientation: { heading: 0, pitch: Cesium.Math.toRadians(-45), roll: 0 },
-        duration: 2,
-      })
+      flyToPoint(Cesium, viewer, wp0.lng, wp0.lat, 2)
     }
   }, [waypoints, selectedId, missionCurrentIndex, terrainFollow, viewerReady, rtlPosition])
 
@@ -1216,17 +1231,7 @@ export default function MissionMap3D({ readOnly = false, showNav = true, navStyl
       // altitude (e.g. Hyderabad ≈ 525 m) don't land the camera underground.
       if (!flewRef.current && useMissionStore.getState().waypoints.length === 0) {
         flewRef.current = true
-        const flyCarto = Cesium.Cartographic.fromDegrees(dronePos.longitude_deg, dronePos.latitude_deg)
-        const flyGroundAlt = viewer.scene.globe.getHeight(flyCarto) ?? 0
-        viewer.camera.flyTo({
-          destination: Cesium.Cartesian3.fromDegrees(
-            dronePos.longitude_deg,
-            dronePos.latitude_deg,
-            Math.max(flyGroundAlt + 400, 800),   // 400 m AGL, minimum 800 m MSL
-          ),
-          orientation: { heading: 0, pitch: Cesium.Math.toRadians(-45), roll: 0 },
-          duration: 1.5,
-        })
+        flyToPoint(Cesium, viewer, dronePos.longitude_deg, dronePos.latitude_deg, 1.5)
       }
     }
   }, [telemetry, viewerReady])
