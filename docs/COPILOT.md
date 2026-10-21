@@ -168,3 +168,12 @@ gives it to the smallest track around it.
 | `app/copilot/service.py` | per-session state, cards, tasks, hooks |
 | `app/copilot/events.py` | socket handlers |
 | `tests/test_copilot.py` | parser, planner, guards, cards, follow matching, survey, tasks, handlers |
+
+## Logs and privacy
+
+The server log records each Copilot exchange as metadata only (session,
+role, status, text length, card kind) and every dropped voice clip (too
+short, or silent with its level). What the pilot said and what Copilot
+answered is logged only when `COPILOT_LOG_TRANSCRIPTS=1` is set, a
+debugging opt-in for test setups; leave it off in production, where pilots
+and customers speak. Audio is never stored.

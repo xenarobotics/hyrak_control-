@@ -38,6 +38,7 @@ import asyncio
 import logging
 from functools import partial
 import math
+import os
 import re
 import secrets
 import time
@@ -240,6 +241,9 @@ def _msg_id() -> str:
     return secrets.token_hex(6)
 
 
+LOG_TRANSCRIPTS = os.environ.get("COPILOT_LOG_TRANSCRIPTS", "") == "1"
+
+
 async def say(session_id: str, text: str, *, role: str = "copilot", status: str = "done",
               msg_id: Optional[str] = None, card: Optional[dict] = None,
               speak: Optional[bool] = None) -> str:
@@ -247,9 +251,12 @@ async def say(session_id: str, text: str, *, role: str = "copilot", status: str 
     payload: Dict[str, Any] = {"id": mid, "role": role, "text": text, "ts": time.time(),
                                "status": status}
     if status != "thinking":
-        # The conversation in the log, so "it did nothing" can be traced.
-        logger.info(f"Copilot {session_id[:8]} {role}/{status}: {text[:160]}"
-                    + (f" [card {card.get('kind')}: {card.get('title')}]" if card else ""))
+        # Metadata always, so "it did nothing" can be traced; what was said
+        # only with COPILOT_LOG_TRANSCRIPTS=1 (a debugging opt-in: pilots'
+        # and customers' words do not belong in ordinary server logs).
+        said = f": {text[:160]}" if LOG_TRANSCRIPTS else f": {len(text)} chars"
+        logger.info(f"Copilot {session_id[:8]} {role}/{status}{said}"
+                    + (f" [card {card.get('kind')}]" if card else ""))
     if speak is None:
         speak = role == "copilot" and status != "thinking"
     payload["speak"] = bool(speak)
