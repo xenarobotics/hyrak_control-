@@ -5,7 +5,7 @@
 
 import { useEffect } from 'react'
 import { ensureCopilotFeed, useCopilotStore } from '@/lib/copilot'
-import { startTalk, stopTalk } from './PushToTalk'
+import { startTalk, stopTalk, warmMic, releaseMic } from './PushToTalk'
 import { FollowMeSharer } from './FollowMeSharer'
 
 function typingTarget(el: Element | null): boolean {
@@ -48,7 +48,14 @@ export function CopilotHost() {
     }, [enabled])
 
     // Switched off (or leaving the page) mid-recording: send nothing more.
-    useEffect(() => () => stopTalk(), [])
+    // Copilot on: open the (already allowed) microphone so the first press
+    // records at once; off: close it.
+    useEffect(() => {
+        if (enabled) void warmMic()
+        else releaseMic()
+    }, [enabled])
+
+    useEffect(() => () => { stopTalk(); releaseMic() }, [])
 
     return <FollowMeSharer />
 }

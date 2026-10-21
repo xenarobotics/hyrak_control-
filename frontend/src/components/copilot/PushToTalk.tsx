@@ -103,11 +103,59 @@ export async function requestMic(): Promise<void> {
     }
 }
 
+// The microphone stays open (not recording) for a while after a take, and
+// from when Copilot is switched on once permission is known, so the next
+// press records at once instead of losing the first word to device start-up.
+// Nothing is recorded or sent unless the button is held.
+const WARM_MS = 90_000
+let warmTimer: ReturnType<typeof setTimeout> | null = null
+let warmId = ''
+
+function live(s: MediaStream | null): s is MediaStream {
+    return !!s && s.getAudioTracks().some(t => t.readyState === 'live')
+}
+
+export function releaseMic(): void {
+    if (warmTimer) { clearTimeout(warmTimer); warmTimer = null }
+    if (recorder && recorder.state !== 'inactive') return      // never cut a take
+    stream?.getTracks().forEach(t => t.stop())
+    stream = null
+}
+
+function keepWarm(): void {
+    if (warmTimer) clearTimeout(warmTimer)
+    warmTimer = setTimeout(releaseMic, WARM_MS)
+}
+
+async function openMic(): Promise<MediaStream> {
+    const id = await micToUse()
+    if (live(stream) && warmId === id) return stream
+    stream?.getTracks().forEach(t => t.stop())
+    const base = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
+    let s: MediaStream
+    try {
+        s = await navigator.mediaDevices.getUserMedia({ audio: id ? { ...base, deviceId: { exact: id } } : base })
+    } catch (e) {
+        // The chosen device is gone: fall back to the system default.
+        if (!id || (e as DOMException)?.name === 'NotAllowedError') throw e
+        s = await navigator.mediaDevices.getUserMedia({ audio: base })
+    }
+    stream = s
+    warmId = id
+    micLabel = s.getAudioTracks()[0]?.label ?? ''
+    return s
+}
+
+/** Copilot switched on with the microphone already allowed: open it now. */
+export async function warmMic(): Promise<void> {
+    if (!micSupported() || !micKnownOk()) return
+    try { await openMic(); keepWarm() } catch { /* opened on the first press instead */ }
+}
+
 function cleanup(): void {
     cancelAnimationFrame(meterRaf)
     if (capTimer) { clearTimeout(capTimer); capTimer = null }
-    stream?.getTracks().forEach(t => t.stop())
-    stream = null
+    keepWarm()
     void audioCtx?.close().catch(() => { /* already closed */ })
     audioCtx = null
 }
@@ -156,19 +204,12 @@ export async function startTalk(): Promise<void> {
     stopSpeaking()
     releaseEarly = false
     st.setTalk({ phase: 'starting', startedAt: Date.now(), level: 0 })
-    const base = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
+    let mic: MediaStream
     try {
-        const id = await micToUse()
-        try {
-            stream = await navigator.mediaDevices.getUserMedia({ audio: id ? { ...base, deviceId: { exact: id } } : base })
-        } catch (e) {
-            // The chosen device is gone: fall back to the system default.
-            if (!id || (e as DOMException)?.name === 'NotAllowedError') throw e
-            stream = await navigator.mediaDevices.getUserMedia({ audio: base })
-        }
-        micLabel = stream.getAudioTracks()[0]?.label ?? ''
+        mic = await openMic()
     } catch {
         cleanup()
+        releaseMic()
         st.setTalk({ phase: 'idle', level: 0 })
         try { localStorage.removeItem(MIC_OK_KEY) } catch { /* fine */ }
         st.setMic('denied')
@@ -177,7 +218,7 @@ export async function startTalk(): Promise<void> {
     st.setMic('granted')
     const mime = pickMime()
     try {
-        recorder = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 32000 } : undefined)
+        recorder = new MediaRecorder(mic, mime ? { mimeType: mime, audioBitsPerSecond: 32000 } : undefined)
     } catch {
         cleanup()
         st.setTalk({ phase: 'idle', level: 0 })
@@ -191,7 +232,7 @@ export async function startTalk(): Promise<void> {
     recorder.onstop = () => void finish(recorder?.mimeType || mime || 'audio/webm', Date.now() - startedAt)
     recorder.start()
     st.setTalk({ phase: 'recording', startedAt, level: 0 })
-    startMeter(stream)
+    startMeter(mic)
     capTimer = setTimeout(() => stopTalk(), MAX_TALK_MS)
     if (releaseEarly) stopTalk()
 }

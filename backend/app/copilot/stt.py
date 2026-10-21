@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import re
 import time
 from typing import Optional
 
@@ -106,6 +107,59 @@ def _load():
 slot = ModelSlot("stt", _load)
 
 
+# Drone command vocabulary given to Whisper as a prompt: it decodes the
+# words a pilot actually says (take off, metres, survey, orbit) instead of
+# the nearest everyday phrase, which matters for short, quiet clips.
+VOCAB_PROMPT = ("Drone pilot commands: take off to 10 metres, land, hold, stop, come back, "
+                "return home, go up 5 metres, move forward 20 metres, follow the man in the red shirt, "
+                "follow me, track the white car, count the people, what do you see, "
+                "survey a 50 metre radius at 30 metres, orbit here, status, battery, yes, no, cancel.")
+TARGET_PEAK = 0.7
+MAX_GAIN = 30.0
+
+
+def prepare(audio: np.ndarray) -> np.ndarray:
+    """Quiet microphones (a laptop mic at a low input level) give Whisper a
+    faint signal it fills with invented words: remove DC, bring the peak to
+    a fixed level (gain capped so noise is not blown up), and pad a short
+    silence at both ends so the first syllable is not clipped."""
+    a = audio.astype(np.float32) - float(np.mean(audio))
+    peak = float(np.max(np.abs(a))) if a.size else 0.0
+    if peak > 0:
+        a = a * min(MAX_GAIN, TARGET_PEAK / peak)
+    pad = np.zeros(int(0.25 * SAMPLE_RATE), dtype=np.float32)
+    return np.concatenate([pad, a, pad])
+
+
+def has_speech(audio: np.ndarray) -> bool:
+    """Speech rises and falls (syllables, pauses); fan noise, hum and an
+    open line stay flat. Needs a real spread between quiet and loud 20 ms
+    frames and about a quarter second of loud frames. Without this,
+    Whisper turns steady noise into confident words."""
+    n = int(0.02 * SAMPLE_RATE)
+    frames = audio[: audio.size // n * n].reshape(-1, n)
+    if frames.shape[0] < 10:
+        return False
+    e = np.sqrt(np.mean(np.square(frames - frames.mean(axis=1, keepdims=True)), axis=1)) + 1e-7
+    lo, hi = float(np.percentile(e, 15)), float(np.percentile(e, 95))
+    if hi / lo < 4.0:                             # under ~12 dB of dynamics: not speech
+        return False
+    loud = int(np.sum(e > lo * 4.0))
+    return loud * 0.02 >= 0.25
+
+
+def looks_invented(text: str) -> bool:
+    """Whisper's tells when it hears no words: only punctuation, or one
+    phrase repeated over and over."""
+    words = re.findall(r"[a-z0-9']+", text.lower())
+    if not words:
+        return True
+    phrases = [p.strip() for p in re.split(r"[,.;!?]+", text.lower()) if p.strip()]
+    if len(phrases) >= 3 and len(set(phrases)) <= max(1, len(phrases) // 3):
+        return True
+    return len(words) >= 8 and len(set(words)) <= len(words) // 3
+
+
 def transcribe_array(audio: np.ndarray, language: Optional[str] = None) -> str:
     """Blocking: run on slot.executor."""
     if audio.size < int(MIN_SECONDS * SAMPLE_RATE):
@@ -113,23 +167,42 @@ def transcribe_array(audio: np.ndarray, language: Optional[str] = None) -> str:
         return ""
     # Silence (a held button, nobody speaking) makes Whisper invent words.
     rms = float(np.sqrt(np.mean(np.square(audio))))
+    peak = float(np.max(np.abs(audio)))
     if rms < 0.002:
         logger.info(f"Copilot STT dropped a {audio.size / SAMPLE_RATE:.1f}s clip: silent (rms {rms:.5f})")
+        return ""
+    if not has_speech(audio):
+        logger.info(f"Copilot STT dropped a {audio.size / SAMPLE_RATE:.1f}s clip: no speech "
+                    f"(steady sound, rms {rms:.4f})")
         return ""
     import torch
     m = slot.get()
     t0 = time.perf_counter()
-    feats = m["processor"](audio, sampling_rate=SAMPLE_RATE, return_tensors="pt").input_features
+    feats = m["processor"](prepare(audio), sampling_rate=SAMPLE_RATE, return_tensors="pt").input_features
     feats = feats.to(m["device"], dtype=m["dtype"])
     lang = language if language is not None else LANGUAGE
-    kwargs = {"task": "transcribe", "max_new_tokens": 128}
+    # Beam search is more careful than greedy on short commands and still
+    # fast on the GPU; the prompt carries the command vocabulary.
+    kwargs = {"task": "transcribe", "max_new_tokens": 48, "num_beams": 4}
     if lang and lang != "auto":
         kwargs["language"] = lang
+    prompt_ids = None
+    try:
+        prompt_ids = m["processor"].get_prompt_ids(VOCAB_PROMPT, return_tensors="pt").to(m["device"])
+        kwargs["prompt_ids"] = prompt_ids
+    except Exception as e:                        # older processors: no prompt
+        logger.debug(f"Copilot STT prompt unavailable: {e}")
     with torch.inference_mode():
         ids = m["model"].generate(feats, **kwargs)
     text = m["processor"].batch_decode(ids, skip_special_tokens=True)[0].strip()
-    logger.info(f"Copilot STT {audio.size / SAMPLE_RATE:.1f}s audio in "
-                f"{time.perf_counter() - t0:.2f}s")
+    # Some versions return the prompt in front of the answer.
+    if text.startswith(VOCAB_PROMPT):
+        text = text[len(VOCAB_PROMPT):].strip()
+    logger.info(f"Copilot STT {audio.size / SAMPLE_RATE:.1f}s audio (rms {rms:.3f}, peak {peak:.2f}) "
+                f"in {time.perf_counter() - t0:.2f}s")
+    if looks_invented(text):
+        logger.info("Copilot STT dropped an invented transcript (repeats or no words)")
+        return ""
     return text
 
 

@@ -1240,3 +1240,28 @@ async def test_handlers_are_guarded_and_answer(live, monkeypatch):  # noqa: F811
 
 
 from test_live_scope import live  # noqa: E402,F401  (fixture)
+
+
+def test_steady_noise_is_not_speech_and_repeats_are_dropped():
+    import numpy as np
+    from app.copilot import stt
+    rng = np.random.default_rng(1)
+    t = np.arange(16000 * 2) / 16000
+    assert not stt.has_speech((rng.standard_normal(t.size) * 0.03).astype(np.float32))
+    assert not stt.has_speech((0.02 * np.sin(2 * np.pi * 50 * t)).astype(np.float32))
+    # Syllable-like bursts with pauses between them are speech.
+    bursts = np.where((t % 0.4) < 0.2, 0.2, 0.002) * np.sin(2 * np.pi * 220 * t)
+    assert stt.has_speech(bursts.astype(np.float32))
+    assert stt.looks_invented("What do you see, what do you see, what do you see, what do you see")
+    assert stt.looks_invented("....")
+    assert not stt.looks_invented("Take off to 10 metres.")
+    assert not stt.looks_invented("Follow the man in the red shirt and take off to 15 metres.")
+
+
+def test_quiet_audio_is_brought_up_and_padded():
+    import numpy as np
+    from app.copilot import stt
+    a = (0.01 * np.sin(np.arange(16000) / 5)).astype(np.float32)
+    out = stt.prepare(a)
+    assert out.size == a.size + 2 * int(0.25 * 16000)
+    assert 0.25 < float(np.max(np.abs(out))) <= 0.71
