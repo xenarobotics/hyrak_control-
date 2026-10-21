@@ -71,10 +71,15 @@ async function micToUse(): Promise<string> {
     const mics = await listMics()
     const saved = savedMicId()
     if (saved && mics.some(m => m.deviceId === saved)) return saved
+    // Chromium on Linux names the system default just "Default", so it
+    // cannot be told apart from a virtual source that way. When the system
+    // has any virtual input at all, open a real microphone by name instead
+    // of trusting "Default".
+    const named = mics.filter(m => m.deviceId !== 'default' && m.deviceId !== 'communications' && m.label)
+    const real = named.find(m => !VIRTUAL_MIC.test(m.label))
     const def = mics.find(m => m.deviceId === 'default') ?? mics[0]
-    if (def && VIRTUAL_MIC.test(def.label)) {
-        const real = mics.find(m => m.deviceId !== 'default' && m.deviceId !== 'communications' && !VIRTUAL_MIC.test(m.label))
-        if (real) return real.deviceId
+    if (real && (named.some(m => VIRTUAL_MIC.test(m.label)) || (def && VIRTUAL_MIC.test(def.label)))) {
+        return real.deviceId
     }
     return ''
 }
