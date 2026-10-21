@@ -26,6 +26,7 @@ import { claimSocket, releaseSocket, socketOwner } from '@/lib/socketClaim'
 import { useDroneStore } from '@/store/drone'
 import type { MapDroneLive, MapRoute, MapSelection } from '@/components/deliveries/DeliveryMap'
 import { BTN, BTN_ACCENT, BTN_DANGER, BTN_PRIMARY, BTN_WARN, FOCUS, INPUT, LABEL } from '@/components/mission/ui'
+import { OptionSelect } from '@/components/config/OptionSelect'
 
 const RegionEditor = dynamic(() => import('@/components/deliveries/RegionEditor'), {
     ssr: false,
@@ -207,7 +208,7 @@ export default function DeliveriesPage() {
                             role="tab" aria-selected={tab === id}
                             className={'flex items-center gap-1.5 h-8 px-3 rounded-[6px] text-sm font-semibold whitespace-nowrap border transition-colors duration-[120ms] ' + FOCUS + ' ' +
                                 (tab === id
-                                    ? 'bg-app-accent-soft text-app-accent border-app-accent/40'
+                                    ? 'bg-app-accent-soft text-app-selected-ink border-app-accent/40'
                                     : 'text-app-text-muted border-transparent hover:text-app-text hover:bg-app-surface-2')}
                         >
                             <Icon size={14} aria-hidden />{label}
@@ -937,31 +938,21 @@ function OrderRow({
                                                 </span>
                                             ) : (
                                                 <span className="flex flex-wrap items-center gap-1.5">
-                                                    <select
-                                                        className={INPUT}
+                                                    <OptionSelect size="sm" className="w-auto min-w-[220px] max-w-[320px] data-[size=sm]:h-8 text-[13px]"
                                                         aria-label="Drone to assign"
                                                         value={assignTo}
-                                                        onChange={e => setAssignTo(e.target.value)}
-                                                    >
-                                                        <option value="">Assign an online drone...</option>
-                                                        {onlineDrones
-                                                            .filter(d => !busyInfo.has(d.id))
-                                                            .map(d => (
-                                                                <option key={d.id} value={d.id}>
-                                                                    {d.name}{d.is_simulated ? ' (sim)' : ''} - idle
-                                                                </option>
-                                                            ))}
-                                                        {onlineDrones
-                                                            .filter(d => busyInfo.has(d.id))
-                                                            .map(d => {
+                                                        onChange={setAssignTo}
+                                                        options={[
+                                                            { value: '', label: 'Assign an online drone' },
+                                                            ...onlineDrones.filter(d => !busyInfo.has(d.id)).map(d => ({
+                                                                value: d.id, label: `${d.name}${d.is_simulated ? ' (sim)' : ''}, idle`,
+                                                            })),
+                                                            ...onlineDrones.filter(d => busyInfo.has(d.id)).map(d => {
                                                                 const b = busyInfo.get(d.id)!
-                                                                return (
-                                                                    <option key={d.id} value={d.id}>
-                                                                        {d.name} - on {b.order_no}, free in ~{b.eta_min} min
-                                                                    </option>
-                                                                )
-                                                            })}
-                                                    </select>
+                                                                return { value: d.id, label: `${d.name}, on ${b.order_no}, free in about ${b.eta_min} min` }
+                                                            }),
+                                                        ]}
+                                                    />
                                                     <button className={btnPrimary} disabled={busy || !assignTo}
                                                         title={!assignTo ? 'Pick a drone first' : undefined}
                                                         onClick={() => onAct(task.id, { status: 'assigned', drone_id: assignTo })}>
@@ -1088,26 +1079,16 @@ function NewOrderForm({ pads, profiles, onDone, onError }: {
                 Client apps create orders with <code className="font-code">POST /v1/tasks</code>.
             </p>
             <div className="grid gap-2 md:grid-cols-5">
-                <select className={inputCls} value={pickup} aria-label="Pickup pad"
-                    onChange={e => setPickup(e.target.value)}>
-                    <option value="">Pickup pad...</option>
-                    {pads.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-                <select className={inputCls} value={dropoff} aria-label="Dropoff pad"
-                    onChange={e => setDropoff(e.target.value)}>
-                    <option value="">Dropoff pad...</option>
-                    {pads.filter(p => p.id !== pickup).map(p =>
-                        <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
+                <OptionSelect size="sm" className="data-[size=sm]:h-8 text-[13px]" value={pickup} aria-label="Pickup pad" onChange={setPickup}
+                    options={[{ value: '', label: 'Pickup pad' }, ...pads.map(p => ({ value: p.id, label: p.name }))]} />
+                <OptionSelect size="sm" className="data-[size=sm]:h-8 text-[13px]" value={dropoff} aria-label="Dropoff pad" onChange={setDropoff}
+                    options={[{ value: '', label: 'Dropoff pad' }, ...pads.filter(p => p.id !== pickup).map(p => ({ value: p.id, label: p.name }))]} />
                 <input className={inputCls} placeholder="Payload description" aria-label="Payload description"
                     value={desc} onChange={e => setDesc(e.target.value)} />
                 <input className={inputCls} placeholder="kg" aria-label="Payload weight in kg" type="number"
                     min="0" step="0.1" value={kg} onChange={e => setKg(e.target.value)} />
-                <select className={inputCls} value={profile} aria-label="Route profile"
-                    onChange={e => setProfile(e.target.value)}>
-                    <option value="">Route profile: auto</option>
-                    {profiles.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
-                </select>
+                <OptionSelect size="sm" className="data-[size=sm]:h-8 text-[13px]" value={profile} aria-label="Route profile" onChange={setProfile}
+                    options={[{ value: '', label: 'Route profile: auto' }, ...profiles.map(p => ({ value: p.name, label: p.name }))]} />
             </div>
             <div className="mt-3">
                 <button className={btnPrimary} disabled={busy || !pickup || !dropoff}
@@ -1308,7 +1289,7 @@ function DronesPanel() {
                                 <span className={'w-2 h-2 rounded-full shrink-0 ' + (lv.in_air ? 'bg-app-warn' : 'bg-app-ok')} aria-hidden />
                                 <span className="text-base font-bold truncate">{d.name || lv.name}</span>
                                 {d.is_simulated && (
-                                    <span className="inline-flex items-center h-5 px-1.5 rounded-full text-xs font-bold text-app-accent bg-app-accent-soft"
+                                    <span className="inline-flex items-center h-5 px-1.5 rounded-full text-xs font-bold text-app-selected-ink bg-app-accent-soft"
                                         title="Simulated drone">Sim</span>
                                 )}
                                 <span className={'ml-auto text-xs font-bold whitespace-nowrap ' + (lv.in_air ? 'text-app-warn' : 'text-app-ok')}>
@@ -1385,11 +1366,9 @@ function DronesPanel() {
                         ? <><Loader size={14} className="animate-spin motion-reduce:animate-none" aria-hidden /> Connecting...</>
                         : <><Plane size={14} aria-hidden /> Connect fleet</>}
                 </button>
-                <select className={INPUT} aria-label="How many fleet drones to connect"
-                    value={fleetCount}
-                    onChange={e => setFleetCount(parseInt(e.target.value))}>
-                    {[1, 2, 3, 4, 5, 6, 7, 8].map(n => <option key={n} value={n}>{n}</option>)}
-                </select>
+                <OptionSelect size="sm" className="w-[64px] data-[size=sm]:h-8 text-[13px] tabular-nums" aria-label="How many fleet drones to connect"
+                    value={fleetCount} onChange={setFleetCount}
+                    options={[1, 2, 3, 4, 5, 6, 7, 8].map(n => ({ value: n, label: String(n) }))} />
             </div>
             <div className="flex items-center gap-1.5">
                 <input className={INPUT + ' flex-1 min-w-0'}
@@ -1517,7 +1496,7 @@ function ProfilesTab() {
                         <div className="flex items-center gap-2">
                             <h3 className="text-base font-bold">{p.name}</h3>
                             {p.builtin && (
-                                <span className="inline-flex items-center h-5 px-1.5 rounded-full text-xs font-bold text-app-accent bg-app-accent-soft">Built-in</span>
+                                <span className="inline-flex items-center h-5 px-1.5 rounded-full text-xs font-bold text-app-selected-ink bg-app-accent-soft">Built-in</span>
                             )}
                             {saved === p.id && (
                                 <span className="inline-flex items-center gap-1 text-xs font-bold text-app-ok" role="status"><Check size={14} aria-hidden /> Saved</span>
@@ -1543,12 +1522,13 @@ function ProfilesTab() {
                             </label>
                             <label className={LABEL + ' normal-case'}>
                                 Orange zones
-                                <select className={inputCls + ' mt-1'} value={e.orange}
-                                    onChange={ev => setEdits(prev => ({ ...prev, [p.id]: { ...e, orange: ev.target.value } }))}>
-                                    <option value="allow">Allow</option>
-                                    <option value="penalize">Penalize (detour if cheap)</option>
-                                    <option value="block">Block (never enter)</option>
-                                </select>
+                                <OptionSelect size="sm" className="mt-1 data-[size=sm]:h-8 text-[13px] font-normal" value={e.orange} aria-label="Orange zones"
+                                    onChange={v => setEdits(prev => ({ ...prev, [p.id]: { ...e, orange: v } }))}
+                                    options={[
+                                        { value: 'allow', label: 'Allow' },
+                                        { value: 'penalize', label: 'Penalize (detour if cheap)' },
+                                        { value: 'block', label: 'Block (never enter)' },
+                                    ]} />
                             </label>
                             <button className={btnPrimary} disabled={busy === p.id}
                                 onClick={() => save(p)}>
@@ -1627,11 +1607,8 @@ function PadsTab() {
                 </p>
                 {error && <p className="text-[13px] mb-2 text-app-danger" role="alert">{error}</p>}
                 <div className="grid gap-2 md:grid-cols-5">
-                    <select className={inputCls} value={kind} aria-label="Kind"
-                        onChange={e => setKind(e.target.value as 'pad' | 'station')}>
-                        <option value="pad">Pad</option>
-                        <option value="station">Station</option>
-                    </select>
+                    <OptionSelect<'pad' | 'station'> size="sm" className="data-[size=sm]:h-8 text-[13px]" value={kind} aria-label="Kind" onChange={setKind}
+                        options={[{ value: 'pad', label: 'Pad' }, { value: 'station', label: 'Station' }]} />
                     <input className={inputCls} placeholder="Name, e.g. Mess-A" aria-label="Name"
                         value={name} onChange={e => setName(e.target.value)} />
                     <input className={inputCls} placeholder="Latitude" aria-label="Latitude" type="number"

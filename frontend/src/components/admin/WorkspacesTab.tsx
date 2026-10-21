@@ -26,6 +26,7 @@ import type { Outline } from '@/components/admin/AreaMap'
 import { Btn, CopyLink, Empty, INPUT_CLS, LABEL_CLS, Notice, Section, Tag } from '@/components/admin/console'
 import { ActivitySection } from '@/components/admin/ActivitySection'
 import { fmtShort } from '@/components/settings/primitives'
+import { OptionSelect } from '@/components/config/OptionSelect'
 
 const AreaMap = dynamic(() => import('@/components/admin/AreaMap'), { ssr: false })
 
@@ -85,7 +86,7 @@ export default function WorkspacesTab({ zones }: { zones: ZoneFeature[] }) {
             {/* Tree column */}
             <div className="w-full md:w-80 shrink-0 border-b md:border-b-0 md:border-r border-app-border bg-app-surface flex flex-col max-h-[45vh] md:max-h-none">
                 <div className="px-3 min-h-10 py-2 text-[13px] font-semibold text-app-text-muted border-b border-app-border flex items-center gap-2">
-                    <h1 className="m-0 text-[16px] font-bold text-app-text">Workspaces</h1>
+                    <h2 className="m-0 text-[16px] font-bold text-app-text">All workspaces</h2>
                     <span className="tabular-nums">{list?.length ?? 0}</span>
                     {isFounder && platform && (
                         <span className="ml-auto flex gap-1.5">
@@ -282,7 +283,7 @@ function WorkspaceDetail({ ws, list, zones, isFounder, onChanged, onDeleted, onS
         <div className="max-w-[960px] p-5 lg:px-8 lg:py-6 space-y-5">
             <div className="space-y-1">
                 <div className="flex items-center gap-3 flex-wrap">
-                    <h2 className="text-[22px] font-bold text-app-text">{ws.name}</h2>
+                    <h2 className="text-[18px] font-bold text-app-text">{ws.name}</h2>
                     <Tag icon={false} label={KIND_LABELS[ws.kind]} tone={ws.kind === 'platform' ? 'cyan' : 'zinc'} />
                     {ws.disabled && <Tag label="Disabled" tone="red" />}
                     {cloudSim && <Tag label="Cloud sim" tone="emerald" />}
@@ -480,15 +481,13 @@ function MembersSection({ ws, list, members, loadError, canManage, isFounder, se
                 </div>
                 {editable ? (
                     <>
-                        <select value={m.role} disabled={busy === m.id} aria-label={`Role of ${personName(m.user)}`}
-                            onChange={e => {
-                                const r = e.target.value as MemberRole
+                        <OptionSelect size="sm" value={m.role} disabled={busy === m.id} aria-label={`Role of ${personName(m.user)}`}
+                            onChange={r => {
                                 void act('members', m.id, () => updateMember(ws.id, m.id, { role: r }),
                                     `${personName(m.user)} is now ${roleLabel(r, ws.kind)}.`, () => void reload())
                             }}
-                            className={INPUT_CLS}>
-                            {opts.map(r => <option key={r} value={r}>{roleLabel(r, ws.kind)}</option>)}
-                        </select>
+                            className="w-auto min-w-[130px] data-[size=sm]:h-8 text-[13px]"
+                            options={opts.map(r => ({ value: r, label: roleLabel(r, ws.kind) }))} />
                         <Btn disabled={busy === m.id} onClick={() => {
                             const t = window.prompt(`Title for ${personName(m.user)} (empty to clear)`, m.title ?? '')
                             if (t === null) return
@@ -524,9 +523,8 @@ function MembersSection({ ws, list, members, loadError, canManage, isFounder, se
                     </div>
                     <div>
                         <label htmlFor={`add-role-${ws.id}`} className={LABEL_CLS}>Role</label>
-                        <select id={`add-role-${ws.id}`} value={addRole} onChange={e => setRole(e.target.value as MemberRole)} className={INPUT_CLS}>
-                            {grantable.map(r => <option key={r} value={r}>{roleLabel(r, ws.kind)}</option>)}
-                        </select>
+                        <OptionSelect id={`add-role-${ws.id}`} size="sm" value={addRole} onChange={setRole} className="w-auto min-w-[130px] data-[size=sm]:h-8 text-[13px]"
+                            options={grantable.map(r => ({ value: r, label: roleLabel(r, ws.kind) }))} />
                     </div>
                     <div className="flex-[1_1_120px] min-w-0">
                         <label htmlFor={`add-title-${ws.id}`} className={LABEL_CLS}>Title</label>
@@ -579,9 +577,8 @@ function InvitesSection({ ws, invites, loadError, isFounder, busy, act, note, re
                     <div className="flex flex-wrap items-end gap-2">
                         <div>
                             <label htmlFor={`inv-role-${ws.id}`} className={LABEL_CLS}>Role</label>
-                            <select id={`inv-role-${ws.id}`} value={inviteRole} onChange={e => setRole(e.target.value as MemberRole)} className={INPUT_CLS}>
-                                {roles.map(r => <option key={r} value={r}>{roleLabel(r, ws.kind)}</option>)}
-                            </select>
+                            <OptionSelect id={`inv-role-${ws.id}`} size="sm" value={inviteRole} onChange={setRole} className="w-auto min-w-[130px] data-[size=sm]:h-8 text-[13px]"
+                                options={roles.map(r => ({ value: r, label: roleLabel(r, ws.kind) }))} />
                         </div>
                         <div className="flex-[2_1_160px] min-w-0">
                             <label htmlFor={`inv-email-${ws.id}`} className={LABEL_CLS}>Lock to email</label>
@@ -595,9 +592,8 @@ function InvitesSection({ ws, invites, loadError, isFounder, busy, act, note, re
                         </div>
                         <div>
                             <label htmlFor={`inv-days-${ws.id}`} className={LABEL_CLS}>Expires</label>
-                            <select id={`inv-days-${ws.id}`} value={days} onChange={e => setDays(Number(e.target.value))} className={INPUT_CLS}>
-                                {EXPIRY_DAYS.map(d => <option key={d} value={d}>{d}d</option>)}
-                            </select>
+                            <OptionSelect id={`inv-days-${ws.id}`} size="sm" value={days} onChange={setDays} className="w-auto min-w-[96px] data-[size=sm]:h-8 text-[13px]"
+                                options={EXPIRY_DAYS.map(d => ({ value: d, label: `${d} day${d > 1 ? 's' : ''}` }))} />
                         </div>
                         <Btn type="submit" tone="cyan" disabled={busy === 'invite'}>{busy === 'invite' ? 'Creating…' : 'Create link'}</Btn>
                     </div>
@@ -655,12 +651,10 @@ function DronesSection({ ws, list, drones, loadError, canManage, isFounder, busy
                             <span className="text-app-text-muted whitespace-nowrap">seen {fmtShort(d.last_seen)}</span>
                             {canManage && targets.length > 0 && (
                                 <span className="ml-auto flex items-center gap-2">
-                                    <select value={to} aria-label={`Move ${d.name} to`}
-                                        onChange={e => setTarget(t => ({ ...t, [d.id]: e.target.value }))}
-                                        className={`${INPUT_CLS} max-w-[160px]`}>
-                                        <option value="">move to…</option>
-                                        {targets.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-                                    </select>
+                                    <OptionSelect size="sm" value={to} aria-label={`Move ${d.name} to`}
+                                        onChange={v => setTarget(t => ({ ...t, [d.id]: v }))}
+                                        className="w-[160px] data-[size=sm]:h-8 text-[13px]"
+                                        options={[{ value: '', label: 'Move to' }, ...targets.map(w => ({ value: w.id, label: w.name }))]} />
                                     <Btn tone="cyan" disabled={!to || busy === d.id} onClick={() => {
                                         const dest = list.find(w => w.id === to)
                                         if (!dest || !window.confirm(`Move ${d.name} from ${ws.name} to ${dest.name}?`)) return

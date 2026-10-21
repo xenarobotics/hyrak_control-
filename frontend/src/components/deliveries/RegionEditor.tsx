@@ -19,6 +19,7 @@ import { getServerUrl } from '@/lib/server-url'
 import { liveAuthHeaders } from '@/lib/auth'
 import { Plus, Undo2 } from 'lucide-react'
 import { BTN, BTN_ACCENT, BTN_PRIMARY, FOCUS, INPUT, LABEL, PANEL } from '@/components/mission/ui'
+import { OptionSelect } from '@/components/config/OptionSelect'
 
 
 export const CATEGORY_COLORS: Record<string, string> = {
@@ -244,10 +245,8 @@ export default function RegionEditor() {
                         </p>
                         <label className="block space-y-1">
                             <span className={LABEL}>Category</span>
-                        <select className={inputCls} value={category}
-                            onChange={e => setCategory(e.target.value)}>
-                            {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
+                        <OptionSelect size="sm" className="data-[size=sm]:h-8 text-[13px]" value={category} aria-label="Category" onChange={setCategory}
+                            options={categories.map(c => ({ value: c, label: c }))} />
                         </label>
                         <label className="block space-y-1">
                             <span className={LABEL}>Name</span>

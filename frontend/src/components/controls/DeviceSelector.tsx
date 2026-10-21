@@ -168,7 +168,7 @@ export function DeviceSelector({ layout = 'stack' }: { layout?: 'stack' | 'strip
                         >
                             {/* w-full + truncate keeps long webcam labels from
                                 widening the side panel into horizontal scroll */}
-                            <SelectTrigger aria-labelledby="dev-cam-label" className={cn('data-[size=default]:h-9 w-full max-w-full text-[14px] bg-app-surface border-app-border-strong rounded-md overflow-hidden [&>span]:truncate [&>span]:min-w-0 [&>span]:text-left disabled:opacity-100 data-[disabled]:opacity-100 disabled:border-dashed data-[disabled]:border-dashed disabled:text-app-text-subtle data-[disabled]:text-app-text-subtle', FOCUS)}>
+                            <SelectTrigger aria-labelledby="dev-cam-label" className={cn('data-[size=default]:h-9 w-full max-w-full text-[14px] bg-app-surface border-app-border-strong rounded-md overflow-hidden [&>span]:truncate [&>span]:min-w-0 [&>span]:text-left disabled:opacity-100 data-[disabled]:opacity-100 disabled:border-app-border data-[disabled]:border-app-border disabled:bg-app-surface-2 data-[disabled]:bg-app-surface-2 disabled:text-app-text-subtle data-[disabled]:text-app-text-subtle', FOCUS)}>
                                 {/* Show a friendly name, never the raw device id the value holds. */}
                                 <SelectValue placeholder={camLoading ? 'Scanning...' : 'No cameras found'}>
                                     {camIdx >= 0 ? cameraLabel(cameras[camIdx].label, camIdx) : (camLoading ? 'Scanning...' : 'No cameras found')}
@@ -193,8 +193,8 @@ export function DeviceSelector({ layout = 'stack' }: { layout?: 'stack' | 'strip
                                     <button key={u.id} onClick={() => pickUnit(u)} disabled={switching || !u.live && !u.in_use}
                                         title={`udp ${u.port}${u.source ? ` from ${u.source}` : ''}${u.kbps ? ` - ${u.kbps} kbit/s` : ''}${u.in_use ? ' - on screen' : ''}`}
                                         aria-pressed={active}
-                                        className={cn('h-8 px-2.5 rounded-full border text-[13px] font-semibold flex items-center gap-1.5 disabled:border-dashed disabled:text-app-text-subtle disabled:cursor-not-allowed', FOCUS,
-                                            active ? 'border-app-accent bg-app-accent-soft text-app-accent' : 'border-app-border-strong bg-app-surface text-app-text')}>
+                                        className={cn('h-8 px-2.5 rounded-full border text-[13px] font-semibold flex items-center gap-1.5 disabled:border-app-border disabled:bg-app-surface-2 disabled:text-app-text-subtle disabled:cursor-not-allowed', FOCUS,
+                                            active ? 'border-app-accent bg-app-accent-soft text-app-selected-ink' : 'border-app-border-strong bg-app-surface text-app-text')}>
                                         <span className={cn('w-2 h-2 rounded-full', (u.live || u.in_use) ? 'bg-app-ok' : 'bg-app-text-subtle')} />
                                         {u.id === 0 ? 'Sim / 5600' : `Unit ${u.id}`}{u.kbps ? <span className="text-app-text-muted">{u.kbps} k</span> : null}
                                     </button>
@@ -248,7 +248,7 @@ export function DeviceSelector({ layout = 'stack' }: { layout?: 'stack' | 'strip
                     onValueChange={(v) => v && setSource(v)}
                     disabled={isConnected}
                 >
-                    <SelectTrigger aria-labelledby="dev-tel-label" className={cn('data-[size=default]:h-9 w-full max-w-full text-[14px] bg-app-surface border-app-border-strong rounded-md overflow-hidden [&>span]:truncate [&>span]:min-w-0 [&>span]:text-left disabled:opacity-100 data-[disabled]:opacity-100 disabled:border-dashed data-[disabled]:border-dashed disabled:text-app-text-subtle data-[disabled]:text-app-text-subtle', FOCUS)}>
+                    <SelectTrigger aria-labelledby="dev-tel-label" className={cn('data-[size=default]:h-9 w-full max-w-full text-[14px] bg-app-surface border-app-border-strong rounded-md overflow-hidden [&>span]:truncate [&>span]:min-w-0 [&>span]:text-left disabled:opacity-100 data-[disabled]:opacity-100 disabled:border-app-border data-[disabled]:border-app-border disabled:bg-app-surface-2 data-[disabled]:bg-app-surface-2 disabled:text-app-text-subtle data-[disabled]:text-app-text-subtle', FOCUS)}>
                         <SelectValue>{telLabel}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
@@ -304,7 +304,7 @@ export function DeviceSelector({ layout = 'stack' }: { layout?: 'stack' | 'strip
                             onValueChange={(v) => { if (v) setBaud(Number(v)) }}
                             disabled={isConnected}
                         >
-                            <SelectTrigger aria-label="Baud rate" className={cn('flex-1 data-[size=default]:h-9 w-full max-w-full text-[14px] bg-app-surface border-app-border-strong rounded-md overflow-hidden [&>span]:truncate [&>span]:min-w-0 [&>span]:text-left disabled:opacity-100 data-[disabled]:opacity-100 disabled:border-dashed data-[disabled]:border-dashed disabled:text-app-text-subtle data-[disabled]:text-app-text-subtle', FOCUS)}>
+                            <SelectTrigger aria-label="Baud rate" className={cn('flex-1 data-[size=default]:h-9 w-full max-w-full text-[14px] bg-app-surface border-app-border-strong rounded-md overflow-hidden [&>span]:truncate [&>span]:min-w-0 [&>span]:text-left disabled:opacity-100 data-[disabled]:opacity-100 disabled:border-app-border data-[disabled]:border-app-border disabled:bg-app-surface-2 data-[disabled]:bg-app-surface-2 disabled:text-app-text-subtle data-[disabled]:text-app-text-subtle', FOCUS)}>
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -349,7 +349,7 @@ export function DeviceSelector({ layout = 'stack' }: { layout?: 'stack' | 'strip
                                 disabled={isConnected}
                                 placeholder={`${DEFAULT_RF_UPLINK_HOST} or auto`}
                                 title="Where commands are sent. wfb-ng: the decoder running wfb_tx (this machine only if the decoder runs here - otherwise commands go nowhere while telemetry keeps working). 'auto': reply to the sender, like QGroundControl - use for SITL or a single-process ground station. Editable only while disconnected."
-                                className="h-9 w-full rounded-md px-2.5 text-[14px] bg-app-surface border border-app-border-strong text-app-text outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg disabled:bg-app-surface-2 disabled:text-app-text-subtle disabled:border-dashed font-code"
+                                className="h-9 w-full rounded-md px-2.5 text-[14px] bg-app-surface border border-app-border-strong text-app-text outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg disabled:bg-app-surface-2 disabled:text-app-text-subtle disabled:border-app-border font-code"
                             />
                         </div>
                         <div className="mt-1.5 flex items-center gap-1.5">
@@ -367,7 +367,7 @@ export function DeviceSelector({ layout = 'stack' }: { layout?: 'stack' | 'strip
                                     if (v >= 0 && v < 65536 && v !== getRfUplinkPort()) setRfFanoutPort(v)
                                 }}
                                 disabled={isConnected}
-                                className="h-9 w-full rounded-md px-2.5 text-[14px] bg-app-surface border border-app-border-strong text-app-text outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg disabled:bg-app-surface-2 disabled:text-app-text-subtle disabled:border-dashed font-code"
+                                className="h-9 w-full rounded-md px-2.5 text-[14px] bg-app-surface border border-app-border-strong text-app-text outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg disabled:bg-app-surface-2 disabled:text-app-text-subtle disabled:border-app-border font-code"
                             />
                         </div>
                         <p className="mt-1 text-[13px] text-app-text-muted leading-snug">
@@ -389,7 +389,7 @@ export function DeviceSelector({ layout = 'stack' }: { layout?: 'stack' | 'strip
                         onChange={e => { setRelayUrl(e.target.value); setLocalRelayUrl(e.target.value) }}
                         disabled={isConnected}
                         placeholder={DEFAULT_LOCAL_RELAY_URL}
-                        className="mt-1.5 h-9 w-full rounded-md px-2.5 text-[14px] bg-app-surface border border-app-border-strong text-app-text outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg disabled:bg-app-surface-2 disabled:text-app-text-subtle disabled:border-dashed font-code"
+                        className="mt-1.5 h-9 w-full rounded-md px-2.5 text-[14px] bg-app-surface border border-app-border-strong text-app-text outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg disabled:bg-app-surface-2 disabled:text-app-text-subtle disabled:border-app-border font-code"
                     />
                 )}
                 {source === 'siyi-udp' && (
@@ -399,7 +399,7 @@ export function DeviceSelector({ layout = 'stack' }: { layout?: 'stack' | 'strip
                             onChange={e => { setSiyiTarget(e.target.value); setSiyiTelemetryTarget(e.target.value) }}
                             disabled={isConnected}
                             placeholder={DEFAULT_SIYI_TELEMETRY_TARGET}
-                            className="mt-1.5 h-9 w-full rounded-md px-2.5 text-[14px] bg-app-surface border border-app-border-strong text-app-text outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg disabled:bg-app-surface-2 disabled:text-app-text-subtle disabled:border-dashed font-code"
+                            className="mt-1.5 h-9 w-full rounded-md px-2.5 text-[14px] bg-app-surface border border-app-border-strong text-app-text outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg disabled:bg-app-surface-2 disabled:text-app-text-subtle disabled:border-app-border font-code"
                         />
                         <p className="mt-1 text-[13px] text-app-text-muted leading-snug">
                             Target host:port, same as QGC&apos;s UDP link. Local port is ephemeral - the ground unit replies to us.
@@ -446,7 +446,7 @@ export function DeviceSelector({ layout = 'stack' }: { layout?: 'stack' | 'strip
                 <WhyDisabled reason={isConnecting ? 'Connecting' : sitlNeedsDesktop ? 'SITL needs the HYRAK desktop app' : null}>
                     <Button
                         size="sm"
-                        className={cn('w-full h-10 rounded-md text-[14px] font-bold gap-2 bg-app-accent text-[var(--app-accent-ink)] hover:bg-app-accent hover:brightness-110', FOCUS, DISABLED)}
+                        className={cn('w-full h-9 rounded-md text-[14px] font-bold gap-2 bg-app-accent text-[var(--app-accent-ink)] hover:bg-app-accent hover:brightness-110', FOCUS, DISABLED)}
                         disabled={isConnecting || sitlNeedsDesktop}
                         onClick={handleConnect}
                     >

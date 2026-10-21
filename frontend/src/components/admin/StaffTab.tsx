@@ -20,6 +20,7 @@ import { polygonFromPoints, type ZoneFeature } from '@/components/admin/zones'
 import type { Outline } from '@/components/admin/AreaMap'
 import { Btn, CopyLink, Empty, INPUT_CLS, LABEL_CLS, Notice, PageHead, Section, Tag, TH_CLS, TR_CLS } from '@/components/admin/console'
 import { fmtShort } from '@/components/settings/primitives'
+import { OptionSelect } from '@/components/config/OptionSelect'
 
 const AreaMap = dynamic(() => import('@/components/admin/AreaMap'), { ssr: false })
 
@@ -309,10 +310,8 @@ function GrantPanel({ initialLogin, staff, workspaces, zones, onGranted }: {
                 {kind === 'manager' ? (
                     <div>
                         <label htmlFor="grant-ws" className={LABEL_CLS}>Workspace</label>
-                        <select id="grant-ws" value={wsId} onChange={e => setWsId(e.target.value)} className={`${INPUT_CLS} w-full`}>
-                            <option value="">Pick a workspace</option>
-                            {customers.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-                        </select>
+                        <OptionSelect id="grant-ws" size="sm" value={wsId} onChange={setWsId} className="data-[size=sm]:h-8 text-[13px]"
+                            options={[{ value: '', label: 'Pick a workspace' }, ...customers.map(w => ({ value: w.id, label: w.name }))]} />
                     </div>
                 ) : (
                     <div className="text-[12px] text-app-text-muted">Held on {platform?.name ?? 'HYRAK'}.</div>

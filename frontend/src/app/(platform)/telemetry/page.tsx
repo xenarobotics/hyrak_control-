@@ -26,6 +26,7 @@ import { ViewOnlyFence } from '@/components/layout/ViewOnly'
 import { AttachmentsSection } from '@/components/attachments/AttachmentsConfig'
 import { useSessionAttachments } from '@/lib/attachments'
 import { useUiMode } from '@/hooks/useUiMode'
+import { OptionSelect } from '@/components/config/OptionSelect'
 
 function ls<T>(key: string, fallback: T): T {
     if (typeof window === 'undefined') return fallback
@@ -458,7 +459,7 @@ const FOCUS_RING = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus
 function Tip({ text }: { text: string }) {
     return (
         <Tooltip>
-            <TooltipTrigger aria-label="More info" className={'rounded-full ' + FOCUS_RING} style={{ background: 'none', border: 'none', padding: 2, cursor: 'help', display: 'flex' }}><Info size={14} style={{ color: 'hsl(var(--app-text-muted))' }} /></TooltipTrigger>
+            <TooltipTrigger aria-label="More info" className={'rounded-full bg-transparent text-app-text-muted hover:bg-app-surface-2 hover:text-app-text transition-colors ' + FOCUS_RING} style={{ border: 'none', padding: 5, margin: -3, cursor: 'help', display: 'flex' }}><Info size={14} /></TooltipTrigger>
             <TooltipContent style={{ maxWidth: 240, fontSize: 13, lineHeight: 1.45 }}>{text}</TooltipContent>
         </Tooltip>
     )
@@ -477,7 +478,7 @@ function Field({ label, tip, children, span2 }: { label: string; tip?: string; c
 const INPUT_STYLE = (disabled?: boolean): React.CSSProperties => ({
     width: '100%', height: 36, padding: '0 11px', borderRadius: 6, boxSizing: 'border-box', outline: 'none',
     background: disabled ? 'hsl(var(--app-surface-2))' : 'hsl(var(--app-surface))',
-    border: `1px ${disabled ? 'dashed' : 'solid'} hsl(var(--app-border-strong))`,
+    border: `1px solid hsl(var(${disabled ? '--app-border' : '--app-border-strong'}))`,
     color: disabled ? 'hsl(var(--app-text-muted))' : 'hsl(var(--app-text))',
     fontSize: 14, fontVariantNumeric: 'tabular-nums', cursor: disabled ? 'not-allowed' : undefined,
 })
@@ -485,14 +486,14 @@ function AppInput({ value, onChange, placeholder, disabled }: { value: string; o
     return <input value={value} onChange={e => onChange?.(e.target.value)} placeholder={placeholder} disabled={disabled} className={FOCUS_RING} style={INPUT_STYLE(disabled)} />
 }
 function AppSelect<T extends string>({ value, options, onChange, disabled }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; disabled?: boolean }) {
-    return <select value={value} onChange={e => onChange(e.target.value as T)} disabled={disabled} className={FOCUS_RING} style={{ ...INPUT_STYLE(disabled), cursor: disabled ? 'not-allowed' : 'pointer' }}>{options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
+    return <OptionSelect value={value} onChange={onChange} disabled={disabled} options={options} />
 }
 function Toggle({ value, onChange, disabled }: { value: boolean; onChange: () => void; disabled?: boolean }) {
     return (
         <button type="button" role="switch" aria-checked={value} disabled={disabled} onClick={disabled ? undefined : onChange}
             className={FOCUS_RING}
             style={{ width: 40, height: 24, borderRadius: 999, cursor: disabled ? 'not-allowed' : 'pointer', flexShrink: 0, padding: 0,
-                background: value ? 'var(--app-accent)' : 'hsl(var(--app-border-strong))', border: disabled ? '1px dashed hsl(var(--app-border-strong))' : 'none',
+                background: value ? 'var(--app-accent)' : 'hsl(var(--app-border-strong))', border: disabled ? '1px solid hsl(var(--app-border))' : 'none',
                 position: 'relative', transition: 'background-color var(--dur) var(--ease-out)' }}>
             <span style={{ position: 'absolute', top: 4, left: 4, width: 16, height: 16, borderRadius: '50%', background: '#fff',
                 transform: `translateX(${value ? 16 : 0}px)`, transition: 'transform var(--dur) var(--ease-out)' }} />
@@ -546,8 +547,8 @@ function ReadinessRow({ label, icon: Icon, state, value, action, onClick }: {
     return (
         <li style={{ listStyle: 'none' }}>
             <button type="button" onClick={onClick}
-                className={'group w-full text-left hover:bg-app-surface-2 transition-colors ' + FOCUS_RING}
-                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', minHeight: 52, background: 'transparent', border: 'none', cursor: 'pointer' }}>
+                className={'group w-full text-left bg-transparent hover:bg-app-surface-2 active:bg-app-surface-2 transition-colors ' + FOCUS_RING}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', minHeight: 52, border: 'none', cursor: 'pointer' }}>
                 <span style={{ width: 20, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{mark}</span>
                 <Icon size={16} aria-hidden style={{ color: 'hsl(var(--app-text-muted))', flexShrink: 0 }} />
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
@@ -573,7 +574,7 @@ function VehicleBanner({ vehicle, readiness, telStatus, address }: { vehicle: Ve
             <DroneSVG airframe={vehicle.airframe} size={40} />
             <div style={{ flex: '1 1 220px', minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <h1 style={{ fontSize: 20, fontWeight: 800, color: 'hsl(var(--app-text))', margin: 0, lineHeight: 1.2 }}>{vehicle.name}</h1>
+                    <h1 style={{ fontSize: 22, fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0, lineHeight: 1.25 }}>{vehicle.name}</h1>
                     <span style={chip}>{AIRFRAME_LABELS[vehicle.airframe] ?? vehicle.airframe}</span>
                     <span style={chip}>{vehicle.firmware === 'ardupilot' ? 'ArduPilot' : vehicle.firmware.toUpperCase()}</span>
                     {vehicle.frameId && <span style={chip}>Frame #{vehicle.frameId}</span>}
@@ -614,7 +615,7 @@ function SectionNav({ current, onSelect, items }: {
                     <React.Fragment key={t.id}>
                         {i === 1 && <div aria-hidden style={{ height: 1, background: 'hsl(var(--app-border))', margin: '6px 8px' }} />}
                         <button role="tab" aria-selected={active} onClick={() => onSelect(t.id)}
-                            className={(active ? 'bg-app-accent-soft text-app-text' : 'text-app-text-muted hover:text-app-text hover:bg-app-surface-2') + ' transition-colors ' + FOCUS_RING}
+                            className={(active ? 'bg-app-accent-soft text-app-selected-ink' : 'text-app-text-muted hover:text-app-text hover:bg-app-surface-2') + ' transition-colors ' + FOCUS_RING}
                             style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 10, padding: '0 12px', minHeight: 38, borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: active ? 700 : 600, textAlign: 'left', whiteSpace: 'nowrap' }}>
                             <span aria-hidden style={{ position: 'absolute', left: 0, top: 8, bottom: 8, width: 3, borderRadius: 2, background: 'var(--app-accent)', opacity: active ? 1 : 0, transition: 'opacity var(--dur) var(--ease-out)' }} />
                             <Icon size={16} style={{ color: active ? 'var(--app-accent)' : undefined, flexShrink: 0 }} />{t.label}
@@ -632,7 +633,7 @@ function SectionHead({ meta, pct }: { meta: { label: string; desc: string }; pct
     return (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-                <h2 style={{ fontSize: 22, fontWeight: 800, color: 'hsl(var(--app-text))', margin: 0, lineHeight: 1.25 }}>{meta.label}</h2>
+                <h2 style={{ fontSize: 18, fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0, lineHeight: 1.3 }}>{meta.label}</h2>
                 <p style={{ fontSize: 14, color: 'hsl(var(--app-text-muted))', margin: '4px 0 0' }}>{meta.desc}</p>
             </div>
             {pct != null && <ReadinessRing pct={pct} color={hColor(pct)} size={48} />}
@@ -883,9 +884,9 @@ function ConnectionWorkspace({ address, setAddress }: { address: string; setAddr
                         <NetworkTopology connected={connected} address={address} />
 
                         {[
-                            { badge: 'PX4', color: 'light-dark(#1d4ed8, #60a5fa)', text: 'MAVSDK over UDP. Default SITL port: 14540. Physical radio: serial:///dev/ttyUSB0:57600' },
+                            { badge: 'PX4', color: 'light-dark(#1e40af, #60a5fa)', text: 'MAVSDK over UDP. Default SITL port: 14540. Physical radio: serial:///dev/ttyUSB0:57600' },
                             { badge: 'ArduPilot', color: 'var(--app-ok)', text: 'Compatible via MAVLink dialect. Default SITL port: 14550. Set TERRAIN_ENABLE=1 for terrain follow.' },
-                            { badge: 'TCP', color: 'light-dark(#7e22ce, #c084fc)', text: 'For companion computer bridge: tcp://192.168.x.x:5760. Set GCS_TCP_PORT on the flight controller.' },
+                            { badge: 'TCP', color: 'light-dark(#6b21a8, #c084fc)', text: 'For companion computer bridge: tcp://192.168.x.x:5760. Set GCS_TCP_PORT on the flight controller.' },
                         ].map(p => (
                             <div key={p.badge} style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
                                 <span style={{ padding: '2px 6px', borderRadius: 6, fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 700, background: `${mix(p.color, 9)}`, color: p.color, flexShrink: 0, marginTop: 1 }}>{p.badge}</span>
@@ -1113,7 +1114,7 @@ function CalCard({ sensor, verdict, connected, busy, isActive, phase, progress, 
                 style={{
                     padding: '5px 13px', borderRadius: 6, flexShrink: 0,
                     background: 'transparent',
-                    border: `1px ${clickable || running ? 'solid' : 'dashed'} ${clickable ? 'color-mix(in srgb, var(--app-accent) 45%, transparent)' : 'hsl(var(--app-border-strong))'}`,
+                    border: `1px solid ${clickable ? 'color-mix(in srgb, var(--app-accent) 45%, transparent)' : clickable || running ? 'hsl(var(--app-border-strong))' : 'hsl(var(--app-border))'}`,
                     color: clickable ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))',
                     fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 600,
                     cursor: clickable ? 'pointer' : 'not-allowed',
@@ -1253,19 +1254,12 @@ function MountOrientation({ connected }: { connected: boolean }) {
     const axisSelect = (key: string, shown: Rpy, axis: 'r' | 'p' | 'y', label: string, opts: number[], enabled: boolean) => (
         <label style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1, minWidth: 76 }}>
             <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', fontWeight: 600 }}>{label}</span>
-            <select
+            <OptionSelect size="sm" aria-label={label}
                 value={shown[axis]}
                 disabled={!enabled}
-                onChange={e => pick(key, shown, axis, Number(e.target.value))}
-                style={{
-                    padding: '5px 8px', borderRadius: 6, fontSize: 12, fontVariantNumeric: 'tabular-nums',
-                    background: enabled ? 'hsl(var(--app-surface))' : 'hsl(var(--app-surface-2))', color: enabled ? 'hsl(var(--app-text))' : 'hsl(var(--app-text-muted))',
-                    border: `1px ${enabled ? 'solid' : 'dashed'} hsl(var(--app-border-strong))`,
-                    cursor: enabled ? 'pointer' : 'not-allowed',
-                }}
-            >
-                {opts.map(d => <option key={d} value={d}>{d}°</option>)}
-            </select>
+                onChange={d => pick(key, shown, axis, d)}
+                options={opts.map(d => ({ value: d, label: `${d}°` }))}
+            />
         </label>
     )
 
@@ -1763,16 +1757,13 @@ function RadioWorkspace() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ fontSize: 14, fontWeight: 700, color: 'hsl(var(--app-text))', flex: 1 }}>Mode switch channel</span>
                         <Tip text="The transmitter channel your mode switch sends on (RC_MAP_FLTMODE)." />
-                        <select
-                            value={modeChannel ?? ''}
+                        <OptionSelect size="sm" aria-label="Mode switch channel" className={SEL_CLS}
+                            value={modeChannel}
+                            placeholder={connected ? 'Loading' : 'No link'}
                             disabled={!connected || modeChannel === null}
-                            onChange={e => writeParam('RC_MAP_FLTMODE', Number(e.target.value))}
-                            style={selStyle(connected && modeChannel !== null)}
-                        >
-                            {modeChannel === null && <option value="">{connected ? '…' : '-'}</option>}
-                            <option value={0}>Unassigned</option>
-                            {Array.from({ length: 18 }, (_, i) => <option key={i + 1} value={i + 1}>CH{i + 1}</option>)}
-                        </select>
+                            onChange={ch => writeParam('RC_MAP_FLTMODE', ch)}
+                            options={[{ value: 0, label: 'Unassigned' }, ...Array.from({ length: 18 }, (_, i) => ({ value: i + 1, label: `CH${i + 1}` }))]}
+                        />
                     </div>
                     {/* WHICH SLOTS YOUR SWITCH CAN REACH. PX4 has six slots
                         but a 3-position switch only ever lands in 1, 4 and 6;
@@ -1819,16 +1810,14 @@ function RadioWorkspace() {
                                 <span style={{ width: 42, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: isActive ? 'var(--app-ok)' : 'hsl(var(--app-text-muted))', transition: 'color var(--dur) var(--ease-out)' }}>
                                     {reachable ? posLabel : ''}
                                 </span>
-                                <select
-                                    value={v ?? ''}
+                                <OptionSelect size="sm" aria-label={`Flight mode for slot ${i + 1}`} className={SEL_CLS + ' flex-1 w-auto'}
+                                    value={v}
+                                    placeholder={connected ? 'Loading' : 'No link'}
                                     disabled={!enabled}
-                                    onChange={e => writeParam(key, Number(e.target.value))}
-                                    style={{ ...selStyle(enabled), flex: 1 }}
+                                    onChange={m => writeParam(key, m)}
                                     title={reachable ? undefined : `A ${switchType}-position switch never lands on this slot`}
-                                >
-                                    {(v === null || v === undefined) && <option value="">{connected ? '…' : '-'}</option>}
-                                    {FLTMODE_OPTS.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
-                                </select>
+                                    options={FLTMODE_OPTS.map(o => ({ value: o.v, label: o.l }))}
+                                />
                             </div>
                         )
                     })}
@@ -1852,16 +1841,13 @@ function RadioWorkspace() {
                             <div key={sw.key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                 <span style={{ fontSize: 12, color: 'hsl(var(--app-text))', flex: 1 }}>{sw.label}</span>
                                 <Tip text={sw.tip} />
-                                <select
-                                    value={v ?? ''}
+                                <OptionSelect size="sm" aria-label={sw.label} className={SEL_CLS}
+                                    value={v}
+                                    placeholder={connected ? 'Loading' : 'No link'}
                                     disabled={!enabled}
-                                    onChange={e => writeParam(sw.key, Number(e.target.value))}
-                                    style={selStyle(enabled)}
-                                >
-                                    {(v === null || v === undefined) && <option value="">{connected ? '…' : '-'}</option>}
-                                    <option value={0}>-</option>
-                                    {Array.from({ length: 18 }, (_, i) => <option key={i + 1} value={i + 1}>CH{i + 1}</option>)}
-                                </select>
+                                    onChange={ch => writeParam(sw.key, ch)}
+                                    options={[{ value: 0, label: 'Unassigned' }, ...Array.from({ length: 18 }, (_, i) => ({ value: i + 1, label: `CH${i + 1}` }))]}
+                                />
                             </div>
                         )
                     })}
@@ -2020,19 +2006,14 @@ function RadioWorkspace() {
     )
 }
 
-function selStyle(enabled: boolean): React.CSSProperties {
-    return {
-        padding: '5px 8px', borderRadius: 6, fontSize: 12, fontVariantNumeric: 'tabular-nums',
-        background: enabled ? 'hsl(var(--app-surface))' : 'hsl(var(--app-surface-2))', color: enabled ? 'hsl(var(--app-text))' : 'hsl(var(--app-text-muted))',
-        border: `1px ${enabled ? 'solid' : 'dashed'} hsl(var(--app-border-strong))`, minWidth: 92, minHeight: 32,
-        cursor: enabled ? 'pointer' : 'not-allowed',
-    }
-}
+// Channel and mode pickers on Radio & RC: compact, at least 92px wide.
+const SEL_CLS = 'w-auto min-w-[104px] text-[13px] tabular-nums data-[size=sm]:h-8'
+
 
 function wizBtn(enabled: boolean, colour: string): React.CSSProperties {
     return {
         padding: '6px 14px', borderRadius: 6, background: 'transparent',
-        border: `1px ${enabled ? 'solid' : 'dashed'} ${enabled ? mix(colour, 47) : 'hsl(var(--app-border-strong))'}`,
+        border: `1px solid ${enabled ? mix(colour, 47) : 'hsl(var(--app-border))'}`,
         color: enabled ? colour : 'hsl(var(--app-text-muted))', minHeight: 32,
         fontSize: 13, fontWeight: 700,
         cursor: enabled ? 'pointer' : 'not-allowed',
@@ -2071,7 +2052,9 @@ function TransmitterSvg({ layout, axisValue, live, modeChannel, modeValue, switc
     const detent = slot === 0 ? 0
         : Math.round(((slot - 1) / 5) * (positions - 1))
     return (
-        <svg ref={svgRef} viewBox="0 0 420 240" style={{ width: '100%', height: 'auto', display: 'block' }} role="img" aria-label="Transmitter stick layout">
+        // Never drawn larger than its own 420 units: text then stays at 12px
+        // or more in user units too, and the drawing does not balloon.
+        <svg ref={svgRef} viewBox="0 0 420 240" style={{ width: '100%', maxWidth: 420, height: 'auto', display: 'block', margin: '0 auto', overflow: 'visible' }} role="img" aria-label="Transmitter stick layout">
             <defs>
                 <linearGradient id="tx-body" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0" stopColor="hsl(var(--app-surface))" />
@@ -2088,9 +2071,6 @@ function TransmitterSvg({ layout, axisValue, live, modeChannel, modeValue, switc
             {/* body */}
             <rect x={20} y={40} width={380} height={172} rx={28}
                 fill="url(#tx-body)" stroke="hsl(var(--app-border))" strokeWidth={1.5} filter="url(#tx-shadow)" />
-            {/* grip chamfers */}
-            <path d="M 20 96 Q 4 128 20 168" fill="none" stroke="hsl(var(--app-border))" strokeWidth={1.2} />
-            <path d="M 400 96 Q 416 128 400 168" fill="none" stroke="hsl(var(--app-border))" strokeWidth={1.2} />
             {/* antenna */}
             <line x1={54} y1={46} x2={24} y2={10} stroke="hsl(var(--app-text-muted))" strokeWidth={4} strokeLinecap="round" />
             <circle cx={22} cy={8} r={4.5} fill="hsl(var(--app-text-muted))" />
@@ -2104,7 +2084,7 @@ function TransmitterSvg({ layout, axisValue, live, modeChannel, modeValue, switc
                 (CSS transition), so flipping the real switch visibly clicks
                 through LOW / MID / HIGH on screen. */}
             <g>
-                <text x={318} y={20} textAnchor="middle" fontSize={px(12)} fontFamily="inherit"
+                <text x={318} y={17} textAnchor="middle" fontSize={px(12)} fontFamily="inherit"
                     fill={modeChannel > 0 ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))'}>
                     {modeChannel > 0 ? `Mode ch${modeChannel}` : 'Mode (unassigned)'}
                 </text>
@@ -2145,15 +2125,23 @@ function TransmitterSvg({ layout, axisValue, live, modeChannel, modeValue, switc
             ))}
             {/* screen: the mode the AIRCRAFT reports, which is the whole
                 point of a mode switch */}
-            <rect x={178} y={96} width={64} height={34} rx={6} fill="hsl(var(--app-bg))" stroke="hsl(var(--app-border))" strokeWidth={1.2} />
-            <text x={210} y={110} textAnchor="middle" fontSize={px(12)} fontFamily="inherit"
-                fill={live ? 'var(--app-ok)' : 'hsl(var(--app-text-muted))'}>
-                {live ? 'RC live' : 'No RC'}
-            </text>
-            <text x={210} y={123} textAnchor="middle" fontSize={px(13)} fontFamily="inherit" fontWeight="700"
-                fill={flightMode !== 'NO LINK' ? 'var(--app-accent)' : 'hsl(var(--app-text-muted))'}>
-                {flightMode === 'NO LINK' ? 'No link' : flightMode.slice(0, 9)}
-            </text>
+            <rect x={174} y={96} width={72} height={34} rx={6} fill="hsl(var(--app-bg))" stroke="hsl(var(--app-border))" strokeWidth={1.2} />
+            {flightMode === 'NO LINK' ? (
+                // Nothing to report: one word, not "No RC" over "No link".
+                <text x={210} y={117} textAnchor="middle" fontSize={px(12)} fontFamily="inherit" fill="hsl(var(--app-text-muted))">
+                    {live ? 'RC live' : 'No RC'}
+                </text>
+            ) : (
+                <>
+                    <text x={210} y={110} textAnchor="middle" fontSize={px(12)} fontFamily="inherit"
+                        fill={live ? 'var(--app-ok)' : 'hsl(var(--app-text-muted))'}>
+                        {live ? 'RC live' : 'No RC'}
+                    </text>
+                    <text x={210} y={124} textAnchor="middle" fontSize={px(13)} fontFamily="inherit" fontWeight="700" fill="var(--app-accent)">
+                        {flightMode.slice(0, 9)}
+                    </text>
+                </>
+            )}
         </svg>
     )
 }
@@ -2480,9 +2468,8 @@ function ParamCard({ p, currentVal, catColor, isSearching, onSet, onRevert }: {
                     </div>
                 )}
                 {p.type === 'enum' && p.opts && (
-                    <select value={currentVal} onChange={e => onSet(p.key, +e.target.value)} style={{ width: '100%', padding: '8px 10px', borderRadius: 6, background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border-strong))', color: 'hsl(var(--app-text))', fontSize: 13, fontVariantNumeric: 'tabular-nums', cursor: 'pointer', outline: 'none' }}>
-                        {p.opts.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
-                    </select>
+                    <OptionSelect aria-label={p.name} value={currentVal} onChange={n => onSet(p.key, n)}
+                        options={p.opts.map(o => ({ value: o.v, label: o.l }))} />
                 )}
                 {(p.type === 'float' || p.type === 'int') && p.min !== undefined && p.max !== undefined && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -2611,10 +2598,8 @@ function LiveParamCard({ dp, localVal, pending, lastOk, expert, originalVal, onS
                 )}
                 {/* 3+ option enum → dropdown */}
                 {hasOpts && !isTwoOpt && (
-                    <select value={val} onChange={e => onSet(dp.key, +e.target.value, dp.paramType)}
-                        style={{ width: '100%', padding: '7px 10px', borderRadius: 6, background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border-strong))', color: 'hsl(var(--app-text))', fontSize: 13, cursor: 'pointer', outline: 'none' }}>
-                        {optEntries.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                    </select>
+                    <OptionSelect aria-label={dp.key} value={val} onChange={n => onSet(dp.key, n, dp.paramType)}
+                        options={optEntries.map(([v, l]) => ({ value: +v, label: l }))} />
                 )}
                 {hasRange && !hasOpts && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -3114,7 +3099,7 @@ function ParametersWorkspace() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8, paddingTop: 4, borderTop: '1px solid hsl(var(--app-border))' }}>
                 {/* Export */}
                 <button onClick={downloadParams} disabled={!liveParams} title={liveParams ? undefined : 'Load the parameters first'}
-                    style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: 6, background: 'hsl(var(--app-surface))', border: `1px ${liveParams ? 'solid' : 'dashed'} hsl(var(--app-border-strong))`, cursor: liveParams ? 'pointer' : 'not-allowed', textAlign: 'left', width: '100%' }}>
+                    style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: 6, background: 'hsl(var(--app-surface))', border: `1px solid hsl(var(${liveParams ? '--app-border-strong' : '--app-border'}))`, cursor: liveParams ? 'pointer' : 'not-allowed', textAlign: 'left', width: '100%' }}>
                     <Download size={14} style={{ color: 'light-dark(#1d4ed8, #60a5fa)', flexShrink: 0 }} />
                     <div>
                         <p style={{ fontSize: 13, fontWeight: 600, color: 'hsl(var(--app-text))', margin: 0 }}>Export .params</p>
@@ -3123,7 +3108,7 @@ function ParametersWorkspace() {
                 </button>
                 {/* Import */}
                 <button onClick={() => liveParams && importFileRef.current?.click()} disabled={!liveParams} title={liveParams ? undefined : 'Load the parameters first'}
-                    style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: 6, background: 'hsl(var(--app-surface))', border: `1px ${liveParams ? 'solid' : 'dashed'} hsl(var(--app-border-strong))`, cursor: liveParams ? 'pointer' : 'not-allowed', textAlign: 'left', width: '100%' }}>
+                    style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: 6, background: 'hsl(var(--app-surface))', border: `1px solid hsl(var(${liveParams ? '--app-border-strong' : '--app-border'}))`, cursor: liveParams ? 'pointer' : 'not-allowed', textAlign: 'left', width: '100%' }}>
                     <Upload size={14} style={{ color: 'light-dark(#7e22ce, #c084fc)', flexShrink: 0 }} />
                     <div>
                         <p style={{ fontSize: 13, fontWeight: 600, color: 'hsl(var(--app-text))', margin: 0 }}>Import .params</p>
@@ -3132,7 +3117,7 @@ function ParametersWorkspace() {
                 </button>
                 {/* Reboot FC */}
                 <button onClick={connected ? rebootFC : undefined} disabled={!connected} title={connected ? undefined : 'Connect a drone first'}
-                    style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: 6, background: 'hsl(var(--app-surface))', border: `1px ${connected ? 'solid' : 'dashed'} ${connected ? 'color-mix(in srgb, var(--app-danger) 35%, transparent)' : 'hsl(var(--app-border-strong))'}`, cursor: connected ? 'pointer' : 'not-allowed', textAlign: 'left', width: '100%' }}>
+                    style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: 6, background: 'hsl(var(--app-surface))', border: `1px solid ${connected ? 'color-mix(in srgb, var(--app-danger) 35%, transparent)' : 'hsl(var(--app-border))'}`, cursor: connected ? 'pointer' : 'not-allowed', textAlign: 'left', width: '100%' }}>
                     <Power size={14} style={{ color: 'var(--app-danger)', flexShrink: 0 }} />
                     <div>
                         <p style={{ fontSize: 13, fontWeight: 600, color: 'hsl(var(--app-text))', margin: 0 }}>Reboot FC</p>
@@ -3261,12 +3246,12 @@ export default function ConfigPage() {
                 <div style={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>
                     <div style={{ maxWidth: 1024, padding: '24px clamp(16px, 3vw, 32px) 40px' }}>
                         {/* Phone width: the section list becomes a select. */}
-                        <label className="flex flex-col md:hidden" style={{ gap: 6, marginBottom: 20 }}>
-                            <span style={{ fontSize: 13, fontWeight: 600, color: 'hsl(var(--app-text-muted))' }}>Section</span>
-                            <select value={section} onChange={e => select(e.target.value as NavId)} className={FOCUS_RING} style={{ ...INPUT_STYLE(), height: 44, fontSize: 15, fontWeight: 600 }}>
-                                {navItems.map(n => <option key={n.id} value={n.id}>{n.label}</option>)}
-                            </select>
-                        </label>
+                        <div className="flex flex-col md:hidden" style={{ gap: 6, marginBottom: 20 }}>
+                            <span id="cfg-section-label" style={{ fontSize: 13, fontWeight: 600, color: 'hsl(var(--app-text-muted))' }}>Section</span>
+                            <OptionSelect aria-labelledby="cfg-section-label" value={section} onChange={select}
+                                className="data-[size=default]:h-11 text-[15px] font-semibold"
+                                options={navItems.map(n => ({ value: n.id, label: n.label }))} />
+                        </div>
 
                         <div key={section} role="tabpanel" className="animate-in fade-in-0 slide-in-from-bottom-1 duration-200">
                             <SectionHead meta={meta} pct={section === 'overview' ? null : domainPcts[section]} />

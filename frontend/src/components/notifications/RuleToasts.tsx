@@ -68,7 +68,7 @@ function Toast({ t }: { t: RuleToast }) {
                 </span>
                 <button type="button" onClick={() => setMuted(!muted)}
                     aria-label={muted ? 'Turn rule sounds on' : 'Mute rule sounds'} title={muted ? 'Sounds off' : 'Sounds on'}
-                    className="-my-1 flex size-8 shrink-0 items-center justify-center rounded-md transition-colors duration-[120ms] hover:bg-app-surface-2 text-app-text-muted hover:text-app-text">
+                    className="-my-1 flex size-8 shrink-0 items-center justify-center rounded-md transition-colors duration-[140ms] hover:bg-app-surface-2 text-app-text-muted hover:text-app-text">
                     {muted ? <VolumeX size={16} aria-hidden /> : <Volume2 size={16} aria-hidden />}
                 </button>
                 {!confirm && (

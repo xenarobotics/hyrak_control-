@@ -47,10 +47,14 @@ export function AvoidChips({ avoid }: { avoid: AvoidanceStatus | null }) {
         : avoid?.reason || (aState === 'off' ? 'Obstacle avoidance is off'
             : aState === 'watching' ? 'Detecting only: Steer is off' : 'Obstacle avoidance')
 
+    // With no drone the bar shows one "No drone" chip; these extras appear
+    // once there is telemetry to read.
+    if (!linked || !t) return null
+
     return (
         <StatusBarSlot>
-            <BarStat icon={<Home size={15} />} tone={linked && t ? 'text' : 'muted'} title="Distance to home" label="Home">
-                {linked && t ? `${Math.round(t.home_distance_m)} m` : <span className="text-app-text-muted">-</span>}
+            <BarStat icon={<Home size={15} />} tone="text" title="Distance to home" label="Home">
+                {`${Math.round(t.home_distance_m)} m`}
             </BarStat>
             <BarStat icon={aState === 'off' || !aState ? <ShieldOff size={15} /> : <ShieldCheck size={15} />}
                 tone={avoidTone} strong={avoidTone === 'danger'} title={avoidTitle}>

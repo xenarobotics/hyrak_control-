@@ -301,9 +301,18 @@ with `view` on the workspace (premium or not); Add still needs
   task, what, license, license_note, classes_preview, fps, verified_at,
   url, added: model_id|null, added_status}]}]}`, from `models_custom/recommended.json`
   (validated at startup; a broken file logs and serves nothing). Categories
-  in a fixed order: Drone and aerial view, Fire and safety, Roads and
-  vehicles, Construction and people, Agriculture and nature, General
-  purpose.
+  in the fixed order of `browse.CATEGORIES`: Drone and aerial view, Search
+  and rescue, People and crowds, Faces and expressions, Security, Fire,
+  smoke and safety gear, Inspection and infrastructure, Vehicles, roads and
+  plates, Agriculture and plants, Animals and wildlife, Water, ships and
+  coast, Scene and weather classification, General purpose.
+  As built 2026-10-21: the list holds 98 models, each imported and
+  test-run through the HYRAK check on the preview backend (status ready,
+  task detect or classify, fps measured, then deleted). Ordered by
+  usefulness for drone work within each category. Models whose file has no
+  class names carry `labels` from the repo's README or config. Rejected
+  candidates (too large over 150 MB, unsupported output layouts, segment /
+  OBB models, missing class names, multi-head models) are not listed.
 * `GET /huggingface/search?q=&task=all|detect|classify|segment&page=&ready=&workspace_id=`
   -> `{workspace_id, premium, can_manage, query, task, page (1-20),
   ready, has_more, cached, stale, results: [{repo, name, url, task

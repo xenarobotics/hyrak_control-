@@ -122,7 +122,7 @@ function ConsoleLink({ normal }: { normal: boolean }) {
     return (
         <a href="/admin" target="_blank" rel="noopener" title="Console (opens in a new tab)"
             className={cn(
-                'flex flex-col items-center rounded-[10px] transition-colors duration-[120ms]',
+                'flex flex-col items-center rounded-[10px] transition-colors duration-[140ms]',
                 normal ? 'gap-1.5 w-20 py-3' : RAIL_ITEM + ' ' + RAIL_IDLE,
             )}
             style={normal ? { color: 'var(--s-ink)' } : undefined}>
@@ -136,7 +136,7 @@ function ConsoleLink({ normal }: { normal: boolean }) {
 // sidebar in every theme; the active item is accent text on the accent wash.
 const RAIL_ITEM = 'flex flex-col items-center justify-center gap-1 w-16 min-h-14 py-1.5'
 const RAIL_IDLE = 'text-app-text-muted hover:text-app-text hover:bg-app-surface-2'
-const RAIL_ACTIVE = 'bg-app-accent-soft text-app-accent font-bold'
+const RAIL_ACTIVE = 'bg-app-accent-soft text-app-selected-ink font-bold'
 
 // The rail's quick theme switch. Same words as Settings (Dark, Midnight,
 // Light); it flips between light and dark, and Settings reaches Midnight.
@@ -148,7 +148,7 @@ function RailThemeButton() {
     return (
         <button type="button" onClick={() => setTheme(light ? 'dark' : 'light')}
             title={light ? 'Switch to the dark theme' : 'Switch to the light theme'}
-            className={cn('rounded-[10px] transition-colors duration-[120ms]', RAIL_ITEM, RAIL_IDLE)}>
+            className={cn('rounded-[10px] transition-colors duration-[140ms]', RAIL_ITEM, RAIL_IDLE)}>
             {light ? <Moon size={20} /> : <Sun size={20} />}
             <span className="text-[12px] font-semibold">{light ? 'Dark' : 'Light'}</span>
         </button>
@@ -227,7 +227,7 @@ function PlatformNav() {
                             onClick={(e) => handleNavClick(href, e)}
                             aria-current={active ? 'page' : undefined}
                             className={cn(
-                                'flex min-w-0 flex-1 flex-col items-center rounded-[10px] transition-colors duration-[120ms] md:flex-none',
+                                'flex min-w-0 flex-1 flex-col items-center rounded-[10px] transition-colors duration-[140ms] md:flex-none',
                                 normal ? 'gap-1 py-1.5 md:w-20 md:gap-1.5 md:py-3' : cn(RAIL_ITEM, 'w-auto md:w-16', active ? RAIL_ACTIVE : RAIL_IDLE),
                             )}
                             style={normal ? (active ? { background: 'var(--s-blue)', color: '#fff' } : { color: 'var(--s-ink)' }) : undefined}
@@ -322,16 +322,16 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
     const { isCustomer } = useAccess()
     const pathname = usePathname()
 
-    // ONE status bar for every page (docs/DESIGN_SYSTEM.md section 10). Fly
-    // and Command no longer carry their own status strip or Kill, so the bar
-    // is always on there whatever the Settings toggle says; elsewhere the
-    // toggle still decides. Normal mode's Command (SimpleCommand) has its own
-    // plain controls, so the bar stays off there.
+    // ONE status bar for every page (docs/DESIGN_SYSTEM.md section 10), with
+    // the same contents everywhere. The Settings toggle only hides its
+    // readings (GPS, battery, altitude, timer); the bar itself, with Hold,
+    // RTL, Land and Kill, is never hidden by it. Normal mode keeps its own
+    // plain shell: the bar shows on Fly there, and Normal mode's Command
+    // (SimpleCommand) has its own controls.
     const flightPage = ['/fly', '/command'].some(p => pathname === p || pathname.startsWith(p + '/'))
     const [uiMode] = useUiMode()
     const normalCommand = uiMode === 'normal' && (pathname === '/command' || pathname.startsWith('/command/'))
-    const showStatusBar = mounted && !normalCommand
-        && (flightPage || (statusBarOn && uiMode !== 'normal'))
+    const showStatusBar = mounted && !normalCommand && (flightPage || uiMode !== 'normal')
 
     if (gate !== 'ok') {
         return (
@@ -357,7 +357,7 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
                         the sidebar/logo area and persists across tab navigation
                         since this layout mounts once for the whole route group. */}
                     <div className="flex min-h-0 min-w-0 flex-col flex-1 overflow-hidden">
-                        {showStatusBar && <StatusBar tools={!flightPage} />}
+                        {showStatusBar && <StatusBar details={statusBarOn} />}
                         <ZoneBanner />
                         <CommandRefusalBanner />
                         <TakeoverBanner />

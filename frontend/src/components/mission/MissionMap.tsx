@@ -135,7 +135,7 @@ function AvoidanceOverlay({ show, reload, home, drone }: {
         <Marker key={`goal-${i}`} position={[g.lat, g.lng]} icon={destIcon} interactive={false} />
       ))}
       {start && (
-        <Marker position={[start.lat, start.lng]} icon={startIcon} interactive={false} />
+        <Marker position={[start.lat, start.lng]} icon={home ? startOnHomeIcon : startIcon} interactive={false} />
       )}
       {hazards.map(h => (
         <Circle key={h.id} center={[h.lat, h.lng]} radius={h.radius_m}
@@ -174,7 +174,7 @@ function wpIcon(index: number, type: string, selected: boolean): L.DivIcon {
       display:flex;align-items:center;justify-content:center;
       font-family:${MARKER_FONT};font-variant-numeric:tabular-nums;
       box-shadow:0 2px 10px rgba(0,0,0,.5),0 0 0 3px ${color}30;
-      transition:all .15s;cursor:pointer;
+      transition:background-color .14s,border-color .14s,box-shadow .14s;cursor:pointer;
     ">${index + 1}</div>`,
     iconSize: [sz, sz],
     iconAnchor: [sz / 2, sz / 2],
@@ -185,7 +185,7 @@ const homeIcon = L.divIcon({
   className: '',
   html: `<div style="
     width:22px;height:22px;border-radius:4px;
-    background:#22c55e;border:2px solid #fff;
+    background:#15803d;border:2px solid #fff;
     display:flex;align-items:center;justify-content:center;
     box-shadow:0 2px 6px rgba(0,0,0,.3);
   "><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></div>`,
@@ -194,13 +194,24 @@ const homeIcon = L.divIcon({
 })
 
 // Mission start (A) and destination/land (B) markers for the avoidance overlay.
+// Dark green so the white letter passes 4.5:1 (#15803d: 5.0:1).
 const startIcon = L.divIcon({
   className: '',
-  html: `<div style="width:26px;height:26px;border-radius:50%;background:#22c55e;
+  html: `<div style="width:26px;height:26px;border-radius:50%;background:#15803d;
     border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.5);display:flex;
     align-items:center;justify-content:center;color:#fff;font-weight:800;
     font-size:12px;font-family:${MARKER_FONT};">A</div>`,
   iconSize: [26, 26], iconAnchor: [13, 13],
+})
+// The same "A" when the start IS the home marker: a smaller badge tucked to
+// the home square's upper left, so the two read as one marker, not a pile.
+const startOnHomeIcon = L.divIcon({
+  className: '',
+  html: `<div style="width:20px;height:20px;border-radius:50%;background:#15803d;
+    border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45);display:flex;
+    align-items:center;justify-content:center;color:#fff;font-weight:800;
+    font-size:12px;line-height:1;font-family:${MARKER_FONT};">A</div>`,
+  iconSize: [20, 20], iconAnchor: [30, 30],
 })
 const destIcon = L.divIcon({
   className: '',
@@ -212,17 +223,24 @@ const destIcon = L.divIcon({
   iconSize: [26, 26], iconAnchor: [13, 24],
 })
 
+// The return point is usually waypoint 1 or home, so the tag never sits ON
+// the point: a dot marks the spot and the label hangs up and to the right,
+// clear of a 34px selected waypoint. Deep violet so white text passes
+// (#7e22ce: 6.4:1).
 const rtlIcon = L.divIcon({
   className: '',
-  html: `<div style="
-    width:34px;height:22px;border-radius:6px;
-    background:#a855f7;border:2px solid #fff;
-    display:flex;align-items:center;justify-content:center;
-    box-shadow:0 2px 6px rgba(0,0,0,.3);
-    font-size:12px;font-weight:800;color:#fff;font-family:${MARKER_FONT};
-  ">RTL</div>`,
-  iconSize: [34, 22],
-  iconAnchor: [17, 11],
+  html: `<div style="position:relative;width:60px;height:40px;pointer-events:none;">
+    <span style="position:absolute;left:0;bottom:0;width:8px;height:8px;margin:0 0 -4px -4px;border-radius:50%;
+      background:#7e22ce;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.35);"></span>
+    <span style="position:absolute;left:3px;bottom:3px;width:16px;height:1.5px;background:#7e22ce;
+      transform-origin:left center;transform:rotate(-45deg);"></span>
+    <span style="position:absolute;left:16px;top:0;height:22px;padding:0 7px;border-radius:6px;
+      background:#7e22ce;border:2px solid #fff;display:flex;align-items:center;
+      box-shadow:0 2px 6px rgba(0,0,0,.3);
+      font-size:12px;font-weight:800;color:#fff;font-family:${MARKER_FONT};">RTL</span>
+  </div>`,
+  iconSize: [60, 40],
+  iconAnchor: [0, 40],
 })
 
 // Red, matching the 3D view's drone billboard exactly - drone position should
@@ -798,7 +816,7 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
             className: '',
             html: `<div style="
               width:22px;height:22px;border-radius:50%;
-              background:#a855f7;border:2.5px solid #fff;
+              background:#7e22ce;border:2.5px solid #fff;
               box-shadow:0 1px 5px rgba(0,0,0,.45);
               display:flex;align-items:center;justify-content:center;
               font-size:12px;font-weight:800;color:#fff;font-family:${MARKER_FONT};

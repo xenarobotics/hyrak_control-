@@ -17,8 +17,8 @@ export function PrefRow({ label, sub, tip, right }: { label: React.ReactNode; su
                     <span style={{ fontSize: 14, fontWeight: 600, color: 'hsl(var(--app-text))' }}>{label}</span>
                     {tip && (
                         <Tooltip>
-                            <TooltipTrigger aria-label="More about this setting" className="focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-accent" style={{ background: 'none', border: 'none', padding: 4, margin: -4, borderRadius: 999, cursor: 'help', display: 'flex' }}>
-                                <Info size={14} style={{ color: 'hsl(var(--app-text-muted))' }} />
+                            <TooltipTrigger aria-label="More about this setting" className="bg-transparent text-app-text-muted hover:bg-app-surface-2 hover:text-app-text transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-accent" style={{ border: 'none', padding: 5, margin: -5, borderRadius: 999, cursor: 'help', display: 'flex' }}>
+                                <Info size={14} />
                             </TooltipTrigger>
                             <TooltipContent style={{ maxWidth: 280, fontSize: 13, lineHeight: 1.5 }}>{tip}</TooltipContent>
                         </Tooltip>
@@ -70,13 +70,13 @@ export function SButton({ tone = 'plain', disabled, onClick, type = 'button', ch
     title?: string
 }) {
     const t = TONE[tone]
-    // Disabled stays readable (muted text on surface-2, dashed edge) rather
+    // Disabled stays readable (subtle text on surface-2, quiet solid edge) rather
     // than fading the whole button.
     return (
         <button type={type} onClick={onClick} disabled={disabled} title={title} style={{
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
             minHeight: 32, padding: '6px 12px', borderRadius: 6, fontSize: 13, fontWeight: 600,
-            border: disabled ? '1px dashed hsl(var(--app-border-strong))' : `1px solid ${t.border}`,
+            border: disabled ? '1px solid hsl(var(--app-border))' : `1px solid ${t.border}`,
             background: disabled ? 'hsl(var(--app-surface-2))' : t.background,
             color: disabled ? 'hsl(var(--app-text-muted))' : t.color,
             cursor: disabled ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap',

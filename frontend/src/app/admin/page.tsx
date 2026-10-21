@@ -37,7 +37,6 @@
 
 import { apiDownload, apiFetch } from '@/lib/api'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import Image from 'next/image'
 import dynamic from 'next/dynamic'
 import { Map as MapIcon, Plane, Shield, FileCheck, X, Search, Building2, Users, ScrollText, ArrowLeft, Activity, Sun, Moon, AlertTriangle, CheckCircle2, Circle } from 'lucide-react'
 import { useTheme } from '@/lib/theme'
@@ -48,12 +47,14 @@ import { useAuthGate } from '@/hooks/useAuthGate'
 import { useAccess } from '@/hooks/useAccess'
 import { hasPerm, type Perm } from '@/lib/access'
 import { Tag } from '@/components/admin/console'
+import { AppFrame, type FrameItem } from '@/components/auth/AppFrame'
 import { FLIGHT_MODES } from '@/lib/flightModes'
 import { getServerUrl } from '@/lib/server-url'
 import { decidePermit as sendDecision, PERMIT_TONE, type Permit } from '@/lib/planning'
 import type { MapDrone } from '@/components/admin/AdminMap'
-import type { ZoneFeature } from '@/components/admin/zones'
+import { geoRings, type ZoneFeature } from '@/components/admin/zones'
 import { fmtShort } from '@/components/settings/primitives'
+import { OptionSelect } from '@/components/config/OptionSelect'
 
 const AdminMap = dynamic(() => import('@/components/admin/AdminMap'), { ssr: false })
 const ZoneEditor = dynamic(() => import('@/components/admin/ZoneEditor'), { ssr: false })
@@ -158,15 +159,16 @@ type FlightDetail = {
 
 type Tab = 'overview' | 'drones' | 'zones' | 'permits' | 'workspaces' | 'staff' | 'audit'
 
-// Rail labels fit a 48px button at 9px mono; `full` is the tooltip.
-const TABS: { key: Tab; label: string; full?: string; icon: typeof MapIcon }[] = [
-    { key: 'overview',   label: 'Map',     icon: MapIcon },
-    { key: 'drones',     label: 'Drones',  icon: Plane },
-    { key: 'zones',      label: 'Zones',   icon: Shield },
-    { key: 'permits',    label: 'Permits', icon: FileCheck },
+// Rail labels fit the 64px rail button; `full` is the tooltip and the page
+// title in the top bar.
+const TABS: { key: Tab; label: string; full: string; icon: typeof MapIcon }[] = [
+    { key: 'overview',   label: 'Map',     full: 'Live map',   icon: MapIcon },
+    { key: 'drones',     label: 'Drones',  full: 'Drones',     icon: Plane },
+    { key: 'zones',      label: 'Zones',   full: 'Zones',      icon: Shield },
+    { key: 'permits',    label: 'Permits', full: 'Permits',    icon: FileCheck },
     { key: 'workspaces', label: 'Spaces',  full: 'Workspaces', icon: Building2 },
-    { key: 'staff',      label: 'Staff',   icon: Users },
-    { key: 'audit',      label: 'Audit',   icon: ScrollText },
+    { key: 'staff',      label: 'Staff',   full: 'Staff',      icon: Users },
+    { key: 'audit',      label: 'Audit',   full: 'Audit log',  icon: ScrollText },
 ]
 
 // Deterministic ~±30m offset so several clients geolocated to the same city
@@ -575,81 +577,48 @@ export default function AdminPage() {
     }
 
     const liveCount = telemSessions.length + fleetDrones.length
+    // Operating areas of the visible workspaces: where the map opens when
+    // there is no drone and no zone to show.
+    const areas = workspaces.flatMap(w => w.operating_area ? geoRings(w.operating_area).slice(0, 1) : [])
+
+    const items: FrameItem[] = visibleTabs.map(({ key, label, full, icon }) => {
+        const pending = key === 'permits' ? permits.filter(p => p.status === 'pending').length : 0
+        return {
+            key, label, icon, active: tab === key, onClick: () => setTab(key), badge: pending,
+            title: pending > 0 ? `${full}: ${pending} waiting` : full,
+        }
+    })
+    const current = TABS.find(t => t.key === tab)
 
     return (
-        <div className={'h-screen flex bg-app-bg text-app-text overflow-hidden ' + FOCUS_SCOPE}>
-            {/* ── Left rail: same look as the app's rail (layout.tsx) ───── */}
-            <aside className="w-16 shrink-0 flex flex-col items-center py-4 gap-1 border-r border-app-border bg-app-sidebar z-10">
-                <div className="mb-5 p-2" title={org ? 'Organization console' : 'HYRAK console'}>
-                    <Image src="/brand/icon-dark.png" alt="HYRAK" width={26} height={26} className="dark:hidden" />
-                    <Image src="/brand/icon.png" alt="HYRAK" width={26} height={26} className="hidden dark:block" />
-                </div>
-                {visibleTabs.map(({ key, label, full, icon: Icon }) => {
-                    const pending = key === 'permits'
-                        ? permits.filter(p => p.status === 'pending').length : 0
-                    return (
-                        <button
-                            key={key}
-                            title={pending > 0 ? `${full ?? label}: ${pending} waiting` : (full ?? label)}
-                            aria-current={tab === key ? 'page' : undefined}
-                            onClick={() => setTab(key)}
-                            className={
-                                'relative flex flex-col items-center gap-1 w-12 py-2 rounded-md text-[12px] font-semibold transition-colors duration-[120ms] ' +
-                                (tab === key
-                                    ? 'bg-app-accent-soft text-app-text'
-                                    : 'text-app-text-muted hover:text-app-text hover:bg-app-surface-2')
-                            }
-                        >
-                            <Icon size={18} aria-hidden />
-                            {label}
-                            {pending > 0 && (
-                                <span className="absolute top-0.5 right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-app-warn text-app-accent-ink text-[12px] font-bold tabular-nums flex items-center justify-center">
-                                    {pending}
-                                </span>
-                            )}
-                        </button>
-                    )
-                })}
-                <div className="mt-auto flex flex-col items-center gap-1">
-                    {/* The live count is founder data; the organization console
-                        has its way back to the app in its header instead. */}
-                    {!org && (
-                        <div className={'flex flex-col items-center gap-0.5 py-2 text-[12px] font-semibold ' + (liveCount > 0 ? 'text-app-ok' : 'text-app-text-muted')}
-                            title={`${liveCount} drone${liveCount === 1 ? '' : 's'} connected`}>
-                            <span className="flex items-center gap-1 tabular-nums text-[14px] font-bold">
-                                <Activity size={14} aria-hidden /> {liveCount}
-                            </span>
-                            Live
-                        </div>
-                    )}
-                    {!org && (
-                        <a href="/command" title="Back to the app"
-                            className="flex flex-col items-center gap-1 w-12 py-2 rounded-md text-[12px] font-semibold text-app-text-muted hover:text-app-text hover:bg-app-surface-2 transition-colors duration-[120ms]">
-                            <ArrowLeft size={18} aria-hidden />
-                            App
-                        </a>
-                    )}
-                    <ConsoleThemeToggle />
-                </div>
-            </aside>
-
-            {/* ── Main area ────────────────────────────────────────────── */}
-            <main className={'flex-1 relative flex flex-col md:flex-row min-w-0 overflow-y-auto md:overflow-hidden' + (org ? ' pt-12' : '')}>
-                {org && (
-                    <header className="absolute top-0 inset-x-0 h-12 flex items-center gap-3 px-4 border-b border-app-border bg-app-surface">
-                        <h1 className="text-[18px] font-bold text-app-text whitespace-nowrap">Organization console</h1>
-                        <span className="text-[13px] text-app-text-muted truncate">
-                            {user?.display_name || user?.username}
+        <div className={'h-screen ' + FOCUS_SCOPE}>
+        <AppFrame label="Console" items={items} title={current?.full ?? 'Console'}
+            context={org ? `Organization console, ${user?.display_name || user?.username}` : 'HYRAK console'}
+            railFooter={<>
+                {/* The live count is founder data; the organization console
+                    has its way back to the app in the top bar instead. */}
+                {!org && (
+                    <div className={'flex flex-col items-center gap-0.5 py-2 text-[12px] font-semibold ' + (liveCount > 0 ? 'text-app-ok' : 'text-app-text-muted')}
+                        title={`${liveCount} drone${liveCount === 1 ? '' : 's'} connected`}>
+                        <span className="flex items-center gap-1 tabular-nums text-[14px] font-bold">
+                            <Activity size={14} aria-hidden /> {liveCount}
                         </span>
-                        <a href="/command" className="ml-auto flex items-center gap-1.5 h-8 px-3 rounded-md border border-app-border-strong text-[13px] font-semibold text-app-text hover:bg-app-surface-2 transition-colors duration-[120ms] whitespace-nowrap">
-                            <ArrowLeft size={14} aria-hidden /> Back to the app
-                        </a>
-                    </header>
+                        Live
+                    </div>
                 )}
+                <ConsoleThemeToggle />
+            </>}
+            actions={
+                <a href="/command" className="flex items-center gap-1.5 h-8 px-3 rounded-md border border-app-border-strong text-[13px] font-semibold text-app-text hover:bg-app-surface-2 transition-colors duration-[140ms] whitespace-nowrap">
+                    <ArrowLeft size={14} aria-hidden /> <span className="max-sm:hidden">Back to the app</span><span className="sm:hidden">App</span>
+                </a>
+            }>
+            {/* ── Main area ────────────────────────────────────────────── */}
+            <main className="flex-1 relative flex flex-col md:flex-row min-w-0 min-h-0 overflow-y-auto md:overflow-hidden">
                 {tab === 'overview' && (
                     <>
                         <div className="flex-1 relative min-w-0 min-h-[360px]">
-                            <AdminMap drones={mapDrones} zones={zones} onSelect={toggleSelect} />
+                            <AdminMap drones={mapDrones} zones={zones} areas={areas} liveCount={liveCount} onSelect={toggleSelect} />
 
                             {/* Active drones column - mission-page panel style */}
                             <div className="absolute left-3 top-3 z-[1000] w-72 max-w-[calc(100%-24px)] max-h-[calc(100%-24px)] rounded-[10px] border border-app-border bg-app-surface shadow-[var(--app-shadow)] flex flex-col overflow-hidden">
@@ -661,7 +630,7 @@ export default function AdminPage() {
                                     {liveCount === 0 && (
                                         <div className="flex items-center gap-2 text-[13px] text-app-text-muted p-2"
                                             title="Clients without a telemetry link don't appear here.">
-                                            <Plane size={16} aria-hidden /> No drones connected
+                                            <Plane size={16} aria-hidden /> No drones online. Connected drones appear here.
                                         </div>
                                     )}
                                     {telemSessions.map(s => (
@@ -795,18 +764,13 @@ export default function AdminPage() {
                         {/* Selector column */}
                         <div className="w-full md:w-80 shrink-0 border-b md:border-b-0 md:border-r border-app-border bg-app-surface flex flex-col max-h-[45vh] md:max-h-none">
                             <div className="p-3 space-y-2 border-b border-app-border">
-                                <select
+                                <OptionSelect size="sm" aria-label="Drone" className="data-[size=sm]:h-8 text-[13px]"
                                     value={selectedDroneId ?? ''}
-                                    onChange={e => selectDrone(e.target.value || null)}
-                                    className="w-full bg-app-surface-2 border border-app-border-strong rounded-md px-2 h-8 text-[13px] text-app-text"
-                                >
-                                    <option value="">Select a drone</option>
-                                    {drones.map(d => (
-                                        <option key={d.id} value={d.id}>
-                                            {d.name} {onlineUids.has(d.hardware_uid) ? '● online' : ''}
-                                        </option>
-                                    ))}
-                                </select>
+                                    onChange={v => selectDrone(v || null)}
+                                    options={[{ value: '', label: 'Select a drone' }, ...drones.map(d => ({
+                                        value: d.id, label: `${d.name}${onlineUids.has(d.hardware_uid) ? ', online' : ''}`,
+                                    }))]}
+                                />
                                 <div className="flex items-center gap-2 bg-app-surface-2 border border-app-border-strong rounded-md px-2">
                                     <Search size={12} className="text-app-text-muted" />
                                     <input
@@ -1125,6 +1089,7 @@ export default function AdminPage() {
                     </div>
                 )}
             </main>
+        </AppFrame>
         </div>
     )
 }
@@ -1256,7 +1221,7 @@ function ControlBlock({ session, telem, control }: { session: SessionInfo; telem
     const [alt, setAlt] = useState(5)
     const [confirming, setConfirming] = useState(false)
     const heldByOther = !!session.takeover && !control.mine
-    const btn = 'min-h-8 px-2 py-1 rounded-md border text-[13px] font-bold transition-colors duration-[120ms] disabled:cursor-not-allowed disabled:border-dashed disabled:border-app-border-strong disabled:text-app-text-muted'
+    const btn = 'min-h-8 px-2 py-1 rounded-md border text-[13px] font-bold transition-colors duration-[120ms] disabled:cursor-not-allowed disabled:border-app-border disabled:bg-app-surface-2 disabled:text-app-text-subtle'
     return (
         <div className="border-b border-app-border px-3 py-2 space-y-2">
             <div className="flex items-center gap-2 text-[13px] font-semibold text-app-text-muted">
@@ -1303,12 +1268,10 @@ function ControlBlock({ session, telem, control }: { session: SessionInfo; telem
                     </div>
                     <div className="flex items-center gap-1.5">
                         <label htmlFor="takeover-mode" className="text-[12px] font-bold text-app-text-muted">Mode</label>
-                        <select id="takeover-mode" value="" aria-label="Set flight mode"
-                            onChange={e => { if (e.target.value) control.send('set_mode', { mode: e.target.value }) }}
-                            className="flex-1 h-8 bg-app-surface-2 border border-app-border-strong rounded-md px-1.5 text-[13px] text-app-text">
-                            <option value="">{telem?.flight_mode.mode ?? 'set mode'}</option>
-                            {FLIGHT_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-                        </select>
+                        <OptionSelect id="takeover-mode" size="sm" value="" aria-label="Set flight mode"
+                            onChange={v => { if (v) control.send('set_mode', { mode: v }) }}
+                            className="flex-1 w-auto data-[size=sm]:h-8 text-[13px]"
+                            options={[{ value: '', label: telem?.flight_mode.mode ?? 'Set mode' }, ...FLIGHT_MODES.map(m => ({ value: m.value, label: m.label }))]} />
                     </div>
                     <button className={btn + ' w-full border-app-ok/50 text-app-ok hover:border-app-ok'}
                         onClick={control.release}>Release control</button>
@@ -1463,13 +1426,13 @@ const FOCUS_SCOPE = '[&_:focus-visible]:outline-2 [&_:focus-visible]:outline-off
 function ConsoleThemeToggle() {
     const { theme, setTheme } = useTheme()
     const mounted = useHydrated()
-    if (!mounted) return <div className="w-12 h-12" />
+    if (!mounted) return <div className="w-16 h-14" />
     const isDark = theme !== 'light'
     return (
         <button onClick={() => setTheme(isDark ? 'light' : 'dark')}
             title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-            className="flex flex-col items-center gap-1 w-12 py-2 rounded-md text-[12px] font-semibold text-app-text-muted hover:text-app-text hover:bg-app-surface-2 transition-colors duration-[120ms]">
-            {isDark ? <Sun size={18} aria-hidden /> : <Moon size={18} aria-hidden />}
+            className="flex flex-col items-center justify-center gap-1 w-16 min-h-14 py-1.5 rounded-[10px] text-[12px] font-semibold text-app-text-muted hover:text-app-text hover:bg-app-surface-2 transition-colors duration-[140ms]">
+            {isDark ? <Sun size={20} aria-hidden /> : <Moon size={20} aria-hidden />}
             {isDark ? 'Light' : 'Dark'}
         </button>
     )

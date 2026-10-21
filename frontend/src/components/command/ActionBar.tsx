@@ -40,7 +40,7 @@ function BarButton({ icon, label, onClick, tone = 'default', active, pending, di
                 className={cn(
                     'h-10 px-3.5 rounded-md border inline-flex items-center justify-center gap-2 text-[14px] font-bold whitespace-nowrap',
                     'transition-[color,background-color,border-color,transform] duration-[140ms] active:scale-[.98]',
-                    active ? 'border-app-accent bg-app-accent-soft text-app-accent' : TONES[tone],
+                    active ? 'border-app-accent bg-app-accent-soft text-app-selected-ink' : TONES[tone],
                     FOCUS, DISABLED,
                 )}>
                 {pending ? <Loader2 size={16} className="animate-spin" /> : icon}
@@ -114,7 +114,7 @@ export function ActionBar({ avoid }: { avoid?: AvoidanceStatus | null }) {
 
             {/* Take off, with its altitude stepper attached */}
             <div className={cn('h-10 inline-flex items-stretch rounded-md border shrink-0 overflow-hidden',
-                !linked || inAir ? 'border-dashed border-app-border-strong' : 'border-app-ok')}>
+                !linked || inAir ? 'border-app-border' : 'border-app-ok')}>
                 <WhyDisabled reason={!linked ? NO_LINK : inAir ? 'Already flying' : null} className="inline-flex">
                     <button onClick={() => sendAction('takeoff', { altitude: takeoffAlt })} disabled={!linked || inAir}
                         title={!linked || inAir ? undefined : `Take off to ${takeoffAlt} m` + (indoor ? ' (indoor: capped at 2 m)' : '')

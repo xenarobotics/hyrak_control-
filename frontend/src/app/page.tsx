@@ -93,7 +93,7 @@ function DesktopDownloadCard() {
                 <button
                     disabled
                     title={mounted && loading ? 'Looking for the latest build' : 'No desktop build for this platform yet'}
-                    className="w-full min-h-10 flex items-center justify-center gap-1.5 text-[14px] py-2 rounded-md font-semibold cursor-not-allowed border border-dashed border-app-border-strong bg-app-surface-2 text-app-text-muted"
+                    className="w-full min-h-10 flex items-center justify-center gap-1.5 text-[14px] py-2 rounded-md font-semibold cursor-not-allowed border border-app-border bg-app-surface-2 text-app-text-subtle"
                 >
                     {mounted && loading ? <Loader2 size={16} className="animate-spin" /> : 'No build published yet'}
                 </button>

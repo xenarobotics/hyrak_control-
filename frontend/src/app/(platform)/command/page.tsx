@@ -27,7 +27,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
-import { Maximize2, Minimize2, PanelRightClose, PanelRightOpen, X, ShieldCheck, Bot, Activity, SlidersHorizontal, ScrollText, Video, Map as MapIcon } from 'lucide-react'
+import { Scaling, PanelRightClose, PanelRightOpen, X, ShieldCheck, Bot, Activity, SlidersHorizontal, ScrollText, Video, Map as MapIcon } from 'lucide-react'
 import { getSocket } from '@/lib/socket'
 import { useSwarmStore } from '@/store/swarm'
 import { useDroneStore } from '@/store/drone'
@@ -57,6 +57,7 @@ import { useAiModule } from '@/components/command/useAiModule'
 import { useLibraryEntry } from '@/components/models/useModelLibrary'
 import { ViewOnlyFence } from '@/components/layout/ViewOnly'
 import { useLiveScope } from '@/hooks/useLiveScope'
+import { useResolvedDroneId } from '@/lib/droneId'
 import { FOCUS, FOCUS_OVERLAY, OVERLAY_BTN } from '@/components/controls/flightStyles'
 
 const mapLoading = () => (
@@ -170,7 +171,7 @@ function Toggle({ on, label, hint, onClick }: { on: boolean; label: string; hint
     return (
         <button onClick={onClick} title={hint} aria-pressed={on}
             className={cn('flex-1 h-9 rounded-md border text-[13px] font-semibold transition-colors duration-[140ms] active:scale-[.98]', FOCUS,
-                on ? 'bg-app-accent-soft border-app-accent text-app-accent'
+                on ? 'bg-app-accent-soft border-app-accent text-app-selected-ink'
                     : 'border-app-border-strong text-app-text-muted hover:text-app-text hover:bg-app-surface-2')}>
             {label} <span className="font-normal">{on ? 'on' : 'off'}</span>
         </button>
@@ -187,7 +188,7 @@ function StageSeg<T extends string>({ value, options, onChange, label }: {
             {options.map(o => (
                 <button key={o.id} onClick={() => onChange(o.id)} aria-pressed={value === o.id}
                     className={cn('flex items-center gap-1.5 h-8 px-3 rounded text-[13px] font-bold transition-colors duration-[140ms]', FOCUS_OVERLAY,
-                        value === o.id ? 'bg-[color-mix(in_srgb,var(--overlay-accent)_18%,transparent)] text-[var(--overlay-accent)]'
+                        value === o.id ? 'bg-[color-mix(in_srgb,var(--overlay-accent)_18%,transparent)] text-overlay-selected-ink'
                             : 'text-overlay-muted hover:text-overlay-text')}>
                     {o.icon}{o.label}
                 </button>
@@ -353,17 +354,23 @@ function DevCommand() {
                 ...(drag?.view === v ? { left: drag.x, top: drag.y, right: 'auto', bottom: 'auto', zIndex: 40 } : {}),
             }
 
+    // PiP chrome: a header band (label left, size right) and the picture
+    // below it. Both start a drag or, on a plain click, make the PiP the main
+    // view; the size button sits inside the band, so no two controls overlap.
     const pipChrome = (view: View, label: string) => (
         <>
             <div onPointerDown={e => onPipDown(e, view)} role="button" aria-label={`Show ${label} full screen`}
-                className="absolute inset-0 z-[1500] cursor-pointer touch-none select-none" style={{ background: 'transparent' }} />
-            <div className="absolute top-1.5 left-1.5 right-1.5 z-[1600] flex items-center justify-between pointer-events-none select-none">
-                <span className="px-2 py-1 rounded-md text-[12px] font-bold bg-overlay-scrim text-overlay-text"
-                    title="Click to enlarge, drag to move">
+                className="absolute inset-x-0 bottom-0 top-11 z-[1500] cursor-pointer touch-none select-none" style={{ background: 'transparent' }} />
+            <div onPointerDown={e => onPipDown(e, view)}
+                className="absolute top-0 inset-x-0 h-11 px-1.5 z-[1600] flex items-center justify-between cursor-pointer touch-none select-none"
+                title="Click to enlarge, drag to move">
+                <span className="px-2 py-1 rounded-md text-[12px] font-bold bg-overlay-scrim text-overlay-text">
                     {label}</span>
-                <button onClick={() => update({ size: layout.size === 's' ? 'm' : layout.size === 'm' ? 'l' : 's' })}
-                    className={cn(OVERLAY_BTN, 'w-8 px-0 pointer-events-auto', FOCUS_OVERLAY)} title="Picture size" aria-label="Picture size">
-                    {layout.size === 'l' ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button>
+                <button onPointerDown={e => e.stopPropagation()}
+                    onClick={() => update({ size: layout.size === 's' ? 'm' : layout.size === 'm' ? 'l' : 's' })}
+                    className={cn(OVERLAY_BTN, 'w-8 px-0', FOCUS_OVERLAY)}
+                    title={`Picture size: ${layout.size === 's' ? 'small' : layout.size === 'm' ? 'medium' : 'large'}`} aria-label="Picture size">
+                    <Scaling size={14} /></button>
             </div>
         </>
     )
@@ -385,6 +392,8 @@ function DevCommand() {
     const tabs = TABS.filter(tb => !(tb.id === 'avoid' && noAvoid))
     const tabIdx = Math.max(0, tabs.findIndex(tb => tb.id === activeTab))
     const bigSel: 'video' | 'map' | 'ai' = layout.big
+    // Avoid tab with no drone: one empty state, filling the panel.
+    const avoidDroneId = useResolvedDroneId()
 
     return (
         <div className="flex flex-col h-full min-h-0 gap-3 text-app-text overflow-y-auto md:overflow-hidden">
@@ -468,7 +477,7 @@ function DevCommand() {
                     <>
                         <div onMouseDown={onDockDrag} className="hidden md:flex w-1.5 -mx-1.5 shrink-0 cursor-col-resize items-center justify-center group"
                             title="Drag to resize">
-                            <div className="w-0.5 h-10 rounded bg-app-border-strong transition-colors duration-[140ms] group-hover:bg-app-accent" />
+                            <div className="w-0.5 h-10 rounded bg-app-accent opacity-0 transition-opacity duration-[140ms] group-hover:opacity-100" />
                         </div>
                         <aside className={cn('w-full md:w-[var(--dock-w)] shrink-0 flex flex-col md:min-h-0 rounded-[10px] border overflow-hidden', PANEL)}
                             style={{ '--dock-w': `${layout.dockW}px` } as React.CSSProperties}>
@@ -479,7 +488,7 @@ function DevCommand() {
                                     <button key={tb.id} role="tab" aria-selected={activeTab === tb.id} onClick={() => update({ tab: tb.id })}
                                         title={tb.hint} aria-label={tb.hint}
                                         className={cn('flex-1 min-w-0 h-14 flex flex-col items-center justify-center gap-1 text-[12px] font-semibold transition-colors duration-[140ms]', FOCUS,
-                                            activeTab === tb.id ? 'text-app-accent' : 'text-app-text-muted hover:text-app-text hover:bg-app-surface-2')}>
+                                            activeTab === tb.id ? 'text-app-selected-ink' : 'text-app-text-muted hover:text-app-text hover:bg-app-surface-2')}>
                                         <tb.icon size={18} />
                                         <span className="whitespace-nowrap">{tb.label}</span>
                                     </button>
@@ -488,7 +497,12 @@ function DevCommand() {
                                     style={{ width: `${100 / tabs.length}%`, transform: `translateX(${tabIdx * 100}%)` }} />
                             </div>
                             <div key={activeTab} className="md:flex-1 md:min-h-0 overflow-y-auto p-4 flex flex-col gap-4 animate-in fade-in-0 duration-200">
-                                {activeTab === 'avoid' && !noAvoid && (
+                                {activeTab === 'avoid' && !noAvoid && !avoidDroneId && (
+                                    <div className="flex-1 flex items-center justify-center">
+                                        <ViewOnlyFence><AvoidancePanel /></ViewOnlyFence>
+                                    </div>
+                                )}
+                                {activeTab === 'avoid' && !noAvoid && avoidDroneId && (
                                     <>
                                         <div className="flex gap-2">
                                             <Toggle on={layout.radar} label="Radar" onClick={() => update({ radar: !layout.radar })}

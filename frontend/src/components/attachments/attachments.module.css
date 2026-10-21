@@ -44,7 +44,7 @@
 .act[data-hazard='true'] { color: var(--cm-warn); border-color: color-mix(in srgb, var(--cm-warn) 40%, transparent); }
 .act[data-armed='true'] { background: var(--cm-warn); border-color: var(--cm-warn); color: var(--cm-panel); }
 .normal .act[data-armed='true'] { background: #FDBA21; border-color: #FDBA21; color: #3D2A00; }
-.act:disabled { cursor: not-allowed; color: hsl(var(--app-text-subtle)); border-style: dashed; border-color: hsl(var(--app-border-strong)); background: transparent; }
+.act:disabled { cursor: not-allowed; color: hsl(var(--app-text-subtle)); border-color: hsl(var(--app-border)); background: hsl(var(--app-surface-2)); }
 .rail .act:disabled { color: #8b95a3; border-color: rgba(255, 255, 255, 0.22); }
 .act:focus-visible { outline: 2px solid var(--cm-accent); outline-offset: 2px; }
 .normal .act { border-width: 2px; }
@@ -104,7 +104,7 @@
   font-size: var(--cm-small); font-weight: 600; cursor: pointer;
 }
 .kind:hover:not(:disabled) { color: var(--cm-ink); border-color: var(--cm-accent-line); }
-.kind[aria-checked='true'] { color: var(--cm-accent); background: var(--cm-accent-soft); border-color: var(--cm-accent); }
+.kind[aria-checked='true'] { color: var(--app-selected-ink); background: var(--cm-accent-soft); border-color: var(--cm-accent); }
 .kind[aria-checked='true'][data-hazard='true'] { color: var(--cm-warn); background: var(--cm-warn-soft); border-color: var(--cm-warn); }
 .kind:disabled { cursor: default; }
 .kind:focus-visible { outline: 2px solid var(--cm-accent); outline-offset: 2px; }
@@ -162,7 +162,7 @@
 .wpBtn > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wpBtn[aria-pressed='true'] { color: var(--overlay-accent); border-color: var(--overlay-accent); background: rgba(34, 211, 238, 0.12); font-weight: 700; }
 .wpBtn[aria-pressed='true'][data-hazard='true'] { color: var(--overlay-warn); border-color: var(--overlay-warn); background: rgba(251, 191, 36, 0.12); }
-.wpBtn:disabled { cursor: not-allowed; color: #8b95a3; border-style: dashed; background: transparent; }
+.wpBtn:disabled { cursor: not-allowed; color: hsl(var(--app-text-subtle)); border-color: hsl(var(--app-border)); background: hsl(var(--app-surface-2)); }
 .wpPrimary { flex: 1; color: var(--overlay-accent); background: rgba(34, 211, 238, 0.14); border-color: rgba(34, 211, 238, 0.45); }
 .wpPrimary[data-hazard='true'] { color: var(--overlay-warn); background: rgba(251, 191, 36, 0.14); border-color: rgba(251, 191, 36, 0.5); }
 .wpLevel { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; width: 40px; text-align: right; color: var(--overlay-warn); }

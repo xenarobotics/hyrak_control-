@@ -204,7 +204,7 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
                     {!isLoading && (
                         <WhyDisabled reason={startBlocked ? 'Pick a camera first' : null} className="inline-block">
                             <Button size="sm" onClick={startStream} disabled={startBlocked}
-                                className="h-9 px-4 gap-1.5 rounded-md text-[13px] font-bold bg-app-accent text-[var(--app-accent-ink)] hover:bg-app-accent hover:brightness-110 transition-[filter,transform] duration-[140ms] active:scale-[.98] disabled:opacity-100 disabled:bg-app-surface disabled:text-app-text-muted disabled:border disabled:border-dashed disabled:border-app-border-strong">
+                                className="h-9 px-4 gap-1.5 rounded-md text-[13px] font-bold bg-app-accent text-[var(--app-accent-ink)] hover:bg-app-accent hover:brightness-110 transition-[filter,transform] duration-[140ms] active:scale-[.98] disabled:opacity-100 disabled:bg-app-surface-2 disabled:text-app-text-subtle disabled:border disabled:border-app-border">
                                 <Video size={15} /> Start video
                             </Button>
                         </WhyDisabled>
@@ -260,7 +260,7 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
                     <WhyDisabled reason={isLoading ? 'Starting the video' : startBlocked ? 'Pick a camera in Devices first' : null} className="inline-block">
                     <Button size="sm"
                         variant={isStreaming ? 'ghost' : 'default'}
-                        className={cn(OVERLAY_BTN, FOCUS_OVERLAY, 'h-8 text-[13px] shadow-none disabled:opacity-100 disabled:border-dashed disabled:text-overlay-muted',
+                        className={cn(OVERLAY_BTN, FOCUS_OVERLAY, 'h-8 text-[13px] shadow-none disabled:opacity-100 disabled:text-overlay-muted',
                             isStreaming ? 'border-[var(--overlay-danger)] text-[var(--overlay-danger)] hover:text-[var(--overlay-danger)]'
                                 : 'bg-[var(--overlay-accent)] border-[var(--overlay-accent)] text-[var(--overlay-scrim)] hover:bg-[var(--overlay-accent)] hover:brightness-110 disabled:bg-overlay-scrim')}
                         onClick={isStreaming ? stopStream : startStream}

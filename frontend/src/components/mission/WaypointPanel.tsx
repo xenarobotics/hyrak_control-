@@ -164,36 +164,38 @@ export default function WaypointPanel({ readOnly = false }: { readOnly?: boolean
                   )}
                 </div>
 
-                {/* Reorder arrows + delete - appear on hover / when active */}
+                {/* Reorder arrows + delete. With a mouse they appear on hover,
+                    focus or selection; on touch (no hover) they are always
+                    there, since there is nothing to hover. 32px targets. */}
                 {!readOnly && <div
-                  className={cn('shrink-0 flex items-center transition-opacity duration-[120ms] group-hover:opacity-100 group-focus-within:opacity-100',
-                    active ? 'opacity-100' : 'opacity-0')}
+                  className={cn('shrink-0 flex items-center transition-opacity duration-[140ms]',
+                    !active && 'pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 pointer-fine:group-focus-within:opacity-100')}
                 >
                   <button
                     type="button"
                     title="Move up" aria-label="Move up"
                     disabled={i === 0}
-                    className={cn('w-6 h-7 flex items-center justify-center rounded-[6px] text-app-text-muted hover:text-app-text hover:bg-app-raised disabled:text-app-text-subtle disabled:hover:bg-transparent', FOCUS)}
+                    className={cn('w-8 h-8 flex items-center justify-center rounded-[6px] text-app-text-muted hover:text-app-text hover:bg-app-raised disabled:text-app-text-subtle disabled:hover:bg-transparent', FOCUS)}
                     onClick={e => { e.stopPropagation(); if (i > 0) moveWaypoint(rawIdx, waypoints.indexOf(orderable[i - 1])) }}
                   >
-                    <ChevronUp size={14} aria-hidden />
+                    <ChevronUp size={16} aria-hidden />
                   </button>
                   <button
                     type="button"
                     title="Move down" aria-label="Move down"
                     disabled={i === orderable.length - 1}
-                    className={cn('w-6 h-7 flex items-center justify-center rounded-[6px] text-app-text-muted hover:text-app-text hover:bg-app-raised disabled:text-app-text-subtle disabled:hover:bg-transparent', FOCUS)}
+                    className={cn('w-8 h-8 flex items-center justify-center rounded-[6px] text-app-text-muted hover:text-app-text hover:bg-app-raised disabled:text-app-text-subtle disabled:hover:bg-transparent', FOCUS)}
                     onClick={e => { e.stopPropagation(); if (i < orderable.length - 1) moveWaypoint(rawIdx, waypoints.indexOf(orderable[i + 1])) }}
                   >
-                    <ChevronDown size={14} aria-hidden />
+                    <ChevronDown size={16} aria-hidden />
                   </button>
                   <button
                     type="button"
                     title="Remove waypoint" aria-label="Remove waypoint"
-                    className={cn('w-6 h-7 flex items-center justify-center rounded-[6px] text-app-danger hover:bg-app-danger-soft', FOCUS)}
+                    className={cn('w-8 h-8 flex items-center justify-center rounded-[6px] text-app-danger hover:bg-app-danger-soft', FOCUS)}
                     onClick={e => { e.stopPropagation(); removeWaypoint(wp.id) }}
                   >
-                    <Trash2 size={14} aria-hidden />
+                    <Trash2 size={15} aria-hidden />
                   </button>
                 </div>}
               </div>

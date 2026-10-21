@@ -1,7 +1,7 @@
 'use client'
 
-// The Command window's AI drawer: a slim tab on the stage's left edge that
-// slides open a panel of the AI modules - the same model library as the AI
+// The Command window's AI drawer: an "AI models" button at the stage's top
+// left (under the view switch) that slides open a panel of the AI modules - the same model library as the AI
 // tab (useModelLibrary: HYRAK models, then our own Ready models), one tile
 // each, icon + name + one line. Tap starts the module, tap the running one
 // stops it. Closes on a tap outside or Esc.
@@ -9,7 +9,7 @@
 import { useEffect, useRef } from 'react'
 import { ChevronLeft, ChevronRight, Cpu } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { FOCUS_OVERLAY } from '@/components/controls/flightStyles'
+import { FOCUS_OVERLAY, OVERLAY_BTN } from '@/components/controls/flightStyles'
 import { useModelAccess, useModelLibrary, type LibraryEntry } from '@/components/models/useModelLibrary'
 
 export function AiDrawer({ open, onOpen, onClose, mode, onToggle }: {
@@ -45,7 +45,7 @@ export function AiDrawer({ open, onOpen, onClose, mode, onToggle }: {
                 title={disabled ? line : active ? `Stop ${m.name}` : `Run ${m.name} - ${m.blurb}`}
                 className={cn('min-h-[72px] rounded-md border flex flex-col items-center justify-center gap-1 px-1.5 text-center transition-colors duration-[140ms] active:scale-[.98]',
                     !active && 'bg-[color-mix(in_srgb,var(--overlay-text)_4%,transparent)] hover:bg-[color-mix(in_srgb,var(--overlay-text)_10%,transparent)]',
-                    'disabled:border-dashed disabled:cursor-not-allowed', FOCUS_OVERLAY)}
+                    'disabled:cursor-not-allowed', FOCUS_OVERLAY)}
                 style={{
                     background: active ? `${m.color}22` : undefined,
                     borderColor: active ? `${m.color}99` : 'var(--overlay-border)',
@@ -80,13 +80,15 @@ export function AiDrawer({ open, onOpen, onClose, mode, onToggle }: {
                     </div>
                 </div>
             )}
+            {/* Closed: one labelled overlay button under the stage's view
+                switch, not a rotated side tab. */}
             {!open && (
                 <button onClick={onOpen} aria-label="Open AI models"
                     title={running ? `AI: ${running.name} running` : 'AI models'}
-                    className={cn('pointer-events-auto self-center w-8 h-24 rounded-r-md border border-l-0 border-overlay-border bg-overlay-scrim backdrop-blur-[6px] flex flex-col items-center justify-center gap-1.5 text-overlay-text hover:bg-[color-mix(in_srgb,var(--overlay-text)_10%,var(--overlay-scrim))] transition-colors duration-[140ms]', FOCUS_OVERLAY)}>
-                    <Cpu size={14} style={running ? { color: running.color } : undefined} />
-                    <span className="text-[12px] font-bold [writing-mode:vertical-rl]">AI</span>
-                    <ChevronRight size={12} />
+                    className={cn(OVERLAY_BTN, FOCUS_OVERLAY, 'pointer-events-auto self-start mt-[52px] ml-2 h-9 w-9 px-0 md:w-auto md:px-3 text-[13px]')}>
+                    <Cpu size={15} style={running ? { color: running.color } : undefined} />
+                    <span className="hidden md:inline">AI models</span>
+                    <ChevronRight size={14} className="hidden md:inline text-overlay-muted" />
                 </button>
             )}
         </div>

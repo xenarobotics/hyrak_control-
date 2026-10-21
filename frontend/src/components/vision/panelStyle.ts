@@ -81,7 +81,7 @@ export function btn(kind: 'default' | 'primary' | 'danger' | 'warn' = 'default')
 
 /** Disabled look that keeps the label readable (no opacity-only). */
 export const DISABLED: CSSProperties = {
-    background: SURFACE_2, color: SUBTLE, border: `1px dashed ${BORDER_STRONG}`, cursor: 'not-allowed',
+    background: SURFACE_2, color: SUBTLE, border: `1px solid ${BORDER}`, cursor: 'not-allowed',
 }
 
 /** Always-dark surfaces (video, map): fixed overlay set, same in both themes. */

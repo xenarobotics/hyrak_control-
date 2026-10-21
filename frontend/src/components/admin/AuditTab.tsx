@@ -8,8 +8,9 @@ import { useEffect, useState } from 'react'
 import { useAccess } from '@/hooks/useAccess'
 import { hasPerm, type WorkspaceInfo } from '@/lib/access'
 import { listAudit, listWorkspaces, type AuditEvent } from '@/lib/workspaces'
-import { Btn, Empty, INPUT_CLS, Notice, TH_CLS, TR_CLS, PageHead } from '@/components/admin/console'
+import { Btn, Empty, Notice, TH_CLS, TR_CLS, PageHead } from '@/components/admin/console'
 import { fmtShort } from '@/components/settings/primitives'
+import { OptionSelect } from '@/components/config/OptionSelect'
 
 const PAGE = 100
 
@@ -69,11 +70,9 @@ export default function AuditTab() {
             <div className="max-w-[960px] space-y-4 lg:px-3 lg:py-1">
                 <div className="flex flex-wrap items-end gap-3">
                     <PageHead title="Audit log" sub="Who changed what, newest first" />
-                    <select value={effective} onChange={e => { setWsId(e.target.value); setEvents(null) }}
-                        aria-label="Filter by workspace" className={`${INPUT_CLS} ml-auto`}>
-                        {isFounder && <option value="">All workspaces</option>}
-                        {options.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-                    </select>
+                    <OptionSelect size="sm" value={effective} onChange={v => { setWsId(v); setEvents(null) }}
+                        aria-label="Filter by workspace" className="ml-auto w-auto min-w-[180px] data-[size=sm]:h-8 text-[13px]"
+                        options={[...(isFounder ? [{ value: '', label: 'All workspaces' }] : []), ...options.map(w => ({ value: w.id, label: w.name }))]} />
                     <Btn onClick={() => setTick(t => t + 1)}>Refresh</Btn>
                 </div>
                 <Notice error={error} />

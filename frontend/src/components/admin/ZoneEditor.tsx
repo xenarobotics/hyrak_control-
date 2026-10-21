@@ -29,6 +29,7 @@ import { createZone, deleteZone, updateZone, type ApiResult } from '@/lib/worksp
 import {
     ZONE_COLORS, geoRings, polygonFromPoints, zoneRings, type ZoneClass, type ZoneFeature,
 } from '@/components/admin/zones'
+import { OptionSelect } from '@/components/config/OptionSelect'
 
 const LAYERS: ZoneLayer[] = ['regulatory', 'area', 'site']
 const LAYER_WEIGHT: Record<ZoneLayer, number> = { regulatory: 2, area: 1.5, site: 1 }
@@ -443,14 +444,12 @@ export default function ZoneEditor({
                         {drawLayer !== 'regulatory' && wsOptions.length > 0 && (
                             <div className="space-y-1">
                                 <label htmlFor="zone-ws" className="block text-[13px] font-semibold text-app-text-muted">Workspace</label>
-                                <select
-                                    id="zone-ws"
+                                <OptionSelect
+                                    id="zone-ws" size="sm" className="data-[size=sm]:h-8 text-[13px]"
                                     value={drawWs?.id ?? ''}
-                                    onChange={e => { setPickedWs(e.target.value); setSaveFailure(null) }}
-                                    className="w-full bg-app-surface-2 border border-app-border-strong rounded-md px-2 h-8 text-[13px] text-app-text outline-none"
-                                >
-                                    {wsOptions.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-                                </select>
+                                    onChange={v => { setPickedWs(v); setSaveFailure(null) }}
+                                    options={wsOptions.map(w => ({ value: w.id, label: w.name }))}
+                                />
                             </div>
                         )}
 

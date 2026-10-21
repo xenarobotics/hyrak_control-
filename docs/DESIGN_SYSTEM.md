@@ -71,8 +71,10 @@ with an icon or a word.
 
 ## 5. Motion
 
-- Durations: 120ms (hover, press), 180ms (toggles, chips, expand), 240ms
-  (panels, sheets, toasts). Nothing over 300ms except a deliberate progress.
+- Durations: 140ms hover (colour, border, background), 90ms press (scale
+  .98), 180ms (toggles, chips, expand), 220-240ms (panels, sheets, toasts).
+  Nothing over 300ms except a deliberate progress. `--dur-fast` is 140ms, the
+  same hover timing as section 11 and the global motion rule in globals.css.
 - Easing: `cubic-bezier(.2, .8, .2, 1)` entering, `cubic-bezier(.4, 0, 1, 1)` leaving.
 - Animate opacity and transform only. No layout-shifting animation.
 - `prefers-reduced-motion`: no movement, opacity only or instant.

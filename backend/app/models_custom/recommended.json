@@ -32,21 +32,6 @@
       ]
     },
     {
-      "repo": "engdarwish/drone-detection-yolov5",
-      "file": "best.onnx",
-      "name": "Other drones in the sky",
-      "category": "Drone and aerial view",
-      "task": "detect",
-      "what": "Spots other drones in view, for airspace awareness and counter-drone watch.",
-      "license": "mit",
-      "license_note": null,
-      "classes_preview": [
-        "drone"
-      ],
-      "fps": 185,
-      "verified_at": "2026-10-18"
-    },
-    {
       "repo": "EdgeFirst/visdrone-yolo11-det",
       "file": "tiled/onnx/visdrone-yolo11s-det-fp32-tiled.onnx",
       "name": "Aerial traffic and people (small targets)",
@@ -212,6 +197,21 @@
       "verified_at": "2026-10-21"
     },
     {
+      "repo": "engdarwish/drone-detection-yolov5",
+      "file": "best.onnx",
+      "name": "Other drones in the sky",
+      "category": "Drone and aerial view",
+      "task": "detect",
+      "what": "Spots other drones in view, for airspace awareness and counter-drone watch.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "drone"
+      ],
+      "fps": 185,
+      "verified_at": "2026-10-18"
+    },
+    {
       "repo": "Siddh10/sih-aerial-person",
       "file": "best.onnx",
       "name": "People from the air",
@@ -225,37 +225,6 @@
       ],
       "fps": 92,
       "verified_at": "2026-10-18"
-    },
-    {
-      "repo": "bbopen/camo-person-yolo",
-      "file": "camo-person-yolo.onnx",
-      "name": "Hidden or camouflaged people",
-      "category": "Search and rescue",
-      "task": "detect",
-      "what": "Trained to find people who blend into the background, such as in foliage or camouflage. Slower, high-resolution model.",
-      "license": "apache-2.0",
-      "license_note": null,
-      "classes_preview": [
-        "person"
-      ],
-      "fps": 26,
-      "verified_at": "2026-10-21"
-    },
-    {
-      "repo": "ubr-physical-ai/rescue-target-yolo26n",
-      "file": "v0_640_2cls.onnx",
-      "name": "Casualty in a hi-vis vest (experimental)",
-      "category": "Search and rescue",
-      "task": "detect",
-      "what": "Looks for a person lying on the ground in a hi-vis vest. Trained only on simulated scenes, so treat it as a trial model.",
-      "license": "agpl-3.0",
-      "license_note": null,
-      "classes_preview": [
-        "person_lying_vest",
-        "distractor"
-      ],
-      "fps": 132,
-      "verified_at": "2026-10-21"
     },
     {
       "repo": "kilanisainikhil/AerialEye",
@@ -276,6 +245,21 @@
       "verified_at": "2026-10-21"
     },
     {
+      "repo": "bbopen/camo-person-yolo",
+      "file": "camo-person-yolo.onnx",
+      "name": "Hidden or camouflaged people",
+      "category": "Search and rescue",
+      "task": "detect",
+      "what": "Trained to find people who blend into the background, such as in foliage or camouflage. Slower, high-resolution model.",
+      "license": "apache-2.0",
+      "license_note": null,
+      "classes_preview": [
+        "person"
+      ],
+      "fps": 26,
+      "verified_at": "2026-10-21"
+    },
+    {
       "repo": "kucheroleksii777/FALLEN_DETECTION_SCORE3",
       "file": "best.onnx",
       "name": "Person lying on the ground",
@@ -288,6 +272,24 @@
         "fallen person"
       ],
       "fps": 94,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "Artsfpv/mine-onnx",
+      "file": "m.onnx",
+      "name": "Landmines and unexploded ordnance",
+      "category": "Search and rescue",
+      "task": "detect",
+      "what": "Finds anti-personnel and anti-tank mines, grenades and shells on the ground. A survey aid only, never proof an area is safe.",
+      "license": "unspecified",
+      "license_note": "No licence is stated on Hugging Face. Check the repo before commercial use.",
+      "classes_preview": [
+        "PPM",
+        "PTM",
+        "grenade",
+        "projectile"
+      ],
+      "fps": 96,
       "verified_at": "2026-10-21"
     },
     {
@@ -338,6 +340,22 @@
       ]
     },
     {
+      "repo": "ubr-physical-ai/rescue-target-yolo26n",
+      "file": "v0_640_2cls.onnx",
+      "name": "Casualty in a hi-vis vest (experimental)",
+      "category": "Search and rescue",
+      "task": "detect",
+      "what": "Looks for a person lying on the ground in a hi-vis vest. Trained only on simulated scenes, so treat it as a trial model.",
+      "license": "agpl-3.0",
+      "license_note": null,
+      "classes_preview": [
+        "person_lying_vest",
+        "distractor"
+      ],
+      "fps": 132,
+      "verified_at": "2026-10-21"
+    },
+    {
       "repo": "deepghs/real_head_detection",
       "file": "head_detect_v0_n_yv11/model.onnx",
       "name": "Heads for crowd counting",
@@ -365,6 +383,21 @@
         "person"
       ],
       "fps": 100,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "hackhackhack66666/Yolov8n_crowdhuman_ONNX",
+      "file": "yolov8n_crowdhuman.onnx",
+      "name": "People in dense crowds",
+      "category": "People and crowds",
+      "task": "detect",
+      "what": "Trained on crowded street scenes, so it keeps finding people who overlap or stand close together.",
+      "license": "unspecified",
+      "license_note": "No licence is stated on Hugging Face. Check the repo before commercial use.",
+      "classes_preview": [
+        "person"
+      ],
+      "fps": 146,
       "verified_at": "2026-10-21"
     },
     {
@@ -470,6 +503,50 @@
       ]
     },
     {
+      "repo": "onnx-community/face-emotion-detection-ONNX",
+      "file": "onnx/model_quantized.onnx",
+      "name": "Facial emotion (transformer)",
+      "category": "Faces and expressions",
+      "task": "classify",
+      "what": "Names the emotion on a close-up face: angry, disgust, fear, happy, sad, surprise or neutral.",
+      "license": "apache-2.0",
+      "license_note": null,
+      "classes_preview": [
+        "Happy",
+        "Neutral",
+        "Sad",
+        "Angry"
+      ],
+      "fps": 17,
+      "verified_at": "2026-10-21",
+      "labels": [
+        "Angry",
+        "Disgust",
+        "Fear",
+        "Happy",
+        "Sad",
+        "Surprise",
+        "Neutral"
+      ]
+    },
+    {
+      "repo": "anbinh39/Military_UAV",
+      "file": "Yolov11_uav_ver_0.1.onnx",
+      "name": "Soldiers, vehicles and fire from above",
+      "category": "Security",
+      "task": "detect",
+      "what": "Trained on drone footage of conflict areas: finds soldiers, vehicles and fires.",
+      "license": "unspecified",
+      "license_note": "No licence is stated on Hugging Face. Check the repo before commercial use.",
+      "classes_preview": [
+        "soldier",
+        "vehicle",
+        "fire"
+      ],
+      "fps": 69,
+      "verified_at": "2026-10-21"
+    },
+    {
       "repo": "lukasiktar11/military-vehicle-detector-yolo26",
       "file": "best.onnx",
       "name": "Military vehicles",
@@ -488,6 +565,56 @@
       "verified_at": "2026-10-21"
     },
     {
+      "repo": "Apex-05/weapons-detector",
+      "file": "yolo11l_weapon.onnx",
+      "name": "Weapons and armed people",
+      "category": "Security",
+      "task": "detect",
+      "what": "Finds pistols, rifles, shotguns, heavy guns, knives and grenades, and the people carrying them.",
+      "license": "unspecified",
+      "license_note": "No licence is stated on Hugging Face. Check the repo before commercial use.",
+      "classes_preview": [
+        "pistol",
+        "rifle",
+        "knife",
+        "person"
+      ],
+      "fps": 55,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "steppacodes/weaponscan",
+      "file": "best.onnx",
+      "name": "Guns and knives (MIT)",
+      "category": "Security",
+      "task": "detect",
+      "what": "A light gun and knife finder under a permissive licence, for perimeter and event security.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "guns",
+        "knife"
+      ],
+      "fps": 138,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "Hadi959/weapon-detection-yolov8",
+      "file": "best.onnx",
+      "name": "Pistols and knives",
+      "category": "Security",
+      "task": "detect",
+      "what": "A fast pistol and knife finder, useful to cross-check weapon alerts.",
+      "license": "unspecified",
+      "license_note": "No licence is stated on Hugging Face. Check the repo before commercial use.",
+      "classes_preview": [
+        "pistol",
+        "knife"
+      ],
+      "fps": 139,
+      "verified_at": "2026-10-21"
+    },
+    {
       "repo": "fireviewer/fire-smoke-yolo11m-strict-v1",
       "file": "model.onnx",
       "name": "Fire and smoke",
@@ -502,6 +629,37 @@
       ],
       "fps": 30,
       "verified_at": "2026-10-18"
+    },
+    {
+      "repo": "fiacecson20/cctv-ai-fire-smoke",
+      "file": "best.onnx",
+      "name": "Fire and smoke (fast, MIT)",
+      "category": "Fire, smoke and safety gear",
+      "task": "detect",
+      "what": "A very fast fire and smoke spotter under a permissive licence, good for long patrol flights.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "fire",
+        "smoke"
+      ],
+      "fps": 236,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "lukasiktar11/thremal-fire-detector",
+      "file": "best.onnx",
+      "name": "Fire on thermal camera",
+      "category": "Fire, smoke and safety gear",
+      "task": "detect",
+      "what": "For thermal cameras: picks out fire hot spots, including through smoke or at night.",
+      "license": "agpl-3.0",
+      "license_note": null,
+      "classes_preview": [
+        "Fire"
+      ],
+      "fps": 82,
+      "verified_at": "2026-10-21"
     },
     {
       "repo": "Hexmon/vyra-yolo-ppe-detection",
@@ -540,22 +698,6 @@
       "verified_at": "2026-10-18"
     },
     {
-      "repo": "fiacecson20/cctv-ai-fire-smoke",
-      "file": "best.onnx",
-      "name": "Fire and smoke (fast, MIT)",
-      "category": "Fire, smoke and safety gear",
-      "task": "detect",
-      "what": "A very fast fire and smoke spotter under a permissive licence, good for long patrol flights.",
-      "license": "mit",
-      "license_note": null,
-      "classes_preview": [
-        "fire",
-        "smoke"
-      ],
-      "fps": 236,
-      "verified_at": "2026-10-21"
-    },
-    {
       "repo": "DarshanM0di/fireandsmoke",
       "file": "best (4).onnx",
       "name": "Fire and smoke (second opinion)",
@@ -569,21 +711,6 @@
         "fire"
       ],
       "fps": 88,
-      "verified_at": "2026-10-21"
-    },
-    {
-      "repo": "lukasiktar11/thremal-fire-detector",
-      "file": "best.onnx",
-      "name": "Fire on thermal camera",
-      "category": "Fire, smoke and safety gear",
-      "task": "detect",
-      "what": "For thermal cameras: picks out fire hot spots, including through smoke or at night.",
-      "license": "agpl-3.0",
-      "license_note": null,
-      "classes_preview": [
-        "Fire"
-      ],
-      "fps": 82,
       "verified_at": "2026-10-21"
     },
     {
@@ -675,40 +802,21 @@
       "verified_at": "2026-10-21"
     },
     {
-      "repo": "vinothvikas1987/pothole-detection-yolov8",
-      "file": "best.onnx",
-      "name": "Road damage and potholes",
-      "category": "Inspection and infrastructure",
-      "task": "detect",
-      "what": "Finds potholes and three kinds of road crack for road inspection.",
+      "repo": "prithivMLmods/Fire-Detection-Engine-ONNX",
+      "file": "onnx/model_quantized.onnx",
+      "name": "Fire alert level",
+      "category": "Fire, smoke and safety gear",
+      "task": "classify",
+      "what": "Rates a whole scene as normal, smoky or fire needing action. A compact build of a larger model, so it runs slower.",
       "license": "apache-2.0",
       "license_note": null,
       "classes_preview": [
-        "Pothole",
-        "Alligator Crack",
-        "Longitudinal Crack",
-        "Transverse Crack"
+        "Fire Needed Action",
+        "Smoky Environment",
+        "Normal Conditions"
       ],
-      "fps": 99,
-      "verified_at": "2026-10-18"
-    },
-    {
-      "repo": "4keles/solar-panel-od",
-      "file": "thermal-v1.0.4/best.onnx",
-      "name": "Solar panel faults (thermal)",
-      "category": "Inspection and infrastructure",
-      "task": "detect",
-      "what": "On thermal camera images, finds hot spots, faulty diodes and string faults in solar panels.",
-      "license": "mit",
-      "license_note": null,
-      "classes_preview": [
-        "HotSpot",
-        "Diode",
-        "ByPassed",
-        "StringOpenCircuit"
-      ],
-      "fps": 94,
-      "verified_at": "2026-10-18"
+      "fps": 11,
+      "verified_at": "2026-10-21"
     },
     {
       "repo": "ACloudCenter/yolo11s-insplad-powerline",
@@ -730,6 +838,24 @@
     },
     {
       "repo": "4keles/solar-panel-od",
+      "file": "thermal-v1.0.4/best.onnx",
+      "name": "Solar panel faults (thermal)",
+      "category": "Inspection and infrastructure",
+      "task": "detect",
+      "what": "On thermal camera images, finds hot spots, faulty diodes and string faults in solar panels.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "HotSpot",
+        "Diode",
+        "ByPassed",
+        "StringOpenCircuit"
+      ],
+      "fps": 94,
+      "verified_at": "2026-10-18"
+    },
+    {
+      "repo": "4keles/solar-panel-od",
       "file": "v1.2.1/best.onnx",
       "name": "Solar panel soiling and damage",
       "category": "Inspection and infrastructure",
@@ -745,6 +871,24 @@
       ],
       "fps": 112,
       "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "vinothvikas1987/pothole-detection-yolov8",
+      "file": "best.onnx",
+      "name": "Road damage and potholes",
+      "category": "Inspection and infrastructure",
+      "task": "detect",
+      "what": "Finds potholes and three kinds of road crack for road inspection.",
+      "license": "apache-2.0",
+      "license_note": null,
+      "classes_preview": [
+        "Pothole",
+        "Alligator Crack",
+        "Longitudinal Crack",
+        "Transverse Crack"
+      ],
+      "fps": 99,
+      "verified_at": "2026-10-18"
     },
     {
       "repo": "saifElgalaly/solarscan-yolov8n-cls",
@@ -779,6 +923,24 @@
         "Defect"
       ],
       "fps": 105,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "ditoow/trashscan8s",
+      "file": "best.onnx",
+      "name": "Litter by material",
+      "category": "Inspection and infrastructure",
+      "task": "detect",
+      "what": "Finds litter and sorts it into paper, plastic, metal, organic or other, for clean-up surveys.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "paper",
+        "plastic",
+        "metal",
+        "organic"
+      ],
+      "fps": 91,
       "verified_at": "2026-10-21"
     },
     {
@@ -1005,20 +1167,238 @@
       "verified_at": "2026-10-18"
     },
     {
-      "repo": "chriamue/bird-species-classifier",
-      "file": "model.onnx",
-      "name": "Bird species",
-      "category": "Animals and wildlife",
+      "repo": "llama-farm/broadleaf-weed-detector",
+      "file": "weights/broadleaf-yolo11n-640.onnx",
+      "name": "Broadleaf weeds",
+      "category": "Agriculture and plants",
+      "task": "detect",
+      "what": "Finds broadleaf weeds in crops and lawns, for spot spraying and weed maps.",
+      "license": "cc-by-4.0",
+      "license_note": null,
+      "classes_preview": [
+        "weed"
+      ],
+      "fps": 112,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "ndunge23/Pest_Disease_Detector",
+      "file": "weights/best.onnx",
+      "name": "Maize pests and disease",
+      "category": "Agriculture and plants",
+      "task": "detect",
+      "what": "In maize fields, finds fall armyworm eggs, larvae, droppings and leaf damage, streak disease and healthy plants.",
+      "license": "apache-2.0",
+      "license_note": null,
+      "classes_preview": [
+        "fall-armyworm-larva",
+        "fall-armyworm-larval-damage",
+        "maize-streak-disease",
+        "healthy-maize"
+      ],
+      "fps": 81,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "f4m1/plant-disease-detector-12",
+      "file": "best.onnx",
+      "name": "Leaf disease spots",
+      "category": "Agriculture and plants",
+      "task": "detect",
+      "what": "Marks where 12 common leaf diseases show, such as blights, rusts, mildews and leaf spots.",
+      "license": "unspecified",
+      "license_note": "No licence is stated on Hugging Face. Check the repo before commercial use.",
+      "classes_preview": [
+        "late_blight",
+        "leaf_rust",
+        "powdery_mildew",
+        "leaf_spot"
+      ],
+      "fps": 97,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "cabrel09/crop_leaf_disease_detector",
+      "file": "onnx/model.onnx",
+      "name": "Corn, potato, rice and wheat disease",
+      "category": "Agriculture and plants",
       "task": "classify",
-      "what": "Names 525 bird species from a close view of the bird.",
+      "what": "Names the disease, or healthy, on a close leaf view of corn, potato, rice or wheat.",
       "license": "mit",
       "license_note": null,
       "classes_preview": [
-        "AFRICAN CROWNED CRANE",
-        "ABBOTTS BOOBY"
+        "Corn___Common_Rust",
+        "Potato___Late_Blight",
+        "Rice___Leaf_Blast",
+        "Wheat___Yellow_Rust"
       ],
-      "fps": 279,
-      "verified_at": "2026-10-18"
+      "fps": 383,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "BiernyVR/crop-disease-classifier",
+      "file": "efficientnet_v2_s_best.onnx",
+      "name": "Crop disease (38 kinds)",
+      "category": "Agriculture and plants",
+      "task": "classify",
+      "what": "Names 38 diseases or healthy leaves across 14 crops including tomato, potato, corn, grape and apple. Close-up leaf images.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "Tomato___Late_blight",
+        "Potato___Early_blight",
+        "Corn_(maize)___Common_rust_",
+        "Grape___Black_rot"
+      ],
+      "fps": 215,
+      "verified_at": "2026-10-21",
+      "labels": [
+        "Apple___Apple_scab",
+        "Apple___Black_rot",
+        "Apple___Cedar_apple_rust",
+        "Apple___healthy",
+        "Blueberry___healthy",
+        "Cherry_(including_sour)___Powdery_mildew",
+        "Cherry_(including_sour)___healthy",
+        "Corn_(maize)___Cercospora_leaf_spot Gray_leaf_spot",
+        "Corn_(maize)___Common_rust_",
+        "Corn_(maize)___Northern_Leaf_Blight",
+        "Corn_(maize)___healthy",
+        "Grape___Black_rot",
+        "Grape___Esca_(Black_Measles)",
+        "Grape___Leaf_blight_(Isariopsis_Leaf_Spot)",
+        "Grape___healthy",
+        "Orange___Haunglongbing_(Citrus_greening)",
+        "Peach___Bacterial_spot",
+        "Peach___healthy",
+        "Pepper,_bell___Bacterial_spot",
+        "Pepper,_bell___healthy",
+        "Potato___Early_blight",
+        "Potato___Late_blight",
+        "Potato___healthy",
+        "Raspberry___healthy",
+        "Soybean___healthy",
+        "Squash___Powdery_mildew",
+        "Strawberry___Leaf_scorch",
+        "Strawberry___healthy",
+        "Tomato___Bacterial_spot",
+        "Tomato___Early_blight",
+        "Tomato___Late_blight",
+        "Tomato___Leaf_Mold",
+        "Tomato___Septoria_leaf_spot",
+        "Tomato___Spider_mites Two-spotted_spider_mite",
+        "Tomato___Target_Spot",
+        "Tomato___Tomato_Yellow_Leaf_Curl_Virus",
+        "Tomato___Tomato_mosaic_virus",
+        "Tomato___healthy"
+      ]
+    },
+    {
+      "repo": "nihal4/rice-disease-model",
+      "file": "rice_disease_resnet50.onnx",
+      "name": "Rice leaf disease",
+      "category": "Agriculture and plants",
+      "task": "classify",
+      "what": "Names bacterial leaf blight, brown spot, leaf blast or tungro on a close view of a rice leaf.",
+      "license": "apache-2.0",
+      "license_note": null,
+      "classes_preview": [
+        "Bacterial_Leaf_Blight",
+        "Brown_Spot",
+        "Leaf_Blast",
+        "Tungro"
+      ],
+      "fps": 289,
+      "verified_at": "2026-10-21",
+      "labels": [
+        "Bacterial_Leaf_Blight",
+        "Brown_Spot",
+        "Leaf_Blast",
+        "Tungro"
+      ]
+    },
+    {
+      "repo": "Raiyan465/kom-bish-rice-leaf",
+      "file": "model.onnx",
+      "name": "Rice blight and blast check",
+      "category": "Agriculture and plants",
+      "task": "classify",
+      "what": "Quick rice leaf check: bacterial leaf blight, blast, healthy or something else.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "bacterial_leaf_blight",
+        "blast",
+        "healthy",
+        "other"
+      ],
+      "fps": 552,
+      "verified_at": "2026-10-21",
+      "labels": [
+        "bacterial_leaf_blight",
+        "blast",
+        "healthy",
+        "other"
+      ]
+    },
+    {
+      "repo": "RononoaIgor98/cassava-leaf-disease-efficientnet-b0",
+      "file": "cassava_v2.onnx",
+      "name": "Cassava leaf disease",
+      "category": "Agriculture and plants",
+      "task": "classify",
+      "what": "Names cassava mosaic, brown streak, bacterial blight or green mottle, or a healthy leaf, from field photos.",
+      "license": "apache-2.0",
+      "license_note": null,
+      "classes_preview": [
+        "Cassava Mosaic Disease",
+        "Cassava Brown Streak Disease",
+        "Healthy"
+      ],
+      "fps": 338,
+      "verified_at": "2026-10-21",
+      "labels": [
+        "Cassava Bacterial Blight",
+        "Cassava Brown Streak Disease",
+        "Cassava Green Mottle",
+        "Cassava Mosaic Disease",
+        "Healthy"
+      ]
+    },
+    {
+      "repo": "niroj-ebpearls/coffee-leaf-yolov12",
+      "file": "yolov12s.onnx",
+      "name": "Coffee leaf problems",
+      "category": "Agriculture and plants",
+      "task": "detect",
+      "what": "On coffee leaves, finds rust, leaf miner, phoma and cercospora, and healthy leaves.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "rust",
+        "miner",
+        "phoma",
+        "cercospora"
+      ],
+      "fps": 84,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "beaunix/apples-detection-model",
+      "file": "best_model2.onnx",
+      "name": "Apples on the tree",
+      "category": "Agriculture and plants",
+      "task": "detect",
+      "what": "Counts red and green apples and flags damaged ones, for orchard yield checks.",
+      "license": "agpl-3.0",
+      "license_note": null,
+      "classes_preview": [
+        "apple",
+        "damaged_apple",
+        "green_apple"
+      ],
+      "fps": 96,
+      "verified_at": "2026-10-21"
     },
     {
       "repo": "bsgcasa/yolov8-animal-detector",
@@ -1057,6 +1437,103 @@
       "verified_at": "2026-10-18"
     },
     {
+      "repo": "DarshanM0di/AnimalDetection",
+      "file": "best (1).onnx",
+      "name": "Large wild animals",
+      "category": "Animals and wildlife",
+      "task": "detect",
+      "what": "Finds elephants, rhinos, buffalo and zebras, for wildlife counts and anti-poaching patrols.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "elephant",
+        "rhino",
+        "buffalo",
+        "zebra"
+      ],
+      "fps": 153,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "libanbullo/goat-detector",
+      "file": "models/goat_yolov8n.onnx",
+      "name": "Goats",
+      "category": "Animals and wildlife",
+      "task": "detect",
+      "what": "Finds and counts goats, for herd checks.",
+      "license": "unspecified",
+      "license_note": "No licence is stated on Hugging Face. Check the repo before commercial use.",
+      "classes_preview": [
+        "goat"
+      ],
+      "fps": 272,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "chriamue/bird-species-classifier",
+      "file": "model.onnx",
+      "name": "Bird species",
+      "category": "Animals and wildlife",
+      "task": "classify",
+      "what": "Names 525 bird species from a close view of the bird.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "AFRICAN CROWNED CRANE",
+        "ABBOTTS BOOBY"
+      ],
+      "fps": 279,
+      "verified_at": "2026-10-18"
+    },
+    {
+      "repo": "NexusDwin/sailswarm-yolo-audited",
+      "file": "onnx/yolov8n_audited_640.onnx",
+      "name": "Boats, buoys and people on water",
+      "category": "Water, ships and coast",
+      "task": "detect",
+      "what": "On lakes and coasts, finds boats, buoys, swimmers, waterbirds and fixed structures.",
+      "license": "other",
+      "license_note": "Custom licence on Hugging Face. Read it before commercial use.",
+      "classes_preview": [
+        "boat",
+        "buoy",
+        "person",
+        "structure"
+      ],
+      "fps": 102,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "xmr8971/areial-ships-dection",
+      "file": "areial-ships-dection.onnx",
+      "name": "Ships from the air",
+      "category": "Water, ships and coast",
+      "task": "detect",
+      "what": "Finds ships and boats in aerial and satellite views of ports and coasts.",
+      "license": "cc-by-nc-nd-4.0",
+      "license_note": null,
+      "classes_preview": [
+        "ship"
+      ],
+      "fps": 108,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "ArturWoz/ship-detection-sentinel2",
+      "file": "model.onnx",
+      "name": "Ships on satellite images",
+      "category": "Water, ships and coast",
+      "task": "detect",
+      "what": "Finds ships on Sentinel-2 satellite images, for wide-area maritime watch.",
+      "license": "unspecified",
+      "license_note": "No licence is stated on Hugging Face. Check the repo before commercial use.",
+      "classes_preview": [
+        "ship"
+      ],
+      "fps": 86,
+      "verified_at": "2026-10-21"
+    },
+    {
       "repo": "NMFS-OSI/yolo11n-cls-noaa-esd-coral-bleaching",
       "file": "yolov11n-cls-noaa-esd-coral-bleaching-classifier.onnx",
       "name": "Coral bleaching",
@@ -1071,6 +1548,75 @@
       ],
       "fps": 690,
       "verified_at": "2026-10-18"
+    },
+    {
+      "repo": "akridge/yolo11-fish-detector-grayscale",
+      "file": "train/weights/yolo11n-fish-detector-grayscale.onnx",
+      "name": "Fish underwater",
+      "category": "Water, ships and coast",
+      "task": "detect",
+      "what": "Finds fish in underwater camera footage, for counts and surveys.",
+      "license": "agpl-3.0",
+      "license_note": null,
+      "classes_preview": [
+        "fish"
+      ],
+      "fps": 109,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "Samyukta31/sonar_yolo",
+      "file": "best_fp32.onnx",
+      "name": "Sonar targets",
+      "category": "Water, ships and coast",
+      "task": "detect",
+      "what": "On side-scan sonar images, finds shipwrecks, pipelines, crab pots, ghost nets and mine-like objects.",
+      "license": "unspecified",
+      "license_note": "No licence is stated on Hugging Face. Check the repo before commercial use.",
+      "classes_preview": [
+        "shipwreck",
+        "submarine_pipeline",
+        "ghost_net",
+        "mine_like_contact"
+      ],
+      "fps": 65,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "NMFS-OSI/yolo11m-cls-noaa-pacific-benthic-cover-t1",
+      "file": "yolo11m_cls_noaa-pacific-benthic-t1.onnx",
+      "name": "Seabed cover",
+      "category": "Water, ships and coast",
+      "task": "classify",
+      "what": "For reef surveys: names the main seabed cover, such as coral, algae, turf or sediment.",
+      "license": "agpl-3.0",
+      "license_note": null,
+      "classes_preview": [
+        "CORAL",
+        "MA",
+        "TURF",
+        "SED"
+      ],
+      "fps": 350,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "onnx-community/AerialTerrainRecogniton-ONNX",
+      "file": "onnx/model_quantized.onnx",
+      "name": "Terrain from the air",
+      "category": "Scene and weather classification",
+      "task": "classify",
+      "what": "Says whether an aerial view shows buildings, desert, forest, roads or water.",
+      "license": "unspecified",
+      "license_note": "No licence is stated on Hugging Face. Check the repo before commercial use.",
+      "classes_preview": [
+        "buildings aerial view",
+        "desert aerial view",
+        "forest aerial view",
+        "roads aerial view"
+      ],
+      "fps": 22,
+      "verified_at": "2026-10-21"
     },
     {
       "repo": "krylox/resnet50-eurosat-onnx",
@@ -1100,6 +1646,32 @@
         "Residential",
         "PermanentCrop",
         "Pasture"
+      ]
+    },
+    {
+      "repo": "TheSon2202/SceneViT-Nano-P8-64",
+      "file": "vit_model.onnx",
+      "name": "Scene type",
+      "category": "Scene and weather classification",
+      "task": "classify",
+      "what": "Names the scene: buildings, forest, glacier, mountain, sea or street. A small, quick model.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "buildings",
+        "forest",
+        "mountain",
+        "sea"
+      ],
+      "fps": 267,
+      "verified_at": "2026-10-21",
+      "labels": [
+        "buildings",
+        "forest",
+        "glacier",
+        "mountain",
+        "sea",
+        "street"
       ]
     },
     {
@@ -1137,6 +1709,114 @@
       ],
       "fps": 62,
       "verified_at": "2026-10-18"
+    },
+    {
+      "repo": "onnx-community/rfdetr_small-ONNX",
+      "file": "onnx/model.onnx",
+      "name": "Everyday objects (RF-DETR small)",
+      "category": "General purpose",
+      "task": "detect",
+      "what": "A more accurate step up from the nano model: 80 everyday things like people, vehicles and animals.",
+      "license": "apache-2.0",
+      "license_note": null,
+      "classes_preview": [
+        "person",
+        "bicycle",
+        "car",
+        "motorcycle"
+      ],
+      "fps": 74,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "onnx-community/rtdetr_v2_r18vd-ONNX",
+      "file": "onnx/model.onnx",
+      "name": "Everyday objects (RT-DETR v2)",
+      "category": "General purpose",
+      "task": "detect",
+      "what": "A transformer detector for 80 everyday things, under a permissive licence.",
+      "license": "apache-2.0",
+      "license_note": null,
+      "classes_preview": [
+        "person",
+        "bicycle",
+        "car",
+        "motorbike"
+      ],
+      "fps": 67,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "onnx-community/dfine_s_coco-ONNX",
+      "file": "onnx/model.onnx",
+      "name": "Everyday objects (D-FINE)",
+      "category": "General purpose",
+      "task": "detect",
+      "what": "An accurate detector for 80 everyday things with tight boxes.",
+      "license": "apache-2.0",
+      "license_note": "No licence is set on this copy; the original D-FINE model is Apache 2.0.",
+      "classes_preview": [
+        "person",
+        "bicycle",
+        "car",
+        "motorbike"
+      ],
+      "fps": 91,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "EdgeFirst/yolo26-det",
+      "file": "onnx/yolo26s-det-fp32.onnx",
+      "name": "Everyday objects (YOLO26)",
+      "category": "General purpose",
+      "task": "detect",
+      "what": "The newest YOLO for 80 everyday things like people, cars, boats and animals.",
+      "license": "agpl-3.0",
+      "license_note": null,
+      "classes_preview": [
+        "person",
+        "bicycle",
+        "car",
+        "motorcycle"
+      ],
+      "fps": 75,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "Xenova/convnext-tiny-224",
+      "file": "onnx/model.onnx",
+      "name": "What is in the picture (1000 kinds)",
+      "category": "General purpose",
+      "task": "classify",
+      "what": "Names the main thing in an image from 1000 everyday categories.",
+      "license": "apache-2.0",
+      "license_note": "No licence is set on this copy; the original ConvNeXt model is Apache 2.0.",
+      "classes_preview": [
+        "tench, Tinca tinca",
+        "goldfish, Carassius auratus",
+        "great white shark, white shark, man-eater, man-eating shark, Carcharodon carcharias",
+        "tiger shark, Galeocerdo cuvieri"
+      ],
+      "fps": 231,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "onnx-community/mobilenet_v2_1.4_224-ONNX",
+      "file": "onnx/model.onnx",
+      "name": "What is in the picture (fast)",
+      "category": "General purpose",
+      "task": "classify",
+      "what": "A very fast version that names the main thing in an image from 1000 everyday categories.",
+      "license": "other",
+      "license_note": "Custom licence on the original MobileNet model. Read it before commercial use.",
+      "classes_preview": [
+        "background",
+        "tench, Tinca tinca",
+        "goldfish, Carassius auratus",
+        "great white shark, white shark, man-eater, man-eating shark, Carcharodon carcharias"
+      ],
+      "fps": 495,
+      "verified_at": "2026-10-21"
     }
   ]
 }

@@ -11,7 +11,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { useResolvedDroneId } from '@/lib/droneId'
 import { useAccess } from '@/hooks/useAccess'
 import { visibleInterval } from '@/lib/poll'
-import { ShieldCheck, ShieldAlert, Shield, TriangleAlert, ChevronDown, ChevronRight } from 'lucide-react'
+import { ShieldCheck, ShieldAlert, Shield, TriangleAlert, ChevronDown, ChevronRight, Plug } from 'lucide-react'
+import { FOCUS_LINK_EVENT } from '@/components/layout/StatusBar'
 import {
     getStatus, setEnabled, setArmed, getEvents, clearHazards, nearestAheadM,
     type AvoidanceStatus, type AvoidanceEvent, type AvoidanceParams,
@@ -19,6 +20,7 @@ import {
 import { cn } from '@/lib/utils'
 import { FOCUS, DISABLED } from '@/components/controls/flightStyles'
 import { WhyDisabled } from '@/components/controls/WhyDisabled'
+import { SimpleSelect } from '@/components/ui/select'
 
 type Tone = 'ok' | 'warn' | 'danger' | 'accent' | 'muted'
 const STATE_TONE: Record<string, Tone> = {
@@ -37,19 +39,19 @@ const DOT: Record<Tone, string> = {
 
 // The knobs worth exposing, with what each one means to the pilot.
 const TUNING: { key: keyof AvoidanceParams; label: string; unit: string; step: number; min: number; max: number; hint: string }[] = [
-    { key: 'reaction_distance_m', label: 'REACT AT', unit: 'm', step: 1, min: 4, max: 40,
+    { key: 'reaction_distance_m', label: 'React at', unit: 'm', step: 1, min: 4, max: 40,
       hint: 'Obstacle closer than this -> act. A mono camera judges ~25 m; keep this below it.' },
-    { key: 'clearance_m', label: 'CLEARANCE', unit: 'm', step: 1, min: 1, max: 20,
+    { key: 'clearance_m', label: 'Clearance', unit: 'm', step: 1, min: 1, max: 20,
       hint: 'Extra keep-out around every obstacle. Depth underestimates range, so err wide.' },
-    { key: 'speed_cap_m_s', label: 'SPEED CAP', unit: 'm/s', step: 0.5, min: 1, max: 12,
+    { key: 'speed_cap_m_s', label: 'Speed cap', unit: 'm/s', step: 0.5, min: 1, max: 12,
       hint: 'Cruise while avoidance is on. Slower buys the camera reaction time.' },
-    { key: 'hold_to_return_s', label: 'HOLD -> RTL', unit: 's', step: 5, min: 5, max: 120,
+    { key: 'hold_to_return_s', label: 'Hold, then RTL', unit: 's', step: 5, min: 5, max: 120,
       hint: 'Holding with no path this long -> return to launch.' },
-    { key: 'local_clearance_m', label: 'STEER GAP', unit: 'm', step: 0.05, min: 0.3, max: 8,
+    { key: 'local_clearance_m', label: 'Steer gap', unit: 'm', step: 0.05, min: 0.3, max: 8,
       hint: 'Distance the local planner keeps from every obstacle while it steers (body + margin).' },
-    { key: 'ttc_engage_s', label: 'TAKE OVER AT', unit: 's TTC', step: 0.5, min: 2, max: 10,
+    { key: 'ttc_engage_s', label: 'Take over at', unit: 's TTC', step: 0.5, min: 2, max: 10,
       hint: 'Take control when closing on something faster than this, whatever its distance.' },
-    { key: 'mono_speed_cap_m_s', label: 'MONO SPEED', unit: 'm/s', step: 0.5, min: 0.5, max: 5,
+    { key: 'mono_speed_cap_m_s', label: 'Camera speed', unit: 'm/s', step: 0.5, min: 0.5, max: 5,
       hint: 'Speed cap while the camera is the only sensor (its range is estimated, not measured).' },
 ]
 
@@ -75,7 +77,7 @@ function Switch({ on, onClick, disabled, title, why, onTone = 'accent' }: Toggle
         <WhyDisabled reason={disabled ? (why ?? 'Busy') : null} className="shrink-0">
             <button onClick={onClick} disabled={disabled} role="switch" aria-checked={on} title={disabled ? undefined : title} aria-label={title}
                 className={cn('relative w-11 h-6 rounded-full transition-colors duration-[var(--dur)] shrink-0 border after:absolute after:-inset-1.5',
-                    'disabled:border-dashed disabled:cursor-not-allowed', FOCUS,
+                    'disabled:cursor-not-allowed disabled:opacity-60', FOCUS,
                     on ? ON_BG[onTone] : 'bg-app-surface-2 border-app-border-strong')}>
                 <span className={cn('absolute left-0 top-1/2 -translate-y-1/2 w-[18px] h-[18px] rounded-full shadow-md transition-transform duration-[var(--dur)]',
                     on ? 'translate-x-[21px] bg-[hsl(var(--app-raised))]' : 'translate-x-[2px] bg-app-text-muted')} />
@@ -153,9 +155,20 @@ export function AvoidancePanel() {
     }, [])
 
     if (!droneId) {
+        // A real empty state, said once for the whole area.
         return (
-            <div className="text-[13px] py-3 text-center text-app-text-muted">
-                Connect a drone to set up avoidance
+            <div className="flex flex-col items-center justify-center gap-2 py-8 px-4 text-center">
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-app-surface-2 text-app-text-muted">
+                    <Shield size={18} />
+                </span>
+                <p className="text-[14px] font-semibold text-app-text">Avoidance needs a drone</p>
+                <p className="max-w-[260px] text-[13px] text-app-text-muted">
+                    Link a drone to turn on detection and let it steer around obstacles.
+                </p>
+                <button type="button" onClick={() => window.dispatchEvent(new CustomEvent(FOCUS_LINK_EVENT))}
+                    className={cn('mt-1 inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-app-border-strong text-[13px] font-bold text-app-text hover:bg-app-surface-2', FOCUS)}>
+                    <Plug size={15} /> Connect a drone
+                </button>
             </div>
         )
     }
@@ -214,18 +227,18 @@ export function AvoidancePanel() {
 
             <div className="flex items-center justify-between gap-2">
                 <label htmlFor="avoid-response" className="text-[14px] font-semibold text-app-text shrink-0">Response</label>
-                <select id="avoid-response" value={responseOf(p)} disabled={busy || !status}
-                    onChange={async e => {
-                        const r = RESPONSES.find(x => x.value === e.target.value)
+                <SimpleSelect id="avoid-response" value={responseOf(p)} disabled={busy || !status}
+                    onValueChange={async v => {
+                        const r = RESPONSES.find(x => x.value === v)
                         if (!r || !droneId || !status) return
                         setBusy(true)
                         try { setStatus(await setEnabled(droneId, status.enabled, r.flags)) }
                         finally { setBusy(false) }
                     }}
+                    ariaLabel="Response"
                     title="What it may do on its own when the path is blocked. Order is always reroute, then hold, then return; this is how far it may go."
-                    className={cn('h-9 max-w-[62%] rounded-md px-2 text-[13px] bg-app-surface border border-app-border-strong text-app-text disabled:border-dashed disabled:text-app-text-subtle', FOCUS)}>
-                    {RESPONSES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-                </select>
+                    className="data-[size=default]:h-9 max-w-[62%] text-[13px]"
+                    options={RESPONSES.map(r => ({ value: r.value, label: r.label }))} />
             </div>
 
             {status?.armed && !camOk && (
@@ -243,17 +256,17 @@ export function AvoidancePanel() {
 
             {/* what it sees and knows */}
             <div className="flex flex-col gap-1">
-                <Row label="CAMERA" value={camOk ? 'feeding' : status?.enabled ? 'NO VIDEO' : '--'}
+                <Row label="Camera" value={camOk ? 'feeding' : status?.enabled ? 'No video' : 'Off'}
                     tone={camOk ? 'ok' : status?.enabled ? 'warn' : undefined}
-                    hint="Depth observations arriving from this session's video. Connect the camera BEFORE takeoff." />
-                <Row label="DESTINATION" value={goal ? `${goal[0].toFixed(5)}, ${goal[1].toFixed(5)}` : 'unknown - upload a mission'}
+                    hint="Depth observations arriving from this session's video. Connect the camera before takeoff." />
+                <Row label="Destination" value={goal ? `${goal[0].toFixed(5)}, ${goal[1].toFixed(5)}` : 'unknown - upload a mission'}
                     tone={goal ? undefined : 'warn'}
                     hint="Without a destination it can only hold, never route around." />
-                <Row label="NEAREST AHEAD"
+                <Row label="Nearest ahead"
                     value={`${nearest !== null ? `${nearest.toFixed(1)} m` : 'clear'}${status?.obstacle_count ? `  (${status.obstacle_count} tracked)` : ''}`}
                     tone={nearest !== null && nearest < (p?.reaction_distance_m ?? 12) ? 'warn' : undefined} />
                 {status?.enabled && (
-                    <Row label="SENSOR"
+                    <Row label="Sensor"
                         value={status.sensor_mode === 'range' ? 'depth camera (measured range)'
                             : status.sensor_mode === 'mono'
                                 ? `camera (estimated${status.mono_calibration?.error_pct_p50 != null ? `, ground-fit err ${status.mono_calibration.error_pct_p50}%` : ', not calibrated yet'})`
@@ -262,12 +275,12 @@ export function AvoidancePanel() {
                         hint={`What the map is built from. Camera-only: senses above ${p?.mono_min_alt_m ?? 8} m, capped at ${p?.mono_speed_cap_m_s ?? 1.5} m/s. Pose ${status.pose_rate_hz ?? 0} Hz.`} />
                 )}
                 {status?.state === 'avoiding' && status.planner && (
-                    <Row label="STEERING"
+                    <Row label="Steering"
                         value={`${status.planner.reason}${status.planner.ttc_s != null ? `  TTC ${status.planner.ttc_s}s` : ''}  ${status.planner.speed_m_s.toFixed(1)} m/s`}
                         tone="accent" hint="The local planner has the aircraft in Offboard; it hands back to the mission once the way to the waypoint is clear." />
                 )}
                 {!!status?.recommended_speed_m_s && status.enabled && (
-                    <Row label="SPEED" value={`${status.recommended_speed_m_s.toFixed(1)} m/s`}
+                    <Row label="Speed" value={`${status.recommended_speed_m_s.toFixed(1)} m/s`}
                         hint="What the governor is asking of the aircraft right now." />
                 )}
             </div>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import { useSwarmStore } from '@/store/swarm'
 import { getSocket } from '@/lib/socket'
@@ -9,6 +9,7 @@ import { DeviceSelector } from '@/components/controls/DeviceSelector'
 import { DroneControls } from '@/components/controls/DroneControls'
 import { AvoidancePanel } from '@/components/avoidance/AvoidancePanel'
 import { FcMessageLog } from '@/components/layout/FcMessageLog'
+import { FOCUS_LINK_EVENT } from '@/components/layout/StatusBar'
 import { TelemetryPanel } from '@/components/telemetry/TelemetryPanel'
 import { VideoStream } from '@/components/video/VideoStream'
 import { CameraWall } from '@/components/video/CameraWall'
@@ -76,7 +77,7 @@ function FleetDeviceSummary() {
                             {drone.name}
                         </span>
                         {isActive && (
-                            <span className="text-[12px] font-bold px-1.5 rounded-md border border-app-accent text-app-accent bg-app-accent-soft">
+                            <span className="text-[12px] font-bold px-1.5 rounded-md border border-app-accent text-app-selected-ink bg-app-accent-soft">
                                 In control
                             </span>
                         )}
@@ -101,6 +102,25 @@ function Panel({ title, children, className, action }: {
             </div>
             {children}
         </section>
+    )
+}
+
+/** A row that opens a section inside the flight card: a divider, the title
+ *  on the left, a chevron on the right. Replaces the near-empty cards. */
+function Disclosure({ title, open, onToggle, hint, children }: {
+    title: string; open: boolean; onToggle: () => void; hint?: string; children: React.ReactNode
+}) {
+    return (
+        <div className="border-t border-app-border -mx-4 px-4">
+            <button type="button" onClick={onToggle} aria-expanded={open}
+                className={cn('w-full flex items-center gap-2 min-h-11 -mx-2 px-2 rounded-md text-left transition-colors duration-[140ms] hover:bg-app-surface-2', FOCUS)}
+                style={{ width: 'calc(100% + 16px)' }}>
+                <span className="text-[14px] font-bold text-app-text">{title}</span>
+                {hint && <span className="text-[13px] text-app-text-muted truncate">{hint}</span>}
+                <ChevronDown size={16} className={cn('ml-auto shrink-0 text-app-text-muted transition-transform duration-[180ms]', open && 'rotate-180')} />
+            </button>
+            {open && <div className="pb-3 pt-1 animate-in fade-in-0 slide-in-from-top-1 duration-200">{children}</div>}
+        </div>
     )
 }
 
@@ -147,8 +167,21 @@ function SetupStrip({ mounted, swarm, isCustomer }: { mounted: boolean; swarm: b
     // null = follow the link (open while unlinked); a press pins it.
     const [pinned, setPinned] = useState<boolean | null>(null)
     const open = pinned ?? !linked
+    // The status bar's "Connect" (no drone): open the strip and bring it in.
+    const ref = useRef<HTMLElement>(null)
+    useEffect(() => {
+        const show = () => {
+            setPinned(true)
+            requestAnimationFrame(() => {
+                ref.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+                ref.current?.querySelector<HTMLElement>('[data-slot="select-trigger"]:not([disabled]), button[aria-expanded]')?.focus()
+            })
+        }
+        window.addEventListener(FOCUS_LINK_EVENT, show)
+        return () => window.removeEventListener(FOCUS_LINK_EVENT, show)
+    }, [])
     return (
-        <section className="rounded-[10px] border border-app-border bg-app-surface">
+        <section ref={ref} className="rounded-[10px] border border-app-border bg-app-surface">
             <button type="button" onClick={() => setPinned(!open)} aria-expanded={open}
                 className={cn('w-full flex items-center gap-3 min-h-12 px-4 py-2 text-left rounded-[10px] transition-colors duration-[140ms] hover:bg-app-surface-2', FOCUS)}>
                 <Plug size={16} className="shrink-0 text-app-text-muted" />
@@ -184,6 +217,11 @@ function SetupStrip({ mounted, swarm, isCustomer }: { mounted: boolean; swarm: b
 
 export default function FlyPage() {
     const [panelCollapsed, setPanelCollapsed] = useState(false)
+    const linked = useDroneStore(s => s.telemetryStatus) === 'connected'
+    // Avoidance follows the link (open once a drone is linked) until pressed.
+    const [avoidPinned, setAvoidPinned] = useState<boolean | null>(null)
+    const avoidOpen = avoidPinned ?? linked
+    const [telemetryOpen, setTelemetryOpen] = useState(false)
     const [wallOn, setWallOn] = useState(false)
     // Deferred mount flag prevents sessionStorage-driven Zustand values from
     // reaching the JSX on the initial (hydration) render. Without this, the
@@ -250,7 +288,7 @@ export default function FlyPage() {
                                 onClick={() => setMainView(key)}
                                 aria-pressed={mainView === key}
                                 className={cn('flex items-center gap-1.5 h-8 px-3 rounded text-[13px] font-bold transition-colors duration-[var(--dur-fast)]', FOCUS_OVERLAY,
-                                    mainView === key ? 'bg-[color-mix(in_srgb,var(--overlay-accent)_20%,transparent)] text-[var(--overlay-accent)]' : 'text-overlay-muted hover:text-overlay-text')}
+                                    mainView === key ? 'bg-[color-mix(in_srgb,var(--overlay-accent)_18%,transparent)] text-overlay-selected-ink' : 'text-overlay-muted hover:text-overlay-text')}
                             >
                                 <Icon size={14} />
                                 {label}
@@ -268,6 +306,8 @@ export default function FlyPage() {
             {/* Flight panel */}
             {!panelCollapsed && (
                 <div className="order-2 md:order-none md:col-start-2 md:row-start-1 md:row-span-2 flex flex-col gap-3 shrink-0 md:shrink md:min-h-0 md:overflow-y-auto md:pr-0.5 animate-in fade-in-0 duration-200">
+                    {/* One flight card: readouts, controls, then avoidance and
+                        the full telemetry as rows that open in place. */}
                     <Panel title="Flight" action={
                         <button onClick={() => setPanelCollapsed(true)}
                             className={cn('hidden md:flex h-8 w-8 items-center justify-center rounded-md text-app-text-muted hover:text-app-text hover:bg-app-surface-2 transition-colors duration-[140ms]', FOCUS)}
@@ -279,22 +319,20 @@ export default function FlyPage() {
                         <div className="border-t border-app-border pt-3">
                             <ViewOnlyFence><DroneControls /></ViewOnlyFence>
                         </div>
+                        {!swarmEnabled && (
+                            <Disclosure title="Avoidance" open={avoidOpen} onToggle={() => setAvoidPinned(!avoidOpen)}>
+                                <ViewOnlyFence note={false}><AvoidancePanel /></ViewOnlyFence>
+                            </Disclosure>
+                        )}
+                        <Disclosure title="All telemetry" open={telemetryOpen} onToggle={() => setTelemetryOpen(o => !o)}>
+                            <div className="min-h-[200px] flex flex-col"><TelemetryPanel /></div>
+                        </Disclosure>
                     </Panel>
 
                     {/* Hidden when the drone has no attachments, and for viewers. */}
                     {!swarmEnabled && (
                         <AttachmentStrip frame={strip => <Panel title="Attachments">{strip}</Panel>} />
                     )}
-
-                    {!swarmEnabled && (
-                        <Panel title="Avoidance">
-                            <ViewOnlyFence note={false}><AvoidancePanel /></ViewOnlyFence>
-                        </Panel>
-                    )}
-
-                    <Panel title="All telemetry" className="md:min-h-[240px]">
-                        <TelemetryPanel />
-                    </Panel>
                 </div>
             )}
         </div>

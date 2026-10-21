@@ -30,15 +30,12 @@ import { VIEW_ONLY_TEXT } from '@/components/layout/ViewOnly'
 import { isDesktopApp } from '@/lib/nativeBridge'
 import { Camera, Satellite, Plug, PlugZap, Loader, RefreshCw, Plus } from 'lucide-react'
 import { useClientValue } from '@/hooks/useClientValue'
+import {
+    Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue, SimpleSelect,
+} from '@/components/ui/select'
 
-const selectStyle: React.CSSProperties = {
-    flexShrink: 0, height: 36, maxWidth: 150, padding: '0 6px', borderRadius: 6,
-    background: 'hsl(var(--app-surface-2))',
-    border: '1px solid hsl(var(--app-border-strong))',
-    color: 'hsl(var(--app-text))',
-    fontSize: 13, cursor: 'pointer',
-    textOverflow: 'ellipsis',
-}
+// The shared Select, sized for the bar.
+const SELECT_CLS = 'shrink-0 data-[size=default]:h-9 max-w-[150px] text-[13px] bg-app-surface-2'
 
 function Label({ icon, text }: { icon: React.ReactNode; text: string }) {
     return (
@@ -144,67 +141,67 @@ export function StatusBarLinks() {
 
     return (
         <>
-            <Label icon={<Camera size={14} />} text="VIDEO" />
-            <select
-                value={videoSource}
-                onChange={e => changeVideoSource(e.target.value as VideoSource)}
-                style={selectStyle}
-                title={isStreaming
-                    ? 'Changing the video source restarts the running stream'
-                    : 'Where the video feed comes from. The full list is in Settings.'}
-            >
-                {/* THE SAME CATALOGUE SETTINGS RENDERS, not a shortlist.
-                    A hand-written subset here would omit whichever source is
-                    added next - and the operator would find it selectable in
-                    Settings, working, and absent from the bar. That exact bug
-                    has already been shipped once in this app, which is why the
-                    catalogue is data (see lib/videoSource.ts). */}
-                {sourceGroupsFor(isCustomer).map(group => (
-                    <optgroup key={group} label={group}>
-                        {catalogue.filter(v => v.group === group).map(v => (
-                            <option key={v.value} value={v.value}>
-                                {v.label}{v.desktopOnly && !desktopApp ? '  (desktop)' : ''}
-                            </option>
-                        ))}
-                    </optgroup>
-                ))}
-            </select>
+            <Label icon={<Camera size={14} />} text="Video" />
+            <Select value={videoSource} onValueChange={v => { if (v != null && v !== videoSource) changeVideoSource(v as VideoSource) }}>
+                <SelectTrigger aria-label="Video source" className={SELECT_CLS}
+                    title={isStreaming
+                        ? 'Changing the video source restarts the running stream'
+                        : 'Where the video feed comes from. The full list is in Settings.'}>
+                    <SelectValue className="min-w-0 truncate">
+                        {catalogue.find(v => v.value === videoSource)?.label ?? videoSource}
+                    </SelectValue>
+                </SelectTrigger>
+                <SelectContent alignItemWithTrigger={false} align="start" className="w-auto min-w-(--anchor-width)">
+                    {/* THE SAME CATALOGUE SETTINGS RENDERS, not a shortlist.
+                        A hand-written subset here would omit whichever source is
+                        added next - and the operator would find it selectable in
+                        Settings, working, and absent from the bar. That exact bug
+                        has already been shipped once in this app, which is why the
+                        catalogue is data (see lib/videoSource.ts). */}
+                    {sourceGroupsFor(isCustomer).map(group => (
+                        <SelectGroup key={group}>
+                            <SelectLabel>{group}</SelectLabel>
+                            {catalogue.filter(v => v.group === group).map(v => (
+                                <SelectItem key={v.value} value={v.value}>
+                                    {v.label}{v.desktopOnly && !desktopApp ? '  (desktop)' : ''}
+                                </SelectItem>
+                            ))}
+                        </SelectGroup>
+                    ))}
+                </SelectContent>
+            </Select>
 
             {needsCamera && (
                 <>
-                    <select
+                    <SimpleSelect
                         value={selectedCameraId}
-                        onChange={e => changeCamera(e.target.value)}
-                        style={selectStyle}
+                        onValueChange={changeCamera}
+                        ariaLabel="Camera"
+                        className={SELECT_CLS}
                         title={isStreaming
                             ? 'Changing the camera restarts the running stream'
                             : 'Which camera on this machine'}
-                    >
-                        {cameras.length === 0 && <option value="">No cameras</option>}
-                        {cameras.map(c => (
-                            <option key={c.deviceId} value={c.deviceId}>{c.label}</option>
-                        ))}
-                    </select>
+                        placeholder="No cameras"
+                        options={cameras.map(c => ({ value: c.deviceId, label: c.label }))}
+                    />
                     <IconButton onClick={scanCameras} title="Re-scan cameras on this device">
                         <RefreshCw size={14} />
                     </IconButton>
                 </>
             )}
 
-            <Label icon={<Satellite size={14} />} text="LINK" />
-            <select
+            <Label icon={<Satellite size={14} />} text="Link" />
+            <SimpleSelect
                 value={source}
-                onChange={e => setSource(e.target.value)}
+                onValueChange={setSource}
                 disabled={isConnected}
-                style={{ ...selectStyle, ...(isConnected ? { borderStyle: 'dashed', color: 'hsl(var(--app-text-muted))', cursor: 'not-allowed' } : null) }}
+                ariaLabel="Telemetry link"
+                className={SELECT_CLS}
                 title={isConnected
                     ? 'Disconnect before changing the telemetry link'
                     : 'Which radio or bridge carries telemetry'}
-            >
-                {options.map(o => (
-                    <option key={o.value} value={o.value} disabled={o.disabled} title={o.note}>{o.label}</option>
-                ))}
-            </select>
+                options={options.map(o => ({ value: o.value, label: o.label, disabled: o.disabled, title: o.note }))}
+            />
 
             {/* Enumerating differs by shell, exactly as on the Fly tab:
                 desktop lists every port outright, the browser needs a one-time
@@ -236,9 +233,9 @@ export function StatusBarLinks() {
                     height: 36, padding: '0 10px', borderRadius: 6,
                     fontSize: 13, fontWeight: 700,
                     background: linkBlocked ? 'hsl(var(--app-surface-2))' : 'transparent',
-                    border: linkBlocked ? '1px dashed hsl(var(--app-border-strong))'
+                    border: linkBlocked ? '1px solid hsl(var(--app-border))'
                         : `1px solid ${isConnected ? 'var(--app-danger)' : 'var(--app-ok)'}`,
-                    color: linkBlocked ? 'hsl(var(--app-text-muted))' : isConnected ? 'var(--app-danger)' : 'var(--app-ok)',
+                    color: linkBlocked ? 'hsl(var(--app-text-subtle))' : isConnected ? 'var(--app-danger)' : 'var(--app-ok)',
                     cursor: linkBlocked ? 'not-allowed' : (isConnecting || disconnecting) ? 'progress' : 'pointer', whiteSpace: 'nowrap',
                 }}
             >

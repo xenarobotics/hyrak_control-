@@ -19,11 +19,18 @@ import { useAccess, useActiveWorkspace } from '@/hooks/useAccess'
 import { KIND_LABELS, roleLabel } from '@/lib/access'
 import { cn } from '@/lib/utils'
 
+// Two letters that never read as a glyph: "IITH" gave "II", which in a
+// filled tile looked like a pause button. One word takes its first and last
+// letters ("IH"), more words their first letters; a repeated letter falls
+// back to the first letter alone.
 function initials(name: string): string {
     const words = name.trim().split(/\s+/).filter(Boolean)
     if (words.length === 0) return '?'
-    if (words.length === 1) return words[0].slice(0, 2).toUpperCase()
-    return (words[0][0] + words[1][0]).toUpperCase()
+    const pair = words.length === 1
+        ? words[0][0] + (words[0].length > 1 ? words[0][words[0].length - 1] : '')
+        : words[0][0] + words[1][0]
+    const up = pair.toUpperCase()
+    return up.length === 2 && up[0] === up[1] ? up[0] : up
 }
 
 export function WorkspaceSwitcher({ normal }: { normal: boolean }) {
@@ -37,7 +44,7 @@ export function WorkspaceSwitcher({ normal }: { normal: boolean }) {
                 title={`Workspace: ${workspace.name}`}
                 aria-label={`Workspace: ${workspace.name}. Switch workspace`}
                 className={cn(
-                    'flex flex-col items-center rounded-[10px] border transition-colors duration-[120ms]',
+                    'flex flex-col items-center rounded-[10px] border transition-colors duration-[140ms]',
                     normal ? 'mb-3 w-20 gap-1 py-2' : 'w-12 gap-1 py-1 md:mb-3',
                     normal ? '' : 'border-app-border text-app-text-muted hover:text-app-text hover:bg-app-surface-2',
                 )}
@@ -45,7 +52,7 @@ export function WorkspaceSwitcher({ normal }: { normal: boolean }) {
             >
                 <span className={cn(
                     'flex items-center justify-center rounded-md font-bold',
-                    normal ? 'h-8 w-8 text-[14px]' : 'h-9 w-9 text-[13px] bg-app-accent-soft text-app-text',
+                    normal ? 'h-8 w-8 text-[14px]' : 'h-9 w-9 rounded-full text-[13px] font-extrabold border border-app-border-strong bg-app-surface-2 text-app-text',
                 )}
                     style={normal ? { background: 'var(--s-blue-soft)', color: 'var(--s-blue)' } : undefined}>
                     {initials(workspace.name)}

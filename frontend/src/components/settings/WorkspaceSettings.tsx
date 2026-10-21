@@ -16,6 +16,7 @@ import {
     personName, removeMember, revokeInvite, updateMember, type Invite, type Member,
 } from '@/lib/workspaces'
 import { fmtShort, Pill, PrefRow, S_FIELD_LABEL, S_INPUT, S_NOTE, SButton, Status } from '@/components/settings/primitives'
+import { OptionSelect } from '@/components/config/OptionSelect'
 
 function NoWorkspace() {
     return <p style={{ ...S_NOTE, padding: '10px 0' }}>You are not in a workspace yet. Ask for an invite link.</p>
@@ -27,10 +28,8 @@ function RoleSelect({ id, value, roles, kind, onChange, disabled }: {
 }) {
     const opts = roles.includes(value) ? roles : [value, ...roles]
     return (
-        <select id={id} value={value} disabled={disabled} onChange={e => onChange(e.target.value as MemberRole)}
-            style={{ ...S_INPUT, paddingRight: 4 }}>
-            {opts.map(r => <option key={r} value={r}>{roleLabel(r, kind)}</option>)}
-        </select>
+        <OptionSelect id={id} value={value} disabled={disabled} onChange={onChange} className="w-auto min-w-[140px]"
+            options={opts.map(r => ({ value: r, label: roleLabel(r, kind) }))} />
     )
 }
 
@@ -42,10 +41,8 @@ export function WorkspaceGroup() {
             <PrefRow label="Workspace"
                 sub={workspaces.length > 1 ? 'The workspace this browser works in. Also switchable from the sidebar.' : undefined}
                 right={workspaces.length > 1 ? (
-                    <select aria-label="Active workspace" value={workspace.id} onChange={e => setActive(e.target.value)}
-                        style={{ ...S_INPUT, maxWidth: 260 }}>
-                        {workspaces.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-                    </select>
+                    <OptionSelect aria-label="Active workspace" value={workspace.id} onChange={setActive} className="w-[260px]"
+                        options={workspaces.map(w => ({ value: w.id, label: w.name }))} />
                 ) : <span style={{ fontSize: 13, color: 'hsl(var(--app-text))' }}>{workspace.name}</span>} />
             <PrefRow label="Type" right={<span style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))' }}>
                 {KIND_LABELS[workspace.kind] ?? workspace.kind}</span>} />
@@ -271,9 +268,8 @@ export function InvitesGroup() {
                         </div>
                         <div>
                             <label htmlFor="inv-days" style={S_FIELD_LABEL}>Expires</label>
-                            <select id="inv-days" value={days} onChange={e => setDays(Number(e.target.value))} style={S_INPUT}>
-                                {EXPIRY_DAYS.map(d => <option key={d} value={d}>{d} day{d > 1 ? 's' : ''}</option>)}
-                            </select>
+                            <OptionSelect id="inv-days" value={days} onChange={setDays} className="w-auto min-w-[110px]"
+                                options={EXPIRY_DAYS.map(d => ({ value: d, label: `${d} day${d > 1 ? 's' : ''}` }))} />
                         </div>
                         <SButton type="submit" tone="primary" disabled={busy === 'create'}>
                             {busy === 'create' ? 'Creating' : 'Create invite link'}

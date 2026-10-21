@@ -62,6 +62,9 @@
   --color-overlay-text: var(--overlay-text);
   --color-overlay-muted: var(--overlay-muted);
   --color-overlay-border: var(--overlay-border);
+  /* Text on a selected toggle, tab or segment (accent-soft fill). */
+  --color-app-selected-ink: var(--app-selected-ink);
+  --color-overlay-selected-ink: var(--overlay-selected-ink);
 }
 
 :root {
@@ -95,6 +98,9 @@
   --overlay-ok: #1D7444;
   --overlay-warn: #8F5500;
   --overlay-danger: #B42323;
+  /* Selected text on accent-soft: #095866 is 6.7:1 on the light tint
+     (the accent itself is 4.3:1 there). */
+  --overlay-selected-ink: #095866;
   --input: 214 12% 53.7%;
   --background: 0 0% 100%;
   --foreground: 240 10% 3.9%;
@@ -123,7 +129,11 @@
   --fs-md: 16px; --fs-lg: 18px; --fs-xl: 22px; --fs-2xl: 28px;
   --ease-out: cubic-bezier(.2, .8, .2, 1);
   --ease-in: cubic-bezier(.4, 0, 1, 1);
-  --dur-fast: 120ms; --dur: 180ms; --dur-slow: 240ms;
+  /* Hover is 140ms everywhere (design system 5 and 11). */
+  --dur-fast: 140ms; --dur: 180ms; --dur-slow: 240ms;
+  /* Height of the status bar while it is on screen (0 otherwise), so
+     sheets and scrims start below it and never cover Kill. */
+  --app-bar-h: 0px;
 
   /* Over video and map tiles: one fixed set in both themes (design system 9). */
   /* The component library's surfaces follow the app palette, so nothing
@@ -136,7 +146,7 @@
   --popover-foreground: var(--app-text);
   --border: var(--app-border);
   --muted-foreground: var(--app-text-muted);
-  --app-selected-ink: var(--app-text);
+  --app-selected-ink: #095866;
 }
 
 .dark {
@@ -201,50 +211,53 @@
   --popover-foreground: var(--app-text);
   --border: var(--app-border);
   --muted-foreground: var(--app-text-muted);
-  --app-selected-ink: var(--app-text);
+  --app-selected-ink: var(--app-accent);
+  --overlay-selected-ink: var(--overlay-accent);
 }
 
-/* Midnight: the reworked dark. Stacked ON TOP of .dark (the theme toggle
-   adds both classes), so the shadcn block above still applies and only the
-   app tokens change. What changed and why:
-   - muted text 55% → 68% lightness: the single biggest "hard to read at
-     full brightness" contributor - every sub-line and unit label uses it.
-   - borders 16% → 24%: panel edges were nearly invisible, so dense pages
-     read as one undifferentiated field.
-   - a slate-blue cast instead of neutral gray: separates surfaces without
-     making them lighter. */
+/* Midnight: "Night ops". For flying at night, when the screen must not
+   glare and every edge must still read at a glance. Stacked ON TOP of .dark
+   (the theme toggle adds both classes), so the shadcn block above still
+   applies and only the app tokens change. What makes it more than a darker
+   Dark (design audit 3, section 5):
+   - near-OLED page with panels that separate by a stronger border;
+   - soft text (#F3F6F9), never pure white, and brighter muted/subtle ink;
+   - border-strong at #8592A3, so inputs sit at 5:1 or better, and inputs
+     and selects carry 2px borders (rules below the token block);
+   - solid overlay panels over video and maps, no translucent scrims;
+   - no accent glow: selected things get an accent outline, not a tint. */
 .midnight {
-  --app-bg: 220 21% 5.5%;
-  --app-surface: 220 21% 8.4%;
-  --app-surface-2: 218 19% 11.2%;
-  --app-raised: 219 19% 14.5%;
-  --app-border: 219 17% 19.8%;
-  --app-border-strong: 218 12% 47.8%;
-  --app-text: 0 0% 100.0%;
-  --app-text-muted: 215 21% 82.2%;
-  --app-text-subtle: 215 14% 66.7%;
-  --app-sidebar: 218 22% 7.1%;
+  --app-bg: 216 26% 3.7%;
+  --app-surface: 213 23% 7.6%;
+  --app-surface-2: 215 21% 11.0%;
+  --app-raised: 216 21% 14.3%;
+  --app-border: 215 18% 20.2%;
+  --app-border-strong: 214 14% 58.0%;
+  --app-text: 210 33% 96.5%;
+  --app-text-muted: 213 21% 83.1%;
+  --app-text-subtle: 212 15% 65.5%;
+  --app-sidebar: 214 24% 5.7%;
   --app-accent: #67E8F9;
   --app-accent-ink: #041315;
-  --app-accent-soft: rgba(103, 232, 249, 0.12);
+  --app-accent-soft: transparent;
   --app-ok: #6EE7A0;
-  --app-ok-soft: color-mix(in srgb, #6EE7A0 12%, transparent);
+  --app-ok-soft: color-mix(in srgb, #6EE7A0 10%, transparent);
   --app-warn: #FBC756;
-  --app-warn-soft: color-mix(in srgb, #FBC756 14%, transparent);
+  --app-warn-soft: color-mix(in srgb, #FBC756 12%, transparent);
   --app-danger: #FF8A8C;
-  --app-danger-soft: color-mix(in srgb, #FF8A8C 12%, transparent);
+  --app-danger-soft: color-mix(in srgb, #FF8A8C 10%, transparent);
   --app-magenta: #EBA3FA;
-  --app-magenta-soft: color-mix(in srgb, #EBA3FA 12%, transparent);
-  --app-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 24px rgb(0 0 0 / 0.35);
-  --overlay-scrim: rgba(11, 13, 17, 0.82);
-  --overlay-text: #FFFFFF;
-  --overlay-muted: #C8D0DB;
-  --overlay-border: rgba(255, 255, 255, 0.2);
+  --app-magenta-soft: color-mix(in srgb, #EBA3FA 10%, transparent);
+  --app-shadow: 0 0 0 1px hsl(215 18% 20.2%);
+  --overlay-scrim: #0F1318;
+  --overlay-text: #F3F6F9;
+  --overlay-muted: #CBD3DD;
+  --overlay-border: #2A323D;
   --overlay-accent: #67E8F9;
   --overlay-ok: #6EE7A0;
   --overlay-warn: #FBC756;
   --overlay-danger: #FF8A8C;
-  --input: 218 12% 47.8%;
+  --input: 214 14% 58.0%;
   /* The component library's surfaces follow the app palette, so nothing
      falls back to pure white or near black. */
   --background: var(--app-bg);
@@ -255,8 +268,24 @@
   --popover-foreground: var(--app-text);
   --border: var(--app-border);
   --muted-foreground: var(--app-text-muted);
-  --app-selected-ink: var(--app-text);
+  --app-selected-ink: var(--app-accent);
+  --overlay-selected-ink: var(--overlay-accent);
 }
+/* Night ops structure: 2px edges on everything you type into or pick from. */
+.midnight :is(input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']), select, textarea, [data-slot='select-trigger']):not([class~='border-0']):not([class~='border-none']):not([class~='bg-transparent']) {
+  border-width: 2px;
+}
+/* Selected toggles and segments: no tint (accent-soft is transparent here),
+   an accent outline drawn over their own 1px edge instead. Tabs keep their
+   underline. */
+.midnight :is([aria-pressed='true'], [data-selected='true'], [aria-current='page']):not([role='tab']):not(:focus-visible) {
+  outline: 1px solid var(--app-accent);
+  outline-offset: -1px;
+}
+
+/* The status bar is 48px (h-12) at every width. While it is mounted,
+   sheets and their scrims start under it (components/ui/sheet.tsx). */
+:root:has([data-status-bar]) { --app-bar-h: 48px; }
 
 /* Percentage height chain for the app shell. The shell used h-screen
    (100vh), and vh under CSS zoom means different things in different

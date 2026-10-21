@@ -41,7 +41,7 @@ function SelectTrigger({
       data-slot="select-trigger"
       data-size={size}
       className={cn(
-        "flex w-fit items-center justify-between gap-1.5 rounded-md border border-app-border-strong bg-app-surface py-2 pr-2 pl-2.5 text-[14px] text-app-text whitespace-nowrap transition-colors outline-none select-none hover:border-app-text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--app-accent)] disabled:cursor-not-allowed disabled:border-dashed disabled:text-app-text-muted aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-placeholder:text-app-text-muted data-[size=default]:h-9 data-[size=sm]:h-7 data-[size=sm]:rounded-[min(var(--radius-md),10px)] *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "flex w-fit items-center justify-between gap-1.5 rounded-md border border-app-border-strong bg-app-surface py-2 pr-2 pl-2.5 text-[14px] text-app-text whitespace-nowrap transition-colors outline-none select-none hover:border-app-text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--app-accent)] disabled:cursor-not-allowed disabled:border-app-border disabled:bg-app-surface-2 disabled:text-app-text-subtle disabled:hover:border-app-border aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-placeholder:text-app-text-muted data-[size=default]:h-9 data-[size=sm]:h-7 data-[size=sm]:rounded-[min(var(--radius-md),10px)] *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       {...props}
@@ -78,7 +78,7 @@ function SelectContent({
         align={align}
         alignOffset={alignOffset}
         alignItemWithTrigger={alignItemWithTrigger}
-        className="isolate z-50"
+        className="isolate z-[4100]"
       >
         <SelectPrimitive.Popup
           data-slot="select-content"
@@ -187,7 +187,57 @@ function SelectScrollDownButton({
   )
 }
 
+export type SimpleSelectOption = {
+  value: string
+  label: React.ReactNode
+  disabled?: boolean
+  /** Tooltip on the option, e.g. why it is unavailable. */
+  title?: string
+}
+
+/**
+ * The shared Select for a plain list of options: the drop-in replacement for
+ * a native <select> (same value / onChange contract, string values), so
+ * every picker in the app has one height, chevron, radius and menu.
+ */
+function SimpleSelect({
+  value, onValueChange, options, disabled, ariaLabel, title, id, placeholder,
+  size = "default", className, contentClassName,
+}: {
+  value: string
+  onValueChange: (value: string) => void
+  options: SimpleSelectOption[]
+  disabled?: boolean
+  ariaLabel?: string
+  title?: string
+  id?: string
+  /** Shown when `value` matches no option. */
+  placeholder?: React.ReactNode
+  size?: "sm" | "default"
+  className?: string
+  contentClassName?: string
+}) {
+  const current = options.find(o => o.value === value)
+  return (
+    <Select value={value} disabled={disabled}
+      onValueChange={v => { if (v != null && v !== value) onValueChange(String(v)) }}>
+      <SelectTrigger id={id} size={size} aria-label={ariaLabel} title={title}
+        className={cn("min-w-0 [&>[data-slot=select-value]]:min-w-0 [&>[data-slot=select-value]]:truncate", className)}>
+        <SelectValue>{current ? current.label : (placeholder ?? "")}</SelectValue>
+      </SelectTrigger>
+      <SelectContent alignItemWithTrigger={false} align="start" className={cn("w-auto min-w-(--anchor-width)", contentClassName)}>
+        {options.map(o => (
+          <SelectItem key={o.value} value={o.value} disabled={o.disabled} title={o.title}>
+            {o.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
 export {
+  SimpleSelect,
   Select,
   SelectContent,
   SelectGroup,

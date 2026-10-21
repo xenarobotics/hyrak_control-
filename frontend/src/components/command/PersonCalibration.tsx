@@ -40,12 +40,12 @@ export function PersonCalibration({ droneId }: { droneId: string }) {
                 <label className="text-[13px] text-app-text-muted" htmlFor="cal-h">Person height</label>
                 <input id="cal-h" type="number" min={1} max={2.3} step={0.01} value={height} disabled={running}
                     onChange={e => setHeight(Number(e.target.value) || 1.7)}
-                    className={cn('w-16 h-8 rounded-md border border-app-border-strong bg-app-surface px-1.5 text-[14px] text-app-text disabled:text-app-text-subtle disabled:border-dashed', FOCUS)} />
+                    className={cn('w-16 h-8 rounded-md border border-app-border-strong bg-app-surface px-1.5 text-[14px] text-app-text disabled:text-app-text-subtle disabled:border-app-border disabled:bg-app-surface-2', FOCUS)} />
                 <span className="text-[12px] text-app-text-muted">m</span>
                 <button onClick={running ? () => { void cancelPersonCalibration(droneId) } : () => { void start() }}
                     className={cn('ml-auto h-8 px-2.5 rounded-md border text-[13px] font-bold flex items-center gap-1.5', FOCUS,
                         running ? 'border-app-danger text-app-danger hover:bg-app-danger-soft'
-                            : 'border-app-accent text-app-accent bg-app-accent-soft hover:brightness-110')}>
+                            : 'border-app-accent text-app-selected-ink bg-app-accent-soft hover:brightness-110')}>
                     {running ? <><Loader2 size={14} className="animate-spin" /> Cancel</> : <><Ruler size={14} /> Calibrate</>}
                 </button>
             </div>

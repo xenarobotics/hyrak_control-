@@ -284,15 +284,15 @@ export default function MissionMap3D({ readOnly = false, showNav = true, navStyl
   // The viewer once built, for the on-screen controls.
   const [navViewer, setNavViewer] = useState<CesiumNS.Viewer | null>(null)
 
-  // Theme-following globe: daylight (no sun shading) in light mode, so the
-  // imagery is never a night globe on a light page; the dark themes keep
-  // the real sun. Only presentation: nothing else on the viewer changes.
+  // Daylight globe in every theme: no real-sun shading, so the imagery is
+  // never a near-black night globe with the route floating on nothing
+  // (design audit 3). The theme only sets the colour past the horizon.
   useEffect(() => {
     themeRef.current = theme
     const viewer = viewerRef.current
     const Cesium = CesiumRef.current
     if (!viewer || !Cesium || viewer.isDestroyed()) return
-    viewer.scene.globe.enableLighting = theme !== 'light'
+    viewer.scene.globe.enableLighting = false
     viewer.scene.backgroundColor = Cesium.Color.fromCssColorString(spaceColour(theme))
     viewer.scene.requestRender()
   }, [theme, viewerReady])
@@ -444,9 +444,8 @@ export default function MissionMap3D({ readOnly = false, showNav = true, navStyl
       })
 
       // Cleaner globe look
-      // Sun lighting follows the theme (see the theme effect below): daylight
-      // in light mode, the real sun position in the dark themes.
-      viewer.scene.globe.enableLighting = themeRef.current !== 'light'
+      // Daylight in every theme (see the theme effect above): no sun shading.
+      viewer.scene.globe.enableLighting = false
       viewer.scene.fog.enabled = true
       viewer.scene.globe.showGroundAtmosphere = true
       if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = true
@@ -1346,6 +1345,14 @@ export default function MissionMap3D({ readOnly = false, showNav = true, navStyl
   return (
     <div style={{ position: 'absolute', inset: 0 }}>
       <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
+      {/* While Cesium initialises, a calm themed placeholder instead of an
+          empty canvas. */}
+      {!viewerReady && (
+        <div role="status" className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-app-surface-2 text-app-text-muted pointer-events-none">
+          <span aria-hidden className="h-5 w-5 rounded-full border-2 border-app-border-strong border-t-transparent animate-spin" />
+          <span className="text-[13px] font-semibold">Loading 3D map</span>
+        </div>
+      )}
       {showNav && navViewer && CesiumRef.current && (
         <Map3DNavControls Cesium={CesiumRef.current} viewer={navViewer}
           onUse={() => pauseFollowRef.current?.()}

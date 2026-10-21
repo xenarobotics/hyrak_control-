@@ -13,7 +13,7 @@ import {
 import {
     Shield, ShieldOff, PlaneTakeoff,
     RotateCcw, MapPin, PlaneLanding, Loader,
-    Hand, Cpu, Radio
+    Hand, Cpu, Radio, ChevronRight
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FLIGHT_MODES, modeOptionFor, modeLabel } from '@/lib/flightModes'
@@ -115,11 +115,11 @@ export function DroneControls() {
             {/* Swarm command target - ticked drones only */}
             {swarmEnabled && (
                 isGroup ? (
-                    <div className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-bold border border-app-accent bg-app-accent-soft text-app-accent">
+                    <div className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-bold border border-app-accent bg-app-accent-soft text-app-selected-ink">
                         Commanding {groupTargets.length} drone{groupTargets.length > 1 ? 's' : ''}
                     </div>
                 ) : (
-                    <div className="px-3 py-1.5 rounded-md text-[13px] text-center border border-dashed border-app-border-strong text-app-text-muted">
+                    <div className="px-3 py-1.5 rounded-md text-[13px] text-center border border-app-border bg-app-surface-2 text-app-text-muted">
                         Tick drones in the Fleet panel to command them
                     </div>
                 )
@@ -150,7 +150,7 @@ export function DroneControls() {
                             >
                                 <SelectTrigger
                                     aria-label="Flight mode"
-                                    className={cn('data-[size=default]:h-9 w-full text-[14px] font-bold border-app-border-strong rounded-md disabled:opacity-100 data-[disabled]:opacity-100 disabled:border-dashed data-[disabled]:border-dashed disabled:text-app-text-subtle data-[disabled]:text-app-text-subtle', FOCUS)}
+                                    className={cn('data-[size=default]:h-9 w-full text-[14px] font-bold border-app-border-strong rounded-md disabled:opacity-100 data-[disabled]:opacity-100 disabled:border-app-border data-[disabled]:border-app-border disabled:bg-app-surface-2 data-[disabled]:bg-app-surface-2 disabled:text-app-text-subtle data-[disabled]:text-app-text-subtle', FOCUS)}
                                 >
                                     <SelectValue placeholder={connected ? modeLabel(mode) : 'No link'}>
                                         {modePending ? 'Switching…' : connected ? modeLabel(mode) : 'No link'}
@@ -357,14 +357,14 @@ export function DroneControls() {
                     <WhyDisabled reason={linkReason ?? (rcPending ? 'Reading parameters' : null)}>
                         <Button
                             size="sm" variant="ghost"
-                            className={cn(ACTION, 'h-8 text-[13px] font-semibold text-app-text-muted hover:text-app-accent disabled:border-transparent disabled:bg-transparent')}
+                            className={cn(ACTION, 'h-9 justify-start px-2 text-[13px] font-semibold text-app-text-muted hover:text-app-text hover:bg-app-surface-2 disabled:border-transparent disabled:bg-transparent')}
                             disabled={!connected || rcPending}
                             onClick={() => sendAction('rc_takeover_check')}
                             title="Read the parameters that decide whether the transmitter can take the aircraft back"
                         >
                             {rcPending
                                 ? <><Loader size={13} className="animate-spin" /> Reading parameters…</>
-                                : <><Radio size={13} /> RC takeover check</>}
+                                : <><Radio size={14} /> RC takeover check <ChevronRight size={14} className="ml-auto" /></>}
                         </Button>
                     </WhyDisabled>
                     {rcReport && (

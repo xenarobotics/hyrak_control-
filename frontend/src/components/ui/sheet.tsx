@@ -28,7 +28,7 @@ function SheetOverlay({ className, ...props }: SheetPrimitive.Backdrop.Props) {
     <SheetPrimitive.Backdrop
       data-slot="sheet-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-[rgb(10_14_20/0.4)] transition-opacity duration-[240ms] ease-[cubic-bezier(.2,.8,.2,1)] data-ending-style:duration-[180ms] data-ending-style:ease-[cubic-bezier(.4,0,1,1)] data-ending-style:opacity-0 data-starting-style:opacity-0",
+        "fixed inset-x-0 bottom-0 top-[var(--app-bar-h,0px)] z-50 bg-[rgb(10_14_20/0.4)] transition-opacity duration-[240ms] ease-[cubic-bezier(.2,.8,.2,1)] data-ending-style:duration-[180ms] data-ending-style:ease-[cubic-bezier(.4,0,1,1)] data-ending-style:opacity-0 data-starting-style:opacity-0",
         className
       )}
       {...props}
@@ -36,6 +36,9 @@ function SheetOverlay({ className, ...props }: SheetPrimitive.Backdrop.Props) {
   )
 }
 
+// Sheets start below the status bar (--app-bar-h, set in globals.css while
+// the bar is mounted), so the bar - and Kill - stay visible and clickable,
+// and the sheet's own title and close button are never under it.
 function SheetContent({
   className,
   children,
@@ -53,7 +56,7 @@ function SheetContent({
         data-slot="sheet-content"
         data-side={side}
         className={cn(
-          "fixed z-50 flex flex-col gap-4 border-app-border bg-app-surface bg-clip-padding text-[14px] text-app-text shadow-[var(--app-shadow)] transition-[opacity,translate,transform] duration-[240ms] ease-[cubic-bezier(.2,.8,.2,1)] data-ending-style:duration-[180ms] data-ending-style:ease-[cubic-bezier(.4,0,1,1)] data-ending-style:opacity-0 data-starting-style:opacity-0 data-[side=bottom]:inset-x-0 data-[side=bottom]:bottom-0 data-[side=bottom]:h-auto data-[side=bottom]:border-t data-[side=bottom]:data-ending-style:translate-y-[2.5rem] data-[side=bottom]:data-starting-style:translate-y-[2.5rem] data-[side=left]:inset-y-0 data-[side=left]:left-0 data-[side=left]:h-full data-[side=left]:w-3/4 data-[side=left]:border-r data-[side=left]:data-ending-style:translate-x-[-2.5rem] data-[side=left]:data-starting-style:translate-x-[-2.5rem] data-[side=right]:inset-y-0 data-[side=right]:right-0 data-[side=right]:h-full data-[side=right]:w-3/4 data-[side=right]:border-l data-[side=right]:data-ending-style:translate-x-[2.5rem] data-[side=right]:data-starting-style:translate-x-[2.5rem] data-[side=top]:inset-x-0 data-[side=top]:top-0 data-[side=top]:h-auto data-[side=top]:border-b data-[side=top]:data-ending-style:translate-y-[-2.5rem] data-[side=top]:data-starting-style:translate-y-[-2.5rem] data-[side=left]:sm:max-w-sm data-[side=right]:sm:max-w-sm",
+          "fixed z-50 flex flex-col gap-4 border-app-border bg-app-surface bg-clip-padding text-[14px] text-app-text shadow-[var(--app-shadow)] transition-[opacity,translate,transform] duration-[240ms] ease-[cubic-bezier(.2,.8,.2,1)] data-ending-style:duration-[180ms] data-ending-style:ease-[cubic-bezier(.4,0,1,1)] data-ending-style:opacity-0 data-starting-style:opacity-0 data-[side=bottom]:inset-x-0 data-[side=bottom]:bottom-0 data-[side=bottom]:h-auto data-[side=bottom]:border-t data-[side=bottom]:data-ending-style:translate-y-[2.5rem] data-[side=bottom]:data-starting-style:translate-y-[2.5rem] data-[side=left]:top-[var(--app-bar-h,0px)] data-[side=left]:bottom-0 data-[side=left]:left-0 data-[side=left]:h-auto data-[side=left]:w-3/4 data-[side=left]:border-r data-[side=left]:data-ending-style:translate-x-[-2.5rem] data-[side=left]:data-starting-style:translate-x-[-2.5rem] data-[side=right]:top-[var(--app-bar-h,0px)] data-[side=right]:bottom-0 data-[side=right]:right-0 data-[side=right]:h-auto data-[side=right]:w-3/4 data-[side=right]:border-l data-[side=right]:data-ending-style:translate-x-[2.5rem] data-[side=right]:data-starting-style:translate-x-[2.5rem] data-[side=top]:inset-x-0 data-[side=top]:top-[var(--app-bar-h,0px)] data-[side=top]:h-auto data-[side=top]:border-b data-[side=top]:data-ending-style:translate-y-[-2.5rem] data-[side=top]:data-starting-style:translate-y-[-2.5rem] data-[side=left]:sm:max-w-sm data-[side=right]:sm:max-w-sm",
           className
         )}
         {...props}

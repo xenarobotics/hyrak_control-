@@ -35,6 +35,7 @@ import { MapDetectionsControls } from '@/components/mapdetect/MapDetectionsUi'
 import { useModelAccess, useModelLibrary, useModeName } from '@/components/models/useModelLibrary'
 import { css, Callout, SlideOver, useCmClass } from '@/components/models/ui'
 import { customMode, isCustomMode, type CustomModel } from '@/lib/models'
+import { OptionSelect } from '@/components/config/OptionSelect'
 
 function ResultsPanel() {
     const mode = useDroneStore(s => s.mode)
@@ -273,18 +274,15 @@ export default function ModulesPage() {
                                 {specFor(videoSource)?.label ?? videoSource}, change it in <a href="/settings" className={css.link}>Settings</a>
                             </span>
                         ) : (
-                            <select
-                                className={css.cameraSelect}
+                            <OptionSelect
+                                className="w-[260px] max-w-full"
                                 aria-label="Camera"
-                                value={selectedCameraId}
-                                onChange={e => { setSelectedCameraId(e.target.value); setRunHelp(null) }}
-                                disabled={isStreaming}
-                            >
-                                {cameras.length === 0 && <option value="">{camerasScanned ? 'No cameras found' : 'Looking for cameras...'}</option>}
-                                {cameras.map(c => (
-                                    <option key={c.deviceId} value={c.deviceId}>{c.label}</option>
-                                ))}
-                            </select>
+                                value={cameras.length === 0 ? null : selectedCameraId}
+                                placeholder={camerasScanned ? 'No cameras found' : 'Looking for cameras'}
+                                onChange={id => { setSelectedCameraId(id); setRunHelp(null) }}
+                                disabled={isStreaming || cameras.length === 0}
+                                options={cameras.map(c => ({ value: c.deviceId, label: c.label }))}
+                            />
                         )}
                     </div>
                     <div className={css.liveActions}>

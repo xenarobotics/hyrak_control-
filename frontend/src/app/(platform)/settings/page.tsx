@@ -52,6 +52,8 @@ import { useAirUnitVideoBridge } from '@/hooks/useAirUnitVideoBridge'
 import { useClientValue, useHydrated } from '@/hooks/useClientValue'
 import { PrefRow } from '@/components/settings/primitives'
 import { Segmented } from '@/components/ui/segmented'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { OptionSelect } from '@/components/config/OptionSelect'
 import { DevicesGroup, PasswordGroup, ProfileGroup } from '@/components/settings/AccountSettings'
 import { InvitesGroup, MembersGroup, WorkspaceGroup } from '@/components/settings/WorkspaceSettings'
 import { useAccess } from '@/hooks/useAccess'
@@ -72,17 +74,18 @@ function lsSet(key: string, val: unknown) {
 
 function GroupLabel({ text }: { text: string }) {
     return (
-        <h3 style={{ margin: 0, padding: '28px 0 4px', fontSize: 16, lineHeight: '22px', fontWeight: 700, color: 'hsl(var(--app-text))' }}>{text}</h3>
+        <h3 style={{ margin: 0, padding: '28px 0 4px', fontSize: 15, lineHeight: '22px', fontWeight: 700, color: 'hsl(var(--app-text))' }}>{text}</h3>
     )
 }
 
 function Toggle({ value, onChange, label }: { value: boolean; onChange: () => void; label?: string }) {
     return (
-        <button type="button" role="switch" aria-checked={value} aria-label={label} onClick={onChange} style={{
+        <button type="button" role="switch" aria-checked={value} aria-label={label} onClick={onChange}
+            className="hover:shadow-[0_0_0_3px_var(--app-accent-soft)]" style={{
             width: 40, height: 24, borderRadius: 999, cursor: 'pointer', padding: 0, flexShrink: 0,
             background: value ? 'var(--app-accent)' : 'hsl(var(--app-surface-2))',
             border: `1px solid ${value ? 'var(--app-accent)' : 'hsl(var(--app-border-strong))'}`,
-            position: 'relative', transition: 'background-color var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out)',
+            position: 'relative', transition: 'background-color var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out)',
         }}>
             <span style={{
                 position: 'absolute', top: 3, left: 3, width: 16, height: 16, borderRadius: '50%',
@@ -153,11 +156,21 @@ function DisplayGroup() {
                 label="Font"
                 sub="Used everywhere. Numbers stay lined up in the default."
                 right={
-                    <ChipGroup
-                        value={font}
-                        onChange={v => { setFont(v as UiFont); setUiFont(v as UiFont) }}
-                        options={UI_FONTS.map(f => ({ value: f.value, label: f.label }))}
-                    />
+                    <>
+                        {/* Five fonts do not fit one row on a phone: a select there. */}
+                        <div className="max-[479px]:hidden">
+                            <ChipGroup
+                                value={font}
+                                onChange={v => { setFont(v as UiFont); setUiFont(v as UiFont) }}
+                                options={UI_FONTS.map(f => ({ value: f.value, label: f.label }))}
+                            />
+                        </div>
+                        <div className="min-[480px]:hidden w-full">
+                            <OptionSelect aria-label="Font" value={font}
+                                onChange={v => { setFont(v as UiFont); setUiFont(v as UiFont) }}
+                                options={UI_FONTS.map(f => ({ value: f.value as string, label: f.label }))} />
+                        </div>
+                    </>
                 }
             />
             <PrefRow
@@ -194,10 +207,10 @@ function StatusBarGroup() {
     return (
         <>
             <PrefRow
-                label="Show status bar"
-                sub="Status, Land and Kill on Mission, AI, Config and Settings."
-                tip="Shows altitude, arm and takeoff, flight mode, GPS and connectivity. Fly and Command have their own controls, so it is hidden there."
-                right={<Toggle label="Show status bar" value={enabled} onChange={() => { const v = !enabled; setEnabled(v); setStatusBarEnabled(v) }} />}
+                label="Status readings in the bar"
+                sub="GPS, battery, altitude and flight time beside the link state."
+                tip="Off keeps the bar lean. The bar itself always stays on every page, with the link state, Mode and Hold, RTL, Land and Kill."
+                right={<Toggle label="Status readings in the bar" value={enabled} onChange={() => { const v = !enabled; setEnabled(v); setStatusBarEnabled(v) }} />}
             />
             <PrefRow
                 label="Link controls in the status bar"
@@ -652,37 +665,36 @@ function VideoGroup() {
                 sub={isStreaming ? "Can't switch mid-stream - stop and restart to apply" : 'Applies to the next stream started from any tab (Fly, Modules)'}
                 tip="Camera uses your device's webcam like normal. Air unit (UDP) skips the browser entirely and has the backend read your RF link's video feed directly (see backend/app/webrtc/udp_video_source.py). SIYI RTSP has the BACKEND pull the camera - only works when the server is on the same network as the camera, which off a dev machine it never is. RTSP relay is the one to use for a real deployment: THIS machine pulls the camera and forwards the original bytes to the server without re-encoding, and shows you a local preview off the same process (desktop app only). The two DataChannel modes are the newest and the only ones that are BOTH bit-exact and NAT-traversing: the desktop opens its own WebRTC PeerConnection carrying raw RTP with no media track, so no codec is negotiated and H.265 survives untouched (aiortc can only negotiate VP8/H.264 on a track, which forces a transcode everywhere else). 'RTSP -> DataChannel' uses ffmpeg purely to speak RTSP. 'Air unit -> DataChannel' uses no ffmpeg at all - wfb_rx already delivers RTP/H.265 to the port, so the app just forwards datagrams; it is the cheapest path here and bit-identical to what the drone's encoder produced. 'Air unit -> GStreamer' is the newest and the one to prefer on Linux: a SINGLE GStreamer pipeline owns udp:5600 and splits it with a tee - a hardware-decoded local preview for the pilot, and a bit-exact H.265 SRT uplink for the server's AI. Nothing passes through JavaScript (the DataChannel path reads every packet on Electron's one event loop, and drops them silently when it stalls), and hardware codecs are actually reachable - the bundled ffmpeg has no VAAPI at all. Measured on 1080p20: ffmpeg preview ~79% of a core, GStreamer software 41%, GStreamer hardware 4.4%. Needs GStreamer installed on this machine. Resolution/fps/feed-mode below don't apply to any backend-sourced mode."
                 right={
-                    <select
-                        value={source}
-                        onChange={e => {
-                            const v = e.target.value as VideoSource
-                            setSource(v); setVideoSource(v)
-                        }}
-                        style={{
-                            padding: '7px 10px', borderRadius: 6, width: 280,
-                            background: 'hsl(var(--app-surface-2))',
-                            border: '1px solid hsl(var(--app-border-strong))',
-                            color: 'hsl(var(--app-text))',
-                            fontSize: 12, fontFamily: 'monospace',
-                        }}
-                    >
-                        {/* Derived from the catalogue, NOT a hand-written list.
-                            It was hardcoded to three groups, so adding
-                            'Ground decoder' silently dropped the entire group
-                            from the dropdown - the source existed, worked, and
-                            could not be selected. Exactly the class of bug the
-                            data-driven catalogue above was introduced to kill,
-                            reintroduced two lines from it. */}
-                        {sourceGroupsFor(isCustomer).map(group => (
-                            <optgroup key={group} label={group}>
-                                {videoSourcesFor(isCustomer).filter(s => s.group === group).map(s => (
-                                    <option key={s.value} value={s.value}>
-                                        {s.label}{s.desktopOnly ? '  (desktop)' : ''}
-                                    </option>
-                                ))}
-                            </optgroup>
-                        ))}
-                    </select>
+                    <Select value={source} onValueChange={v => {
+                        if (!v) return
+                        const nv = v as VideoSource
+                        setSource(nv); setVideoSource(nv)
+                    }}>
+                        <SelectTrigger aria-label="Video source" className="w-[280px] max-w-full overflow-hidden text-[13px] [&>span]:min-w-0 [&>span]:truncate">
+                            <SelectValue>
+                                {(() => { const s = videoSourcesFor(isCustomer).find(x => x.value === source); return s ? s.label : source })()}
+                            </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent alignItemWithTrigger={false} align="end">
+                            {/* Derived from the catalogue, NOT a hand-written list.
+                                It was hardcoded to three groups, so adding
+                                'Ground decoder' silently dropped the entire group
+                                from the dropdown - the source existed, worked, and
+                                could not be selected. Exactly the class of bug the
+                                data-driven catalogue above was introduced to kill,
+                                reintroduced two lines from it. */}
+                            {sourceGroupsFor(isCustomer).map(group => (
+                                <SelectGroup key={group}>
+                                    <SelectLabel>{group}</SelectLabel>
+                                    {videoSourcesFor(isCustomer).filter(s => s.group === group).map(s => (
+                                        <SelectItem key={s.value} value={s.value}>
+                                            {s.label}{s.desktopOnly ? ' (desktop)' : ''}
+                                        </SelectItem>
+                                    ))}
+                                </SelectGroup>
+                            ))}
+                        </SelectContent>
+                    </Select>
                 }
             />
 
@@ -1328,7 +1340,7 @@ function DesktopUpdateRow() {
                                 minHeight: 32, padding: '6px 12px', borderRadius: 6, fontSize: 13, fontWeight: 600,
                                 whiteSpace: 'nowrap',
                                 background: action.primary && !action.disabled ? 'var(--app-accent)' : 'hsl(var(--app-surface-2))',
-                                border: (action.disabled ? '1px dashed ' : '1px solid ') + (action.primary && !action.disabled ? 'var(--app-accent)' : 'hsl(var(--app-border-strong))'),
+                                border: '1px solid ' + (action.primary && !action.disabled ? 'var(--app-accent)' : action.disabled ? 'hsl(var(--app-border))' : 'hsl(var(--app-border-strong))'),
                                 color: action.disabled ? 'hsl(var(--app-text-muted))' : action.primary ? 'var(--app-accent-ink)' : 'hsl(var(--app-text))',
                                 cursor: action.disabled ? 'not-allowed' : 'pointer',
                             }}
@@ -1763,20 +1775,9 @@ function LinkGroup() {
                 sub="Default for serial telemetry radios"
                 tip="SiK-family radios (the common 433/915 MHz modules) ship at 57600. RFD900 and some clones use 115200. A wrong baud opens the port successfully and then delivers nothing decodable, which looks exactly like a dead radio - so if the port connects but no telemetry arrives, try the other value here first."
                 right={
-                    <select
-                        value={baud}
-                        onChange={e => {
-                            const v = Number(e.target.value)
-                            setBaudState(v); setTelemetryBaud(v)
-                        }}
-                        style={{
-                            padding: '6px 10px', borderRadius: 6, width: 120,
-                            background: 'hsl(var(--app-surface-2))', border: '1px solid hsl(var(--app-border-strong))',
-                            color: 'hsl(var(--app-text))', fontSize: 12, fontFamily: 'monospace',
-                        }}
-                    >
-                        {BAUD_OPTIONS.map(b => <option key={b} value={b}>{b}</option>)}
-                    </select>
+                    <OptionSelect aria-label="Radio baud rate" value={baud} className="w-[120px] tabular-nums"
+                        onChange={v => { setBaudState(v); setTelemetryBaud(v) }}
+                        options={BAUD_OPTIONS.map(b => ({ value: b, label: String(b) }))} />
                 }
             />
         </>
@@ -2000,7 +2001,7 @@ function SettingsNav({ categories, active, onSelect }: {
                         className={cn(
                             'relative flex min-h-[38px] cursor-pointer items-center gap-2.5 whitespace-nowrap rounded-md px-3 text-left text-[14px] transition-colors',
                             on
-                                ? 'bg-app-accent-soft font-bold text-app-text'
+                                ? 'bg-app-accent-soft font-bold text-app-selected-ink'
                                 : 'font-semibold text-app-text-muted hover:bg-app-surface-2 hover:text-app-text',
                         )}
                     >
@@ -2038,7 +2039,7 @@ export default function SettingsPage() {
 
     const intro = (
         <>
-            <h1 style={{ fontSize: 'var(--fs-xl)', lineHeight: '28px', fontWeight: 800, color: 'hsl(var(--app-text))', margin: 0 }}>Settings</h1>
+            <h1 style={{ fontSize: 'var(--fs-xl)', lineHeight: '28px', fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>Settings</h1>
             <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: '4px 0 0', lineHeight: 1.45 }}>Saved on this device. Nothing here is sent to the drone.</p>
         </>
     )
@@ -2059,17 +2060,16 @@ export default function SettingsPage() {
                         {mounted && (
                             <label className="flex flex-col gap-1.5">
                                 <span style={{ fontSize: 13, fontWeight: 600, color: 'hsl(var(--app-text-muted))' }}>Section</span>
-                                <select value={activeId} onChange={e => select(e.target.value)}
-                                    className="h-11 w-full rounded-md border border-app-border-strong bg-app-surface px-3 text-[15px] font-semibold text-app-text">
-                                    {categories.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-                                </select>
+                                <OptionSelect aria-label="Section" value={activeId} onChange={select}
+                                    className="data-[size=default]:h-11 text-[15px] font-semibold"
+                                    options={categories.map(c => ({ value: c.id, label: c.label }))} />
                             </label>
                         )}
                     </div>
 
                     {mounted && (
                         <div key={activeId} className="animate-in fade-in-0 slide-in-from-bottom-1 duration-200">
-                            <h2 style={{ fontSize: 'var(--fs-xl)', lineHeight: '28px', fontWeight: 800, color: 'hsl(var(--app-text))', margin: 0 }}>{active.label}</h2>
+                            <h2 style={{ fontSize: 'var(--fs-lg)', lineHeight: '24px', fontWeight: 700, color: 'hsl(var(--app-text))', margin: 0 }}>{active.label}</h2>
                             <p style={{ fontSize: 14, color: 'hsl(var(--app-text-muted))', margin: '4px 0 0' }}>{active.blurb}</p>
 
                             {active.sections.map(({ label, Body }) => (

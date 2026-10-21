@@ -25,7 +25,7 @@ let _rsCounter = 0
 const rsUid = () => `rs_${Date.now()}_${++_rsCounter}`
 
 const ALERT_CLASS: Record<string, string> = {
-    info: 'bg-app-accent-soft border-app-accent/40 text-app-accent',
+    info: 'bg-app-accent-soft border-app-accent/40 text-app-selected-ink',
     warn: 'bg-app-warn-soft border-app-warn/40 text-app-warn',
     critical: 'bg-app-danger-soft border-app-danger/40 text-app-danger',
 }

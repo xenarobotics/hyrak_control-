@@ -440,7 +440,7 @@ export function PersonTrackerPanel() {
                         type="button"
                         onClick={() => fileInputRef.current?.click()}
                         className={FOCUS}
-                        style={{ ...btn(), borderStyle: 'dashed' }}
+                        style={{ ...btn() }}
                     >
                         <Upload size={13} aria-hidden /> Try another photo
                     </button>

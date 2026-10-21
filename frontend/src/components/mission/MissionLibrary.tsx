@@ -191,7 +191,7 @@ export default function MissionLibrary({ workspaceId, canPlan, droneId, loaded, 
                                     <div className="text-[14px] font-semibold text-app-text truncate flex items-center gap-1.5">
                                         {busy === m.id ? <Loader2 size={13} className="animate-spin shrink-0" /> : <FolderOpen size={13} className="text-app-text-muted shrink-0" />}
                                         <span className="truncate">{m.name || <span className="text-app-text-muted">Untitled {m.profile_name !== 'Manual' ? `(${m.profile_name})` : ''}</span>}</span>
-                                        {loaded?.id === m.id && <span className="shrink-0 text-xs font-bold px-1.5 rounded-full bg-app-accent-soft text-app-accent">Open</span>}
+                                        {loaded?.id === m.id && <span className="shrink-0 text-xs font-bold px-1.5 rounded-full bg-app-accent-soft text-app-selected-ink">Open</span>}
                                     </div>
                                     <div className="text-[13px] text-app-text-muted mt-0.5 tabular-nums">
                                         {m.waypoint_count} wp · {fmtDist(m.distance_m)} · {m.status} · {fmtWhen(m.updated_at ?? m.created_at)}

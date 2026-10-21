@@ -62,7 +62,7 @@ export const CHIP =
 const BTN_BASE =
   'inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-[6px] text-[13px] font-semibold whitespace-nowrap select-none ' +
   'transition-colors duration-[140ms] ease-[var(--ease-out)] ' + FOCUS +
-  ' disabled:cursor-not-allowed disabled:bg-app-surface-2 disabled:text-app-text-subtle disabled:border-dashed disabled:border-app-border'
+  ' disabled:cursor-not-allowed disabled:bg-app-surface-2 disabled:text-app-text-subtle disabled:border-app-border'
 
 /** Neutral outline button. */
 export const BTN =
@@ -74,7 +74,7 @@ export const BTN_PRIMARY =
 
 /** Accent outline, for a selected or secondary-important action. */
 export const BTN_ACCENT =
-  BTN_BASE + ' border border-app-accent/50 bg-app-accent-soft text-app-accent hover:bg-app-accent/20'
+  BTN_BASE + ' border border-app-accent/50 bg-app-accent-soft text-app-selected-ink hover:bg-app-accent/20'
 
 /** Moves the drone or can hurt someone. */
 export const BTN_WARN =
@@ -91,14 +91,14 @@ export const BTN_DANGER =
 /** Text input / select that follows the theme. */
 export const INPUT =
   'h-8 rounded-[6px] border border-app-border-strong bg-app-surface-2 px-2 text-[13px] text-app-text tabular-nums ' +
-  'placeholder:text-app-text-subtle ' + FOCUS + ' disabled:text-app-text-subtle disabled:border-dashed disabled:border-app-border'
+  'placeholder:text-app-text-subtle ' + FOCUS + ' disabled:text-app-text-subtle disabled:border-app-border'
 
 /** Segmented control container + option. */
 export const SEG = 'inline-flex items-center rounded-[6px] border border-app-border bg-app-surface-2 p-0.5 gap-0.5'
 export const segBtn = (active: boolean) =>
   'inline-flex items-center justify-center gap-1.5 h-7 px-2.5 rounded-[5px] text-[13px] font-semibold whitespace-nowrap ' +
   'transition-colors duration-[120ms] ' + FOCUS + ' ' +
-  (active ? 'bg-app-accent-soft text-app-accent shadow-sm' : 'text-app-text-muted hover:text-app-text hover:bg-app-raised')
+  (active ? 'bg-app-accent-soft text-app-selected-ink shadow-sm' : 'text-app-text-muted hover:text-app-text hover:bg-app-raised')
 
 /** Fonts for canvas labels: the body face (Nunito) resolved at draw time. */
 export function bodyFont(): string {

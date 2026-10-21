@@ -77,13 +77,14 @@ export function Section({ title, right, children }: { title: React.ReactNode; ri
     )
 }
 
-/** A setup-screen page heading: 22px title and one muted line. */
+/** The lead line of a console page. The page title itself is the H1 in the
+ *  console's top bar (components/auth/AppFrame), so `title` is not repeated
+ *  here; it only names the block for assistive tech. */
 export function PageHead({ title, sub, right }: { title: string; sub?: React.ReactNode; right?: React.ReactNode }) {
     return (
-        <div className="flex flex-wrap items-end gap-3 pb-1">
+        <div className="flex flex-wrap items-center gap-3 pb-1" aria-label={title} role="group">
             <div className="min-w-0 flex-1">
-                <h1 className="m-0 text-[22px] font-extrabold leading-7 text-app-text">{title}</h1>
-                {sub && <p className="m-0 mt-1 text-[14px] text-app-text-muted">{sub}</p>}
+                {sub && <p className="m-0 text-[14px] text-app-text-muted">{sub}</p>}
             </div>
             {right}
         </div>

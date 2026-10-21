@@ -13,11 +13,13 @@ export const FOCUS_OVERLAY =
 
 /**
  * Readable disabled state: keeps the label at >= 4.5:1 and signals
- * "unavailable" with a muted fill and dashed border instead of opacity.
+ * "unavailable" with a quiet solid edge (border, not border-strong), the
+ * surface-2 fill and subtle ink instead of opacity. Dashes are kept for
+ * drop zones only (design audit 3, 4.0).
  * Wrap the control in <WhyDisabled> so the reason shows on hover.
  */
 export const DISABLED =
-    'disabled:opacity-100 disabled:border-dashed disabled:border-app-border-strong disabled:bg-app-surface-2 disabled:text-app-text-subtle disabled:shadow-none'
+    'disabled:opacity-100 disabled:border-app-border disabled:bg-app-surface-2 disabled:text-app-text-subtle disabled:shadow-none'
 
 /** A control drawn over video or a map: the theme's frosted overlay (paper in
  *  light, night in dark) with matching ink. */

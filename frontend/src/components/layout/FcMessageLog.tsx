@@ -22,6 +22,7 @@ import { createPortal } from 'react-dom'
 import { useDroneStore } from '@/store/drone'
 import { ScrollText, X, Trash2, ChevronDown, AlertTriangle } from 'lucide-react'
 import { useHydrated } from '@/hooks/useClientValue'
+import { SimpleSelect } from '@/components/ui/select'
 
 /** MAVSDK's StatusTextType ascends with severity - 0 DEBUG … 7 EMERGENCY -
  *  unlike MAVLink's own SEVERITY enum, which descends. Reading it the wrong
@@ -190,22 +191,19 @@ function MessageWindow({ onClose, onClear, onRead }: {
                         {shown.length}{minSeverity > 0 ? ` of ${fcMessages.length}` : ''}
                     </span>
 
-                    <select
-                        value={minSeverity}
-                        onChange={e => setMinSeverity(Number(e.target.value))}
+                    <SimpleSelect
+                        value={String(minSeverity)}
+                        onValueChange={v => setMinSeverity(Number(v))}
                         title="Hide routine chatter"
-                        aria-label="Show messages from this severity up"
-                        className="ml-auto h-8 text-[13px] rounded-md px-2"
-                        style={{
-                            background: 'hsl(var(--app-surface-2))',
-                            border: '1px solid hsl(var(--app-border-strong))', color: 'hsl(var(--app-text))',
-                        }}
-                    >
-                        <option value={0}>All</option>
-                        <option value={2}>Notice +</option>
-                        <option value={3}>Warnings +</option>
-                        <option value={4}>Errors only</option>
-                    </select>
+                        ariaLabel="Show messages from this severity up"
+                        className="ml-auto data-[size=default]:h-8 text-[13px] bg-app-surface-2"
+                        options={[
+                            { value: '0', label: 'All' },
+                            { value: '2', label: 'Notice +' },
+                            { value: '3', label: 'Warnings +' },
+                            { value: '4', label: 'Errors only' },
+                        ]}
+                    />
 
                     <button
                         onClick={onClear}

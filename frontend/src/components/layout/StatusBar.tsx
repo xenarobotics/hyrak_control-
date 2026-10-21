@@ -6,12 +6,19 @@
 // included, so the drone's state and the four safety actions sit in the same
 // place whichever tab is open:
 //
-//   left    read-only status, icon + word, one colour each. Grey "-" while
-//           there is no drone (never a red NO FIX / 0%): red means act now.
-//   middle  Mode, and on pages without their own flight controls the arm and
-//           altitude tools (`tools`).
+//   left    read-only status, icon + word, one colour each. With no drone
+//           the readings fold into ONE "No drone" chip with a Connect action
+//           (never five grey dashes, never a red NO FIX / 0%): red means act
+//           now. Page extras (Command's Home and Avoid) follow the status,
+//           always in that spot, and only once there is something to say.
+//   middle  Set altitude while flying, then Mode. The same on every page:
+//           Arm and Take off live on the flight screens (Fly, Command).
 //   right   HOLD, RTL, LAND and KILL, fixed to the right edge at every width.
 //           KILL is the strongest element and asks to be pressed twice.
+//
+// The Settings toggle ("Status readings in the bar", `details`) only hides
+// the GPS, battery, altitude, timer and video readings. It never hides the
+// link state, Mode or the four safety actions.
 //
 // Below 768px the status folds into one summary chip that opens a sheet;
 // the four actions stay on the bar.
@@ -21,13 +28,14 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
+import { usePathname, useRouter } from 'next/navigation'
 import { useDroneStore, type ActionResult } from '@/store/drone'
 import { useDrone } from '@/hooks/useDrone'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import {
     Wifi, WifiOff, Shield, ShieldAlert, Satellite, Battery, Timer, CloudOff,
-    Navigation, PlaneLanding, PlaneTakeoff, TriangleAlert, MoveVertical, SignalMedium,
-    Loader2, CirclePause, Home, OctagonX, ChevronDown, X,
+    Navigation, PlaneLanding, TriangleAlert, MoveVertical, SignalMedium,
+    Loader2, CirclePause, Home, OctagonX, ChevronDown, X, Plug,
 } from 'lucide-react'
 import { gpsFixLabel, gpsFixColor, batteryTextColor, connectionQuality, connectionQualityColor, formatDuration } from '@/lib/osd'
 import { FLIGHT_MODES, modeOptionFor, modeLabel } from '@/lib/flightModes'
@@ -38,7 +46,12 @@ import { useClientValueOn } from '@/hooks/useClientValue'
 import { useFlightTimer } from '@/hooks/useFlightTimer'
 import { useLiveScope } from '@/hooks/useLiveScope'
 import { VIEW_ONLY_TEXT } from '@/components/layout/ViewOnly'
+import { SimpleSelect } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+
+/** Fired by the bar's "Connect" action on Fly and Command: those pages open
+ *  and focus their own link controls (elsewhere the action goes to Fly). */
+export const FOCUS_LINK_EVENT = 'hyrak-focus-link'
 
 // ── Page slot ────────────────────────────────────────────────────────────
 // A page renders <StatusBarSlot>{chips}</StatusBarSlot>; the bar owns where
@@ -105,9 +118,9 @@ function ActionButton({ onClick, disabled, why, title, active, pending, icon, la
                     'outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-surface',
                     compact ? 'px-2' : 'px-3',
                     disabled
-                        ? 'border-dashed border-app-border-strong bg-app-surface-2 text-app-text-muted'
+                        ? 'border-app-border bg-app-surface-2 text-app-text-subtle'
                         : active
-                            ? 'border-app-accent bg-app-accent-soft text-app-accent'
+                            ? 'border-app-accent bg-app-accent-soft text-app-selected-ink'
                             : tone === 'move'
                                 ? 'border-app-warn text-app-warn hover:bg-app-warn-soft'
                                 : 'border-app-border-strong text-app-text hover:bg-app-surface-2',
@@ -149,16 +162,17 @@ function useOnlineStatus(): boolean {
 
 // ── The bar ──────────────────────────────────────────────────────────────
 
-/** `tools`: show Arm and the altitude box. Off on Fly and Command, which
- *  carry those controls in their own layout. */
-export function StatusBar({ tools = true }: { tools?: boolean }) {
+/** `details`: show the GPS, battery, altitude, timer and video readings
+ *  (Settings, "Status readings in the bar"). The link state, Mode and Hold,
+ *  RTL, Land and Kill are always there. */
+export function StatusBar({ details = true }: { details?: boolean }) {
     const telemetry = useDroneStore(s => s.telemetry)
     const telemetryStatus = useDroneStore(s => s.telemetryStatus)
     const connectionStatus = useDroneStore(s => s.connectionStatus)
     const cvResults = useDroneStore(s => s.cvResults)
     const lastActionResult = useDroneStore(s => s.lastActionResult)
     const pendingAction = useDroneStore(s => s.pendingAction)
-    const { sendAction, arm, disarm, emergencyStop } = useDrone()
+    const { sendAction, emergencyStop } = useDrone()
     const { isStreaming, stats } = useWebRTCContext()
     const online = useOnlineStatus()
     const wide = useIsWide()
@@ -166,6 +180,8 @@ export function StatusBar({ tools = true }: { tools?: boolean }) {
     // Viewers watch only (docs/ACCESS_MODEL.md section 8a): every command
     // on the bar is disabled for them, the status stays.
     const { viewOnly } = useLiveScope()
+    const pathname = usePathname()
+    const router = useRouter()
 
     // Opt-in, and read on mount rather than during render - localStorage does
     // not exist while the server renders this. The event keeps a bar that is
@@ -203,7 +219,6 @@ export function StatusBar({ tools = true }: { tools?: boolean }) {
     const droneLinked = telemetryStatus === 'connected'
     const has = droneLinked && !!telemetry
     const armed = telemetry?.flight_mode.is_armed ?? false
-    const armPending = pendingAction?.action === 'arm' || pendingAction?.action === 'disarm'
     const modePending = pendingAction?.action === 'set_mode'
     const alt = telemetry?.position.relative_altitude_m ?? 0
     // AIRBORNE IS JUDGED FROM THE ALTITUDE TOO, not from the flag alone.
@@ -314,7 +329,28 @@ export function StatusBar({ tools = true }: { tools?: boolean }) {
         : telemetryStatus === 'connecting' ? { tone: 'warn', word: 'Connecting', icon: <Wifi size={15} />, title: 'Connecting to the drone' }
         : { tone: 'muted', word: 'No drone', icon: <WifiOff size={15} />, title: 'No drone connected. Connect one on Fly or Command.' }
 
-    const linkStat = (
+    // "Connect": Fly and Command open their own link controls; any other
+    // page goes to Fly, where the link and devices strip is open.
+    const onFlightPage = ['/fly', '/command'].some(p => pathname === p || pathname.startsWith(p + '/'))
+    const connect = () => {
+        setSheetOpen(false)
+        if (onFlightPage) window.dispatchEvent(new CustomEvent(FOCUS_LINK_EVENT))
+        else router.push('/fly')
+    }
+    const noDrone = link.tone === 'muted'
+
+    const linkStat = noDrone ? (
+        // One chip and one action instead of five grey readings.
+        <span title={link.title}
+            className="inline-flex shrink-0 items-center gap-2 h-8 pl-2.5 pr-1 rounded-md border border-app-border bg-app-surface-2 text-[13px] font-semibold text-app-text-muted whitespace-nowrap">
+            <span className="w-2 h-2 rounded-full shrink-0 bg-app-text-subtle" />
+            No drone
+            <button type="button" onClick={connect}
+                className="inline-flex items-center gap-1 h-6 px-2 rounded-[4px] text-[13px] font-bold text-app-selected-ink hover:bg-app-accent-soft outline-none focus-visible:ring-2 focus-visible:ring-app-accent">
+                <Plug size={13} /> Connect
+            </button>
+        </span>
+    ) : (
         <BarStat tone={link.tone} strong={link.tone === 'danger'} title={link.title}
             icon={<span className={cn('w-2 h-2 rounded-full shrink-0',
                 link.tone === 'ok' ? 'bg-app-ok' : link.tone === 'warn' ? 'bg-app-warn' : link.tone === 'danger' ? 'bg-app-danger' : 'bg-app-text-subtle')} />}>
@@ -322,33 +358,42 @@ export function StatusBar({ tools = true }: { tools?: boolean }) {
         </BarStat>
     )
 
-    const dash = <span className="text-app-text-muted">-</span>
+    // With no telemetry there is nothing to read: the link chip says so.
+    // The readings appear with the first packet.
     const statusItems = (
         <>
             {linkStat}
-            <BarStat tone={has ? (armed ? 'danger' : 'text') : 'muted'} strong={has && armed}
-                icon={armed ? <ShieldAlert size={15} /> : <Shield size={15} />} title="Motors" label="Motors">
-                {has ? (armed ? 'ARMED' : 'DISARMED') : dash}
-            </BarStat>
-            <BarStat tone="muted" label="GPS" title={has ? `GPS: ${gpsFixLabel(fix)}, ${sats} satellites` : 'GPS'}
-                icon={<Satellite size={15} style={has ? { color: gpsFixColor(fix, 'app') } : undefined} />}>
-                {has ? <><span style={{ color: gpsFixColor(fix, 'app') }}>{gpsFixLabel(fix) === 'NO FIX' ? 'No fix' : gpsFixLabel(fix)}</span><span>{sats}</span></> : dash}
-            </BarStat>
-            <BarStat tone="muted" label="Battery" title={has ? `Battery ${bat.toFixed(0)}%, ${telemetry?.battery.voltage_v.toFixed(1)} V` : 'Battery'}
-                icon={<Battery size={15} style={has ? { color: batteryTextColor(bat, 'app') } : undefined} />}>
-                {has ? <span className="font-bold" style={{ color: batteryTextColor(bat, 'app') }}>{bat.toFixed(0)}%</span> : dash}
-            </BarStat>
-            <BarStat tone={has ? (altMismatch ? 'danger' : 'text') : 'muted'} label="Altitude"
-                title={commandedAlt != null
-                    ? `Asked for ${commandedAlt.toFixed(1)} m, drone reports ${alt.toFixed(1)} m`
-                    : 'Altitude above takeoff'}
-                icon={<Navigation size={15} />}>
-                {has ? <>{alt.toFixed(1)} m{commandedAlt != null && <span className="text-app-text-muted font-normal">of {commandedAlt.toFixed(0)}</span>}</> : dash}
-            </BarStat>
-            <BarStat tone={running ? 'ok' : 'muted'} icon={<Timer size={15} />} title="Flight time" label="Flight time">
-                {formatDuration(elapsed)}
-            </BarStat>
-            {isStreaming && stats && (() => {
+            {has && (
+                <BarStat tone={armed ? 'danger' : 'text'} strong={armed}
+                    icon={armed ? <ShieldAlert size={15} /> : <Shield size={15} />} title="Motors" label="Motors">
+                    {armed ? 'ARMED' : 'DISARMED'}
+                </BarStat>
+            )}
+            {has && details && (
+                <>
+                    <BarStat tone="muted" label="GPS" title={`GPS: ${gpsFixLabel(fix)}, ${sats} satellites`}
+                        icon={<Satellite size={15} style={{ color: gpsFixColor(fix, 'app') }} />}>
+                        <span style={{ color: gpsFixColor(fix, 'app') }}>{gpsFixLabel(fix) === 'NO FIX' ? 'No fix' : gpsFixLabel(fix)}</span><span>{sats}</span>
+                    </BarStat>
+                    <BarStat tone="muted" label="Battery" title={`Battery ${bat.toFixed(0)}%, ${telemetry?.battery.voltage_v.toFixed(1)} V`}
+                        icon={<Battery size={15} style={{ color: batteryTextColor(bat, 'app') }} />}>
+                        <span className="font-bold" style={{ color: batteryTextColor(bat, 'app') }}>{bat.toFixed(0)}%</span>
+                    </BarStat>
+                    <BarStat tone={altMismatch ? 'danger' : 'text'} label="Altitude"
+                        title={commandedAlt != null
+                            ? `Asked for ${commandedAlt.toFixed(1)} m, drone reports ${alt.toFixed(1)} m`
+                            : 'Altitude above takeoff'}
+                        icon={<Navigation size={15} />}>
+                        {alt.toFixed(1)} m{commandedAlt != null && <span className="text-app-text-muted font-normal">of {commandedAlt.toFixed(0)}</span>}
+                    </BarStat>
+                </>
+            )}
+            {(has || running) && details && (
+                <BarStat tone={running ? 'ok' : 'muted'} icon={<Timer size={15} />} title="Flight time" label="Flight time">
+                    {formatDuration(elapsed)}
+                </BarStat>
+            )}
+            {details && isStreaming && stats && (() => {
                 const q = connectionQuality(stats.roundTripTime, stats.packetLoss)
                 return (
                     <BarStat tone="muted" title={`Video link ${q}, ${stats.roundTripTime.toFixed(0)} ms`}
@@ -368,6 +413,7 @@ export function StatusBar({ tools = true }: { tools?: boolean }) {
                     <span className="max-w-[320px] truncate">{refusal.reason}</span>
                 </BarStat>
             )}
+            {/* Page extras (Command: Home, Avoid), always right after the status. */}
             <span ref={setSlotEl} className="contents" />
         </>
     )
@@ -375,48 +421,31 @@ export function StatusBar({ tools = true }: { tools?: boolean }) {
     // Bound to the LIVE mode, not to "". A select that always shows a
     // placeholder cannot show you that the mode you picked was refused.
     const modeSelect = (
-        <label className="inline-flex shrink-0 items-center gap-1.5" title={droneLinked ? 'Change flight mode' : NO_LINK_REASON}>
+        <span className="inline-flex shrink-0 items-center gap-1.5" title={droneLinked ? 'Change flight mode' : NO_LINK_REASON}>
             <span className="text-[13px] font-semibold text-app-text-muted">Mode</span>
-            <span className="relative inline-flex">
-                <select
-                    disabled={!droneLinked || modePending}
-                    value={modeOptionFor(flightMode)}
-                    onChange={e => { const m = e.target.value; if (m) sendAction('set_mode', { mode: m }) }}
-                    aria-label="Change flight mode"
-                    className={cn('appearance-none h-9 pl-2.5 pr-7 rounded-md border text-[13px] font-semibold max-w-[150px]',
-                        'transition-colors duration-[140ms] outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-surface',
-                        droneLinked ? 'bg-app-surface-2 border-app-border-strong text-app-accent hover:border-app-accent'
-                            : 'bg-app-surface-2 border-dashed border-app-border-strong text-app-text-muted cursor-not-allowed')}
-                >
-                    <option value="">{modePending ? 'Switching' : droneLinked ? modeLabel(flightMode) : '-'}</option>
-                    {FLIGHT_MODES.map(m => (
-                        <option key={m.value} value={m.value}>{m.label}</option>
-                    ))}
-                </select>
-                <ChevronDown size={14} aria-hidden className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-app-text-muted" />
-            </span>
-        </label>
+            <SimpleSelect
+                disabled={!droneLinked || modePending}
+                value={modeOptionFor(flightMode)}
+                onValueChange={m => { if (m) sendAction('set_mode', { mode: m }) }}
+                ariaLabel="Change flight mode"
+                placeholder={modePending ? 'Switching' : droneLinked ? modeLabel(flightMode) : 'None'}
+                options={FLIGHT_MODES.map(m => ({ value: m.value, label: m.label }))}
+                className={cn('data-[size=default]:h-9 max-w-[160px] text-[13px] font-semibold',
+                    droneLinked ? 'bg-app-surface-2 text-app-selected-ink hover:border-app-accent' : '')}
+            />
+        </span>
     )
 
-    const altBtnOff = inAir ? (!canSetAlt || !altInput) : (!canTakeoff || !altInput)
-    const flightTools = tools && (
+    // Set altitude: an in-flight action, so it is on the bar on every page
+    // while the drone is flying. Before takeoff, Arm and Take off are on Fly
+    // and Command only.
+    const altBtnOff = !canSetAlt || !altInput
+    const altTool = droneLinked && inAir && (
         <fieldset disabled={viewOnly} className="contents">
-            <span title={!droneLinked ? NO_LINK_REASON : armPending ? 'Waiting for the drone to answer' : undefined}
-                className={cn('shrink-0', (!droneLinked || armPending) && 'cursor-not-allowed')}>
-                <button type="button" onClick={armed ? disarm : arm} disabled={!droneLinked || armPending}
-                    title={armed ? 'Disarm motors' : 'Arm motors'}
-                    className={cn('inline-flex items-center gap-1.5 h-9 px-3 rounded-md border text-[13px] font-bold whitespace-nowrap transition-colors duration-[140ms] active:scale-[.98]',
-                        'outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-surface',
-                        'disabled:border-dashed disabled:border-app-border-strong disabled:bg-app-surface-2 disabled:text-app-text-muted',
-                        armed ? 'border-app-warn text-app-warn hover:bg-app-warn-soft' : 'border-app-ok text-app-ok hover:bg-app-ok-soft')}>
-                    {armPending ? <Loader2 size={15} className="animate-spin" /> : <Shield size={15} />}
-                    {armPending ? (armed ? 'Disarming' : 'Arming') : armed ? 'Disarm' : 'Arm'}
-                </button>
-            </span>
             <span className="inline-flex shrink-0 items-center gap-1">
                 <span className={cn('inline-flex items-center h-9 w-[76px] pr-2 rounded-md border bg-app-surface-2',
                     'focus-within:ring-2 focus-within:ring-app-accent focus-within:ring-offset-2 focus-within:ring-offset-app-surface',
-                    altitudeLocked ? 'border-dashed border-app-border-strong' : 'border-app-border-strong')}>
+                    altitudeLocked ? 'border-app-border' : 'border-app-border-strong')}>
                     <input
                         type="number" min={1} max={120} step={1}
                         placeholder="Alt"
@@ -430,22 +459,21 @@ export function StatusBar({ tools = true }: { tools?: boolean }) {
                             : 'Target altitude in metres'}
                         aria-label="Target altitude in metres"
                         className={cn('w-full min-w-0 h-full pl-2.5 bg-transparent border-0 outline-none text-[13px] tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none placeholder:text-app-text-muted',
-                            altitudeLocked ? 'text-app-text-muted' : 'text-app-text')}
+                            altitudeLocked ? 'text-app-text-subtle' : 'text-app-text')}
                     />
                     <span aria-hidden className="text-[12px] text-app-text-muted">m</span>
                 </span>
-                <span title={altBtnOff ? (!droneLinked ? NO_LINK_REASON : !inAir && !armed ? 'Arm first' : !altInput ? 'Type an altitude first' : undefined) : undefined}
+                <span title={altBtnOff ? (!altInput ? 'Type an altitude first' : undefined) : undefined}
                     className={cn(altBtnOff && 'cursor-not-allowed')}>
                     <button type="button" onClick={handleAltAction} disabled={altBtnOff}
-                        title={inAir ? 'Move to this altitude while flying' : 'Take off to this altitude'}
+                        title="Move to this altitude while flying"
                         className={cn('inline-flex items-center gap-1.5 h-9 px-3 rounded-md border text-[13px] font-bold whitespace-nowrap transition-colors duration-[140ms] active:scale-[.98]',
                             'outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-surface',
-                            'disabled:border-dashed disabled:bg-app-surface-2',
+                            'disabled:border-app-border disabled:bg-app-surface-2 disabled:text-app-text-subtle',
                             altError ? 'border-app-danger text-app-danger'
-                                : altBtnOff ? 'border-app-border-strong text-app-text-muted'
-                                    : 'border-app-border-strong text-app-text hover:bg-app-surface-2')}>
-                        {inAir ? <MoveVertical size={15} /> : <PlaneTakeoff size={15} />}
-                        {altError ?? (inAir ? (altSent != null ? `Sent ${altSent} m` : 'Set altitude') : 'Take off')}
+                                : 'border-app-border-strong text-app-text hover:bg-app-surface-2')}>
+                        <MoveVertical size={15} />
+                        {altError ?? (altSent != null ? `Sent ${altSent} m` : 'Set altitude')}
                     </button>
                 </span>
             </span>
@@ -495,7 +523,8 @@ export function StatusBar({ tools = true }: { tools?: boolean }) {
                             'transition-[color,background-color,border-color,transform] duration-[140ms] ease-[var(--ease-out)] active:scale-[.98]',
                             'outline-none focus-visible:ring-2 focus-visible:ring-app-danger focus-visible:ring-offset-2 focus-visible:ring-offset-app-surface',
                             'border-app-danger bg-app-danger text-[hsl(var(--app-bg))] hover:brightness-110',
-                            'disabled:bg-app-danger-soft disabled:text-app-danger disabled:border-dashed disabled:hover:brightness-100')}>
+                            // At rest with no drone: a quiet solid outline, no tint.
+                            'disabled:bg-transparent disabled:text-app-danger disabled:border-[color-mix(in_srgb,var(--app-danger)_40%,transparent)] disabled:hover:brightness-100')}>
                         <OctagonX size={16} />
                         Kill
                     </button>
@@ -513,13 +542,13 @@ export function StatusBar({ tools = true }: { tools?: boolean }) {
                         : { tone: 'muted', text: 'No drone' }
 
     return (
-        <div ref={barRef} role="region" aria-label="Drone status and quick controls"
+        <div ref={barRef} role="region" aria-label="Drone status and quick controls" data-status-bar
             className="relative z-[2000] flex h-12 shrink-0 items-center gap-2 px-2 sm:px-3 min-w-0 border-b border-app-border bg-app-surface">
             {wide ? (
                 <div className="flex flex-1 min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] h-full">
                     {statusItems}
                     <span className="flex-1 min-w-2" />
-                    {flightTools && <>{flightTools}<Divider /></>}
+                    {altTool && <>{altTool}<Divider /></>}
                     {linksOn && <><StatusBarLinks /><Divider /></>}
                     {modeSelect}
                 </div>
@@ -542,13 +571,13 @@ export function StatusBar({ tools = true }: { tools?: boolean }) {
 
             {sheetShown && (
                 <div className="absolute left-0 right-0 top-full border-b border-app-border bg-app-surface shadow-[var(--app-shadow)] px-3 py-3 flex flex-col gap-3 animate-in fade-in-0 slide-in-from-top-2 duration-200 ease-[var(--ease-out)]">
-                    <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 [&_[data-bar-label]]:inline">{statusItems}</div>
+                    <div className={cn('gap-x-2 gap-y-0.5 [&_[data-bar-label]]:inline', has ? 'grid grid-cols-2' : 'flex flex-wrap items-center')}>{statusItems}</div>
                     <div className="flex flex-wrap items-center gap-2">
                         {modeSelect}
                         <span className="flex-1" />
                         <FcMessageLog />
                     </div>
-                    {flightTools && <div className="flex flex-wrap items-center gap-2">{flightTools}</div>}
+                    {altTool && <div className="flex flex-wrap items-center gap-2">{altTool}</div>}
                     {linksOn && <div className="flex flex-wrap items-center gap-2"><StatusBarLinks /></div>}
                 </div>
             )}

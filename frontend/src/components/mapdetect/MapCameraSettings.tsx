@@ -27,7 +27,7 @@ function Seg({ value, onChange }: { value: Direction; onChange: (v: Direction) =
                         minHeight: 32, padding: '0 12px', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer',
                         border: `1px solid ${value === o.v ? 'color-mix(in srgb, var(--app-accent) 55%, transparent)' : 'hsl(var(--app-border))'}`,
                         background: value === o.v ? 'var(--app-accent-soft)' : 'transparent',
-                        color: value === o.v ? 'var(--app-accent)' : 'hsl(var(--app-text))',
+                        color: value === o.v ? 'var(--app-selected-ink)' : 'hsl(var(--app-text))',
                         transition: 'background-color 120ms, color 120ms',
                     }}>
                     {o.label}

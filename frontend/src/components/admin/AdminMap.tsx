@@ -73,6 +73,10 @@ function droneIcon(d: MapDrone): L.DivIcon {
     })
 }
 
+// The site HYRAK flies (IIT Hyderabad), the same fallback as the Mission map.
+const DEFAULT_SITE: [number, number] = [17.594, 78.123]
+const EMPTY_AREAS: [number, number][][] = []
+
 // Fits all drones into view when they first appear (or on RECENTER), then
 // leaves the operator's pan/zoom alone.
 function FitAll({ points, fitKey }: { points: [number, number][]; fitKey: number }) {
@@ -87,17 +91,20 @@ function FitAll({ points, fitKey }: { points: [number, number][]; fitKey: number
 }
 
 // With no drone to show, open on the airspace zones instead of a whole
-// subcontinent: once, the first time zones arrive.
-function FitZones({ zones, skip }: { zones: ZoneFeature[]; skip: boolean }) {
+// subcontinent: once, the first time zones arrive. Without zones, the
+// workspaces' operating areas; without those, the default site (the
+// MapContainer's centre).
+function FitZones({ zones, areas, skip }: { zones: ZoneFeature[]; areas: [number, number][][]; skip: boolean }) {
     const map = useMap()
     const done = useRef(false)
     useEffect(() => {
         if (done.current || skip) return
-        const pts = zones.filter(z => z.properties.active).flatMap(z => zoneRings(z).flat()) as [number, number][]
+        let pts = zones.filter(z => z.properties.active).flatMap(z => zoneRings(z).flat()) as [number, number][]
+        if (pts.length < 2) pts = areas.flat()
         if (pts.length < 2) return
         done.current = true
         map.fitBounds(L.latLngBounds(pts), { padding: [60, 60], maxZoom: 16 })
-    }, [zones, skip, map])
+    }, [zones, areas, skip, map])
     return null
 }
 
@@ -119,10 +126,16 @@ function FlyToSelected({ target }: { target: { lat: number; lng: number; approx:
 export default function AdminMap({
     drones,
     zones = [],
+    areas = EMPTY_AREAS,
+    liveCount = 0,
     onSelect,
 }: {
     drones: MapDrone[]
     zones?: ZoneFeature[]
+    /** Workspace operating areas (outer rings), the fallback view. */
+    areas?: [number, number][][]
+    /** Connected sessions, located or not: an unlocated one gets a hint. */
+    liveCount?: number
     onSelect: (sessionId: string) => void
 }) {
     const layer = MAP_LAYERS.find(l => l.key === 'satellite') ?? MAP_LAYERS[0]
@@ -133,8 +146,8 @@ export default function AdminMap({
     return (
         <div className="absolute inset-0">
             <MapContainer
-                center={[17.445, 78.349]}
-                zoom={10}
+                center={DEFAULT_SITE}
+                zoom={15}
                 className="w-full h-full"
                 zoomControl={false}
                 attributionControl={false}
@@ -145,7 +158,7 @@ export default function AdminMap({
                     maxZoom={layer.maxZoom}
                 />
                 <FitAll points={points} fitKey={fitKey} />
-                <FitZones zones={zones} skip={points.length > 0} />
+                <FitZones zones={zones} areas={areas} skip={points.length > 0} />
                 <FlyToSelected
                     target={sel ? { lat: sel.lat, lng: sel.lng, approx: sel.approx } : null}
                 />
@@ -179,9 +192,9 @@ export default function AdminMap({
             >
                 Recenter
             </button>
-            {drones.length === 0 && (
+            {drones.length === 0 && liveCount > 0 && (
                 <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] px-3 py-1.5 rounded-full border border-overlay-border bg-overlay-scrim text-[13px] text-overlay-muted backdrop-blur-sm">
-                    No locatable clients
+                    Connected drones have no position yet
                 </div>
             )}
         </div>

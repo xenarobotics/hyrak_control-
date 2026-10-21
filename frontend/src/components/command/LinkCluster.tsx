@@ -26,6 +26,7 @@ import { setParams, type AvoidanceStatus } from '@/lib/avoidance'
 import { PersonCalibration } from './PersonCalibration'
 import { useLiveScope } from '@/hooks/useLiveScope'
 import { VIEW_ONLY_TEXT } from '@/components/layout/ViewOnly'
+import { FOCUS_LINK_EVENT } from '@/components/layout/StatusBar'
 import { cn } from '@/lib/utils'
 import { FOCUS } from '@/components/controls/flightStyles'
 import { WhyDisabled } from '@/components/controls/WhyDisabled'
@@ -36,10 +37,10 @@ function Pill({ on, busy, label, detail, onClick, disabled, title, icon, menuOpe
     disabled?: boolean; title?: string; icon: React.ReactNode; menuOpen: boolean; onMenu: () => void
 }) {
     // Live = green, ready to start = accent. Theme tokens, not fixed hex.
-    const tone = on ? 'border-app-ok bg-app-ok-soft text-app-ok' : 'border-app-accent bg-app-accent-soft text-app-accent'
+    const tone = on ? 'border-app-ok bg-app-ok-soft text-app-ok' : 'border-app-accent bg-app-accent-soft text-app-selected-ink'
     const off = disabled || busy
     return (
-        <div className={cn('h-10 flex rounded-md border transition-colors duration-[140ms]', tone, off && !busy && 'border-dashed border-app-border-strong bg-app-surface-2 text-app-text-subtle')}>
+        <div className={cn('h-10 flex rounded-md border transition-colors duration-[140ms]', tone, off && !busy && 'border-app-border bg-app-surface-2 text-app-text-subtle')}>
             <WhyDisabled reason={off && !busy ? title : null} className="h-full">
                 <button onClick={onClick} disabled={off} title={off ? undefined : title}
                     className={cn('h-full pl-3 pr-3 flex items-center gap-2 text-[13px] rounded-l-md transition-colors duration-[140ms] hover:bg-[color-mix(in_srgb,currentColor_8%,transparent)]', FOCUS)}>
@@ -87,7 +88,7 @@ function Item({ active, label, sub, onClick, disabled }: {
     return (
         <button onClick={onClick} disabled={disabled} aria-pressed={active}
             className={cn('w-full min-h-8 flex items-start gap-2 px-2 py-1.5 rounded-md text-left disabled:text-app-text-subtle disabled:cursor-not-allowed', FOCUS,
-                active ? 'bg-app-accent-soft text-app-accent font-bold' : 'text-app-text hover:bg-app-surface-2')}>
+                active ? 'bg-app-accent-soft text-app-selected-ink font-bold' : 'text-app-text hover:bg-app-surface-2')}>
             <span className="w-3.5 shrink-0 pt-0.5">{active && <Check size={13} />}</span>
             <span className="flex flex-col min-w-0">
                 <span className="truncate">{label}</span>
@@ -120,6 +121,12 @@ export function LinkCluster({ avoid }: { avoid: AvoidanceStatus | null }) {
     const [menu, setMenu] = useState<'telem' | 'video' | null>(null)
     const [src, setSrc] = useState<VideoSource>(() => getVideoSource())
     const [sensorBusy, setSensorBusy] = useState(false)
+    // The status bar's "Connect" (no drone) opens the telemetry menu here.
+    useEffect(() => {
+        const open = () => setMenu('telem')
+        window.addEventListener(FOCUS_LINK_EVENT, open)
+        return () => window.removeEventListener(FOCUS_LINK_EVENT, open)
+    }, [])
 
     // One restart at a time: a second change cancels the first (see
     // StatusBarLinks for the wedged-feed story behind this).

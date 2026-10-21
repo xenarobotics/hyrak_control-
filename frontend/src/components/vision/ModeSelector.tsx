@@ -153,7 +153,7 @@ export function ModeSelector() {
                             display: 'flex', alignItems: 'center', gap: 8, minHeight: 44,
                             padding: '8px 12px', borderRadius: 10, cursor: available && !isStreaming ? 'pointer' : 'not-allowed',
                             background: active ? TONE.accent.bg : SURFACE_2,
-                            border: `1px ${available ? 'solid' : 'dashed'} ${active ? 'var(--app-accent)' : available ? BORDER : BORDER_STRONG}`,
+                            border: `1px solid ${active ? 'var(--app-accent)' : BORDER}`,
                             transition: 'background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out)',
                         }}
                     >
