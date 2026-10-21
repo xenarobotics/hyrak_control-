@@ -246,6 +246,10 @@ async def say(session_id: str, text: str, *, role: str = "copilot", status: str 
     mid = msg_id or _msg_id()
     payload: Dict[str, Any] = {"id": mid, "role": role, "text": text, "ts": time.time(),
                                "status": status}
+    if status != "thinking":
+        # The conversation in the log, so "it did nothing" can be traced.
+        logger.info(f"Copilot {session_id[:8]} {role}/{status}: {text[:160]}"
+                    + (f" [card {card.get('kind')}: {card.get('title')}]" if card else ""))
     if speak is None:
         speak = role == "copilot" and status != "thinking"
     payload["speak"] = bool(speak)

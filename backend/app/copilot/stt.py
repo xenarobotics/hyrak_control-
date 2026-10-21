@@ -109,9 +109,12 @@ slot = ModelSlot("stt", _load)
 def transcribe_array(audio: np.ndarray, language: Optional[str] = None) -> str:
     """Blocking: run on slot.executor."""
     if audio.size < int(MIN_SECONDS * SAMPLE_RATE):
+        logger.info(f"Copilot STT dropped a {audio.size / SAMPLE_RATE:.2f}s clip: too short")
         return ""
     # Silence (a held button, nobody speaking) makes Whisper invent words.
-    if float(np.sqrt(np.mean(np.square(audio)))) < 0.002:
+    rms = float(np.sqrt(np.mean(np.square(audio))))
+    if rms < 0.002:
+        logger.info(f"Copilot STT dropped a {audio.size / SAMPLE_RATE:.1f}s clip: silent (rms {rms:.5f})")
         return ""
     import torch
     m = slot.get()

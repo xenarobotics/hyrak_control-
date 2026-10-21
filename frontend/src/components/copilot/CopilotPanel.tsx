@@ -17,7 +17,7 @@ import {
     MAX_TEXT, type CopilotMessage, type CopilotTask,
 } from '@/lib/copilot'
 import { CopilotCardView } from './CopilotCards'
-import { PushToTalkButton, MicExplain } from './PushToTalk'
+import { PushToTalkButton, MicExplain, MicPicker } from './PushToTalk'
 import { FollowMeChip } from './FollowMeSharer'
 
 // ── header ───────────────────────────────────────────────────────────────
@@ -217,6 +217,7 @@ function Composer({ text, setText, inputRef }: {
     return (
         <div className="shrink-0 flex flex-col gap-2 pt-1 border-t border-app-border">
             <MicExplain />
+            <MicPicker />
             <div className="hidden md:block pt-2"><PushToTalkButton disabled={!enabled} /></div>
             {hint && enabled && <p className="text-[12px] text-app-text-muted">{hint}</p>}
             {/* Phone: the round talk button floats at the right of this row. */}

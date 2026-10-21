@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react'
 import { Mic, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FOCUS } from '@/components/controls/flightStyles'
+import { SimpleSelect } from '@/components/ui/select'
 import {
     useCopilotStore, sendCopilotAudio, stopSpeaking, MAX_TALK_MS, MAX_AUDIO_BYTES,
 } from '@/lib/copilot'
@@ -43,6 +44,45 @@ function micKnownOk(): boolean {
 export function micSupported(): boolean {
     return typeof window !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined'
 }
+
+// The microphone to record from. The system default can be a virtual
+// device (a "Loopback" or "Monitor" source) that carries no room sound, so
+// the pilot can pick one, and without a pick a virtual default is skipped.
+const MIC_DEVICE_KEY = 'hyrak.copilot.micDevice'
+const VIRTUAL_MIC = /loopback|monitor|virtual|stereo mix|what u hear|null/i
+
+export function savedMicId(): string {
+    try { return localStorage.getItem(MIC_DEVICE_KEY) || '' } catch { return '' }
+}
+
+export function saveMicId(id: string): void {
+    try { if (id) localStorage.setItem(MIC_DEVICE_KEY, id); else localStorage.removeItem(MIC_DEVICE_KEY) } catch { /* not remembered */ }
+}
+
+export async function listMics(): Promise<MediaDeviceInfo[]> {
+    try {
+        return (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audioinput')
+    } catch { return [] }
+}
+
+/** The device to open: the pilot's pick if it still exists, else the
+ *  first real (non-virtual) microphone when the default looks virtual. */
+async function micToUse(): Promise<string> {
+    const mics = await listMics()
+    const saved = savedMicId()
+    if (saved && mics.some(m => m.deviceId === saved)) return saved
+    const def = mics.find(m => m.deviceId === 'default') ?? mics[0]
+    if (def && VIRTUAL_MIC.test(def.label)) {
+        const real = mics.find(m => m.deviceId !== 'default' && m.deviceId !== 'communications' && !VIRTUAL_MIC.test(m.label))
+        if (real) return real.deviceId
+    }
+    return ''
+}
+
+let micLabel = ''
+// Loudest level seen while recording: a take with no sound at all is not sent.
+let peak = 0
+const SILENT_PEAK = 0.02
 
 /** The explanation's button: ask the browser, then close the stream at once. */
 export async function requestMic(): Promise<void> {
@@ -84,6 +124,7 @@ function startMeter(s: MediaStream): void {
             let sum = 0
             for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v }
             const rms = Math.sqrt(sum / buf.length)
+            if (rms > peak) peak = rms
             useCopilotStore.getState().setTalk({ level: Math.min(1, rms * 4) })
         }
         meterRaf = requestAnimationFrame(tick)
@@ -110,10 +151,17 @@ export async function startTalk(): Promise<void> {
     stopSpeaking()
     releaseEarly = false
     st.setTalk({ phase: 'starting', startedAt: Date.now(), level: 0 })
+    const base = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
     try {
-        stream = await navigator.mediaDevices.getUserMedia({
-            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
-        })
+        const id = await micToUse()
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({ audio: id ? { ...base, deviceId: { exact: id } } : base })
+        } catch (e) {
+            // The chosen device is gone: fall back to the system default.
+            if (!id || (e as DOMException)?.name === 'NotAllowedError') throw e
+            stream = await navigator.mediaDevices.getUserMedia({ audio: base })
+        }
+        micLabel = stream.getAudioTracks()[0]?.label ?? ''
     } catch {
         cleanup()
         st.setTalk({ phase: 'idle', level: 0 })
@@ -132,6 +180,7 @@ export async function startTalk(): Promise<void> {
         return
     }
     chunks = []
+    peak = 0
     const startedAt = Date.now()
     recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data) }
     recorder.onstop = () => void finish(recorder?.mimeType || mime || 'audio/webm', Date.now() - startedAt)
@@ -162,6 +211,13 @@ async function finish(mime: string, ms: number): Promise<void> {
             st.addLocal('system', 'Too short. Hold the button while you speak.')
             return
         }
+        if (peak > 0 && peak < SILENT_PEAK) {
+            st.addLocal('system', `No sound came from ${micLabel ? `"${micLabel}"` : 'the microphone'}. `
+                + 'Pick another microphone below, or check it is not muted.', 'error')
+            st.setMicHint(true)
+            return
+        }
+        st.setMicHint(false)
         if (blob.size > MAX_AUDIO_BYTES) {
             st.addLocal('system', 'That recording is too large to send. Try a shorter command.', 'error')
             return
@@ -327,6 +383,34 @@ export function MicExplain() {
                     className={cn('h-9 px-3 rounded-md border border-app-border-strong text-[13px] font-semibold text-app-text hover:bg-app-surface', FOCUS)}>
                     Not now</button>
             </div>
+        </div>
+    )
+}
+
+/** Which microphone Copilot records from. Labels appear once the browser
+ *  has granted the microphone. */
+export function MicPicker() {
+    const mic = useCopilotStore(s => s.mic)
+    const hint = useCopilotStore(s => s.micHint)
+    const [mics, setMics] = useState<MediaDeviceInfo[]>([])
+    const [value, setValue] = useState(() => savedMicId())
+    useEffect(() => {
+        let alive = true
+        const load = () => void listMics().then(l => { if (alive) setMics(l) })
+        load()
+        navigator.mediaDevices?.addEventListener?.('devicechange', load)
+        return () => { alive = false; navigator.mediaDevices?.removeEventListener?.('devicechange', load) }
+    }, [mic])
+    const named = mics.filter(m => m.label)
+    if (named.length < 2 && !hint) return null
+    const options = [{ value: '', label: 'Automatic (skip virtual devices)' },
+        ...named.filter(m => m.deviceId !== 'default' && m.deviceId !== 'communications')
+            .map(m => ({ value: m.deviceId, label: m.label + (VIRTUAL_MIC.test(m.label) ? ' (virtual, no room sound)' : '') }))]
+    return (
+        <div className="flex items-center gap-2">
+            <Mic size={14} className={hint ? 'text-app-warn shrink-0' : 'text-app-text-muted shrink-0'} aria-hidden />
+            <SimpleSelect size="sm" value={value} options={options} ariaLabel="Microphone" className="flex-1 min-w-0"
+                onValueChange={v => { setValue(v); saveMicId(v); useCopilotStore.getState().setMicHint(false) }} />
         </div>
     )
 }

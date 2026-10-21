@@ -124,6 +124,8 @@ interface CopilotStore {
     showPreview: boolean
     talk: { phase: TalkPhase; startedAt: number; level: number }
     mic: MicAccess
+    /** The last take had no sound: show the microphone picker prominently. */
+    micHint: boolean
     /** Follow me: this browser's position sharing. */
     geo: { state: GeoShare; accuracy: number | null }
     sessionId: string | null
@@ -137,6 +139,7 @@ interface CopilotStore {
     setShowPreview: (v: boolean) => void
     setTalk: (t: Partial<CopilotStore['talk']>) => void
     setMic: (m: MicAccess) => void
+    setMicHint: (v: boolean) => void
     setPendingEnabled: (v: boolean | null) => void
     reset: (sessionId: string | null) => void
 }
@@ -168,6 +171,7 @@ export const useCopilotStore = create<CopilotStore>((set, get) => ({
     showPreview: true,
     talk: { phase: 'idle', startedAt: 0, level: 0 },
     mic: 'unknown',
+    micHint: false,
     geo: { state: 'off', accuracy: null },
     sessionId: null,
 
@@ -198,6 +202,7 @@ export const useCopilotStore = create<CopilotStore>((set, get) => ({
     setShowPreview: (v) => { writeFlag(PREVIEW_KEY, v); set({ showPreview: v }) },
     setTalk: (t) => set(s => ({ talk: { ...s.talk, ...t } })),
     setMic: (m) => set({ mic: m }),
+    setMicHint: (v) => set({ micHint: v }),
     setPendingEnabled: (v) => set({ pendingEnabled: v }),
     reset: (sessionId) => set({
         sessionId, enabled: false, pendingEnabled: null, loading: [], ready: NOT_READY, task: null,
