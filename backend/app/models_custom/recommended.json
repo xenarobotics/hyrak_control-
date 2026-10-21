@@ -1,5 +1,5 @@
 {
-  "_comment": "HYRAK-curated Hugging Face models for the model browser, grouped by use case. Every entry is checked at startup (app/models_custom/browse.validate_recommended): repo owner/name, file ends in .onnx, category one of the six listed there, task detect or classify, fps a number or null, verified_at YYYY-MM-DD or null (null = not yet run through the HYRAK check). license_note null means the server fills it for AGPL and cc-by-nc licences. Every entry below passed the HYRAK check on 2026-10-18 (RTX 4070); fps is the measured test-run speed. Optional `labels` supplies class names for files that only say \"class N\".",
+  "_comment": "HYRAK-curated Hugging Face models for the model browser, grouped by use case. Every entry is checked at startup (app/models_custom/browse.validate_recommended): repo owner/name, file ends in .onnx, category one of browse.CATEGORIES, task detect or classify, fps a number or null, verified_at YYYY-MM-DD or null (null = not yet run through the HYRAK check). license_note null means the server fills it for AGPL and cc-by-nc licences. Every entry passed the HYRAK check (import, inspect, test run) on its verified_at date (RTX 4070, shared GPU); fps is the measured test-run speed. Optional `labels` supplies class names for files that only say \"class N\".",
   "models": [
     {
       "repo": "EdgeFirst/visdrone-yolo11-det",
@@ -32,21 +32,6 @@
       ]
     },
     {
-      "repo": "Siddh10/sih-aerial-person",
-      "file": "best.onnx",
-      "name": "People from the air",
-      "category": "Drone and aerial view",
-      "task": "detect",
-      "what": "Finds people in aerial images, useful for search and rescue and crowd checks.",
-      "license": "agpl-3.0",
-      "license_note": null,
-      "classes_preview": [
-        "person"
-      ],
-      "fps": 92,
-      "verified_at": "2026-10-18"
-    },
-    {
       "repo": "engdarwish/drone-detection-yolov5",
       "file": "best.onnx",
       "name": "Other drones in the sky",
@@ -62,19 +47,295 @@
       "verified_at": "2026-10-18"
     },
     {
-      "repo": "AdamCodd/YOLOv11n-face-detection",
-      "file": "model.onnx",
-      "name": "Faces",
-      "category": "People and crowds",
+      "repo": "EdgeFirst/visdrone-yolo11-det",
+      "file": "tiled/onnx/visdrone-yolo11s-det-fp32-tiled.onnx",
+      "name": "Aerial traffic and people (small targets)",
+      "category": "Drone and aerial view",
       "task": "detect",
-      "what": "Finds human faces in the frame.",
+      "what": "Drone footage model built for tiled frames, so it keeps finding small, far-away people and vehicles from high altitude.",
+      "license": "agpl-3.0",
+      "license_note": null,
+      "classes_preview": [
+        "pedestrian",
+        "car",
+        "truck",
+        "motor"
+      ],
+      "fps": 114,
+      "verified_at": "2026-10-21",
+      "labels": [
+        "pedestrian",
+        "people",
+        "bicycle",
+        "car",
+        "van",
+        "truck",
+        "tricycle",
+        "awning-tricycle",
+        "bus",
+        "motor"
+      ]
+    },
+    {
+      "repo": "EdgeFirst/visdrone-yolo26-det",
+      "file": "640/onnx/visdrone-yolo26s-det-fp32-640.onnx",
+      "name": "Aerial traffic and people (YOLO26)",
+      "category": "Drone and aerial view",
+      "task": "detect",
+      "what": "Newer, fast drone footage model: people, cars, vans, trucks, buses, bikes and tricycles seen from above.",
+      "license": "agpl-3.0",
+      "license_note": null,
+      "classes_preview": [
+        "pedestrian",
+        "car",
+        "van",
+        "bus"
+      ],
+      "fps": 115,
+      "verified_at": "2026-10-21",
+      "labels": [
+        "pedestrian",
+        "people",
+        "bicycle",
+        "car",
+        "van",
+        "truck",
+        "tricycle",
+        "awning-tricycle",
+        "bus",
+        "motor"
+      ]
+    },
+    {
+      "repo": "banu4prasad/YOLO26m-transformer_VisDrone",
+      "file": "YOLO26m-transformer.onnx",
+      "name": "Aerial traffic and people (MIT licence)",
+      "category": "Drone and aerial view",
+      "task": "detect",
+      "what": "Larger drone footage model under a permissive licence: people, cars, vans, trucks, buses and bikes from above.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "pedestrian",
+        "people",
+        "bicycle",
+        "car"
+      ],
+      "fps": 59,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "RISEF/yolov11s-visdrone",
+      "file": "weights/best.onnx",
+      "name": "Aerial traffic and people (YOLO11s)",
+      "category": "Drone and aerial view",
+      "task": "detect",
+      "what": "Another drone footage model for people and ten kinds of road user seen from above; a good second opinion.",
+      "license": "agpl-3.0",
+      "license_note": null,
+      "classes_preview": [
+        "pedestrian",
+        "people",
+        "bicycle",
+        "car"
+      ],
+      "fps": 112,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "geobase/WALDO30-yolov8m-640x640",
+      "file": "onnx/model.onnx",
+      "name": "Overhead scene objects (WALDO)",
+      "category": "Drone and aerial view",
+      "task": "detect",
+      "what": "For straight-down drone or aerial views: finds vehicles, people, buildings, poles, boats, containers, diggers and solar panels.",
+      "license": "unspecified",
+      "license_note": "No licence is stated on this copy. The original WALDO model is open source; check it before commercial use.",
+      "classes_preview": [
+        "LightVehicle",
+        "Person",
+        "Building",
+        "SolarPanels"
+      ],
+      "fps": 63,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "lukasiktar11/aerial-traffic-detector",
+      "file": "best.onnx",
+      "name": "Aerial road users",
+      "category": "Drone and aerial view",
+      "task": "detect",
+      "what": "Finds cars, trucks, buses, motorcycles, bicycles and people in overhead traffic views.",
+      "license": "agpl-3.0",
+      "license_note": null,
+      "classes_preview": [
+        "bicycle",
+        "bus",
+        "car",
+        "motorcycle"
+      ],
+      "fps": 106,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "steven0226/uav-traffic-vision",
+      "file": "yolo26s_visdrone_640.onnx",
+      "name": "UAV traffic watch",
+      "category": "Drone and aerial view",
+      "task": "detect",
+      "what": "Drone traffic model that counts pedestrians, cars, vans, trucks, buses and bikes from above.",
+      "license": "other",
+      "license_note": "Custom licence on Hugging Face. Read it before commercial use.",
+      "classes_preview": [
+        "pedestrian",
+        "people",
+        "bicycle",
+        "car"
+      ],
+      "fps": 104,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "kshitijrajsharma/yolo11m-swimming-pools",
+      "file": "yolo11m_swimming_pools.onnx",
+      "name": "Swimming pools from above",
+      "category": "Drone and aerial view",
+      "task": "detect",
+      "what": "Finds swimming pools in aerial images, for mapping, mosquito control and property surveys.",
+      "license": "unspecified",
+      "license_note": "No licence is stated on Hugging Face. Check the repo before commercial use.",
+      "classes_preview": [
+        "swimming_pool"
+      ],
+      "fps": 69,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "Siddh10/sih-aerial-person",
+      "file": "best.onnx",
+      "name": "People from the air",
+      "category": "Search and rescue",
+      "task": "detect",
+      "what": "Finds people in aerial images, useful for search and rescue and crowd checks.",
+      "license": "agpl-3.0",
+      "license_note": null,
+      "classes_preview": [
+        "person"
+      ],
+      "fps": 92,
+      "verified_at": "2026-10-18"
+    },
+    {
+      "repo": "bbopen/camo-person-yolo",
+      "file": "camo-person-yolo.onnx",
+      "name": "Hidden or camouflaged people",
+      "category": "Search and rescue",
+      "task": "detect",
+      "what": "Trained to find people who blend into the background, such as in foliage or camouflage. Slower, high-resolution model.",
       "license": "apache-2.0",
       "license_note": null,
       "classes_preview": [
-        "face"
+        "person"
       ],
-      "fps": 118,
-      "verified_at": "2026-10-18"
+      "fps": 26,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "ubr-physical-ai/rescue-target-yolo26n",
+      "file": "v0_640_2cls.onnx",
+      "name": "Casualty in a hi-vis vest (experimental)",
+      "category": "Search and rescue",
+      "task": "detect",
+      "what": "Looks for a person lying on the ground in a hi-vis vest. Trained only on simulated scenes, so treat it as a trial model.",
+      "license": "agpl-3.0",
+      "license_note": null,
+      "classes_preview": [
+        "person_lying_vest",
+        "distractor"
+      ],
+      "fps": 132,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "kilanisainikhil/AerialEye",
+      "file": "best.onnx",
+      "name": "Disaster survey from the air",
+      "category": "Search and rescue",
+      "task": "detect",
+      "what": "For flood and disaster flights: finds people, SOS signs, vehicles, flood water, road damage and cracks.",
+      "license": "apache-2.0",
+      "license_note": null,
+      "classes_preview": [
+        "human",
+        "sos",
+        "flood",
+        "road_damage"
+      ],
+      "fps": 108,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "kucheroleksii777/FALLEN_DETECTION_SCORE3",
+      "file": "best.onnx",
+      "name": "Person lying on the ground",
+      "category": "Search and rescue",
+      "task": "detect",
+      "what": "Flags people who have fallen or are lying down, a quick cue for injured or collapsed people.",
+      "license": "unspecified",
+      "license_note": "No licence is stated on Hugging Face. Check the repo before commercial use.",
+      "classes_preview": [
+        "fallen person"
+      ],
+      "fps": 94,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "zainafxal/disaster-cv-model",
+      "file": "disaster_cv_model.onnx",
+      "name": "Disaster scene check",
+      "category": "Search and rescue",
+      "task": "classify",
+      "what": "Sorts a scene into no damage, flood water, fire or smoke, minor damage or major damage, to triage areas fast.",
+      "license": "apache-2.0",
+      "license_note": null,
+      "classes_preview": [
+        "no damage",
+        "flood water",
+        "fire or smoke",
+        "major damage"
+      ],
+      "fps": 625,
+      "verified_at": "2026-10-21",
+      "labels": [
+        "no damage",
+        "flood water",
+        "fire or smoke",
+        "minor damage",
+        "major damage"
+      ]
+    },
+    {
+      "repo": "Divyanshu-Kumar19/aapdasetu-damage-assessment",
+      "file": "best.onnx",
+      "name": "Building damage grade",
+      "category": "Search and rescue",
+      "task": "classify",
+      "what": "Grades a damaged building after a disaster as minor, major or destroyed. Works best with one building in view.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "DESTROYED",
+        "MAJOR",
+        "MINOR"
+      ],
+      "fps": 224,
+      "verified_at": "2026-10-21",
+      "labels": [
+        "DESTROYED",
+        "MAJOR",
+        "MINOR"
+      ]
     },
     {
       "repo": "deepghs/real_head_detection",
@@ -92,10 +353,145 @@
       "verified_at": "2026-10-18"
     },
     {
+      "repo": "chanubc/overhead-person-yolo11",
+      "file": "best.onnx",
+      "name": "People seen from straight above",
+      "category": "People and crowds",
+      "task": "detect",
+      "what": "Finds people from a top-down camera, such as a drone hovering overhead or a ceiling camera.",
+      "license": "cc-by-4.0",
+      "license_note": null,
+      "classes_preview": [
+        "person"
+      ],
+      "fps": 100,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "deepghs/real_person_detection",
+      "file": "person_detect_v0_s_yv11/model.onnx",
+      "name": "People (fast)",
+      "category": "People and crowds",
+      "task": "detect",
+      "what": "A quick, reliable person finder for ground-level and low-altitude views.",
+      "license": "unspecified",
+      "license_note": "No licence is stated on Hugging Face. Check the repo before commercial use.",
+      "classes_preview": [
+        "person"
+      ],
+      "fps": 110,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "trysem/YOLOv8_head_detector",
+      "file": "yolo-head-nano.onnx",
+      "name": "Heads (fast)",
+      "category": "People and crowds",
+      "task": "detect",
+      "what": "Finds heads, a light model for counting people in busy scenes.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "head"
+      ],
+      "fps": 148,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "AdamCodd/yolos-small-person",
+      "file": "onnx/model.onnx",
+      "name": "People (transformer)",
+      "category": "People and crowds",
+      "task": "detect",
+      "what": "A transformer-based person finder that copes well with partly hidden people. Slower than the YOLO ones.",
+      "license": "apache-2.0",
+      "license_note": null,
+      "classes_preview": [
+        "person"
+      ],
+      "fps": 33,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "AdamCodd/YOLOv11n-face-detection",
+      "file": "model.onnx",
+      "name": "Faces",
+      "category": "Faces and expressions",
+      "task": "detect",
+      "what": "Finds human faces in the frame.",
+      "license": "apache-2.0",
+      "license_note": null,
+      "classes_preview": [
+        "face"
+      ],
+      "fps": 118,
+      "verified_at": "2026-10-18"
+    },
+    {
+      "repo": "Banaxi-Tech/face-model",
+      "file": "yolo11n/face_yolo11n_fp32.onnx",
+      "name": "Faces (alternative)",
+      "category": "Faces and expressions",
+      "task": "detect",
+      "what": "A second small face finder, useful to compare against the main one.",
+      "license": "agpl-3.0",
+      "license_note": null,
+      "classes_preview": [
+        "face"
+      ],
+      "fps": 106,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "opencv/facial_expression_recognition",
+      "file": "facial_expression_recognition_mobilefacenet_2022july.onnx",
+      "name": "Facial expression",
+      "category": "Faces and expressions",
+      "task": "classify",
+      "what": "Names the expression on a close-up, front-facing face: angry, disgusted, fearful, happy, neutral, sad or surprised.",
+      "license": "apache-2.0",
+      "license_note": null,
+      "classes_preview": [
+        "happy",
+        "neutral",
+        "sad",
+        "angry"
+      ],
+      "fps": 763,
+      "verified_at": "2026-10-21",
+      "labels": [
+        "angry",
+        "disgust",
+        "fearful",
+        "happy",
+        "neutral",
+        "sad",
+        "surprised"
+      ]
+    },
+    {
+      "repo": "lukasiktar11/military-vehicle-detector-yolo26",
+      "file": "best.onnx",
+      "name": "Military vehicles",
+      "category": "Security",
+      "task": "detect",
+      "what": "Finds tanks, artillery, military trucks and vehicles, people and explosions.",
+      "license": "unspecified",
+      "license_note": "No licence is stated on Hugging Face. Check the repo before commercial use.",
+      "classes_preview": [
+        "tank",
+        "artillery",
+        "military_truck",
+        "explosion"
+      ],
+      "fps": 99,
+      "verified_at": "2026-10-21"
+    },
+    {
       "repo": "fireviewer/fire-smoke-yolo11m-strict-v1",
       "file": "model.onnx",
       "name": "Fire and smoke",
-      "category": "Fire and safety",
+      "category": "Fire, smoke and safety gear",
       "task": "detect",
       "what": "Spots visible flames and smoke, for wildfire and site fire watch.",
       "license": "agpl-3.0",
@@ -111,7 +507,7 @@
       "repo": "Hexmon/vyra-yolo-ppe-detection",
       "file": "best.onnx",
       "name": "Safety gear and falls",
-      "category": "Fire and safety",
+      "category": "Fire, smoke and safety gear",
       "task": "detect",
       "what": "Checks for hardhats, vests, gloves, goggles and masks, and flags falls.",
       "license": "cc-by-4.0",
@@ -129,7 +525,7 @@
       "repo": "yihong1120/Construction-Hazard-Detection",
       "file": "models/yolo26/onnx/yolo26n.onnx",
       "name": "Construction site hazards",
-      "category": "Fire and safety",
+      "category": "Fire, smoke and safety gear",
       "task": "detect",
       "what": "Finds workers, machinery and vehicles on site, and missing hardhats, masks or vests.",
       "license": "agpl-3.0",
@@ -142,6 +538,141 @@
       ],
       "fps": 104,
       "verified_at": "2026-10-18"
+    },
+    {
+      "repo": "fiacecson20/cctv-ai-fire-smoke",
+      "file": "best.onnx",
+      "name": "Fire and smoke (fast, MIT)",
+      "category": "Fire, smoke and safety gear",
+      "task": "detect",
+      "what": "A very fast fire and smoke spotter under a permissive licence, good for long patrol flights.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "fire",
+        "smoke"
+      ],
+      "fps": 236,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "DarshanM0di/fireandsmoke",
+      "file": "best (4).onnx",
+      "name": "Fire and smoke (second opinion)",
+      "category": "Fire, smoke and safety gear",
+      "task": "detect",
+      "what": "Another fire and smoke finder, handy to cross-check alerts from the main one.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "smoke",
+        "fire"
+      ],
+      "fps": 88,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "lukasiktar11/thremal-fire-detector",
+      "file": "best.onnx",
+      "name": "Fire on thermal camera",
+      "category": "Fire, smoke and safety gear",
+      "task": "detect",
+      "what": "For thermal cameras: picks out fire hot spots, including through smoke or at night.",
+      "license": "agpl-3.0",
+      "license_note": null,
+      "classes_preview": [
+        "Fire"
+      ],
+      "fps": 82,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "mancalazure/construction-ppe-safety",
+      "file": "best.onnx",
+      "name": "Site safety gear check",
+      "category": "Fire, smoke and safety gear",
+      "task": "detect",
+      "what": "Finds workers and checks hardhats, masks and vests (worn or missing), plus cones, machinery and vehicles.",
+      "license": "cc-by-4.0",
+      "license_note": null,
+      "classes_preview": [
+        "Hardhat",
+        "NO-Hardhat",
+        "Safety Vest",
+        "NO-Safety Vest"
+      ],
+      "fps": 118,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "ayushgupta7777/safetyvision-yolov8",
+      "file": "v2/best_640.onnx",
+      "name": "Safety gear, harness and falls",
+      "category": "Fire, smoke and safety gear",
+      "task": "detect",
+      "what": "Checks hardhats, vests, gloves, goggles, masks and harnesses, and flags a person who has fallen.",
+      "license": "agpl-3.0",
+      "license_note": null,
+      "classes_preview": [
+        "Hardhat",
+        "No_Harness",
+        "NO-Safety Vest",
+        "Fall-Detected"
+      ],
+      "fps": 100,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "nduka1999/nd_ppe_yolo11s",
+      "file": "best.onnx",
+      "name": "Hardhats and vests (MIT)",
+      "category": "Fire, smoke and safety gear",
+      "task": "detect",
+      "what": "Finds workers and whether they wear a hardhat and a hi-vis vest, under a permissive licence.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "hardhat",
+        "no-hardhat",
+        "vest",
+        "no-vest"
+      ],
+      "fps": 99,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "fiacecson20/cctv-ai-ppe",
+      "file": "best.onnx",
+      "name": "Helmets and vests (very fast)",
+      "category": "Fire, smoke and safety gear",
+      "task": "detect",
+      "what": "A very light helmet, bare head and vest finder for wide site views.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "helmet",
+        "head",
+        "vest"
+      ],
+      "fps": 341,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "MeetCool/yolov8n-smoking-detection",
+      "file": "models/fine_tune_YOLOv8n.onnx",
+      "name": "Smoking on site",
+      "category": "Fire, smoke and safety gear",
+      "task": "detect",
+      "what": "Finds cigarettes and smokers, for no-smoking zones such as fuel depots and refineries.",
+      "license": "unspecified",
+      "license_note": "No licence is stated on Hugging Face. Check the repo before commercial use.",
+      "classes_preview": [
+        "cigarette",
+        "person",
+        "smoke"
+      ],
+      "fps": 80,
+      "verified_at": "2026-10-21"
     },
     {
       "repo": "vinothvikas1987/pothole-detection-yolov8",
@@ -180,10 +711,81 @@
       "verified_at": "2026-10-18"
     },
     {
+      "repo": "ACloudCenter/yolo11s-insplad-powerline",
+      "file": "detector-1280-fp32.onnx",
+      "name": "Power line components",
+      "category": "Inspection and infrastructure",
+      "task": "detect",
+      "what": "For power line drone inspection: finds insulators, dampers, spacers, shackles, yokes and tower plates.",
+      "license": "cc-by-nc-3.0",
+      "license_note": null,
+      "classes_preview": [
+        "polymer insulator",
+        "glass insulator",
+        "stockbridge damper",
+        "spacer"
+      ],
+      "fps": 20,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "4keles/solar-panel-od",
+      "file": "v1.2.1/best.onnx",
+      "name": "Solar panel soiling and damage",
+      "category": "Inspection and infrastructure",
+      "task": "detect",
+      "what": "On normal camera images of solar panels, finds bird droppings, dust, leaves, snow and physical damage.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "bird_drop",
+        "bird_feather",
+        "physical_damage",
+        "dust_partical"
+      ],
+      "fps": 112,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "saifElgalaly/solarscan-yolov8n-cls",
+      "file": "best.onnx",
+      "name": "Solar panel condition",
+      "category": "Inspection and infrastructure",
+      "task": "classify",
+      "what": "Says whether a close view of a solar panel is clean, dusty, snow covered, bird-fouled or damaged.",
+      "license": "unspecified",
+      "license_note": "No licence is stated on Hugging Face. Check the repo before commercial use.",
+      "classes_preview": [
+        "Clean",
+        "Dusty",
+        "Bird-drop",
+        "Physical-Damage"
+      ],
+      "fps": 893,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "avinashhm/welding-defect-yolov8-full-training",
+      "file": "weights/best.onnx",
+      "name": "Weld quality",
+      "category": "Inspection and infrastructure",
+      "task": "detect",
+      "what": "Marks good welds, bad welds and weld defects on close-up images of steel structures.",
+      "license": "unspecified",
+      "license_note": "No licence is stated on Hugging Face. Check the repo before commercial use.",
+      "classes_preview": [
+        "Bad Weld",
+        "Good Weld",
+        "Defect"
+      ],
+      "fps": 105,
+      "verified_at": "2026-10-21"
+    },
+    {
       "repo": "morsetechlab/yolov11-license-plate-detection",
       "file": "license-plate-finetune-v1n.onnx",
       "name": "Number plates",
-      "category": "Roads and vehicles",
+      "category": "Vehicles, roads and plates",
       "task": "detect",
       "what": "Finds vehicle number plates in the frame.",
       "license": "agpl-3.0",
@@ -198,7 +800,7 @@
       "repo": "Logesshhh/road-anomaly-pothole-yolov8m",
       "file": "pothole_yolov8.onnx",
       "name": "Road anomalies",
-      "category": "Roads and vehicles",
+      "category": "Vehicles, roads and plates",
       "task": "detect",
       "what": "Potholes, cracks, vehicles and pedestrians on the road surface.",
       "license": "apache-2.0",
@@ -213,10 +815,183 @@
       "verified_at": "2026-10-18"
     },
     {
+      "repo": "Kodjaoglanian/pavimentos-yolo11s",
+      "file": "exports/best.onnx",
+      "name": "Road cracks and manholes",
+      "category": "Vehicles, roads and plates",
+      "task": "detect",
+      "what": "For road surveys: finds potholes, three kinds of crack and manhole covers.",
+      "license": "agpl-3.0",
+      "license_note": null,
+      "classes_preview": [
+        "pothole",
+        "longitudinal crack",
+        "alligator crack",
+        "manhole cover"
+      ],
+      "fps": 149,
+      "verified_at": "2026-10-21",
+      "labels": [
+        "pothole",
+        "longitudinal crack",
+        "transverse crack",
+        "alligator crack",
+        "manhole cover"
+      ]
+    },
+    {
+      "repo": "tahaUgan/pothole-yolo11n",
+      "file": "pothole2v_320.onnx",
+      "name": "Potholes and manholes (very fast)",
+      "category": "Vehicles, roads and plates",
+      "task": "detect",
+      "what": "A tiny, very fast model that finds potholes and sewer manholes on roads.",
+      "license": "cc-by-4.0",
+      "license_note": null,
+      "classes_preview": [
+        "Pothole",
+        "Sewage-Manhole"
+      ],
+      "fps": 273,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "DarshanM0di/potholedetect",
+      "file": "best (3).onnx",
+      "name": "Potholes (MIT)",
+      "category": "Vehicles, roads and plates",
+      "task": "detect",
+      "what": "Finds potholes, under a permissive licence.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "pothole"
+      ],
+      "fps": 101,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "ishaqinu/yolo26n-license-plate-detection",
+      "file": "alpr_26n.onnx",
+      "name": "Number plates (YOLO26)",
+      "category": "Vehicles, roads and plates",
+      "task": "detect",
+      "what": "A newer, fast number plate finder.",
+      "license": "agpl-3.0",
+      "license_note": null,
+      "classes_preview": [
+        "License_Plate"
+      ],
+      "fps": 126,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "0xnu/european-license-plate-recognition",
+      "file": "model.onnx",
+      "name": "European number plates",
+      "category": "Vehicles, roads and plates",
+      "task": "detect",
+      "what": "Finds number plates, trained on European plates, under a permissive licence.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "license_plate"
+      ],
+      "fps": 106,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "Topurrra/rtdetr-license-plate-detection-onnx",
+      "file": "plate_rtdetr.onnx",
+      "name": "Number plates (RT-DETR)",
+      "category": "Vehicles, roads and plates",
+      "task": "detect",
+      "what": "A transformer-based plate finder that needs no extra tuning, under a permissive licence.",
+      "license": "apache-2.0",
+      "license_note": null,
+      "classes_preview": [
+        "license_plate"
+      ],
+      "fps": 84,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "sosa123454321/cekicin-damage-yolo11n-onnx",
+      "file": "model.onnx",
+      "name": "Car body damage",
+      "category": "Vehicles, roads and plates",
+      "task": "detect",
+      "what": "Finds dents and broken lights, mirrors or windscreens on cars, for accident and fleet checks.",
+      "license": "agpl-3.0",
+      "license_note": null,
+      "classes_preview": [
+        "front-bumper-dent",
+        "Headlight-damage",
+        "Front-windscreen-damage",
+        "doorouter-dent"
+      ],
+      "fps": 111,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "bhundredss/vehicle_detection",
+      "file": "vehicle_detection.onnx",
+      "name": "Vehicle types",
+      "category": "Vehicles, roads and plates",
+      "task": "detect",
+      "what": "Finds and names cars, trucks, buses, motorcycles and bicycles, under a permissive licence.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "bicycle",
+        "bus",
+        "car",
+        "motorcycle"
+      ],
+      "fps": 112,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "Bumbimsudarat/cctv-accident-detection",
+      "file": "best(m).onnx",
+      "name": "Road accidents",
+      "category": "Vehicles, roads and plates",
+      "task": "detect",
+      "what": "Spots crashes between cars or between a car and a bike, plus normal cars and bikes, for incident response.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "car accident",
+        "car-bike accident",
+        "car-car accident",
+        "cars"
+      ],
+      "fps": 48,
+      "verified_at": "2026-10-21"
+    },
+    {
+      "repo": "star092304/traffic-sign-detection-vietnam-yolo",
+      "file": "best.onnx",
+      "name": "Traffic signs (Vietnam)",
+      "category": "Vehicles, roads and plates",
+      "task": "detect",
+      "what": "Finds and names 82 kinds of road sign, such as speed limits and no-entry. Trained on Vietnamese signs.",
+      "license": "apache-2.0",
+      "license_note": null,
+      "classes_preview": [
+        "No Entry",
+        "Speed limit 40km/h",
+        "Danger",
+        "No U-Turn"
+      ],
+      "fps": 104,
+      "verified_at": "2026-10-21"
+    },
+    {
       "repo": "onnx-community/mobilenet_v2_1.0_224-plant-disease-identification-ONNX",
       "file": "onnx/model.onnx",
       "name": "Plant disease",
-      "category": "Agriculture and wildlife",
+      "category": "Agriculture and plants",
       "task": "classify",
       "what": "Names 38 crop diseases or healthy leaves. Works best on close-up leaf images.",
       "license": "other",
@@ -233,7 +1008,7 @@
       "repo": "chriamue/bird-species-classifier",
       "file": "model.onnx",
       "name": "Bird species",
-      "category": "Agriculture and wildlife",
+      "category": "Animals and wildlife",
       "task": "classify",
       "what": "Names 525 bird species from a close view of the bird.",
       "license": "mit",
@@ -246,26 +1021,10 @@
       "verified_at": "2026-10-18"
     },
     {
-      "repo": "NMFS-OSI/yolo11n-cls-noaa-esd-coral-bleaching",
-      "file": "yolov11n-cls-noaa-esd-coral-bleaching-classifier.onnx",
-      "name": "Coral bleaching",
-      "category": "Agriculture and wildlife",
-      "task": "classify",
-      "what": "Tells healthy coral from bleached coral, for marine surveys.",
-      "license": "agpl-3.0",
-      "license_note": null,
-      "classes_preview": [
-        "CORAL",
-        "CORAL_BL"
-      ],
-      "fps": 690,
-      "verified_at": "2026-10-18"
-    },
-    {
       "repo": "bsgcasa/yolov8-animal-detector",
       "file": "best.onnx",
       "name": "Farm and common animals",
-      "category": "Agriculture and wildlife",
+      "category": "Animals and wildlife",
       "task": "detect",
       "what": "Finds horses, deer, dogs, cats, birds and other animals.",
       "license": "agpl-3.0",
@@ -283,7 +1042,7 @@
       "repo": "UWyo/wildlife-north-american-wildlife",
       "file": "yolo26s_finetuned_26-wildlife-class_by_J.Gong_uwyo_2026-05-28.onnx",
       "name": "North American wildlife",
-      "category": "Agriculture and wildlife",
+      "category": "Animals and wildlife",
       "task": "detect",
       "what": "Finds 26 wild species such as bison, elk, bears, deer and eagles, for wildlife surveys.",
       "license": "cc-by-4.0",
@@ -296,6 +1055,52 @@
       ],
       "fps": 75,
       "verified_at": "2026-10-18"
+    },
+    {
+      "repo": "NMFS-OSI/yolo11n-cls-noaa-esd-coral-bleaching",
+      "file": "yolov11n-cls-noaa-esd-coral-bleaching-classifier.onnx",
+      "name": "Coral bleaching",
+      "category": "Water, ships and coast",
+      "task": "classify",
+      "what": "Tells healthy coral from bleached coral, for marine surveys.",
+      "license": "agpl-3.0",
+      "license_note": null,
+      "classes_preview": [
+        "CORAL",
+        "CORAL_BL"
+      ],
+      "fps": 690,
+      "verified_at": "2026-10-18"
+    },
+    {
+      "repo": "krylox/resnet50-eurosat-onnx",
+      "file": "model.onnx",
+      "name": "Land use from above",
+      "category": "Scene and weather classification",
+      "task": "classify",
+      "what": "Names the land type in a top-down image: forest, river, highway, farmland, lake, industrial, housing or pasture.",
+      "license": "mit",
+      "license_note": null,
+      "classes_preview": [
+        "Forest",
+        "River",
+        "Highway",
+        "Residential"
+      ],
+      "fps": 235,
+      "verified_at": "2026-10-21",
+      "labels": [
+        "Forest",
+        "River",
+        "Highway",
+        "AnnualCrop",
+        "SeaLake",
+        "HerbaceousVegetation",
+        "Industrial",
+        "Residential",
+        "PermanentCrop",
+        "Pasture"
+      ]
     },
     {
       "repo": "onnx-community/rfdetr_nano-ONNX",
