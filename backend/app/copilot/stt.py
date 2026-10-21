@@ -35,8 +35,28 @@ class AudioError(Exception):
     pass
 
 
-def _ffmpeg(src: str, data: Optional[bytes], max_seconds: float) -> subprocess.CompletedProcess:
-    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-i", src,
+def container_of(data: bytes) -> str:
+    """The ffmpeg demuxer for what a browser recorder makes, from the file's
+    own signature (never the client's mime string): webm/matroska, ogg,
+    wav, or mp4/m4a. Anything else is refused before ffmpeg sees it, so a
+    crafted upload cannot pick a demuxer (playlists, concat lists) that
+    opens other files or URLs."""
+    if data[:4] == b"\x1a\x45\xdf\xa3":
+        return "matroska"
+    if data[:4] == b"OggS":
+        return "ogg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return "wav"
+    if data[4:8] == b"ftyp":
+        return "mov"
+    raise AudioError("unsupported audio format")
+
+
+def _ffmpeg(src: str, data: Optional[bytes], max_seconds: float, fmt: str) -> subprocess.CompletedProcess:
+    # The demuxer is fixed by container_of and only the pipe or our own
+    # temporary file may be read.
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+           "-protocol_whitelist", "pipe,file", "-f", fmt, "-i", src,
            "-t", f"{max_seconds:g}", "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "f32le", "pipe:1"]
     try:
         return subprocess.run(cmd, input=data, capture_output=True, timeout=20, check=False)
@@ -56,14 +76,15 @@ def decode_audio(data: bytes, max_seconds: float = MAX_SECONDS, mime: str = "") 
         raise AudioError("no audio")
     if len(data) > MAX_BYTES:
         raise AudioError("audio too long")
-    out = _ffmpeg("pipe:0", data, max_seconds)
+    fmt = container_of(data)
+    out = _ffmpeg("pipe:0", data, max_seconds, fmt)
     if out.returncode != 0 or not out.stdout:
         import tempfile
         suffix = ".mp4" if "mp4" in mime or "m4a" in mime or "aac" in mime else ".bin"
         with tempfile.NamedTemporaryFile(prefix="copilot-", suffix=suffix) as f:
             f.write(data)
             f.flush()
-            out = _ffmpeg(f.name, None, max_seconds)
+            out = _ffmpeg(f.name, None, max_seconds, fmt)
     if out.returncode != 0 or not out.stdout:
         err = out.stderr.decode(errors="replace").strip().splitlines()[-1:] or ["no output"]
         raise AudioError(f"could not decode the audio ({err[0][:120]})")

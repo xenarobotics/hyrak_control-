@@ -931,6 +931,34 @@ async def test_orbit_around_the_drone_and_not_supported(rig):
     assert "does not support" in last(rig)["text"]
 
 
+async def test_orbit_refuses_a_red_zone_inside_the_circle_or_on_the_way(rig):
+    from app.zones import engine
+    await on(rig)
+    # A small no-fly box 8 m east of the drone: inside the 20 m orbit,
+    # touching neither the circle nor its centre.
+    lat, lng = survey.offset(17.6, 78.1, 8.0, 0.0)
+    engine.set_zones([{"id": "r1", "name": "Mast", "zone_class": "red", "geometry": square(lat, lng, 2.0)}])
+    await service.handle_text(rig.s, "orbit here at 20 metres radius")
+    assert last(rig)["status"] == "refused"
+    # The transit leg: a no-fly box between the drone and a far circle.
+    mid = survey.offset(17.6, 78.1, 0.0, 150.0)
+    far = survey.offset(17.6, 78.1, 0.0, 300.0)
+    engine.set_zones([{"id": "r2", "name": "Tower", "zone_class": "red", "geometry": square(*mid, 10.0)}])
+    assert await service._ring_reason(rig.s, far[0], far[1], 20.0, 30.0, from_point=(17.6, 78.1)) == "dest_red"
+    assert await service._ring_reason(rig.s, far[0], far[1], 20.0, 30.0) is None
+
+
+def test_audio_container_comes_from_the_file_not_the_client():
+    from app.copilot import stt
+    assert stt.container_of(b"\x1a\x45\xdf\xa3" + b"\0" * 8) == "matroska"
+    assert stt.container_of(b"OggS" + b"\0" * 8) == "ogg"
+    assert stt.container_of(b"RIFF\0\0\0\0WAVE") == "wav"
+    assert stt.container_of(b"\0\0\0\x18ftypmp42") == "mov"
+    for bad in (b"#EXTM3U\nhttp://example.com/x.ts", b"ffconcat version 1.0\nfile /etc/passwd", b"\0" * 16):
+        with pytest.raises(stt.AudioError):
+            stt.decode_audio(bad)
+
+
 async def test_orbit_round_the_target_needs_its_position(rig):
     await on(rig)
     await service.handle_text(rig.s, "orbit the target at 30 metres radius")

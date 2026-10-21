@@ -42,7 +42,7 @@ import re
 import secrets
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.copilot import planner as _planner
 from app.copilot import skills, stt, survey, vision
@@ -807,7 +807,9 @@ async def _prepare(session, tel, skill: str, args: dict):
         if isinstance(center, str):
             return center, None
         clat, clng, alt = center
-        code = await _ring_reason(session, clat, clng, args["radius_m"], alt)
+        pos = skills.position(tel)
+        code = await _ring_reason(session, clat, clng, args["radius_m"], alt,
+                                  from_point=(pos[0], pos[1]) if pos else None)
         if code:
             return code, None
         ring = [survey.offset(clat, clng, args["radius_m"] * math.sin(a), args["radius_m"] * math.cos(a))
@@ -862,13 +864,27 @@ async def _orbit_center(session, tel, center: str):
     return tp[0], tp[1], pos[2]
 
 
-async def _ring_reason(session, lat, lng, radius, alt) -> Optional[str]:
+async def _ring_reason(session, lat, lng, radius, alt, *,
+                       from_point: Optional[Tuple[float, float]] = None) -> Optional[str]:
+    """Zones anywhere the orbit can take the drone: the circle itself, the
+    disc inside it (radial segments, so a zone wholly inside the circle is
+    caught too), and the transit from the drone to the nearest point of the
+    circle."""
     from app.zones import engine
     ring = [survey.offset(lat, lng, radius * math.sin(a), radius * math.cos(a))
             for a in (i * math.pi / 8 for i in range(17))]
-    zones = engine.check_path(ring, corridor_m=5.0)["zones"]
+    zones = list(engine.check_path(ring, corridor_m=5.0)["zones"])
     zones += engine.check_point(lat, lng, alt)["zones"]
-    return await skills._zones_reason(session, zones, lat, lng)
+    for p in ring[:16]:
+        zones += engine.check_path([(lat, lng), p], corridor_m=5.0)["zones"]
+    if from_point is not None:
+        nearest = min(ring, key=lambda p: (p[0] - from_point[0]) ** 2 + (p[1] - from_point[1]) ** 2)
+        zones += engine.check_path([from_point, nearest], corridor_m=5.0)["zones"]
+    seen, unique = set(), []
+    for z in zones:
+        if z["id"] not in seen:
+            seen.add(z["id"]); unique.append(z)
+    return await skills._zones_reason(session, unique, lat, lng)
 
 
 # ── running a confirmed plan ──────────────────────────────────────────────
