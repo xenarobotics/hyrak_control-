@@ -11,6 +11,7 @@ from aiortc import MediaStreamTrack
 from av import VideoFrame
 
 from app.avoidance.sensing import camera as _sensing
+from app.copilot import service as _copilot
 from app.sessions import observer
 
 if TYPE_CHECKING:
@@ -204,6 +205,10 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
         _t = self._lap("source_wait", _t)
         frame = self._skip_to_live_edge(frame)
         _t = self._lap("skip", _t)
+        # HYRAK Copilot looks at the latest raw frame when asked (kept by
+        # reference, converted only then). A dict lookup when it is off.
+        if _copilot.wants_frames(self.session_id):
+            _copilot.note_frame(self.session_id, frame)
 
         self._frame_count += 1
         now = time.time()
@@ -392,6 +397,15 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
                     from app.vision.base import warn_limited
                     warn_limited(f"rules:{self.session_id}",
                                  f"Model rules failed for session {self.session_id[:8]}: {e!r}")
+
+            # HYRAK Copilot (app/copilot/service.py): the tracks it matches
+            # targets to, and its follow / track target as copilot_target.
+            try:
+                _copilot.on_result(self.session_id, mode.value, meta, capture, annotated_bgr)
+            except Exception as e:
+                from app.vision.base import warn_limited
+                warn_limited(f"copilot:{self.session_id}",
+                             f"Copilot frame hook failed for session {self.session_id[:8]}: {e!r}")
 
             # ── Send drone command directly to MAVLink ──────────────
             drone_cmd = meta.get("drone_command")

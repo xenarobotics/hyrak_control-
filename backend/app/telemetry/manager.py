@@ -1380,6 +1380,37 @@ class TelemetryManager:
             return False
 
     @_claims_mode_change
+    async def do_orbit(self, radius_m: float, velocity_m_s: float, lat: float, lng: float,
+                       relative_altitude_m: float) -> bool:
+        """Circle (lat, lng) at radius_m, nose to the centre (MAV_CMD_DO_ORBIT
+        through MAVSDK's action plugin). Raises NotImplementedError when the
+        plugin has no orbit; False when the aircraft refused it."""
+        action = getattr(self._drone, "action", None)
+        if action is None or not hasattr(action, "do_orbit"):
+            raise NotImplementedError("orbit")
+        from mavsdk.action import OrbitYawBehavior
+        pos = self._snapshot.position
+        ground_amsl = self._snapshot.home_alt or (pos.absolute_altitude_m - pos.relative_altitude_m)
+        if not ground_amsl and not pos.absolute_altitude_m:
+            logger.error("Orbit refused: ground altitude unknown (no home or position yet)")
+            return False
+        self.last_action_error = None
+        sent = time.monotonic()
+        try:
+            await action.do_orbit(float(radius_m), float(velocity_m_s),
+                                  OrbitYawBehavior.HOLD_FRONT_TO_CIRCLE_CENTER,
+                                  float(lat), float(lng), float(ground_amsl + float(relative_altitude_m)))
+            logger.info(f"✅ Orbit {radius_m} m at {velocity_m_s} m/s around {lat},{lng}")
+            return True
+        except ActionError as e:
+            self.last_action_error = await self._failure_reason(e, sent, "the drone refused the orbit")
+            logger.error(f"Orbit failed: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Orbit failed: {e}")
+            return False
+
+    @_claims_mode_change
     async def goto_home(self, relative_altitude_m: Optional[float] = None) -> bool:
         """
         Fly to THIS drone's own home position (where it armed) and hover there.

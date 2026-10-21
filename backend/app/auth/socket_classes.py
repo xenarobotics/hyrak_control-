@@ -90,6 +90,17 @@ EVENTS: dict[str, str] = {
     # ── attachments fitted to the drone (app/attachments/events.py) ─────
     "attachment_action": SESSION_COMMAND,  # drop, open, light on: the guards are in control.py
 
+    # ── HYRAK Copilot, the voice assistant (app/copilot/events.py) ──────
+    # Every one may lead to a plan that moves the drone; the guards are in
+    # app/copilot/skills.py and run again when a plan card is accepted.
+    "copilot_set": SESSION_COMMAND,
+    "copilot_audio": SESSION_COMMAND,
+    "copilot_text": SESSION_COMMAND,
+    "copilot_confirm": SESSION_COMMAND,
+    "copilot_choose": SESSION_COMMAND,
+    "copilot_cancel": SESSION_COMMAND,
+    "copilot_pilot_position": SESSION_COMMAND,  # follow-me only
+
     # ── staff only ──────────────────────────────────────────────────────
     "connect_telemetry": STAFF,       # arbitrary address: server Gazebo udp:14600, LAN, anything
     "connect_rf_bridge": STAFF,       # the one shared RF bridge / ground-station relay
@@ -143,6 +154,11 @@ PUSHED_EVENTS: dict[str, str] = {
     # the staff session that sent it during a takeover).
     "attachment_result": "session",
     "attachment_state": "session",
+    # HYRAK Copilot (app/copilot/service.py): its state, the conversation
+    # and plan cards, to the session's own socket.
+    "copilot_state": "session",
+    "copilot_message": "session",
+    "copilot_card_update": "session",
 }
 
 # Other namespaces: the ground-station relay agent (a script, operator token).
@@ -165,6 +181,8 @@ DRONE_EVENTS = frozenset({
     "set_multi_follow", "select_person", "set_pd_params", "set_altitude_mode",
     "set_altitude_nudge", "set_tracking_params", "upload_mission",
     "set_model_control", "rule_confirm", "attachment_action",
+    "copilot_set", "copilot_audio", "copilot_text", "copilot_confirm", "copilot_choose",
+    "copilot_cancel", "copilot_pilot_position",
 })
 
 # Session commands a staff console socket may route to ANOTHER session's

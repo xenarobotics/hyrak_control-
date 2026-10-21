@@ -32,6 +32,7 @@ import { ZONE_COLORS, zoneRings, type ZoneFeature } from '@/components/admin/zon
 import { LiveSightingsLayer, SightingsLegend } from '@/components/mapdetect/MapDetectionsUi'
 import { useActiveWorkspace } from '@/hooks/useAccess'
 import { FOCUS_OVERLAY, OVERLAY } from '@/components/mission/ui'
+import { CopilotMapPreview } from '@/components/copilot/CopilotMapPreview'
 
 // Marker text: the app's body face, never below 12px.
 const MARKER_FONT = 'var(--font-nunito),Nunito,system-ui,sans-serif'
@@ -784,6 +785,10 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
 
       {/* AI detections placed on the ground (app/mapdetect) */}
       <LiveSightingsLayer />
+
+      {/* Copilot's plan preview (Command only): dashed magenta, read from
+          the Copilot store, never the mission plan */}
+      {readOnly && <CopilotMapPreview />}
 
       {/* Live drone - glides between telemetry samples */}
       <SmoothDroneMarker />

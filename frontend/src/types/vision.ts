@@ -117,6 +117,9 @@ export interface CVResult {
     rules_state?: RuleState[]
     /** Set while a follow rule is following something. */
     follow?: FollowState | null
+    /** HYRAK Copilot: the box it is tracking or following (source-frame
+     *  pixels), drawn magenta by CopilotVideoOverlay. */
+    copilot_target?: { box: [number, number, number, number]; label: string } | null
     /** "Allow model control" is on for this session. */
     model_control?: boolean
     // Object detection

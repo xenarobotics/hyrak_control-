@@ -16,6 +16,7 @@ import { useClientValue } from '@/hooks/useClientValue'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { useDroneStore } from '@/store/drone'
 import { CvOverlayCanvas } from '@/components/vision/CvOverlayCanvas'
+import { CopilotVideoOverlay } from '@/components/copilot/CopilotVideoOverlay'
 import { Recon3DView } from '@/components/vision/Recon3DView'
 import { WebCodecsVideo } from '@/components/video/WebCodecsVideo'
 import { getVideoFit, type VideoFit } from '@/lib/videoSettings'
@@ -63,6 +64,7 @@ export function AiView() {
             )}
             {isStreaming && overlayActive && mode !== '3d-reconstruction' && <CvOverlayCanvas fit={fit} />}
             {isStreaming && mode === '3d-reconstruction' && <Recon3DView />}
+            {isStreaming && mode !== '3d-reconstruction' && <CopilotVideoOverlay fit={fit} />}
             {!isStreaming && (
                 <div className="absolute inset-0 flex items-center justify-center text-[13px] text-app-text-muted">
                     AI view starts with the video

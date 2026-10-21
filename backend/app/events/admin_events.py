@@ -226,6 +226,9 @@ def register_admin_events(sio, session_manager: SessionManager):
             # has already held an Offboard follow).
             from app.models_custom import actions as model_actions
             await model_actions.switch_off(target.session_id, "taken_over")
+            # A Copilot task ends the same way, and its open card expires.
+            from app.copilot import service as copilot
+            await copilot.on_takeover(target.session_id)
         await notify_takeover(target, t)
         await sio.emit("takeover_result", {"ok": True, "session_id": target.session_id,
                                            "active": True, **t.public()}, to=sid)

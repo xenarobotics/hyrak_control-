@@ -27,7 +27,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
-import { Scaling, PanelRightClose, PanelRightOpen, X, ShieldCheck, Bot, Activity, SlidersHorizontal, ScrollText, Video, Map as MapIcon } from 'lucide-react'
+import { Scaling, PanelRightClose, PanelRightOpen, X, ShieldCheck, Bot, Activity, SlidersHorizontal, ScrollText, Video, Map as MapIcon, AudioLines } from 'lucide-react'
 import { getSocket } from '@/lib/socket'
 import { useSwarmStore } from '@/store/swarm'
 import { useDroneStore } from '@/store/drone'
@@ -59,6 +59,11 @@ import { ViewOnlyFence } from '@/components/layout/ViewOnly'
 import { useLiveScope } from '@/hooks/useLiveScope'
 import { useResolvedDroneId } from '@/lib/droneId'
 import { FOCUS, FOCUS_OVERLAY, OVERLAY_BTN } from '@/components/controls/flightStyles'
+import { CopilotPanel } from '@/components/copilot/CopilotPanel'
+import { CopilotHost } from '@/components/copilot/CopilotHost'
+import { CopilotVideoOverlay } from '@/components/copilot/CopilotVideoOverlay'
+import { PushToTalkFab } from '@/components/copilot/PushToTalk'
+import { useCopilotStore } from '@/lib/copilot'
 
 const mapLoading = () => (
     <div className="w-full h-full flex items-center justify-center bg-app-surface-2">
@@ -71,7 +76,7 @@ const MissionMap3D = dynamic(() => import('@/components/mission/MissionMap3D'), 
 type View = 'video' | 'map' | 'ai'
 type Corner = 'bl' | 'br' | 'tl' | 'tr'
 type PipSize = 's' | 'm' | 'l'
-type DockTab = 'avoid' | 'ai' | 'telemetry' | 'setup' | 'log'
+type DockTab = 'avoid' | 'ai' | 'copilot' | 'telemetry' | 'setup' | 'log'
 interface Layout {
     big: View
     corners: Record<View, Corner>   // where each view sits while it is a PiP
@@ -91,6 +96,7 @@ const DOCK_MIN = 280, DOCK_MAX = 600
 const TABS: { id: DockTab; label: string; hint: string; icon: typeof Bot }[] = [
     { id: 'avoid', label: 'Avoid', hint: 'Obstacle avoidance', icon: ShieldCheck },
     { id: 'ai', label: 'AI', hint: 'The running AI module', icon: Bot },
+    { id: 'copilot', label: 'Copilot', hint: 'Copilot: fly and ask by voice', icon: AudioLines },
     { id: 'telemetry', label: 'Telemetry', hint: 'Every telemetry value', icon: Activity },
     { id: 'setup', label: 'Setup', hint: 'Devices, link and full flight controls', icon: SlidersHorizontal },
     { id: 'log', label: 'Log', hint: 'Messages from the aircraft', icon: ScrollText },
@@ -224,6 +230,7 @@ function DevCommand() {
     // command surfaces below are fenced and the AI drawer is not offered.
     const { viewOnly } = useLiveScope()
     const avoid = useAvoidanceLive()
+    const copilotOn = useCopilotStore(s => s.enabled)
     const dockDrag = useRef<{ x: number; w: number } | null>(null)
     const stageRef = useRef<HTMLDivElement>(null)
 
@@ -406,6 +413,7 @@ function DevCommand() {
                     <div style={boxFor('video')} className={cn('flex', layout.big !== 'video' && 'max-md:hidden')}>
                         <div className="absolute inset-0 flex">
                             {wallOn ? <CameraWall onClose={() => setWallOn(false)} /> : <VideoStream bare cleanFeed />}
+                            {!wallOn && <CopilotVideoOverlay interactive={layout.big === 'video'} />}
                         </div>
                         {layout.big !== 'video' && pipChrome('video', 'Video')}
                     </div>
@@ -516,6 +524,7 @@ function DevCommand() {
                                     </>
                                 )}
                                 {activeTab === 'ai' && <ViewOnlyFence><AiPanel onStop={ai.stop} /></ViewOnlyFence>}
+                                {activeTab === 'copilot' && <ViewOnlyFence><CopilotPanel /></ViewOnlyFence>}
                                 {activeTab === 'telemetry' && <TelemetryPanel />}
                                 {activeTab === 'setup' && (
                                     <>
@@ -536,9 +545,16 @@ function DevCommand() {
                 )}
             </div>
 
+            {mounted && !viewOnly && <CopilotHost />}
+
             {/* ── Action bar: links, arm, take off, mission ───────────────── */}
             <div className={cn('shrink-0 rounded-[10px] border px-3 py-2.5 flex items-center gap-3 min-w-0',
                 'max-md:sticky max-md:bottom-0 max-md:z-20 max-md:mt-auto max-md:shadow-[var(--app-shadow)]', PANEL)}>
+                {/* Phone: hold to talk under the thumb, just above this bar,
+                    while the Copilot tab is open. */}
+                {mounted && !viewOnly && !dockHidden && activeTab === 'copilot' && copilotOn && (
+                    <div className="md:hidden absolute right-2 bottom-[calc(100%+12px)]"><PushToTalkFab disabled={false} /></div>
+                )}
                 {mounted && <div className="hidden md:flex items-center shrink-0"><LinkCluster avoid={avoid} /></div>}
                 <span aria-hidden className="hidden md:block w-px h-6 bg-app-border shrink-0" />
                 <ViewOnlyFence compact>

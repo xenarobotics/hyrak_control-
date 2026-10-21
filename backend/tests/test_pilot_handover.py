@@ -569,6 +569,7 @@ _MODE_CHANGING = [
     ("takeoff", ()),
     ("goto_altitude", (10.0,)),
     ("goto_custom_rtl", (1.0, 2.0, 10.0)),
+    ("do_orbit", (20.0, 2.0, 1.0, 2.0, 10.0)),
     ("goto_home", ()),
     ("start_mission", ()),
     ("restart_mission", ()),

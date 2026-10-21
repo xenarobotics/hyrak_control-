@@ -121,6 +121,9 @@ def create_app() -> socketio.ASGIApp:
         # any more (see SESSION_GRACE_S), so a short timeout costs nothing.
         ping_timeout=3,
         ping_interval=2,
+        # Copilot's push-to-talk recordings are up to 1.5 MB (15 s of
+        # opus is far less; a wav is not). The default is 1 MB.
+        max_http_buffer_size=2_000_000,
         # NaN/inf anywhere in a payload is invalid JSON; a browser client
         # that receives it closes the connection (see utils/safe_json.py).
         json=safe_json,
@@ -415,6 +418,10 @@ def create_app() -> socketio.ASGIApp:
             # pilot gone (and the video with them) it ends, a follow too.
             from app.models_custom import actions as model_actions
             await model_actions.switch_off(session.session_id, "link_lost", hold=True)
+            # Copilot too: its follow-me needs the pilot's page, and nobody
+            # is there to answer a plan card.
+            from app.copilot import service as copilot
+            await copilot.switch_off(session.session_id, "link_lost", hold=True)
             _expiry_tasks[session.session_id] = asyncio.create_task(
                 _expire_session(session.session_id))
         logger.info(f"Disconnected {sid[:8]}")
@@ -450,6 +457,8 @@ def create_app() -> socketio.ASGIApp:
         zone_monitor.drop(session.session_id)
         from app.models_custom import actions as model_actions
         model_actions.drop(session.session_id)
+        from app.copilot import service as copilot
+        copilot.drop(session.session_id)
         from app.attachments import control as attachment_control
         from app.attachments import mission as attachment_mission
         attachment_control.drop(session.session_id)
@@ -509,6 +518,8 @@ def create_app() -> socketio.ASGIApp:
     register_map_events(sio, session_manager)
     from app.attachments.events import register_attachment_events
     register_attachment_events(sio, session_manager)
+    from app.copilot.events import register_copilot_events
+    register_copilot_events(sio, session_manager, vision_pool)
 
     # ------------------------------------------------------------------ #
     # Mount                                                                #

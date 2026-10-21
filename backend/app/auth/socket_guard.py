@@ -193,6 +193,12 @@ async def _refuse(sid: str, session, event: str, msg: str, code: str = FORBIDDEN
                 # The button waits for an action_result; give it one.
                 await _sio.emit("action_result", {"action": data.get("action"), "ok": False,
                                                   "error": msg, "code": code}, to=sid)
+            elif event.startswith("copilot_"):
+                # The Copilot panel shows refusals in its conversation.
+                await _sio.emit("copilot_message", {
+                    "id": f"refused-{int(time.time() * 1000)}", "role": "system", "text": msg,
+                    "ts": time.time(), "status": "refused", "speak": False,
+                    "code": code, "event": event}, to=sid)
             elif event == "attachment_action" and isinstance(data, dict):
                 # The strip's button waits for an attachment_result.
                 await _sio.emit("attachment_result", {
@@ -318,6 +324,18 @@ async def require_session_view(sid: str, event: str, data=None) -> bool:
     if _is_staff_session(session) or perms.VIEW in (session.perms or frozenset()):
         return True
     return await _refuse(sid, session, event, f"{event} needs view access on this workspace")
+
+
+def session_may_fly(session) -> bool:
+    """The session's right to fly on its last known stamp (staff: operator
+    rank; customers: `fly` on the session workspace). For work that runs
+    after the event that started it was guarded (Copilot's confirmed plans
+    and follow-me updates re-check it at the moment they move the drone)."""
+    if session is None:
+        return False
+    if _is_staff_session(session):
+        return role_at_least(session.role or "member", "operator")
+    return perms.FLY in (session.perms or frozenset())
 
 
 def _holds_link(session) -> bool:

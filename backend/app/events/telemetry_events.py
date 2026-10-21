@@ -146,6 +146,285 @@ async def _execute_drone_action(tel, action: str, data: dict) -> dict:
 
 
 
+async def run_guarded_action(sio, session, tel, action: str, data: dict, sid) -> dict:
+    """The checks drone_action runs before an action reaches the drone, then
+    the action itself. Returns the action_result payload; notices go to `sid`
+    as fc_message. Shared by the drone_action handler and Copilot
+    (app/copilot/skills.py), so a spoken takeoff passes exactly the checks a
+    button press does: red zone (with its permit read fresh, fail closed),
+    the link-loss failsafe check, the avoidance-off notice, the avoidance
+    camera interlock and the indoor takeoff cap."""
+    async def _note(payload: dict) -> None:
+        if sio is not None and sid:
+            await sio.emit("fc_message", payload, to=sid)
+
+    # No arming/takeoff inside a red zone, unless an approved, in-window
+    # permit for this drone covers every red zone at this spot.
+    if action in ("arm", "takeoff"):
+        from app.zones import engine as zone_engine
+        from app.zones import monitor as zone_monitor
+        snap = tel.snapshot
+        lat, lng = snap.position.latitude_deg, snap.position.longitude_deg
+        check = zone_engine.check_point(lat, lng)
+        red_here = {z["id"] for z in check["zones"] if z["zone_class"] == "red"}
+        permitted, unchecked = set(), False
+        if red_here and (session.drone or {}).get("id"):
+            from app.permits.service import PermitCheckUnavailable
+            try:
+                permitted = await zone_monitor.permitted_zone_ids(session, lat, lng, fresh=True)
+            except PermitCheckUnavailable:
+                unchecked = True
+        if red_here and unchecked:
+            names = ", ".join(z["name"] for z in check["zones"])
+            logger.warning(f"{action} blocked in red zone for {session.session_id[:8]}: "
+                           "permits unreadable")
+            return {"action": action, "ok": False,
+                    "error": f"Blocked - inside NO-FLY (red) zone: {names}. Its permit could not "
+                             "be checked just now (database unreachable); try again shortly"}
+        if red_here and not red_here <= permitted:
+            names = ", ".join(z["name"] for z in check["zones"])
+            logger.warning(f"{action} blocked in red zone for {session.session_id[:8]}")
+            return {"action": action, "ok": False,
+                    "error": f"Blocked - inside NO-FLY (red) zone: {names}"}
+
+    # Link-loss failsafes (app/telemetry/failsafe_check.py): the cloud is
+    # the companion computer, so what PX4 does in the seconds a link is
+    # gone must be set sanely BEFORE the aircraft leaves the ground.
+    if action in ("arm", "takeoff", "start_mission", "arm_and_start_mission",
+                  "restart_mission", "arm_and_restart_mission"):
+        try:
+            from app.telemetry import failsafe_check as _fs
+            params = await _fs.read_params(tel)
+            gps_denied = False
+            try:                    # indoors: avoidance's environment, or no GPS at all
+                from app.avoidance.core import controller as _av
+                did = (session.drone or {}).get("id") if isinstance(session.drone, dict) else None
+                snap = tel.snapshot
+                from app.avoidance.core import loop as _avl
+                ctl = _av.controller(did) if (did and _av.has_controller(did)) else None
+                gps_denied = (not _avl._gps_ok(snap)) or \
+                    bool(ctl and (ctl.env == "indoor" or int(round(ctl.params.env_mode)) == 2))
+            except Exception:
+                pass
+            block, warn = _fs.evaluate(
+                params, _fs.mission_max_alt(getattr(session, "last_mission", None)),
+                gps_denied=gps_denied)
+            if block:
+                logger.warning(f"{action} blocked for {session.session_id[:8]}: {block}")
+                return {"action": action, "ok": False,
+                        "error": "Blocked by the link-loss failsafe check - " + " ".join(block)}
+            for w in warn:
+                await _note({"severity": "WARNING", "text": f"Failsafe check: {w}",
+                             "rank": 4, "ts": time.time()})
+            if warn:
+                logger.info(f"Failsafe check warnings for {session.session_id[:8]}: {warn}")
+        except Exception as e:
+            logger.warning(f"failsafe check failed ({e}) - not blocking")
+
+    # Say so when a mission starts with avoidance OFF. Switching Steer off
+    # mid-flight to stop a loop and forgetting it is exactly how the aircraft
+    # flew a leg into a pillar with nothing watching (SITL 2026-09-26 21:50).
+    # A notice, not a block: flying without avoidance can be deliberate.
+    if action in ("start_mission", "arm_and_start_mission",
+                  "restart_mission", "arm_and_restart_mission"):
+        try:
+            from app.avoidance.core import loop as _av_loop
+            from app.avoidance.core import controller as _av
+            c = _av_loop._controller_for_session(session.session_id)
+            note = None
+            if c is None:
+                note = "Avoidance is OFF - this mission flies with NO obstacle avoidance."
+            elif not c.armed:
+                note = "Avoidance is detecting only (Steer OFF) - it will NOT steer around obstacles."
+            else:
+                # Mission legs below the height avoidance may act at fly unprotected.
+                from app.telemetry.failsafe_check import mission_min_alt
+                low = mission_min_alt(getattr(session, "last_mission", None))
+                floor = c.acting_floor_m()
+                if low is not None and low < floor:
+                    note = (f"Part of this mission is at {low:g} m; avoidance only acts above "
+                            f"{floor:g} m with the current sensor - raise the mission or those legs fly unprotected.")
+            if note:
+                await _note({"severity": "WARNING", "text": note, "rank": 4, "ts": time.time()})
+                logger.info(f"{action} for {session.session_id[:8]}: {note}")
+        except Exception as e:
+            logger.debug(f"avoidance-off notice failed: {e}")
+
+    # Avoidance interlock: steering armed but no camera frames reaching
+    # the depth sensor means the aircraft would fly blind while the
+    # operator believes it is covered - that is exactly how it flew into
+    # a cylinder with the video started 18 s after takeoff. Refuse to
+    # launch until the panel's CAMERA row says "feeding" (or Steer is off).
+    if action in ("arm", "takeoff", "start_mission", "arm_and_start_mission",
+                  "restart_mission", "arm_and_restart_mission"):
+        try:
+            from app.avoidance.core import loop as _av_loop
+            c = _av_loop._controller_for_session(session.session_id)
+            if c is not None and c.armed:
+                from app.avoidance.sensing import registry as _sensors
+                inv = _sensors.inventory(c.drone_id)
+                feeding = any(x.get("status") == "ok" for x in inv)
+                if not feeding:
+                    logger.warning(f"{action} blocked for {session.session_id[:8]}: avoidance armed, no camera data")
+                    return {"action": action, "ok": False,
+                            "error": ("Blocked - avoidance steering is ON but the camera is not "
+                                      "feeding the depth sensor. Start the video and wait for "
+                                      "CAMERA: feeding in the AVOIDANCE card, or switch Steer off.")}
+        except Exception as e:
+            logger.debug(f"avoidance interlock check failed: {e}")
+
+    logger.info(f"Action: {action} | session {session.session_id[:8]}")
+    if action == "takeoff" and data.get("altitude") is not None:
+        # Indoors a 10 m default takeoff meets the ceiling: cap at the
+        # indoor takeoff height (the UI defaults to 1.5 m; this is the net).
+        try:
+            from app.avoidance.core import controller as _avc
+            did = (session.drone or {}).get("id") if isinstance(session.drone, dict) else None
+            if did and _avc.has_controller(did) and _avc.controller(did).env == "indoor" \
+                    and float(data["altitude"]) > INDOOR_TAKEOFF_MAX_M:
+                logger.warning(f"takeoff {float(data['altitude']):g} m capped to {INDOOR_TAKEOFF_MAX_M} m (indoor)")
+                data = {**data, "altitude": INDOOR_TAKEOFF_MAX_M}
+                await _note({"severity": "WARNING", "rank": 4, "ts": time.time(),
+                             "text": f"Indoor: takeoff capped to {INDOOR_TAKEOFF_MAX_M:g} m"})
+        except Exception:
+            pass
+    # execute_drone_action handles ActionError; a gRPC failure (mavsdk_server
+    # died, link torn down concurrently) used to escape here, socket.io
+    # swallowed it, and LAND / emergency stop produced no action_result -
+    # the button just timed out with no text.
+    try:
+        return await execute_drone_action(tel, action, data)
+    except Exception as e:
+        logger.exception(f"drone_action {action} failed: {e}")
+        return {"ok": False, "action": action, "error": f"{action} failed: {e}"}
+
+
+async def upload_mission_for(session, tel, data: dict) -> dict:
+    """The upload itself, after the caller has checked the session and its
+    link: the zone gate (app/permits/service.gate_upload: red blocks unless a
+    permit covers the path, orange needs an ack or a permit), attachment
+    actions at waypoints, the upload, avoidance's goal and the planner's
+    'uploaded' mark. Returns the mission_upload_result payload. Shared by
+    upload_mission and Copilot's survey (which never acks orange)."""
+    waypoints = data.get("waypoints", [])
+    terrain_follow = bool(data.get("terrain_follow", False))
+
+    if not waypoints:
+        return {"ok": False, "msg": "No waypoints provided"}
+
+    # ── Zone validation before anything reaches the drone ────────
+    # Red blocks unless an approved, in-window permit of the drone's
+    # workspace covers this path; orange needs an ack unless a
+    # permit covers it too (app/permits/service.gate_upload).
+    from app.permits import service as permit_service
+    try:
+        gate = await permit_service.gate_upload(
+            session.drone, waypoints, ack_orange=bool(data.get("ack_orange")))
+    except (KeyError, TypeError, ValueError):
+        return {"ok": False, "msg": "Every waypoint needs numeric lat and lng"}
+    if not gate["ok"]:
+        if gate.get("blocked"):
+            logger.warning(f"Mission blocked ({gate['msg']}) for {session.session_id[:8]}")
+        return {k: v for k, v in gate.items() if k != "permit"}
+    permit = gate["permit"]
+    if permit is not None:
+        logger.info(
+            f"Mission allowed under permit {permit['id'][:8]} "
+            f"for {session.session_id[:8]}"
+        )
+
+    # Attachment actions at waypoints (app/attachments/mission.py):
+    # checked against the drone's attachments now, run by the
+    # backend when each waypoint is reached, never written into the
+    # flight controller's mission. Hazard ones need the pilot's tick.
+    from app.attachments import mission as attachment_mission
+    try:
+        attachment_plan = await attachment_mission.prepare(
+            session, waypoints, allow=data.get("allow_attachment_actions") is True,
+            terrain=terrain_follow)
+    except attachment_mission.MissionActionError as e:
+        return {"ok": False, "msg": str(e), "code": e.code}
+
+    logger.info(
+        f"Uploading {len(waypoints)} waypoints "
+        f"(terrain_follow={terrain_follow}) for session {session.session_id[:8]}"
+    )
+
+    ok, err_msg = await tel.upload_mission(waypoints, terrain_follow=terrain_follow)
+    if ok:
+        attachment_mission.arm(session.session_id, attachment_plan)
+        # Tell avoidance where this aircraft is now going, so an
+        # obstacle on the way is routed around, not just held for.
+        try:
+            from app.avoidance.core import loop as _av_loop
+            _av_loop.note_mission_goal(session.session_id, waypoints)
+            session.last_mission = list(waypoints)   # failsafe check: RTL vs mission altitude
+        except Exception:
+            pass
+        # A planned mission whose waypoints match advances to
+        # 'uploaded' - hand-drawn missions simply match nothing.
+        from app.planner import service as mission_service
+        await mission_service.mark_uploaded_by_hash(
+            waypoints,
+            drone_id=session.drone["id"] if session.drone else None,
+            workspace_id=(session.drone or {}).get("workspace_id")
+            or getattr(session, "workspace_id", None),
+        )
+    return {
+        "ok": ok,
+        "count": len(waypoints) if ok else 0,
+        "terrain_follow": terrain_follow,
+        "permit_id": permit["id"] if ok and permit else None,
+        "attachment_actions": sum(len(v) for v in attachment_plan.by_wp.values())
+        if ok and attachment_plan else 0,
+        "msg": f"Mission uploaded: {len(waypoints)} waypoints" if ok
+               else f"Upload failed: {err_msg}",
+    }
+
+
+async def apply_mode_switch(sio, session_manager, vision_pool, session, old_mode, mode, sid) -> bool:
+    """Swap the session's analyzer after session.mode was set: what
+    set_analysis_mode runs in the background, and what Copilot awaits when it
+    puts a tracker on for follow / track. Pushes model_status to `sid`.
+    True when the new analyzer is running (or the mode needs none)."""
+    # Leaving a custom model: its model control ends, and a rule
+    # follow stops with HOLD before the analyzer goes.
+    if getattr(old_mode, "spec", None) is not None:
+        from app.models_custom import actions as model_actions
+        await model_actions.switch_off(session.session_id, "mode_changed")
+    # A Copilot follow or track runs on the analyzer being replaced.
+    from app.copilot import service as copilot
+    await copilot.on_mode_changed(session.session_id, mode.value)
+    # If we're leaving human-tracking, stop offboard cleanly BEFORE
+    # the analyzer is swapped - this gives the drone a proper HOLD
+    # command instead of letting PX4 hit its setpoint-loss failsafe.
+    if old_mode == AnalysisMode.HUMAN_TRACKING:
+        tel = session_manager.get_telemetry(session.session_id)
+        if tel and tel.is_connected and tel._offboard_active:
+            # Freeze the tracker so no new velocity commands are queued
+            analyzer = vision_pool.get_for_session(session.session_id)
+            from app.vision.modules.human_tracker import HumanTracker
+            if isinstance(analyzer, HumanTracker):
+                analyzer.set_tracking(session.session_id, False)
+            await tel.stop_offboard()
+            logger.info(
+                f"Session {session.session_id[:8]}: offboard stopped "
+                f"on mode switch → {mode.value}"
+            )
+
+    ok = await vision_pool.switch_mode(session.session_id, old_mode, mode)
+    if ok or mode == AnalysisMode.MANUAL_CONTROL:
+        await sio.emit("model_status", {"status": "ready", "mode": mode.value}, to=sid)
+        return True
+    # Previously "ready" was emitted whatever happened and the
+    # stream relayed raw video with no boxes and no message.
+    err = vision_pool.last_error(session.session_id) or "model failed to load"
+    await sio.emit("model_status", {"status": "error", "mode": mode.value,
+                                    "error": err}, to=sid)
+    await sio.emit("error", {"msg": f"{mode.value}: {err}"}, to=sid)
+    return False
+
+
 RC_MONITOR_ROOM = "rc-monitor"
 
 _ENHANCE_KEYS = frozenset({"preset", "denoise", "sharpen", "contrast", "saturation",
@@ -271,6 +550,9 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 # a red-zone lock, a pilot or a takeover.
                 from app.models_custom import actions as model_actions
                 model_actions.on_telemetry(session.session_id)
+                # So does a Copilot task (app/copilot/service.py).
+                from app.copilot import service as copilot
+                copilot.on_telemetry(session.session_id)
                 # A mission's "at this waypoint" attachment actions run when
                 # the drone gets there (app/attachments/mission.py).
                 from app.attachments import mission as attachment_mission
@@ -321,6 +603,8 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                     # pilot is flying).
                     from app.models_custom import actions as model_actions
                     await model_actions.switch_off(session.session_id, "pilot_control")
+                    from app.copilot import service as copilot
+                    await copilot.on_pilot_override(session.session_id)
                 except Exception as e:
                     logger.error(f"Pilot-override stand-down failed: {e}")
             try:
@@ -585,6 +869,8 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         session.zone_lock = False
         from app.models_custom import actions as model_actions
         await model_actions.switch_off(session.session_id, "link_lost")
+        from app.copilot import service as copilot
+        await copilot.on_link_released(session.session_id)
         from app.attachments import mission as attachment_mission
         attachment_mission.clear(session.session_id)
         session.telemetry_connected = False
@@ -630,160 +916,9 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             await sio.emit("error", {"msg": "No telemetry connected"}, to=sid)
             return
         action = data.get("action", "")
-
-        # No arming/takeoff inside a red zone, unless an approved, in-window
-        # permit for this drone covers every red zone at this spot.
-        if action in ("arm", "takeoff"):
-            from app.zones import engine as zone_engine
-            from app.zones import monitor as zone_monitor
-            snap = tel.snapshot
-            lat, lng = snap.position.latitude_deg, snap.position.longitude_deg
-            check = zone_engine.check_point(lat, lng)
-            red_here = {z["id"] for z in check["zones"] if z["zone_class"] == "red"}
-            permitted, unchecked = set(), False
-            if red_here and (session.drone or {}).get("id"):
-                from app.permits.service import PermitCheckUnavailable
-                try:
-                    permitted = await zone_monitor.permitted_zone_ids(session, lat, lng, fresh=True)
-                except PermitCheckUnavailable:
-                    unchecked = True
-            if red_here and unchecked:
-                names = ", ".join(z["name"] for z in check["zones"])
-                await sio.emit("action_result", {
-                    "action": action, "ok": False,
-                    "error": f"Blocked - inside NO-FLY (red) zone: {names}. Its permit could not "
-                             "be checked just now (database unreachable); try again shortly",
-                }, to=sid)
-                logger.warning(f"{action} blocked in red zone for {session.session_id[:8]}: "
-                               "permits unreadable")
-                return
-            if red_here and not red_here <= permitted:
-                names = ", ".join(z["name"] for z in check["zones"])
-                await sio.emit("action_result", {
-                    "action": action, "ok": False,
-                    "error": f"Blocked - inside NO-FLY (red) zone: {names}",
-                }, to=sid)
-                logger.warning(f"{action} blocked in red zone for {session.session_id[:8]}")
-                return
-
-        # Link-loss failsafes (app/telemetry/failsafe_check.py): the cloud is
-        # the companion computer, so what PX4 does in the seconds a link is
-        # gone must be set sanely BEFORE the aircraft leaves the ground.
-        if action in ("arm", "takeoff", "start_mission", "arm_and_start_mission",
-                      "restart_mission", "arm_and_restart_mission"):
-            try:
-                from app.telemetry import failsafe_check as _fs
-                params = await _fs.read_params(tel)
-                gps_denied = False
-                try:                    # indoors: avoidance's environment, or no GPS at all
-                    from app.avoidance.core import controller as _av
-                    did = (session.drone or {}).get("id") if isinstance(session.drone, dict) else None
-                    snap = tel.snapshot
-                    from app.avoidance.core import loop as _avl
-                    ctl = _av.controller(did) if (did and _av.has_controller(did)) else None
-                    gps_denied = (not _avl._gps_ok(snap)) or \
-                        bool(ctl and (ctl.env == "indoor" or int(round(ctl.params.env_mode)) == 2))
-                except Exception:
-                    pass
-                block, warn = _fs.evaluate(
-                    params, _fs.mission_max_alt(getattr(session, "last_mission", None)),
-                    gps_denied=gps_denied)
-                if block:
-                    await sio.emit("action_result", {
-                        "action": action, "ok": False,
-                        "error": "Blocked by the link-loss failsafe check - " + " ".join(block),
-                    }, to=sid)
-                    logger.warning(f"{action} blocked for {session.session_id[:8]}: {block}")
-                    return
-                for w in warn:
-                    await sio.emit("fc_message", {"severity": "WARNING", "text": f"Failsafe check: {w}",
-                                                  "rank": 4, "ts": time.time()}, to=sid)
-                if warn:
-                    logger.info(f"Failsafe check warnings for {session.session_id[:8]}: {warn}")
-            except Exception as e:
-                logger.warning(f"failsafe check failed ({e}) - not blocking")
-
-        # Say so when a mission starts with avoidance OFF. Switching Steer off
-        # mid-flight to stop a loop and forgetting it is exactly how the aircraft
-        # flew a leg into a pillar with nothing watching (SITL 2026-09-26 21:50).
-        # A notice, not a block: flying without avoidance can be deliberate.
-        if action in ("start_mission", "arm_and_start_mission",
-                      "restart_mission", "arm_and_restart_mission"):
-            try:
-                from app.avoidance.core import loop as _av_loop
-                from app.avoidance.core import controller as _av
-                c = _av_loop._controller_for_session(session.session_id)
-                note = None
-                if c is None:
-                    note = "Avoidance is OFF - this mission flies with NO obstacle avoidance."
-                elif not c.armed:
-                    note = "Avoidance is detecting only (Steer OFF) - it will NOT steer around obstacles."
-                else:
-                    # Mission legs below the height avoidance may act at fly unprotected.
-                    from app.telemetry.failsafe_check import mission_min_alt
-                    low = mission_min_alt(getattr(session, "last_mission", None))
-                    floor = c.acting_floor_m()
-                    if low is not None and low < floor:
-                        note = (f"Part of this mission is at {low:g} m; avoidance only acts above "
-                                f"{floor:g} m with the current sensor - raise the mission or those legs fly unprotected.")
-                if note:
-                    await sio.emit("fc_message", {"severity": "WARNING", "text": note,
-                                                  "rank": 4, "ts": time.time()}, to=sid)
-                    logger.info(f"{action} for {session.session_id[:8]}: {note}")
-            except Exception as e:
-                logger.debug(f"avoidance-off notice failed: {e}")
-
-        # Avoidance interlock: steering armed but no camera frames reaching
-        # the depth sensor means the aircraft would fly blind while the
-        # operator believes it is covered - that is exactly how it flew into
-        # a cylinder with the video started 18 s after takeoff. Refuse to
-        # launch until the panel's CAMERA row says "feeding" (or Steer is off).
-        if action in ("arm", "takeoff", "start_mission", "arm_and_start_mission",
-                      "restart_mission", "arm_and_restart_mission"):
-            try:
-                from app.avoidance.core import loop as _av_loop
-                c = _av_loop._controller_for_session(session.session_id)
-                if c is not None and c.armed:
-                    from app.avoidance.sensing import registry as _sensors
-                    inv = _sensors.inventory(c.drone_id)
-                    feeding = any(x.get("status") == "ok" for x in inv)
-                    if not feeding:
-                        await sio.emit("action_result", {
-                            "action": action, "ok": False,
-                            "error": ("Blocked - avoidance steering is ON but the camera is not "
-                                      "feeding the depth sensor. Start the video and wait for "
-                                      "CAMERA: feeding in the AVOIDANCE card, or switch Steer off."),
-                        }, to=sid)
-                        logger.warning(f"{action} blocked for {session.session_id[:8]}: avoidance armed, no camera data")
-                        return
-            except Exception as e:
-                logger.debug(f"avoidance interlock check failed: {e}")
-
-        logger.info(f"Action: {action} | session {session.session_id[:8]}")
-        if action == "takeoff" and data.get("altitude") is not None:
-            # Indoors a 10 m default takeoff meets the ceiling: cap at the
-            # indoor takeoff height (the UI defaults to 1.5 m; this is the net).
-            try:
-                from app.avoidance.core import controller as _avc
-                did = (session.drone or {}).get("id") if isinstance(session.drone, dict) else None
-                if did and _avc.has_controller(did) and _avc.controller(did).env == "indoor" \
-                        and float(data["altitude"]) > INDOOR_TAKEOFF_MAX_M:
-                    logger.warning(f"takeoff {float(data['altitude']):g} m capped to {INDOOR_TAKEOFF_MAX_M} m (indoor)")
-                    data = {**data, "altitude": INDOOR_TAKEOFF_MAX_M}
-                    await sio.emit("fc_message", {"severity": "WARNING", "rank": 4, "ts": time.time(),
-                                                  "text": f"Indoor: takeoff capped to {INDOOR_TAKEOFF_MAX_M:g} m"}, to=sid)
-            except Exception:
-                pass
-        # execute_drone_action handles ActionError; a gRPC failure (mavsdk_server
-        # died, link torn down concurrently) used to escape here, socket.io
-        # swallowed it, and LAND / emergency stop produced no action_result -
-        # the button just timed out with no text.
-        try:
-            result = await execute_drone_action(tel, action, data)
-        except Exception as e:
-            logger.exception(f"drone_action {action} failed: {e}")
-            result = {"ok": False, "action": action, "error": f"{action} failed: {e}"}
+        result = await run_guarded_action(sio, session, tel, action, data, sid)
         await sio.emit("action_result", result, to=sid)
+
 
     @sio.on("set_analysis_mode")
     async def on_set_analysis_mode(sid, data):
@@ -826,42 +961,8 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
         # Re-register with vision pool so new analyzer gets frames
         if vision_pool and old_mode != mode:
             await sio.emit("model_status", {"status": "loading", "mode": mode.value}, to=sid)
-
-            async def _do_switch():
-                # Leaving a custom model: its model control ends, and a rule
-                # follow stops with HOLD before the analyzer goes.
-                if getattr(old_mode, "spec", None) is not None:
-                    from app.models_custom import actions as model_actions
-                    await model_actions.switch_off(session.session_id, "mode_changed")
-                # If we're leaving human-tracking, stop offboard cleanly BEFORE
-                # the analyzer is swapped - this gives the drone a proper HOLD
-                # command instead of letting PX4 hit its setpoint-loss failsafe.
-                if old_mode == AnalysisMode.HUMAN_TRACKING:
-                    tel = session_manager.get_telemetry(session.session_id)
-                    if tel and tel.is_connected and tel._offboard_active:
-                        # Freeze the tracker so no new velocity commands are queued
-                        analyzer = vision_pool.get_for_session(session.session_id)
-                        from app.vision.modules.human_tracker import HumanTracker
-                        if isinstance(analyzer, HumanTracker):
-                            analyzer.set_tracking(session.session_id, False)
-                        await tel.stop_offboard()
-                        logger.info(
-                            f"Session {session.session_id[:8]}: offboard stopped "
-                            f"on mode switch → {mode.value}"
-                        )
-
-                ok = await vision_pool.switch_mode(session.session_id, old_mode, mode)
-                if ok or mode == AnalysisMode.MANUAL_CONTROL:
-                    await sio.emit("model_status", {"status": "ready", "mode": mode.value}, to=sid)
-                else:
-                    # Previously "ready" was emitted whatever happened and the
-                    # stream relayed raw video with no boxes and no message.
-                    err = vision_pool.last_error(session.session_id) or "model failed to load"
-                    await sio.emit("model_status", {"status": "error", "mode": mode.value,
-                                                    "error": err}, to=sid)
-                    await sio.emit("error", {"msg": f"{mode.value}: {err}"}, to=sid)
-
-            asyncio.create_task(_do_switch())
+            asyncio.create_task(
+                apply_mode_switch(sio, session_manager, vision_pool, session, old_mode, mode, sid))
             logger.info(f"Session {session.session_id[:8]}: switching {old_mode.value} → {mode.value}")
 
         await sio.emit("mode_changed", {"mode": mode.value}, to=sid)
@@ -1091,91 +1192,8 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
                 }, to=sid)
                 return
 
-            waypoints = data.get("waypoints", [])
-            terrain_follow = bool(data.get("terrain_follow", False))
-
-            if not waypoints:
-                await sio.emit("mission_upload_result", {
-                    "ok": False, "msg": "No waypoints provided"
-                }, to=sid)
-                return
-
-            # ── Zone validation before anything reaches the drone ────────
-            # Red blocks unless an approved, in-window permit of the drone's
-            # workspace covers this path; orange needs an ack unless a
-            # permit covers it too (app/permits/service.gate_upload).
-            from app.permits import service as permit_service
-            try:
-                gate = await permit_service.gate_upload(
-                    session.drone, waypoints, ack_orange=bool(data.get("ack_orange")))
-            except (KeyError, TypeError, ValueError):
-                await sio.emit("mission_upload_result", {
-                    "ok": False, "msg": "Every waypoint needs numeric lat and lng"
-                }, to=sid)
-                return
-            if not gate["ok"]:
-                await sio.emit("mission_upload_result", {
-                    k: v for k, v in gate.items() if k != "permit"}, to=sid)
-                if gate.get("blocked"):
-                    logger.warning(f"Mission blocked ({gate['msg']}) for {session.session_id[:8]}")
-                return
-            permit = gate["permit"]
-            if permit is not None:
-                logger.info(
-                    f"Mission allowed under permit {permit['id'][:8]} "
-                    f"for {session.session_id[:8]}"
-                )
-
-            # Attachment actions at waypoints (app/attachments/mission.py):
-            # checked against the drone's attachments now, run by the
-            # backend when each waypoint is reached, never written into the
-            # flight controller's mission. Hazard ones need the pilot's tick.
-            from app.attachments import mission as attachment_mission
-            try:
-                attachment_plan = await attachment_mission.prepare(
-                    session, waypoints, allow=data.get("allow_attachment_actions") is True,
-                    terrain=terrain_follow)
-            except attachment_mission.MissionActionError as e:
-                await sio.emit("mission_upload_result", {
-                    "ok": False, "msg": str(e), "code": e.code,
-                }, to=sid)
-                return
-
-            logger.info(
-                f"Uploading {len(waypoints)} waypoints "
-                f"(terrain_follow={terrain_follow}) for session {session.session_id[:8]}"
-            )
-
-            ok, err_msg = await tel.upload_mission(waypoints, terrain_follow=terrain_follow)
-            if ok:
-                attachment_mission.arm(session.session_id, attachment_plan)
-                # Tell avoidance where this aircraft is now going, so an
-                # obstacle on the way is routed around, not just held for.
-                try:
-                    from app.avoidance.core import loop as _av_loop
-                    _av_loop.note_mission_goal(session.session_id, waypoints)
-                    session.last_mission = list(waypoints)   # failsafe check: RTL vs mission altitude
-                except Exception:
-                    pass
-                # A planned mission whose waypoints match advances to
-                # 'uploaded' - hand-drawn missions simply match nothing.
-                from app.planner import service as mission_service
-                await mission_service.mark_uploaded_by_hash(
-                    waypoints,
-                    drone_id=session.drone["id"] if session.drone else None,
-                    workspace_id=(session.drone or {}).get("workspace_id")
-                    or getattr(session, "workspace_id", None),
-                )
-            await sio.emit("mission_upload_result", {
-                "ok": ok,
-                "count": len(waypoints) if ok else 0,
-                "terrain_follow": terrain_follow,
-                "permit_id": permit["id"] if ok and permit else None,
-                "attachment_actions": sum(len(v) for v in attachment_plan.by_wp.values())
-                if ok and attachment_plan else 0,
-                "msg": f"Mission uploaded: {len(waypoints)} waypoints" if ok
-                       else f"Upload failed: {err_msg}",
-            }, to=sid)
+            result = await upload_mission_for(session, tel, data)
+            await sio.emit("mission_upload_result", result, to=sid)
 
         except Exception as e:
             logger.error(f"on_upload_mission unhandled error: {e}", exc_info=True)
