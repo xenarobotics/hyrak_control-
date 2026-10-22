@@ -24,7 +24,7 @@ import { StatusBar } from '@/components/layout/StatusBar'
 import { getStatusBarEnabled, STATUSBAR_CHANGE_EVENT } from '@/lib/statusBarSettings'
 import { useAuthGate, hasConsoleAccess } from '@/hooks/useAuthGate'
 import { useClientValueOn, useHydrated } from '@/hooks/useClientValue'
-import { WorkspaceSwitcher } from '@/components/layout/WorkspaceSwitcher'
+import { AccountMenu } from '@/components/layout/AccountMenu'
 import { CommandRefusalBanner } from '@/components/controls/CommandRefusalBanner'
 import { TakeoverBanner } from '@/components/controls/TakeoverBanner'
 import { RuleToasts } from '@/components/notifications/RuleToasts'
@@ -215,8 +215,6 @@ function PlatformNav() {
                     )}
                 </div>
 
-                <WorkspaceSwitcher normal={normal} />
-
                 {nav.map(({ href, label, icon: Icon }) => {
                     const active = pathname === href || pathname.startsWith(href + '/')
                     return (
@@ -238,10 +236,14 @@ function PlatformNav() {
                     )
                 })}
 
-                <div className="mt-auto hidden flex-col items-center gap-1 md:flex">
+                {/* Foot of the rail: console, theme, then the account menu
+                    (who is signed in, workspace, sign out). On a phone only
+                    the account menu shows, as the last tab. */}
+                <div className="hidden flex-col items-center gap-1 md:mt-auto md:flex">
                     <ConsoleLink normal={normal} />
                     {!normal && <RailThemeButton />}
                 </div>
+                <AccountMenu normal={normal} />
             </aside>
 
             {/* Navigation guard popup */}
@@ -328,6 +330,7 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
     // RTL, Land and Kill, is never hidden by it. Normal mode keeps its own
     // plain shell: the bar shows on Fly there, and Normal mode's Command
     // (SimpleCommand) has its own controls.
+    const onFly = pathname === '/fly' || pathname.startsWith('/fly/')
     const flightPage = ['/fly', '/command'].some(p => pathname === p || pathname.startsWith(p + '/'))
     const [uiMode] = useUiMode()
     const normalCommand = uiMode === 'normal' && (pathname === '/command' || pathname.startsWith('/command/'))
@@ -369,7 +372,9 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
                             {isCustomer && isStaffOnlyPath(pathname) ? null : children}
                         </main>
                     </div>
-                    {mounted && swarmEnabled && !isCustomer && <FleetAside />}
+                    {/* Fly shows the fleet inside its own side column, under the swarm
+                        switch, so turning swarm on there never opens a new column. */}
+                    {mounted && swarmEnabled && !isCustomer && !onFly && <FleetAside />}
                 </div>
                 <UpdatePrompt />
                 <LocalLinkPanel />

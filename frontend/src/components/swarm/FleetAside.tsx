@@ -20,7 +20,12 @@ function triggerScan() {
     getSocket().emit('scan_swarm_drones', { count: FLEET_SCAN_COUNT })
 }
 
-export function FleetAside() {
+/**
+ * The fleet panel. On most pages it is its own column at the right edge of
+ * the window; `embedded` drops that chrome so the Fly tab can show it inside
+ * its side column, under the swarm switch, instead of opening a new column.
+ */
+export function FleetAside({ embedded = false }: { embedded?: boolean } = {}) {
     const {
         drones, activeDroneId, scanStatus, selectedIds, lastGroupResult,
         setActiveDrone, addDrone, removeDrone, toggleSelected, setSelected, setGroupResult,
@@ -158,8 +163,13 @@ export function FleetAside() {
 
     return (
         <aside
-            className="w-56 shrink-0 flex flex-col border-l overflow-hidden"
-            style={{ background: 'hsl(var(--app-sidebar))', borderColor: 'hsl(var(--app-border))' }}
+            aria-label="Fleet"
+            className={embedded
+                ? 'flex flex-col overflow-hidden rounded-[10px] border'
+                : 'w-56 shrink-0 flex flex-col border-l overflow-hidden'}
+            style={embedded
+                ? { background: 'hsl(var(--app-surface))', borderColor: 'hsl(var(--app-border))' }
+                : { background: 'hsl(var(--app-sidebar))', borderColor: 'hsl(var(--app-border))' }}
         >
             {/* Header */}
             <div
@@ -170,7 +180,7 @@ export function FleetAside() {
                     className="text-[13px] font-semibold"
                     style={{ color: 'hsl(var(--app-text-muted))' }}
                 >
-                    FLEET
+                    Fleet
                 </span>
                 <div className="flex items-center gap-1">
                     <button
