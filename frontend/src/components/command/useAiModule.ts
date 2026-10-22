@@ -16,6 +16,8 @@ import { useDrone } from '@/hooks/useDrone'
 import { useDroneStore } from '@/store/drone'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { getVideoSource, needsCameraSelection } from '@/lib/videoSource'
+import { getFeedMode, setFeedMode, FEED_MODE_EVENT, type FeedMode } from '@/lib/videoSettings'
+import { useClientValueOn } from '@/hooks/useClientValue'
 
 export function useAiModule() {
     const { setMode } = useDrone()
@@ -43,8 +45,24 @@ export function useAiModule() {
     }, [mode, setMode, setCvResults, isStreaming, stopStream, startStream, selectedCameraId])
 
     const running = mode !== 'manual-control'
+
+    // How the processed view gets its picture (FeedMode): boxes drawn here on
+    // the raw picture, or the server's annotated video. The transport is
+    // fixed when the stream starts, so a running AI stream is restarted
+    // around the change, the same way a module switch is.
+    const feedMode = useClientValueOn<FeedMode>(FEED_MODE_EVENT, getFeedMode, 'overlay')
+    const setFeed = useCallback((next: FeedMode) => {
+        if (next === getFeedMode()) return
+        setFeedMode(next)
+        if (isStreaming && running) {
+            if (restartTimer.current) clearTimeout(restartTimer.current)
+            stopStream()
+            restartTimer.current = setTimeout(() => { restartTimer.current = null; void startStream() }, 600)
+        }
+    }, [isStreaming, running, stopStream, startStream])
+
     return {
-        mode, running,
+        mode, running, feedMode, setFeed,
         start: apply,
         stop: useCallback(() => apply('manual-control'), [apply]),
         toggle: useCallback((m: string) => apply(m === mode ? 'manual-control' : m), [apply, mode]),

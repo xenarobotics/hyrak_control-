@@ -6,12 +6,17 @@
 // HOLD / RTL / LAND / KILL; this page adds its avoidance state to that bar
 // (AvoidChips). Below it, fixed places, no chrome floating over the picture
 // except the stage's own switches:
-//   centre  the stage - video (with the Fly tab's configurable OSD), map (2D
-//           or 3D) or, while an AI module runs, the AI view - and the others
-//           as pictures-in-picture pinned to corners. Video | Map switch top
-//           left; click a PiP to make it the main view, drag it to another
-//           corner. The AI drawer (slim tab on the left edge) starts and stops
-//           the AI modules.
+//   centre  the stage - three views: the raw video (with the Fly tab's
+//           configurable OSD), the processed video (what the running AI
+//           module sees, its results drawn on; see AiView) and the map (2D or
+//           3D). One is the main view, the others are pictures-in-picture
+//           pinned to corners (the processed one while a module runs).
+//           Raw | Processed | Map switch top left, with the processed feed's
+//           source (boxes drawn here, or the server's annotated video) beside
+//           it; click a PiP to make it the main view, drag it to another
+//           corner. Top right: the picture setting (Fill, Source, 16:9, 4:3,
+//           1:1) for both videos. The AI drawer (slim tab on the left edge)
+//           starts and stops the AI modules.
 //   right   the dock, icon tabs, one at a time: avoidance (+ optional radar
 //           and forward-depth views), the running AI module's panel,
 //           telemetry, setup (devices + full controls), message log. Drag its
@@ -27,7 +32,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
-import { Scaling, PanelRightClose, PanelRightOpen, X, ShieldCheck, Bot, Activity, SlidersHorizontal, ScrollText, Video, Map as MapIcon, AudioLines } from 'lucide-react'
+import { Scaling, PanelRightClose, PanelRightOpen, X, ShieldCheck, Bot, Activity, SlidersHorizontal, ScrollText, Video, Map as MapIcon, AudioLines, ScanEye } from 'lucide-react'
 import { getSocket } from '@/lib/socket'
 import { useSwarmStore } from '@/store/swarm'
 import { useDroneStore } from '@/store/drone'
@@ -36,6 +41,9 @@ import { getVideoSource } from '@/lib/videoSource'
 import { cn } from '@/lib/utils'
 import { VideoStream } from '@/components/video/VideoStream'
 import { CameraWall } from '@/components/video/CameraWall'
+import { AspectFrame } from '@/components/video/AspectFrame'
+import { PictureFitMenu, useVideoAspect } from '@/components/video/PictureFitMenu'
+import { innerFit, type FeedMode } from '@/lib/videoSettings'
 import { DeviceSelector } from '@/components/controls/DeviceSelector'
 import { DroneControls } from '@/components/controls/DroneControls'
 import { AvoidancePanel } from '@/components/avoidance/AvoidancePanel'
@@ -186,14 +194,14 @@ function Toggle({ on, label, hint, onClick }: { on: boolean; label: string; hint
 
 /** A segmented switch drawn over the stage (video or map). */
 function StageSeg<T extends string>({ value, options, onChange, label }: {
-    value: T; options: { id: T; label: string; icon?: React.ReactNode }[]; onChange: (v: T) => void; label: string
+    value: T; options: { id: T; label: string; icon?: React.ReactNode; hint?: string }[]; onChange: (v: T) => void; label: string
 }) {
     return (
         <div role="group" aria-label={label}
             className="flex gap-0.5 p-0.5 rounded-md border border-overlay-border bg-overlay-scrim backdrop-blur-[6px] shadow-[var(--app-shadow)]">
             {options.map(o => (
-                <button key={o.id} onClick={() => onChange(o.id)} aria-pressed={value === o.id}
-                    className={cn('flex items-center gap-1.5 h-8 px-3 rounded text-[13px] font-bold transition-colors duration-[140ms]', FOCUS_OVERLAY,
+                <button key={o.id} onClick={() => onChange(o.id)} aria-pressed={value === o.id} title={o.hint}
+                    className={cn('flex items-center gap-1.5 h-8 px-2.5 sm:px-3 rounded text-[13px] font-bold transition-colors duration-[140ms]', FOCUS_OVERLAY,
                         value === o.id ? 'bg-[color-mix(in_srgb,var(--overlay-accent)_18%,transparent)] text-overlay-selected-ink'
                             : 'text-overlay-muted hover:text-overlay-text')}>
                     {o.icon}{o.label}
@@ -260,10 +268,16 @@ function DevCommand() {
         saveLayout(next); return next
     }), [setLayout])
 
-    // The AI view exists only while a module runs; if it was the main view
-    // when the module stopped, the video takes over.
-    // Adjusted during render: an effect would paint one frame of the empty AI view.
-    if (mounted && !ai.running && layout.big === 'ai') makeBig('video')
+    // The processed view can always be picked (it explains itself while no
+    // module runs), but when the module the pilot was watching stops, the
+    // raw video takes over rather than leaving an empty main view.
+    // Adjusted during render: an effect would paint one frame of the empty view.
+    const [wasRunning, setWasRunning] = useState(ai.running)
+    if (wasRunning !== ai.running) {
+        setWasRunning(ai.running)
+        if (mounted && !ai.running && layout.big === 'ai') makeBig('video')
+    }
+    const aspect = useVideoAspect()
     const toggleDock = useCallback(() => setLayout(prev => {
         const next = { ...prev, dockHidden: !prev.dockHidden }; saveLayout(next); return next
     }), [setLayout])
@@ -347,7 +361,8 @@ function DevCommand() {
         window.addEventListener('pointerup', up)
     }
 
-    const views: View[] = ai.running ? ['video', 'map', 'ai'] : ['video', 'map']
+    // The processed PiP only while a module runs: without one it is an empty card.
+    const views: View[] = ai.running || layout.big === 'ai' ? ['video', 'map', 'ai'] : ['video', 'map']
     const small = views.filter(v => v !== layout.big)
     const placed = placePips(small, layout.corners)
 
@@ -413,9 +428,13 @@ function DevCommand() {
                     <div style={boxFor('video')} className={cn('flex', layout.big !== 'video' && 'max-md:hidden')}>
                         <div className="absolute inset-0 flex">
                             {wallOn ? <CameraWall onClose={() => setWallOn(false)} /> : <VideoStream bare cleanFeed />}
-                            {!wallOn && <CopilotVideoOverlay interactive={layout.big === 'video'} />}
+                            {!wallOn && (
+                                <AspectFrame aspect={aspect}>
+                                    <CopilotVideoOverlay fit={innerFit(aspect)} interactive={layout.big === 'video'} />
+                                </AspectFrame>
+                            )}
                         </div>
-                        {layout.big !== 'video' && pipChrome('video', 'Video')}
+                        {layout.big !== 'video' && pipChrome('video', 'Raw video')}
                     </div>
                     <div style={boxFor('map')} className={cn(!mapBig && 'max-md:hidden')}>
                         {mounted && (layout.map3d
@@ -423,22 +442,31 @@ function DevCommand() {
                             : <MissionMap readOnly follow compact={!mapBig} />)}
                         {!mapBig && pipChrome('map', layout.map3d ? 'Map 3D' : 'Map')}
                     </div>
-                    {mounted && ai.running && (
+                    {mounted && views.includes('ai') && (
                         <div style={boxFor('ai')} className={cn(layout.big !== 'ai' && 'max-md:hidden')}>
-                            <AiView />
-                            {layout.big !== 'ai' && pipChrome('ai', `AI ${runningMod?.name ?? ''}`)}
+                            <AiView onPickModule={viewOnly ? undefined : () => setDrawerOpen(true)} />
+                            {layout.big !== 'ai' && pipChrome('ai', runningMod ? `Processed: ${runningMod.name}` : 'Processed')}
                         </div>
                     )}
 
-                    {/* Stage switches: what is big, and the map's 2D / 3D. */}
-                    <div className="absolute top-2 left-2 z-[1600] flex items-center gap-1.5">
+                    {/* Stage switches: what is big, the processed feed's source,
+                        and the map's 2D / 3D. */}
+                    <div className="absolute top-2 left-2 right-[132px] md:right-auto z-[1600] flex flex-wrap items-center gap-1.5">
                         <StageSeg label="Main view" value={bigSel}
                             onChange={v => makeBig(v)}
                             options={[
-                                { id: 'video', label: 'Video', icon: <Video size={14} /> },
-                                { id: 'map', label: 'Map', icon: <MapIcon size={14} /> },
-                                ...(mounted && ai.running ? [{ id: 'ai' as const, label: 'AI', icon: <Bot size={14} /> }] : []),
+                                { id: 'video', label: 'Raw', icon: <Video size={14} />, hint: 'Raw video: the camera picture as it arrives' },
+                                { id: 'ai', label: 'Processed', icon: <ScanEye size={14} />, hint: 'Processed video: what the AI module sees, with its results' },
+                                { id: 'map', label: 'Map', icon: <MapIcon size={14} />, hint: 'Map (M swaps raw video and map)' },
                             ]} />
+                        {layout.big === 'ai' && mounted && ai.running && (
+                            <StageSeg<FeedMode> label="Processed feed" value={ai.feedMode}
+                                onChange={v => ai.setFeed(v)}
+                                options={[
+                                    { id: 'overlay', label: 'Overlay', hint: 'Raw picture with the results drawn here: sharpest, lowest latency' },
+                                    { id: 'processed', label: 'Server', hint: 'The server\'s annotated video: picture and results in sync (restarts the video)' },
+                                ]} />
+                        )}
                         {mapBig && (
                             <StageSeg label="Map view" value={layout.map3d ? '3d' : '2d'}
                                 onChange={v => update({ map3d: v === '3d' })}
@@ -459,6 +487,7 @@ function DevCommand() {
                                 </button>
                             </div>
                         )}
+                        {mounted && !wallOn && layout.big !== 'map' && <PictureFitMenu />}
                         {mounted && !wallOn && getVideoSource() === 'air_unit_udp' && (
                             <button onClick={() => setWallOn(true)} className={cn(OVERLAY_BTN, FOCUS_OVERLAY, 'h-9')}
                                 title="Show every mesh unit delivering video">Wall</button>

@@ -19,12 +19,15 @@ import { WebCodecsVideo } from './WebCodecsVideo'
 import { useClientValue } from '@/hooks/useClientValue'
 import { FOCUS_OVERLAY, OVERLAY_BTN } from '@/components/controls/flightStyles'
 import { WhyDisabled } from '@/components/controls/WhyDisabled'
+import { innerFit } from '@/lib/videoSettings'
+import { AspectFrame } from './AspectFrame'
+import { PictureFitMenu, useVideoAspect } from './PictureFitMenu'
 
-// 'fit' shows the WHOLE frame at the source's own aspect, letterboxed -
-// distinct from the fixed presets, which force an aspect the camera may not
-// have. For a 16:10 or 4:3 sensor 'fill' crops away frame the AI is still
-// analysing, so a detection can sit where the operator cannot see it.
-type AspectRatio = 'fill' | 'fit' | '16:9' | '4:3' | '1:1'
+// The picture setting (Fill, Source, 16:9, 4:3, 1:1) is saved and shared by
+// every video pane: see VideoAspect in lib/videoSettings.ts. 'Source' shows
+// the WHOLE frame at the camera's own aspect, letterboxed. For a 16:10 or
+// 4:3 sensor 'Fill' crops away frame the AI is still analysing, so a
+// detection can sit where the operator cannot see it.
 
 // `bare`: picture + OSD only, no control bar. For hosts that put Start/Stop
 // and the rest in their own chrome (the Command window's top bar).
@@ -99,7 +102,8 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
     const containerRef = useRef<HTMLDivElement | null>(null)
     const [maximized, setMaximized] = useState(false)
     const [isFullscreen, setIsFullscreen] = useState(false)
-    const [aspectRatio, setAspectRatio] = useState<AspectRatio>('fill')
+    const aspect = useVideoAspect()
+    const objectFit = innerFit(aspect) === 'fit' ? 'object-contain' : 'object-cover'
 
     // Attach whichever stream should currently be visible to the main video
     // element. Relay mode is the exception: its preview is a loopback HTTP
@@ -145,11 +149,6 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
         }
     }, [])
 
-    const videoStyle: React.CSSProperties =
-        aspectRatio === 'fill' ? {}
-        : aspectRatio === 'fit' ? { maxHeight: '100%', maxWidth: '100%' }
-        : { aspectRatio: aspectRatio.replace(':', '/'), maxHeight: '100%', maxWidth: '100%' }
-
     const startBlocked = needsCamera && camerasScanned && !selectedCameraId && !isStreaming
 
     // Live picture: slate surround (the same in every theme). No picture:
@@ -167,28 +166,24 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
                 maximized && !isFullscreen ? 'fixed inset-4 z-50' : 'flex-1'
             )}
         >
-            {/* Main video - raw local feed when no AI mode is active, processed remote feed otherwise */}
-            {wcUrl ? (
-                <WebCodecsVideo
-                    src={wcUrl}
-                    codec={wcCodec}
-                    onDecodeError={serverFeed ? onServerFeedFail : (wcCodec === 'hevc' ? fallbackFromHevc : undefined)}
-                    className={aspectRatio === 'fill'
-                        ? 'w-full h-full object-cover'
-                        : 'h-full object-contain mx-auto'}
-                    style={videoStyle}
-                />
-            ) : (
-                <video
-                    ref={mainVideoRef}
-                    autoPlay playsInline muted
-                    className={cn(
-                        aspectRatio === 'fill' ? 'w-full h-full object-cover' : 'h-full object-contain mx-auto',
-                        !isStreaming && !localPreviewUrl && 'hidden'
-                    )}
-                    style={videoStyle}
-                />
-            )}
+            {/* Main video - raw local feed when no AI mode is active, processed
+                remote feed otherwise - in the box the picture setting gives. */}
+            <AspectFrame aspect={aspect} className={cn(!live && 'hidden')}>
+                {wcUrl ? (
+                    <WebCodecsVideo
+                        src={wcUrl}
+                        codec={wcCodec}
+                        onDecodeError={serverFeed ? onServerFeedFail : (wcCodec === 'hevc' ? fallbackFromHevc : undefined)}
+                        className={cn('w-full h-full', objectFit)}
+                    />
+                ) : (
+                    <video
+                        ref={mainVideoRef}
+                        autoPlay playsInline muted
+                        className={cn('w-full h-full', objectFit)}
+                    />
+                )}
+            </AspectFrame>
 
             {/* Offline state - the relay preview is live before the backend
                 stream negotiates, so "Video offline" over a working picture
@@ -245,18 +240,7 @@ export function VideoStream({ bare = false, cleanFeed = false, noOsd = false }: 
                     ? <RecordingControls videoRef={mainVideoRef} isStreaming={isStreaming} />
                     : <span />}
                 <div className="flex items-center gap-1.5">
-                    {isStreaming && (
-                        <div className="hidden sm:flex gap-0.5 p-0.5 rounded-md border border-overlay-border bg-overlay-scrim backdrop-blur-[6px]" role="group" aria-label="Picture fit">
-                            {(['fill', 'fit', '16:9', '4:3', '1:1'] as const).map(r => (
-                                <button key={r} onClick={() => setAspectRatio(r)} aria-pressed={aspectRatio === r}
-                                    className={cn('h-8 min-w-8 px-2 rounded text-[12px] font-bold capitalize transition-colors duration-[var(--dur-fast)]', FOCUS_OVERLAY,
-                                        aspectRatio === r ? 'bg-[color-mix(in_srgb,var(--overlay-accent)_18%,transparent)] text-[var(--overlay-accent)]' : 'text-overlay-muted hover:text-overlay-text')}
-                                >
-                                    {r}
-                                </button>
-                            ))}
-                        </div>
-                    )}
+                    <PictureFitMenu placement="above" />
                     <WhyDisabled reason={isLoading ? 'Starting the video' : startBlocked ? 'Pick a camera in Devices first' : null} className="inline-block">
                     <Button size="sm"
                         variant={isStreaming ? 'ghost' : 'default'}

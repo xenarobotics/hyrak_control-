@@ -12,24 +12,31 @@
 // hooks/useAttachVideo.ts.
 
 import { useRef } from 'react'
-import { useClientValue } from '@/hooks/useClientValue'
+import { Bot } from 'lucide-react'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
 import { useDroneStore } from '@/store/drone'
 import { CvOverlayCanvas } from '@/components/vision/CvOverlayCanvas'
 import { CopilotVideoOverlay } from '@/components/copilot/CopilotVideoOverlay'
 import { Recon3DView } from '@/components/vision/Recon3DView'
 import { WebCodecsVideo } from '@/components/video/WebCodecsVideo'
-import { getVideoFit, type VideoFit } from '@/lib/videoSettings'
+import { innerFit } from '@/lib/videoSettings'
+import { AspectFrame } from '@/components/video/AspectFrame'
+import { useVideoAspect } from '@/components/video/PictureFitMenu'
 import { useAirUnitPreview } from '@/lib/airUnitPreview'
 import { useGstPreview } from '@/lib/gstPreview'
 import { useReceiver, fallbackFromHevc } from '@/lib/hyrakReceiver'
 import { useAttachVideo } from '@/hooks/useAttachVideo'
 import { useServerFeed } from '@/lib/serverHevcFeed'
 
-export function AiView() {
+/** `onPickModule`: shown as the way out of the empty state while no module
+ *  runs (Command opens its AI drawer). */
+export function AiView({ onPickModule }: { onPickModule?: () => void } = {}) {
     const { localStream, remoteStream, isStreaming, overlayActive } = useWebRTCContext()
     const mode = useDroneStore(s => s.mode)
-    const fit: VideoFit = useClientValue(getVideoFit, 'fill')
+    // The shared picture setting (Fill, Source, 16:9, 4:3, 1:1). The video and
+    // every overlay sit in one AspectFrame with the same fit, so boxes line up.
+    const aspect = useVideoAspect()
+    const fit = innerFit(aspect)
     const videoRef = useRef<HTMLVideoElement | null>(null)
 
     const airUnitPreviewUrl = useAirUnitPreview()
@@ -54,18 +61,34 @@ export function AiView() {
     const objectFit = fit === 'fit' ? 'contain' : 'cover'
     return (
         <div className={isStreaming ? 'absolute inset-0 bg-[#1A2129]' : 'absolute inset-0 bg-app-surface-2'}>
-            {wcUrl ? (
-                <WebCodecsVideo src={wcUrl} codec={wcCodec}
-                    onDecodeError={wcCodec === 'hevc' ? fallbackFromHevc : undefined}
-                    style={{ width: '100%', height: '100%', objectFit }} />
-            ) : (
-                <video ref={videoRef} autoPlay playsInline muted
-                    style={{ width: '100%', height: '100%', objectFit, display: isStreaming ? 'block' : 'none' }} />
-            )}
-            {isStreaming && overlayActive && mode !== '3d-reconstruction' && <CvOverlayCanvas fit={fit} />}
+            <AspectFrame aspect={aspect}>
+                {wcUrl ? (
+                    <WebCodecsVideo src={wcUrl} codec={wcCodec}
+                        onDecodeError={wcCodec === 'hevc' ? fallbackFromHevc : undefined}
+                        style={{ width: '100%', height: '100%', objectFit }} />
+                ) : (
+                    <video ref={videoRef} autoPlay playsInline muted
+                        style={{ width: '100%', height: '100%', objectFit, display: isStreaming ? 'block' : 'none' }} />
+                )}
+                {isStreaming && overlayActive && mode !== '3d-reconstruction' && <CvOverlayCanvas fit={fit} />}
+                {isStreaming && mode !== '3d-reconstruction' && <CopilotVideoOverlay fit={fit} />}
+            </AspectFrame>
             {isStreaming && mode === '3d-reconstruction' && <Recon3DView />}
-            {isStreaming && mode !== '3d-reconstruction' && <CopilotVideoOverlay fit={fit} />}
-            {!isStreaming && (
+            {mode === 'manual-control' ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-4 pt-12 sm:pt-0 sm:pb-[12%] text-center bg-app-surface-2">
+                    <span className="max-sm:hidden flex size-12 items-center justify-center rounded-full bg-app-surface text-app-text-muted border border-app-border">
+                        <Bot size={22} strokeWidth={1.75} />
+                    </span>
+                    <p className="text-[14px] font-semibold text-app-text">No AI module running</p>
+                    <p className="max-sm:hidden text-[13px] text-app-text-muted max-w-xs">The processed feed shows what a module sees, with its results drawn on.</p>
+                    {onPickModule && (
+                        <button onClick={onPickModule}
+                            className="h-9 px-4 inline-flex items-center gap-1.5 rounded-md text-[13px] font-bold bg-app-accent text-[var(--app-accent-ink)] hover:brightness-110 transition-[filter,transform] duration-[140ms] active:scale-[.98] outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg">
+                            <Bot size={15} /> Pick a module
+                        </button>
+                    )}
+                </div>
+            ) : !isStreaming && (
                 <div className="absolute inset-0 flex items-center justify-center text-[13px] text-app-text-muted">
                     AI view starts with the video
                 </div>

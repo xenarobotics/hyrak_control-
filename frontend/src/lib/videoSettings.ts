@@ -100,6 +100,15 @@ export function getFeedMode(): FeedMode {
     return 'overlay'
 }
 
+export const FEED_MODE_EVENT = 'hyrak-feed-mode'
+
+/** Saves the feed mode and announces it. The stream's transport is chosen at
+ *  start, so a caller with a running AI stream restarts it to apply. */
+export function setFeedMode(v: FeedMode) {
+    try { localStorage.setItem('hyrak-feed-mode', JSON.stringify(v)) } catch { /* not critical */ }
+    window.dispatchEvent(new CustomEvent(FEED_MODE_EVENT, { detail: v }))
+}
+
 /** The canonical list, exported so CvOverlayCanvas can assert against it in
  *  dev rather than failing silently when the two drift apart. */
 export function overlayCapableModes(): string[] {
@@ -295,16 +304,57 @@ export async function tuneVideoSender(pc: RTCPeerConnection, thumbnailOnly = fal
 // boxes and clicks land in the wrong place.
 export type VideoFit = 'fill' | 'fit'
 
-export function getVideoFit(): VideoFit {
+// The picture setting the Fly and Command video offer: the two fits above
+// plus fixed frame shapes. A preset draws the picture in a centred box of
+// that shape (letterboxed in the panel) and fills the box, cropping the
+// source to the shape without stretching it. Everything drawn over the
+// video goes inside the same box with fit 'fill', so overlay boxes and
+// clicks line up for every option (see components/video/AspectFrame.tsx).
+// Stored under the same key as VideoFit: one setting, and the AI tab, which
+// only offers fill / fit, reads a preset as 'fill'.
+export type VideoAspect = VideoFit | '16:9' | '4:3' | '1:1'
+
+export const ASPECT_OPTIONS: { id: VideoAspect; label: string; hint: string }[] = [
+    { id: 'fill', label: 'Fill', hint: 'Default. Fills the panel and crops the edges' },
+    { id: 'fit', label: 'Source', hint: 'The whole frame at the camera\'s own aspect' },
+    { id: '16:9', label: '16:9', hint: 'Widescreen frame, cropped to shape' },
+    { id: '4:3', label: '4:3', hint: 'Classic camera frame, cropped to shape' },
+    { id: '1:1', label: '1:1', hint: 'Square frame, cropped to shape' },
+]
+const ASPECT_IDS = ASPECT_OPTIONS.map(o => o.id) as string[]
+
+/** Width / height of a preset, or null for fill and fit. */
+export function aspectRatioOf(a: VideoAspect): number | null {
+    if (a === 'fill' || a === 'fit') return null
+    const [w, h] = a.split(':').map(Number)
+    return w / h
+}
+
+/** The object-fit to use INSIDE the picture box for this setting. */
+export function innerFit(a: VideoAspect): VideoFit {
+    return a === 'fit' ? 'fit' : 'fill'
+}
+
+export const VIDEO_FIT_EVENT = 'hyrak-video-fit'
+
+export function getVideoAspect(): VideoAspect {
     if (typeof window === 'undefined') return 'fill'
     try {
         const v = JSON.parse(localStorage.getItem('hyrak-video-fit') ?? '""')
-        if (v === 'fill' || v === 'fit') return v
+        if (ASPECT_IDS.includes(v)) return v
     } catch { /* fall back */ }
     return 'fill'
 }
 
+export function getVideoFit(): VideoFit {
+    return getVideoAspect() === 'fit' ? 'fit' : 'fill'
+}
+
+export function setVideoAspect(v: VideoAspect) {
+    try { localStorage.setItem('hyrak-video-fit', JSON.stringify(v)) } catch { /* not critical */ }
+    window.dispatchEvent(new CustomEvent(VIDEO_FIT_EVENT, { detail: v }))
+}
+
 export function setVideoFit(v: VideoFit) {
-    localStorage.setItem('hyrak-video-fit', JSON.stringify(v))
-    window.dispatchEvent(new CustomEvent('hyrak-video-fit', { detail: v }))
+    setVideoAspect(v)
 }
