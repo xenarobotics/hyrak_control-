@@ -23,6 +23,14 @@ export const FOCUS_OVERLAY =
 export const PANEL =
   'rounded-[10px] border border-overlay-border bg-overlay-scrim text-app-text shadow-[var(--app-shadow)] backdrop-blur-md'
 
+/** Docked glass panel over the map (Mission plan and waypoint settings):
+ *  the app surface at 80% with a strong blur, so the map shows through
+ *  without hurting text contrast. Midnight (the high-glare theme) keeps it
+ *  near-opaque. */
+export const GLASS =
+  'border border-app-border bg-[hsl(var(--app-surface)/0.8)] text-app-text shadow-[var(--app-shadow)] ' +
+  'backdrop-blur-xl backdrop-saturate-150 [.midnight_&]:bg-[hsl(var(--app-surface)/0.97)]'
+
 /** Popover / menu that follows the theme. */
 export const POPOVER =
   'rounded-[10px] border border-app-border bg-app-raised text-app-text shadow-[var(--app-shadow)]'

@@ -75,6 +75,8 @@ function FlightZonesOverlay() {
   )
 }
 
+const AVOID_OVERLAY_KEY = 'hyrak.mission.avoidOverlay'
+
 // ── Obstacle avoidance overlay ──────────────────────────────────────────────
 // Known hazards (persistent shared map, blue) + every avoidance drone's LIVE
 // obstacle map (grey = confirmed static, amber = moving). Pure read-only.
@@ -135,7 +137,9 @@ function AvoidanceOverlay({ show, reload, home, drone }: {
       {goals.map((g, i) => (
         <Marker key={`goal-${i}`} position={[g.lat, g.lng]} icon={destIcon} interactive={false} />
       ))}
-      {start && (
+      {/* "A" only means something next to a destination "B"; on its own it
+          is a second marker on top of the takeoff point while planning. */}
+      {start && goals.length > 0 && (
         <Marker position={[start.lat, start.lng]} icon={home ? startOnHomeIcon : startIcon} interactive={false} />
       )}
       {hazards.map(h => (
@@ -623,8 +627,26 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
 
   // Drone position trail - last 60 positions for a flight path ghost
   const [droneTrail, setDroneTrail] = useState<[number, number][]>([])
-  const [showAvoid, setShowAvoid] = useState(true)   // obstacle-avoidance overlay
+  // Obstacle-avoidance overlay. On by default (hazards matter when planning);
+  // turning it off is remembered so it stays out of the way.
+  const [showAvoid, setShowAvoidState] = useState(() => {
+    try { return localStorage.getItem(AVOID_OVERLAY_KEY) !== 'off' } catch { return true }
+  })
+  const setShowAvoid = useCallback((on: boolean) => {
+    setShowAvoidState(on)
+    try { localStorage.setItem(AVOID_OVERLAY_KEY, on ? 'on' : 'off') } catch { /* private window */ }
+  }, [])
   const [pinMode, setPinMode] = useState(false)      // click-to-pin a known hazard
+  // Pin mode turns the next map click into a hazard instead of a waypoint.
+  // It must never outlive its control: drop it when the legend is hidden
+  // (the Mission page's Avoidance popover closed) or the overlay is off.
+  if (pinMode && (avoidanceLegendHost === null || !showAvoid)) setPinMode(false)
+  useEffect(() => {
+    if (!pinMode) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPinMode(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [pinMode])
   const hazardReadOnly = useAccess().isCustomer
   const [hazardNonce, setHazardNonce] = useState(0)  // bump to force overlay reload
 
@@ -695,7 +717,7 @@ export default function MissionMap({ readOnly = false, follow = false, compact =
               color: 'var(--overlay-text)',
             }}
             title="Pin a known hazard: click here, then click the map">
-            {pinMode ? 'Click the map to pin…' : '+ Pin hazard'}
+            {pinMode ? 'Click the map to pin (Esc cancels)' : '+ Pin hazard'}
           </button>}
         </div>
       )}

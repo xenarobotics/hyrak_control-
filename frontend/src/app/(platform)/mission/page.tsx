@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useMissionStore, planKeyForDrone, planSignature } from '@/store/mission'
@@ -26,7 +26,7 @@ import { useSessionAttachments } from '@/lib/attachments'
 import { waypointActionHazard } from '@/components/attachments/WaypointActions'
 import { cn } from '@/lib/utils'
 import {
-  FOCUS, PANEL, POPOVER, DIALOG, BACKDROP, OVERLAY, TITLE, LABEL, CHIP,
+  FOCUS, PANEL, POPOVER, DIALOG, BACKDROP, OVERLAY, GLASS, TITLE, LABEL, CHIP,
   BTN, BTN_PRIMARY, BTN_ACCENT, BTN_WARN, BTN_WARN_SOLID, BTN_DANGER, INPUT, ovBtn,
 } from '@/components/mission/ui'
 import {
@@ -80,6 +80,30 @@ function fmtTime(s: number): string {
   const ss = s % 60
   return mm > 0 ? `${mm}m ${ss}s` : `${ss}s`
 }
+
+// ── Layout ──────────────────────────────────────────────────────────────────
+
+/** Floating panel width and the gap to the map edge (px). */
+const PANEL_W = 320
+const GAP = 12
+/** Where a map overlay starts when a panel is docked on that side. */
+const BESIDE_PANEL = PANEL_W + 2 * GAP
+
+const DESKTOP_MQ = '(min-width: 768px)'
+function useIsDesktop(): boolean {
+  return useSyncExternalStore(
+    cb => {
+      const m = window.matchMedia(DESKTOP_MQ)
+      m.addEventListener('change', cb)
+      return () => m.removeEventListener('change', cb)
+    },
+    () => window.matchMedia(DESKTOP_MQ).matches,
+    () => true,
+  )
+}
+
+/** The Avoidance legend popover: closed by default, the choice remembered. */
+const AVOID_POPOVER_KEY = 'hyrak.mission.avoidLegendOpen'
 
 // ── Page ────────────────────────────────────────────────────────────────────
 
@@ -171,6 +195,20 @@ export default function MissionPage() {
   const [sitlAddress]  = useState('udp://:14540')
 
   const [leftOpen, setLeftOpen]     = useState(true)
+  const isDesktop = useIsDesktop()
+  // The Avoidance legend (hazard key, pin a hazard) opens from the toolbar.
+  const [avoidOpen, setAvoidOpenState] = useState(false)
+  useEffect(() => {
+    try {
+      // Restore the remembered choice after mount (localStorage is client-only).
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time restore
+      if (localStorage.getItem(AVOID_POPOVER_KEY) === 'open') setAvoidOpenState(true)
+    } catch { /* storage blocked */ }
+  }, [])
+  const setAvoidOpen = useCallback((open: boolean) => {
+    setAvoidOpenState(open)
+    try { localStorage.setItem(AVOID_POPOVER_KEY, open ? 'open' : 'closed') } catch { /* storage blocked */ }
+  }, [])
   // 390px: the plan panel is a bottom sheet, peeking until opened.
   const [sheetOpen, setSheetOpen]   = useState(false)
   const [showLayers, setShowLayers] = useState(false)
@@ -224,6 +262,11 @@ export default function MissionPage() {
   const [showAvoidPanel, setShowAvoidPanel] = useState(false)
   // Where the 2D map portals its avoidance legend (the left column).
   const [legendHost, setLegendHost] = useState<HTMLDivElement | null>(null)
+  // An airspace answer to an upload that needs the pilot (orange zone: upload
+  // anyway; red zone on the fleet: apply for a permit). Shown as a calm note
+  // above Upload instead of a blocking browser popup; any plan edit voids it.
+  const [zoneAsk, setZoneAsk] = useState<{ kind: 'orange' | 'red'; msg: string; plan: Waypoint[] } | null>(null)
+  if (zoneAsk && zoneAsk.plan !== waypoints) setZoneAsk(null)
 
   // In swarm mode permits belong to the ACTIVE fleet drone - every permit
   // request/list call must name it explicitly.
@@ -307,49 +350,19 @@ export default function MissionPage() {
     }
     if (missionUploadResult.blocked === 'red' && missionUploadResult.can_request
         && lastUploadRef.current && pageInitiated) {
-      const msg = missionUploadResult.msg
+      setZoneAsk({ kind: 'red', msg: missionUploadResult.msg, plan: useMissionStore.getState().waypoints })
       setMissionUploadResult(null)
-      if (window.confirm(`${msg}.\n\nApply for permission to fly this exact mission?`)) {
-        const description = window
-          .prompt('Describe the purpose of this flight for the reviewing authority:')
-          ?.trim()
-        if (description) {
-          getSocket().emit('request_permit', {
-            description,
-            waypoints: lastUploadRef.current,
-            ...permitScope(),
-          })
-        }
-      }
+      pendingUploadRef.current = null
       return
     }
 
-    // Orange-zone crossing: backend wants explicit pilot confirmation.
-    // Re-send on the channel the upload came from (fleet vs primary).
+    // Orange-zone crossing: backend wants explicit pilot confirmation. Asked
+    // inline in the plan panel (Upload anyway), never as a popup.
     if (missionUploadResult.needs_ack && pageInitiated) {
-      const msg = missionUploadResult.msg
-      setMissionUploadResult(null)
-      if (lastUploadRef.current &&
-          window.confirm(`${msg}.\n\nYou will get warnings while inside it. Upload anyway?`)) {
-        setIsUploading(true)
-        const { enabled, activeDroneId: fleetId } = useSwarmStore.getState()
-        if (enabled && fleetId !== null) {
-          getSocket().emit('swarm_upload_mission', {
-            drone_id: fleetId,
-            terrain_follow: terrainFollow,
-            waypoints: lastUploadRef.current,
-            ack_orange: true,
-            ...allowAttachRef.current,
-          })
-        } else {
-          getSocket().emit('upload_mission', {
-            terrain_follow: terrainFollow,
-            waypoints: lastUploadRef.current,
-            ack_orange: true,
-            ...allowAttachRef.current,
-          })
-        }
+      if (lastUploadRef.current) {
+        setZoneAsk({ kind: 'orange', msg: missionUploadResult.msg, plan: useMissionStore.getState().waypoints })
       }
+      setMissionUploadResult(null)
       return
     }
 
@@ -360,7 +373,7 @@ export default function MissionPage() {
     const t = setTimeout(() => setMissionUploadResult(null),
       missionUploadResult.blocked === 'red' ? 7000 : 4000)
     return () => clearTimeout(t)
-  }, [missionUploadResult, setMissionUploadResult, terrainFollow, markPlanUploaded, permitScope, canPlan])
+  }, [missionUploadResult, setMissionUploadResult, markPlanUploaded, canPlan])
 
   // wasMission: tracks whether drone has entered MISSION mode this session.
   // Reset when waypoints change so a re-uploaded mission shows "Start" not "Resume".
@@ -525,7 +538,6 @@ export default function MissionPage() {
   // Status strip layout helpers
   const statusBarVisible = missionExecuting || missionPaused
   const toolbarTop = statusBarVisible ? 'top-12' : 'top-3'
-  const legendTop  = statusBarVisible ? 'top-[100px]' : 'top-16'
   const toastTop   = statusBarVisible ? 'top-[100px]' : 'top-16'
 
   // Wind speed from EKF2
@@ -663,6 +675,51 @@ export default function MissionPage() {
     }
   }, [waypoints, telStatus, terrainFollow, autoHeading, planHasHazardActions, allowAttachments])
 
+  // Orange zone: re-send the exact last upload with the acknowledgement, on
+  // the channel it came from (fleet vs primary).
+  const uploadWithAck = useCallback(() => {
+    setZoneAsk(null)
+    if (!lastUploadRef.current) return
+    setIsUploading(true)
+    const { enabled, activeDroneId: fleetId } = useSwarmStore.getState()
+    const payload = {
+      terrain_follow: terrainFollow,
+      waypoints: lastUploadRef.current,
+      ack_orange: true,
+      ...allowAttachRef.current,
+    }
+    if (enabled && fleetId !== null) getSocket().emit('swarm_upload_mission', { drone_id: fleetId, ...payload })
+    else getSocket().emit('upload_mission', payload)
+  }, [terrainFollow])
+
+  // Red zone (staff fleet): apply for a permit for this exact mission.
+  const applyForPermit = useCallback(() => {
+    setZoneAsk(null)
+    if (!lastUploadRef.current) return
+    const description = window
+      .prompt('Describe the purpose of this flight for the reviewing authority:')
+      ?.trim()
+    if (description) {
+      getSocket().emit('request_permit', {
+        description,
+        waypoints: lastUploadRef.current,
+        ...permitScope(),
+      })
+    }
+  }, [permitScope])
+
+  // Esc closes the waypoint settings panel (dialogs handle their own Esc).
+  useEffect(() => {
+    if (selectedId === null) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
+      useMissionStore.getState().selectWaypoint(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selectedId])
+
   // ── Pieces shared by the desktop toolbar and the 390px Layers popover ──
   const viewToggle = (
     <div className="inline-flex items-center gap-0.5" role="group" aria-label="Map view">
@@ -705,6 +762,10 @@ export default function MissionPage() {
   const toolDivider = <span className="w-px h-5 mx-0.5 bg-overlay-border shrink-0" aria-hidden />
 
   const editing = selectedId !== null
+  // Desktop offsets: map overlays sit beside whichever panels are docked.
+  const leftOff  = isDesktop && leftOpen ? BESIDE_PANEL : GAP
+  const rightOff = isDesktop && editing ? BESIDE_PANEL : GAP
+  const panelTop = statusBarVisible ? 'md:top-[52px]' : 'md:top-3'
   const startLabel = missionExecuting ? 'Pause' : missionPaused ? 'Resume' : 'Start'
   const uploadBtn = (compact: boolean) => canFly ? (
     <span className={cn('relative inline-flex', !compact && 'flex-1')}
@@ -726,21 +787,22 @@ export default function MissionPage() {
   ) : null
 
   return (
-    <div className="relative w-full h-full flex overflow-hidden rounded-[10px] border border-app-border bg-app-surface">
+    <div className="relative w-full h-full overflow-hidden rounded-[10px] border border-app-border bg-app-surface">
 
       {/* Hidden file input */}
       <input ref={fileRef} type="file" accept=".plan,.json" className="hidden" onChange={onFileChange} />
 
-      {/* ── Plan panel: docked at the side (desktop), a bottom sheet at 390 ──
-          It owns the whole workflow, top to bottom: waypoints, defaults,
-          plans, then Upload and Start where the eye finishes. A selected
-          waypoint's editor takes the body's place. */}
+      {/* ── Plan panel: floating glass on the left (desktop), a bottom sheet
+          at 390. It owns the whole workflow, top to bottom: waypoints,
+          defaults, plans, then Upload and Start where the eye finishes. The
+          selected waypoint's settings open in their own panel on the right,
+          so the list never goes away. */}
       <aside aria-label="Mission plan"
         className={cn(
-          'z-[2100] flex flex-col min-h-0 bg-app-surface text-app-text',
-          'md:relative md:h-full md:w-[320px] md:shrink-0 md:border-r md:border-app-border',
+          'absolute z-[2100] flex flex-col min-h-0 overflow-hidden', GLASS,
+          'md:left-3 md:bottom-3 md:w-[320px] md:rounded-[12px]', panelTop,
           !leftOpen && 'md:hidden',
-          'max-md:absolute max-md:inset-x-0 max-md:bottom-0 max-md:rounded-t-[14px] max-md:border-t max-md:border-app-border',
+          'max-md:inset-x-0 max-md:bottom-0 max-md:rounded-t-[14px] max-md:border-x-0 max-md:border-b-0',
           'max-md:shadow-[0_-6px_24px_rgb(10_14_20/0.18)]',
           sheetOpen && 'max-md:h-[78%]',
         )}>
@@ -755,7 +817,7 @@ export default function MissionPage() {
         <div className="shrink-0 px-4 pt-1 md:pt-4 pb-3 flex flex-col gap-1.5">
           <div className="flex items-center gap-2 min-w-0">
             <h2 className={cn(TITLE, 'shrink-0')}>Mission plan</h2>
-            <span className={cn(CHIP, !editing && 'md:hidden')} title="Waypoints in this plan" suppressHydrationWarning>
+            <span className={cn(CHIP, 'md:hidden')} title="Waypoints in this plan" suppressHydrationWarning>
               {waypoints.length}<span className="font-semibold text-app-text-muted max-md:hidden">waypoints</span>
             </span>
             {swarmEnabled && activeDrone && (
@@ -789,14 +851,6 @@ export default function MissionPage() {
 
         {/* Body */}
         <div className={cn('min-h-0 flex-1 overflow-y-auto border-t border-app-border', !sheetOpen && 'max-md:hidden')}>
-          {editing ? (
-            <div className="px-3 py-3">
-              {/* Viewers inspect a waypoint; every field is disabled. */}
-              <fieldset disabled={readOnly} className="min-w-0 border-0 p-0 m-0">
-                <WaypointEditor />
-              </fieldset>
-            </div>
-          ) : (
             <div className="flex flex-col">
               {/* 390: the stats live here (the map strip is hidden) */}
               <div className="md:hidden grid grid-cols-3 gap-x-3 gap-y-2 px-4 py-3 border-b border-app-border">
@@ -914,11 +968,10 @@ export default function MissionPage() {
                 </section>
               )}
             </div>
-          )}
         </div>
 
         {/* Footer: link state, airspace, then Upload and Start */}
-        <div className={cn('shrink-0 border-t border-app-border px-3 pt-3 pb-3 flex flex-col gap-2 bg-app-surface', !sheetOpen && 'max-md:hidden')}>
+        <div className={cn('shrink-0 border-t border-app-border px-3 pt-3 pb-3 flex flex-col gap-2', !sheetOpen && 'max-md:hidden')}>
           {!isConnected && !(swarmEnabled && activeDrone) && (
             <div className="flex items-center gap-2 min-h-9">
               <WifiOff size={15} className="text-app-text-muted shrink-0" aria-hidden />
@@ -948,6 +1001,27 @@ export default function MissionPage() {
               path={uploadPath} canPlan={canPlan} nonce={airspaceNonce}
               onRequest={() => setPermitAsk({ reason: null, path: uploadPath })}
               onShowPermits={() => { setShowLibrary(false); setShowPermitList(v => !v) }} />
+          )}
+          {zoneAsk && (
+            <div role="status" className="rounded-[8px] border border-app-warn/50 bg-app-warn-soft px-3 py-2.5 flex flex-col gap-2 animate-in fade-in duration-200">
+              <p className="flex items-start gap-2 text-[13px] font-semibold text-app-text">
+                <AlertTriangle size={15} className="text-app-warn shrink-0 mt-px" aria-hidden />
+                <span>
+                  {zoneAsk.msg}.{' '}
+                  <span className="font-normal text-app-text-muted">
+                    {zoneAsk.kind === 'orange'
+                      ? 'You will get warnings while inside it.'
+                      : 'Flying this exact mission needs a permit.'}
+                  </span>
+                </span>
+              </p>
+              <div className="flex gap-2">
+                {zoneAsk.kind === 'orange'
+                  ? <button onClick={uploadWithAck} className={cn(BTN_WARN, 'flex-1')}><Upload size={14} aria-hidden /> Upload anyway</button>
+                  : <button onClick={applyForPermit} className={cn(BTN_WARN, 'flex-1')}>Apply for a permit</button>}
+                <button onClick={() => { setZoneAsk(null); pendingUploadRef.current = null }} className={BTN}>Not now</button>
+              </div>
+            </div>
           )}
           {canFly && planHasHazardActions && (
             <label
@@ -1022,21 +1096,39 @@ export default function MissionPage() {
         </div>
       </aside>
 
+      {/* ── Waypoint settings: floating glass on the right (desktop), a
+          sheet over the plan at 390. Open while a waypoint is selected;
+          x, Esc or Delete closes it. ── */}
+      {editing && (
+        <aside aria-label="Waypoint settings"
+          className={cn(
+            'absolute z-[2150] flex flex-col min-h-0 overflow-y-auto overscroll-contain', GLASS,
+            'md:right-3 md:w-[320px] md:max-h-[calc(100%-24px)] md:rounded-[12px]', panelTop,
+            statusBarVisible && 'md:max-h-[calc(100%-64px)]',
+            'max-md:inset-x-0 max-md:bottom-0 max-md:max-h-[60%] max-md:rounded-t-[14px] max-md:border-x-0 max-md:border-b-0',
+            'max-md:shadow-[0_-6px_24px_rgb(10_14_20/0.22)]',
+            'animate-in fade-in slide-in-from-right-2 max-md:slide-in-from-bottom-2 duration-200 motion-reduce:animate-none',
+          )}>
+          <div className="px-4 py-4">
+            <WaypointEditor readOnly={readOnly} />
+          </div>
+        </aside>
+      )}
+
       {/* ── Map area ───────────────────────────────────────────────────── */}
-      <div className="relative flex-1 min-w-0 h-full">
+      <div className="absolute inset-0">
         {/* Full-bleed map - 2D or 3D */}
         {mapView === '3d' ? <MissionMap3D readOnly={readOnly}
-          // The plan panel is docked beside the map, so the controls sit on
-          // the map's right edge, centred.
-          navStyle={{ right: 12, top: '50%', transform: 'translateY(-50%)' }} />
+          // Controls on the map's right edge, clear of the settings panel.
+          navStyle={{ right: rightOff, top: '50%', transform: 'translateY(-50%)' }} />
           : <MissionMap readOnly={readOnly}
-          // Detections legend top-right; the avoidance legend joins the
-          // left column under the toolbar (no overlap).
-          detectionsLegendStyle={{ right: 12, top: statusBarVisible ? 52 : 12 }}
-          avoidanceLegendHost={legendHost} />}
+          // Detections legend top-right, clear of the settings panel; the
+          // avoidance legend opens from the toolbar (portal).
+          detectionsLegendStyle={{ right: rightOff, top: statusBarVisible ? 52 : 12 }}
+          avoidanceLegendHost={avoidOpen ? legendHost : null} />}
 
         {/* ── Fleet mission console (swarm mode, general missions) ────── */}
-        {!isCustomer && <FleetMissionPanel leftOffset="12px" />}
+        {!isCustomer && <FleetMissionPanel leftOffset={`${leftOff}px`} />}
 
         {/* ── Upload error toast (not connected etc.) ──────────────────── */}
         {uploadError && (
@@ -1066,7 +1158,8 @@ export default function MissionPage() {
 
         {/* ── Saved missions / permits popovers ───────────────────────── */}
         {(showLibrary || showPermitList) && (
-          <div className={`absolute ${toastTop} left-3 z-[2600] max-w-[calc(100%-24px)] animate-in fade-in slide-in-from-top-1 duration-200`}>
+          <div className={`absolute ${toastTop} z-[2600] max-w-[calc(100%-24px)] animate-in fade-in slide-in-from-top-1 duration-200`}
+            style={{ left: leftOff }}>
             {showLibrary && (
               <MissionLibrary workspaceId={planWorkspaceId} canPlan={canPlan}
                 droneId={boundDrone?.id ?? null} loaded={loadedPlan} onLoaded={setLoadedPlan}
@@ -1132,9 +1225,10 @@ export default function MissionPage() {
         )}
 
         {/* ── The one map toolbar (overlay surface), top-left ──────────── */}
-        <div className={`absolute ${toolbarTop} left-3 right-3 z-[2000] flex items-start pointer-events-none`}>
+        <div className={`absolute ${toolbarTop} z-[2000] flex items-start pointer-events-none transition-[left,right] duration-200`}
+          style={{ left: leftOff, right: rightOff }}>
           <div role="toolbar" aria-label="Map"
-            className={cn(OVERLAY, 'pointer-events-auto relative flex items-center gap-0.5 p-1 rounded-[10px] shadow-[var(--app-shadow)] max-w-full')}
+            className={cn(OVERLAY, 'pointer-events-auto relative flex flex-wrap items-center gap-0.5 p-1 rounded-[10px] shadow-[var(--app-shadow)] max-w-full')}
             onMouseDown={e => e.stopPropagation()}>
             <button onClick={() => setLeftOpen(o => !o)}
               className={cn(ovBtn(false), 'hidden md:inline-flex w-8 px-0')}
@@ -1158,6 +1252,21 @@ export default function MissionPage() {
                 <Layers size={14} aria-hidden /> Layers <ChevronDown size={13} aria-hidden />
               </button>
             </span>
+            {/* Avoidance legend (hazard key, pin a hazard): closed until asked
+                for, and the choice is remembered. Staff only, 2D map. */}
+            {!isCustomer && mapView === '2d' && (
+              <span className="relative inline-flex items-center">
+                {toolDivider}
+                <button onClick={() => setAvoidOpen(!avoidOpen)} aria-expanded={avoidOpen}
+                  className={ovBtn(avoidOpen)} aria-label="Avoidance" title="Avoidance: hazards and obstacles on the map">
+                  <ShieldCheck size={14} aria-hidden /> <span className="max-lg:hidden">Avoidance</span>
+                </button>
+                {avoidOpen && (
+                  <div ref={setLegendHost}
+                    className="absolute top-full right-0 mt-1.5 z-[2200] animate-in fade-in slide-in-from-top-1 duration-200 motion-reduce:animate-none" />
+                )}
+              </span>
+            )}
             {showLayers && (
               <div className={cn(OVERLAY, 'md:hidden absolute top-full left-0 mt-1.5 p-1.5 rounded-[10px] shadow-[var(--app-shadow)] flex flex-col gap-1 min-w-[180px] animate-in fade-in slide-in-from-top-1 duration-200')}>
                 {layerButtons(true)}
@@ -1225,10 +1334,6 @@ export default function MissionPage() {
           </div>
         </div>
 
-        {/* The 2D map's avoidance legend lands here (portal), under the toolbar. */}
-        {mapView === '2d' && (
-          <div ref={setLegendHost} className={`absolute ${legendTop} left-3 z-[1000] empty:hidden`} />
-        )}
 
         {/* Fleet RTL progress chip - visible while the group is returning */}
         {rtlReturning && swarmEnabled && fleetRtlArrived && !rtlLandConfirmVisible && (
@@ -1239,39 +1344,31 @@ export default function MissionPage() {
           </div>
         )}
 
-        {/* ── Altitude profile, above the stats strip ──────────────────── */}
-        {showProfile && !(rtlReturning && swarmEnabled) && (
-          <div className={cn(PANEL, 'absolute md:bottom-[68px] max-md:top-16 left-1/2 -translate-x-1/2 z-[1100] w-[min(640px,calc(100%-24px))] px-3 py-2 animate-in fade-in duration-200')}>
-            <AltitudeProfile waypoints={waypoints} />
+        {/* ── Profile and stats, centred in the map between the panels ── */}
+        <div className="absolute bottom-3 max-md:top-16 max-md:bottom-auto z-[1100] flex flex-col-reverse md:flex-col items-center gap-2 pointer-events-none transition-[left,right] duration-200"
+          style={{ left: leftOff, right: rightOff }}>
+          {showProfile && !(rtlReturning && swarmEnabled) && (
+            <div className={cn(PANEL, 'pointer-events-auto w-[min(640px,100%)] px-3 py-2 animate-in fade-in duration-200')}>
+              <AltitudeProfile waypoints={waypoints} />
+            </div>
+          )}
+          {/* Stats strip (in the plan sheet at 390) */}
+          <div className={cn(OVERLAY, 'max-md:hidden pointer-events-auto flex items-center gap-5 h-12 px-4 rounded-[10px] shadow-[var(--app-shadow)] max-w-full overflow-x-auto')}>
+            <Stat icon={<MapIcon size={14} />}      label="Waypoints" value={String(missionStats.waypointCount)} />
+            <Stat icon={<Route size={14} />}        label="Distance"  value={fmtDist(missionStats.totalDistanceM)} />
+            <Stat icon={<Clock size={14} />}        label="Est. time" value={fmtTime(missionStats.estimatedTimeS)} />
+            <Stat icon={<ArrowUpDown size={14} />}  label="Max alt"   value={`${missionStats.maxAltitude} m`} />
+            {/* Battery warning - only shown when drone connected */}
+            {batteryPct !== null && (
+              <Stat icon={<Battery size={14} />} label="Battery" value={`${batteryPct.toFixed(0)}%`}
+                warn={batteryWarning} warnMsg={`Est. mission uses ~${estBatteryDraw}%`} />
+            )}
+            {/* Wind - only shown when drone connected and wind > 0.5 m/s */}
+            {windSpeed > 0.5 && (
+              <Stat icon={<Wind size={14} />} label="Wind" value={`${windSpeed.toFixed(1)} m/s`}
+                warn={windSpeed > 8} warnMsg="Strong wind - check flight safety" />
+            )}
           </div>
-        )}
-
-        {/* ── Stats strip (bottom of the map; in the plan sheet at 390) ── */}
-        <div className={cn(OVERLAY, 'max-md:hidden absolute bottom-3 left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-5 h-12 px-4 rounded-[10px] shadow-[var(--app-shadow)] max-w-[calc(100%-24px)] overflow-x-auto')}>
-          <Stat icon={<MapIcon size={14} />}      label="Waypoints" value={String(missionStats.waypointCount)} />
-          <Stat icon={<Route size={14} />}        label="Distance"  value={fmtDist(missionStats.totalDistanceM)} />
-          <Stat icon={<Clock size={14} />}        label="Est. time" value={fmtTime(missionStats.estimatedTimeS)} />
-          <Stat icon={<ArrowUpDown size={14} />}  label="Max alt"   value={`${missionStats.maxAltitude} m`} />
-          {/* Battery warning - only shown when drone connected */}
-          {batteryPct !== null && (
-            <Stat
-              icon={<Battery size={14} />}
-              label="Battery"
-              value={`${batteryPct.toFixed(0)}%`}
-              warn={batteryWarning}
-              warnMsg={`Est. mission uses ~${estBatteryDraw}%`}
-            />
-          )}
-          {/* Wind - only shown when drone connected and wind > 0.5 m/s */}
-          {windSpeed > 0.5 && (
-            <Stat
-              icon={<Wind size={14} />}
-              label="Wind"
-              value={`${windSpeed.toFixed(1)} m/s`}
-              warn={windSpeed > 8}
-              warnMsg="Strong wind - check flight safety"
-            />
-          )}
         </div>
       </div>
 
