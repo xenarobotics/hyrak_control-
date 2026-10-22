@@ -821,7 +821,9 @@ async def _monitor_loop() -> None:
 def start_background() -> None:
     """Start the adopt/reconnect watchdog and the landing monitor."""
     global _watchdog, _monitor
-    if _watchdog is None or _watchdog.done():
+    if not get_settings().fleet_watchdog_enabled:
+        logger.info("Fleet watchdog off (FLEET_WATCHDOG_ENABLED=false): no automatic udp probes")
+    elif _watchdog is None or _watchdog.done():
         _watchdog = asyncio.create_task(_watchdog_loop(), name="fleet_watchdog")
     if _monitor is None or _monitor.done():
         _monitor = asyncio.create_task(_monitor_loop(), name="fleet_monitor")

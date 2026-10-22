@@ -340,6 +340,9 @@ class Settings(BaseSettings):
     # heal list altogether. Without these an empty SITL port (or one held by
     # an unrelated process) spawned a mavsdk_server and logged an ERROR every
     # cycle, forever.
+    # Off on a dev machine that shares udp 14541-14549 with other SITL
+    # campaigns: the watchdog would bind those ports on its own.
+    fleet_watchdog_enabled: bool = Field(default=True)
     fleet_watchdog_backoff_max_s: float = Field(default=1800.0)
     fleet_watchdog_max_retries: int = Field(default=10)
     fleet_watchdog_forget_s: float = Field(default=3 * 3600.0)
