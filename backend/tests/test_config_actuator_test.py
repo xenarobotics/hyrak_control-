@@ -141,7 +141,7 @@ def test_shell_classify():
     for c in ["param set MPC_XY_VEL_MAX 20", "reboot", "logger off"]:
         assert classify(c) == "write", c
     for c in ["commander arm", "commander takeoff", "motor_test test -m 1 -p 20", "actuator_test set -m 1 -v 0.2",
-              "ver; commander arm", "ver && commander arm", "ver | sh", "ls > /x", "/bin/commander arm",
+              "ver; commander arm", "ver && commander arm", "ver | sh", "ls > /x", "/bin/commander arm", "/fs/microsd/x/ver", "./ver", "VER",
               "sh /fs/microsd/x", "source /x", "pwm test -c 1 -p 1500", "dshot beep1 -m 1", "ekf2 stop",
               "mavlink stop", "rm /fs/microsd/x", "rm status", "cat `x`", "ver $(x)", "param show *",
               "ekf2 status extra", "control_allocator stop", "navigator fencefile"]:

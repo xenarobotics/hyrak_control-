@@ -37,7 +37,7 @@ def clean_command(raw) -> str | None:
 # Fail closed: a line is sent only if it matches an allowlist below. The
 # shell (NuttShell) chains and redirects, so any line with an operator or
 # quoting character is refused before the words are looked at, and argv[0]
-# is compared after basename() so "/bin/commander" is "commander".
+# must be a bare command name (a path would run that file).
 UNSAFE = re.compile(r"[;&|<>`$()'\"\\#{}\[\]*?~!]")
 PLAIN_ARG = re.compile(r"^[A-Za-z0-9_./:=,+-]+$")
 # Any pilot with fly on the drone: commands that only read state.
@@ -71,7 +71,9 @@ def classify(cmd: str) -> str:
         return "read"
     if not all(PLAIN_ARG.match(w) for w in words):
         return "never"
-    first = words[0].rsplit("/", 1)[-1]
+    first = words[0]
+    if not re.fullmatch(r"[a-z0-9_]+", first):
+        return "never"   # a path runs that file, whatever its name
     sub = words[1] if len(words) > 1 else ""
     if first in READ_ANY_ARGS:
         return "read"
