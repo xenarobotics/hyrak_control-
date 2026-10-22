@@ -11,11 +11,11 @@ import { getSocket } from '@/lib/socket'
 import {
     Radio, Wifi, WifiOff, Check, RotateCcw,
     Plane, Gauge, SlidersHorizontal, Battery, Shield, Navigation,
-    Terminal, Lock, Info, ChevronLeft, ChevronRight, LayoutList,
+    Terminal, Info, ChevronLeft, ChevronRight, LayoutList,
     Search, AlertTriangle, Cpu, Move, Zap,
     Download, Upload, Power,
     Satellite, Compass as CompassIcon, Activity, Mountain,
-    Move3d, Camera, AlignCenterHorizontal, RotateCw, Loader, Package,
+    Move3d, Camera, AlignCenterHorizontal, RotateCw, Loader, Package, Fan, SquareTerminal,
 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { PX4_META, getGroupFromKey, humanizeParamKey, type PX4Group, type PX4Meta } from '@/lib/px4-params-meta'
@@ -27,6 +27,15 @@ import { AttachmentsSection } from '@/components/attachments/AttachmentsConfig'
 import { useSessionAttachments } from '@/lib/attachments'
 import { useUiMode } from '@/hooks/useUiMode'
 import { OptionSelect } from '@/components/config/OptionSelect'
+import { PowerSetup } from '@/components/config/PowerSetup'
+import { ActuatorsSetup } from '@/components/config/ActuatorsSetup'
+import { SafetySetup } from '@/components/config/SafetySetup'
+import { TuningSetup } from '@/components/config/TuningSetup'
+import { CameraGimbalSetup } from '@/components/config/CameraGimbalSetup'
+import { RadioChannels } from '@/components/config/RadioChannels'
+import { AirframePanel } from '@/components/config/AirframePanel'
+import { MavlinkConsole } from '@/components/config/MavlinkConsole'
+import { useVehicleParams } from '@/lib/vehicleParams'
 
 function ls<T>(key: string, fallback: T): T {
     if (typeof window === 'undefined') return fallback
@@ -47,12 +56,8 @@ function hColor(pct: number, locked = false) {
     return 'var(--app-danger)'
 }
 
-type SectionId = 'connection' | 'vehicle' | 'sensors' | 'radio' | 'power' | 'safety' | 'flight' | 'parameters' | 'attachments'
+type SectionId = 'connection' | 'vehicle' | 'sensors' | 'radio' | 'power' | 'actuators' | 'safety' | 'flight' | 'camera' | 'parameters' | 'console' | 'attachments'
 type VehicleProfile = { name: string; airframe: string; firmware: string; frameId: string }
-type PowerProfile   = { cells: string; capacity: string; warnPct: number; critPct: number; critAction: string }
-type SafetyProfile  = { signalLoss: string; maxAltEnabled: boolean; maxAlt: number; maxDistEnabled: boolean; maxDist: number; rthAlt: number }
-type FlightProfile  = { takeoffAlt: number; loiterRadius: number; rthMode: string }
-type RadioProfile   = { rcMode: string; modes: string[] }
 
 type ParamType = 'float' | 'int' | 'bool' | 'enum'
 interface Param {
@@ -88,10 +93,13 @@ const DOMAIN_META: { id: SectionId; label: string; icon: React.ElementType; desc
     { id: 'vehicle',    label: 'Vehicle',     icon: Plane,             desc: 'Drone identity, airframe type, and firmware' },
     { id: 'sensors',    label: 'Sensors',     icon: Gauge,             desc: 'Live sensor health and calibration' },
     { id: 'radio',      label: 'Radio & RC',  icon: SlidersHorizontal, desc: 'Stick layout and flight mode channel assignments' },
-    { id: 'power',      label: 'Power',       icon: Battery,           desc: 'Battery pack configuration and failsafe thresholds' },
-    { id: 'safety',     label: 'Safety',      icon: Shield,            desc: 'Failsafes, terrain following, and geofence limits' },
-    { id: 'flight',     label: 'Flight',      icon: Navigation,        desc: 'Altitude defaults and return-to-home behaviour' },
+    { id: 'power',      label: 'Power',       icon: Battery,           desc: 'Batteries, power module calibration, low battery levels and ESC calibration' },
+    { id: 'actuators',  label: 'Actuators',   icon: Fan,               desc: 'Motor geometry, output mapping, and motor testing with the propellers off' },
+    { id: 'safety',     label: 'Safety',      icon: Shield,            desc: 'Link loss, RC loss, geofence, return home and landing failsafes' },
+    { id: 'camera',     label: 'Camera & gimbal', icon: Camera,        desc: 'Camera trigger for surveys, and how PX4 drives the gimbal' },
+    { id: 'flight',     label: 'Tuning',      icon: Navigation,        desc: 'Speeds and heights, controller gains, hover thrust and autotune' },
     { id: 'parameters', label: 'Advanced',     icon: Terminal,          desc: '50+ PX4 parameters across 8 subsystems - search, browse, and edit' },
+    { id: 'console',    label: 'PX4 console', icon: SquareTerminal,    desc: 'The flight controller shell over MAVLink, for diagnostics' },
     { id: 'attachments', label: 'Attachments', icon: Package,           desc: 'What is fitted to the drone: drop hook, gripper, winch, light, speaker, sprayer' },
 ]
 
@@ -311,147 +319,6 @@ function NetworkTopology({ connected, address }: { connected: boolean; address: 
 }
 
 
-function BatteryCellsViz({ cells, totalV }: { cells: string; totalV?: number }) {
-    const n = Math.min(parseInt(cells) || 4, 12)
-    const estV = totalV ? totalV / n : 4.1
-    const fillPct = Math.min(Math.max(((estV - 3.0) / (4.2 - 3.0)) * 100, 0), 100)
-    const cellColor = fillPct > 60 ? 'var(--app-accent)' : fillPct > 30 ? 'var(--app-warn)' : 'var(--app-danger)'
-    return (
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 5 }}>
-            <div style={{ width: 6, height: 22, background: 'hsl(var(--app-text) / 0.12)', borderRadius: 2, alignSelf: 'center' }} />
-            {Array.from({ length: n }, (_, i) => (
-                <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                    <div style={{ width: 8, height: 5, background: `${mix(cellColor, 38)}`, borderRadius: '2px 2px 0 0' }} />
-                    <div style={{ width: 20, height: 52, borderRadius: 3, background: 'hsl(var(--app-surface-2))', border: `1.5px solid ${mix(cellColor, 25)}`, position: 'relative', overflow: 'hidden' }}>
-                        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${fillPct}%`, background: `linear-gradient(to top, ${cellColor}, ${mix(cellColor, 25)})` }} />
-                    </div>
-                    <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>S{i+1}</span>
-                </div>
-            ))}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-                <div style={{ width: 8, height: 8, background: 'var(--app-ok)', borderRadius: 1, opacity: 0.7 }} />
-                <div style={{ width: 6, height: 18, background: 'hsl(var(--app-text) / 0.12)', borderRadius: 2 }} />
-            </div>
-        </div>
-    )
-}
-
-function DischargeCurve({ warnPct, critPct }: { warnPct: number; critPct: number }) {
-    const W = 200, H = 72
-    const warnX = (1 - warnPct / 100) * W
-    const critX = (1 - critPct / 100) * W
-    const curve = `M 0,${H*0.04} C ${W*0.12},${H*0.08} ${W*0.35},${H*0.18} ${W*0.62},${H*0.24} C ${W*0.78},${H*0.3} ${W*0.88},${H*0.56} ${W},${H*0.97}`
-    const [ref, px] = useSvgPx(W)
-    return (
-        <svg ref={ref} viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', maxWidth: 420, display: 'block' }} role="img" aria-label="Battery discharge curve with warning and critical levels">
-            <defs><clipPath id="dcc"><rect x={0} y={0} width={W} height={H} /></clipPath></defs>
-            <rect x={0} y={0} width={critX} height={H} fill="color-mix(in srgb, var(--app-danger) 7%, transparent)" clipPath="url(#dcc)" />
-            <rect x={critX} y={0} width={warnX-critX} height={H} fill="color-mix(in srgb, var(--app-warn) 6%, transparent)" clipPath="url(#dcc)" />
-            <rect x={warnX} y={0} width={W-warnX} height={H} fill="color-mix(in srgb, var(--app-ok) 4%, transparent)" clipPath="url(#dcc)" />
-            <path d={`${curve} L ${W},${H} L 0,${H} Z`} fill="color-mix(in srgb, var(--app-accent) 5%, transparent)" />
-            <path d={curve} fill="none" stroke="var(--app-accent)" strokeWidth={1.8} opacity={0.7} />
-            <line x1={warnX} y1={0} x2={warnX} y2={H} stroke="var(--app-warn)" strokeWidth={1.5} strokeDasharray="4 3" />
-            <text x={warnX-3} y={px(12)} textAnchor="end" fontSize={px(12)} fontFamily="inherit" fill="var(--app-warn)">{warnPct}%</text>
-            <line x1={critX} y1={0} x2={critX} y2={H} stroke="var(--app-danger)" strokeWidth={1.5} strokeDasharray="4 3" />
-            <text x={critX-3} y={px(12)} textAnchor="end" fontSize={px(12)} fontFamily="inherit" fill="var(--app-danger)">{critPct}%</text>
-            <text x={1} y={H-2} fontSize={px(12)} fontFamily="inherit" fill="hsl(var(--app-text-muted))">100%, 4.2 V</text>
-            <text x={W-1} y={H-2} textAnchor="end" fontSize={px(12)} fontFamily="inherit" fill="hsl(var(--app-text-muted))">0%, 3.0 V</text>
-        </svg>
-    )
-}
-
-function GeofenceMap({ maxDist, maxDistEnabled, rthAlt }: { maxDist: number; maxDistEnabled: boolean; rthAlt: number }) {
-    const labels: [string, number, string][] = [['N',0,'var(--app-danger)'],['E',90,'hsl(var(--app-text-muted))'],['S',180,'hsl(var(--app-text-muted))'],['W',270,'hsl(var(--app-text-muted))']]
-    const [ref, px] = useSvgPx(224)
-    return (
-        <svg ref={ref} viewBox="-112 -112 224 224" style={{ width: '100%', display: 'block' }} role="img" aria-label="Top-down view of the distance fence and return altitude">
-            <defs>
-                <radialGradient id="gfbg" cx="50%" cy="50%" r="50%">
-                    <stop offset="0%" stopColor="color-mix(in srgb, var(--app-accent) 4%, transparent)" />
-                    <stop offset="100%" stopColor="rgba(0,0,0,0)" />
-                </radialGradient>
-            </defs>
-            <circle r={106} fill="hsl(var(--app-surface-2))" />
-            <circle r={106} fill="url(#gfbg)" />
-            {[-80,-60,-40,-20,0,20,40,60,80].map(v => (
-                <g key={v}>
-                    <line x1={v} y1={-100} x2={v} y2={100} stroke="hsl(var(--app-text) / 0.025)" strokeWidth={0.5} />
-                    <line x1={-100} y1={v} x2={100} y2={v} stroke="hsl(var(--app-text) / 0.025)" strokeWidth={0.5} />
-                </g>
-            ))}
-            <circle r={100} fill="none" stroke="hsl(var(--app-text) / 0.06)" strokeWidth={0.8} />
-            {[30,60,90,120,150,180,210,240,270,300,330,0].map(d => {
-                const rad=(d-90)*Math.PI/180
-                return <line key={d} x1={96*Math.cos(rad)} y1={96*Math.sin(rad)} x2={100*Math.cos(rad)} y2={100*Math.sin(rad)} stroke="hsl(var(--app-text) / 0.12)" strokeWidth={d%90===0?1.5:0.5} />
-            })}
-            {labels.map(([l,d,col]) => {
-                const rad=(d-90)*Math.PI/180
-                return <text key={l} x={82*Math.cos(rad)} y={82*Math.sin(rad)+3} textAnchor="middle" fontSize={px(13)} fontFamily="inherit" fontWeight="700" fill={col}>{l}</text>
-            })}
-            {/* Safe zone */}
-            <circle r={48} fill="color-mix(in srgb, var(--app-ok) 3%, transparent)" stroke="color-mix(in srgb, var(--app-ok) 45%, transparent)" strokeWidth={1} strokeDasharray="2 5" />
-            {/* Max distance fence */}
-            {maxDistEnabled ? (
-                <>
-                    <circle r={78} fill="color-mix(in srgb, var(--app-danger) 4%, transparent)" stroke="var(--app-danger)" strokeWidth={1.5} strokeDasharray="5 3" opacity={0.7} />
-                    <text x={80} y={-3} fontSize={px(12)} fontFamily="inherit" fill="var(--app-danger)">{maxDist} m</text>
-                </>
-            ) : (
-                <circle r={78} fill="none" stroke="hsl(var(--app-text-subtle) / 0.2)" strokeWidth={1} strokeDasharray="4 4" />
-            )}
-            {/* RTH circle (indicates RTH altitude conceptually) */}
-            <circle r={28} fill="none" stroke="color-mix(in srgb, var(--app-accent) 45%, transparent)" strokeWidth={0.8} strokeDasharray="2 5" />
-            {/* Home */}
-            <circle r={5} fill="var(--app-accent)" opacity={0.9} />
-            <line x1={0} y1={0} x2={0} y2={-10} stroke="var(--app-accent)" strokeWidth={1.5} opacity={0.7} />
-            <text x={7} y={-8} fontSize={px(12)} fontFamily="inherit" fill="var(--app-accent)">H</text>
-            <text x={0} y={-31} textAnchor="middle" fontSize={px(12)} fontFamily="inherit" fill="var(--app-accent)">Return {rthAlt} m</text>
-        </svg>
-    )
-}
-
-function AltitudeProfile({ takeoffAlt, rthAlt, maxAlt, maxAltEnabled }: { takeoffAlt: number; rthAlt: number; maxAlt: number; maxAltEnabled: boolean }) {
-    const H = 90, W = 260
-    const ceiling = maxAltEnabled ? Math.max(maxAlt, rthAlt * 1.2) : Math.max(rthAlt * 1.4, 60)
-    const py = (alt: number) => H - (alt / ceiling) * H * 0.88
-    const ty = py(takeoffAlt), ry = py(rthAlt), my = maxAltEnabled ? py(maxAlt) : 0
-    const [ref, px] = useSvgPx(W)
-    return (
-        <svg ref={ref} viewBox={`0 0 ${W} ${H+22}`} style={{ width: '100%', maxWidth: 480, display: 'block' }} role="img" aria-label="Side view of takeoff and return altitudes">
-            {/* Sky gradient */}
-            <defs>
-                <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="color-mix(in srgb, var(--app-accent) 6%, transparent)" />
-                    <stop offset="100%" stopColor="color-mix(in srgb, var(--app-accent) 0%, transparent)" />
-                </linearGradient>
-            </defs>
-            <rect x={0} y={0} width={W} height={H} fill="url(#sky)" />
-            {/* Ceiling */}
-            {maxAltEnabled && <>
-                <rect x={0} y={0} width={W} height={my} fill="color-mix(in srgb, var(--app-danger) 4%, transparent)" />
-                <line x1={0} y1={my} x2={W} y2={my} stroke="var(--app-danger)" strokeWidth={1.5} strokeDasharray="6 3" />
-                <text x={W-4} y={my-4} textAnchor="end" fontSize={px(12)} fontFamily="inherit" fill="var(--app-danger)">{maxAlt} m ceiling</text>
-            </>}
-            {/* RTH altitude */}
-            <line x1={0} y1={ry} x2={W} y2={ry} stroke="var(--app-accent)" strokeWidth={1} strokeDasharray="6 4" opacity={0.45} />
-            <text x={W-4} y={ry-4} textAnchor="end" fontSize={px(12)} fontFamily="inherit" fill="var(--app-accent)">Return {rthAlt} m</text>
-            {/* Takeoff */}
-            <line x1={44} y1={H} x2={44} y2={ty} stroke="var(--app-ok)" strokeWidth={2.5} opacity={0.7} />
-            <polygon points={`${44},${ty-9} ${40},${ty} ${48},${ty}`} fill="var(--app-ok)" opacity={0.8} />
-            <circle cx={44} cy={ty} r={3.5} fill="var(--app-ok)" />
-            <text x={50} y={ty+4} fontSize={px(12)} fontFamily="inherit" fill="var(--app-ok)">{takeoffAlt} m</text>
-            {/* RTH flight path */}
-            <path d={`M 110,${ty} L 110,${ry} L 200,${ry}`} fill="none" stroke="var(--app-accent)" strokeWidth={1.5} strokeDasharray="5 3" opacity={0.35} />
-            <text x={204} y={ry + px(12) + 3} fontSize={px(12)} fontFamily="inherit" fill="var(--app-accent)">Home</text>
-            {/* Ground */}
-            <rect x={0} y={H} width={W} height={22} fill="color-mix(in srgb, var(--app-ok) 6%, transparent)" />
-            <line x1={0} y1={H} x2={W} y2={H} stroke="color-mix(in srgb, var(--app-ok) 40%, transparent)" strokeWidth={1.5} />
-            <text x={44} y={H+15} textAnchor="middle" fontSize={px(12)} fontFamily="inherit" fill="hsl(var(--app-text-muted))">Home</text>
-            <text x={W-4} y={H+15} textAnchor="end" fontSize={px(12)} fontFamily="inherit" fill="hsl(var(--app-text-muted))">0 m AGL</text>
-        </svg>
-    )
-}
-
 // ── Primitives ────────────────────────────────────────────────────────────────
 
 const FOCUS_RING = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--app-accent)]'
@@ -499,9 +366,6 @@ function Toggle({ value, onChange, disabled }: { value: boolean; onChange: () =>
                 transform: `translateX(${value ? 16 : 0}px)`, transition: 'transform var(--dur) var(--ease-out)' }} />
         </button>
     )
-}
-function LockedNote({ text }: { text: string }) {
-    return <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px 12px', borderRadius: 6, background: 'var(--app-warn-soft)', border: '1px solid color-mix(in srgb, var(--app-warn) 30%, transparent)' }}><Lock size={14} style={{ color: 'var(--app-warn)', flexShrink: 0, marginTop: 2 }} /><span style={{ fontSize: 13, color: 'hsl(var(--app-text))', lineHeight: 1.45 }}>{text}</span></div>
 }
 
 // ── Layout shells ─────────────────────────────────────────────────────────────
@@ -2146,229 +2010,6 @@ function TransmitterSvg({ layout, axisValue, live, modeChannel, modeValue, switc
     )
 }
 
-// ── POWER ─────────────────────────────────────────────────────────────────────
-
-function PowerWorkspace({ p, onUpdate }: { p: PowerProfile; onUpdate: (patch: Partial<PowerProfile>) => void }) {
-    const telemetry = useDroneStore(s => s.telemetry)
-    const n = parseInt(p.cells) || 4
-    const totalV = telemetry?.battery?.voltage_v
-    const nomV = (n * 3.7).toFixed(1), fullV = (n * 4.2).toFixed(1), minV = (n * 3.0).toFixed(1)
-
-    return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* Battery hero panel */}
-            <Panel title="Battery pack" accent="var(--app-accent)">
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 24 }}>
-                    <BatteryCellsViz cells={p.cells} totalV={totalV} />
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        <div>
-                            <span style={{ fontSize: 28, fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--app-accent)', lineHeight: 1 }}>{p.cells}S</span>
-                            <span style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', marginLeft: 8 }}>{p.capacity} mAh</span>
-                        </div>
-                        {[
-                            { label: 'Full charge', val: `${fullV} V` },
-                            { label: 'Nominal',     val: `${nomV} V` },
-                            { label: 'Min safe',    val: `${minV} V` },
-                            ...(totalV ? [{ label: 'Per cell', val: `${(totalV / n).toFixed(2)} V` }] : []),
-                            ...(totalV ? [{ label: 'Live voltage', val: `${totalV.toFixed(2)} V` }] : []),
-                        ].map(r => (
-                            <div key={r.label} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                                <span style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', width: 92 }}>{r.label}</span>
-                                <span style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: r.label === 'Live voltage' ? 'var(--app-ok)' : 'hsl(var(--app-text))' }}>{r.val}</span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            </Panel>
-
-            <G2>
-                <Card title="Pack config">
-                    <Field label="Cell count (S)">
-                        <AppSelect value={p.cells} onChange={cells => onUpdate({ cells })} options={['2','3','4','5','6','8','10','12'].map(v => ({ value: v, label: `${v}S, ${(+v*4.2).toFixed(1)} V full` }))} />
-                    </Field>
-                    <Field label="Capacity (mAh)">
-                        <AppInput value={p.capacity} onChange={capacity => onUpdate({ capacity })} placeholder="5000" />
-                    </Field>
-                    <Field label="Critical action" tip="What autopilot does at critical battery level.">
-                        <AppSelect value={p.critAction} onChange={critAction => onUpdate({ critAction })} options={[
-                            { value: 'warn',   label: 'Warning only - pilot decides' },
-                            { value: 'land',   label: 'Land immediately' },
-                            { value: 'rtl',    label: 'Return to Launch (RTL)' },
-                            { value: 'disarm', label: 'Disarm (ground only)' },
-                        ]} />
-                    </Field>
-                </Card>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                    <Panel title="Discharge curve" accent="var(--app-warn)">
-                        <DischargeCurve warnPct={p.warnPct} critPct={p.critPct} />
-                        <p style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))', margin: 0 }}>Typical LiPo curve - flat to ~20%, then rapid voltage drop</p>
-                    </Panel>
-                    <Card title="Thresholds">
-                        <div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                                <Label text="Warning level" tip="Triggers a warning alert. Fly home well before this." />
-                                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--app-warn)' }}>{p.warnPct}%</span>
-                            </div>
-                            <input type="range" min={10} max={40} step={5} value={p.warnPct} onChange={e => onUpdate({ warnPct: +e.target.value })} style={{ width: '100%', accentColor: 'var(--app-warn)' }} />
-                        </div>
-                        <div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                                <Label text="Critical level" tip="Triggers the action below." />
-                                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--app-danger)' }}>{p.critPct}%</span>
-                            </div>
-                            <input type="range" min={5} max={20} step={1} value={p.critPct} onChange={e => onUpdate({ critPct: +e.target.value })} style={{ width: '100%', accentColor: 'var(--app-danger)' }} />
-                        </div>
-                    </Card>
-                </div>
-            </G2>
-        </div>
-    )
-}
-
-// ── SAFETY ────────────────────────────────────────────────────────────────────
-
-/** A limit: label left, the value large in tabular numerals right, an optional switch. */
-function LimitRow({ label, tip, value, unit, toggle }: { label: string; tip?: string; value: string; unit?: string; toggle?: React.ReactNode }) {
-    return (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: 'hsl(var(--app-text-muted))' }}>{label}</span>
-                {tip && <Tip text={tip} />}
-            </div>
-            <span style={{ fontSize: 16, fontWeight: 700, color: 'hsl(var(--app-text))', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                {value}{unit && <span style={{ fontSize: 13, fontWeight: 600, color: 'hsl(var(--app-text-muted))', marginLeft: 3 }}>{unit}</span>}
-            </span>
-            {toggle}
-        </div>
-    )
-}
-
-function SafetyWorkspace({ s, onUpdate }: { s: SafetyProfile; onUpdate: (p: Partial<SafetyProfile>) => void }) {
-    const terrainFollow    = useMissionStore(st => st.terrainFollow)
-    const setTerrainFollow = useMissionStore(st => st.setTerrainFollow)
-
-    return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <G2>
-                {/* Left: geofence map */}
-                <Panel title="Airspace, top-down">
-                    <div style={{ width: '100%', maxWidth: 340, margin: '0 auto' }}>
-                        <GeofenceMap maxDist={s.maxDist} maxDistEnabled={s.maxDistEnabled} rthAlt={s.rthAlt} />
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {[
-                            { color: 'var(--app-danger)', label: `Distance fence: ${s.maxDistEnabled ? s.maxDist + ' m' : 'off'}` },
-                            { color: 'var(--app-ok)', label: 'Safe zone (estimate)' },
-                            { color: 'var(--app-accent)', label: `Return altitude: ${s.rthAlt} m` },
-                        ].map(l => (
-                            <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                                <div style={{ width: 20, height: 3, borderRadius: 2, background: l.color, flexShrink: 0 }} />
-                                <span style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text))' }}>{l.label}</span>
-                            </div>
-                        ))}
-                    </div>
-                </Panel>
-
-                {/* Right: controls */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    {/* Terrain follow - functional, prominent */}
-                    <div style={{ padding: '14px 16px', borderRadius: 10, background: terrainFollow ? 'color-mix(in srgb, var(--app-accent) 7%, transparent)' : 'hsl(var(--app-surface-2))', border: `1px solid ${terrainFollow ? 'color-mix(in srgb, var(--app-accent) 40%, transparent)' : 'hsl(var(--app-border))'}`, transition: 'background-color var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out)' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                            <span style={{ fontSize: 16, fontWeight: 700, color: 'hsl(var(--app-text))' }}>Terrain following</span>
-                            <Toggle value={terrainFollow} onChange={() => setTerrainFollow(!terrainFollow)} />
-                        </div>
-                        <p style={{ fontSize: 13, color: 'hsl(var(--app-text-muted))', margin: 0, lineHeight: 1.45 }}
-                            title={terrainFollow ? 'Missions export with the TERRAIN_ALT frame.' : undefined}>
-                            {terrainFollow ? 'On: holds the same height above the ground over hills.' : 'Off: mission heights are measured from the home point.'}
-                        </p>
-                    </div>
-                    <Card title="Failsafe">
-                        <Field label="If the link is lost" tip="What the autopilot does if the RC or telemetry link drops.">
-                            <AppSelect value={s.signalLoss} onChange={signalLoss => onUpdate({ signalLoss })} options={[
-                                { value: 'rtl',      label: 'Return to Launch (RTL)' },
-                                { value: 'land',     label: 'Land immediately' },
-                                { value: 'hold',     label: 'Hold position (loiter)' },
-                                { value: 'continue', label: 'Continue current mission' },
-                            ]} />
-                        </Field>
-                    </Card>
-                    <Card title="Limits">
-                        <div>
-                            <LimitRow label="Return altitude" tip="The drone climbs to this before flying home." value={`${s.rthAlt}`} unit="m" />
-                            <input type="range" min={10} max={150} step={5} value={s.rthAlt} onChange={e => onUpdate({ rthAlt: +e.target.value })} style={{ width: '100%', accentColor: 'var(--app-accent)' }} />
-                        </div>
-                        <div>
-                            <LimitRow label="Max altitude" value={s.maxAltEnabled ? `${s.maxAlt}` : 'No limit'} unit={s.maxAltEnabled ? 'm' : undefined}
-                                toggle={<Toggle value={s.maxAltEnabled} onChange={() => onUpdate({ maxAltEnabled: !s.maxAltEnabled })} />} />
-                            {s.maxAltEnabled && <input type="range" min={20} max={500} step={10} value={s.maxAlt} onChange={e => onUpdate({ maxAlt: +e.target.value })} style={{ width: '100%', accentColor: 'var(--app-danger)' }} />}
-                        </div>
-                        <div>
-                            <LimitRow label="Max distance" value={s.maxDistEnabled ? `${s.maxDist}` : 'No limit'} unit={s.maxDistEnabled ? 'm' : undefined}
-                                toggle={<Toggle value={s.maxDistEnabled} onChange={() => onUpdate({ maxDistEnabled: !s.maxDistEnabled })} />} />
-                            {s.maxDistEnabled && <input type="range" min={50} max={5000} step={50} value={s.maxDist} onChange={e => onUpdate({ maxDist: +e.target.value })} style={{ width: '100%', accentColor: 'var(--app-danger)' }} />}
-                        </div>
-                    </Card>
-                    <LockedNote text="Saved on this device only. Sending limits to the autopilot needs parameter write access." />
-                </div>
-            </G2>
-        </div>
-    )
-}
-
-// ── FLIGHT ────────────────────────────────────────────────────────────────────
-
-function FlightWorkspace({ f, onUpdate, rthAlt, maxAlt, maxAltEnabled }: { f: FlightProfile; onUpdate: (p: Partial<FlightProfile>) => void; rthAlt: number; maxAlt: number; maxAltEnabled: boolean }) {
-    return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <G2>
-                <Panel title="Altitude profile, side view" accent="var(--app-ok)">
-                    <AltitudeProfile takeoffAlt={f.takeoffAlt} rthAlt={rthAlt} maxAlt={maxAlt} maxAltEnabled={maxAltEnabled} />
-                    <div style={{ display: 'flex', gap: '6px 16px', flexWrap: 'wrap' }}>
-                        {[
-                            { color: 'var(--app-ok)', label: `Takeoff ${f.takeoffAlt} m` },
-                            { color: 'var(--app-accent)', label: `Return altitude ${rthAlt} m` },
-                            ...(maxAltEnabled ? [{ color: 'var(--app-danger)', label: `Max altitude ${maxAlt} m` }] : []),
-                        ].map(l => (
-                            <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <div style={{ width: 16, height: 2, background: l.color }} />
-                                <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'hsl(var(--app-text-muted))' }}>{l.label}</span>
-                            </div>
-                        ))}
-                    </div>
-                </Panel>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <Card title="Altitude defaults">
-                    <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                            <Label text="Default takeoff" tip="Height for automated takeoff commands." />
-                            <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--app-ok)' }}>{f.takeoffAlt} m</span>
-                        </div>
-                        <input type="range" min={2} max={50} step={1} value={f.takeoffAlt} onChange={e => onUpdate({ takeoffAlt: +e.target.value })} style={{ width: '100%', accentColor: 'var(--app-ok)' }} />
-                    </div>
-                    <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                            <Label text="Loiter radius" tip="Circle radius in loiter/hold. Mostly for fixed-wing." />
-                            <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--app-accent)' }}>{f.loiterRadius} m</span>
-                        </div>
-                        <input type="range" min={10} max={200} step={10} value={f.loiterRadius} onChange={e => onUpdate({ loiterRadius: +e.target.value })} style={{ width: '100%', accentColor: 'var(--app-accent)' }} />
-                    </div>
-                </Card>
-                <Card title="Return to home">
-                    <Field label="Return mode" tip="What the drone does when RTL triggers.">
-                        <AppSelect value={f.rthMode} onChange={rthMode => onUpdate({ rthMode })} options={[
-                            { value: 'ascend',  label: 'Climb to RTH alt → fly home → land' },
-                            { value: 'current', label: 'Fly home at current altitude → land' },
-                            { value: 'mission', label: 'Finish waypoint → return' },
-                        ]} />
-                    </Field>
-                    <LockedNote text="Saved on this device only. Sending these to the autopilot comes in a later update." />
-                </Card>
-                </div>
-            </G2>
-        </div>
-    )
-}
-
 // ── ADVANCED (Parameter Browser) ──────────────────────────────────────────────
 
 // Live param entry coming from the drone
@@ -3141,16 +2782,8 @@ export default function ConfigPage() {
     const [address, setAddress] = useState(() => ls('hyrak-mav-address', 'udpin://0.0.0.0:14540'))
 
     const [vehicle, setVehicle] = useState<VehicleProfile>(() => ls('hyrak-vehicle', { name: 'My Drone', airframe: 'quad-x', firmware: 'px4', frameId: '' }))
-    const [power,   setPower]   = useState<PowerProfile>(()   => ls('hyrak-power',   { cells: '4', capacity: '5000', warnPct: 25, critPct: 10, critAction: 'rtl' }))
-    const [safety,  setSafety]  = useState<SafetyProfile>(()  => ls('hyrak-safety',  { signalLoss: 'rtl', maxAltEnabled: false, maxAlt: 120, maxDistEnabled: false, maxDist: 500, rthAlt: 50 }))
-    const [flight,  setFlight]  = useState<FlightProfile>(()  => ls('hyrak-flight',  { takeoffAlt: 10, loiterRadius: 50, rthMode: 'ascend' }))
-    const [radio,   setRadio]   = useState<RadioProfile>(()   => ls('hyrak-radio',   { rcMode: '2', modes: ['Stabilize', 'Altitude Hold', 'Position'] }))
 
     const upV = useCallback((p: Partial<VehicleProfile>) => setVehicle(prev => { const n={...prev,...p}; lsSet('hyrak-vehicle',n); return n }), [])
-    const upP = useCallback((p: Partial<PowerProfile>)   => setPower(prev =>   { const n={...prev,...p}; lsSet('hyrak-power',  n); return n }), [])
-    const upS = useCallback((p: Partial<SafetyProfile>)  => setSafety(prev =>  { const n={...prev,...p}; lsSet('hyrak-safety', n); return n }), [])
-    const upF = useCallback((p: Partial<FlightProfile>)  => setFlight(prev =>  { const n={...prev,...p}; lsSet('hyrak-flight', n); return n }), [])
-    const upR = useCallback((p: Partial<RadioProfile>)   => setRadio(prev =>   { const n={...prev,...p}; lsSet('hyrak-radio',  n); return n }), [])
 
     const connected = telStatus === 'connected'
     // Same verdicts as the Sensors workspace - PX4's health flags where they
@@ -3173,9 +2806,12 @@ export default function ConfigPage() {
         sensors:     connected ? (sensorOK / 4) * 100 : null,
         radio:       null,
         power:       null,
+        actuators:   null,
+        camera:      null,
         safety:      null,
         flight:      null,
         parameters:  null,
+        console:     null,
         attachments: null,
     }
     const readiness = connected ? Math.round((sensorOK / 4) * 100) : null
@@ -3215,23 +2851,59 @@ export default function ConfigPage() {
 
     const navItems: { id: NavId; label: string; icon: React.ElementType }[] = [
         { id: 'overview', label: 'Overview', icon: LayoutList },
-        ...DOMAIN_META.filter(d => d.id !== 'parameters'),
+        ...DOMAIN_META.filter(d => d.id !== 'parameters' && d.id !== 'console'),
         ...DOMAIN_META.filter(d => d.id === 'parameters'),
+        ...DOMAIN_META.filter(d => d.id === 'console'),
     ]
     const meta = section === 'overview'
         ? { label: 'Overview', desc: 'Is the drone ready to fly? Open any line to change it.' }
         : (DOMAIN_META.find(d => d.id === section) ?? DOMAIN_META[0])
 
-    const ACTION_WORD: Record<string, string> = { rtl: 'RTL', land: 'Land', hold: 'Hold', continue: 'Continue mission', warn: 'Warn only', disarm: 'Disarm' }
+    // Power, actuators, safety and tuning rows read the aircraft's own
+    // parameters. Without a drone they say so rather than show a setting
+    // that lives nowhere.
+    const vp = useVehicleParams()
+    const pv = (k: string, alt?: string) => vp.get(k) ?? (alt ? vp.get(alt) : null)
+    const LOSS_WORD: Record<number, string> = { 0: 'nothing', 1: 'Hold', 2: 'Return', 3: 'Land', 5: 'Terminate', 6: 'Lockdown' }
+    const BAT_ACT_WORD: Record<number, string> = { 0: 'warn only', 2: 'land at critical', 3: 'return at critical' }
+    const paramRow = (fill: () => { state: RowState; value: string }): { state: RowState; value: string } =>
+        !connected ? { state: 'idle', value: 'Needs a drone' } : !vp.params ? { state: 'idle', value: vp.loading ? 'Reading parameters' : 'Parameters not read' } : fill()
+    const powerRow = paramRow(() => {
+        const cells = pv('BAT1_N_CELLS', 'BAT_N_CELLS') ?? 0, cap = pv('BAT1_CAPACITY', 'BAT_CAPACITY') ?? -1
+        const act = pv('COM_LOW_BAT_ACT'), crit = pv('BAT_CRIT_THR')
+        return { state: cells > 0 ? 'ok' : 'warn', value: `${cells > 0 ? `${cells}S` : 'Cells not set'}${cap > 0 ? ` ${cap} mAh` : ''}, ${BAT_ACT_WORD[act ?? 0] ?? 'action ' + act}${crit != null ? ` (critical ${Math.round(crit * 100)}%)` : ''}` }
+    })
+    const actuatorRow = paramRow(() => {
+        const n = pv('CA_ROTOR_COUNT')
+        return n == null ? { state: 'none', value: 'Geometry needs PX4 1.14+' } : { state: 'ok', value: `${n} motor${n === 1 ? '' : 's'}` }
+    })
+    const safetyRow = paramRow(() => {
+        const dll = pv('NAV_DLL_ACT'), obl = pv('COM_OBL_RC_ACT'), rtl = pv('RTL_RETURN_ALT')
+        const bad = dll === 0 || dll === 5 || dll === 6 || obl === 6 || obl === 7
+        return { state: bad ? 'warn' : 'ok', value: `Link loss: ${LOSS_WORD[dll ?? -1] ?? '?'}, return at ${rtl ?? '?'} m${bad ? ', blocks arming' : ''}, terrain ${terrainFollow ? 'on' : 'off'}` }
+    })
+    const radioRow = paramRow(() => {
+        const ch = pv('RC_MAP_FLTMODE'), thr = pv('RC_MAP_THROTTLE')
+        if (!thr) return { state: 'warn', value: 'Sticks not mapped (RC_MAP_THROTTLE)' }
+        return ch ? { state: 'ok', value: `Mode switch on CH${ch}` } : { state: 'warn', value: 'No mode switch channel' }
+    })
+    const TRIG_WORD: Record<number, string> = { 0: 'trigger off', 1: 'time trigger on command', 2: 'time trigger', 3: 'distance trigger', 4: 'survey trigger' }
+    const cameraRow = paramRow(() => {
+        const t = pv('TRIG_MODE'), m = pv('MNT_MODE_IN')
+        return { state: 'ok', value: `${t == null ? 'No trigger module' : TRIG_WORD[t] ?? `trigger mode ${t}`}, gimbal ${m == null || m < 0 ? 'off' : 'on'}` }
+    })
+    const flightRow = paramRow(() => ({ state: 'ok', value: `Takeoff ${pv('MIS_TAKEOFF_ALT') ?? '?'} m, max ${pv('MPC_XY_VEL_MAX') ?? '?'} m/s` }))
     const attachmentsValue = !fitted.droneId ? 'Needs a drone' : fitted.attachments.length ? fitted.attachments.map(x => x.name).join(', ') : 'None fitted'
     const rows: { id: SectionId; state: RowState; value: string; action?: string }[] = [
         { id: 'vehicle',     state: 'ok', value: `${vehicle.name}, ${AIRFRAME_LABELS[vehicle.airframe] ?? vehicle.airframe}` },
         { id: 'connection',  state: connected ? 'ok' : 'idle', value: connected ? 'Connected' : 'Not connected', action: connected ? undefined : 'Connect' },
         { id: 'sensors',     state: !connected ? 'idle' : sensorOK === 4 ? 'ok' : 'warn', value: !connected ? 'Needs a drone' : `${sensorOK} of 4 healthy`, action: connected && sensorOK < 4 ? 'Calibrate' : undefined },
-        { id: 'radio',       state: 'ok', value: `Mode ${radio.rcMode}, ${radio.modes.length} modes set` },
-        { id: 'power',       state: 'ok', value: `${power.cells}S ${power.capacity} mAh, ${ACTION_WORD[power.critAction] ?? power.critAction} at ${power.critPct}%` },
-        { id: 'safety',      state: 'ok', value: `Link loss: ${ACTION_WORD[safety.signalLoss] ?? safety.signalLoss}, terrain ${terrainFollow ? 'on' : 'off'}` },
-        { id: 'flight',      state: 'ok', value: `Takeoff ${flight.takeoffAlt} m, return ${safety.rthAlt} m` },
+        { id: 'radio',       ...radioRow },
+        { id: 'power',       ...powerRow },
+        { id: 'actuators',   ...actuatorRow },
+        { id: 'safety',      ...safetyRow, action: safetyRow.state === 'warn' ? 'Fix' : undefined },
+        { id: 'flight',      ...flightRow },
+        { id: 'camera',      ...cameraRow },
         { id: 'attachments', state: fitted.droneId ? 'ok' : 'idle', value: attachmentsValue },
         { id: 'parameters',  state: 'none', value: `${PARAMS_DB.length} parameters`, action: 'Open' },
     ]
@@ -3276,12 +2948,15 @@ export default function ConfigPage() {
                             {section !== 'overview' && section !== 'attachments' && (
                                 <ViewOnlyFence>
                                 {section === 'connection' && <ConnectionWorkspace address={address} setAddress={v => { setAddress(v); lsSet('hyrak-mav-address', v) }} />}
-                                {section === 'vehicle'    && <VehicleWorkspace v={vehicle} onUpdate={upV} />}
+                                {section === 'vehicle'    && <><VehicleWorkspace v={vehicle} onUpdate={upV} /><div style={{ marginTop: 16 }}><AirframePanel /></div></>}
                                 {section === 'sensors'    && <SensorsWorkspace />}
-                                {section === 'radio'      && <RadioWorkspace />}
-                                {section === 'power'      && <PowerWorkspace p={power} onUpdate={upP} />}
-                                {section === 'safety'     && <SafetyWorkspace s={safety} onUpdate={upS} />}
-                                {section === 'flight'     && <FlightWorkspace f={flight} onUpdate={upF} rthAlt={safety.rthAlt} maxAlt={safety.maxAlt} maxAltEnabled={safety.maxAltEnabled} />}
+                                {section === 'radio'      && <><RadioWorkspace /><RadioChannels /></>}
+                                {section === 'power'      && <PowerSetup />}
+                                {section === 'actuators'  && <ActuatorsSetup />}
+                                {section === 'safety'     && <SafetySetup />}
+                                {section === 'flight'     && <TuningSetup />}
+                                {section === 'camera'     && <CameraGimbalSetup />}
+                                {section === 'console'    && <MavlinkConsole />}
                                 {section === 'parameters' && <ParametersWorkspace />}
                                 </ViewOnlyFence>
                             )}

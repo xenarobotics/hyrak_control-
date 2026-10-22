@@ -92,6 +92,11 @@ async def _execute_drone_action(tel, action: str, data: dict) -> dict:
     if action == "dismiss_calibration":
         tel.dismiss_calibration()
         return {"action": action, "ok": True}
+    if action in ("actuator_test", "configure_actuator", "esc_calibration"):
+        # Config > Actuators: motor / servo test and DShot spin direction.
+        # Refused unless disarmed and on the ground (app/telemetry/actuator_test.py).
+        from app.telemetry import actuator_test as _at
+        return await _at.handle(tel, action, data)
     if action == "handover_to_pilot":
         # THE OPERATOR'S ROUTE TO HANDING THE AIRCRAFT OVER, which until now
         # only existed on the transmitter and only worked if the airframe's
@@ -1505,6 +1510,12 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             return
 
         ok = await tel.set_param(key, float(value), param_type)
+        if ok:
+            # The pre-arm failsafe check caches these for 2 minutes; a value
+            # just changed on Config > Safety must count on the next arm.
+            from app.telemetry import failsafe_check as _fs
+            if key in _fs.PARAMS:
+                _fs.forget(tel)
         await sio.emit(
             "param_set_ack",
             {

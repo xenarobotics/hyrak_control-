@@ -821,9 +821,14 @@ class TelemetryManager:
             async for bat in self._drone.telemetry.battery():
                 if not self._running:
                     break
+                cur = getattr(bat, "current_battery_a", None)
+                used = getattr(bat, "capacity_consumed_ah", None)
                 self._snapshot.battery = BatteryData(
                     voltage_v=round(bat.voltage_v, 2),
                     remaining_percent=round(bat.remaining_percent, 1),
+                    # -1 / NaN = no current sensor; None keeps the JSON finite.
+                    current_a=round(cur, 2) if cur is not None and cur == cur and cur >= 0 else None,
+                    consumed_mah=round(used * 1000.0, 0) if used is not None and used == used and used >= 0 else None,
                 )
                 self._emit()
         await self._run_subscription("Battery", _stream)

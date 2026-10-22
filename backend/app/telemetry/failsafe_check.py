@@ -119,6 +119,15 @@ async def read_params(manager, force: bool = False) -> dict:
     return out
 
 
+def forget(manager) -> None:
+    """Drop the cached values for one link (a failsafe parameter was just
+    written, so the next check must read it fresh)."""
+    try:
+        _cache.pop(manager, None)
+    except TypeError:
+        pass
+
+
 def mission_max_alt(waypoints) -> float | None:
     alts = []
     for w in waypoints or []:

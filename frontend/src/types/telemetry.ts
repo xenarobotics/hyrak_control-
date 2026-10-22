@@ -23,6 +23,9 @@ export interface VelocityData {
 export interface BatteryData {
     voltage_v: number
     remaining_percent: number
+    /** Null or absent when the aircraft has no current sensor. */
+    current_a?: number | null
+    consumed_mah?: number | null
 }
 
 export interface GPSData {

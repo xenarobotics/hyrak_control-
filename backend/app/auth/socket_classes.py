@@ -60,6 +60,7 @@ EVENTS: dict[str, str] = {
     "drone_action": SESSION_COMMAND,
     "drone_command": SESSION_COMMAND,
     "set_param": SESSION_COMMAND,
+    "mavlink_shell": SESSION_COMMAND,  # PX4 console (app/events/shell_events.py)
     "set_tracking": SESSION_COMMAND,
     "set_vehicle_tracking": SESSION_COMMAND,
     "set_follow_vehicle": SESSION_COMMAND,
@@ -159,6 +160,8 @@ PUSHED_EVENTS: dict[str, str] = {
     "copilot_state": "session",
     "copilot_message": "session",
     "copilot_card_update": "session",
+    # Config > Console: PX4 shell output, to the socket that last typed.
+    "shell_output": "session",
 }
 
 # Other namespaces: the ground-station relay agent (a script, operator token).
@@ -176,7 +179,7 @@ NAMESPACES: dict[str, dict[str, str]] = {
 # `fly` on the drone's own workspace. The rest act on the session's AI
 # pipeline only.
 DRONE_EVENTS = frozenset({
-    "drone_action", "drone_command", "set_param",
+    "drone_action", "drone_command", "set_param", "mavlink_shell",
     "set_tracking", "set_vehicle_tracking", "set_follow_vehicle", "set_follow_person",
     "set_multi_follow", "select_person", "set_pd_params", "set_altitude_mode",
     "set_altitude_nudge", "set_tracking_params", "upload_mission",

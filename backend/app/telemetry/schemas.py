@@ -44,6 +44,10 @@ class VelocityData:
 class BatteryData:
     voltage_v: float = 0.0
     remaining_percent: float = 0.0
+    # None when the aircraft has no current sensor (PX4 sends -1 / NaN).
+    # Config > Power needs the live current to calculate amps-per-volt.
+    current_a: float | None = None
+    consumed_mah: float | None = None
 
 
 @dataclass

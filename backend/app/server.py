@@ -518,6 +518,8 @@ def create_app() -> socketio.ASGIApp:
     register_map_events(sio, session_manager)
     from app.attachments.events import register_attachment_events
     register_attachment_events(sio, session_manager)
+    from app.events.shell_events import register_shell_events   # Config > Console
+    register_shell_events(sio, session_manager)
     from app.copilot.events import register_copilot_events
     register_copilot_events(sio, session_manager, vision_pool)
 
