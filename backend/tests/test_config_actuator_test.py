@@ -131,3 +131,15 @@ def test_shell_clean_command():
     assert clean_command("ls\x1b[2J /fs") == "ls[2J /fs"    # control bytes dropped
     assert clean_command(42) is None
     assert clean_command("x" * (MAX_CMD + 1)) is None
+
+
+def test_shell_classify():
+    from app.events.shell_events import classify
+    for c in ["ver all", "top", "listener vehicle_status", "param show MPC_*", "commander status",
+              "ekf2 status", "sensors status", "dshot status"]:
+        assert classify(c) == "read", c
+    for c in ["commander arm", "commander takeoff", "commander mode auto:mission", "motor_test test -m 1 -p 20",
+              "actuator_test set -m 1 -v 0.2", "navigator fencefile"]:
+        assert classify(c) == "never", c
+    for c in ["param set MPC_XY_VEL_MAX 20", "reboot", "dshot beep1 -m 1", "ekf2 stop", "rm /fs/microsd/x"]:
+        assert classify(c) == "write", c
