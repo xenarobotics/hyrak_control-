@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 
 from app.auth.socket_guard import _is_staff_session, require_session_fly
 from app.telemetry import actuator_test
@@ -33,36 +34,58 @@ def clean_command(raw) -> str | None:
     return cmd
 
 
-# Commands that only read state: any pilot with fly on the drone may run them.
-READ_ONLY = frozenset({
-    "ver", "top", "listener", "uorb", "dmesg", "free", "help", "ls", "cat",
-    "perf", "work_queue",
+# Fail closed: a line is sent only if it matches an allowlist below. The
+# shell (NuttShell) chains and redirects, so any line with an operator or
+# quoting character is refused before the words are looked at, and argv[0]
+# is compared after basename() so "/bin/commander" is "commander".
+UNSAFE = re.compile(r"[;&|<>`$()'\"\\#{}\[\]*?~!]")
+PLAIN_ARG = re.compile(r"^[A-Za-z0-9_./:=,+-]+$")
+# Any pilot with fly on the drone: commands that only read state.
+READ_ANY_ARGS = frozenset({"ver", "top", "free", "dmesg", "help", "perf", "work_queue", "listener"})
+READ_SUB = {
+    "param": {"show", "status", "compare", "greater", "show-for-airframe"},
+    "uorb": {"top", "status"},
+    "ls": None, "cat": None,   # None: any plain path arguments
+    "commander": {"status", "check"},
+}
+STATUS_MODULES = frozenset({
+    "sensors", "ekf2", "mavlink", "logger", "gps", "battery_status", "dshot", "pwm_out",
+    "uavcan", "navigator", "rc_update", "manual_control", "land_detector", "control_allocator",
+    "mc_pos_control", "mc_att_control", "mc_rate_control", "flight_mode_manager", "dataman",
 })
-# Modules (sensors, ekf2, mavlink, logger...) are read-only only with a
-# status-like subcommand: "ekf2 stop" or "mavlink stop" changes the aircraft.
-READ_ONLY_SUBCOMMANDS = frozenset({"status", "info", "show", "list", "check", "dump"})
-# Never through the console, for anyone: these skip HYRAK's own gates
-# (red zone, takeover, pre-arm failsafe check, the propellers-off confirm).
-# Arm, take off, modes and motor tests have their own guarded buttons.
-NEVER = frozenset({"commander", "motor_test", "actuator_test", "navigator"})
+# Staff, on a disarmed drone on the ground: the few changes QGC users run here.
+# Arming, take off, modes and motors stay on HYRAK's guarded controls.
+WRITE_SUB = {
+    "param": {"set", "set-default", "reset", "save", "load", "import", "export"},
+    "logger": {"on", "off"},
+    "reboot": None,
+}
 
 
 def classify(cmd: str) -> str:
-    """'read' (any pilot), 'never' (nobody), or 'write' (staff, on the ground)."""
+    """'read' (any pilot), 'write' (staff, on the ground) or 'never'."""
+    if UNSAFE.search(cmd):
+        return "never"
     words = cmd.split()
     if not words:
         return "read"
-    first, rest = words[0], words[1:]
-    sub = rest[0] if rest else ""
-    if first == "commander" and sub in {"status", "check"}:
-        return "read"
-    if first in NEVER:
+    if not all(PLAIN_ARG.match(w) for w in words):
         return "never"
-    if first == "param":
-        return "read" if sub in {"show", "status", "compare", "greater"} else "write"
-    if first in READ_ONLY or sub in READ_ONLY_SUBCOMMANDS:
+    first = words[0].rsplit("/", 1)[-1]
+    sub = words[1] if len(words) > 1 else ""
+    if first in READ_ANY_ARGS:
         return "read"
-    return "write"
+    if first in READ_SUB:
+        allowed = READ_SUB[first]
+        if allowed is None or sub in allowed:
+            return "read"
+    if first in STATUS_MODULES and sub in {"status", "info"} and len(words) == 2:
+        return "read"
+    if first in WRITE_SUB:
+        allowed = WRITE_SUB[first]
+        if allowed is None or sub in allowed:
+            return "write"
+    return "never"
 
 
 def register_shell_events(sio, session_manager) -> None:
@@ -98,8 +121,9 @@ def register_shell_events(sio, session_manager) -> None:
             return
         kind = classify(cmd)
         if kind == "never":
-            await sio.emit("shell_output", {"text": f"\n[HYRAK] '{cmd.split()[0]}' is not available here. "
-                            "Use the Arm, Take off, Mode and Test motors controls, which run HYRAK's safety checks.\n",
+            await sio.emit("shell_output", {"text": "\n[HYRAK] That command is not available in this console. "
+                            "Arm, take off, modes and motor tests are on HYRAK's guarded controls; "
+                            "here: ver, top, listener, param show/set, <module> status, reboot.\n",
                             "error": True}, to=sid)
             return
         if kind == "write":

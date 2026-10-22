@@ -135,11 +135,14 @@ def test_shell_clean_command():
 
 def test_shell_classify():
     from app.events.shell_events import classify
-    for c in ["ver all", "top", "listener vehicle_status", "param show MPC_*", "commander status",
-              "ekf2 status", "sensors status", "dshot status"]:
+    for c in ["ver all", "top", "listener vehicle_status", "param show MPC_XY_VEL_MAX", "commander status",
+              "ekf2 status", "sensors status", "dshot status", "ls /fs/microsd", ""]:
         assert classify(c) == "read", c
-    for c in ["commander arm", "commander takeoff", "commander mode auto:mission", "motor_test test -m 1 -p 20",
-              "actuator_test set -m 1 -v 0.2", "navigator fencefile"]:
-        assert classify(c) == "never", c
-    for c in ["param set MPC_XY_VEL_MAX 20", "reboot", "dshot beep1 -m 1", "ekf2 stop", "rm /fs/microsd/x"]:
+    for c in ["param set MPC_XY_VEL_MAX 20", "reboot", "logger off"]:
         assert classify(c) == "write", c
+    for c in ["commander arm", "commander takeoff", "motor_test test -m 1 -p 20", "actuator_test set -m 1 -v 0.2",
+              "ver; commander arm", "ver && commander arm", "ver | sh", "ls > /x", "/bin/commander arm",
+              "sh /fs/microsd/x", "source /x", "pwm test -c 1 -p 1500", "dshot beep1 -m 1", "ekf2 stop",
+              "mavlink stop", "rm /fs/microsd/x", "rm status", "cat `x`", "ver $(x)", "param show *",
+              "ekf2 status extra", "control_allocator stop", "navigator fencefile"]:
+        assert classify(c) == "never", c
