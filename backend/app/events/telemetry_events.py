@@ -97,6 +97,11 @@ async def _execute_drone_action(tel, action: str, data: dict) -> dict:
         # Refused unless disarmed and on the ground (app/telemetry/actuator_test.py).
         from app.telemetry import actuator_test as _at
         return await _at.handle(tel, action, data)
+    if action == "reset_params_default":
+        # Config > Parameters: every parameter back to the firmware default
+        # (PREFLIGHT_STORAGE 2). Typed confirmation, disarmed and on the ground.
+        from app.telemetry import param_meta as _pm
+        return await _pm.handle_reset_all(tel, data)
     if action == "handover_to_pilot":
         # THE OPERATOR'S ROUTE TO HANDING THE AIRCRAFT OVER, which until now
         # only existed on the transmitter and only worked if the airframe's
@@ -1485,6 +1490,23 @@ def register_telemetry_events(sio, session_manager: SessionManager, vision_pool=
             {"key": key, "ok": value is not None, "value": value},
             to=sid,
         )
+
+    @sio.on("vehicle_info")
+    async def on_vehicle_info(sid, data=None):
+        """What the connected flight controller says about itself (Config >
+        Vehicle and Connection): firmware, board, hardware UID, flight stack,
+        system ids and the link's last-message age. Emits vehicle_info_result.
+        A read: nothing is sent to the aircraft but the AUTOPILOT_VERSION
+        request MAVSDK already makes."""
+        if not await require_session_view(sid, "vehicle_info"): return
+        session = session_manager.get_by_socket(sid)
+        if not session:
+            return
+        tel = session_manager.get_telemetry(session.session_id)
+        if not tel or not tel.is_connected:
+            await sio.emit("vehicle_info_result", {"ok": False, "error": "No drone connected"}, to=sid)
+            return
+        await sio.emit("vehicle_info_result", await tel.get_vehicle_info(), to=sid)
 
     @sio.on("set_param")
     async def on_set_param(sid, data):

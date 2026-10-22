@@ -48,6 +48,9 @@ EVENTS: dict[str, str] = {
     "disconnect_telemetry": SESSION_VIEW,  # dropping your own link is always allowed
     "fetch_params": SESSION_VIEW,
     "get_param": SESSION_VIEW,
+    "param_metadata": SESSION_VIEW,   # PX4's parameter metadata, read-only (config_events.py)
+    "config_live": SESSION_VIEW,      # passive read of the session's own link (config_live_events.py)
+    "vehicle_info": SESSION_VIEW,     # firmware / board / ids of the session's drone
 
     # ── the session's own cloud simulator (8c, premium) ─────────────────
     # The server picks the ports, launches the process and links the
@@ -61,6 +64,11 @@ EVENTS: dict[str, str] = {
     "drone_command": SESSION_COMMAND,
     "set_param": SESSION_COMMAND,
     "mavlink_shell": SESSION_COMMAND,  # PX4 console (app/events/shell_events.py)
+    # Config > Logs (app/events/config_events.py): the drone's own ULog files.
+    "log_list": SESSION_COMMAND,
+    "log_download": SESSION_COMMAND,   # disarmed, one at a time, one-time link for the caller
+    "log_cancel": SESSION_COMMAND,
+    "log_erase": SESSION_COMMAND,      # typed confirmation, disarmed and on the ground
     "set_tracking": SESSION_COMMAND,
     "set_vehicle_tracking": SESSION_COMMAND,
     "set_follow_vehicle": SESSION_COMMAND,
@@ -162,6 +170,8 @@ PUSHED_EVENTS: dict[str, str] = {
     "copilot_card_update": "session",
     # Config > Console: PX4 shell output, to the socket that last typed.
     "shell_output": "session",
+    # Config > Sensors / Radio: raw readings off the session's own link.
+    "config_live_data": "session",
 }
 
 # Other namespaces: the ground-station relay agent (a script, operator token).
@@ -180,6 +190,7 @@ NAMESPACES: dict[str, dict[str, str]] = {
 # pipeline only.
 DRONE_EVENTS = frozenset({
     "drone_action", "drone_command", "set_param", "mavlink_shell",
+    "log_list", "log_download", "log_cancel", "log_erase",
     "set_tracking", "set_vehicle_tracking", "set_follow_vehicle", "set_follow_person",
     "set_multi_follow", "select_person", "set_pd_params", "set_altitude_mode",
     "set_altitude_nudge", "set_tracking_params", "upload_mission",

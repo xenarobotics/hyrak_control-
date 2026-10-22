@@ -7,7 +7,7 @@
 import React from 'react'
 import { numberedKeys, useVehicleParams, writeParam } from '@/lib/vehicleParams'
 import { OptionSelect } from '@/components/config/OptionSelect'
-import { Grid, NumberBox, Panel, ParamSourceBar, T, Tip, Toggle, mix } from '@/components/config/kit'
+import { Grid, NumberBox, Panel, T, Tip, Toggle, mix } from '@/components/config/kit'
 
 const AXES = [
     { key: 'RC_MAP_ROLL', label: 'Roll', def: 1 },
@@ -17,14 +17,14 @@ const AXES = [
 ]
 const CH_OPTS = [{ value: 0, label: 'Unassigned' }, ...Array.from({ length: 18 }, (_, i) => ({ value: i + 1, label: `CH${i + 1}` }))]
 
-export function RadioChannels() {
+export function RadioChannels({ extra }: { extra?: React.ReactNode } = {}) {
     const vp = useVehicleParams()
     const chans = vp.ready ? numberedKeys(vp.params, /^RC(\d+)_MIN$/) : Array.from({ length: 8 }, (_, i) => i + 1)
     const axisOf = (ch: number) => AXES.find(a => (vp.ready ? vp.get(a.key) : a.def) === ch)?.label
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 16 }}>
-            <ParamSourceBar what="the channel setup" />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <Grid min={300}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
                 <Panel title="Stick channels" hint="which channel drives each axis">
                     {AXES.map(a => {
                         const v = vp.ready ? vp.get(a.key) : a.def
@@ -39,6 +39,8 @@ export function RadioChannels() {
                     })}
                     <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.5 }}>Run the stick calibration again after changing these.</p>
                 </Panel>
+                {extra}
+                </div>
                 <Panel title="Channels" hint="calibrated range, reverse and deadzone"
                     right={<Tip text="Min, trim and max come from the stick calibration (RCn_MIN / TRIM / MAX). Reverse flips a channel (RCn_REV). Deadzone ignores small movements around the centre (RCn_DZ, microseconds)." />}>
                     <div style={{ overflowX: 'auto' }}>

@@ -29,10 +29,12 @@ interface ParamState {
     /** key -> time of the last confirmed write, for a brief "saved" mark */
     saved: Record<string, number>
     loadedAt: number
+    /** The values as downloaded, for "changed since loading". */
+    loaded: Record<string, number> | null
 }
 
 export const useParamStore = create<ParamState>(() => ({
-    params: null, loading: false, error: null, pending: {}, failed: {}, saved: {}, loadedAt: 0,
+    params: null, loading: false, error: null, pending: {}, failed: {}, saved: {}, loadedAt: 0, loaded: null,
 }))
 
 let wired = false
@@ -48,7 +50,9 @@ function wire() {
         if (d.ok === true && d.params) {
             const params: Record<string, VParam> = {}
             for (const [k, p] of Object.entries(d.params)) params[k] = { value: p.value, type: p.type === 'int' ? 'int' : 'float' }
-            useParamStore.setState({ params, loading: false, error: null, loadedAt: Date.now() })
+            const loaded: Record<string, number> = {}
+            for (const [k, p] of Object.entries(params)) loaded[k] = p.value
+            useParamStore.setState({ params, loaded, loading: false, error: null, loadedAt: Date.now() })
         } else if (d.ok === false) {
             useParamStore.setState({ loading: false, error: d.error ?? 'The parameter download failed' })
         }
@@ -85,7 +89,7 @@ function wire() {
         if (s.telemetryStatus === prev) return
         prev = s.telemetryStatus
         if (s.telemetryStatus !== 'connected') {
-            useParamStore.setState({ params: null, loading: false, error: null, pending: {}, failed: {}, saved: {}, loadedAt: 0 })
+            useParamStore.setState({ params: null, loading: false, error: null, pending: {}, failed: {}, saved: {}, loadedAt: 0, loaded: null })
         }
     })
 }

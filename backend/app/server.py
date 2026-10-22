@@ -98,6 +98,8 @@ def create_app() -> socketio.ASGIApp:
     fastapi_app.include_router(map_sightings_router)
     from app.attachments.routes import router as attachments_router
     fastapi_app.include_router(attachments_router)
+    from app.api.log_routes import router as log_router   # Config > Logs
+    fastapi_app.include_router(log_router)
 
     # Desktop app installers + electron-updater manifests - plain static
     # files, no auth (same tier as a public download page). Directory is
@@ -520,6 +522,10 @@ def create_app() -> socketio.ASGIApp:
     register_attachment_events(sio, session_manager)
     from app.events.shell_events import register_shell_events   # Config > Console
     register_shell_events(sio, session_manager)
+    from app.events.config_events import register_config_events   # Config > Logs, parameter metadata
+    register_config_events(sio, session_manager)
+    from app.events.config_live_events import register_config_live_events   # Config live readings
+    register_config_live_events(sio, session_manager)
     from app.copilot.events import register_copilot_events
     register_copilot_events(sio, session_manager, vision_pool)
 

@@ -103,6 +103,11 @@ class TelemetryManager:
     automation_locked: bool = False
     _target_sysid: int = 1
     _target_sysid_learned: bool = False
+    # Config > Vehicle: the autopilot HEARTBEAT's flight stack and vehicle
+    # type, and the AUTOPILOT_VERSION read (cached per link, it never changes
+    # without a reboot that drops the link). See app/telemetry/vehicle_info.py.
+    _heartbeat_meta: dict = {}
+    _vehicle_info_cache: Optional[dict] = None
 
     def __init__(self, on_update: Optional[Callable[[dict], None]] = None, fleet_mode: bool = False,
                  on_fc_message: Optional[Callable[[dict], None]] = None,
@@ -386,6 +391,8 @@ class TelemetryManager:
             return False
 
         self._address = address
+        self._vehicle_info_cache = None
+        self._heartbeat_meta = {}
 
         # Kill any stale mavsdk_server holding THIS address's port from a prior
         # session. Scoped to the endpoint so other drones' servers survive.
@@ -964,6 +971,11 @@ class TelemetryManager:
                         continue
                     self._target_sysid = sysid
                     self._target_sysid_learned = True
+                    try:
+                        from app.telemetry.vehicle_info import heartbeat_meta
+                        self._heartbeat_meta = heartbeat_meta(json.loads(msg.fields_json or "{}"))
+                    except Exception:
+                        self._heartbeat_meta = {}
                     if sysid != 1:
                         logger.info(f"Vehicle system id is {sysid} (not PX4's default 1)")
                     return
@@ -3142,6 +3154,32 @@ class TelemetryManager:
                 await asyncio.sleep(1.0 + i * 0.5)
         logger.warning("Could not read hardware UID - drone will be anonymous this session")
         return None
+
+    async def get_vehicle_info(self) -> dict:
+        """What the flight controller says about itself, for Config > Vehicle:
+        firmware version and git hash, board vendor and product, hardware UID
+        (AUTOPILOT_VERSION through the Info plugin, cached for the link) plus
+        the flight stack and vehicle type from its HEARTBEAT and the link's
+        own facts (both system ids, address, last message age)."""
+        import time as _time
+        if not self._drone or not self._connected:
+            return {"ok": False, "error": "No drone connected"}
+        if self._vehicle_info_cache is None or not self._vehicle_info_cache.get("ok"):
+            from app.telemetry.vehicle_info import read_info
+            self._vehicle_info_cache = await read_info(self._drone.info)
+        out = dict(self._vehicle_info_cache)
+        out.update(self._heartbeat_meta)
+        out.update({
+            "ok": True,
+            "info_ok": bool(self._vehicle_info_cache.get("ok")),
+            "vehicle_sysid": self._target_sysid if self._target_sysid_learned else None,
+            "gcs_sysid": self._sysid,
+            "address": self._address,
+            "link_kind": self._link_kind,
+            "last_rx_age_s": round(_time.monotonic() - self._last_rx_t, 2) if self._last_rx_t > 0 else None,
+            "rates": dict(self._measured_rates),
+        })
+        return out
 
     @property
     def snapshot(self) -> TelemetrySnapshot:

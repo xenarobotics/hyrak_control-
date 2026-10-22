@@ -163,8 +163,9 @@ def test_only_the_streams_opted_in():
     import app.reconstruction.routes  # noqa: F401  (registers its template)
     import app.webrtc.mesh_units  # noqa: F401
     import app.models_custom.routes  # noqa: F401  (a model's preview image, signed in)
+    import app.api.log_routes  # noqa: F401  (Config > Logs: a one-time file link, its owner only)
     assert sorted(url_tickets.ticket_templates()) == [
-        "/api/models/{model_id}/preview",
+        "/api/logs/file/{token}", "/api/models/{model_id}/preview",
         "/api/recon/stream/{kind}", "/api/video/feeds/{port}/h264", "/api/video/feeds/{port}/hevc"]
 
 

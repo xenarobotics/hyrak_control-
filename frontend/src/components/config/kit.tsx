@@ -55,6 +55,20 @@ export function Panel({ title, hint, right, children, pad = 16, gap = 12, style 
     )
 }
 
+/** The title line of a Config page: name, one sentence, an optional
+ *  element on the right (a readiness ring, a reload button). */
+export function PageHeader({ title, desc, right }: { title: React.ReactNode; desc?: React.ReactNode; right?: React.ReactNode }) {
+    return (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 240px', minWidth: 0 }}>
+                <h2 style={{ fontSize: 20, fontWeight: 700, color: T.text, margin: 0, lineHeight: 1.3 }}>{title}</h2>
+                {desc && <p style={{ fontSize: 14, color: T.muted, margin: '4px 0 0', lineHeight: 1.5 }}>{desc}</p>}
+            </div>
+            {right}
+        </div>
+    )
+}
+
 export function Grid({ children, min = 300, gap = 16 }: { children: React.ReactNode; min?: number; gap?: number }) {
     return <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${min}px), 1fr))`, gap, alignItems: 'start' }}>{children}</div>
 }

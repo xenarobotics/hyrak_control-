@@ -68,13 +68,35 @@ const SIDE_ABBR: Record<CalSide, string> = {
  *  adjusting while the calibration was already counting. */
 const MATCH_DEGREES = 22
 
-export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot }: {
+/** What to try after a failure, from the autopilot's reason. PX4's own
+ *  words stay on screen below this; this is the plain next step. */
+export function failureAdvice(sensor: string, error: string | undefined): string {
+    const e = (error ?? '').toLowerCase()
+    if (e.includes('armed')) return 'Disarm the drone, then start again.'
+    if (e.includes('motion') || e.includes('moved') || e.includes('still')) return 'The drone moved. Set it on a firm surface, hands off, and start again.'
+    if (e.includes('timeout') || e.includes('stopped reporting') || e.includes('did not answer')) return 'The drone stopped answering. Check the telemetry link and start again.'
+    if (e.includes('busy') || e.includes('already')) return 'Another calibration is still running on the drone. Wait 10 seconds and start again.'
+    if (e.includes('unsupported') || e.includes('not offer')) return 'This flight controller does not offer this calibration.'
+    if (e.includes('link') || e.includes('connection')) return 'The link dropped. Reconnect, then start again.'
+    if (sensor === 'mag') return 'Move away from metal, cars and concrete, rotate more slowly, and start again.'
+    if (sensor === 'accel') return 'Hold each position completely still until it is ticked off, then start again.'
+    if (sensor === 'level') return 'Put the drone on a surface that is truly level, then start again.'
+    return 'Check the reason below, then start again.'
+}
+
+export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot, sceneHeight = 430, idleTitle, idleSub, next }: {
     state: CalibrationState
     onCancel: () => void
     onDismiss: () => void
     onRetry: () => void
     /** Fired by the reboot prompt after a compass calibration. */
     onReboot?: () => void
+    sceneHeight?: number
+    /** Words for the resting state (nothing running). */
+    idleTitle?: string
+    idleSub?: string
+    /** The next step, offered after a calibration finishes. */
+    next?: { label: string; onStart: () => void } | null
 }) {
     const attitude = useDroneStore(s => s.telemetry?.attitude)
     const idle = state.phase === 'idle'
@@ -136,7 +158,7 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
     // ONE SENTENCE, and it is the position when there is one. PX4's own line
     // is kept underneath rather than promoted - "hold vehicle still on a
     // pending side" is true and useless next to "On its LEFT side".
-    const headline = idle ? 'Pick a calibration on the left'
+    const headline = idle ? (idleTitle ?? 'Pick a calibration on the left')
         : done ? 'Calibration complete'
         : failed ? 'Calibration failed'
         : cancelled ? 'Calibration cancelled'
@@ -151,7 +173,7 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
     const wantsReboot = done && state.sensor === 'mag'
 
     const tone = textFor(accent)
-    const subline = idle ? 'This model follows the real aircraft. Turn it and watch.'
+    const subline = idle ? (idleSub ?? 'This model follows the real aircraft. Turn it and watch.')
         : wantsReboot ? 'Saved. Reboot before flying: PX4 loads compass changes at startup.'
         : done ? 'The new offsets are saved on the aircraft'
         : failed ? (state.error || 'The autopilot did not accept the calibration')
@@ -243,7 +265,7 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
                     mode={mode}
                     accent={accent}
                     live={running}
-                    height={430}
+                    height={sceneHeight}
                 />
                 {!live && running && (
                     <span style={{
@@ -280,6 +302,11 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
                     already done nose-down. The dots carry the same fact as
                     colour; this carries it as words, which is what someone
                     reads when they are trying to plan the next move. */}
+                {failed && (
+                    <p style={{ fontSize: 14, margin: '8px 0 0', lineHeight: 1.5, color: 'hsl(var(--app-text))' }}>
+                        <span style={{ fontWeight: 700 }}>What to do: </span>{failureAdvice(state.sensor, state.error)}
+                    </p>
+                )}
                 {running && oriented && (
                     <p style={{ fontSize: 13, margin: '8px 0 0', lineHeight: 1.6, color: T_MUTED }}>
                         {doneList.length > 0 && (
@@ -325,7 +352,12 @@ export function CalibrationStage({ state, onCancel, onDismiss, onRetry, onReboot
                                 <RotateCw size={14} aria-hidden /> Reboot flight controller
                             </button>
                         )}
-                        <button type="button" onClick={onDismiss} style={btn(T_IDLE)} className={FOCUS}>
+                        {done && !wantsReboot && next && (
+                            <button type="button" onClick={() => { onDismiss(); next.onStart() }} style={btn(T_IDLE)} className={FOCUS}>
+                                Next: {next.label}
+                            </button>
+                        )}
+                        <button type="button" onClick={onDismiss} style={btn(done && next && !wantsReboot ? T_MUTED : T_IDLE)} className={FOCUS}>
                             <Check size={14} aria-hidden /> {wantsReboot ? 'Later' : 'Done'}
                         </button>
                         {(failed || cancelled) && (
