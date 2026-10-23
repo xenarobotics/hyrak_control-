@@ -315,6 +315,25 @@ class CalibrationSession:
         s.instruction = ev.text
         return True
 
+    def abort(self, reason: str) -> bool:
+        """End a running calibration on the autopilot's say-so.
+
+        PX4 reports some fatal conditions WITHOUT the [cal] prefix and without
+        a "calibration failed" line after them - "CRITICAL: No gyros found" is
+        the one seen on a real board. The plugin then waits out its whole
+        timeout, and the screen sits on "keep it still" for a minute and a
+        half on a calibration that ended in its first second.
+        """
+        s = self.state
+        if s.phase not in ("starting", "running"):
+            return False
+        s.phase = "failed"
+        s.ok = False
+        s.error = reason
+        s.detail = reason
+        s.instruction = "Calibration failed - see the autopilot's reason below"
+        return True
+
     def _pending_instruction(self) -> str:
         remaining = [s for s in SIDES if self.state.sides.get(s) == PENDING]
         if not remaining:

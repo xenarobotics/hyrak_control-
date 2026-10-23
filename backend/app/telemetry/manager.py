@@ -15,6 +15,7 @@ import functools
 import json
 import logging
 import math
+import re
 import socket
 import time
 from typing import Callable, Optional
@@ -923,7 +924,7 @@ class TelemetryManager:
                 # sending the operator to check a radio that is working.
                 # Nothing about drawing a calibration is worth that.
                 try:
-                    self._feed_calibration(text)
+                    self._feed_calibration(text, sev)
                 except Exception as e:
                     logger.debug(f"Calibration feed raised: {e}")
                 if self._status_event is not None:
@@ -3203,12 +3204,27 @@ class TelemetryManager:
         """The sensor being calibrated, or None."""
         return self._calibration.state.sensor if self._calibration else None
 
-    def _feed_calibration(self, text: str) -> None:
+    #: STATUSTEXT severities that end a running calibration even without the
+    #: [cal] prefix. ERROR and below stay informational: PX4 says those
+    #: mid-routine about things the operator can recover from.
+    _CAL_FATAL_SEVERITIES = ("EMERGENCY", "ALERT", "CRITICAL")
+
+    def _feed_calibration(self, text: str, severity: str = "") -> None:
         if self._calibration is None:
             return
         try:
             if self._calibration.feed(text):
                 self._emit_calibration()
+            elif severity.upper() in self._CAL_FATAL_SEVERITIES:
+                reason = re.sub(r"^(critical|emergency|alert)\s*:\s*", "", text, flags=re.I)
+                if self._calibration.abort(reason):
+                    self._emit_calibration()
+                    logger.warning(f"Calibration ended by the autopilot: {text}")
+                    # The plugin stream is still waiting on a verdict PX4 will
+                    # not send; close it so the next Start is not refused BUSY.
+                    task = self._calibration_task
+                    if task is not None and not task.done():
+                        task.cancel()
         except Exception as e:
             logger.debug(f"Calibration line ignored: {e}")
 
@@ -3344,8 +3360,11 @@ class TelemetryManager:
             session.finish(True)
             logger.info(f"✅ Calibration complete: {SENSORS[sensor]['label']}")
         except asyncio.CancelledError:
-            session.state.phase = "cancelled"
-            session.state.instruction = "Calibration cancelled"
+            # An abort from the autopilot cancels this task too, and its
+            # reason must stay on screen rather than read as "cancelled".
+            if session.state.phase != "failed":
+                session.state.phase = "cancelled"
+                session.state.instruction = "Calibration cancelled"
             raise
         except Exception as e:
             reason = self._calibration_reason(e)

@@ -689,3 +689,31 @@ async def test_cancel_marks_the_panel_before_it_waits_on_the_aircraft():
 
     assert "emit:cancelled" in seen
     assert seen.index("emit:cancelled") < seen.index("phase-at-cancel:cancelled")
+
+
+def test_a_critical_line_without_the_cal_prefix_ends_the_calibration():
+    """REPORTED ON A REAL BOARD. PX4 answered a gyro calibration with
+    "CRITICAL: No gyros found" and nothing else, and the screen said "keep it
+    still" until the operator gave up and pressed Cancel."""
+    t = _mgr(running="gyro")
+    t._calibration.feed("[cal] calibration started: 2 gyro")
+    t._calibration_task = None
+    t._feed_calibration("CRITICAL: No gyros found", "CRITICAL")
+    st = t._calibration.state
+    assert st.phase == "failed"
+    assert st.error == "No gyros found"
+    assert t.calibration_refusal("accel") is None
+
+
+def test_a_critical_line_after_the_verdict_changes_nothing():
+    t = _mgr(running="gyro")
+    t._calibration.finish(True)
+    t._feed_calibration("CRITICAL: Baro sensor timeout", "CRITICAL")
+    assert t._calibration.state.phase == "done"
+
+
+def test_an_ordinary_warning_does_not_end_the_calibration():
+    t = _mgr(running="accel")
+    t._calibration.feed("[cal] calibration started: 2 accel")
+    t._feed_calibration("Preflight: GPS Horizontal Pos Drift too high", "WARNING")
+    assert t._calibration.state.phase == "running"

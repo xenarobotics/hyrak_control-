@@ -72,6 +72,7 @@ const MATCH_DEGREES = 22
  *  words stay on screen below this; this is the plain next step. */
 export function failureAdvice(sensor: string, error: string | undefined): string {
     const e = (error ?? '').toLowerCase()
+    if (e.includes('no ') && e.includes('found')) return 'The flight controller cannot see this sensor, so there is nothing to calibrate. Check the firmware matches the board (Vehicle tab) and run "sensors status" in the Console.'
     if (e.includes('armed')) return 'Disarm the drone, then start again.'
     if (e.includes('motion') || e.includes('moved') || e.includes('still')) return 'The drone moved. Set it on a firm surface, hands off, and start again.'
     if (e.includes('timeout') || e.includes('stopped reporting') || e.includes('did not answer')) return 'The drone stopped answering. Check the telemetry link and start again.'
