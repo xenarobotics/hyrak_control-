@@ -50,6 +50,7 @@ EVENTS: dict[str, str] = {
     "get_param": SESSION_VIEW,
     "param_metadata": SESSION_VIEW,   # PX4's parameter metadata, read-only (config_events.py)
     "config_live": SESSION_VIEW,      # passive read of the session's own link (config_live_events.py)
+    "tuning_stream": SESSION_VIEW,    # Config > Tuning chart: setpoint vs response (tuning_events.py)
     "vehicle_info": SESSION_VIEW,     # firmware / board / ids of the session's drone
 
     # ── the session's own cloud simulator (8c, premium) ─────────────────
@@ -172,6 +173,8 @@ PUSHED_EVENTS: dict[str, str] = {
     "shell_output": "session",
     # Config > Sensors / Radio: raw readings off the session's own link.
     "config_live_data": "session",
+    # Config > Tuning: setpoint vs response rows, to the asking socket.
+    "tuning_data": "session",
 }
 
 # Other namespaces: the ground-station relay agent (a script, operator token).

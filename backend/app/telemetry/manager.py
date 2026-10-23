@@ -274,6 +274,12 @@ class TelemetryManager:
         if kind in ("radio", "local"):
             self._link_kind = kind
 
+    @property
+    def link_is_radio(self) -> bool:
+        """True on a telemetry radio (or a local serial cable): the slow,
+        half-duplex profile. Config > Tuning's chart asks for 10 Hz here."""
+        return self._link_kind == "radio" or self._address.startswith("serial://")
+
     # ------------------------------------------------------------------ #
     # Connection                                                           #
     # ------------------------------------------------------------------ #

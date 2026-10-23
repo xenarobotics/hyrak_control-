@@ -3,12 +3,15 @@
 // Config > Flight & tuning. QGroundControl's Tuning page plus the flight
 // behaviour limits it keeps under Parameters: speeds and takeoff height,
 // hover thrust and thrust curve, the rate / attitude / velocity / position
-// controller gains, and PX4's in-flight autotune.
+// controller gains with a live setpoint vs response chart (tuning/), and
+// PX4's in-flight autotune.
 
 import React, { useState } from 'react'
 import { useDroneStore } from '@/store/drone'
 import { useVehicleParams, writeParam } from '@/lib/vehicleParams'
 import { Btn, Chip, Dialog, Grid, Note, NumberBox, Panel, ParamRow, ParamSourceBar, ReloadButton, SubTabs, T, Tip, mix, type ParamSpec } from '@/components/config/kit'
+import { ATT, POS, RATE, RATE_COLS, VEL } from '@/components/config/tuning/gains'
+import { LiveTuning } from '@/components/config/tuning/LiveTuning'
 
 const BEHAVIOUR: ParamSpec[] = [
     { key: 'MIS_TAKEOFF_ALT', label: 'Takeoff height', unit: 'm', def: 2.5, min: 0, max: 100, decimals: 1, tip: 'Height an automatic takeoff climbs to.' },
@@ -27,34 +30,6 @@ const HOVER: ParamSpec[] = [
     { key: 'MPC_USE_HTE', label: 'Learn hover thrust in flight', bool: true, def: 1, tip: 'PX4\'s hover thrust estimator. Leave on unless you have a reason.' },
     { key: 'THR_MDL_FAC', label: 'Thrust curve', def: 0, min: 0, max: 1, decimals: 2, tip: 'Linearises motor thrust against throttle. 0 = linear (PWM ESCs), around 0.3 for many DShot / RPM-controlled setups.' },
     { key: 'MC_AIRMODE', label: 'Airmode', options: [{ value: 0, label: 'Off' }, { value: 1, label: 'Roll and pitch' }, { value: 2, label: 'Roll, pitch and yaw' }], def: 0, tip: 'Keeps attitude control at zero throttle. Useful for acro; leave off for most aerial work.' },
-]
-
-type Cell = { key: string; def: number; max?: number }
-const RATE: { axis: string; cells: Cell[] }[] = [
-    { axis: 'Roll', cells: [{ key: 'MC_ROLLRATE_K', def: 1 }, { key: 'MC_ROLLRATE_P', def: 0.15 }, { key: 'MC_ROLLRATE_I', def: 0.2 }, { key: 'MC_ROLLRATE_D', def: 0.003 }, { key: 'MC_ROLLRATE_FF', def: 0 }] },
-    { axis: 'Pitch', cells: [{ key: 'MC_PITCHRATE_K', def: 1 }, { key: 'MC_PITCHRATE_P', def: 0.15 }, { key: 'MC_PITCHRATE_I', def: 0.2 }, { key: 'MC_PITCHRATE_D', def: 0.003 }, { key: 'MC_PITCHRATE_FF', def: 0 }] },
-    { axis: 'Yaw', cells: [{ key: 'MC_YAWRATE_K', def: 1 }, { key: 'MC_YAWRATE_P', def: 0.2 }, { key: 'MC_YAWRATE_I', def: 0.1 }, { key: 'MC_YAWRATE_D', def: 0 }, { key: 'MC_YAWRATE_FF', def: 0 }] },
-]
-const ATT: ParamSpec[] = [
-    { key: 'MC_ROLL_P', label: 'Roll angle gain', def: 6.5, min: 0, max: 12, decimals: 2 },
-    { key: 'MC_PITCH_P', label: 'Pitch angle gain', def: 6.5, min: 0, max: 12, decimals: 2 },
-    { key: 'MC_YAW_P', label: 'Yaw angle gain', def: 2.8, min: 0, max: 5, decimals: 2 },
-    { key: 'MC_YAW_WEIGHT', label: 'Yaw weight', def: 0.4, min: 0, max: 1, decimals: 2, tip: 'How much yaw error counts against roll and pitch error.' },
-    { key: 'MC_ROLLRATE_MAX', label: 'Max roll rate', unit: '°/s', def: 220, min: 0, max: 1800, decimals: 0 },
-    { key: 'MC_PITCHRATE_MAX', label: 'Max pitch rate', unit: '°/s', def: 220, min: 0, max: 1800, decimals: 0 },
-    { key: 'MC_YAWRATE_MAX', label: 'Max yaw rate', unit: '°/s', def: 200, min: 0, max: 1800, decimals: 0 },
-]
-const VEL: ParamSpec[] = [
-    { key: 'MPC_XY_VEL_P_ACC', label: 'Horizontal P', def: 1.8, min: 1.2, max: 5, decimals: 2 },
-    { key: 'MPC_XY_VEL_I_ACC', label: 'Horizontal I', def: 0.4, min: 0, max: 60, decimals: 2 },
-    { key: 'MPC_XY_VEL_D_ACC', label: 'Horizontal D', def: 0.2, min: 0.1, max: 2, decimals: 2 },
-    { key: 'MPC_Z_VEL_P_ACC', label: 'Vertical P', def: 4, min: 2, max: 15, decimals: 2 },
-    { key: 'MPC_Z_VEL_I_ACC', label: 'Vertical I', def: 2, min: 0.2, max: 3, decimals: 2 },
-    { key: 'MPC_Z_VEL_D_ACC', label: 'Vertical D', def: 0, min: 0, max: 2, decimals: 2 },
-]
-const POS: ParamSpec[] = [
-    { key: 'MPC_XY_P', label: 'Horizontal position gain', def: 0.95, min: 0, max: 2, decimals: 2 },
-    { key: 'MPC_Z_P', label: 'Vertical position gain', def: 1, min: 0.1, max: 1.5, decimals: 2 },
 ]
 
 export function TuningSetup() {
@@ -90,10 +65,11 @@ export function TuningSetup() {
 
 function Gains() {
     const vp = useVehicleParams()
-    const COLS = ['Gain K', 'P', 'I', 'D', 'Feed-forward']
+    const COLS = RATE_COLS
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <Note>Change one gain at a time, by 10 to 20 %, and fly between changes. Autotune (next tab) does this for you on most multirotors.</Note>
+            <LiveTuning />
             <Panel title="Rate controller" hint="the innermost loop: how hard it fights a rotation"
                 right={<Tip text="PX4 uses the parallel form: output = K x (P x error + I x integral + D x rate of change) + FF x setpoint. K scales the whole axis." />}>
                 <div style={{ overflowX: 'auto' }}>
