@@ -26,7 +26,7 @@ import asyncio
 import logging
 import time
 
-from app.auth.socket_guard import require_session_view
+from app.auth.socket_guard import require_session_view, session_may_fly, takeover_stops
 from app.telemetry import tuning_stream as ts
 
 logger = logging.getLogger("verocore.tuning_events")
@@ -46,18 +46,20 @@ async def drop_sid(sid: str) -> None:
 
 
 async def run_feed(sid: str, tel, loop: str, emit, feeds: dict | None = None,
-                   rates: "ts.MessageRates | None" = None) -> None:
+                   rates: "ts.MessageRates | None" = None, may_raise: bool = True) -> None:
     """Read the loop's two messages off `tel` and emit batched rows until the
     feed entry for `sid` goes away, its lease runs out or the link drops.
-    `emit(payload)` sends one packet to the socket."""
+    `emit(payload)` sends one packet to the socket. With `may_raise` False
+    nothing is sent to the vehicle: the chart reads the messages at whatever
+    rate they already stream."""
     feeds = _feeds if feeds is None else feeds
     names = ts.LOOPS[loop]
-    hz = ts.stream_hz(tel)
+    hz = ts.stream_hz(tel) if may_raise else 0
     rates = rates or ts.MessageRates.for_tel(tel)
     batch = ts.Batcher()
     stop = asyncio.Event()
-    status = {"loop": loop, "hz": hz, "link": "radio" if hz == ts.RADIO_HZ else "local",
-              "bytes_s": ts.extra_bytes_s(loop, hz)}
+    status = {"loop": loop, "hz": hz, "link": "radio" if getattr(tel, "link_is_radio", False) else "local",
+              "bytes_s": ts.extra_bytes_s(loop, hz) if may_raise else 0}
 
     async def _listen(name: str):
         key = ts.KEY[name]
@@ -82,8 +84,9 @@ async def run_feed(sid: str, tel, loop: str, emit, feeds: dict | None = None,
         await emit(dict(status))
         # Shielded both ways: a feed cancelled half-way through raising the
         # rates lets the raise finish, then puts them back.
-        acq = asyncio.ensure_future(rates.acquire(tel, names, hz))
-        await asyncio.shield(acq)
+        if may_raise:
+            acq = asyncio.ensure_future(rates.acquire(tel, names, hz))
+            await asyncio.shield(acq)
         while True:
             feed = feeds.get(sid)
             if feed is None or feed.get("tel") is not tel or feed.get("loop") != loop \
@@ -137,7 +140,13 @@ def register_tuning_events(sio, session_manager) -> None:
             return
         if cur is not None and cur.get("task") is not None:
             cur["task"].cancel()
+        # Watching is a view right, but raising message rates is a command to
+        # the vehicle and spends its link: only a session that may fly it, and
+        # is not taken over, gets the faster stream. Everyone else reads the
+        # messages at the rates already set.
+        may_raise = session_may_fly(session) and takeover_stops(session, "tuning_stream") is None
         feed = {"until": time.monotonic() + LEASE_S, "tel": tel, "loop": loop, "task": None}
         _feeds[sid] = feed
         feed["task"] = asyncio.create_task(
-            run_feed(sid, tel, loop, lambda p: _emit_to(sid, p)), name=f"tuning_{sid[:6]}")
+            run_feed(sid, tel, loop, lambda p: _emit_to(sid, p), may_raise=may_raise),
+            name=f"tuning_{sid[:6]}")

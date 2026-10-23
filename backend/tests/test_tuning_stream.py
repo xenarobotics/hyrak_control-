@@ -260,3 +260,27 @@ async def test_drop_sid_cancels_the_socket_feed():
     await asyncio.gather(t, return_exceptions=True)
     assert t.cancelled() and "gone" not in te._feeds
     await te.drop_sid("never-was")
+
+
+async def test_a_view_only_session_never_changes_the_vehicles_rates():
+    """Watching is a view right; raising message rates is a command to the
+    vehicle. A session without the right to fly reads at the current rates."""
+    calls = []
+
+    class _Rates(ts.MessageRates):
+        async def acquire(self, *a, **k):
+            calls.append("acquire")
+
+        async def release(self, *a, **k):
+            calls.append("release")
+
+    tel = _tel()
+    feeds = {"v": {"until": 0.0, "tel": tel, "loop": "rate", "task": None}}
+    sent = []
+
+    async def emit(p):
+        sent.append(p)
+
+    await asyncio.wait_for(te.run_feed("v", tel, "rate", emit, feeds=feeds, rates=_Rates(), may_raise=False), 5)
+    assert calls == []
+    assert sent and sent[0]["hz"] == 0 and sent[0]["bytes_s"] == 0

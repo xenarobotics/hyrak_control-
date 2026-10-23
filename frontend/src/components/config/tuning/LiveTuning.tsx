@@ -84,6 +84,7 @@ export function LiveTuning() {
         : s.error ? <Chip tone="warn">No data</Chip>
         : frozen ? <Chip tone="accent">{frozen.step ? 'Step captured' : 'Paused'}</Chip>
         : stale ? <Chip tone="warn">No samples for 3 s</Chip>
+        : s.status && s.status.hz === 0 ? <Chip tone="ok">View only, normal rate</Chip>
         : s.status ? <Chip tone="ok">{s.status.hz} Hz{s.status.link === 'radio' ? ' on radio' : ''}</Chip>
         : <Chip tone="off">Starting</Chip>
 
