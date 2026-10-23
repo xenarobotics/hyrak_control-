@@ -1,41 +1,61 @@
 'use client'
 
-// Config > Parameters: every PX4 parameter, the way QGroundControl's
-// Parameters page works. Values come from the shared parameter copy
-// (lib/vehicleParams.ts); writes go through the guarded `set_param` event
-// and show what the aircraft confirmed. Metadata (defaults, units, ranges,
-// enum values, bitmask bits) comes from the drone's own firmware when it
-// sends it, else from a bundled PX4 copy (lib/paramMeta.ts).
+// Config > Parameters: every PX4 parameter, in HYRAK's own browser. A
+// sidebar of colour-coded groups with counts, and cards that lead with the
+// human name and a plain description, the PX4 key underneath. Beginner mode
+// hides the expert-only groups; Expert shows everything.
 //
-// Reset one parameter: only to a known default. Reset all: either the
-// airframe's defaults (SYS_AUTOCONFIG = 1 and a reboot, calibration kept)
-// or the firmware's (PREFLIGHT_STORAGE, everything wiped), typed
-// confirmation, disarmed only.
+// Values come from the shared parameter copy (lib/vehicleParams.ts); writes
+// go through the guarded `set_param` event and show what the aircraft
+// confirmed. Metadata (defaults, units, ranges, enum values, bitmask bits)
+// comes from the drone's own firmware when it sends it, else from a bundled
+// PX4 copy (lib/paramMeta.ts). Names and descriptions prefer HYRAK's own
+// wording (lib/px4-params-meta.ts) where it exists.
+//
+// Reset one parameter: only to a known default. Revert: back to the value it
+// had when the parameters were loaded. Reset all: either the airframe's
+// defaults (SYS_AUTOCONFIG = 1 and a reboot, calibration kept) or the
+// firmware's (PREFLIGHT_STORAGE, everything wiped), typed confirmation,
+// disarmed only.
 
-import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Download, FileUp, Loader, Power, RotateCcw, Search, X } from 'lucide-react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { AlertTriangle, Download, FileUp, Loader, Power, RotateCcw, Search, X, Zap } from 'lucide-react'
 import { useDroneStore } from '@/store/drone'
 import { useParamStore, useVehicleParams, writeParam, writeParams } from '@/lib/vehicleParams'
 import { describeValue, fmtValue, sameValue, useParamMeta, validate, type PMeta } from '@/lib/paramMeta'
-import { getGroupFromKey } from '@/lib/px4-params-meta'
+import { PX4_META, getGroupFromKey, humanizeParamKey } from '@/lib/px4-params-meta'
 import { droneAction } from '@/lib/droneAction'
 import { OptionSelect } from '@/components/config/OptionSelect'
 import { Btn, Chip, Dialog, FOCUS_RING, Note, ParamSourceBar, ReloadButton, T, Tip, mix } from '@/components/config/kit'
+import { ParamCard, type Row } from '@/components/config/params/ParamCard'
+import { ALL_STYLE, EXPERT_GROUPS, groupStyle } from '@/components/config/params/groupStyle'
 
 type Show = 'all' | 'default' | 'session'
-const PAGE = 150
-
-interface Row {
-    key: string
-    value: number | null      // null: no drone, reference only
-    isFloat: boolean
-    m: PMeta | null
-    group: string
-    offDefault: boolean
-    session: boolean
-}
+const PAGE = 48
+const ALL = 'All parameters'
 
 function unitOf(m: PMeta | null) { return m?.u ? ` ${m.u}` : '' }
+
+function oneLine(s: string) { return s.replace(/\s*\n\s*/g, ' ').trim() }
+
+function makeRow(key: string, value: number | null, isFloat: boolean, m: PMeta | null, loadedValue: number | null): Row {
+    const own = PX4_META[key]
+    const group = m?.g || getGroupFromKey(key)
+    const short = m?.s?.trim().replace(/\.$/, '') || ''
+    const name = own?.name ?? (short || humanizeParamKey(key))
+    const long = longText(m)
+    const desc = own?.desc ?? (long ? oneLine(long) : null)
+    const extra = own && short && short !== name ? short : ''
+    return {
+        key, value, isFloat, m, group, name, desc,
+        expert: !!own?.expert || EXPERT_GROUPS.has(group),
+        danger: !!own?.danger || key.startsWith('CBRK_'),
+        offDefault: value != null && m?.d != null && !sameValue(value, m.d, isFloat),
+        session: value != null && loadedValue != null && !sameValue(value, loadedValue, isFloat),
+        loaded: loadedValue,
+        hay: `${key} ${name} ${extra} ${desc ?? ''}`.toLowerCase(),
+    }
+}
 
 export function ParametersSetup() {
     const vp = useVehicleParams()
@@ -43,12 +63,13 @@ export function ParametersSetup() {
     const pm = useParamMeta()
     const armed = useDroneStore(s => s.telemetry?.flight_mode?.is_armed ?? false)
     const [query, setQuery] = useState('')
-    const [group, setGroup] = useState<string | null>(null)
+    const [group, setGroup] = useState<string>('Commander')
     const [show, setShow] = useState<Show>('all')
-    const [limit, setLimit] = useState(PAGE)
+    const [expert, setExpert] = useState(false)
     const [editing, setEditing] = useState<string | null>(null)
     const [importing, setImporting] = useState(false)
     const [resetting, setResetting] = useState(false)
+    const [reverting, setReverting] = useState(false)
     const live = vp.ready
 
     const rows = useMemo<Row[]>(() => {
@@ -56,47 +77,69 @@ export function ParametersSetup() {
         const out: Row[] = []
         if (vp.params) {
             for (const [key, p] of Object.entries(vp.params)) {
-                const m = meta?.[key] ?? null
-                const isFloat = p.type === 'float'
-                out.push({
-                    key, value: p.value, isFloat, m,
-                    group: m?.g || getGroupFromKey(key),
-                    offDefault: m?.d != null && !sameValue(p.value, m.d, isFloat),
-                    session: loaded?.[key] != null && !sameValue(p.value, loaded[key], isFloat),
-                })
+                out.push(makeRow(key, p.value, p.type === 'float', meta?.[key] ?? null, loaded?.[key] ?? null))
             }
         } else if (meta && !vp.connected) {
-            for (const [key, m] of Object.entries(meta)) {
-                out.push({ key, value: null, isFloat: m.t === 'f', m, group: m.g, offDefault: false, session: false })
-            }
+            for (const [key, m] of Object.entries(meta)) out.push(makeRow(key, null, m.t === 'f', m, null))
         }
         return out.sort((a, b) => a.key.localeCompare(b.key))
     }, [vp.params, vp.connected, pm.meta, loaded])
 
     const counts = useMemo(() => {
-        const c = { default: 0, session: 0 }
-        for (const r of rows) { if (r.offDefault) c.default++; if (r.session) c.session++ }
+        const c = { default: 0, session: 0, expert: 0 }
+        for (const r of rows) { if (r.offDefault) c.default++; if (r.session) c.session++; if (r.expert) c.expert++ }
         return c
     }, [rows])
 
-    const shown = useMemo(() => show === 'default' ? rows.filter(r => r.offDefault) : show === 'session' ? rows.filter(r => r.session) : rows, [rows, show])
+    // Beginner hides expert-only parameters from browsing; the two change
+    // filters always show everything that changed.
+    const base = useMemo(() => show === 'default' ? rows.filter(r => r.offDefault)
+        : show === 'session' ? rows.filter(r => r.session)
+        : expert ? rows : rows.filter(r => !r.expert), [rows, show, expert])
 
     const groups = useMemo(() => {
         const g = new Map<string, number>()
-        for (const r of shown) g.set(r.group, (g.get(r.group) ?? 0) + 1)
+        for (const r of base) g.set(r.group, (g.get(r.group) ?? 0) + 1)
         return [...g.entries()].sort((a, b) => a[0].localeCompare(b[0]))
-    }, [shown])
+    }, [base])
 
     const q = query.trim().toLowerCase()
-    const activeGroup = q ? null : (group && groups.some(([g]) => g === group) ? group : null)
+    const activeGroup = group === ALL || groups.some(([g]) => g === group) ? group : (groups[0]?.[0] ?? ALL)
+    const crossGroup = !!q || show !== 'all' || activeGroup === ALL
+
     const filtered = useMemo(() => {
-        if (q) return shown.filter(r => r.key.toLowerCase().includes(q) || (r.m?.s ?? '').toLowerCase().includes(q))
-        return activeGroup ? shown.filter(r => r.group === activeGroup) : shown
-    }, [shown, q, activeGroup])
+        if (q) return base.filter(r => r.hay.includes(q))
+        if (show !== 'all' || activeGroup === ALL) return base
+        return base.filter(r => r.group === activeGroup)
+    }, [base, q, show, activeGroup])
+
+    // Matches or group members that Beginner is hiding, offered as a link.
+    const hiddenExpert = useMemo(() => {
+        if (expert || show !== 'all') return 0
+        if (q) return rows.filter(r => r.expert && r.hay.includes(q)).length
+        return activeGroup === ALL ? counts.expert : rows.filter(r => r.expert && r.group === activeGroup).length
+    }, [expert, show, q, rows, activeGroup, counts.expert])
+
+    // Cards render a page at a time; more load as the list end scrolls in.
+    const viewKey = `${q}|${show}|${activeGroup}|${expert}`
+    const [lim, setLim] = useState({ key: viewKey, n: PAGE })
+    const limit = lim.key === viewKey ? lim.n : PAGE
+    const more = useCallback(() => setLim(l => ({ key: viewKey, n: (l.key === viewKey ? l.n : PAGE) + PAGE })), [viewKey])
+    const sentinel = useRef<HTMLDivElement>(null)
+    const hasMore = filtered.length > limit
+    useEffect(() => {
+        const el = sentinel.current
+        if (!el || !hasMore || typeof IntersectionObserver === 'undefined') return
+        const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) more() }, { rootMargin: '600px 0px' })
+        io.observe(el)
+        return () => io.disconnect()
+    }, [hasMore, more])
 
     const rebootKeys = Object.keys(vp.saved).filter(k => pm.meta?.[k]?.r)
     const editRow = editing ? rows.find(r => r.key === editing) ?? null : null
     const defaultsLabel = pm.source === 'drone' ? 'this firmware' : pm.version || 'PX4'
+    const openEditor = useCallback((k: string) => setEditing(k), [])
+    const pickGroup = (g: string) => { setGroup(g); setQuery(''); setShow('all') }
 
     const exportFile = () => {
         if (!vp.params) return
@@ -111,9 +154,65 @@ export function ParametersSetup() {
         setTimeout(() => URL.revokeObjectURL(url), 60_000)
     }
 
+    const head = q
+        ? `${filtered.length} ${filtered.length === 1 ? 'result' : 'results'} for "${query.trim()}" across all groups`
+        : show === 'default' ? `${filtered.length} ${filtered.length === 1 ? 'parameter' : 'parameters'} not at the default, across all groups`
+        : show === 'session' ? `${filtered.length} ${filtered.length === 1 ? 'parameter' : 'parameters'} changed since loading, across all groups`
+        : `${activeGroup} - ${filtered.length} ${filtered.length === 1 ? 'parameter' : 'parameters'}`
+    const headColor = q ? T.muted : show !== 'all' ? T.warn : activeGroup === ALL ? ALL_STYLE.color : groupStyle(activeGroup).color
+
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* Toolbar */}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <label style={{ flex: '1 1 280px', position: 'relative', minWidth: 0 }}>
+                    <span className="sr-only">Search parameters</span>
+                    <Search size={15} aria-hidden style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: T.muted, pointerEvents: 'none' }} />
+                    <input value={query} onChange={e => setQuery(e.target.value)} placeholder={`Search ${rows.length || ''} parameters`}
+                        className={FOCUS_RING}
+                        style={{ width: '100%', height: 40, padding: '0 36px 0 38px', borderRadius: 8, boxSizing: 'border-box', outline: 'none',
+                            background: T.surface, border: `1px solid ${T.borderStrong}`, color: T.text, fontSize: 14 }} />
+                    {query && (
+                        <button type="button" aria-label="Clear search" onClick={() => setQuery('')} className={FOCUS_RING}
+                            style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', width: 28, height: 28, borderRadius: 6, border: 'none', background: 'transparent', color: T.muted, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <X size={14} />
+                        </button>
+                    )}
+                </label>
+                <button type="button" onClick={() => setExpert(e => !e)} aria-pressed={expert} className={FOCUS_RING + ' transition-colors'}
+                    title={expert ? 'Showing every parameter. Switch back to hide the expert-only ones' : `Show the ${counts.expert} expert-only parameters too`}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 40, padding: '0 13px', borderRadius: 8, cursor: 'pointer', whiteSpace: 'nowrap', fontSize: 13,
+                        border: `1px solid ${expert ? mix(T.warn, 60) : T.borderStrong}`, background: expert ? mix(T.warn, 10) : T.surface,
+                        color: expert ? T.warn : T.muted, fontWeight: expert ? 700 : 600 }}>
+                    <Zap size={14} />{expert ? 'Expert on' : 'Beginner'}
+                </button>
+                <Segmented value={show} onChange={setShow} label="Which parameters" options={[
+                    { id: 'all', label: 'All' },
+                    { id: 'default', label: `Not default${live ? ` (${counts.default})` : ''}`, disabled: !live || !pm.meta },
+                    { id: 'session', label: `Changed now${live ? ` (${counts.session})` : ''}`, disabled: !live },
+                ]} />
+                {live && counts.session > 0 && (
+                    <button type="button" onClick={() => setReverting(true)} className={FOCUS_RING + ' transition-colors'}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 40, padding: '0 13px', borderRadius: 8, cursor: 'pointer', whiteSpace: 'nowrap',
+                            border: `1px solid ${mix(T.warn, 30)}`, background: mix(T.warn, 7), color: T.warn, fontSize: 13, fontWeight: 700 }}>
+                        <RotateCcw size={13} /> Revert all
+                    </button>
+                )}
+                <ReloadButton />
+            </div>
+
+            {/* Where the values come from */}
             <ParamSourceBar what="parameters" />
+            {live && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 8, flexWrap: 'wrap',
+                    background: mix(T.ok, 6), border: `1px solid ${mix(T.ok, 22)}` }}>
+                    <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: T.ok, flexShrink: 0 }} />
+                    <span style={{ fontSize: 13, color: T.ok, fontWeight: 700 }}>{rows.length} parameters from the drone</span>
+                    <span style={{ fontSize: 13, color: T.muted, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        {pm.droneLoading ? <><Loader size={12} className="animate-spin" /> Reading descriptions from the drone</> : pm.source === 'drone' ? 'Defaults and descriptions from this firmware' : `Defaults from ${pm.version || 'a bundled PX4 copy'}`}
+                    </span>
+                </div>
+            )}
             {vp.connected && pm.source !== 'drone' && !pm.droneLoading && (
                 <Note tone="warn">
                     The drone did not send its parameter descriptions{pm.droneError ? ` (${pm.droneError})` : ''}. Defaults shown are from {pm.version || 'a bundled PX4 copy'} and may differ on this firmware.
@@ -127,90 +226,101 @@ export function ParametersSetup() {
                     </div>
                 </Note>
             )}
+            {expert && (
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px', borderRadius: 8, background: mix(T.danger, 6), border: `1px solid ${mix(T.danger, 22)}` }}>
+                    <AlertTriangle size={15} style={{ color: T.danger, flexShrink: 0, marginTop: 2 }} />
+                    <p style={{ fontSize: 13, color: T.text, margin: 0, lineHeight: 1.55 }}>
+                        <span style={{ color: T.danger, fontWeight: 700 }}>Expert mode. </span>
+                        Parameters marked with a warning sign can make the drone unsafe. Change gains in small steps and hover-test after every change.
+                    </p>
+                </div>
+            )}
 
-            {/* Toolbar */}
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <label style={{ flex: '1 1 260px', position: 'relative', minWidth: 0 }}>
-                    <span className="sr-only">Search parameters</span>
-                    <Search size={15} aria-hidden style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: T.muted, pointerEvents: 'none' }} />
-                    <input value={query} onChange={e => { setQuery(e.target.value); setLimit(PAGE) }} placeholder={`Search ${rows.length || ''} parameters by name or description`}
-                        className={FOCUS_RING}
-                        style={{ width: '100%', height: 38, padding: '0 34px 0 34px', borderRadius: 8, boxSizing: 'border-box', outline: 'none',
-                            background: T.surface, border: `1px solid ${T.borderStrong}`, color: T.text, fontSize: 14 }} />
-                    {query && (
-                        <button type="button" aria-label="Clear search" onClick={() => setQuery('')} className={FOCUS_RING}
-                            style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', width: 26, height: 26, borderRadius: 6, border: 'none', background: 'transparent', color: T.muted, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <X size={14} />
-                        </button>
-                    )}
-                </label>
-                <Segmented value={show} onChange={v => { setShow(v); setLimit(PAGE) }} label="Which parameters" options={[
-                    { id: 'all', label: 'All' },
-                    { id: 'default', label: `Not default${live ? ` (${counts.default})` : ''}`, disabled: !live || !pm.meta },
-                    { id: 'session', label: `Changed now${live ? ` (${counts.session})` : ''}`, disabled: !live },
-                ]} />
-                <span style={{ display: 'inline-flex', gap: 8, marginLeft: 'auto' }}>
-                    <ReloadButton />
-                </span>
-            </div>
+            {/* Phone: the group list becomes a picker */}
+            {!q && show === 'all' ? (
+                <div className="md:hidden">
+                    <OptionSelect aria-label="Parameter group" value={activeGroup} onChange={pickGroup}
+                        options={[{ value: ALL, label: `${ALL} (${base.length})` }, ...groups.map(([g, n]) => ({ value: g, label: `${g} (${n})` }))]} />
+                </div>
+            ) : null}
 
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
-                {/* Groups */}
-                {!q && (
-                    <nav aria-label="Parameter groups" style={{ flex: '0 1 210px', minWidth: 170, maxHeight: '70vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 1,
-                        borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, padding: 6, position: 'sticky', top: 12 }}>
-                        <GroupItem label="All groups" count={shown.length} active={!activeGroup} onClick={() => { setGroup(null); setLimit(PAGE) }} />
-                        {groups.map(([g, n]) => (
-                            <GroupItem key={g} label={g} count={n} active={g === activeGroup} onClick={() => { setGroup(g); setLimit(PAGE) }} />
-                        ))}
-                    </nav>
+            <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+                {/* Group sidebar, hidden while searching or filtering, as before */}
+                {!q && show === 'all' && (
+                    <>
+                        <nav aria-label="Parameter groups" className="hidden md:flex"
+                            style={{ flex: '0 0 230px', flexDirection: 'column', gap: 2, position: 'sticky', top: 8, maxHeight: 'calc(100vh - 120px)', overflowY: 'auto', paddingRight: 2 }}>
+                            <SidebarItem label={ALL} count={base.length} style={ALL_STYLE} active={activeGroup === ALL} onClick={() => pickGroup(ALL)} />
+                            <div aria-hidden style={{ height: 1, background: T.border, margin: '4px 6px' }} />
+                            {groups.map(([g, n]) => (
+                                <SidebarItem key={g} label={g} count={n} style={groupStyle(g)} active={g === activeGroup} onClick={() => pickGroup(g)} />
+                            ))}
+                            {!expert && (
+                                <button type="button" onClick={() => setExpert(true)} className={FOCUS_RING}
+                                    style={{ marginTop: 6, padding: '6px 10px', border: 'none', background: 'none', textAlign: 'left', fontSize: 12, color: T.muted, cursor: 'pointer', lineHeight: 1.45 }}>
+                                    {counts.expert} expert-only parameters hidden. <span style={{ color: T.warn, fontWeight: 700 }}>Show them</span>
+                                </button>
+                            )}
+                        </nav>
+                        <div aria-hidden className="hidden md:block" style={{ width: 1, alignSelf: 'stretch', background: T.border, margin: '0 16px', flexShrink: 0 }} />
+                    </>
                 )}
 
-                {/* List */}
-                <section aria-label="Parameters" style={{ flex: '1 1 420px', minWidth: 0, borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface, overflow: 'hidden' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderBottom: `1px solid ${T.border}`, flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: 14, fontWeight: 700, color: T.text }}>{q ? 'Search results' : activeGroup ?? 'All groups'}</span>
-                        <span style={{ fontSize: 13, color: T.muted, fontVariantNumeric: 'tabular-nums' }}>{filtered.length} {filtered.length === 1 ? 'parameter' : 'parameters'}</span>
-                        {!live && pm.meta && !vp.loading && <span style={{ marginLeft: 'auto', fontSize: 12, color: T.muted }}>Showing {pm.version} defaults</span>}
-                        {live && pm.source && <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: T.muted }}>
-                            {pm.droneLoading ? <><Loader size={12} className="animate-spin" /> Reading descriptions from the drone</> : pm.source === 'drone' ? 'Defaults from the drone' : `Defaults from ${pm.version}`}
-                        </span>}
+                {/* Cards */}
+                <section aria-label="Parameters" style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minHeight: 24, flexWrap: 'wrap' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                            <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', background: headColor, flexShrink: 0 }} />
+                            <span style={{ fontSize: 13, fontWeight: 600, color: T.muted, fontVariantNumeric: 'tabular-nums' }}>{head}</span>
+                        </span>
+                        <span style={{ flex: 1 }} />
+                        {hiddenExpert > 0 && (
+                            <button type="button" onClick={() => setExpert(true)} className={FOCUS_RING}
+                                style={{ border: 'none', background: 'none', padding: '2px 0', fontSize: 13, fontWeight: 700, color: T.warn, cursor: 'pointer' }}>
+                                +{hiddenExpert} expert {hiddenExpert === 1 ? 'parameter' : 'parameters'}
+                            </button>
+                        )}
+                        {(q || show !== 'all') && <Btn onClick={() => { setQuery(''); setShow('all') }}>Back to groups</Btn>}
                     </div>
+
                     {filtered.length === 0 ? (
-                        <div style={{ padding: '40px 16px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                        <div style={{ padding: '48px 16px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, borderRadius: 10, border: `1px dashed ${T.border}` }}>
                             <span style={{ fontSize: 14, color: T.muted }}>
-                                {vp.loading ? 'Reading parameters from the drone' : q ? `No parameter matches "${query}"` : show === 'default' ? 'Every parameter is at its default' : show === 'session' ? 'Nothing changed since the parameters were loaded' : vp.connected ? 'No parameters loaded yet' : 'Parameter descriptions are loading'}
+                                {vp.loading ? 'Reading parameters from the drone' : q ? `No parameter matches "${query.trim()}"` : show === 'default' ? 'Every parameter is at its default' : show === 'session' ? 'Nothing changed since the parameters were loaded' : vp.connected ? 'No parameters loaded yet' : 'Parameter descriptions are loading'}
                             </span>
                             {(q || show !== 'all') && <Btn onClick={() => { setQuery(''); setShow('all') }}>Show all parameters</Btn>}
                         </div>
                     ) : (
-                        <div role="list">
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 270px), 1fr))', gap: 10, alignItems: 'stretch' }}>
                             {filtered.slice(0, limit).map(r => (
-                                <ParamListRow key={r.key} row={r} showGroup={!!q || !activeGroup} live={live}
-                                    pending={!!vp.pending[r.key]} failed={vp.failed[r.key]} onOpen={() => setEditing(r.key)} />
+                                <ParamCard key={r.key} row={r} live={live} pending={!!vp.pending[r.key]} failed={vp.failed[r.key]} savedAt={vp.saved[r.key] ?? 0}
+                                    showGroup={crossGroup} canResetDefault={pm.source === 'drone'} defaultsLabel={pm.version || 'PX4'} onOpen={openEditor} />
                             ))}
-                            {filtered.length > limit && (
-                                <div style={{ padding: 12, display: 'flex', justifyContent: 'center' }}>
-                                    <Btn onClick={() => setLimit(l => l + PAGE)}>Show {Math.min(PAGE, filtered.length - limit)} more of {filtered.length - limit}</Btn>
-                                </div>
-                            )}
+                        </div>
+                    )}
+                    {hasMore && (
+                        <div ref={sentinel} style={{ padding: 8, display: 'flex', justifyContent: 'center' }}>
+                            <Btn onClick={more}>Show {Math.min(PAGE, filtered.length - limit)} more of {filtered.length - limit}</Btn>
                         </div>
                     )}
                 </section>
             </div>
 
             {/* File and reset tools */}
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', paddingTop: 12, borderTop: `1px solid ${T.border}` }}>
-                <Btn onClick={exportFile} disabled={!live} title={live ? 'Save every parameter to a .params file' : 'Connect a drone first'}><Download size={15} /> Export .params</Btn>
-                <Btn onClick={() => setImporting(true)} disabled={!live} title={live ? 'Compare a .params file with the drone, then write the changes' : 'Connect a drone first'}><FileUp size={15} /> Import .params</Btn>
-                <span style={{ flex: 1 }} />
-                <RebootButton armed={armed} quiet />
-                <Btn kind="danger" onClick={() => setResetting(true)} disabled={!live || armed} title={armed ? 'Disarm first' : live ? undefined : 'Connect a drone first'}><RotateCcw size={15} /> Reset all to defaults</Btn>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 200px), 1fr))', gap: 8, paddingTop: 12, borderTop: `1px solid ${T.border}` }}>
+                <Tile icon={<Download size={16} />} color="light-dark(#1d4ed8, #60a5fa)" title="Export .params" sub="Save every value to a file"
+                    onClick={exportFile} disabled={!live} why="Connect a drone first" />
+                <Tile icon={<FileUp size={16} />} color="light-dark(#7e22ce, #c084fc)" title="Import .params" sub="Compare a file, then write"
+                    onClick={() => setImporting(true)} disabled={!live} why="Connect a drone first" />
+                <RebootButton armed={armed} tile />
+                <Tile icon={<RotateCcw size={16} />} color={T.danger} title="Reset all to defaults" sub="Airframe or firmware defaults" danger
+                    onClick={() => setResetting(true)} disabled={!live || armed} why={armed ? 'Disarm first' : 'Connect a drone first'} />
             </div>
 
             {editRow && <ParamEditor row={editRow} live={live} source={pm.source} defaultsLabel={defaultsLabel} onClose={() => setEditing(null)} />}
             {importing && <ImportDialog onClose={() => setImporting(false)} />}
             {resetting && <ResetAllDialog armed={armed} onClose={() => setResetting(false)} />}
+            {reverting && <RevertAllDialog rows={rows.filter(r => r.session)} onClose={() => setReverting(false)} />}
         </div>
     )
 }
@@ -221,13 +331,13 @@ function Segmented<V extends string>({ value, onChange, options, label }: {
     value: V; onChange: (v: V) => void; label: string; options: { id: V; label: string; disabled?: boolean }[]
 }) {
     return (
-        <div role="radiogroup" aria-label={label} style={{ display: 'inline-flex', padding: 3, borderRadius: 9, background: T.surface2, border: `1px solid ${T.border}`, gap: 2 }}>
+        <div role="radiogroup" aria-label={label} style={{ display: 'inline-flex', padding: 3, borderRadius: 9, background: T.surface2, border: `1px solid ${T.border}`, gap: 2, maxWidth: '100%', overflowX: 'auto' }}>
             {options.map(o => {
                 const on = o.id === value
                 return (
                     <button key={o.id} type="button" role="radio" aria-checked={on} disabled={o.disabled} onClick={() => onChange(o.id)}
                         className={FOCUS_RING + ' transition-colors'}
-                        style={{ minHeight: 30, padding: '0 12px', borderRadius: 7, border: 'none', fontSize: 13, fontWeight: on ? 700 : 600, whiteSpace: 'nowrap',
+                        style={{ minHeight: 32, padding: '0 12px', borderRadius: 7, border: 'none', fontSize: 13, fontWeight: on ? 700 : 600, whiteSpace: 'nowrap',
                             cursor: o.disabled ? 'not-allowed' : 'pointer', fontVariantNumeric: 'tabular-nums',
                             background: on ? T.surface : 'transparent', color: o.disabled ? T.subtle : on ? T.text : T.muted,
                             boxShadow: on ? `0 1px 2px ${mix('hsl(var(--app-text))', 12)}` : 'none' }}>
@@ -239,53 +349,40 @@ function Segmented<V extends string>({ value, onChange, options, label }: {
     )
 }
 
-function GroupItem({ label, count, active, onClick }: { label: string; count: number; active: boolean; onClick: () => void }) {
+function SidebarItem({ label, count, style, active, onClick }: {
+    label: string; count: number; style: { color: string; icon: React.ElementType }; active: boolean; onClick: () => void
+}) {
+    const Icon = style.icon
     return (
-        <button type="button" onClick={onClick} aria-current={active ? 'true' : undefined}
+        <button type="button" onClick={onClick} aria-current={active ? 'true' : undefined} title={label}
             className={FOCUS_RING + ' transition-colors ' + (active ? '' : 'hover:bg-app-surface-2')}
-            style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 32, padding: '0 10px', borderRadius: 6, border: 'none', cursor: 'pointer', textAlign: 'left',
-                background: active ? mix(T.accent, 12) : 'transparent', color: active ? T.text : T.muted, fontSize: 13, fontWeight: active ? 700 : 600 }}>
-            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
-            <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: active ? T.accent : T.subtle }}>{count}</span>
+            style={{ display: 'flex', alignItems: 'center', gap: 9, minHeight: 34, padding: '6px 10px', borderRadius: 6, border: 'none', borderLeft: `3px solid ${active ? style.color : 'transparent'}`,
+                background: active ? mix(style.color, 10) : 'transparent', cursor: 'pointer', width: '100%', textAlign: 'left', flexShrink: 0 }}>
+            <Icon size={15} aria-hidden style={{ color: active ? style.color : T.muted, flexShrink: 0 }} />
+            <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: active ? T.text : T.muted, fontWeight: active ? 700 : 500, lineHeight: 1.3 }}>{label}</span>
+            <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: active ? style.color : T.subtle, fontWeight: active ? 700 : 500 }}>{count}</span>
         </button>
     )
 }
 
-function ParamListRow({ row, showGroup, live, pending, failed, onOpen }: {
-    row: Row; showGroup: boolean; live: boolean; pending: boolean; failed?: string; onOpen: () => void
+function Tile({ icon, color, title, sub, onClick, disabled, why, danger }: {
+    icon: React.ReactNode; color: string; title: string; sub: string; onClick: () => void; disabled?: boolean; why?: string; danger?: boolean
 }) {
-    const { m } = row
-    const v = row.value ?? m?.d ?? null
-    const label = v == null ? null : describeValue(v, m)
     return (
-        <div role="listitem" style={{ borderBottom: `1px solid ${T.border}` }}>
-            <button type="button" onClick={onOpen} className={FOCUS_RING + ' transition-colors hover:bg-app-surface-2'}
-                style={{ width: '100%', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', gap: 12, padding: '9px 14px',
-                    border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', color: T.text }}>
-                <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                        <span className="font-code" style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{row.key}</span>
-                        {row.offDefault && <span title="Not the default" aria-label="Not the default" style={{ width: 7, height: 7, borderRadius: '50%', background: T.warn, flexShrink: 0 }} />}
-                        {showGroup && <span style={{ fontSize: 12, color: T.subtle, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.group}</span>}
-                    </span>
-                    <span style={{ fontSize: 13, color: T.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m?.s || 'No description'}</span>
-                </span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end', maxWidth: 280, minWidth: 0 }}>
-                    {pending && <Loader size={14} className="animate-spin" style={{ color: T.accent }} aria-label="Saving" />}
-                    {failed && !pending && <span title={failed}><AlertTriangle size={14} style={{ color: T.danger }} aria-label="Refused" /></span>}
-                    <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: 0 }}>
-                        <span style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: live ? T.text : T.muted, whiteSpace: 'nowrap' }}>
-                            {v == null ? '-' : fmtValue(v, m, row.isFloat)}{v != null && <span style={{ fontSize: 12, fontWeight: 600, color: T.muted }}>{unitOf(m)}</span>}
-                        </span>
-                        {label && <span style={{ fontSize: 12, color: T.muted, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>}
-                    </span>
-                </span>
-            </button>
-        </div>
+        <button type="button" onClick={disabled ? undefined : onClick} disabled={disabled} title={disabled ? why : undefined}
+            className={FOCUS_RING + ' transition-colors ' + (disabled ? '' : 'hover:bg-app-surface-2')}
+            style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '11px 14px', borderRadius: 8, textAlign: 'left', width: '100%',
+                background: T.surface, border: `1px solid ${disabled ? T.border : danger ? mix(color, 40) : T.borderStrong}`, cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.7 : 1 }}>
+            <span style={{ color: disabled ? T.muted : color, display: 'flex', flexShrink: 0 }}>{icon}</span>
+            <span style={{ minWidth: 0 }}>
+                <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: disabled ? T.muted : T.text }}>{title}</span>
+                <span style={{ display: 'block', fontSize: 12, color: T.muted, marginTop: 1 }}>{sub}</span>
+            </span>
+        </button>
     )
 }
 
-function RebootButton({ armed, quiet }: { armed: boolean; quiet?: boolean }) {
+function RebootButton({ armed, tile }: { armed: boolean; tile?: boolean }) {
     const connected = useDroneStore(s => s.telemetryStatus === 'connected')
     const [open, setOpen] = useState(false)
     const [busy, setBusy] = useState(false)
@@ -298,7 +395,10 @@ function RebootButton({ armed, quiet }: { armed: boolean; quiet?: boolean }) {
     }
     return (
         <>
-            <Btn kind={quiet ? 'quiet' : 'primary'} onClick={() => setOpen(true)} disabled={!connected || armed} title={armed ? 'Disarm first' : undefined}><Power size={15} /> Reboot</Btn>
+            {tile
+                ? <Tile icon={<Power size={16} />} color={T.danger} title="Reboot" sub="Restart the flight controller" danger
+                    onClick={() => setOpen(true)} disabled={!connected || armed} why={armed ? 'Disarm first' : 'Connect a drone first'} />
+                : <Btn kind="primary" onClick={() => setOpen(true)} disabled={!connected || armed} title={armed ? 'Disarm first' : undefined}><Power size={15} /> Reboot</Btn>}
             <Dialog open={open} onClose={() => setOpen(false)} title="Reboot the flight controller?" width={440}>
                 <p style={{ margin: 0, fontSize: 14, lineHeight: 1.55, color: T.text }}>The link drops for about 10 to 30 seconds while PX4 restarts, then the parameters are read again.</p>
                 {err && <Note tone="danger">{err}</Note>}
@@ -308,6 +408,36 @@ function RebootButton({ armed, quiet }: { armed: boolean; quiet?: boolean }) {
                 </div>
             </Dialog>
         </>
+    )
+}
+
+/** Write every parameter changed this session back to its loaded value. */
+function RevertAllDialog({ rows, onClose }: { rows: Row[]; onClose: () => void }) {
+    const [busy, setBusy] = useState(false)
+    const go = async () => {
+        setBusy(true)
+        await writeParams(rows.filter(r => r.loaded != null).map(r => [r.key, r.loaded!] as [string, number]))
+        setBusy(false)
+        onClose()
+    }
+    return (
+        <Dialog open onClose={onClose} title={`Revert ${rows.length} ${rows.length === 1 ? 'parameter' : 'parameters'}?`} width={480}>
+            <p style={{ margin: 0, fontSize: 14, lineHeight: 1.55, color: T.text }}>Each goes back to the value it had when the parameters were loaded from the drone.</p>
+            <div style={{ borderRadius: 8, border: `1px solid ${T.border}`, maxHeight: 220, overflowY: 'auto' }}>
+                {rows.map(r => (
+                    <div key={r.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderTop: `1px solid ${T.border}`, fontSize: 13 }}>
+                        <span className="font-code" style={{ flex: 1, minWidth: 0, color: T.text, fontWeight: 600 }}>{r.key}</span>
+                        <span style={{ color: T.muted, fontVariantNumeric: 'tabular-nums' }}>{r.value == null ? '-' : fmtValue(r.value, r.m, r.isFloat)}</span>
+                        <span style={{ color: T.muted }}>to</span>
+                        <span style={{ color: T.text, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{r.loaded == null ? '-' : fmtValue(r.loaded, r.m, r.isFloat)}{unitOf(r.m)}</span>
+                    </div>
+                ))}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <Btn onClick={onClose}>Cancel</Btn>
+                <Btn kind="primary" onClick={go} disabled={busy}>{busy ? <Loader size={14} className="animate-spin" /> : <RotateCcw size={14} />} Revert all</Btn>
+            </div>
+        </Dialog>
     )
 }
 
@@ -372,9 +502,12 @@ function ParamEditor({ row, live, source, defaultsLabel, onClose }: {
     const unknownBits = bitmask ? Math.round(bits) - bitmask.reduce((acc, [b]) => acc + (hasBit(bits, b) ? 2 ** b : 0), 0) : 0
 
     return (
-        <Dialog open onClose={onClose} title={key} width={560}>
+        <Dialog open onClose={onClose} title={row.name} width={560}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <span style={{ fontSize: 15, fontWeight: 700, color: T.text }}>{m?.s || 'No description for this parameter'}</span>
+                <span className="font-code" style={{ fontSize: 13, fontWeight: 600, color: T.muted }}>{key}</span>
+                {m?.s && m.s.replace(/\.$/, '') !== row.name && <span style={{ fontSize: 15, fontWeight: 700, color: T.text }}>{m.s}</span>}
+                {!m?.s && !row.desc && <span style={{ fontSize: 14, color: T.muted }}>No description for this parameter</span>}
+                {PX4_META[key]?.desc && <p style={{ margin: 0, fontSize: 14, lineHeight: 1.55, color: T.text }}>{PX4_META[key].desc}</p>}
                 {longText(m) && <p style={{ margin: 0, fontSize: 13, lineHeight: 1.55, color: T.muted, whiteSpace: 'pre-line' }}>{longText(m)}</p>}
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
                     <Chip tone="off">{row.group}</Chip>
