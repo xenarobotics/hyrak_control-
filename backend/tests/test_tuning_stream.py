@@ -274,7 +274,7 @@ async def test_a_view_only_session_never_changes_the_vehicles_rates():
         async def release(self, *a, **k):
             calls.append("release")
 
-    tel = _tel()
+    tel, _ = _tel()
     feeds = {"v": {"until": 0.0, "tel": tel, "loop": "rate", "task": None}}
     sent = []
 
@@ -284,3 +284,51 @@ async def test_a_view_only_session_never_changes_the_vehicles_rates():
     await asyncio.wait_for(te.run_feed("v", tel, "rate", emit, feeds=feeds, rates=_Rates(), may_raise=False), 5)
     assert calls == []
     assert sent and sent[0]["hz"] == 0 and sent[0]["bytes_s"] == 0
+
+
+async def test_losing_the_right_to_fly_mid_feed_puts_the_rates_back(monkeypatch):
+    """A takeover or a revoked fly right while the chart is open: the raised
+    rates go back within a recheck and the chart carries on at normal rate."""
+    monkeypatch.setattr(te, "RECHECK_S", 0.05)
+    tel, d = _tel(intervals={30: 100_000, 83: 0})
+    feeds = {"s": {"until": time.monotonic() + 30, "tel": tel, "loop": "rate"}}
+    allowed = {"v": True}
+    packets = []
+
+    async def emit(p):
+        packets.append(p)
+
+    task = asyncio.create_task(te.run_feed("s", tel, "rate", emit, feeds=feeds, rates=ts.MessageRates(),
+                                           still_may_raise=lambda: allowed["v"]))
+    feeds["s"]["task"] = task
+    for _ in range(50):
+        await asyncio.sleep(0.02)
+        if (30, 20_000.0) in _sets(d):
+            break
+    assert (30, 20_000.0) in _sets(d)
+    d.sent.clear()
+    allowed["v"] = False
+    for _ in range(50):
+        await asyncio.sleep(0.02)
+        if any(p.get("hz") == 0 for p in packets):
+            break
+    assert _sets(d) == [(30, 100_000.0), (83, -1.0)]
+    assert any(p.get("hz") == 0 and p.get("bytes_s") == 0 for p in packets)
+    d.sent.clear()
+    feeds.pop("s")
+    await asyncio.wait_for(task, 1)
+    assert _sets(d) == []                 # not restored twice
+
+
+def test_a_taken_over_session_may_not_raise_rates(monkeypatch):
+    """tuning_stream is a view event, so the event-class takeover filter would
+    let it through; the rate raise checks the takeover itself."""
+    s = type("S", (), {"session_id": "x"})()
+    monkeypatch.setattr(te, "session_may_fly", lambda _s: True)
+    monkeypatch.setattr(te.takeover, "blocking", lambda *_a, **_k: object())
+    assert te.may_raise_rates(s) is False
+    monkeypatch.setattr(te.takeover, "blocking", lambda *_a, **_k: None)
+    assert te.may_raise_rates(s) is True
+    monkeypatch.setattr(te, "session_may_fly", lambda _s: False)
+    assert te.may_raise_rates(s) is False
+    assert te.may_raise_rates(None) is False
