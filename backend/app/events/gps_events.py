@@ -98,8 +98,18 @@ def _public(ip: str) -> bool:
         a = ipaddress.ip_address(ip)
     except ValueError:
         return False
-    return not (a.is_private or a.is_loopback or a.is_link_local or a.is_multicast
-                or a.is_reserved or a.is_unspecified or getattr(a, "is_site_local", False))
+    # Unwrap the forms that smuggle an internal IPv4 address inside IPv6
+    # (::ffff:10.0.0.1, 64:ff9b::a00:1, 6to4, Teredo) and judge that.
+    if isinstance(a, ipaddress.IPv6Address):
+        if a.ipv4_mapped is not None:
+            a = a.ipv4_mapped
+        elif a in ipaddress.ip_network("64:ff9b::/96") or a in ipaddress.ip_network("64:ff9b:1::/48"):
+            a = ipaddress.IPv4Address(int(a) & 0xFFFFFFFF)
+        elif a.sixtofour is not None:
+            a = a.sixtofour
+        elif a.teredo is not None:
+            return False
+    return a.is_global and not a.is_multicast
 
 
 async def resolve_checked(host: str, port: int, allow_private: bool) -> str:

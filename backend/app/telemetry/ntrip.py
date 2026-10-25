@@ -193,12 +193,20 @@ def parse_response_head(head: bytes) -> bool:
             raise NtripError("The caster refused the username or password (401)")
         if code == 404:
             raise NtripError("The caster does not have that mountpoint (404)")
-        raise NtripError(f"The caster answered {code} {' '.join(parts[2:])}".strip())
-    raise NtripError(f"Not an NTRIP caster answer: {first[:60]!r}")
+        # Status code only: the peer's own words are not echoed back, so the
+        # client cannot be used to read banners off arbitrary servers.
+        raise NtripError(f"The caster refused the connection (HTTP {code})")
+    raise NtripError("That address did not answer like an NTRIP caster. Check the host and port")
 
 
 class ChunkDecoder:
-    """HTTP/1.1 chunked transfer decoding, incremental."""
+    """HTTP/1.1 chunked transfer decoding, incremental.
+
+    Bounded: a chunk-size line longer than MAX_SIZE_LINE or a chunk bigger
+    than MAX_CHUNK is a broken or hostile peer, not a caster."""
+
+    MAX_SIZE_LINE = 64
+    MAX_CHUNK = 1 << 20
 
     def __init__(self) -> None:
         self._buf = bytearray()
@@ -224,13 +232,19 @@ class ChunkDecoder:
                 continue
             i = self._buf.find(b"\r\n")
             if i < 0:
+                if len(self._buf) > self.MAX_SIZE_LINE:
+                    raise NtripError("The caster sent a malformed stream")
                 break
+            if i > self.MAX_SIZE_LINE:
+                raise NtripError("The caster sent a malformed stream")
             size = self._buf[:i].split(b";")[0].strip()
             del self._buf[:i + 2]
             try:
                 self._left = int(size or b"0", 16)
             except ValueError:
-                self._left = 0
+                raise NtripError("The caster sent a malformed stream") from None
+            if self._left > self.MAX_CHUNK:
+                raise NtripError("The caster sent a malformed stream")
             if self._left == 0:
                 self._crlf = 2
         return bytes(out)

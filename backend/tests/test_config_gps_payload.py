@@ -286,7 +286,7 @@ def test_request_and_answers():
     assert ntrip.parse_response_head(b"ICY 200 OK\r\n") is False
     assert ntrip.parse_response_head(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n") is True
     for head, word in ((b"HTTP/1.1 401 Unauthorized\r\n", "password"), (b"SOURCETABLE 200 OK\r\n", "mountpoint"),
-                       (b"HTTP/1.0 404 Not Found\r\n", "mountpoint"), (b"SSH-2.0-OpenSSH\r\n", "Not an NTRIP")):
+                       (b"HTTP/1.0 404 Not Found\r\n", "mountpoint"), (b"SSH-2.0-OpenSSH\r\n", "did not answer like an NTRIP caster")):
         with pytest.raises(ntrip.NtripError) as e:
             ntrip.parse_response_head(head)
         assert word in str(e.value)
@@ -393,7 +393,9 @@ def test_customer_casters_must_be_public():
     assert "private" in str(e.value)
     assert run(ge.resolve_checked("127.0.0.1", 2101, allow_private=True)) == "127.0.0.1"
     for ip, ok in (("10.0.0.5", False), ("192.168.1.2", False), ("169.254.1.1", False),
-                   ("8.8.8.8", True), ("::1", False)):
+                   ("8.8.8.8", True), ("::1", False), ("::ffff:10.0.0.1", False),
+                   ("::ffff:8.8.8.8", True), ("64:ff9b::a00:1", False), ("2002:a00:1::1", False),
+                   ("100.64.0.1", False), ("2001:4860:4860::8888", True)):
         assert ge._public(ip) is ok
 
 
@@ -406,3 +408,17 @@ def test_live_pick_cleans_fields():
     a2 = ge.pick("ADSB_VEHICLE", json.dumps({"ICAO_address": 1, "callsign": [65, 66, 0]}))
     assert a2["callsign"] == "AB"
     assert ge.pick("HEARTBEAT", "{}") is None
+
+
+def test_chunk_decoder_is_bounded():
+    d = ntrip.ChunkDecoder()
+    with pytest.raises(ntrip.NtripError):
+        d.feed(b"A" * 100)                       # no CRLF, ever
+    d = ntrip.ChunkDecoder()
+    with pytest.raises(ntrip.NtripError):
+        d.feed(b"FFFFFFFF\r\n")                 # 4 GB chunk
+    d = ntrip.ChunkDecoder()
+    with pytest.raises(ntrip.NtripError):
+        d.feed(b"zz\r\n")                       # not hex
+    d = ntrip.ChunkDecoder()
+    assert d.feed(b"3\r\nabc\r\n0\r\n\r\n") == b"abc"
