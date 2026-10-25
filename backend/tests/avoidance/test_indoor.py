@@ -123,13 +123,42 @@ def test_auto_switches_only_after_it_settles_and_not_mid_manoeuvre():
     assert c.update_env(now=12.5) == "outdoor"
 
 
-def test_camera_verdict_can_call_it_indoor_with_gps():
+def test_good_gps_wins_over_the_camera_in_auto():
+    """SITL regression 2026-10-25: a Gazebo world has no sky in the picture,
+    so the camera called a GPS-good outdoor flight INDOOR; the indoor speed
+    cap (0.8 m/s) then kept it under the 1.5 m/s gate and the environment
+    flipped INDOOR/OUTDOOR with the speed all flight."""
     c = AvoidanceController("au2")
     c.note_gps(True)
+    c._last_speed_m_s = 0.5                       # slow, as under the indoor cap
+    for t in (0.0, 2.0, 5.5, 8.0, 12.0, 30.0):
+        c.note_vision_env(0.0, 3.5, True, now=t)  # "enclosed" every frame
+        assert c.update_env(now=t) is None
+    assert c.env == "outdoor" and c.env_reason == "auto: GPS good"
+
+
+def test_camera_verdict_counts_only_while_gps_state_is_unknown():
+    c = AvoidanceController("au3")
+    c._last_speed_m_s = 0.5
     c.note_vision_env(0.0, 3.5, True, now=0.0)
     c.update_env(now=0.0)
     c.note_vision_env(0.0, 3.5, True, now=5.5)
     assert c.update_env(now=5.5) == "indoor"
+    # A good fix arrives: back outdoors once it has held, and it stays there.
+    c.note_gps(True)
+    c.note_vision_env(0.0, 3.5, True, now=6.0)
+    assert c.update_env(now=6.0) is None          # candidate only (hysteresis)
+    c.note_vision_env(0.0, 3.5, True, now=11.5)
+    assert c.update_env(now=11.5) == "outdoor"
+    c.note_vision_env(0.0, 3.5, True, now=20.0)
+    assert c.update_env(now=20.0) is None and c.env == "outdoor"
+
+
+def test_operator_indoor_still_wins_over_good_gps():
+    c = AvoidanceController("au4")
+    c.note_gps(True)
+    c.params.env_mode = 2.0
+    assert c.update_env(now=0.0) == "indoor" and c.env_reason == "set by operator"
 
 
 def test_persisted_params_keep_the_outdoor_values(tmp_path, monkeypatch):

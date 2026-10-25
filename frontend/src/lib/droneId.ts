@@ -94,16 +94,23 @@ function stop() {
 
 /** The gate: telemetry up -> resolve; telemetry down -> nothing to resolve.
  *  A bound drone arriving on the session short-circuits the back-off. */
+function apply() {
+    const st = useDroneStore.getState()
+    if (listeners.size === 0) { stop(); return }
+    if (st.telemetryStatus !== 'connected') { stop(); return }
+    const bound = st.session?.drone?.id
+    if (bound && bound !== current) { backoff = BACKOFF_MIN_MS; start(); schedule(0); return }
+    start()
+}
+
 function ensureStoreSubscription() {
-    if (storeSub) return
-    const apply = () => {
-        const st = useDroneStore.getState()
-        if (listeners.size === 0) { stop(); return }
-        if (st.telemetryStatus !== 'connected') { stop(); return }
-        const bound = st.session?.drone?.id
-        if (bound && bound !== current) { backoff = BACKOFF_MIN_MS; start(); schedule(0); return }
-        start()
-    }
+    // Re-evaluated on EVERY subscribe, not only the first. The last listener
+    // leaving stops the resolver (a page change unmounts all of them before
+    // the next page mounts its own), and the store subscription below only
+    // fires on a link or bound-drone change. Returning early here left the
+    // next page with no resolver at all: Command's Avoid tab said "connect a
+    // drone" with a drone connected and flying, until the link flapped.
+    if (storeSub) { apply(); return }
     storeSub = useDroneStore.subscribe((s, prev) => {
         if (s.telemetryStatus !== prev.telemetryStatus || s.session?.drone?.id !== prev.session?.drone?.id) apply()
     })

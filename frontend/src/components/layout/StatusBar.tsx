@@ -48,6 +48,7 @@ import { useLiveScope } from '@/hooks/useLiveScope'
 import { VIEW_ONLY_TEXT } from '@/components/layout/ViewOnly'
 import { SimpleSelect } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+import { getRtlOverride } from '@/lib/rtlOverride'
 
 /** Fired by the bar's "Connect" action on Fly and Command: those pages open
  *  and focus their own link controls (elsewhere the action goes to Fly). */
@@ -493,8 +494,9 @@ export function StatusBar({ details = true }: { details?: boolean }) {
             <ActionButton compact={!wide} label="RTL" ariaLabel="Return to launch"
                 icon={<Home size={15} />}
                 disabled={!droneLinked || !flagInAir} why={!droneLinked ? NO_LINK_REASON : 'Only while flying'}
-                active={modeUpper.includes('RETURN') || modeUpper === 'RTL'} pending={pend('return')}
-                onClick={() => sendAction('return')} title="Return to launch" />
+                active={modeUpper.includes('RETURN') || modeUpper === 'RTL'} pending={pend('return', 'goto_custom_rtl', 'rtl_home')}
+                onClick={() => { const plan = getRtlOverride(); if (plan) plan(); else sendAction('return') }}
+                title={pathname?.startsWith('/mission') ? 'Return to the plan\'s RTL point, then confirm the landing' : 'Return to launch'} />
             <ActionButton compact={!wide} label="Land" ariaLabel="Land now"
                 icon={<PlaneLanding size={15} />}
                 disabled={!droneLinked} why={NO_LINK_REASON}

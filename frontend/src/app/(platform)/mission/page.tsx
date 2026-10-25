@@ -22,6 +22,7 @@ import { AirspaceStrip, PermitRequestDialog, PermitsPanel } from '@/components/m
 import { useAccess, useActiveWorkspace } from '@/hooks/useAccess'
 import { fromWire, planningAccess, requestPlanFit, type Permit } from '@/lib/planning'
 import { getSocket } from '@/lib/socket'
+import { registerRtlOverride } from '@/lib/rtlOverride'
 import { useSessionAttachments } from '@/lib/attachments'
 import { waypointActionHazard } from '@/components/attachments/WaypointActions'
 import { cn } from '@/lib/utils'
@@ -675,6 +676,36 @@ export default function MissionPage() {
     }
   }, [waypoints, telStatus, terrainFollow, autoHeading, planHasHazardActions, allowAttachments])
 
+  // RTL to the plan's RTL point, then "Land now?" on arrival (the popup
+  // below). The status bar's RTL runs this too while this tab is open
+  // (lib/rtlOverride.ts), so both buttons do the same thing here.
+  const startPlanRtl = useCallback(() => {
+    if (swarmEnabled) {
+      const { selectedIds, drones } = useSwarmStore.getState()
+      const targets = selectedIds.filter(id => drones[id]?.connected)
+      if (targets.length === 0) {
+        setUploadError('Tick drones in the fleet panel first - RTL targets ticked drones')
+        return
+      }
+      returningIdsRef.current = targets
+      setReturningCount(targets.length)
+      sendAction('rtl_home', {})
+      rtlDismissedRef.current = false
+      setFleetRtlArrived({ n: 0, total: targets.length })
+      setRtlReturning(true)
+      return
+    }
+    const rtl = getRtlWaypoint()
+    sendAction('goto_custom_rtl', { lat: rtl.lat, lng: rtl.lng, altitude: rtl.altitude })
+    rtlTargetRef.current = { lat: rtl.lat, lng: rtl.lng }
+    rtlDismissedRef.current = false
+    setRtlReturning(true)
+  }, [swarmEnabled, sendAction, getRtlWaypoint])
+  // Single drone only: fleet RTL here targets the ticked drones and does
+  // nothing with none ticked, which the bar's RTL must never do.
+  useEffect(() => (canFly && !swarmEnabled ? registerRtlOverride(startPlanRtl) : undefined),
+    [canFly, swarmEnabled, startPlanRtl])
+
   // Orange zone: re-send the exact last upload with the acknowledgement, on
   // the channel it came from (fleet vs primary).
   const uploadWithAck = useCallback(() => {
@@ -1066,28 +1097,7 @@ export default function MissionPage() {
             <ToolBtn
               icon={<Home size={14} />}
               label="Return to launch"
-              onClick={() => {
-                if (swarmEnabled) {
-                  const { selectedIds, drones } = useSwarmStore.getState()
-                  const targets = selectedIds.filter(id => drones[id]?.connected)
-                  if (targets.length === 0) {
-                    setUploadError('Tick drones in the fleet panel first - RTL targets ticked drones')
-                    return
-                  }
-                  returningIdsRef.current = targets
-                  setReturningCount(targets.length)
-                  sendAction('rtl_home', {})
-                  rtlDismissedRef.current = false
-                  setFleetRtlArrived({ n: 0, total: targets.length })
-                  setRtlReturning(true)
-                  return
-                }
-                const rtl = getRtlWaypoint()
-                sendAction('goto_custom_rtl', { lat: rtl.lat, lng: rtl.lng, altitude: rtl.altitude })
-                rtlTargetRef.current = { lat: rtl.lat, lng: rtl.lng }
-                rtlDismissedRef.current = false
-                setRtlReturning(true)
-              }}
+              onClick={startPlanRtl}
               tone="warn"
               wide
               tip="Return to launch: fly back to the RTL point now"

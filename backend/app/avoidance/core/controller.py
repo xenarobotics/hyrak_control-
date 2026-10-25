@@ -533,13 +533,23 @@ class AvoidanceController:
             want, why = "indoor", "set by operator"
         else:
             vis = self._vision_env if self._vision_env and now - self._vision_env[0] < 5.0 else None
-            # Auto indoor needs more than one weak signal: no GPS at all, or
-            # the camera's enclosed-space verdict WITH a real sky mask while
-            # slow (a facade or a bridge at mission speed must not shrink the
-            # clearance to 0.45 m).
+            # Precedence in auto: a good GPS fix means OUTDOOR, full stop.
+            # Indoor needs no usable GPS (and the camera not seeing open sky).
+            # The camera's enclosed-space verdict only counts while the GPS
+            # state is still unknown (no position read yet), WITH a real sky
+            # mask and slow (a facade or a bridge at mission speed must not
+            # shrink the clearance to 0.45 m).
+            #
+            # It used to win over a good fix too, and in a Gazebo world (no
+            # sky in the picture) it called a GPS-good outdoor flight INDOOR:
+            # the indoor speed cap (0.8 m/s) kept the aircraft under the
+            # 1.5 m/s gate, so the verdict fed itself and the environment
+            # flipped INDOOR/OUTDOOR with the speed all flight. Indoors with
+            # a GPS fix (a hall near windows) is the operator's call: Indoor.
             if self._gps_ok is False and not (vis and vis[1] == "outdoor"):
                 want, why = "indoor", "auto: no usable GPS"
-            elif vis and vis[1] == "indoor" and vis[2] and self._last_speed_m_s < 1.5:
+            elif self._gps_ok is None and vis and vis[1] == "indoor" and vis[2] \
+                    and self._last_speed_m_s < 1.5:
                 want, why = "indoor", "auto: camera sees an enclosed space (no sky, ceiling, near walls)"
             else:
                 want, why = "outdoor", ("auto: sky / open scene" if vis and vis[1] == "outdoor"
