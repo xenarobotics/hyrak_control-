@@ -28,9 +28,11 @@ export interface AutoConnectConfig {
     sik: boolean
     udp: boolean
     udpPort: number
+    /** Accept UDP vehicles from other machines (off: this computer only). */
+    udpLan: boolean
 }
 
-export const DEFAULT_AUTOCONNECT: AutoConnectConfig = { enabled: true, usb: true, sik: true, udp: true, udpPort: 14550 }
+export const DEFAULT_AUTOCONNECT: AutoConnectConfig = { enabled: true, usb: true, sik: true, udp: true, udpPort: 14550, udpLan: false }
 
 export type PortClass = 'fc' | 'sik' | 'other'
 

@@ -32,10 +32,14 @@ export interface AutoConnectConfig {
     sik: boolean
     udp: boolean
     udpPort: number
+    /** Accept UDP vehicles from other machines. Off by default: anything on
+     *  the LAN can send a HEARTBEAT, and auto-connect would then hand the
+     *  operator's session to whoever sent it. */
+    udpLan: boolean
 }
 
 export const DEFAULT_AUTOCONNECT_CONFIG: AutoConnectConfig = {
-    enabled: true, usb: true, sik: true, udp: true, udpPort: 14550,
+    enabled: true, usb: true, sik: true, udp: true, udpPort: 14550, udpLan: false,
 }
 
 export interface ProbeHandle {
@@ -119,6 +123,7 @@ export class AutoConnectManager {
     private udp: UdpLike | null = null
     private udpState: 'off' | 'listening' | 'busy' | 'paused' = 'off'
     private udpBoundPort = 0
+    private udpLanBound = false
     private udpSuppressed = false
     private udpLastHeartbeat = 0
     private udpHoldUntil = 0
@@ -140,7 +145,10 @@ export class AutoConnectManager {
             sik: next.sik ?? this.cfg.sik,
             udp: next.udp ?? this.cfg.udp,
             udpPort: Number.isInteger(port) && port > 0 && port < 65536 ? port : this.cfg.udpPort,
+            udpLan: next.udpLan ?? this.cfg.udpLan,
         }
+        // Rebind when the accepted sources change (loopback vs every interface).
+        if (this.udp && this.udpLanBound !== this.cfg.udpLan) void this.closeUdp('off')
         void this.tick()
         return this.getConfig()
     }
@@ -378,8 +386,9 @@ export class AutoConnectManager {
     private async openUdp(): Promise<void> {
         const sock = this.deps.createUdp()
         const port = this.cfg.udpPort
+        const lan = this.cfg.udpLan
         try {
-            await sock.bind(port, '0.0.0.0')
+            await sock.bind(port, lan ? '0.0.0.0' : '127.0.0.1')
         } catch {
             // Another ground station (QGC, Mission Planner, a relay) holds it.
             try { await sock.close() } catch { /* never bound */ }
@@ -389,6 +398,7 @@ export class AutoConnectManager {
         }
         this.udp = sock
         this.udpBoundPort = port
+        this.udpLanBound = lan
         this.udpState = 'listening'
         // A fresh listen starts with no memory of who was talking: quiet
         // detection must not compare against a heartbeat from long ago.
@@ -396,6 +406,7 @@ export class AutoConnectManager {
         const scanners = new Map<string, HeartbeatScanner>()
         sock.onMessage((data, from) => {
             if (this.udp !== sock) return
+            if (!lan && !isLoopback(from.address)) return
             const k = `${from.address}:${from.port}`
             let sc = scanners.get(k)
             if (!sc) { sc = new HeartbeatScanner(); scanners.set(k, sc) }
@@ -471,4 +482,10 @@ export class AutoConnectManager {
         this.lastStatus = sig
         this.emit(e)
     }
+}
+
+/** 127.0.0.0/8, ::1 and the IPv4-mapped forms of loopback. */
+export function isLoopback(address: string): boolean {
+    const a = address.replace(/^::ffff:/i, '')
+    return a === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(a)
 }

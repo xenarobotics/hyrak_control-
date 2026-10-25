@@ -88,6 +88,13 @@ export function AutoConnectGroup() {
             {subRow('USB flight controllers', 'Pixhawk, Cube, Holybro, ARK and other PX4 or ArduPilot boards on a USB cable.', 'usb')}
             {subRow('SiK / 3DR telemetry radios', 'FTDI and CP210x radios, opened at 57600 baud.', 'sik')}
             {desktop && subRow('UDP 14550 (simulator and companion)', 'PX4 SITL and most companion computers send here. If you fly with a HYRAK air unit, pick it on the Link card once and auto-connect uses it.', 'udp')}
+            {desktop && (
+                <div style={{ paddingLeft: 32 }}>
+                    <PrefRow label="Also accept UDP from other computers"
+                        sub="Off: only a simulator or program on this computer is connected automatically. Turn on for a companion computer, air unit or simulator elsewhere on your network. Anything on that network could then send a heartbeat and be connected, so only use it on a network you trust."
+                        right={<Switch label="Also accept UDP from other computers" value={config.udpLan} disabled={off || !config.udp} onChange={v => set({ udpLan: v })} />} />
+                </div>
+            )}
 
             {desktop && (
                 <PrefRow

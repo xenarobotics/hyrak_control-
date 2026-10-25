@@ -60,7 +60,7 @@ function harness() {
         createUdp: () => {
             const s = { port: 0, cb: null, closed: false }
             return {
-                bind: async (port) => { if (bindBusy) throw new Error('EADDRINUSE'); s.port = port; sockets.push(s) },
+                bind: async (port, address) => { if (bindBusy) throw new Error('EADDRINUSE'); s.port = port; s.address = address; sockets.push(s) },
                 onMessage: (cb) => { s.cb = cb },
                 close: async () => { s.closed = true },
             }
@@ -257,4 +257,29 @@ test('UDP listener closes while a link is active and when a bridge wants the por
     assert.equal(h.sockets.length, 2)
     await h.m.yieldResources('udp', { ports: [{ tag: 0, port: 24552 }] })
     assert.ok(h.sockets[1].closed)
+})
+
+test('UDP: a heartbeat from another machine is ignored unless the LAN switch is on', async () => {
+    const h = harness()
+    h.m.setConfig({ usb: false, sik: false, udpPort: 24553 })
+    h.m.setGate({ ready: true })
+    await h.tick()
+    assert.equal(h.sockets[0].address, '127.0.0.1', 'loopback only by default')
+    h.sockets[0].cb(encodeHeartbeat({ sysid: 1 }), { address: '192.168.1.50', port: 14550 })
+    await h.advance(UDP_GATHER_MS + 10)
+    assert.equal(h.vehicles().length, 0, 'a LAN sender must not be auto-connected')
+
+    h.m.setConfig({ udpLan: true })
+    await h.tick()
+    const s = h.sockets[h.sockets.length - 1]
+    assert.equal(s.address, '0.0.0.0', 'rebound on every interface after opt-in')
+    s.cb(encodeHeartbeat({ sysid: 1 }), { address: '192.168.1.50', port: 14550 })
+    await h.advance(UDP_GATHER_MS + 10)
+    assert.equal(h.vehicles().length, 1)
+})
+
+test('isLoopback', () => {
+    const { isLoopback } = require('../dist/autoconnect/manager')
+    for (const a of ['127.0.0.1', '127.8.9.10', '::1', '::ffff:127.0.0.1']) assert.equal(isLoopback(a), true, a)
+    for (const a of ['192.168.1.5', '10.0.0.1', '::ffff:192.168.1.5', '0.0.0.0', '128.0.0.1']) assert.equal(isLoopback(a), false, a)
 })
