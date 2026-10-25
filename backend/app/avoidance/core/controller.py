@@ -213,10 +213,12 @@ class AvoidanceController:
         from app.avoidance.sensing.mono_calibration import ScaleTracker
         self.grid = OccupancyGrid()
         self.mono_scale = ScaleTracker()
-        # Set by the camera sensing while the session's video is a camera on
-        # this computer (a laptop webcam): it never sees the ground under the
-        # aircraft, so it is treated as a bench camera like mono_bench.
-        self.bench_auto = False
+        # Monotonic time of the last frame from a camera on the operator's
+        # computer (a laptop webcam) for this drone's own session. Advice
+        # only: such a camera never sees the ground under the aircraft, so
+        # the operator is told to switch on the bench test. It never relaxes
+        # anything by itself - only the explicit mono_bench setting does.
+        self.local_camera_t = 0.0
         self._range_data_t = 0.0          # last scan from a real range sensor
         self._mono_data_t = 0.0
         self._last_frame_t: float | None = None   # capture time of the newest scan
@@ -1275,7 +1277,12 @@ class AvoidanceController:
     # -- status -----------------------------------------------------------
     @property
     def bench_active(self) -> bool:
-        return bool(self.params.mono_bench) or self.bench_auto
+        return bool(self.params.mono_bench)
+
+    def bench_suggested(self, now: float | None = None) -> bool:
+        """A local camera fed this drone in the last 5 s and bench is off."""
+        now = time.monotonic() if now is None else now
+        return not self.params.mono_bench and self.local_camera_t > 0 and now - self.local_camera_t < 5.0
 
     def status(self, now: float | None = None) -> dict:
         now = now if now is not None else time.monotonic()
@@ -1310,7 +1317,7 @@ class AvoidanceController:
             "guarding": bool(self._guard_active and self.following(now)),
             "scans": dict(self._scans),
             "mono_calibration": self.mono_scale.status(),
-            "bench": {"active": self.bench_active, "auto": self.bench_auto and not self.params.mono_bench},
+            "bench": {"active": self.bench_active, "suggested": self.bench_suggested(now)},
             "pose_rate_hz": round(_pose_rate(self.drone_id), 1),
             "planner": None if self.last_setpoint is None else {
                 "reason": self.last_setpoint.reason,

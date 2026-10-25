@@ -923,6 +923,16 @@ def _controller_for_session(session_id: str):
     return _sole_enabled_controller()
 
 
+def session_bound_to(session_id: str, drone_id: str) -> bool:
+    """True only when the session is explicitly bound to `drone_id` (not via
+    the sole-enabled-controller fallback)."""
+    sm = _session_manager
+    sess = sm.get(session_id) if sm is not None else None
+    drone = getattr(sess, "drone", None) if sess else None
+    did = (drone or {}).get("id") if isinstance(drone, dict) else getattr(drone, "id", None)
+    return bool(did) and str(did) == str(drone_id)
+
+
 def note_mission_goal(session_id: str, waypoints: list) -> None:
     """Called by the session upload handler: the last waypoint is where the
     aircraft is going, whatever the planner knows about the mission."""

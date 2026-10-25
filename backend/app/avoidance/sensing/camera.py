@@ -232,7 +232,9 @@ def submit(session_id: str, img_bgr: np.ndarray) -> None:
     ctx = None
     if c is not None:
         from app.vision import camera_profiles
-        c.bench_auto = camera_profiles.source_of(session_id) in camera_profiles.LOCAL_CAMERA_SOURCES
+        if camera_profiles.source_of(session_id) in camera_profiles.LOCAL_CAMERA_SOURCES \
+                and av_loop.session_bound_to(session_id, c.drone_id):
+            c.local_camera_t = time.monotonic()
         pose = pose_history.history(c.drone_id).at(captured_at)
         if pose is not None:
             # Camera height above the GROUND, not above home: over terrain

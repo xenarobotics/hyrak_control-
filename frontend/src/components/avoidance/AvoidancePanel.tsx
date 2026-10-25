@@ -14,7 +14,7 @@ import { visibleInterval } from '@/lib/poll'
 import { ShieldCheck, ShieldAlert, Shield, TriangleAlert, ChevronDown, ChevronRight, Plug } from 'lucide-react'
 import { FOCUS_LINK_EVENT } from '@/components/layout/StatusBar'
 import {
-    getStatus, setEnabled, setArmed, getEvents, clearHazards, nearestAheadM,
+    getStatus, setEnabled, setArmed, getEvents, clearHazards, nearestAheadM, setParams,
     type AvoidanceStatus, type AvoidanceEvent, type AvoidanceParams,
 } from '@/lib/avoidance'
 import { cn } from '@/lib/utils'
@@ -256,6 +256,19 @@ export function AvoidancePanel() {
 
             {/* what it sees and knows */}
             <div className="flex flex-col gap-1">
+                {status?.enabled && status.bench?.suggested && (
+                    <div role="note" className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-2 text-[12px] leading-snug">
+                        <p className="font-semibold">This video is from a camera on your computer</p>
+                        <p className="mt-0.5 opacity-90">
+                            Camera avoidance on a drone measures distance from the ground below it, which this camera never sees, so nothing is detected.
+                            For a desk test, turn on the bench test: it uses the camera as-is at about {p?.bench_cam_height_m ?? 1} m height. Do not use it on a real flight.
+                        </p>
+                        <button type="button" className={cn('mt-1.5 rounded border border-amber-500/60 px-2 py-1 font-semibold', FOCUS)}
+                            onClick={() => { if (droneId) void setParams(droneId, { use_range_sensor: 0, mono_bench: 1 }).then(setStatus).catch(() => {}) }}>
+                            Turn on bench test
+                        </button>
+                    </div>
+                )}
                 <Row label="Camera" value={camOk ? 'feeding' : status?.enabled ? 'No video' : 'Off'}
                     tone={camOk ? 'ok' : status?.enabled ? 'warn' : undefined}
                     hint="Depth observations arriving from this session's video. Connect the camera before takeoff." />
