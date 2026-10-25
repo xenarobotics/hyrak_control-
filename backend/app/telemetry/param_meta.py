@@ -161,17 +161,17 @@ def reset_all_fields(target_sysid: int) -> dict:
 async def handle_reset_all(tel, data: dict) -> dict:
     """drone_action `reset_params_default`: needs {"confirm": "RESET"} and a
     disarmed aircraft on the ground."""
-    from app.telemetry import actuator_test
+    from app.telemetry import actuator_control
     action = "reset_params_default"
     if (data or {}).get("confirm") != RESET_CONFIRM:
         return {"action": action, "ok": False, "error": "Type RESET to confirm"}
-    why = actuator_test.refusal(tel)
+    why = actuator_control.refusal(tel)
     if why:
         if why.startswith("Disarm first"):
             why = "Disarm first. Parameters are reset on the ground only"
         return {"action": action, "ok": False, "error": why}
     try:
-        await actuator_test._send(tel, reset_all_fields(int(getattr(tel, "_target_sysid", 1) or 1)))
+        await actuator_control._send(tel, reset_all_fields(int(getattr(tel, "_target_sysid", 1) or 1)))
     except Exception as e:
         return {"action": action, "ok": False, "error": f"Could not send to the drone ({e})"}
     try:

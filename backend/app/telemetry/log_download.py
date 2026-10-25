@@ -47,8 +47,8 @@ def entry_dict(e) -> dict:
 def busy_refusal(tel) -> str | None:
     """Why a download or erase may not run now (armed, in the air, Offboard,
     no link), or None. Listing is always allowed."""
-    from app.telemetry import actuator_test
-    why = actuator_test.refusal(tel)
+    from app.telemetry import actuator_control
+    why = actuator_control.refusal(tel)
     if why and why.startswith("Disarm first"):
         return "Disarm first. Logs are downloaded and erased on the ground only"
     return why

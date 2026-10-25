@@ -94,8 +94,8 @@ async def _execute_drone_action(tel, action: str, data: dict) -> dict:
         return {"action": action, "ok": True}
     if action in ("actuator_test", "configure_actuator", "esc_calibration"):
         # Config > Actuators: motor / servo test and DShot spin direction.
-        # Refused unless disarmed and on the ground (app/telemetry/actuator_test.py).
-        from app.telemetry import actuator_test as _at
+        # Refused unless disarmed and on the ground (app/telemetry/actuator_control.py).
+        from app.telemetry import actuator_control as _at
         return await _at.handle(tel, action, data)
     if action in ("gripper_test", "rx_pair"):
         # Config > Payload gripper test, Radio Spektrum bind. Confirmed,

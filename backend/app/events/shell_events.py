@@ -16,7 +16,7 @@ import logging
 import re
 
 from app.auth.socket_guard import _is_staff_session, require_session_fly
-from app.telemetry import actuator_test
+from app.telemetry import actuator_control
 
 logger = logging.getLogger("verocore.shell")
 
@@ -130,7 +130,7 @@ def register_shell_events(sio, session_manager) -> None:
             return
         if kind == "write":
             why = None if _is_staff_session(session) else "Only staff can run commands that change the aircraft"
-            why = why or actuator_test.refusal(tel)
+            why = why or actuator_control.refusal(tel)
             if why:
                 await sio.emit("shell_output", {"text": f"\n[HYRAK] {why}. Read-only commands (ver, top, listener, "
                                 "param show, ... status) still work.\n", "error": True}, to=sid)

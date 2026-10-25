@@ -13,7 +13,7 @@
 
 Both are bench actions, refused here in words unless the aircraft is
 connected, disarmed, on the ground and not flown by this app (the same rule
-as the actuator test, actuator_test.refusal), and only with the operator's
+as the actuator test, actuator_control.refusal), and only with the operator's
 explicit confirmation in the payload. The vehicle's COMMAND_ACK comes back in
 the result so the page shows what the autopilot said.
 """
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 
-from app.telemetry import actuator_test
+from app.telemetry import actuator_control
 from app.telemetry.mav_command import command_fields, send_command
 
 logger = logging.getLogger("verocore.payload_cmd")
@@ -48,7 +48,7 @@ def rx_pair_fields(target_sysid: int, mode: str) -> dict:
 async def handle(tel, action: str, data: dict) -> dict:
     """drone_action entry point for gripper_test / rx_pair."""
     data = data or {}
-    why = actuator_test.refusal(tel)
+    why = actuator_control.refusal(tel)
     if why:
         return {"action": action, "ok": False, "error": why}
     if not data.get("confirmed"):

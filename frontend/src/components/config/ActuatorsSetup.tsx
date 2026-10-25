@@ -8,7 +8,7 @@
 //
 // TESTING SAFETY, the same rules QGC follows and a few more:
 //  - only on a connected, disarmed aircraft on the ground (the backend
-//    refuses the command otherwise too, app/telemetry/actuator_test.py);
+//    refuses the command otherwise too, app/telemetry/actuator_control.py);
 //  - nothing moves until the operator confirms the propellers are off;
 //  - sliders start at Stop and are capped at a low level (20 % by default);
 //  - every command carries a 1 s timeout on the aircraft and is re-sent

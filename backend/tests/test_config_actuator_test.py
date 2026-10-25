@@ -1,4 +1,4 @@
-"""Config > Actuators: actuator test / configure commands (app/telemetry/actuator_test.py)."""
+"""Config > Actuators: actuator test / configure commands (app/telemetry/actuator_control.py)."""
 import asyncio
 import json
 import math
@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.telemetry import actuator_test as at
+from app.telemetry import actuator_control as at
 from app.telemetry import failsafe_check as fs
 
 
