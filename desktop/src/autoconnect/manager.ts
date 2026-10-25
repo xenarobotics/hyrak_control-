@@ -373,7 +373,7 @@ export class AutoConnectManager {
         const now = this.deps.now()
         const want = this.cfg.udp && now >= this.udpHoldUntil
         if (!want) { await this.closeUdp('off'); return }
-        if (this.udp && this.udpBoundPort !== this.cfg.udpPort) await this.closeUdp('off')
+        if (this.udp && (this.udpBoundPort !== this.cfg.udpPort || this.udpLanBound !== this.cfg.udpLan)) await this.closeUdp('off')
         if (this.udpSuppressed && this.udpLastHeartbeat && now - this.udpLastHeartbeat > UDP_QUIET_MS) {
             this.udpSuppressed = false
         }
@@ -396,6 +396,12 @@ export class AutoConnectManager {
             this.udpRetryAt = this.deps.now() + 10000
             return
         }
+        if (this.cfg.udpLan !== lan || this.cfg.udpPort !== port) {
+            // The setting changed while binding: drop this socket, the next
+            // tick binds the right one.
+            try { await sock.close() } catch { /* already closed */ }
+            return
+        }
         this.udp = sock
         this.udpBoundPort = port
         this.udpLanBound = lan
@@ -406,7 +412,7 @@ export class AutoConnectManager {
         const scanners = new Map<string, HeartbeatScanner>()
         sock.onMessage((data, from) => {
             if (this.udp !== sock) return
-            if (!lan && !isLoopback(from.address)) return
+            if (!this.cfg.udpLan && !isLoopback(from.address)) return
             const k = `${from.address}:${from.port}`
             let sc = scanners.get(k)
             if (!sc) { sc = new HeartbeatScanner(); scanners.set(k, sc) }

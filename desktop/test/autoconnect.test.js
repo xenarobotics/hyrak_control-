@@ -283,3 +283,19 @@ test('isLoopback', () => {
     for (const a of ['127.0.0.1', '127.8.9.10', '::1', '::ffff:127.0.0.1']) assert.equal(isLoopback(a), true, a)
     for (const a of ['192.168.1.5', '10.0.0.1', '::ffff:192.168.1.5', '0.0.0.0', '128.0.0.1']) assert.equal(isLoopback(a), false, a)
 })
+
+test('UDP: turning the LAN switch off while listening rebinds to loopback', async () => {
+    const h = harness()
+    h.m.setConfig({ usb: false, sik: false, udpPort: 24554, udpLan: true })
+    h.m.setGate({ ready: true })
+    await h.tick()
+    assert.equal(h.sockets[h.sockets.length - 1].address, '0.0.0.0')
+    h.m.setConfig({ udpLan: false })
+    await h.tick()
+    await h.tick()
+    const s = h.sockets[h.sockets.length - 1]
+    assert.equal(s.address, '127.0.0.1')
+    s.cb(encodeHeartbeat({ sysid: 1 }), { address: '10.0.0.9', port: 14550 })
+    await h.advance(UDP_GATHER_MS + 10)
+    assert.equal(h.vehicles().length, 0)
+})

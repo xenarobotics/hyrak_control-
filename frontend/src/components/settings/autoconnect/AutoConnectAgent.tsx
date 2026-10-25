@@ -123,11 +123,14 @@ export function AutoConnectAgent() {
             // An operator who flies through a HYRAK air unit (wfb-ng) gets
             // that link: its uplink is a separate port, which the plain relay
             // would never reach.
+            // Heard from this computer: keep the real link on loopback too, so
+            // a LAN sender cannot take it over after the auto-connect.
+            const local = isLoopbackHost(one.from)
             if (getTelemetrySource() === 'air-unit-udp' && e.port === 14550) {
                 void fns.current.connectNativeRf()
             } else {
                 setTelemetrySource(UDP_14550_LINK)
-                void fns.current.connectRemoteSitl(e.port)
+                void fns.current.connectRemoteSitl(e.port, local ? '127.0.0.1' : undefined)
             }
             const what = `${one.vehicle} on UDP ${e.port} (from ${one.from})`
             useAutoConnectStore.setState({ last: { at: Date.now(), what } })
@@ -234,4 +237,10 @@ function AutoConnectToast() {
             </div>
         </div>
     )
+}
+
+/** "127.0.0.1:18570" / "::ffff:127.0.0.1:18570" / "::1:18570" -> loopback? */
+function isLoopbackHost(from: string): boolean {
+    const host = from.replace(/:\d+$/, '').replace(/^::ffff:/i, '')
+    return host === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
 }

@@ -522,7 +522,7 @@ export function useDrone() {
     // The client's own SITL instance (port 14540, the classic PX4 default),
     // bridged via the desktop app's native UDP bridge - desktop only, no
     // browser path (see lib/remoteSitlRelay.ts).
-    const connectRemoteSitl = useCallback(async (port?: number) => {
+    const connectRemoteSitl = useCallback(async (port?: number, bindAddress?: string) => {
         if (isRemoteSitlRelayActive()) return
         useDroneStore.getState().setTelemetryStatus('connecting')
         // The port binding succeeding tells us nothing about whether SITL is
@@ -534,7 +534,7 @@ export function useDrone() {
             void stopRemoteSitlRelay()
         })
         try {
-            await startRemoteSitlRelay(port)
+            await startRemoteSitlRelay(port, bindAddress)
         } catch (err) {
             console.error('SITL bridge connect failed', err)
             useDroneStore.getState().setTelemetryError(err instanceof Error ? err.message : 'Could not start the SITL bridge')

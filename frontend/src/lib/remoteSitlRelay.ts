@@ -36,7 +36,10 @@ export type SitlSilenceHandler = (message: string) => void
 let onSilence: SitlSilenceHandler | null = null
 export function setSitlSilenceHandler(h: SitlSilenceHandler | null) { onSilence = h }
 
-export async function startRemoteSitlRelay(port = 14540): Promise<void> {
+/** `bindAddress` '127.0.0.1' keeps the link to this computer: a datagram
+ *  from anywhere else never reaches the vehicle link (auto-connect uses it
+ *  unless the operator allowed UDP from other computers). */
+export async function startRemoteSitlRelay(port = 14540, bindAddress?: string): Promise<void> {
     if (active) return
     if (!isDesktopApp()) {
         throw new Error('SITL requires the desktop app')
@@ -45,7 +48,7 @@ export async function startRemoteSitlRelay(port = 14540): Promise<void> {
     if (!bridge) throw new Error('Native bridge unavailable')
     const socket = getSocket()
 
-    const result = await bridge.start('udp', NATIVE_UDP_ID, { ports: [{ tag: 0, port }] })
+    const result = await bridge.start('udp', NATIVE_UDP_ID, { ports: [{ tag: 0, port }], ...(bindAddress ? { bindAddress } : {}) })
     if (!result.ok) {
         if (result.error?.includes('EADDRINUSE')) {
             throw new Error(
