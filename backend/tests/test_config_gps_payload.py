@@ -395,7 +395,9 @@ def test_customer_casters_must_be_public():
     for ip, ok in (("10.0.0.5", False), ("192.168.1.2", False), ("169.254.1.1", False),
                    ("8.8.8.8", True), ("::1", False), ("::ffff:10.0.0.1", False),
                    ("::ffff:8.8.8.8", True), ("64:ff9b::a00:1", False), ("2002:a00:1::1", False),
-                   ("100.64.0.1", False), ("2001:4860:4860::8888", True)):
+                   ("100.64.0.1", False), ("2001:4860:4860::8888", True),
+                   ("64:ff9b:1::a00:1", False), ("::a00:1", False), ("::8.8.8.8", False),
+                   ("64:ff9b::808:808", True)):
         assert ge._public(ip) is ok
 
 
