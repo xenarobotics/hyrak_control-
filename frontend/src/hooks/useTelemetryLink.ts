@@ -32,7 +32,7 @@ import { useAccess, useActiveWorkspace } from '@/hooks/useAccess'
 import { requestCloudSimStatus, startCloudSim, stopCloudSim, useCloudSimStore } from '@/store/cloudSim'
 import { getLocalRelayUrl } from '@/lib/localRfRelay'
 import { getSiyiTelemetryTarget, startSiyiTelemetry } from '@/lib/siyiTelemetryRelay'
-import { isDesktopApp } from '@/lib/nativeBridge'
+import { isDesktopApp, nativeAutoConnect } from '@/lib/nativeBridge'
 import { listNativeSerialPorts, type NativeRadio } from '@/lib/nativeSerialRelay'
 import {
 
@@ -53,6 +53,8 @@ export interface LinkOption {
  *  A premium extra, below the desktop "SITL" link, which stays the default
  *  way to fly a simulator. Never merged with 'sitl' or 'sitl-server'. */
 export const CLOUD_SIM_LINK = 'cloud-sim'
+/** udp:14550 through the desktop relay, where QGC listens. Desktop only. */
+export const UDP_14550_LINK = 'udp-14550'
 export const CLOUD_SIM_PREMIUM_NOTE = 'Premium feature, not enabled for this workspace. Your own PX4 / Gazebo connects free through the SITL link.'
 
 
@@ -128,10 +130,12 @@ export function useTelemetryLink() {
 
     useEffect(() => {
         if (desktop) {
-            // No plug/unplug event to subscribe to natively - the refresh
-            // button re-lists, which is all QGC does too.
             void refreshNativeRadios()
-            return
+            // Shells with auto-connect announce plug/unplug (they poll the
+            // port list every 2 s); older ones rely on the refresh button.
+            return nativeAutoConnect()?.onEvent((e) => {
+                if ((e as { type?: string })?.type === 'ports') void refreshNativeRadios()
+            })
         }
         const api = getSerialApi()
         if (!api) return
@@ -179,6 +183,12 @@ export function useTelemetryLink() {
             void startSiyiTelemetry(getSiyiTelemetryTarget())
             return
         }
+        if (source === UDP_14550_LINK) {
+            // Same desktop relay as SITL, on the port QGroundControl listens
+            // on: PX4 SITL's GCS link and most companions send there.
+            void connectRemoteSitl(14550)
+            return
+        }
         if (source === CLOUD_SIM_LINK) {
             // The server starts the sim and links this session when it is up.
             startCloudSim()
@@ -216,6 +226,9 @@ export function useTelemetryLink() {
         // sitl is the desktop relay of the client's own SITL on udp:14540.
         { value: 'sitl-server', label: 'Gazebo sim on server (udp:14600)' },
         { value: 'sitl', label: 'SITL' },
+        // What auto-connect picks when a vehicle talks on udp:14550. Its own
+        // option, next to (never merged with) SITL on 14540.
+        ...(desktop ? [{ value: UDP_14550_LINK, label: 'UDP 14550 (SITL / companion)' }] : []),
         // Below SITL on purpose: SITL (the customer's own simulator through
         // the desktop app) is the default; the cloud sim is a premium extra.
         ...(cloudSimEnabled ? [{
@@ -255,6 +268,6 @@ export function useTelemetryLink() {
         isConnecting: telemetryStatus === 'connecting',
         // SITL bridges the CLIENT'S own SITL through the desktop app's native
         // UDP bridge - a plain browser tab has no way to reach udp:14540.
-        sitlNeedsDesktop: source === 'sitl' && !desktop,
+        sitlNeedsDesktop: (source === 'sitl' || source === UDP_14550_LINK) && !desktop,
     }
 }

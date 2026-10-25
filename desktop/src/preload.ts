@@ -39,6 +39,37 @@ contextBridge.exposeInMainWorld('hyrakNative', {
             ipcRenderer.invoke('hyrak-net-probe', targets),
     },
 
+    // QGroundControl-style auto-connect (autoconnect/manager.ts). The main
+    // process only detects; the page decides and connects through its usual
+    // path, then reports back whether a link is up (gate) and when one ended
+    // (suppress), so a manual Disconnect is never undone.
+    autoConnect: {
+        get: () => ipcRenderer.invoke('hyrak-autoconnect-get'),
+        set: (patch: Record<string, unknown>) => ipcRenderer.invoke('hyrak-autoconnect-set', patch),
+        gate: (gate: { ready?: boolean; linkActive?: boolean }) => ipcRenderer.send('hyrak-autoconnect-gate', gate),
+        suppress: () => ipcRenderer.send('hyrak-autoconnect-suppress'),
+        release: (key: string) => ipcRenderer.send('hyrak-autoconnect-release', key),
+        onEvent: (cb: (event: unknown) => void) => {
+            const listener = (_evt: IpcRendererEvent, event: unknown) => cb(event)
+            ipcRenderer.on('hyrak-autoconnect-event', listener)
+            return () => ipcRenderer.removeListener('hyrak-autoconnect-event', listener)
+        },
+    },
+
+    // PX4 bootloader flashing (firmware/service.ts). start() waits for a
+    // board to be plugged in; nothing is erased until flash() is called.
+    firmware: {
+        status: () => ipcRenderer.invoke('hyrak-firmware-status'),
+        start: () => ipcRenderer.invoke('hyrak-firmware-start'),
+        cancel: () => ipcRenderer.invoke('hyrak-firmware-cancel'),
+        flash: (source: Record<string, unknown>) => ipcRenderer.invoke('hyrak-firmware-flash', source),
+        onEvent: (cb: (event: unknown) => void) => {
+            const listener = (_evt: IpcRendererEvent, event: unknown) => cb(event)
+            ipcRenderer.on('hyrak-firmware-event', listener)
+            return () => ipcRenderer.removeListener('hyrak-firmware-event', listener)
+        },
+    },
+
     // Consent-gated: checkNow()/the automatic launch check only ever
     // report availability. Nothing downloads until authorizeDownload() is
     // called, and nothing restarts/installs until install() is — both are

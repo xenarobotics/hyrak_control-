@@ -5,6 +5,7 @@ import type { BridgeEvent } from './bridges/types'
 import { registerUpdater, checkForUpdatesOnLaunch, setInstallTeardown } from './updater'
 import { killAllTracked, reapOrphans, reapOutdatedInstances, reapStaleInstances, trackedCount } from './bridges/processGuard'
 import { probeNetwork, type ProbeTarget } from './netProbe'
+import { registerHardwareIpc, type HardwareServices } from './hardwareIpc'
 import { SITE_URL_DEFAULT } from './site-url'
 import ffmpegStaticPath from 'ffmpeg-static'
 
@@ -63,6 +64,8 @@ const START_URL = `${SITE_URL}/fly`
 const SITE_ORIGIN = new URL(SITE_URL).origin
 
 let mainWindow: BrowserWindow | null = null
+// Auto-connect and firmware flashing (hardwareIpc.ts), set up once the app is ready.
+let hardware: HardwareServices | null = null
 
 // The native bridges (ffmpeg, raw UDP, serial) are reachable from the
 // renderer through IPC. Only the HYRAK site may call them: a page the
@@ -172,6 +175,8 @@ ipcMain.handle(
         if (!isTrustedSender(evt)) return { ok: false, error: 'untrusted sender' }
         const bridge = bridges[kind]
         if (!bridge) return { ok: false, error: `unknown bridge: ${kind}` }
+        // An auto-connect probe or UDP listener must never make this fail with "busy".
+        await hardware?.beforeBridgeStart(kind, config)
         return bridge.start(id, config, emitToRenderer(evt.sender))
     },
 )
@@ -296,6 +301,7 @@ app.whenReady().then(() => {
         console.warn(`killed ${stale.length} stale HYRAK instance(s) from a superseded version: ${stale.join(', ')}`)
     }
 
+    hardware = registerHardwareIpc(isTrustedSender, () => mainWindow?.webContents ?? null)
     createWindow()
 
     // Consent-gated: checks silently on launch, but the actual download
@@ -333,7 +339,7 @@ function teardownBridges(immediate: boolean): void {
     if (n) console.warn(`app quit: killed ${n} tracked child process(es)`)
 }
 
-app.on('before-quit', () => teardownBridges(false))
+app.on('before-quit', () => { void hardware?.shutdown(); teardownBridges(false) })
 
 // Last resort. Runs synchronously and cannot await, so it goes straight to
 // SIGKILL - a leaked transcode is far worse than an unclean ffmpeg exit.

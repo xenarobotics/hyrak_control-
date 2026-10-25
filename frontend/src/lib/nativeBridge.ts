@@ -52,10 +52,31 @@ interface HyrakNativeUpdaterApi {
     onEvent: (cb: (event: UpdaterEvent) => void) => () => void
 }
 
+// Auto-connect and firmware flashing (desktop/src/hardwareIpc.ts). Optional:
+// shells older than these features simply lack them, and the pages say so.
+export interface HyrakNativeAutoConnectApi {
+    get: () => Promise<unknown>
+    set: (patch: Record<string, unknown>) => Promise<unknown>
+    gate: (gate: { ready?: boolean; linkActive?: boolean }) => void
+    suppress: () => void
+    release: (key: string) => void
+    onEvent: (cb: (event: unknown) => void) => () => void
+}
+
+export interface HyrakNativeFirmwareApi {
+    status: () => Promise<unknown>
+    start: () => Promise<{ ok: boolean; error?: string }>
+    cancel: () => Promise<{ ok: boolean; error?: string }>
+    flash: (source: Record<string, unknown>) => Promise<{ ok: boolean; error?: string }>
+    onEvent: (cb: (event: unknown) => void) => () => void
+}
+
 interface HyrakNative {
     isElectron: true
     bridge: HyrakNativeBridgeApi
     updater: HyrakNativeUpdaterApi
+    autoConnect?: HyrakNativeAutoConnectApi
+    firmware?: HyrakNativeFirmwareApi
 }
 
 declare global {
@@ -70,6 +91,14 @@ export function isDesktopApp(): boolean {
 
 export function nativeBridge(): HyrakNativeBridgeApi | null {
     return typeof window !== 'undefined' && window.hyrakNative ? window.hyrakNative.bridge : null
+}
+
+export function nativeAutoConnect(): HyrakNativeAutoConnectApi | null {
+    return typeof window !== 'undefined' ? window.hyrakNative?.autoConnect ?? null : null
+}
+
+export function nativeFirmware(): HyrakNativeFirmwareApi | null {
+    return typeof window !== 'undefined' ? window.hyrakNative?.firmware ?? null : null
 }
 
 export function nativeUpdater(): HyrakNativeUpdaterApi | null {

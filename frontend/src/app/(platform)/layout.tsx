@@ -8,6 +8,7 @@ import { useTheme } from '@/lib/theme'
 import { ZoneBanner } from '@/components/controls/ZoneBanner'
 import { UpdatePrompt } from '@/components/updater/UpdatePrompt'
 import { LocalLinkPanel } from '@/components/controls/LocalLinkPanel'
+import { AutoConnectAgent } from '@/components/settings/autoconnect/AutoConnectAgent'
 import { useDrone, disconnectTelemetryLink } from '@/hooks/useDrone'
 import { WebRTCProvider } from '@/contexts/WebRTCContext'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
@@ -378,6 +379,7 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
                 </div>
                 <UpdatePrompt />
                 <LocalLinkPanel />
+                <AutoConnectAgent />
             </WebRTCProvider>
         </TooltipProvider>
     )

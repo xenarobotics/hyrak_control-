@@ -7,6 +7,7 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "node build/write-site-url.js && tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/",
     "start": "npm run build && electron .",
     "icons": "python3 build/generate-icon.py && node build/build-icons.js",
     "dist": "npm run build && electron-builder",

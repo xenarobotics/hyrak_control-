@@ -59,6 +59,7 @@ import { InvitesGroup, MembersGroup, WorkspaceGroup } from '@/components/setting
 import { useAccess } from '@/hooks/useAccess'
 import { FlightHistory } from '@/components/settings/FlightHistory'
 import { MapCameraGroup } from '@/components/mapdetect/MapCameraSettings'
+import { AutoConnectGroup } from '@/components/settings/autoconnect/AutoConnectSettings'
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
 
@@ -1928,8 +1929,8 @@ const CATEGORIES: Category[] = [
     },
     {
         id: 'links', label: 'Comm links', icon: Radio,
-        blurb: 'Telemetry link defaults and the active connection',
-        sections: [{ label: 'Comm links', Body: LinkGroup }],
+        blurb: 'Telemetry link defaults, the active connection and auto-connect',
+        sections: [{ label: 'Comm links', Body: LinkGroup }, { label: 'Auto-connect', Body: AutoConnectGroup }],
     },
     {
         id: 'ai', label: 'AI Modules', icon: Bot, staffOnly: true,
