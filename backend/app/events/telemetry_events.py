@@ -97,6 +97,11 @@ async def _execute_drone_action(tel, action: str, data: dict) -> dict:
         # Refused unless disarmed and on the ground (app/telemetry/actuator_test.py).
         from app.telemetry import actuator_test as _at
         return await _at.handle(tel, action, data)
+    if action in ("gripper_test", "rx_pair"):
+        # Config > Payload gripper test, Radio Spektrum bind. Confirmed,
+        # disarmed and on the ground (app/telemetry/payload_cmd.py).
+        from app.telemetry import payload_cmd as _pc
+        return await _pc.handle(tel, action, data)
     if action == "reset_params_default":
         # Config > Parameters: every parameter back to the firmware default
         # (PREFLIGHT_STORAGE 2). Typed confirmation, disarmed and on the ground.

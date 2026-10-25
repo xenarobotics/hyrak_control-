@@ -82,6 +82,11 @@ export function failureAdvice(sensor: string, error: string | undefined): string
     if (sensor === 'mag') return 'Move away from metal, cars and concrete, rotate more slowly, and start again.'
     if (sensor === 'accel') return 'Hold each position completely still until it is ticked off, then start again.'
     if (sensor === 'level') return 'Put the drone on a surface that is truly level, then start again.'
+    if (sensor === 'airspeed') {
+        if (e.includes('swap') || e.includes('sens_dpres_rev')) return 'Swap the two pitot tubes on the sensor (or set SENS_DPRES_REV to 1 on Parameters), then start again.'
+        if (e.includes('did not start') || e.includes('detected')) return 'Check the airspeed sensor is detected: SYS_HAS_NUM_ASPD and the sensor driver (SENS_EN_*) on Parameters, then reboot and start again.'
+        return 'Cover the pitot so no wind reaches it while the zero is measured, then blow firmly into the front when asked, within 90 seconds.'
+    }
     return 'Check the reason below, then start again.'
 }
 

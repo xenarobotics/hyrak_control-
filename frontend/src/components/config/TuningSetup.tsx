@@ -1,10 +1,11 @@
 'use client'
 
-// Config > Flight & tuning. QGroundControl's Tuning page plus the flight
-// behaviour limits it keeps under Parameters: speeds and takeoff height,
-// hover thrust and thrust curve, the rate / attitude / velocity / position
-// controller gains with a live setpoint vs response chart (tuning/), and
-// PX4's in-flight autotune.
+// Config > Tuning. QGroundControl's Tuning page: hover thrust and thrust
+// curve, the multicopter rate / attitude / velocity / position controller
+// gains with a live setpoint vs response chart (tuning/), PX4's in-flight
+// autotune, and for planes and VTOLs the fixed-wing gains, TECS, path
+// following, airspeeds and throttle (tuning/FixedWingTuning.tsx). Speeds,
+// heights and other flight behaviour limits are on Config > Flight behaviour.
 
 import React, { useState } from 'react'
 import { useDroneStore } from '@/store/drone'
@@ -12,18 +13,8 @@ import { useVehicleParams, writeParam } from '@/lib/vehicleParams'
 import { Btn, Chip, Dialog, Grid, Note, NumberBox, Panel, ParamRow, ParamSourceBar, ReloadButton, SubTabs, T, Tip, mix, type ParamSpec } from '@/components/config/kit'
 import { ATT, POS, RATE, RATE_COLS, VEL } from '@/components/config/tuning/gains'
 import { LiveTuning } from '@/components/config/tuning/LiveTuning'
-
-const BEHAVIOUR: ParamSpec[] = [
-    { key: 'MIS_TAKEOFF_ALT', label: 'Takeoff height', unit: 'm', def: 2.5, min: 0, max: 100, decimals: 1, tip: 'Height an automatic takeoff climbs to.' },
-    { key: 'MPC_XY_VEL_MAX', label: 'Max horizontal speed', unit: 'm/s', def: 12, min: 0, max: 20, decimals: 1, tip: 'Fastest the aircraft moves in Position mode and missions.' },
-    { key: 'MPC_XY_CRUISE', label: 'Mission cruise speed', unit: 'm/s', def: 5, min: 3, max: 20, decimals: 1, tip: 'Default speed between mission waypoints.' },
-    { key: 'MPC_Z_VEL_MAX_UP', label: 'Max climb rate', unit: 'm/s', def: 3, min: 0.5, max: 8, decimals: 1 },
-    { key: 'MPC_Z_VEL_MAX_DN', label: 'Max descent rate', unit: 'm/s', def: 1.5, min: 0.5, max: 4, decimals: 1, tip: 'Above 2 m/s risks descending through its own propwash.' },
-    { key: 'MPC_TKO_SPEED', label: 'Takeoff climb rate', unit: 'm/s', def: 1.5, min: 1, max: 5, decimals: 1 },
-    { key: 'MPC_TILTMAX_AIR', label: 'Max tilt', unit: '°', def: 45, min: 20, max: 89, decimals: 0, tip: 'Steepest lean in any automatic or assisted mode.' },
-    { key: 'MPC_ACC_HOR', label: 'Horizontal acceleration', unit: 'm/s²', def: 3, min: 2, max: 15, decimals: 1, tip: 'How briskly it speeds up and slows down in automatic flight.' },
-    { key: 'NAV_ACC_RAD', label: 'Waypoint radius', unit: 'm', def: 2, min: 0.05, max: 200, decimals: 2, tip: 'How close counts as reaching a waypoint.' },
-]
+import { FixedWingTuning } from '@/components/config/tuning/FixedWingTuning'
+import { useVehicleClass, WriteLog } from '@/components/config/setupKit'
 
 const HOVER: ParamSpec[] = [
     { key: 'MPC_THR_HOVER', label: 'Hover thrust', unit: '%', scale: 100, def: 0.5, min: 10, max: 80, decimals: 0, tip: 'Throttle that holds a hover. With the estimator on, PX4 learns it in flight and this is only the starting point.' },
@@ -32,44 +23,46 @@ const HOVER: ParamSpec[] = [
     { key: 'MC_AIRMODE', label: 'Airmode', options: [{ value: 0, label: 'Off' }, { value: 1, label: 'Roll and pitch' }, { value: 2, label: 'Roll, pitch and yaw' }], def: 0, tip: 'Keeps attitude control at zero throttle. Useful for acro; leave off for most aerial work.' },
 ]
 
+type TuningTab = 'gains' | 'fixedwing' | 'autotune'
+
 export function TuningSetup() {
-    const [tab, setTab] = useState<'behaviour' | 'gains' | 'autotune'>('behaviour')
+    const vc = useVehicleClass()
+    // A pure plane has no multicopter loops to tune; a VTOL has both.
+    const mc = !(vc.ready && vc.plane && !vc.vtol)
+    const tabs: { id: TuningTab; label: string }[] = [
+        ...(mc ? [{ id: 'gains' as const, label: vc.fw ? 'Multicopter gains' : 'Controller gains' }] : []),
+        ...(vc.fw ? [{ id: 'fixedwing' as const, label: 'Fixed-wing' }] : []),
+        ...(mc ? [{ id: 'autotune' as const, label: 'Hover and autotune' }] : []),
+    ]
+    const [picked, setTab] = useState<TuningTab>('gains')
+    const tab = tabs.some(t => t.id === picked) ? picked : tabs[0].id
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                <div style={{ flex: 1, minWidth: 0 }}><ParamSourceBar what="flight behaviour and gains" /></div>
+                <div style={{ flex: 1, minWidth: 0 }}><ParamSourceBar what="controller gains" /></div>
                 <ReloadButton />
             </div>
-            <SubTabs label="Tuning" value={tab} onChange={setTab} tabs={[
-                { id: 'behaviour', label: 'Behaviour' },
-                { id: 'gains', label: 'Controller gains' },
-                { id: 'autotune', label: 'Hover and autotune' },
-            ]} />
-            {tab === 'behaviour' && (
-                <Panel title="Speeds and heights" hint="for Position mode, missions and HYRAK's automatic flight">
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 380px), 1fr))', columnGap: 32 }}>
-                        {BEHAVIOUR.map(s => <ParamRow key={s.key} spec={s} />)}
-                    </div>
-                </Panel>
-            )}
-            {tab === 'gains' && <Gains />}
+            <SubTabs label="Tuning" value={tab} onChange={setTab} tabs={tabs} />
+            {tab === 'gains' && <Gains fw={vc.ready && vc.fw} />}
+            {tab === 'fixedwing' && <FixedWingTuning />}
             {tab === 'autotune' && (
                 <Grid min={340}>
                     <Panel title="Hover and thrust">{HOVER.map(s => <ParamRow key={s.key} spec={s} />)}</Panel>
                     <Autotune />
                 </Grid>
             )}
+            <WriteLog />
         </div>
     )
 }
 
-function Gains() {
+function Gains({ fw }: { fw: boolean }) {
     const vp = useVehicleParams()
     const COLS = RATE_COLS
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <Note>Change one gain at a time, by 10 to 20 %, and fly between changes. Autotune (next tab) does this for you on most multirotors.</Note>
-            <LiveTuning />
+            <LiveTuning fw={fw} />
             <Panel title="Rate controller" hint="the innermost loop: how hard it fights a rotation"
                 right={<Tip text="PX4 uses the parallel form: output = K x (P x error + I x integral + D x rate of change) + FF x setpoint. K scales the whole axis." />}>
                 <div style={{ overflowX: 'auto' }}>

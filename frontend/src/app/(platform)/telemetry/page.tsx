@@ -8,7 +8,7 @@ import {
     Plane, Gauge, SlidersHorizontal, Battery, Shield, Navigation,
     Terminal, ChevronRight, LayoutList,
     AlertTriangle,
-    Camera, Package, Fan, SquareTerminal, FileText, Gamepad2,
+    Camera, Package, Fan, SquareTerminal, FileText, Gamepad2, Cpu, Activity,
 } from 'lucide-react'
 import { ViewOnlyFence } from '@/components/layout/ViewOnly'
 import { AttachmentsSection } from '@/components/attachments/AttachmentsConfig'
@@ -30,7 +30,16 @@ import { PageHeader } from '@/components/config/kit'
 import { MavlinkConsole } from '@/components/config/MavlinkConsole'
 import { ParametersSetup } from '@/components/config/ParametersSetup'
 import { LogsSetup } from '@/components/config/LogsSetup'
+import { FirmwareSetup } from '@/components/config/firmware/FirmwareSetup'
+import { AnalyzeSetup } from '@/components/config/analyze/AnalyzeSetup'
 import { useVehicleParams } from '@/lib/vehicleParams'
+import { Route, PlaneTakeoff, Satellite, Hand, Radar } from 'lucide-react'
+import { FlightBehaviour } from '@/components/config/FlightBehaviour'
+import { VtolSetup } from '@/components/config/VtolSetup'
+import { GpsSetup } from '@/components/config/GpsSetup'
+import { PayloadSetup } from '@/components/config/PayloadSetup'
+import { TrafficSetup } from '@/components/config/TrafficSetup'
+import { useVehicleClass } from '@/components/config/setupKit'
 
 function hColor(pct: number, locked = false) {
     if (locked) return 'hsl(var(--app-text-muted))'
@@ -40,7 +49,8 @@ function hColor(pct: number, locked = false) {
     return 'var(--app-danger)'
 }
 
-type SectionId = 'connection' | 'vehicle' | 'sensors' | 'radio' | 'power' | 'actuators' | 'safety' | 'flight' | 'camera' | 'parameters' | 'console' | 'logs' | 'joystick' | 'attachments'
+type SectionId = 'connection' | 'vehicle' | 'sensors' | 'radio' | 'power' | 'actuators' | 'safety' | 'flight' | 'camera' | 'parameters' | 'console' | 'logs' | 'analyze' | 'joystick' | 'attachments' | 'firmware'
+    | 'behaviour' | 'vtol' | 'gps' | 'payload' | 'traffic'
 
 
 const DOMAIN_META: { id: SectionId; label: string; icon: React.ElementType; desc: string }[] = [
@@ -53,10 +63,17 @@ const DOMAIN_META: { id: SectionId; label: string; icon: React.ElementType; desc
     { id: 'actuators',  label: 'Actuators',   icon: Fan,               desc: 'Motor geometry, output mapping, and motor testing with the propellers off' },
     { id: 'safety',     label: 'Safety',      icon: Shield,            desc: 'Link loss, RC loss, geofence, return home and landing failsafes' },
     { id: 'camera',     label: 'Camera & gimbal', icon: Camera,        desc: 'Camera trigger for surveys, and how PX4 drives the gimbal' },
-    { id: 'flight',     label: 'Tuning',      icon: Navigation,        desc: 'Speeds and heights, controller gains, hover thrust and autotune' },
+    { id: 'flight',     label: 'Tuning',      icon: Navigation,        desc: 'Controller gains, hover thrust and autotune, and fixed-wing tuning for planes and VTOLs' },
+    { id: 'behaviour',  label: 'Flight behaviour', icon: Route,        desc: 'Speeds, smoothness, takeoff and landing heights, mission acceptance and pilot override' },
+    { id: 'vtol',       label: 'VTOL',        icon: PlaneTakeoff,      desc: 'Transitions, tilt, hover in wind, quad-chute and differential thrust' },
+    { id: 'gps',        label: 'GPS & RTK',   icon: Satellite,         desc: 'Receiver status and setup, GPS checks, and RTK corrections from an NTRIP caster' },
+    { id: 'payload',    label: 'Payload',     icon: Hand,              desc: 'PX4 gripper setup and a bench open / close test' },
+    { id: 'traffic',    label: 'Traffic & Remote ID', icon: Radar,     desc: 'ADS-B traffic nearby, traffic avoidance, transponder identity and Remote ID' },
     { id: 'parameters', label: 'Parameters',   icon: Terminal,          desc: 'Every PX4 parameter: search, edit, reset to default, import and export' },
     { id: 'console',    label: 'PX4 console', icon: SquareTerminal,    desc: 'The flight controller shell over MAVLink, for diagnostics' },
     { id: 'logs',       label: 'Logs',        icon: FileText,          desc: 'Flight logs on the SD card, and the flights HYRAK recorded' },
+    { id: 'analyze',    label: 'Analyze',     icon: Activity,          desc: 'MAVLink inspector, vibration, estimator health, log plots and photo geotagging' },
+    { id: 'firmware',   label: 'Firmware',    icon: Cpu,               desc: 'Install or update PX4 on the flight controller over USB (desktop app)' },
     { id: 'attachments', label: 'Attachments', icon: Package,           desc: 'What is fitted to the drone: drop hook, gripper, winch, light, speaker, sprayer' },
 ]
 
@@ -175,7 +192,7 @@ type NavId = SectionId | 'overview'
 /** Setup sections, always visible on the left (a select at phone width). */
 function SectionNav({ current, onSelect, items }: {
     current: NavId; onSelect: (id: NavId) => void
-    items: { id: NavId; label: string; icon: React.ElementType }[]
+    items: { id: NavId; label: string; icon: React.ElementType; group?: string }[]
 }) {
     return (
         <nav role="tablist" aria-label="Setup sections" aria-orientation="vertical"
@@ -185,7 +202,9 @@ function SectionNav({ current, onSelect, items }: {
                 const active = t.id === current, Icon = t.icon
                 return (
                     <React.Fragment key={t.id}>
-                        {i === 1 && <div aria-hidden style={{ height: 1, background: 'hsl(var(--app-border))', margin: '6px 8px' }} />}
+                        {i > 0 && t.group !== items[i - 1].group && (
+                            <div aria-hidden style={{ margin: i === 1 ? '10px 12px 4px' : '14px 12px 4px', fontSize: 12, fontWeight: 700, color: 'hsl(var(--app-text-subtle))', letterSpacing: '0.02em' }}>{t.group}</div>
+                        )}
                         <button role="tab" aria-selected={active} onClick={() => onSelect(t.id)}
                             className={(active ? 'bg-app-accent-soft text-app-selected-ink' : 'text-app-text-muted hover:text-app-text hover:bg-app-surface-2') + ' transition-colors ' + FOCUS_RING}
                             style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 10, padding: '0 12px', minHeight: 38, borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: active ? 700 : 600, textAlign: 'left', whiteSpace: 'nowrap' }}>
@@ -244,8 +263,15 @@ export default function ConfigPage() {
         parameters:  null,
         console:     null,
         logs:        null,
+        analyze:     null,
         joystick:    null,
         attachments: null,
+        firmware:    null,
+        behaviour:   null,
+        vtol:        null,
+        gps:         null,
+        payload:     null,
+        traffic:     null,
     }
     const readiness = connected ? Math.round((sensorOK / 4) * 100) : null
 
@@ -282,12 +308,23 @@ export default function ConfigPage() {
         setSection(id)
     }, [])
 
-    const navItems: { id: NavId; label: string; icon: React.ElementType }[] = [
+    // Grouped, because the list outgrew one column of names. VTOL only
+    // shows for a VTOL (or with no drone, as reference).
+    const vclass = useVehicleClass()
+    const NAV_GROUPS: [string, SectionId[]][] = [
+        ['Setup', ['connection', 'vehicle', 'sensors', 'gps', 'radio', 'joystick', 'power', 'actuators']],
+        ['Flight', ['safety', 'behaviour', 'flight', 'vtol']],
+        ['Payload', ['camera', 'payload', 'attachments', 'traffic']],
+        ['Tools', ['parameters', 'console', 'logs', 'analyze', 'firmware']],
+    ]
+    const navItems: { id: NavId; label: string; icon: React.ElementType; group?: string }[] = [
         { id: 'overview', label: 'Overview', icon: LayoutList },
-        ...DOMAIN_META.filter(d => d.id !== 'parameters' && d.id !== 'console' && d.id !== 'logs'),
-        ...DOMAIN_META.filter(d => d.id === 'parameters'),
-        ...DOMAIN_META.filter(d => d.id === 'console'),
-        ...DOMAIN_META.filter(d => d.id === 'logs'),
+        ...NAV_GROUPS.flatMap(([group, ids]) => ids
+            .filter(id => id !== 'vtol' || vclass.vtol || section === 'vtol')
+            .map(id => DOMAIN_META.find(d => d.id === id))
+            .filter((d): d is (typeof DOMAIN_META)[number] => !!d)
+            .map(d => ({ ...d, group }))),
+        ...DOMAIN_META.filter(d => !NAV_GROUPS.some(([, ids]) => ids.includes(d.id))),
     ]
     const meta = section === 'overview'
         ? { label: 'Overview', desc: 'Is the drone ready to fly? Open any line to change it.' }
@@ -343,7 +380,10 @@ export default function ConfigPage() {
         { id: 'power',       ...powerRow },
         { id: 'actuators',   ...actuatorRow },
         { id: 'safety',      ...safetyRow, action: safetyRow.state === 'warn' ? 'Fix' : undefined },
-        { id: 'flight',      ...flightRow },
+        { id: 'gps',         state: !connected ? 'idle' : (telemetry?.gps?.fix_type ?? 0) >= 3 ? 'ok' : 'warn',
+            value: !connected ? 'Needs a drone' : `${({ 0: 'No GPS', 1: 'No fix', 2: '2D fix', 3: '3D fix', 4: 'DGPS', 5: 'RTK float', 6: 'RTK fixed' } as Record<number, string>)[telemetry?.gps?.fix_type ?? 0] ?? 'Fix ' + telemetry?.gps?.fix_type}, ${telemetry?.gps?.satellites_visible ?? 0} satellites` },
+        { id: 'behaviour',   ...flightRow },
+        ...(vclass.vtol && vp.params ? [{ id: 'vtol' as const, ...paramRow(() => ({ state: 'ok' as RowState, value: `Plane at ${pv('VT_ARSP_TRANS') ?? '?'} m/s, front transition ${pv('VT_F_TRANS_DUR') ?? '?'} s` })) }] : []),
         { id: 'camera',      ...cameraRow },
         { id: 'attachments', state: fitted.droneId ? 'ok' : 'idle', value: attachmentsValue },
         { id: 'parameters',  state: 'none', value: vp.params ? `${Object.keys(vp.params).length} parameters` : 'All PX4 parameters', action: 'Open' },
@@ -386,7 +426,7 @@ export default function ConfigPage() {
 
                             {/* Parameter writes, calibration and reboots are
                                 commands: a workspace viewer reads this page only. */}
-                            {section !== 'overview' && section !== 'attachments' && (
+                            {section !== 'overview' && section !== 'attachments' && section !== 'analyze' && (
                                 <ViewOnlyFence>
                                 {section === 'connection' && <ConnectionSetup />}
                                 {section === 'vehicle'    && <VehicleSetup />}
@@ -401,10 +441,18 @@ export default function ConfigPage() {
                                 {section === 'console'    && <MavlinkConsole />}
                                 {section === 'parameters' && <ParametersSetup />}
                                 {section === 'logs'       && <LogsSetup />}
+                                {section === 'firmware'   && <FirmwareSetup />}
+                                {section === 'behaviour'  && <FlightBehaviour />}
+                                {section === 'vtol'       && <VtolSetup />}
+                                {section === 'gps'        && <GpsSetup />}
+                                {section === 'payload'    && <PayloadSetup />}
+                                {section === 'traffic'    && <TrafficSetup />}
                                 </ViewOnlyFence>
                             )}
                             {/* Reads for everyone; owners and admins edit (the server says who). */}
                             {section === 'attachments' && <AttachmentsSection />}
+                            {/* Read-only tools: viewers use them too (the server gates the one rate change). */}
+                            {section === 'analyze' && <AnalyzeSetup />}
                         </div>
                     </div>
                 </div>

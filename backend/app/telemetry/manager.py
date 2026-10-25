@@ -30,6 +30,7 @@ from mavsdk.offboard import (
 from app.telemetry.calibration import (
     LEVEL_MAX_TILT_DEG, SENSORS, CalibrationSession,
 )
+from app.telemetry import calibration as _calibration_mod
 from app.telemetry.schemas import (
     LocalPositionData,
     TelemetrySnapshot,
@@ -3333,6 +3334,11 @@ class TelemetryManager:
 
     async def _run_calibration(self, sensor: str) -> None:
         session = self._calibration
+        if _calibration_mod.is_command_sensor(sensor):
+            # No MAVSDK plugin method (airspeed): a direct COMMAND_LONG, with
+            # the verdict from PX4's own "[cal]" lines. telemetry/calibration.py.
+            await _calibration_mod.run_command_calibration(self, session, sensor)
+            return
         method = getattr(self._drone.calibration, SENSORS[sensor]["method"])
         limit = float(SENSORS[sensor].get("timeout", 120.0))
         deadline = time.monotonic() + limit
@@ -3405,7 +3411,11 @@ class TelemetryManager:
         self._emit_calibration()
 
         try:
-            await asyncio.wait_for(self._drone.calibration.cancel(), timeout=2.0)
+            if _calibration_mod.is_command_sensor(self._calibration.state.sensor):
+                # MAVSDK's cancel does nothing for a calibration it did not start.
+                await _calibration_mod.send_command_cancel(self)
+            else:
+                await asyncio.wait_for(self._drone.calibration.cancel(), timeout=2.0)
         except Exception as e:
             logger.warning(f"Calibration cancel not acknowledged: {e}")
         await self._reap_calibration_task()

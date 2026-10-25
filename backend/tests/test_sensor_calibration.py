@@ -339,7 +339,12 @@ def test_every_offered_sensor_has_a_plugin_method_and_a_label():
     would offer the operator a button that raises on click."""
     from mavsdk.calibration import Calibration
     for key, spec in SENSORS.items():
-        assert hasattr(Calibration, spec["method"]), f"{key} has no MAVSDK method"
+        if spec.get("command") is not None:
+            # No plugin method (airspeed): driven by a direct COMMAND_LONG
+            # (calibration.run_command_calibration) instead.
+            assert spec.get("method") is None, key
+        else:
+            assert hasattr(Calibration, spec["method"]), f"{key} has no MAVSDK method"
         assert spec["label"], key
 
 

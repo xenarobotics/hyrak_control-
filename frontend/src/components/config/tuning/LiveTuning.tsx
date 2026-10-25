@@ -13,6 +13,7 @@ import { series, useTuningStream, type Axis, type Loop, type Pt } from '@/lib/tu
 import { TuningChart, MEAS_COLOR, SP_COLOR } from './TuningChart'
 import { analyzeStep, type StepResult } from './stepAnalysis'
 import { gainsFor, LOOP_ADVICE } from './gains'
+import { fwGainsFor } from './fwGains'
 
 const LOOPS: { id: Loop; label: string }[] = [
     { id: 'rate', label: 'Rate' }, { id: 'attitude', label: 'Attitude' },
@@ -31,7 +32,9 @@ const META: Record<Loop, { unit: string; minRange: number; stepThr: [number, num
 
 type Frozen = { sp: Pt[]; meas: Pt[]; t1: number; span: number; tRef: number; step: StepResult | null }
 
-export function LiveTuning() {
+/** `fw`: the aircraft flies as a plane too (fixed-wing or VTOL), so the
+ *  gains column adds the fixed-wing gains for the same loop and axis. */
+export function LiveTuning({ fw = false }: { fw?: boolean } = {}) {
     const [loop, setLoop] = useState<Loop>('rate')
     const [axis, setAxis] = useState<Axis>(0)
     const [span, setSpan] = useState<(typeof WINDOWS)[number]>(10)
@@ -89,6 +92,7 @@ export function LiveTuning() {
         : <Chip tone="off">Starting</Chip>
 
     const gains = gainsFor(loop, axis)
+    const fwGains = fw ? fwGainsFor(loop, axis) : []
 
     return (
         <Panel title="Live response" hint="setpoint against what the aircraft did" right={status}>
@@ -133,6 +137,8 @@ export function LiveTuning() {
                 <aside aria-label={`${axisName} ${meta.what} gains`} style={{ flex: '1 1 280px', maxWidth: '100%', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, padding: '12px 12px', borderRadius: 8, background: T.surface2, border: `1px solid ${T.border}` }}>
                     <h4 style={{ margin: '0 0 4px', fontSize: 13, fontWeight: 700, color: T.text }}>{axisName} {meta.what} gains</h4>
                     {gains.map(g => <GainRow key={g.key} spec={g} />)}
+                    {fwGains.length > 0 && <h4 style={{ margin: '10px 0 4px', fontSize: 13, fontWeight: 700, color: T.text }}>Fixed-wing {meta.what} gains</h4>}
+                    {fwGains.map(g => <GainRow key={g.key} spec={g} />)}
                     <p style={{ margin: '8px 0 0', fontSize: 12, lineHeight: 1.5, color: T.muted }}>{LOOP_ADVICE[loop]}</p>
                 </aside>
             </div>

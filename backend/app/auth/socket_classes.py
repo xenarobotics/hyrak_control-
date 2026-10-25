@@ -51,6 +51,10 @@ EVENTS: dict[str, str] = {
     "param_metadata": SESSION_VIEW,   # PX4's parameter metadata, read-only (config_events.py)
     "config_live": SESSION_VIEW,      # passive read of the session's own link (config_live_events.py)
     "tuning_stream": SESSION_VIEW,    # Config > Tuning chart: setpoint vs response (tuning_events.py)
+    "setup_live": SESSION_VIEW,       # Config GPS / traffic / Remote ID live readings, passive (gps_events.py)
+    "ntrip_status": SESSION_VIEW,     # this session's own NTRIP client state (gps_events.py)
+    "ntrip_stop": SESSION_VIEW,       # stopping your own corrections, like disconnect_telemetry
+    "inspector_stream": SESSION_VIEW, # Config > Analyze: MAVLink Inspector (inspector_events.py)
     "vehicle_info": SESSION_VIEW,     # firmware / board / ids of the session's drone
 
     # ── the session's own cloud simulator (8c, premium) ─────────────────
@@ -70,6 +74,7 @@ EVENTS: dict[str, str] = {
     "log_download": SESSION_COMMAND,   # disarmed, one at a time, one-time link for the caller
     "log_cancel": SESSION_COMMAND,
     "log_erase": SESSION_COMMAND,      # typed confirmation, disarmed and on the ground
+    "ntrip_start": SESSION_COMMAND,    # RTK corrections to the drone; public casters only for customers
     "set_tracking": SESSION_COMMAND,
     "set_vehicle_tracking": SESSION_COMMAND,
     "set_follow_vehicle": SESSION_COMMAND,
@@ -175,6 +180,10 @@ PUSHED_EVENTS: dict[str, str] = {
     "config_live_data": "session",
     # Config > Tuning: setpoint vs response rows, to the asking socket.
     "tuning_data": "session",
+    "setup_live_data": "session",
+    "ntrip_state": "session",
+    # Config > Analyze: MAVLink Inspector summaries, to the asking socket.
+    "inspector_data": "session",
 }
 
 # Other namespaces: the ground-station relay agent (a script, operator token).
@@ -193,7 +202,7 @@ NAMESPACES: dict[str, dict[str, str]] = {
 # pipeline only.
 DRONE_EVENTS = frozenset({
     "drone_action", "drone_command", "set_param", "mavlink_shell",
-    "log_list", "log_download", "log_cancel", "log_erase",
+    "log_list", "log_download", "log_cancel", "log_erase", "ntrip_start",
     "set_tracking", "set_vehicle_tracking", "set_follow_vehicle", "set_follow_person",
     "set_multi_follow", "select_person", "set_pd_params", "set_altitude_mode",
     "set_altitude_nudge", "set_tracking_params", "upload_mission",

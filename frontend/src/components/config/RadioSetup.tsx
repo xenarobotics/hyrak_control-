@@ -19,6 +19,7 @@ import { getSocket } from '@/lib/socket'
 import { Check, SlidersHorizontal, ToggleRight } from 'lucide-react'
 import { OptionSelect } from '@/components/config/OptionSelect'
 import { Btn, Chip, Dialog, NumberBox, Note, Panel, ParamRow, ParamSourceBar, SubTabs, T, Tip, mix } from '@/components/config/kit'
+import { SpektrumBind } from '@/components/config/SpektrumBind'
 import { RadioChannels } from '@/components/config/RadioChannels'
 import { useVehicleParams, writeParam, writeParams } from '@/lib/vehicleParams'
 import { rcChannels, useConfigLive } from '@/lib/configLive'
@@ -638,6 +639,7 @@ function ChannelsTab({ live }: { live: Live }) {
                         </>
                     )}
                 </Panel>
+                <SpektrumBind />
             </>} />
             <Dialog open={confirm} onClose={() => setConfirm(false)} title="Copy trims">
                 <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5 }}>Let go of the sticks so they rest at centre. These values become the trims:</p>

@@ -392,6 +392,8 @@ def create_app() -> socketio.ASGIApp:
             _obs.drop_sid(sid)
             from app.events.tuning_events import drop_sid as _drop_tuning
             await _drop_tuning(sid)
+            from app.events.inspector_events import drop_sid as _drop_inspector
+            await _drop_inspector(sid)
             logger.info(f"Disconnected superseded socket {sid[:8]} (session kept)")
             return
         entry = peer_registry.get_by_socket(sid)
@@ -404,6 +406,8 @@ def create_app() -> socketio.ASGIApp:
         await _wall.close_for_sid(sid)
         from app.events.tuning_events import drop_sid as _drop_tuning
         await _drop_tuning(sid)
+        from app.events.inspector_events import drop_sid as _drop_inspector
+        await _drop_inspector(sid)
         # The single view's shared feed port is owned by its PeerEntry and
         # released by peer_registry.remove above.
 
@@ -532,6 +536,10 @@ def create_app() -> socketio.ASGIApp:
     register_config_live_events(sio, session_manager)
     from app.events.tuning_events import register_tuning_events   # Config > Tuning chart
     register_tuning_events(sio, session_manager)
+    from app.events.gps_events import register_gps_events   # Config > GPS & RTK (NTRIP), traffic
+    register_gps_events(sio, session_manager)
+    from app.events.inspector_events import register_inspector_events   # Config > Analyze inspector
+    register_inspector_events(sio, session_manager)
     from app.copilot.events import register_copilot_events
     register_copilot_events(sio, session_manager, vision_pool)
 

@@ -151,6 +151,14 @@ const STEP_WHAT: Record<string, string> = {
     mag: 'Outdoors, away from metal. Rotate it around each axis.',
     level: 'On a truly level surface. Fixes drift in a steady hover.',
     gimbal: 'Only for a gimbal with its own IMU. Hold it level.',
+    airspeed: 'Shield the pitot from wind, then blow into it when asked.',
+}
+/** Airspeed is offered only on airframes with an airspeed sensor, so it is
+ *  not in CAL_SENSORS. The backend drives it with a direct command
+ *  (MAVSDK has no airspeed calibration). */
+const AIRSPEED_SENSOR: (typeof CAL_SENSORS)[number] = {
+    key: 'airspeed', label: 'Airspeed', oriented: false, mins: '~1 min',
+    blurb: 'Zeroes the pitot sensor with no wind on it, then checks the tubes by having you blow into the front of the pitot.',
 }
 const REQUIRED = ['gyro', 'accel', 'mag', 'level']
 
@@ -251,10 +259,8 @@ function CalibrateTab({ cal: calHook, live, onOrientation }: {
                             cal={cal} connected={connected} busy={busy} onStart={() => start(s.key)} />
                     ))}
                     {hasAirspeed && (
-                        <StepRow icon={Wind} label="Airspeed" mins="~1 min"
-                            what="Not available from HYRAK yet. Its settings are on the Sensors tab."
-                            state="info" connected={connected} busy={false}
-                            action={<Btn disabled title="Airspeed calibration from HYRAK is not built yet">Start</Btn>} />
+                        <CalStep sensor={AIRSPEED_SENSOR} verdict={verdict('airspeed')} isNext={false}
+                            cal={cal} connected={connected} busy={busy} onStart={() => start('airspeed')} />
                     )}
                     {refusal && <Note tone="danger">{refusal}</Note>}
                 </Panel>
@@ -665,7 +671,7 @@ function airframeHasAirspeed(vp: ReturnType<typeof useVehicleParams>): boolean {
 function AirspeedPanel() {
     return (
         <Panel title="Airspeed sensor" right={<Tip text="Airspeed calibration zeroes the differential pressure sensor (SENS_DPRES_OFF). Shield the pitot from wind, then blow into it when PX4 asks." />}>
-            <Note>Airspeed calibration cannot be started from HYRAK yet. The settings below are live.</Note>
+            <Note>Calibrate from the Calibrate tab (Airspeed, under Optional). The settings below are live.</Note>
             <ParamRow spec={{ key: 'SENS_DPRES_OFF', label: 'Pressure offset', unit: 'Pa', decimals: 2, tip: 'Set by the airspeed calibration. Zero means it was never calibrated.' }} />
             <ParamRow spec={{ key: 'ASPD_SCALE_1', label: 'Airspeed scale', decimals: 3, tip: 'Corrects the indicated airspeed. PX4 can learn it in flight (ASPD_SCALE_APPLY).' }} />
             <ParamRow spec={{ key: 'CAL_AIR_CMODEL', label: 'Tube model', options: [{ value: 0, label: 'With pitot' }, { value: 1, label: 'Without pitot' }, { value: 2, label: 'Pressure loss only' }], tip: 'How PX4 corrects for the pitot tubing.' }} />

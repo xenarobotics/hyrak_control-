@@ -28,6 +28,7 @@ operator as the autopilot's own words rather than being swallowed.
 
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import dataclass, field
 from typing import Optional
@@ -65,6 +66,12 @@ SENSORS = {
     "mag":   {"method": "calibrate_magnetometer", "label": "Compass",        "oriented": True,  "timeout": 420.0},
     "level": {"method": "calibrate_level_horizon", "label": "Level Horizon", "oriented": False, "timeout": 90.0},
     "gimbal": {"method": "calibrate_gimbal_accelerometer", "label": "Gimbal Accel", "oriented": False, "timeout": 90.0},
+    # MAVSDK's calibration plugin has no airspeed method, so this one is
+    # MAV_CMD_PREFLIGHT_CALIBRATION with param6 = 1 sent through
+    # mavlink_direct (run_command_calibration below), exactly what
+    # QGroundControl sends. PX4 gives up by itself after 90 s.
+    "airspeed": {"method": None, "command": {"param6": 1.0}, "label": "Airspeed",
+                 "oriented": False, "timeout": 120.0},
 }
 
 #: PX4 refuses a level-horizon calibration whose starting attitude is already
@@ -218,6 +225,9 @@ class CalibrationSession:
             # something true, and "all six still to do" is true.
             self.state.sides = {s: PENDING for s in SIDES}
         self.state.instruction = self._opening_instruction(sensor)
+        #: The last thing PX4 said went wrong, for a failure line that does
+        #: not say why (airspeed).
+        self.problem = ""
 
     @staticmethod
     def _opening_instruction(sensor: str) -> str:
@@ -231,6 +241,8 @@ class CalibrationSession:
             return "You will rotate the aircraft around each position PX4 asks for"
         if sensor == "gimbal":
             return "Hold the gimbal still and level"
+        if sensor == "airspeed":
+            return "Shield the pitot tube from any wind and keep it still while the zero is measured"
         return "Follow the instructions from the autopilot"
 
     def feed(self, raw: str) -> bool:
@@ -302,7 +314,9 @@ class CalibrationSession:
 
         if ev.kind == "failed":
             s.phase = "failed"
-            s.error = ev.text
+            # PX4's airspeed failure line only names the sensor ("calibration
+            # failed: airspeed"); the reason was in the line before it.
+            s.error = self.problem if (self.problem and ev.text.lower().strip() in ("airspeed", "")) else ev.text
             s.instruction = "Calibration failed - see the autopilot's reason below"
             return True
 
@@ -312,6 +326,13 @@ class CalibrationSession:
             return True
 
         # instruction
+        translated = _airspeed_instruction(ev.text) if s.sensor == "airspeed" else None
+        if translated is not None:
+            words, problem = translated
+            if problem:
+                self.problem = words
+            s.instruction = words
+            return True
         s.instruction = ev.text
         return True
 
@@ -361,3 +382,137 @@ class CalibrationSession:
             self.state.phase = "failed"
             self.state.error = error or self.state.error
             self.state.instruction = "Calibration failed"
+
+
+# ---------------------------------------------------------------------- #
+# Airspeed: PX4's own lines (commander/airspeed_calibration.cpp) in words  #
+# ---------------------------------------------------------------------- #
+
+_ASPD_CREATE_RE = re.compile(r"create air pressure!?\s*\(got\s*(-?\d+)")
+_ASPD_OFFSET_RE = re.compile(r"offset of\s*(-?\d+)\s*pascal")
+_ASPD_POSITIVE_RE = re.compile(r"positive pressure:?\s*ok\s*\((-?\d+)")
+_ASPD_NEGATIVE_RE = re.compile(r"negative pressure difference detected\s*\((-?\d+)")
+
+
+def _airspeed_instruction(said: str) -> Optional[tuple[str, bool]]:
+    """(words for the pilot, is-a-problem) for one airspeed line, or None
+    if it is not one we know. Loose matching, like parse_cal_line."""
+    low = said.lower()
+    if "not measuring wind" in low or "ensure sensor" in low:
+        return ("Shield the pitot tube from any wind (cup a hand loosely around it, or cover it) "
+                "and keep it still while the zero is measured", False)
+    m = _ASPD_OFFSET_RE.search(low)
+    if m:
+        return (f"Zero measured ({m.group(1)} Pa). Get ready to blow into the pitot", False)
+    if "blow into" in low or "blow across" in low:
+        return ("Now blow gently into the FRONT of the pitot tube, without touching it, "
+                "until PX4 confirms", False)
+    m = _ASPD_CREATE_RE.search(low)
+    if m:
+        return (f"Blow harder into the front of the pitot: PX4 reads {m.group(1)} Pa and needs more than 50 Pa", False)
+    m = _ASPD_POSITIVE_RE.search(low)
+    if m:
+        return (f"Pressure seen ({m.group(1)} Pa). Stop blowing, finishing", False)
+    m = _ASPD_NEGATIVE_RE.search(low)
+    if m:
+        return (f"Blowing made the pressure go DOWN ({m.group(1)} Pa): the static and dynamic tubes are "
+                f"swapped. Swap them, or set SENS_DPRES_REV, then calibrate again", True)
+    if "swap static and dynamic" in low:
+        return ("The static and dynamic tubes are swapped. Swap them on the sensor, or set "
+                "SENS_DPRES_REV = 1, then calibrate again", True)
+    if "failed to set" in low or ("param" in low and "fail" in low):
+        return ("PX4 could not save the airspeed calibration", True)
+    return None
+
+
+#: MAV_CMD_PREFLIGHT_CALIBRATION.
+MAV_CMD_PREFLIGHT_CALIBRATION = 241
+
+#: With no "[cal]" line from PX4 this long after the command, it did not
+#: start: refused, no airspeed sensor module, or the command was lost.
+COMMAND_START_GRACE_S = 10.0
+
+
+def preflight_calibration_fields(target_sysid: int, params: dict) -> dict:
+    """COMMAND_LONG fields for PREFLIGHT_CALIBRATION with only the given
+    params set. All zeros is PX4's cancel."""
+    from app.telemetry.mav_command import command_fields
+    return command_fields(target_sysid, MAV_CMD_PREFLIGHT_CALIBRATION, **(params or {}))
+
+
+def is_command_sensor(sensor: str) -> bool:
+    return SENSORS.get(sensor, {}).get("command") is not None
+
+
+async def send_command_cancel(tel) -> bool:
+    """PREFLIGHT_CALIBRATION with every param 0: PX4's calibration routines
+    poll for exactly this (calibrate_cancel_check). MAVSDK's own cancel is a
+    no-op when the plugin did not start the calibration."""
+    from app.telemetry.mav_command import send_command
+    sysid = int(getattr(tel, "_target_sysid", 1) or 1)
+    out = await send_command(tel, preflight_calibration_fields(sysid, {}), ack_timeout=1.5)
+    return out.sent
+
+
+async def run_command_calibration(tel, session: "CalibrationSession", sensor: str, *,
+                                  clock=None, sleep=None, poll_s: float = 0.25) -> None:
+    """Drive a calibration MAVSDK has no plugin method for (airspeed).
+
+    The command goes out with its COMMAND_ACK read back, so a refusal is
+    reported straight away in PX4's terms. After that PX4's "[cal]" lines,
+    fed in by the manager's STATUSTEXT reader, are the whole protocol: the
+    verdict is "[cal] calibration done/failed". Bounded by the sensor's
+    timeout, and by COMMAND_START_GRACE_S if PX4 never says it started.
+    Mirrors the plugin path in TelemetryManager._run_calibration: the
+    session is kept for the operator to read, and the manager's task slot
+    cleared when this ends.
+    """
+    import time as _time
+    from app.telemetry.mav_command import send_command
+    clock = clock or _time.monotonic
+    sleep = sleep or asyncio.sleep
+    spec = SENSORS[sensor]
+    limit = float(spec.get("timeout", 120.0))
+    try:
+        sysid = int(getattr(tel, "_target_sysid", 1) or 1)
+        out = await send_command(tel, preflight_calibration_fields(sysid, spec["command"]), ack_timeout=3.0)
+        if not out.sent:
+            session.finish(False, out.error or "could not send the calibration command")
+            return
+        if out.result is not None and out.result not in (0, 5):
+            session.finish(False, f"the autopilot {out.words} the {spec['label'].lower()} calibration")
+            return
+        t0 = clock()
+        while True:
+            if getattr(tel, "_calibration", None) is not session:
+                return                                  # superseded or dismissed
+            phase = session.state.phase
+            if phase == "done":
+                session.finish(True)
+                return
+            if phase in ("failed", "cancelled"):
+                session.state.ok = False
+                return
+            waited = clock() - t0
+            if phase == "starting" and waited > COMMAND_START_GRACE_S:
+                session.finish(False, "the autopilot did not start the calibration. Check that an "
+                                      "airspeed sensor is detected (SYS_HAS_NUM_ASPD, sensor driver enabled)")
+                return
+            if waited > limit:
+                session.finish(False, f"the aircraft stopped reporting after {limit:.0f}s - "
+                                      f"the calibration did not finish")
+                return
+            await sleep(poll_s)
+    except asyncio.CancelledError:
+        if session.state.phase != "failed":
+            session.state.phase = "cancelled"
+            session.state.instruction = "Calibration cancelled"
+        raise
+    except Exception as e:
+        session.finish(False, f"the calibration did not complete ({e})")
+    finally:
+        if getattr(tel, "_calibration", None) is session:
+            emit = getattr(tel, "_emit_calibration", None)
+            if emit is not None:
+                emit()
+            tel._calibration_task = None
