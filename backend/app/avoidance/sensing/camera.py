@@ -127,8 +127,9 @@ def analyze_depth(depth: np.ndarray, frame_w: int, frame_h: int, ctx: dict | Non
         scan = scan_from_depth(pooled, hfov_deg, vfov, alt_m=ctx["bench_h"],
                                max_range_m=max_range_m, invalid_is_free=False)
         return {"fit": None, "scan": scan, "bench": True}
+    why: dict = {}
     fit = fit_scale(pooled, hfov_deg, vfov, alt_m=ctx["alt_m"], roll_deg=ctx["roll_deg"],
-                    pitch_deg=ctx["pitch_deg"], cam_pitch_deg=ctx["cam_pitch_deg"])
+                    pitch_deg=ctx["pitch_deg"], cam_pitch_deg=ctx["cam_pitch_deg"], why=why)
     scale = ctx.get("scale")
     if scale is None and fit is not None and ctx.get("scale_seed"):
         scale = float(ctx["scale_seed"])
@@ -136,16 +137,16 @@ def analyze_depth(depth: np.ndarray, frame_w: int, frame_h: int, ctx: dict | Non
         # No ground fit in this frame and the tracker's scale is old: the
         # benchmark shows a model's scale wanders between scenes, so a stale
         # scale on a wall-filling frame makes phantoms. No obstacles.
-        return {"fit": None, "scan": None}
+        return {"fit": None, "fit_why": why.get("reason"), "scan": None}
     if fit is not None:
         scale = fit.scale if scale is None else 0.7 * scale + 0.3 * fit.scale
     if scale is None:
-        return {"fit": None, "scan": None}
+        return {"fit": None, "fit_why": why.get("reason"), "scan": None}
     scan = scan_from_depth(pooled * scale, hfov_deg, vfov, alt_m=ctx["alt_m"],
                            roll_deg=ctx["roll_deg"], pitch_deg=ctx["pitch_deg"],
                            cam_pitch_deg=ctx["cam_pitch_deg"], max_range_m=max_range_m,
                            invalid_is_free=False)
-    return {"fit": fit, "scan": scan}
+    return {"fit": fit, "fit_why": why.get("reason"), "scan": scan}
 
 
 def _analyze(img_bgr: np.ndarray, ctx: dict | None, session_id: str | None = None) -> dict | None:
@@ -297,7 +298,7 @@ def submit(session_id: str, img_bgr: np.ndarray) -> None:
         if res.get("env"):
             cc.note_vision_env(*res["env"])
         if not res.get("bench"):
-            cc.mono_scale.update(res.get("fit"))
+            cc.mono_scale.update(res.get("fit"), res.get("fit_why"))
         if res.get("scan"):
             cc.integrate_scan(res["scan"], captured_at, "monocular")
 

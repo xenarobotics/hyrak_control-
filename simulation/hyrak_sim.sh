@@ -97,7 +97,9 @@ elif [ "$MODEL" = "gz_x500_indoor" ]; then
 else
     AUTOSTART=4001
     CAM_TOPIC="/world/$WORLD/model/x500_mono_cam_1/link/camera_link/sensor/camera/image"
-    CAM_IN=640x480; CAM_OUT=""
+    # PX4's mono_cam publishes 1280x960 (hfov 1.74 rad = 99.7 deg). Declaring
+    # 640x480 here made ffmpeg cut every frame into four garbled strips.
+    CAM_IN=1280x960; CAM_OUT=640x480
 fi
 
 export GZ_IP=127.0.0.1 GZ_PARTITION=hyrak_demo DISPLAY="${DISPLAY:-:1}"

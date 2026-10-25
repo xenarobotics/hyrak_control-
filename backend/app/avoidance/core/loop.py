@@ -45,7 +45,10 @@ def _resolve_link(drone_id: str):
         i = fleet_service.instance_for(drone_id)
         if i is not None:
             mgr = fleet_service._managers.get(i)
-            if mgr is not None and mgr.is_connected:
+            # A fleet link that went silent yields to a session link that
+            # is still receiving (the session loop below picks it).
+            if mgr is not None and mgr.is_connected and \
+                    (_link_alive(mgr) or not _live_session_link(drone_id)):
                 entry = next((d for d in fleet_service.status()
                               if d.get("db_id") == drone_id), None)
                 lv = (entry or {}).get("live")
@@ -65,27 +68,59 @@ def _resolve_link(drone_id: str):
                     return mgr, pose, in_air, str(lv.get("mode") or "")
     except Exception:
         pass
-    sm = _session_manager
-    if sm is not None:
-        for s in sm.all_sessions():
-            if (s.drone or {}).get("id") != drone_id:
-                continue
-            mgr = sm.get_telemetry(s.session_id)
-            if mgr is not None and mgr.is_connected:
-                snap = mgr.snapshot          # a property, not a method
-                lat, lng = snap.position.latitude_deg, snap.position.longitude_deg
-                lpose = _local_pose(drone_id)
-                if lpose is not None:               # GPS-denied: PX4 local frame
-                    in_air = bool(snap.flight_mode.is_in_air) or lpose.alt_m > 1.0
-                    return mgr, lpose, in_air, str(snap.flight_mode.mode or "")
-                if not (lat or lng):
-                    return mgr, None, False, str(snap.flight_mode.mode or "")
-                pose = Pose(lat=lat, lng=lng, heading_deg=snap.heading_deg,
-                            alt_m=snap.position.relative_altitude_m)
-                in_air = (bool(snap.flight_mode.is_in_air)
-                          or snap.position.relative_altitude_m > 1.5)
-                return mgr, pose, in_air, str(snap.flight_mode.mode or "")
+    mgr = _best_session_link(drone_id)
+    if mgr is not None:
+        snap = mgr.snapshot          # a property, not a method
+        lat, lng = snap.position.latitude_deg, snap.position.longitude_deg
+        lpose = _local_pose(drone_id)
+        if lpose is not None:               # GPS-denied: PX4 local frame
+            in_air = bool(snap.flight_mode.is_in_air) or lpose.alt_m > 1.0
+            return mgr, lpose, in_air, str(snap.flight_mode.mode or "")
+        if not (lat or lng):
+            return mgr, None, False, str(snap.flight_mode.mode or "")
+        pose = Pose(lat=lat, lng=lng, heading_deg=snap.heading_deg,
+                    alt_m=snap.position.relative_altitude_m)
+        in_air = (bool(snap.flight_mode.is_in_air)
+                  or snap.position.relative_altitude_m > 1.5)
+        return mgr, pose, in_air, str(snap.flight_mode.mode or "")
     return None, None, False, ""
+
+
+def _link_alive(mgr) -> bool:
+    """Connected AND still receiving. is_connected stays True through a LINK
+    LOST (the watchdog only flags it) until the session is torn down, up to
+    90 s later - long enough to starve avoidance of pose."""
+    return bool(mgr.is_connected) and getattr(mgr, "_link_lost_since", None) is None
+
+
+def _session_links(drone_id: str) -> list:
+    sm = _session_manager
+    if sm is None:
+        return []
+    out = []
+    for s in sm.all_sessions():
+        if (s.drone or {}).get("id") != drone_id:
+            continue
+        mgr = sm.get_telemetry(s.session_id)
+        if mgr is not None and mgr.is_connected:
+            out.append(mgr)
+    return out
+
+
+def _best_session_link(drone_id: str):
+    """The session link for this drone that is actually receiving: a live
+    link beats one in LINK LOST, then the most recent message wins. Session
+    order alone picked the OLD session (created first) whose link had died
+    while a new session's link was live, and the pose went stale for the 90 s
+    the old session was held for its client (bench 2026-10-25 13:38)."""
+    links = _session_links(drone_id)
+    if not links:
+        return None
+    return max(links, key=lambda m: (_link_alive(m), float(getattr(m, "_last_rx_t", 0.0) or 0.0)))
+
+
+def _live_session_link(drone_id: str) -> bool:
+    return any(_link_alive(m) for m in _session_links(drone_id))
 
 
 # Modes in which the aircraft is DONE with its route (returning home or
@@ -598,7 +633,10 @@ async def _local_step(c, manager, pose, in_air, mode, now) -> None:
         c._operator_hold = True
     elif m not in ("HOLD", "LOITER", "OFFBOARD", ""):
         c._operator_hold = False
-    if getattr(c, "_operator_hold", False):
+    # The keep-clear reflex runs only with no route (operator HOLD, or a HOLD
+    # avoidance entered from a non-mission mode). Its own Offboard must not
+    # turn it into "pursuing" a stale mission stored on the aircraft.
+    if getattr(c, "_operator_hold", False) or getattr(c, "_repelling", False):
         pursuing = False
         if c.state == avoidance.AvoidanceState.NOMINAL:
             c.intervened = False

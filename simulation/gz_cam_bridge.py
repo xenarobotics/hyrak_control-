@@ -68,8 +68,19 @@ _stop = [False]
 _stats = {"recv": 0, "sent": 0, "dropped": 0}
 
 
+_size_warned = [False]
+
+
 def cb(msg: Image):
     # Runs on gz's transport thread - MUST return instantly, never block.
+    if len(msg.data) != W * H * 3:
+        # A size mismatch would make ffmpeg slice each frame into garbage
+        # strips (the backend then sees no ground and no obstacles): drop it.
+        if not _size_warned[0]:
+            _size_warned[0] = True
+            print(f"cam bridge: topic frames are {msg.width}x{msg.height} but WxH is {W}x{H} - "
+                  f"dropping frames, pass {msg.width}x{msg.height} as WxH", flush=True)
+        return
     with _lock:
         if _latest[0] is not None:
             _stats["dropped"] += 1

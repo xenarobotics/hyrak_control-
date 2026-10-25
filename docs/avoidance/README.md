@@ -159,12 +159,25 @@ Sensing / map
   frames really means three). An older scan never rewinds a cell's clock.
 - A mono frame with no ground fit yields no obstacles unless a fit is at
   most 2 s old. Mono tops are unknown (never climbed).
+- The ground fit uses only ground within 50 m (`FIT_MAX_GROUND_M`, its own
+  limit, not the obstacle max range): DA3 halves its scale past ~60 m. The
+  ground used must span 1.5x in distance and hold one scale near vs far
+  (else `ground_band_too_thin` / `not_planar`). Rejections are counted per
+  reason in `mono_calibration.rejected_by`. A level 99.7 deg / 4:3 camera
+  sees ground from 1.13x its height, so it can fit up to ~25 m AGL; a
+  narrower or 16:9 lens needs `camera_pitch_deg` (tilted down) to fit high.
 - `/depth_scan` bounds its inputs and drops scans older than 1.5 s;
   `GET /status` never creates a controller.
 
 Loop
 - One drone's exception never starves the others; an intervened drone
   whose tick failed is parked in HOLD.
+- With several session links to one drone, the pose follows the one that
+  is receiving (not in LINK LOST, newest message), and the pose listener
+  moves with it. A dead session is held 90 s with is_connected still true.
+- A HOLD avoidance entered with no route (manual flight, stale pose) runs
+  the keep-clear reflex like an operator HOLD; it never resumes a mission
+  from there.
 - A session bound to a drone without avoidance is never guarded by
   another drone's map.
 

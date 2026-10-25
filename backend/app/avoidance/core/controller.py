@@ -987,6 +987,30 @@ class AvoidanceController:
                                       and self._last_frame_t > wiped + 0.5)
         # No route (operator HOLD, manual hover): nothing to steer toward, so
         # the only job is keeping clear of what comes close in view.
+        # The same holds for a HOLD avoidance itself entered with no route
+        # ("manual flight, obstacle ahead", a stale-pose brake): it has
+        # nothing to resume or return to, and without the reflex it sat in
+        # HOLD forever, 0.7 m from the obstacle, repeating the reason it went
+        # in with (bench 2026-10-25: "pose stale (90.0 s)" long after the
+        # pose was fresh).
+        own_parked = goal_ne is None and (
+            getattr(self, "_repelling", False)
+            or (self.intervened and st == AvoidanceState.HOLDING))
+        if own_parked and not getattr(self, "_operator_hold", False):
+            if self.params.keep_clear_m > 0:
+                rep = self._keep_clear(polar, pp, pose, now, _d)
+                if rep is not None:
+                    return rep
+            if self._hold_since is None:
+                self._hold_since = now
+            fresh = self._last_frame_t is not None and not blind and \
+                self._last_frame_t > max(self._frame_changed_at or -math.inf, self._hold_since) + 0.5
+            if not threat and fresh:
+                self._hold_since = None
+                return _d("clear", AvoidanceState.NOMINAL, "obstacle gone")
+            return _d("hold", AvoidanceState.HOLDING,
+                      f"holding - no route, nearest obstacle {near:.1f} m" if math.isfinite(near)
+                      else "holding - no route")
         if goal_ne is None and getattr(self, "_operator_hold", False):
             if self.params.keep_clear_m > 0:
                 rep = self._keep_clear(polar, pp, pose, now, _d)
