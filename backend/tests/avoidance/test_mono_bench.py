@@ -35,3 +35,18 @@ def test_bench_drops_the_camera_height_floors():
     assert c.acting_floor_m() == c.params.mono_min_alt_m
     c.params.mono_bench = 1.0
     assert c.acting_floor_m() == c.params.range_min_alt_m
+
+
+def test_a_laptop_webcam_counts_as_a_bench_camera_without_the_setting():
+    """REPORTED: the owner held an object in front of the laptop camera with
+    the SITL drone hovering and nothing was detected - flight mode needs a
+    ground fit a webcam never gets, and drops mono scans below 8 m."""
+    c = AvoidanceController("bench-auto"); c.set_enabled(True)
+    c._mono_data_t = __import__("time").monotonic()
+    assert c.params.mono_bench == 0.0
+    c.bench_auto = True
+    assert c.bench_active
+    assert c.acting_floor_m() == c.params.range_min_alt_m
+    assert c.status()["bench"] == {"active": True, "auto": True}
+    c.bench_auto = False
+    assert not c.bench_active and c.acting_floor_m() == c.params.mono_min_alt_m

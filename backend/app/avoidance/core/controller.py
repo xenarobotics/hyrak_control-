@@ -213,6 +213,10 @@ class AvoidanceController:
         from app.avoidance.sensing.mono_calibration import ScaleTracker
         self.grid = OccupancyGrid()
         self.mono_scale = ScaleTracker()
+        # Set by the camera sensing while the session's video is a camera on
+        # this computer (a laptop webcam): it never sees the ground under the
+        # aircraft, so it is treated as a bench camera like mono_bench.
+        self.bench_auto = False
         self._range_data_t = 0.0          # last scan from a real range sensor
         self._mono_data_t = 0.0
         self._last_frame_t: float | None = None   # capture time of the newest scan
@@ -269,7 +273,7 @@ class AvoidanceController:
         if mode == "range":
             return float(self.params.range_min_alt_m)
         if mode == "mono":
-            if self.params.mono_bench:
+            if self.bench_active:
                 return float(self.params.range_min_alt_m)
             return float(self.params.mono_min_alt_m)
         return 3.0
@@ -318,7 +322,7 @@ class AvoidanceController:
             self._scans["dropped_no_pose"] += 1
             return False
         min_alt = self.params.range_min_alt_m if is_range else \
-            (0.0 if self.params.mono_bench else self.params.mono_min_alt_m)
+            (0.0 if self.bench_active else self.params.mono_min_alt_m)
         if pose.alt_m < min_alt:
             self._scans["dropped_low"] += 1
             return False
@@ -1269,6 +1273,10 @@ class AvoidanceController:
                 for o in self.omap.active(now)]
 
     # -- status -----------------------------------------------------------
+    @property
+    def bench_active(self) -> bool:
+        return bool(self.params.mono_bench) or self.bench_auto
+
     def status(self, now: float | None = None) -> dict:
         now = now if now is not None else time.monotonic()
         return {
@@ -1302,6 +1310,7 @@ class AvoidanceController:
             "guarding": bool(self._guard_active and self.following(now)),
             "scans": dict(self._scans),
             "mono_calibration": self.mono_scale.status(),
+            "bench": {"active": self.bench_active, "auto": self.bench_auto and not self.params.mono_bench},
             "pose_rate_hz": round(_pose_rate(self.drone_id), 1),
             "planner": None if self.last_setpoint is None else {
                 "reason": self.last_setpoint.reason,

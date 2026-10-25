@@ -231,6 +231,8 @@ def submit(session_id: str, img_bgr: np.ndarray) -> None:
     c = av_loop._controller_for_session(session_id)
     ctx = None
     if c is not None:
+        from app.vision import camera_profiles
+        c.bench_auto = camera_profiles.source_of(session_id) in camera_profiles.LOCAL_CAMERA_SOURCES
         pose = pose_history.history(c.drone_id).at(captured_at)
         if pose is not None:
             # Camera height above the GROUND, not above home: over terrain
@@ -238,7 +240,7 @@ def submit(session_id: str, img_bgr: np.ndarray) -> None:
             # The downward rangefinder gives it when fresh and sane.
             alt = pose.alt_m
             rf = getattr(getattr(av_loop._resolve_link(c.drone_id)[0], "_snapshot", None), "rangefinder_m", None) \
-                if not c.params.mono_bench else None
+                if not c.bench_active else None
             if rf is not None and 0.3 <= rf <= 40.0 and abs(rf - pose.alt_m) / max(pose.alt_m, 1.0) > 0.15:
                 alt = float(rf)
             import time as _t
@@ -246,7 +248,7 @@ def submit(session_id: str, img_bgr: np.ndarray) -> None:
                    "cam_pitch_deg": float(c.params.camera_pitch_deg),
                    "scale": c.mono_scale.scale,
                    "fit_age_s": (_t.monotonic() - c.mono_scale.last_fit_t) if c.mono_scale.last_fit_t else 1e9,
-                   "bench": bool(c.params.mono_bench),
+                   "bench": c.bench_active,
                    "bench_h": float(c.params.bench_cam_height_m)}
         from app.avoidance.sensing import person_ruler
         if person_ruler.pending(c.drone_id):
