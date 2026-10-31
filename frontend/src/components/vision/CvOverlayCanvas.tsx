@@ -455,6 +455,12 @@ function drawSubjectRing(
 ) {
     ctx.save()
     ctx.globalAlpha *= alpha
+    // Dark under-stroke first: a light ring alone disappears against sky,
+    // concrete or snow (a crane against cloud showed no outline at all).
+    // Two tones read on any background.
+    ctx.strokeStyle = 'rgba(0,0,0,0.55)'
+    ctx.lineWidth = width + 2.5
+    roundRectPath(ctx, x1, y1, x2, y2); ctx.stroke()
     ctx.shadowColor = color
     ctx.shadowBlur = 12
     ctx.strokeStyle = color
