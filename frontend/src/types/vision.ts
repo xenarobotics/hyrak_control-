@@ -106,6 +106,9 @@ export interface CVResult {
     /** Mean per-frame cost inside the server's recv() path, excluding the
      *  idle wait for a frame to arrive. */
     pipeline_ms?: number
+    /** RTP timestamp of the analysed frame (90 kHz), so the browser can put
+     *  the result back on the local frame it describes (lib/frameSync.ts). */
+    pts?: number
     // Source frame size the box coordinates refer to (for canvas scaling)
     frame_w?: number
     frame_h?: number

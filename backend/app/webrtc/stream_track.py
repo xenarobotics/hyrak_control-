@@ -299,7 +299,10 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
                     tel_mgr.snapshot.to_dict()
                     if tel_mgr and tel_mgr.is_connected else None
                 )
-                analyzer.submit_frame(self.session_id, img_bgr, telemetry=tel_snapshot)
+                analyzer.submit_frame(
+                    self.session_id, img_bgr, telemetry=tel_snapshot,
+                    pts=int(frame.pts) if frame.pts is not None else None,
+                )
             except Exception as e:
                 logger.warning(f"Vision analyzer submit error (session {self.session_id[:8]}): {e}")
         else:
@@ -461,6 +464,11 @@ class MultiModeVideoStreamTrack(MediaStreamTrack):
                         "pipeline_ms": round(sum(stages.values()), 1),
                         **meta,
                     }
+                    # `meta` carries the pts of the frame it was computed on
+                    # (FrameContext.pts); results are re-sent with every
+                    # frame, so the CURRENT frame's pts would be a lie here.
+                    # The browser uses it to draw the boxes on that frame
+                    # (frontend lib/frameSync.ts).
                     asyncio.create_task(self._emit_callback(payload))
                 except Exception:
                     pass

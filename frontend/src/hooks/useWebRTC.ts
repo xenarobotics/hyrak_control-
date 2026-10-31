@@ -2,6 +2,7 @@
 
 import { apiFetch } from '@/lib/api'
 import { useEffect, useRef, useCallback, useState } from 'react'
+import { frameClock } from '@/lib/frameSync'
 import { getSocket } from '@/lib/socket'
 import { getServerUrl } from '@/lib/server-url'
 import { isServerFeedReady } from '@/lib/serverHevcFeed'
@@ -403,9 +404,12 @@ export function useWebRTC() {
             pc.addTransceiver('video', { direction: 'recvonly' })
         } else if (cameraStream) {
             if (clientOverlay) {
-                cameraStream.getTracks().forEach(t =>
-                    pc.addTransceiver(t, { direction: 'sendonly', streams: [cameraStream] })
-                )
+                frameClock.reset()
+                cameraStream.getTracks().forEach(t => {
+                    const tr = pc.addTransceiver(t, { direction: 'sendonly', streams: [cameraStream] })
+                    // Lets results be matched to the frames they describe.
+                    if (t.kind === 'video') frameClock.tagSender(tr.sender)
+                })
             } else {
                 cameraStream.getTracks().forEach(t => pc.addTrack(t, cameraStream))
             }

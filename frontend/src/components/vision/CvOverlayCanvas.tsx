@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react'
 import { useDroneStore } from '@/store/drone'
 import type { CVResult } from '@/types/vision'
 import { OverlaySmoothers } from '@/lib/overlaySmoothing'
+import { frameClock, shownFrameTs } from '@/lib/frameSync'
 import { getSocket } from '@/lib/socket'
 import type { VideoFit } from '@/lib/videoSettings'
 
@@ -863,8 +864,31 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
     // handlers so a click is mapped with the same dimensions it was drawn at.
     const sourceSize = useRef({ W: 1280, H: 720 })
 
+    // Frame-synced results waiting for their frame to come on screen, oldest
+    // first (lib/frameSync.ts). Empty whenever the picture is not synced.
+    const queued = useRef<{ r: CVResult; t: number }[]>([])
+    // Which clock the smoothers are running on: the synced picture's capture
+    // time, or performance.now(). A switch resets them.
+    const synced = useRef(false)
+    const lastPts = useRef<number | null>(null)
+
     useEffect(() => {
         if (!cvResults) return
+        // The server re-sends the newest result with every frame it receives;
+        // only a new pts is a new result.
+        const fresh = typeof cvResults.pts === 'number' && cvResults.pts !== lastPts.current
+        if (typeof cvResults.pts === 'number') lastPts.current = cvResults.pts
+        const ts = typeof cvResults.pts === 'number' ? frameClock.frameTs(cvResults.pts) : null
+        if (ts !== null && fresh) frameClock.noteResult(ts)
+        if (ts !== null && shownFrameTs() !== null) {
+            if (!fresh) return
+            const q = queued.current
+            let i = q.length
+            while (i > 0 && q[i - 1].t > ts) i--
+            q.splice(i, 0, { r: cvResults, t: ts })
+            if (q.length > 60) q.splice(0, q.length - 60)
+            return
+        }
         latest.current = cvResults
         for (const field of SMOOTHED_FIELDS[mode] ?? []) {
             smoothers.current.ingest(
@@ -877,6 +901,7 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
     // things and the ids do not correspond.
     useEffect(() => {
         smoothers.current.reset()
+        queued.current = []
         // Box hold is per mode: a stale box is noise in a crowd but a false
         // claim in person-ID. See MODE_HOLD_MS.
         smoothers.current.setMode(mode)
@@ -892,8 +917,31 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
         if (!ctx) return
 
         let raf = 0
+        let debugOverlay = false
+        try { debugOverlay = localStorage.getItem('hyrak-overlay-debug') === '1' } catch { /* off */ }
         const frame = () => {
             raf = requestAnimationFrame(frame)
+
+            // Synced picture: apply every result whose frame is now on
+            // screen, and keep the next one for interpolation.
+            const shown = shownFrameTs()
+            if ((shown !== null) !== synced.current) {
+                synced.current = shown !== null
+                smoothers.current.reset()
+                queued.current = []
+            }
+            const fields0 = SMOOTHED_FIELDS[mode] ?? []
+            let next: { r: CVResult; t: number } | undefined
+            if (shown !== null) {
+                const q = queued.current
+                while (q.length && q[0].t <= shown) {
+                    const e = q.shift()!
+                    latest.current = e.r
+                    for (const f of fields0) smoothers.current.ingest(f, e.r[f as keyof CVResult] as never, e.t)
+                }
+                next = q[0]
+            }
+
             const r = latest.current
             const W = r?.frame_w ?? 1280
             const H = r?.frame_h ?? 720
@@ -937,10 +985,14 @@ export function CvOverlayCanvas({ fit = 'fill' }: { fit?: VideoFit } = {}) {
             const fields = SMOOTHED_FIELDS[mode] ?? []
             const view: CVResult = fields.length
                 ? fields.reduce<CVResult>(
-                    (acc, f) => ({ ...acc, [f]: smoothers.current.sample(f) }),
+                    (acc, f) => ({ ...acc, [f]: smoothers.current.sample(f, shown ?? undefined,
+                        next ? { items: next.r[f as keyof CVResult] as never, t: next.t } : undefined) }),
                     r,
                   )
                 : r
+
+            // Opt-in probe for measuring overlay alignment (frameSync tests).
+            if (debugOverlay) (window as unknown as { __hyrakOverlay?: unknown }).__hyrakOverlay = { shown, at: performance.now(), boxes: (view.detections ?? []).map(d => d.box) }
 
             ctx.font = overlayFont(H)
             ctx.textBaseline = 'alphabetic'

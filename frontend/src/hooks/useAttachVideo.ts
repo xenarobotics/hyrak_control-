@@ -17,6 +17,8 @@
 import { useEffect, type RefObject } from 'react'
 import { getLiveEdgeClamp } from '@/lib/videoSource'
 import { clampToLiveEdge } from '@/lib/liveEdge'
+import { acquireDelayedStream, releaseDelayedStream, notePresented, getOverlaySync, OVERLAY_SYNC_EVENT } from '@/lib/frameSync'
+import { useClientValueOn } from '@/hooks/useClientValue'
 
 export interface AttachVideoSources {
     wcUrl: string | null | undefined
@@ -34,6 +36,7 @@ export function useAttachVideo(
     videoRef: RefObject<HTMLVideoElement | null>,
     { wcUrl, overlayActive, localPreviewUrl, localStream, remoteStream, forceLiveEdge = false }: AttachVideoSources,
 ) {
+    const sync = useClientValueOn<boolean>(OVERLAY_SYNC_EVENT, getOverlaySync, true)
     useEffect(() => {
         const el = videoRef.current
         if (!el) return
@@ -44,6 +47,20 @@ export function useAttachVideo(
             return (forceLiveEdge || getLiveEdgeClamp()) ? clampToLiveEdge(el) : undefined
         }
         el.removeAttribute('src')
+        // Overlay on the local camera: show it through the frame-sync buffer
+        // so each result lands on the frame it was computed on.
+        if (overlayActive && localStream && sync) {
+            const delayed = acquireDelayedStream(localStream)
+            el.srcObject = delayed ?? localStream
+            if (!delayed) return undefined
+            let handle = 0
+            const onFrame = (_: number, m: VideoFrameCallbackMetadata) => {
+                notePresented(m.mediaTime)
+                handle = el.requestVideoFrameCallback(onFrame)
+            }
+            handle = el.requestVideoFrameCallback(onFrame)
+            return () => { el.cancelVideoFrameCallback(handle); releaseDelayedStream(localStream) }
+        }
         el.srcObject = overlayActive ? localStream : remoteStream
-    }, [videoRef, overlayActive, localStream, remoteStream, localPreviewUrl, forceLiveEdge, wcUrl])
+    }, [videoRef, overlayActive, localStream, remoteStream, localPreviewUrl, forceLiveEdge, wcUrl, sync])
 }

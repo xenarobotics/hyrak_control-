@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils'
 import { formatBytes, formatRate, formatEta } from '@/lib/formatBytes'
 import { useMissionStore } from '@/store/mission'
 import { useWebRTCContext } from '@/contexts/WebRTCContext'
+import { getOverlaySync, setOverlaySync, frameSyncSupported } from '@/lib/frameSync'
 import { getVideoSettings, getFeedMode, RES_OPTIONS, FPS_OPTIONS, type VideoRes, type VideoFps, type FeedMode, getCrowdPreset, type CrowdPreset, getCrowdThresholds, getCrowdCustom, normaliseCrowdThresholds, getStandbyUplink, type StandbyUplink, getCaptureProfile, type CaptureProfile } from '@/lib/videoSettings'
 import { getSocket } from '@/lib/socket'
 import {
@@ -633,6 +634,7 @@ function VideoGroup() {
     const [res, setRes] = useState<VideoRes>(() => getVideoSettings().res)
     const [fps, setFps] = useState<VideoFps>(() => getVideoSettings().fps)
     const [feed, setFeed] = useState<FeedMode>(() => getFeedMode())
+    const [overlaySync, setOverlaySyncState] = useState(() => getOverlaySync())
     const [standby, setStandby] = useState<StandbyUplink>(() => getStandbyUplink())
     const [capture, setCapture] = useState<CaptureProfile>(() => getCaptureProfile())
     const [source, setSource] = useState<VideoSource>(() => getVideoSource())
@@ -1049,7 +1051,7 @@ function VideoGroup() {
             <PrefRow
                 label="AI module feed"
                 sub="Applies when the next stream starts"
-                tip="Direct + overlay shows your camera feed directly and draws AI results on top - sharpest video, lowest latency, and roughly half the bandwidth since no video is sent back from the server. The overlays lag the video by one inference (~100 ms). Processed shows the server-rendered feed - video and annotations perfectly in sync, but quality is limited by the return encode and bandwidth is higher. Depth mapping and enhance always use the processed feed."
+                tip="Direct + overlay shows your camera feed directly and draws AI results on top - sharpest video, lowest latency, and roughly half the bandwidth since no video is sent back from the server. With Keep AI boxes on the video turned on, the picture is held back by the measured AI delay so boxes stay on their objects. Processed shows the server-rendered feed - video and annotations perfectly in sync, but quality is limited by the return encode and bandwidth is higher. Depth mapping and enhance always use the processed feed."
                 right={
                     <ChipGroup
                         value={feed}
@@ -1060,6 +1062,12 @@ function VideoGroup() {
                         ]}
                     />
                 }
+            />
+            <PrefRow
+                label="Keep AI boxes on the video"
+                sub={frameSyncSupported() ? 'Direct + overlay only' : 'Not supported in this browser'}
+                tip="Each AI result describes a frame that left this computer a moment ago. With this on, the AI view's picture is held back by that measured delay (typically 100-300 ms, never more than 0.6 s) so every box is drawn on the frame it was computed on and moves between real detections. Off shows the camera live, with boxes trailing moving objects by that delay. The raw view and flight video are always live."
+                right={<Toggle label="Keep AI boxes on the video" value={overlaySync} onChange={() => { const v = !overlaySync; setOverlaySyncState(v); setOverlaySync(v) }} />}
             />
             <PrefRow
                 label="Standby uplink"

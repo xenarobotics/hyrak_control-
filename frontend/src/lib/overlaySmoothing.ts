@@ -268,8 +268,15 @@ export class BoxSmoother {
         t.gone = null
     }
 
-    /** Current on-screen state. Call once per animation frame. */
-    sample(now = performance.now()): SmoothedItem[] {
+    /** Current on-screen state. Call once per animation frame.
+     *
+     *  `next` is the following result when the overlay is frame-synced (see
+     *  lib/frameSync.ts): `now` is then the capture time of the frame on
+     *  screen, which lies between this track's last measurement and `next.t`,
+     *  and a track found in `next` is drawn exactly between the two measured
+     *  boxes instead of easing after the newest one. Still interpolation only:
+     *  both ends are real detections. */
+    sample(now = performance.now(), next?: { items: RawItem[]; t: number }): SmoothedItem[] {
         const dt = this.lastSample ? Math.min(now - this.lastSample, 200) : 16
         this.lastSample = now
         const k = 1 - Math.exp(-dt / TAU_MS)
@@ -290,8 +297,14 @@ export class BoxSmoother {
             const age = now - t.firstSeen
             if (age < FADE_IN_MS) alpha = Math.min(alpha, age / FADE_IN_MS)
 
-            for (let i = 0; i < 4; i++) {
-                t.shown[i] += (t.target[i] - t.shown[i]) * k
+            const ahead = next && t.gone === null && next.t > t.lastSeen ? this.nextBox(t, next) : null
+            if (ahead) {
+                const f = Math.max(0, Math.min(1, (now - t.lastSeen) / (next!.t - t.lastSeen)))
+                for (let i = 0; i < 4; i++) t.shown[i] = t.target[i] + (ahead[i] - t.target[i]) * f
+            } else {
+                for (let i = 0; i < 4; i++) {
+                    t.shown[i] += (t.target[i] - t.shown[i]) * k
+                }
             }
 
             keep.push(t)
@@ -304,6 +317,19 @@ export class BoxSmoother {
 
         this.tracks = keep
         return out
+    }
+
+    /** Where this track is in the following result, by the same rules
+     *  ingest() would use to match it. */
+    private nextBox(t: Track, next: { items: RawItem[]; t: number }): Box | null {
+        let best: Box | null = null, bestScore = 0
+        for (const item of next.items) {
+            if (t.key !== null ? String(item.id) !== t.key : (item.id !== undefined || item.name !== t.name)) continue
+            if (t.key !== null) return item.box
+            const score = association(t, item.box, next.t)
+            if (score > bestScore) { bestScore = score; best = item.box }
+        }
+        return best
     }
 
     reset(): void {
@@ -352,8 +378,8 @@ export class OverlaySmoothers {
         s.ingest(items ?? [], now)
     }
 
-    sample(field: string, now?: number): SmoothedItem[] {
-        return this.get(field).sample(now)
+    sample(field: string, now?: number, next?: { items: RawItem[] | undefined; t: number }): SmoothedItem[] {
+        return this.get(field).sample(now, next ? { items: next.items ?? [], t: next.t } : undefined)
     }
 
     reset(): void {

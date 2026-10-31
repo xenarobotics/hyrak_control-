@@ -50,7 +50,7 @@ class _Analyzer:
         self._inflight = set()
         self.draw_calls = 0
 
-    def submit_frame(self, client_id, frame_bgr, telemetry=None):
+    def submit_frame(self, client_id, frame_bgr, telemetry=None, pts=None):
         self.submitted += 1
         self.results.append((np.zeros((48, 64, 3), np.uint8), {"n": self.submitted}))
 
@@ -288,7 +288,7 @@ async def test_result_with_drone_command_uses_the_slot(monkeypatch):
     monkeypatch.setattr(av_loop, "guard_follow", lambda sid, f, r: (f, r))
     tel = _Tel()
     analyzer = _Analyzer()
-    analyzer.submit_frame = lambda cid, fr, telemetry=None: analyzer.results.append(
+    analyzer.submit_frame = lambda cid, fr, telemetry=None, pts=None: analyzer.results.append(
         (np.zeros((48, 64, 3), np.uint8),
          {"drone_command": {"type": "velocity", "forward_m_s": 1.5}}))
     t = _track(_Sessions(_Mode.DETECT, tel), _Pool(analyzer))

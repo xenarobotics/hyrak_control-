@@ -99,6 +99,10 @@ class FrameContext:
     width: int = 0
     height: int = 0
     pipeline_latency_s: float = 0.0
+    # The source frame's pts (WebRTC: the RTP timestamp as aiortc rebases
+    # it), echoed with the result so a browser drawing boxes over its own
+    # copy of the video can find the frame they belong to.
+    pts: Optional[int] = None
 
     def dt_since(self, previous: Optional["FrameContext"]) -> Optional[float]:
         """Seconds since `previous`, or None if not usable as a time base."""
@@ -243,6 +247,7 @@ class BaseAnalyzer(ABC):
         telemetry: Optional[Dict[str, Any]] = None,
         captured_at: Optional[float] = None,
         source_latency_s: Optional[float] = None,
+        pts: Optional[int] = None,
     ):
         """
         Non-blocking. Stores the latest frame and starts processing
@@ -279,6 +284,7 @@ class BaseAnalyzer(ABC):
             width=w,
             height=h,
             pipeline_latency_s=now - captured_at,
+            pts=pts,
         )
 
         # THE ANALYZER GETS ITS OWN COPY OF THE PIXELS.
@@ -526,6 +532,7 @@ class BaseAnalyzer(ABC):
                         )
                 if context is not None:
                     meta["frame_index"] = context.frame_index
+                    meta["pts"] = context.pts
                     meta["pipeline_latency_ms"] = round(context.pipeline_latency_s * 1000.0, 1)
                     # How stale the annotation is by the time anyone sees it.
                     # Distinct from analysis_time_ms, which excludes the wait
