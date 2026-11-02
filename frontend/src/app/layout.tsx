@@ -66,7 +66,7 @@ export default function RootLayout({
           suppressHydrationWarning
           dangerouslySetInnerHTML={{
             __html:
-              "try{var t=localStorage.getItem('theme');var d=document.documentElement;if(t==='midnight'){d.classList.add('dark','midnight');d.style.colorScheme='dark'}else{t=t==='light'?'light':'dark';d.classList.add(t);d.style.colorScheme=t}var f=localStorage.getItem('hyrak-ui-font');if(f&&f!=='default')d.dataset.font=f;var z=Number(localStorage.getItem('hyrak-ui-zoom'));if(z&&z!==100)d.style.zoom=String(z/100);var ts=localStorage.getItem('hyrak-ui-textsize');if(ts&&ts!=='default')d.dataset.fontsize=ts}catch(e){}",
+              "try{var t=localStorage.getItem('theme');var d=document.documentElement;if(t!=='dark'&&t!=='midnight'&&t!=='light')t='hyrak';if(t==='light'){d.classList.add('light');d.style.colorScheme='light'}else{d.classList.add('dark');if(t!=='dark')d.classList.add(t);d.style.colorScheme='dark'}var f=localStorage.getItem('hyrak-ui-font');if(f&&f!=='default')d.dataset.font=f;var z=Number(localStorage.getItem('hyrak-ui-zoom'));if(z&&z!==100)d.style.zoom=String(z/100);var ts=localStorage.getItem('hyrak-ui-textsize');if(ts&&ts!=='default')d.dataset.fontsize=ts}catch(e){}",
           }}
         />
       </head>

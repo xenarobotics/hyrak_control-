@@ -3,10 +3,10 @@
 import { apiFetch } from '@/lib/api'
 import { useUiMode } from '@/hooks/useUiMode'
 import { useState, useEffect } from 'react'
-import { useTheme } from '@/lib/theme'
+import { useTheme, type Theme } from '@/lib/theme'
 import { getUiFont, setUiFont, getUiZoom, setUiZoom, getUiTextSize, setUiTextSize, UI_FONTS, UI_ZOOMS, UI_TEXT_SIZES, type UiFont, type UiTextSize } from '@/lib/uiPrefs'
 import {
-    Sun, Moon, MoonStar, Info, Zap,
+    Sun, Moon, MoonStar, Sparkles, Info, Zap,
     SlidersHorizontal, Video, Bot, Map, Route, Bell, Database, Keyboard, AlertTriangle, Radio,
     Radar, UserRound, Users, History,
     type LucideIcon,
@@ -141,12 +141,13 @@ function DisplayGroup() {
             />
             <PrefRow
                 label="Theme"
-                sub="Midnight is a higher-contrast dark."
+                sub="Hyrak matches the website. Midnight is a higher-contrast dark."
                 right={
                     <SegmentControl
-                        value={theme ?? 'dark'}
-                        onChange={v => setTheme(v as 'dark' | 'midnight' | 'light')}
+                        value={theme}
+                        onChange={v => setTheme(v as Theme)}
                         options={[
+                            { value: 'hyrak',    label: 'Hyrak',    icon: <Sparkles size={14} /> },
                             { value: 'dark',     label: 'Dark',     icon: <Moon size={14} /> },
                             { value: 'midnight', label: 'Midnight', icon: <MoonStar size={14} /> },
                             { value: 'light',    label: 'Light',    icon: <Sun size={14} /> },

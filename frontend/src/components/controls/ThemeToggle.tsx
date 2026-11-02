@@ -7,7 +7,7 @@ import { FOCUS } from './flightStyles'
 import { useHydrated } from '@/hooks/useClientValue'
 
 export function ThemeToggle() {
-    const { theme, setTheme } = useTheme()
+    const { theme, toggleLight } = useTheme()
     const mounted = useHydrated()
 
     // Render placeholder until mounted - prevents hydration mismatch
@@ -17,11 +17,11 @@ export function ThemeToggle() {
         )
     }
 
-    const isDark = theme === 'dark'
+    const isDark = theme !== 'light'
 
     return (
         <button
-            onClick={() => setTheme(isDark ? 'light' : 'dark')}
+            onClick={toggleLight}
             title={isDark ? 'Light mode' : 'Dark mode'}
             className={cn(
                 'flex flex-col items-center gap-1 w-12 py-2 rounded-md transition-colors duration-[var(--dur-fast)]',

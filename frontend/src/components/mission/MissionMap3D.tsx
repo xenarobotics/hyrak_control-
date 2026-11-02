@@ -13,7 +13,7 @@ import { useTheme } from '@/lib/theme'
 
 /** What shows past the horizon: the page colour in light mode, night in the dark themes. */
 function spaceColour(theme: string): string {
-  return theme === 'light' ? '#C9D6E3' : theme === 'midnight' ? '#0B0D11' : '#12171E'
+  return theme === 'light' ? '#C9D6E3' : theme === 'midnight' ? '#0B0D11' : theme === 'hyrak' ? '#0F0F11' : '#12171E'
 }
 
 // ── Bezier smooth-path ──────────────────────────────────────────────────────

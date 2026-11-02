@@ -271,6 +271,56 @@
   --app-selected-ink: var(--app-accent);
   --overlay-selected-ink: var(--overlay-accent);
 }
+/* Hyrak: the website's palette, and the default. Graphite surfaces, the
+   silver of the Hyrak mark for text, one electric orange accent (website
+   --accent #ff5a1f). Stacked on .dark like Midnight. The page is a soft
+   graphite, not the website's pure black, and danger is a pink-red so it
+   never reads as the orange accent. */
+.hyrak {
+  --app-bg: 240 6% 6.3%;
+  --app-surface: 240 4% 9%;
+  --app-surface-2: 240 5% 12%;
+  --app-raised: 240 5% 14.5%;
+  --app-border: 240 5% 19%;
+  --app-border-strong: 220 4% 51%;
+  --app-text: 240 11% 96.5%;
+  --app-text-muted: 216 5% 79%;
+  --app-text-subtle: 240 3% 64%;
+  --app-sidebar: 240 8% 5%;
+  --app-accent: #FF5A1F;
+  --app-accent-ink: #0A0A0B;
+  --app-accent-soft: rgba(255, 90, 31, 0.14);
+  --app-ok: #5BD38B;
+  --app-ok-soft: color-mix(in srgb, #5BD38B 12%, transparent);
+  --app-warn: #F5C542;
+  --app-warn-soft: color-mix(in srgb, #F5C542 14%, transparent);
+  --app-danger: #FF6B81;
+  --app-danger-soft: color-mix(in srgb, #FF6B81 12%, transparent);
+  --app-magenta: #E08AF5;
+  --app-magenta-soft: color-mix(in srgb, #E08AF5 12%, transparent);
+  --app-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.28);
+  --overlay-scrim: rgba(15, 15, 17, 0.8);
+  --overlay-text: #F5F5F7;
+  --overlay-muted: #C7C9CC;
+  --overlay-border: rgba(245, 245, 247, 0.16);
+  --overlay-accent: #FF7A45;
+  --overlay-ok: #5BD38B;
+  --overlay-warn: #F5C542;
+  --overlay-danger: #FF6B81;
+  --input: 220 4% 51%;
+  --background: var(--app-bg);
+  --foreground: var(--app-text);
+  --card: var(--app-surface);
+  --card-foreground: var(--app-text);
+  --popover: var(--app-raised);
+  --popover-foreground: var(--app-text);
+  --border: var(--app-border);
+  --muted-foreground: var(--app-text-muted);
+  /* Orange text on the orange tint: the website's lighter --accent-hi. */
+  --app-selected-ink: #FF7A45;
+  --overlay-selected-ink: #FF7A45;
+}
+
 /* Night ops structure: 2px edges on everything you type into or pick from. */
 .midnight :is(input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']), select, textarea, [data-slot='select-trigger']):not([class~='border-0']):not([class~='border-none']):not([class~='bg-transparent']) {
   border-width: 2px;

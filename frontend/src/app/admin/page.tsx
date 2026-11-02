@@ -1424,12 +1424,12 @@ const FOCUS_SCOPE = '[&_:focus-visible]:outline-2 [&_:focus-visible]:outline-off
 
 /** Light / dark switch for the console rail, same choice as the app's rail. */
 function ConsoleThemeToggle() {
-    const { theme, setTheme } = useTheme()
+    const { theme, toggleLight } = useTheme()
     const mounted = useHydrated()
     if (!mounted) return <div className="w-16 h-14" />
     const isDark = theme !== 'light'
     return (
-        <button onClick={() => setTheme(isDark ? 'light' : 'dark')}
+        <button onClick={toggleLight}
             title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
             className="flex flex-col items-center justify-center gap-1 w-16 min-h-14 py-1.5 rounded-[10px] text-[12px] font-semibold text-app-text-muted hover:text-app-text hover:bg-app-surface-2 transition-colors duration-[140ms]">
             {isDark ? <Sun size={20} aria-hidden /> : <Moon size={20} aria-hidden />}

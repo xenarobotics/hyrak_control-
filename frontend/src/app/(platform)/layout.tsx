@@ -139,15 +139,15 @@ const RAIL_ITEM = 'flex flex-col items-center justify-center gap-1 w-16 min-h-14
 const RAIL_IDLE = 'text-app-text-muted hover:text-app-text hover:bg-app-surface-2'
 const RAIL_ACTIVE = 'bg-app-accent-soft text-app-selected-ink font-bold'
 
-// The rail's quick theme switch. Same words as Settings (Dark, Midnight,
-// Light); it flips between light and dark, and Settings reaches Midnight.
+// The rail's quick theme switch. It flips between Light and the dark theme
+// last picked in Settings (Hyrak, Dark or Midnight).
 function RailThemeButton() {
-    const { theme, setTheme } = useTheme()
+    const { theme, toggleLight } = useTheme()
     const mounted = useHydrated()
     if (!mounted) return <div className="w-16 h-14" />
     const light = theme === 'light'
     return (
-        <button type="button" onClick={() => setTheme(light ? 'dark' : 'light')}
+        <button type="button" onClick={toggleLight}
             title={light ? 'Switch to the dark theme' : 'Switch to the light theme'}
             className={cn('rounded-[10px] transition-colors duration-[140ms]', RAIL_ITEM, RAIL_IDLE)}>
             {light ? <Moon size={20} /> : <Sun size={20} />}
